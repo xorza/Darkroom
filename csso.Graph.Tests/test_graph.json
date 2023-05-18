@@ -1,0 +1,129 @@
+{
+  "Nodes": [
+    {
+      "SelfIndex": 0,
+      "Name": "value 0 node",
+      "Behavior": "Active",
+      "IsOutput": false
+    },
+    {
+      "SelfIndex": 1,
+      "Name": "value 1 node",
+      "Behavior": "Passive",
+      "IsOutput": false
+    },
+    {
+      "SelfIndex": 2,
+      "Name": "sum node",
+      "Behavior": "Passive",
+      "IsOutput": false
+    },
+    {
+      "SelfIndex": 3,
+      "Name": "mult node",
+      "Behavior": "Passive",
+      "IsOutput": false
+    },
+    {
+      "SelfIndex": 4,
+      "Name": "print node",
+      "Behavior": "Passive",
+      "IsOutput": true
+    }
+  ],
+  "Inputs": [
+    {
+      "SelfIndex": 0,
+      "NodeIndex": 2,
+      "Name": "A",
+      "DataType": {},
+      "required": true
+    },
+    {
+      "SelfIndex": 1,
+      "NodeIndex": 2,
+      "Name": "B",
+      "DataType": {},
+      "required": true
+    },
+    {
+      "SelfIndex": 2,
+      "NodeIndex": 3,
+      "Name": "A",
+      "DataType": {},
+      "required": true
+    },
+    {
+      "SelfIndex": 3,
+      "NodeIndex": 3,
+      "Name": "B",
+      "DataType": {},
+      "required": true
+    },
+    {
+      "SelfIndex": 4,
+      "NodeIndex": 4,
+      "Name": "Message",
+      "DataType": {},
+      "required": true
+    }
+  ],
+  "Outputs": [
+    {
+      "SelfIndex": 0,
+      "NodeIndex": 0,
+      "Name": "Int32 Value",
+      "DataType": {}
+    },
+    {
+      "SelfIndex": 1,
+      "NodeIndex": 1,
+      "Name": "Int32 Value",
+      "DataType": {}
+    },
+    {
+      "SelfIndex": 2,
+      "NodeIndex": 2,
+      "Name": "Sum Result",
+      "DataType": {}
+    },
+    {
+      "SelfIndex": 3,
+      "NodeIndex": 3,
+      "Name": "Mult Result",
+      "DataType": {}
+    }
+  ],
+  "Edges": [
+    {
+      "SelfIndex": 0,
+      "InputIndex": 0,
+      "OutputIndex": 0,
+      "Behavior": "Once"
+    },
+    {
+      "SelfIndex": 1,
+      "InputIndex": 1,
+      "OutputIndex": 1,
+      "Behavior": "Once"
+    },
+    {
+      "SelfIndex": 2,
+      "OutputIndex": 2,
+      "InputIndex": 2,
+      "Behavior": "Always"
+    },
+    {
+      "SelfIndex": 3,
+      "OutputIndex": 3,
+      "InputIndex": 4,
+      "Behavior": "Always"
+    },
+    {
+      "SelfIndex": 4,
+      "OutputIndex": 1,
+      "InputIndex": 3,
+      "Behavior": "Always"
+    }
+  ]
+}

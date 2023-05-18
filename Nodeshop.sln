@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Graph", "csso.Graph\csso.Graph.csproj", "{058596F8-8A7E-4F6C-B75F-ED14D7940649}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Graph.Tests", "csso.Graph.Tests\csso.Graph.Tests.csproj", "{0A5BF322-3169-477C-8E25-4E1956DC07C5}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{058596F8-8A7E-4F6C-B75F-ED14D7940649}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{058596F8-8A7E-4F6C-B75F-ED14D7940649}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{058596F8-8A7E-4F6C-B75F-ED14D7940649}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{058596F8-8A7E-4F6C-B75F-ED14D7940649}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0A5BF322-3169-477C-8E25-4E1956DC07C5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0A5BF322-3169-477C-8E25-4E1956DC07C5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0A5BF322-3169-477C-8E25-4E1956DC07C5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0A5BF322-3169-477C-8E25-4E1956DC07C5}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
