@@ -19,7 +19,10 @@ public class FunctionTests {
     };
 
     [SetUp]
+    [TearDown]
     public void Setup() {
+        FunctionTests.TestOutputValue = 0;
+        FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
     }
 
     public static FunctionGraph CreateTestFunctionGraph() {

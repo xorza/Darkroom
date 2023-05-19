@@ -2,7 +2,10 @@ namespace csso.Graph.Tests;
 
 public class ExecutionTests {
     [SetUp]
+    [TearDown]
     public void Setup() {
+        FunctionTests.TestOutputValue = 0;
+        FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
     }
 
     [Test]
@@ -36,37 +39,69 @@ public class ExecutionTests {
 
         var executionCache = new ExecutionCache();
 
-        FunctionTests.TestOutputValue = 0;
-        executionCache = executionGraph.Run(executionContext, executionCache);
+        {
+            FunctionTests.TestOutputValue = 0;
+            executionCache = executionGraph.Run(executionContext, executionCache);
 
-        Assert.That(executionCache.Nodes.All(_ => _.IsExecuted), Is.True);
-        Assert.That(executionCache.Nodes.All(_ => _.HasOutputs), Is.True);
-        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+            Assert.That(executionCache.Nodes.All(_ => _.IsExecuted), Is.True);
+            Assert.That(executionCache.Nodes.All(_ => _.HasOutputs), Is.True);
+            Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+        }
 
-        FunctionTests.TestOutputValue = 0;
-        executionCache = executionGraph.Run(executionContext, executionCache);
+        {
+            FunctionTests.TestOutputValue = 0;
+            executionCache = executionGraph.Run(executionContext, executionCache);
 
-        Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[1].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[3].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
-        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+            Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[1].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[3].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
+            Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+        }
 
+        {
+            FunctionTests.TestOutputValue = 0;
+            FunctionTests.Node1OutputValue = 11;
+            executionGraph.Graph.Nodes[1].Behavior = NodeBehavior.Active;
+            executionCache = executionGraph.Run(executionContext, executionCache);
+            FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
 
-        FunctionTests.TestOutputValue = 0;
-        FunctionTests.Node1OutputValue = 11;
-        executionGraph.Graph.Nodes[1].Behavior = NodeBehavior.Active;
-        executionCache = executionGraph.Run(executionContext, executionCache);
-        FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
+            Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[1].IsExecuted, Is.True);
+            Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[3].IsExecuted, Is.True);
+            Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
+            Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(77));
+        }
 
+        {
+            FunctionTests.TestOutputValue = 0;
+            executionGraph.Graph.Edges[4].Behavior = EdgeBehavior.Once;
+            executionCache = executionGraph.Run(executionContext, executionCache);
+            FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
 
-        Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[1].IsExecuted, Is.True);
-        Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[3].IsExecuted, Is.True);
-        Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
-        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(77));
+            Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[1].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[3].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
+            Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(77));
+        }
+
+        {
+            FunctionTests.TestOutputValue = 0;
+            executionGraph.Graph.Edges[1].Behavior = EdgeBehavior.Always;
+            executionCache = executionGraph.Run(executionContext, executionCache);
+            FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
+
+            Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
+            Assert.That(executionCache.Nodes[1].IsExecuted, Is.True);
+            Assert.That(executionCache.Nodes[2].IsExecuted, Is.True);
+            Assert.That(executionCache.Nodes[3].IsExecuted, Is.True);
+            Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
+            Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+        }
 
         Assert.Pass();
     }

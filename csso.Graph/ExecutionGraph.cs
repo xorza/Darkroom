@@ -82,7 +82,8 @@ public class ExecutionGraph {
                         }
                     }
 
-                    if (!hasUpdatedInputs) continue;
+                    if (!hasUpdatedInputs)
+                        continue;
                 }
             }
 
