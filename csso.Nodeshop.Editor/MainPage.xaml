@@ -2,15 +2,21 @@
 
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             x:Class="csso.Nodeshop.Editor.MainPage">
+             x:Class="csso.Nodeshop.Editor.MainPage"
+             Style="{StaticResource ContentPageDefaultStyle}"
+             BackgroundColor="{StaticResource ContentBackground}">
+    <Grid VerticalOptions="Fill"
+          HorizontalOptions="Fill">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
 
-    <VerticalStackLayout
-        Spacing="25"
-        Padding="30,0"
-        VerticalOptions="Center">
-
-        <Button Text="test me" Clicked="Button_OnClicked" />
-
-    </VerticalStackLayout>
-
+        <HorizontalStackLayout>
+            <Button Text="Load" Clicked="Button_OnClicked" />
+        </HorizontalStackLayout>
+    </Grid>
 </ContentPage>
