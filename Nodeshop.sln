@@ -4,9 +4,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Graph", "csso.Graph\cs
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Graph.Tests", "csso.Graph.Tests\csso.Graph.Tests.csproj", "{0A5BF322-3169-477C-8E25-4E1956DC07C5}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "Common\Common.csproj", "{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Editor", "Editor\Editor\Editor.csproj", "{0BD21151-56AA-4848-B02E-5FBC5DAA236E}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Common", "csso.Common\csso.Common.csproj", "{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -26,9 +24,5 @@ Global
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Release|Any CPU.Build.0 = Release|Any CPU
-		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

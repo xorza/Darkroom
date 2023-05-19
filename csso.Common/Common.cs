@@ -1,6 +1,7 @@
 ﻿namespace csso.Common;
 
-public static class MyDebug {
+public static class MyDebug
+{
 #if DEBUG
     public const bool IsDebug = true;
 #else
