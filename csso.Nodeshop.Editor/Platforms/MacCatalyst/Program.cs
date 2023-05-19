@@ -6,7 +6,7 @@ public class Program {
     static void Main(string[] args) {
 #if DEBUG
         //Rider debugger doesn't work without this
-        Thread.Sleep(2000);
+        Thread.Sleep(2500);
 #endif
 
         UIApplication.Main(args, null, typeof(AppDelegate));

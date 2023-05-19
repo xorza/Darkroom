@@ -5,6 +5,11 @@
              x:Class="csso.Nodeshop.Editor.MainPage"
              Style="{StaticResource ContentPageDefaultStyle}"
              BackgroundColor="{StaticResource ContentBackground}">
+
+    <ContentPage.Resources>
+        <ResourceDictionary />
+    </ContentPage.Resources>
+
     <Grid VerticalOptions="Fill"
           HorizontalOptions="Fill">
         <Grid.RowDefinitions>
@@ -18,5 +23,10 @@
         <HorizontalStackLayout>
             <Button Text="Load" Clicked="Button_OnClicked" />
         </HorizontalStackLayout>
+
+        <AbsoluteLayout x:Name="NodeAbsoluteLayout"
+                        Grid.Row="1"
+                        HorizontalOptions="Fill"
+                        VerticalOptions="Fill" />
     </Grid>
 </ContentPage>

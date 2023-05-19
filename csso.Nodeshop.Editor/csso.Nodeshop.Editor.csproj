@@ -52,6 +52,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\csso.Common\csso.Common.csproj"/>
+        <ProjectReference Include="..\csso.Graph.Tests\csso.Graph.Tests.csproj"/>
         <ProjectReference Include="..\csso.Graph\csso.Graph.csproj"/>
     </ItemGroup>
 
