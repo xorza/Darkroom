@@ -1,6 +1,6 @@
 ﻿using UIKit;
 
-namespace MyApp;
+namespace csso.Nodeshop.Editor;
 
 public class Program {
     // This is the main entry point of the application.

@@ -1,20 +1,13 @@
-﻿namespace MyApp;
+﻿using System.Diagnostics;
+
+namespace csso.Nodeshop.Editor;
 
 public partial class MainPage : ContentPage {
-    int count = 0;
-
     public MainPage() {
         InitializeComponent();
     }
 
-    private void OnCounterClicked(object sender, EventArgs e) {
-        count++;
-
-        if (count == 1)
-            CounterBtn.Text = $"Clicked {count} time";
-        else
-            CounterBtn.Text = $"Clicked {count} times";
-
-        SemanticScreenReader.Announce(CounterBtn.Text);
+    private void Button_OnClicked(object sender, EventArgs e) {
+        Debug.WriteLine("Hello World!");
     }
 }

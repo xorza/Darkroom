@@ -59,4 +59,10 @@
         <Folder Include="Properties\"/>
     </ItemGroup>
 
+    <ItemGroup>
+        <MauiXaml Update="Resources\Styles\Styles.xaml">
+            <SubType>Designer</SubType>
+        </MauiXaml>
+    </ItemGroup>
+
 </Project>
