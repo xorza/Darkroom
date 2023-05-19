@@ -10,7 +10,7 @@ public struct DataType {
     }
 }
 
-public struct Output {
+public class Output {
     public int SelfIndex { get; set; }
     public int NodeIndex { get; set; }
     public string Name { get; set; }
@@ -18,7 +18,7 @@ public struct Output {
     public DataType Type { get; set; }
 }
 
-public struct Input {
+public class Input {
     public int SelfIndex { get; set; }
     public int NodeIndex { get; set; }
 
@@ -33,7 +33,7 @@ public enum NodeBehavior {
     Passive
 }
 
-public struct Node {
+public class Node {
     public int SelfIndex { get; set; }
     public string Name { get; set; }
 

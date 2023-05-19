@@ -52,6 +52,22 @@ public class ExecutionTests {
         Assert.That(executionCache.Nodes[3].IsExecuted, Is.False);
         Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
         Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+
+
+        FunctionTests.TestOutputValue = 0;
+        FunctionTests.Node1OutputValue = 11;
+        executionGraph.Graph.Nodes[1].Behavior = NodeBehavior.Active;
+        executionCache = executionGraph.Run(executionContext, executionCache);
+        FunctionTests.Node1OutputValue = FunctionTests.Node1DefaultOutputValue;
+
+
+        Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
+        Assert.That(executionCache.Nodes[1].IsExecuted, Is.True);
+        Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
+        Assert.That(executionCache.Nodes[3].IsExecuted, Is.True);
+        Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
+        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(77));
+
         Assert.Pass();
     }
 

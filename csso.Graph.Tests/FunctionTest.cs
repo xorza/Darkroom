@@ -3,11 +3,13 @@ using System.Diagnostics;
 namespace csso.Graph.Tests;
 
 public class FunctionTests {
+    public const int Node1DefaultOutputValue = 5;
     public static int TestOutputValue;
+    public static int Node1OutputValue = 5;
 
     public static readonly Delegate[] Delegates = {
         () => 2,
-        () => 5,
+        () => Node1OutputValue,
         (int a, int b) => a + b,
         (int a, int b) => a * b,
         (int a) => {
@@ -21,6 +23,9 @@ public class FunctionTests {
     }
 
     public static FunctionGraph CreateTestFunctionGraph() {
+        Node1OutputValue = Node1DefaultOutputValue;
+        TestOutputValue = 0;
+
         var functionGraph = new FunctionGraph();
 
         for (var i = 0; i < Delegates.Length; i++) {

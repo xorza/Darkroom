@@ -57,10 +57,12 @@ public class ExecutionGraph {
 
             currentExecution.Nodes.Add(executionNode);
 
-            if (iNode.IsComplete == false) continue;
+            if (iNode.IsComplete == false)
+                continue;
 
             if (executionNode.HasOutputs) {
-                if (iNode.EdgeBehavior == EdgeBehavior.Once) continue;
+                if (iNode.EdgeBehavior == EdgeBehavior.Once)
+                    continue;
 
                 if (iNode.SelfBehavior == NodeBehavior.Passive) {
                     var hasUpdatedInputs = false;
