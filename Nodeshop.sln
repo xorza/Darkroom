@@ -6,6 +6,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "csso.Graph.Tests", "csso.Gr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Common", "Common\Common.csproj", "{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Editor", "Editor\Editor\Editor.csproj", "{0BD21151-56AA-4848-B02E-5FBC5DAA236E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -24,5 +26,9 @@ Global
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2227BC2C-1687-479D-BFB4-9B6A84A3CBB9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0BD21151-56AA-4848-B02E-5FBC5DAA236E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

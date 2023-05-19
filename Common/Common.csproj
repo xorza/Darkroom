@@ -6,6 +6,7 @@
         <Nullable>enable</Nullable>
         <RootNamespace>csso.Common</RootNamespace>
         <AssemblyName>csso.Common</AssemblyName>
+        <LangVersion>default</LangVersion>
     </PropertyGroup>
 
 </Project>

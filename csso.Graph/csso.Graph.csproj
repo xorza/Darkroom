@@ -6,6 +6,8 @@
         <Nullable>enable</Nullable>
 
         <RootNamespace>csso.Graph</RootNamespace>
+
+        <LangVersion>default</LangVersion>
     </PropertyGroup>
 
     <ItemGroup>

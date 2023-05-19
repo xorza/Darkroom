@@ -8,6 +8,8 @@
         <IsPackable>false</IsPackable>
         <IsTestProject>true</IsTestProject>
         <RootNamespace>csso.Graph.Tests</RootNamespace>
+        <LangVersion>default</LangVersion>
+        <OutputType>Library</OutputType>
     </PropertyGroup>
 
     <ItemGroup>
