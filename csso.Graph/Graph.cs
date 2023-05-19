@@ -48,7 +48,7 @@ public enum EdgeBehavior {
     Once
 }
 
-public struct Edge {
+public class Edge {
     public Int32 SelfIndex { get; set; }
     public Int32 OutputIndex { get; set; }
     public Int32 InputIndex { get; set; }
@@ -107,7 +107,7 @@ public class Graph {
 
         Edge? existingEdge = Edges.SingleOrDefault(_ => _.InputIndex == inputIndex);
         if (existingEdge != null) {
-            edge.SelfIndex = existingEdge.Value.SelfIndex;
+            edge.SelfIndex = existingEdge.SelfIndex;
             Edges[edge.SelfIndex] = edge;
         } else {
             edge.SelfIndex = Edges.Count;

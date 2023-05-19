@@ -48,7 +48,7 @@ public class ExecutionTests {
         Assert.That(executionCache.Nodes[0].IsExecuted, Is.False);
         Assert.That(executionCache.Nodes[1].IsExecuted, Is.False);
         Assert.That(executionCache.Nodes[2].IsExecuted, Is.False);
-        Assert.That(executionCache.Nodes[3].IsExecuted, Is.True);
+        Assert.That(executionCache.Nodes[3].IsExecuted, Is.False);
         Assert.That(executionCache.Nodes[4].IsExecuted, Is.True);
         Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
         Assert.Pass();

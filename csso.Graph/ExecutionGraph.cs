@@ -57,29 +57,35 @@ public class ExecutionGraph {
 
             currentExecution.Nodes.Add(executionNode);
 
+            if (iNode.IsComplete == false) {
+                continue;
+            }
+
             if (executionNode.HasOutputs) {
                 if (iNode.EdgeBehavior == EdgeBehavior.Once) {
                     continue;
                 }
 
-                if (iNode.ParentBehavior == NodeBehavior.Active) {
-                    bool canSkip = true;
+                if (iNode.SelfBehavior == NodeBehavior.Passive) {
+                    bool hasUpdatedInputs = false;
                     foreach (var input in Graph.InputsForNode(iNode.NodeIndex)) {
                         var edge = Graph.EdgeForInput(input.SelfIndex);
                         if (edge is null) {
                             Debug.Assert(input.Required == false);
                         } else {
-                            if (edge.Value.Behavior == EdgeBehavior.Always) {
-                                canSkip = false;
+                            if (edge.Behavior == EdgeBehavior.Always) {
+                                var output = Graph.Outputs[edge.OutputIndex];
+                                var outputExecutionNode =
+                                    currentExecution.Nodes.Single(_ => _.NodeIndex == output.NodeIndex);
+
+                                if (outputExecutionNode.IsExecuted) {
+                                    hasUpdatedInputs = true;
+                                }
                             }
                         }
                     }
 
-                    if (canSkip) {
-                        continue;
-                    }
-                } else {
-                    if (iNode.SelfBehavior == NodeBehavior.Passive) {
+                    if (!hasUpdatedInputs) {
                         continue;
                     }
                 }
@@ -140,7 +146,7 @@ public class ExecutionGraph {
             var executionArgument = Arguments.Single(_ =>
                 _.ArgumentIndex == argument.SelfIndex && _.FunctionIndex == function.SelfIndex);
             var input = Graph.Inputs[executionArgument.InputIndex];
-            var edge = Graph.EdgeForInput(input.SelfIndex)!.Value;
+            var edge = Graph.EdgeForInput(input.SelfIndex)!;
             var output = Graph.Outputs[edge.OutputIndex];
             var outputFunction = FunctionGraph.Functions.Single(_ => _.NodeIndex == output.NodeIndex);
             var outputExecutionNode = currentExecution.Nodes.Single(_ => _.NodeIndex == output.NodeIndex);
