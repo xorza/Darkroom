@@ -1,7 +1,7 @@
 namespace csso.Graph;
 
 public class IntermediateNode {
-    public Int32 NodeIndex { get; set; }
+    public int NodeIndex { get; set; }
     public NodeBehavior SelfBehavior { get; set; }
     public bool IsComplete { get; set; }
     public EdgeBehavior EdgeBehavior { get; set; }
@@ -32,13 +32,13 @@ public class IntermediateGraph {
             Nodes.Add(iNode);
         }
 
-        Int32 i = 0;
+        var i = 0;
         while (i < Nodes.Count) {
             var iNode = Nodes[i];
             ++i;
 
             var inputs = graph.InputsForNode(iNode.NodeIndex);
-            foreach (Input input in inputs) {
+            foreach (var input in inputs) {
                 var edge = graph.EdgeForInput(input.SelfIndex);
                 if (edge != null) {
                     var output = graph.Outputs[edge.OutputIndex];
@@ -47,7 +47,8 @@ public class IntermediateGraph {
                     IntermediateNode iOutputNode;
                     if (Nodes.SingleOrDefault(_ => _.NodeIndex == outputNode.SelfIndex) is IntermediateNode node) {
                         iOutputNode = node;
-                    } else {
+                    }
+                    else {
                         iOutputNode = new IntermediateNode {
                             NodeIndex = outputNode.SelfIndex,
                             SelfBehavior = outputNode.Behavior,
@@ -58,10 +59,10 @@ public class IntermediateGraph {
                     }
 
                     if (iNode.EdgeBehavior == EdgeBehavior.Always
-                        && edge.Behavior == EdgeBehavior.Always) {
+                        && edge.Behavior == EdgeBehavior.Always)
                         iOutputNode.EdgeBehavior = EdgeBehavior.Always;
-                    }
-                } else {
+                }
+                else {
                     iNode.IsComplete = false;
                 }
             }
@@ -71,21 +72,18 @@ public class IntermediateGraph {
     }
 
     private void TraverseForward(Graph graph) {
-        for (int i = 0; i < Nodes.Count; i++) {
-            IntermediateNode iIntermediateNode = Nodes[i];
+        for (var i = 0; i < Nodes.Count; i++) {
+            var iIntermediateNode = Nodes[i];
             var inputs = graph.InputsForNode(iIntermediateNode.NodeIndex);
-            foreach (Input input in inputs) {
+            foreach (var input in inputs) {
                 var edge = graph.EdgeForInput(input.SelfIndex);
                 if (edge != null) {
                     var output = graph.Outputs[edge.OutputIndex];
                     var outputINode = Nodes.First(_ => _.NodeIndex == output.NodeIndex);
-                    if (outputINode.IsComplete == false) {
-                        iIntermediateNode.IsComplete = false;
-                    }
-                } else {
-                    if (input.Required) {
-                        iIntermediateNode.IsComplete = false;
-                    }
+                    if (outputINode.IsComplete == false) iIntermediateNode.IsComplete = false;
+                }
+                else {
+                    if (input.Required) iIntermediateNode.IsComplete = false;
                 }
             }
 

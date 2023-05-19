@@ -6,23 +6,23 @@ namespace csso.Graph;
 
 public struct DataType {
     public static DataType FromType(Type type) {
-        return new DataType { };
+        return new DataType();
     }
 }
 
 public struct Output {
-    public Int32 SelfIndex { get; set; }
-    public Int32 NodeIndex { get; set; }
-    public String Name { get; set; }
+    public int SelfIndex { get; set; }
+    public int NodeIndex { get; set; }
+    public string Name { get; set; }
 
     public DataType Type { get; set; }
 }
 
 public struct Input {
-    public Int32 SelfIndex { get; set; }
-    public Int32 NodeIndex { get; set; }
+    public int SelfIndex { get; set; }
+    public int NodeIndex { get; set; }
 
-    public String Name { get; set; }
+    public string Name { get; set; }
 
     public bool Required { get; set; }
     public DataType Type { get; set; }
@@ -34,8 +34,8 @@ public enum NodeBehavior {
 }
 
 public struct Node {
-    public Int32 SelfIndex { get; set; }
-    public String Name { get; set; }
+    public int SelfIndex { get; set; }
+    public string Name { get; set; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public NodeBehavior Behavior { get; set; }
@@ -49,9 +49,9 @@ public enum EdgeBehavior {
 }
 
 public class Edge {
-    public Int32 SelfIndex { get; set; }
-    public Int32 OutputIndex { get; set; }
-    public Int32 InputIndex { get; set; }
+    public int SelfIndex { get; set; }
+    public int OutputIndex { get; set; }
+    public int InputIndex { get; set; }
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public EdgeBehavior Behavior { get; set; }
@@ -63,14 +63,14 @@ public class Graph {
     public List<Node> Nodes { get; set; } = new();
     public List<Edge> Edges { get; set; } = new();
 
-    public static Graph? FromJsonFile(String filename) {
-        string jsonString = File.ReadAllText(filename);
-        Graph? result = JsonSerializer.Deserialize<Graph>(jsonString);
+    public static Graph? FromJsonFile(string filename) {
+        var jsonString = File.ReadAllText(filename);
+        var result = JsonSerializer.Deserialize<Graph>(jsonString);
         return result;
     }
 
-    public String ToJson() {
-        string jsonString = JsonSerializer.Serialize(this);
+    public string ToJson() {
+        var jsonString = JsonSerializer.Serialize(this);
         return jsonString;
     }
 
@@ -79,13 +79,13 @@ public class Graph {
         Nodes.Add(node);
     }
 
-    public void NewOutput(Int32 nodeIndex, ref Output output) {
+    public void NewOutput(int nodeIndex, ref Output output) {
         output.SelfIndex = Outputs.Count;
         output.NodeIndex = nodeIndex;
         Outputs.Add(output);
     }
 
-    public void NewInput(Int32 nodeIndex, ref Input input) {
+    public void NewInput(int nodeIndex, ref Input input) {
         input.SelfIndex = Inputs.Count;
         input.NodeIndex = nodeIndex;
         Inputs.Add(input);
@@ -105,25 +105,26 @@ public class Graph {
 
         var inputIndex = edge.InputIndex;
 
-        Edge? existingEdge = Edges.SingleOrDefault(_ => _.InputIndex == inputIndex);
+        var existingEdge = Edges.SingleOrDefault(_ => _.InputIndex == inputIndex);
         if (existingEdge != null) {
             edge.SelfIndex = existingEdge.SelfIndex;
             Edges[edge.SelfIndex] = edge;
-        } else {
+        }
+        else {
             edge.SelfIndex = Edges.Count;
             Edges.Add(edge);
         }
     }
 
 
-    public List<Input> InputsForNode(Int32 nodeIndex) {
+    public List<Input> InputsForNode(int nodeIndex) {
         return
             Inputs
                 .Where(_ => _.NodeIndex == nodeIndex)
                 .ToList();
     }
 
-    public Edge? EdgeForInput(Int32 inputIndex) {
+    public Edge? EdgeForInput(int inputIndex) {
         return Edges.SingleOrDefault(_ => _.InputIndex == inputIndex);
     }
 }

@@ -8,24 +8,24 @@ public enum Direction {
 }
 
 public class Argument {
-    public Int32 SelfIndex { get; set; }
+    public int SelfIndex { get; set; }
     public DataType Type { get; set; }
-    public required String Name { get; set; }
+    public required string Name { get; set; }
     public Direction Direction { get; set; }
     public bool IsRequired { get; set; } = true;
 
-    public Int32 Position { get; set; }
+    public int Position { get; set; }
 }
 
 public class Function {
-    public Int32 SelfIndex { get; set; }
-    public Int32 NodeIndex { get; set; }
+    public int SelfIndex { get; set; }
+    public int NodeIndex { get; set; }
 
-    public required String Name { get; set; }
+    public required string Name { get; set; }
 
     public required List<Argument> Arguments { get; set; }
-    public Int32 InvokeArgumentsCount { get; set; }
-    public Int32 DelegateIndex { get; set; }
+    public int InvokeArgumentsCount { get; set; }
+    public int DelegateIndex { get; set; }
 
     public static Function FromDelegate(Delegate @delegate) {
         var result = new Function {

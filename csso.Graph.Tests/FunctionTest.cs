@@ -3,7 +3,7 @@ using System.Diagnostics;
 namespace csso.Graph.Tests;
 
 public class FunctionTests {
-    public static Int32 TestOutputValue = 0;
+    public static int TestOutputValue;
 
     public static readonly Delegate[] Delegates = {
         () => 2,
@@ -17,12 +17,13 @@ public class FunctionTests {
     };
 
     [SetUp]
-    public void Setup() { }
+    public void Setup() {
+    }
 
     public static FunctionGraph CreateTestFunctionGraph() {
-        var functionGraph = new csso.Graph.FunctionGraph();
+        var functionGraph = new FunctionGraph();
 
-        for (int i = 0; i < Delegates.Length; i++) {
+        for (var i = 0; i < Delegates.Length; i++) {
             var function = Function.FromDelegate(Delegates[i]);
             function.NodeIndex = i;
             function.DelegateIndex = i;
@@ -34,7 +35,7 @@ public class FunctionTests {
 
     [Test]
     public void Creation() {
-        var graph = csso.Graph.Graph.FromJsonFile("./test_graph.json")!;
+        var graph = Graph.FromJsonFile("./test_graph.json")!;
 
         var functionGraph = CreateTestFunctionGraph();
     }

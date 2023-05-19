@@ -2,10 +2,11 @@ namespace csso.Graph.Tests;
 
 public class GraphTests {
     [SetUp]
-    public void Setup() { }
+    public void Setup() {
+    }
 
     public static Graph CreateTestGraph() {
-        var graph = csso.Graph.Graph.FromJsonFile("./test_graph.json")!;
+        var graph = Graph.FromJsonFile("./test_graph.json")!;
         return graph;
     }
 
@@ -14,7 +15,7 @@ public class GraphTests {
         var node = new Node();
         node.Name = "test";
 
-        var graph = new csso.Graph.Graph();
+        var graph = new Graph();
         graph.NewNode(ref node);
 
         Assert.Pass();
@@ -26,10 +27,10 @@ public class GraphTests {
             Name = "test"
         };
 
-        var graph = new csso.Graph.Graph();
+        var graph = new Graph();
         graph.NewNode(ref node);
 
-        String json = graph.ToJson();
+        var json = graph.ToJson();
 
         Assert.Pass();
     }
@@ -67,7 +68,7 @@ public class GraphTests {
     [Test]
     public void GraphPreprocessing() {
         var graph = CreateTestGraph();
-        var intermediateGraph = new csso.Graph.IntermediateGraph(graph);
+        var intermediateGraph = new IntermediateGraph(graph);
 
         Assert.That(intermediateGraph.Nodes.Count, Is.EqualTo(5));
 

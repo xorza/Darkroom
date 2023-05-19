@@ -2,7 +2,8 @@ namespace csso.Graph.Tests;
 
 public class ExecutionTests {
     [SetUp]
-    public void Setup() { }
+    public void Setup() {
+    }
 
     [Test]
     public void Creation() {

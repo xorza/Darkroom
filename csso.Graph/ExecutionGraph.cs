@@ -5,20 +5,20 @@ using csso.Common;
 namespace csso.Graph;
 
 public class ExecutionNode {
-    public Int32 NodeIndex { get; set; }
-    public Object?[]? Arguments { get; set; } = null;
-    public Object? Return { get; set; } = null;
+    public int NodeIndex { get; set; }
+    public object?[]? Arguments { get; set; }
+    public object? Return { get; set; }
 
-    public bool IsExecuted { get; set; } = false;
-    public bool HasOutputs { get; set; } = false;
+    public bool IsExecuted { get; set; }
+    public bool HasOutputs { get; set; }
     public TimeSpan ExecutionTime { get; set; }
 }
 
 public struct ExecutionArgument {
-    public Int32 InputIndex { get; set; }
-    public Int32 OutputIndex { get; set; }
-    public Int32 FunctionIndex { get; set; }
-    public Int32 ArgumentIndex { get; set; }
+    public int InputIndex { get; set; }
+    public int OutputIndex { get; set; }
+    public int FunctionIndex { get; set; }
+    public int ArgumentIndex { get; set; }
 }
 
 public class ExecutionCache {
@@ -35,13 +35,13 @@ public class ExecutionGraph {
     public List<ExecutionArgument> Arguments { get; set; } = new();
 
 
-    public String ToJson() {
-        string jsonString = JsonSerializer.Serialize(this);
+    public string ToJson() {
+        var jsonString = JsonSerializer.Serialize(this);
         return jsonString;
     }
 
-    public static ExecutionGraph FromJsonFile(String filename) {
-        string jsonString = File.ReadAllText(filename);
+    public static ExecutionGraph FromJsonFile(string filename) {
+        var jsonString = File.ReadAllText(filename);
         var executionGraph = JsonSerializer.Deserialize<ExecutionGraph>(jsonString);
         return executionGraph!;
     }
@@ -50,44 +50,37 @@ public class ExecutionGraph {
         ExecutionCache currentExecution = new();
 
         var intermediateGraph = new IntermediateGraph(Graph);
-        foreach (IntermediateNode iNode in intermediateGraph.Nodes) {
+        foreach (var iNode in intermediateGraph.Nodes) {
             var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == iNode.NodeIndex);
             var @delegate = context.Delegates[function.DelegateIndex];
             var executionNode = MakeNode(function.NodeIndex, previousCache);
 
             currentExecution.Nodes.Add(executionNode);
 
-            if (iNode.IsComplete == false) {
-                continue;
-            }
+            if (iNode.IsComplete == false) continue;
 
             if (executionNode.HasOutputs) {
-                if (iNode.EdgeBehavior == EdgeBehavior.Once) {
-                    continue;
-                }
+                if (iNode.EdgeBehavior == EdgeBehavior.Once) continue;
 
                 if (iNode.SelfBehavior == NodeBehavior.Passive) {
-                    bool hasUpdatedInputs = false;
+                    var hasUpdatedInputs = false;
                     foreach (var input in Graph.InputsForNode(iNode.NodeIndex)) {
                         var edge = Graph.EdgeForInput(input.SelfIndex);
                         if (edge is null) {
                             Debug.Assert(input.Required == false);
-                        } else {
+                        }
+                        else {
                             if (edge.Behavior == EdgeBehavior.Always) {
                                 var output = Graph.Outputs[edge.OutputIndex];
                                 var outputExecutionNode =
                                     currentExecution.Nodes.Single(_ => _.NodeIndex == output.NodeIndex);
 
-                                if (outputExecutionNode.IsExecuted) {
-                                    hasUpdatedInputs = true;
-                                }
+                                if (outputExecutionNode.IsExecuted) hasUpdatedInputs = true;
                             }
                         }
                     }
 
-                    if (!hasUpdatedInputs) {
-                        continue;
-                    }
+                    if (!hasUpdatedInputs) continue;
                 }
             }
 
@@ -99,9 +92,8 @@ public class ExecutionGraph {
                 Debug.Assert(@delegate.Method.GetParameters().Length == function.InvokeArgumentsCount);
             }
 
-            foreach (var argument in function.Arguments) {
+            foreach (var argument in function.Arguments)
                 ProcessArgument(function, executionNode, argument, currentExecution);
-            }
 
 
             var timer = Stopwatch.StartNew();
@@ -116,8 +108,8 @@ public class ExecutionGraph {
         return currentExecution;
     }
 
-    private ExecutionNode MakeNode(Int32 nodeIndex, ExecutionCache cache) {
-        var result = new ExecutionNode() {
+    private ExecutionNode MakeNode(int nodeIndex, ExecutionCache cache) {
+        var result = new ExecutionNode {
             NodeIndex = nodeIndex,
             Arguments = null,
             HasOutputs = false
@@ -125,13 +117,14 @@ public class ExecutionGraph {
 
         var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == nodeIndex);
 
-        ExecutionNode? executionNode = cache.Nodes.SingleOrDefault(_ => _.NodeIndex == nodeIndex);
-        if (executionNode is {HasOutputs: true}) {
+        var executionNode = cache.Nodes.SingleOrDefault(_ => _.NodeIndex == nodeIndex);
+        if (executionNode is { HasOutputs: true }) {
             result.Arguments = executionNode.Arguments;
             result.Return = executionNode.Return;
             result.HasOutputs = true;
-        } else if (function.InvokeArgumentsCount > 0) {
-            result.Arguments = new Object?[function.InvokeArgumentsCount];
+        }
+        else if (function.InvokeArgumentsCount > 0) {
+            result.Arguments = new object?[function.InvokeArgumentsCount];
         }
 
         return result;
@@ -156,15 +149,14 @@ public class ExecutionGraph {
 
             Debug.Assert(outputExecutionNode.HasOutputs);
 
-            Object? value = outputArgument.Position == -1
+            var value = outputArgument.Position == -1
                 ? outputExecutionNode.Return
                 : outputExecutionNode.Arguments![outputArgument.Position];
 
             executionNode.Arguments![argument.Position] = value;
-        } else {
-            if (argument.Position > 0) {
-                executionNode.Arguments![argument.Position] = null;
-            }
+        }
+        else {
+            if (argument.Position > 0) executionNode.Arguments![argument.Position] = null;
         }
     }
 }
