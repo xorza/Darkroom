@@ -39,7 +39,7 @@ public class ExecutionTests {
 
         var executionCache = new ExecutionCache();
 
-        {
+        { // first run - all nodes should be executed
             FunctionTests.TestOutputValue = 0;
             executionCache = executionGraph.Run(executionContext, executionCache);
 
@@ -48,7 +48,7 @@ public class ExecutionTests {
             Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
         }
 
-        {
+        { // second run - all cached and no nodes should be executed
             FunctionTests.TestOutputValue = 0;
             executionCache = executionGraph.Run(executionContext, executionCache);
 
@@ -60,7 +60,7 @@ public class ExecutionTests {
             Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
         }
 
-        {
+        { // node1 made active
             FunctionTests.TestOutputValue = 0;
             FunctionTests.Node1OutputValue = 11;
             executionGraph.Graph.Nodes[1].Behavior = NodeBehavior.Active;
@@ -75,7 +75,7 @@ public class ExecutionTests {
             Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(77));
         }
 
-        {
+        { //
             FunctionTests.TestOutputValue = 0;
             executionGraph.Graph.Edges[4].Behavior = EdgeBehavior.Once;
             executionCache = executionGraph.Run(executionContext, executionCache);
