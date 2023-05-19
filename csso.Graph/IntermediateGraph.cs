@@ -3,6 +3,7 @@ namespace csso.Graph;
 public class IntermediateNode {
     public Int32 NodeIndex { get; set; }
     public NodeBehavior SelfBehavior { get; set; }
+    public NodeBehavior ParentBehavior { get; set; }
     public bool IsComplete { get; set; }
     public EdgeBehavior EdgeBehavior { get; set; }
 }
@@ -26,6 +27,7 @@ public class IntermediateGraph {
             var iNode = new IntermediateNode {
                 NodeIndex = node.SelfIndex,
                 SelfBehavior = NodeBehavior.Active,
+                ParentBehavior = NodeBehavior.Passive,
                 EdgeBehavior = EdgeBehavior.Always,
                 IsComplete = true
             };
@@ -49,6 +51,7 @@ public class IntermediateGraph {
                         iOutputNode = node;
                     } else {
                         iOutputNode = new IntermediateNode {
+                            ParentBehavior = NodeBehavior.Passive,
                             NodeIndex = outputNode.SelfIndex,
                             SelfBehavior = outputNode.Behavior,
                             IsComplete = true,
@@ -79,8 +82,9 @@ public class IntermediateGraph {
                 if (edge != null) {
                     var output = graph.Outputs[edge.Value.OutputIndex];
                     var outputINode = Nodes.First(_ => _.NodeIndex == output.NodeIndex);
-                    if (outputINode.SelfBehavior == NodeBehavior.Active) {
-                        iIntermediateNode.SelfBehavior = NodeBehavior.Active;
+                    if (outputINode.SelfBehavior == NodeBehavior.Active
+                        || outputINode.ParentBehavior == NodeBehavior.Active) {
+                        iIntermediateNode.ParentBehavior = NodeBehavior.Active;
                     }
 
                     if (outputINode.IsComplete == false) {

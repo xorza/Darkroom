@@ -72,23 +72,27 @@ public class GraphTests {
         Assert.That(intermediateGraph.Nodes.Count, Is.EqualTo(5));
 
         var iNode4 = intermediateGraph.Nodes[4];
+        Assert.That(graph.Nodes[iNode4.NodeIndex].Name, Is.EqualTo("print node"));
         Assert.That(iNode4.IsComplete, Is.EqualTo(true));
         Assert.That(iNode4.SelfBehavior, Is.EqualTo(NodeBehavior.Active));
-        Assert.That(graph.Nodes[iNode4.NodeIndex].Name, Is.EqualTo("print node"));
+        Assert.That(iNode4.ParentBehavior, Is.EqualTo(NodeBehavior.Active));
 
         var iNode3 = intermediateGraph.Nodes[3];
-        Assert.That(iNode3.IsComplete, Is.EqualTo(true));
-        Assert.That(iNode3.SelfBehavior, Is.EqualTo(NodeBehavior.Active));
         Assert.That(graph.Nodes[iNode3.NodeIndex].Name, Is.EqualTo("mult node"));
+        Assert.That(iNode3.IsComplete, Is.EqualTo(true));
+        Assert.That(iNode3.SelfBehavior, Is.EqualTo(NodeBehavior.Passive));
+        Assert.That(iNode3.ParentBehavior, Is.EqualTo(NodeBehavior.Active));
 
         var iNode1 = intermediateGraph.Nodes[1];
         Assert.That(graph.Nodes[iNode1.NodeIndex].Name, Is.EqualTo("value 1 node"));
         Assert.That(iNode1.IsComplete, Is.EqualTo(true));
         Assert.That(iNode1.SelfBehavior, Is.EqualTo(NodeBehavior.Passive));
+        Assert.That(iNode1.ParentBehavior, Is.EqualTo(NodeBehavior.Passive));
 
         var iNode0 = intermediateGraph.Nodes[0];
         Assert.That(graph.Nodes[iNode0.NodeIndex].Name, Is.EqualTo("value 0 node"));
         Assert.That(iNode0.IsComplete, Is.EqualTo(true));
         Assert.That(iNode0.SelfBehavior, Is.EqualTo(NodeBehavior.Active));
+        Assert.That(iNode0.ParentBehavior, Is.EqualTo(NodeBehavior.Passive));
     }
 }

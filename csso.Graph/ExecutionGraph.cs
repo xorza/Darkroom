@@ -62,8 +62,26 @@ public class ExecutionGraph {
                     continue;
                 }
 
-                if (iNode.SelfBehavior == NodeBehavior.Passive) {
-                    continue;
+                if (iNode.ParentBehavior == NodeBehavior.Active) {
+                    bool canSkip = true;
+                    foreach (var input in Graph.InputsForNode(iNode.NodeIndex)) {
+                        var edge = Graph.EdgeForInput(input.SelfIndex);
+                        if (edge is null) {
+                            Debug.Assert(input.Required == false);
+                        } else {
+                            if (edge.Value.Behavior == EdgeBehavior.Always) {
+                                canSkip = false;
+                            }
+                        }
+                    }
+
+                    if (canSkip) {
+                        continue;
+                    }
+                } else {
+                    if (iNode.SelfBehavior == NodeBehavior.Passive) {
+                        continue;
+                    }
                 }
             }
 
