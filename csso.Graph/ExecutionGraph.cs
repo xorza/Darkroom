@@ -50,23 +50,35 @@ public class ExecutionGraph {
         ExecutionCache currentExecution = new();
 
         var intermediateGraph = new IntermediateGraph(Graph);
-        foreach (IntermediateNode intermediateNode in intermediateGraph.Nodes) {
-            var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == intermediateNode.NodeIndex);
-            var executionNode = GetOrCreateNode(function.NodeIndex, previousCache);
+        foreach (IntermediateNode iNode in intermediateGraph.Nodes) {
+            var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == iNode.NodeIndex);
+            var @delegate = context.Delegates[function.DelegateIndex];
+            var executionNode = MakeNode(function.NodeIndex, previousCache);
+
             currentExecution.Nodes.Add(executionNode);
 
+            if (executionNode.HasOutputs) {
+                if (iNode.EdgeBehavior == EdgeBehavior.Once) {
+                    continue;
+                }
+
+                if (iNode.SelfBehavior == NodeBehavior.Passive) {
+                    continue;
+                }
+            }
+
             if (MyDebug.IsDebug) {
-                var node = Graph.Nodes[intermediateNode.NodeIndex];
+                var node = Graph.Nodes[iNode.NodeIndex];
                 Debug.Assert(function.Arguments.Count
                              == Graph.Inputs.Count(_ => _.NodeIndex == node.SelfIndex)
                              + Graph.Outputs.Count(_ => _.NodeIndex == node.SelfIndex));
+                Debug.Assert(@delegate.Method.GetParameters().Length == function.InvokeArgumentsCount);
             }
 
             foreach (var argument in function.Arguments) {
                 ProcessArgument(function, executionNode, argument, currentExecution);
             }
 
-            var @delegate = context.Delegates[function.DelegateIndex];
 
             var timer = Stopwatch.StartNew();
             executionNode.Return = @delegate.DynamicInvoke(executionNode.Arguments);
@@ -80,19 +92,25 @@ public class ExecutionGraph {
         return currentExecution;
     }
 
-    private ExecutionNode GetOrCreateNode(Int32 nodeIndex, ExecutionCache cache) {
+    private ExecutionNode MakeNode(Int32 nodeIndex, ExecutionCache cache) {
+        var result = new ExecutionNode() {
+            NodeIndex = nodeIndex,
+            Arguments = null,
+            HasOutputs = false
+        };
+
+        var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == nodeIndex);
+
         ExecutionNode? executionNode = cache.Nodes.SingleOrDefault(_ => _.NodeIndex == nodeIndex);
-        if (executionNode == null) {
-            executionNode = new ExecutionNode {
-                NodeIndex = nodeIndex
-            };
-            var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == nodeIndex);
-            if (function.InvokeArgumentsCount > 0) {
-                executionNode.Arguments = new Object?[function.InvokeArgumentsCount];
-            }
+        if (executionNode is {HasOutputs: true}) {
+            result.Arguments = executionNode.Arguments;
+            result.Return = executionNode.Return;
+            result.HasOutputs = true;
+        } else if (function.InvokeArgumentsCount > 0) {
+            result.Arguments = new Object?[function.InvokeArgumentsCount];
         }
 
-        return executionNode;
+        return result;
     }
 
     private void ProcessArgument(

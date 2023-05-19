@@ -33,9 +33,17 @@ public class ExecutionTests {
         var executionContext = new ExecutionContext();
         executionContext.Delegates.AddRange(FunctionTests.Delegates);
 
+        var executionCache = new ExecutionCache();
 
         FunctionTests.TestOutputValue = 0;
-        executionGraph.Run(executionContext, new ExecutionCache());
+        executionCache = executionGraph.Run(executionContext, executionCache);
+
+        Assert.That(executionCache.Nodes.All(_ => _.IsExecuted), Is.True);
+        Assert.That(executionCache.Nodes.All(_ => _.HasOutputs), Is.True);
+        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+
+        FunctionTests.TestOutputValue = 0;
+        executionCache = executionGraph.Run(executionContext, executionCache);
 
         Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
         Assert.Pass();
