@@ -6,6 +6,42 @@ public class ExecutionTests {
 
     [Test]
     public void Creation() {
+        var executionGraph = CreateTestExecutionGraph();
+
+        Assert.Pass();
+    }
+
+    [Test]
+    public void ToJson() {
+        var executionGraph = CreateTestExecutionGraph();
+        var json = executionGraph.ToJson();
+
+        Assert.Pass();
+    }
+
+    [Test]
+    public void FromJson() {
+        var executionGraph = ExecutionGraph.FromJsonFile("./test_execution_graph.json");
+
+        Assert.Pass();
+    }
+
+    [Test]
+    public void Run() {
+        var executionGraph = ExecutionGraph.FromJsonFile("./test_execution_graph.json");
+
+        var executionContext = new ExecutionContext();
+        executionContext.Delegates.AddRange(FunctionTests.Delegates);
+
+
+        FunctionTests.TestOutputValue = 0;
+        executionGraph.Run(executionContext, new ExecutionCache());
+
+        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
+        Assert.Pass();
+    }
+
+    public static ExecutionGraph CreateTestExecutionGraph() {
         var functionGraph = FunctionTests.CreateTestFunctionGraph();
         var graph = GraphTests.CreateTestGraph();
         var executionGraph = new ExecutionGraph {
@@ -77,11 +113,6 @@ public class ExecutionTests {
             ArgumentIndex = 0
         });
 
-
-        FunctionTests.TestOutputValue = 0;
-        executionGraph.Run();
-
-        Assert.That(FunctionTests.TestOutputValue, Is.EqualTo(35));
-        Assert.Pass();
+        return executionGraph;
     }
 }

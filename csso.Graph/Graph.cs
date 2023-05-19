@@ -5,7 +5,9 @@ using System.Text.Json.Serialization;
 namespace csso.Graph;
 
 public struct DataType {
-    /**/
+    public static DataType FromType(Type type) {
+        return new DataType { };
+    }
 }
 
 public struct Output {
@@ -56,7 +58,6 @@ public struct Edge {
 }
 
 public class Graph {
-    public Graph() { }
     public List<Output> Outputs { get; set; } = new();
     public List<Input> Inputs { get; set; } = new();
     public List<Node> Nodes { get; set; } = new();

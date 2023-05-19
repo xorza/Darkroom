@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using csso.Common;
 
 namespace csso.Graph;
@@ -20,22 +21,39 @@ public struct ExecutionArgument {
     public Int32 ArgumentIndex { get; set; }
 }
 
+public class ExecutionCache {
+    public List<ExecutionNode> Nodes { get; set; } = new();
+}
+
+public class ExecutionContext {
+    public List<Delegate> Delegates { get; set; } = new();
+}
+
 public class ExecutionGraph {
     public FunctionGraph FunctionGraph { get; set; } = new();
     public Graph Graph { get; set; } = new();
-
-    public List<ExecutionNode> CurrentRunNodes { get; set; } = new();
     public List<ExecutionArgument> Arguments { get; set; } = new();
 
-    public List<ExecutionNode> LastRunNodes { get; set; } = new();
 
-    public void Run() {
+    public String ToJson() {
+        string jsonString = JsonSerializer.Serialize(this);
+        return jsonString;
+    }
+
+    public static ExecutionGraph FromJsonFile(String filename) {
+        string jsonString = File.ReadAllText(filename);
+        var executionGraph = JsonSerializer.Deserialize<ExecutionGraph>(jsonString);
+        return executionGraph!;
+    }
+
+    public ExecutionCache Run(ExecutionContext context, ExecutionCache previousCache) {
+        ExecutionCache currentExecution = new();
+
         var intermediateGraph = new IntermediateGraph(Graph);
         foreach (IntermediateNode intermediateNode in intermediateGraph.Nodes) {
             var function = FunctionGraph.Functions.Single(_ => _.NodeIndex == intermediateNode.NodeIndex);
-            var executionNode = GetOrCreateNode(function.NodeIndex);
-
-            CurrentRunNodes.Add(executionNode);
+            var executionNode = GetOrCreateNode(function.NodeIndex, previousCache);
+            currentExecution.Nodes.Add(executionNode);
 
             if (MyDebug.IsDebug) {
                 var node = Graph.Nodes[intermediateNode.NodeIndex];
@@ -45,11 +63,13 @@ public class ExecutionGraph {
             }
 
             foreach (var argument in function.Arguments) {
-                ProcessArgument(function, executionNode, argument);
+                ProcessArgument(function, executionNode, argument, currentExecution);
             }
 
+            var @delegate = context.Delegates[function.DelegateIndex];
+
             var timer = Stopwatch.StartNew();
-            executionNode.Return = function.Invoke(executionNode.Arguments);
+            executionNode.Return = @delegate.DynamicInvoke(executionNode.Arguments);
             timer.Stop();
 
             executionNode.ExecutionTime = timer.Elapsed;
@@ -57,11 +77,11 @@ public class ExecutionGraph {
             executionNode.IsExecuted = true;
         }
 
-        LastRunNodes = CurrentRunNodes;
+        return currentExecution;
     }
 
-    private ExecutionNode GetOrCreateNode(Int32 nodeIndex) {
-        ExecutionNode? executionNode = LastRunNodes.SingleOrDefault(_ => _.NodeIndex == nodeIndex);
+    private ExecutionNode GetOrCreateNode(Int32 nodeIndex, ExecutionCache cache) {
+        ExecutionNode? executionNode = cache.Nodes.SingleOrDefault(_ => _.NodeIndex == nodeIndex);
         if (executionNode == null) {
             executionNode = new ExecutionNode {
                 NodeIndex = nodeIndex
@@ -78,7 +98,8 @@ public class ExecutionGraph {
     private void ProcessArgument(
         Function function,
         ExecutionNode executionNode,
-        Argument argument) {
+        Argument argument,
+        ExecutionCache currentExecution) {
         if (argument.Direction == Direction.In) {
             var executionArgument = Arguments.Single(_ =>
                 _.ArgumentIndex == argument.SelfIndex && _.FunctionIndex == function.SelfIndex);
@@ -86,7 +107,7 @@ public class ExecutionGraph {
             var edge = Graph.EdgeForInput(input.SelfIndex)!.Value;
             var output = Graph.Outputs[edge.OutputIndex];
             var outputFunction = FunctionGraph.Functions.Single(_ => _.NodeIndex == output.NodeIndex);
-            var outputExecutionNode = CurrentRunNodes.Single(_ => _.NodeIndex == output.NodeIndex);
+            var outputExecutionNode = currentExecution.Nodes.Single(_ => _.NodeIndex == output.NodeIndex);
             var outputExecutionArgument = Arguments.Single(_ =>
                 _.OutputIndex == output.SelfIndex && _.FunctionIndex == outputFunction.SelfIndex);
             var outputArgument = outputFunction.Arguments[outputExecutionArgument.ArgumentIndex];

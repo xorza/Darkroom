@@ -5,37 +5,27 @@ namespace csso.Graph.Tests;
 public class FunctionTests {
     public static Int32 TestOutputValue = 0;
 
+    public static readonly Delegate[] Delegates = {
+        () => 2,
+        () => 5,
+        (int a, int b) => a + b,
+        (int a, int b) => a * b,
+        (int a) => {
+            Debug.WriteLine("Print node: {0}", a);
+            TestOutputValue = a;
+        }
+    };
+
     [SetUp]
     public void Setup() { }
 
     public static FunctionGraph CreateTestFunctionGraph() {
         var functionGraph = new csso.Graph.FunctionGraph();
-        {
-            var function = Function.FromDelegate(() => 2);
-            function.NodeIndex = 0;
-            functionGraph.NewFunction(function);
-        }
-        {
-            var function = Function.FromDelegate(() => 5);
-            function.NodeIndex = 1;
-            functionGraph.NewFunction(function);
-        }
-        {
-            var function = Function.FromDelegate((int a, int b) => a + b);
-            function.NodeIndex = 2;
-            functionGraph.NewFunction(function);
-        }
-        {
-            var function = Function.FromDelegate((int a, int b) => a * b);
-            function.NodeIndex = 3;
-            functionGraph.NewFunction(function);
-        }
-        {
-            var function = Function.FromDelegate((int a) => {
-                Debug.WriteLine("Print node: {0}", a);
-                TestOutputValue = a;
-            });
-            function.NodeIndex = 4;
+
+        for (int i = 0; i < Delegates.Length; i++) {
+            var function = Function.FromDelegate(Delegates[i]);
+            function.NodeIndex = i;
+            function.DelegateIndex = i;
             functionGraph.NewFunction(function);
         }
 
