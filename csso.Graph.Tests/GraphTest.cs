@@ -57,6 +57,8 @@ public class GraphTests {
 
         graph.NewEdge(ref edge);
 
+        Assert.That(edge.SelfIndex, Is.EqualTo(3));
+
         var input = graph.Inputs[4];
         Assert.That(graph.Edges.Count(_ => _.InputIndex == input.SelfIndex), Is.EqualTo(1));
         Assert.That(graph.Edges.Count, Is.EqualTo(5));

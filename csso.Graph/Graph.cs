@@ -42,7 +42,7 @@ public struct Node {
 }
 
 public enum EdgeBehavior {
-    ALways,
+    Always,
     Once
 }
 
@@ -103,10 +103,15 @@ public class Graph {
         }
 
         var inputIndex = edge.InputIndex;
-        Edges.RemoveAll(_ => _.InputIndex == inputIndex);
 
-        edge.SelfIndex = Edges.Count;
-        Edges.Add(edge);
+        Edge? existingEdge = Edges.SingleOrDefault(_ => _.InputIndex == inputIndex);
+        if (existingEdge != null) {
+            edge.SelfIndex = existingEdge.Value.SelfIndex;
+            Edges[edge.SelfIndex] = edge;
+        } else {
+            edge.SelfIndex = Edges.Count;
+            Edges.Add(edge);
+        }
     }
 
 
