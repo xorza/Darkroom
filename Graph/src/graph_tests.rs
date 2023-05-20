@@ -1,7 +1,7 @@
 #[cfg(test)]
-mod tests {
+mod graph_tests {
     use std::hint::black_box;
-    use crate::graph::Graph;
+    use crate::graph::*;
 
     #[test]
     fn from_json() {
