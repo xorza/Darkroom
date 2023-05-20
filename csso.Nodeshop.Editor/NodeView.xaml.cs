@@ -1,21 +1,34 @@
 namespace csso.Nodeshop.Editor;
 
+public class NodeViewModel {
+    public NodeViewModel() {
+    }
+
+    public Int32 NodeIndex { get; set; }
+
+    public String Name { get; set; }
+    public List<String> Inputs { get; set; } = new();
+    public List<String> Outputs { get; set; } = new();
+}
+
 public partial class NodeView : ContentView {
-    private VisualNode _node = null!;
+    private NodeViewModel _vm = null!;
 
     public NodeView() {
         InitializeComponent();
+        VerticalOptions = LayoutOptions.Start;
+        HorizontalOptions = LayoutOptions.Start;
     }
 
-    public VisualNode Node {
-        get => _node;
+    public NodeViewModel VM {
+        get => _vm;
         set {
-            if (_node == value) {
+            if (_vm == value) {
                 return;
             }
 
-            _node = value;
-            BindingContext = _node;
+            _vm = value;
+            BindingContext = _vm;
         }
     }
 }

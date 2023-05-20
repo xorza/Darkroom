@@ -1,6 +1,4 @@
-﻿using System.Diagnostics;
-
-namespace csso.Nodeshop.Editor;
+﻿namespace csso.Nodeshop.Editor;
 
 public partial class MainPage : ContentPage {
     public MainPage() {
@@ -10,21 +8,38 @@ public partial class MainPage : ContentPage {
         InitializeComponent();
     }
 
+
     public VisualGraph Graph { get; set; }
 
     private void OnLoaded(object sender, EventArgs e) {
         foreach (var vNode in Graph.Nodes) {
-            var nodeView = new NodeView();
+            var node = Graph.Graph.Graph.Nodes[vNode.NodeIndex];
+
+            var nodeView = NodeAbsoluteLayout.Children.OfType<NodeView>()
+                .SingleOrDefault(_ => _.VM.NodeIndex == vNode.NodeIndex);
+            if (nodeView == null) {
+                nodeView = new NodeView { };
+                var nodeViewModel = new NodeViewModel() {
+                    NodeIndex = vNode.NodeIndex,
+                    Name = vNode.Name
+                };
+                var inputs = Graph.Graph.Graph.Inputs.Where(_ => _.NodeIndex == vNode.NodeIndex).Select(_ => _.Name)
+                    .ToList();
+                nodeViewModel.Inputs = inputs;
+                var outputs = Graph.Graph.Graph.Outputs.Where(_ => _.NodeIndex == vNode.NodeIndex).Select(_ => _.Name)
+                    .ToList();
+                nodeViewModel.Outputs = outputs;
+
+                nodeView.VM = nodeViewModel;
+                NodeAbsoluteLayout.Children.Add(nodeView);
+            }
+
             var sizeRequest = nodeView.Measure(double.PositiveInfinity, double.PositiveInfinity);
             AbsoluteLayout.SetLayoutBounds(nodeView,
                 new Rect(vNode.Point.X, vNode.Point.Y, sizeRequest.Minimum.Width, sizeRequest.Minimum.Height));
-            nodeView.Node = vNode;
-            NodeAbsoluteLayout.Children.Add(nodeView);
         }
     }
 
-
     private void Button_OnClicked(object sender, EventArgs e) {
-        Debug.WriteLine("Hello World!");
     }
 }

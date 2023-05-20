@@ -1,9 +1,67 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 
 <ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="csso.Nodeshop.Editor.NodeView"
              BackgroundColor="{StaticResource ActiveElementBackground}"
-             >
-    <Label Text="Hellle!!" />
+             HorizontalOptions="Start"
+             VerticalOptions="Start"
+             MinimumWidthRequest="110">
+    <ContentView.Resources>
+        <ResourceDictionary />
+    </ContentView.Resources>
+    <Grid HorizontalOptions="Start"
+          VerticalOptions="Start"
+          MaximumHeightRequest="200">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition />
+            <ColumnDefinition />
+        </Grid.ColumnDefinitions>
+
+        <Label Grid.ColumnSpan="2" Text="{Binding Name}" LineBreakMode="NoWrap"
+               Margin="10" HorizontalOptions="Start" HorizontalTextAlignment="Start" />
+        <StackLayout Grid.Row="1" Grid.Column="0" Orientation="Vertical" HorizontalOptions="Start"
+                     MaximumWidthRequest="90">
+            <CollectionView x:Name="InputCollectionView" ItemsSource="{Binding Inputs}" HorizontalOptions="Start">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:Key="ArgumentTemplate">
+                        <StackLayout Orientation="Horizontal"
+                                     HorizontalOptions="Start">
+                            <Button Text="{Binding}"
+                                    ContentLayout="Left"
+                                    HorizontalOptions="Start" 
+                                    BackgroundColor="Chocolate"
+                                    
+                                    MinimumWidthRequest="60"
+                                    MinimumHeightRequest="30"
+                                    Padding="0"/>
+                        </StackLayout>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </StackLayout>
+        <StackLayout Grid.Row="1" Grid.Column="1" Orientation="Vertical"
+                     MaximumWidthRequest="90">
+            <CollectionView x:Name="OutputCollectionView" ItemsSource="{Binding Outputs}">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:Key="ArgumentTemplate">
+                        <StackLayout Orientation="Horizontal"
+                                     HorizontalOptions="End">
+                            <Button Text="{Binding}"
+                                    ContentLayout="Right"
+                                    HorizontalOptions="End"
+                                    MinimumWidthRequest="60"
+                                    MinimumHeightRequest="30"
+                                    Padding="0"
+                                    BackgroundColor="Chocolate" />
+                        </StackLayout>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </StackLayout>
+    </Grid>
 </ContentView>

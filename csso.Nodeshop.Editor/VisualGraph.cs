@@ -9,18 +9,22 @@ public class VisualNode {
 }
 
 public class VisualGraph {
-    public ExecutionGraph ExecutionGraph { get; set; }
+    public ExecutionGraph Graph { get; set; }
     public List<VisualNode> Nodes { get; set; } = new();
 
     public static VisualGraph CreateTest() {
-        var currentDirectory = Directory.GetCurrentDirectory();
+        if (!Common.MyDebug.IsDebug) {
+            throw new InvalidOperationException();
+        }
+
         var graph = new VisualGraph();
-        graph.ExecutionGraph = ExecutionGraph.FromJsonFile("../test_execution_graph.json");
+        graph.Graph = ExecutionGraph.FromJsonFile("../test_execution_graph.json");
 
         for (int i = 0; i < 5; i++) {
             var visualNode = new VisualNode {
                 NodeIndex = i,
-                Point = new System.Drawing.Point(i * 100, i * 100)
+                Point = new System.Drawing.Point(i * 100, i * 100),
+                Name = graph.Graph.Graph.Nodes[i].Name
             };
             graph.Nodes.Add(visualNode);
         }

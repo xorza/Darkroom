@@ -13,7 +13,7 @@ public struct DataType {
 public class Output {
     public int SelfIndex { get; set; }
     public int NodeIndex { get; set; }
-    public string Name { get; set; }
+    public string Name { get; set; } = String.Empty;
 
     public DataType Type { get; set; }
 }
@@ -22,7 +22,7 @@ public class Input {
     public int SelfIndex { get; set; }
     public int NodeIndex { get; set; }
 
-    public string Name { get; set; }
+    public string Name { get; set; } = String.Empty;
 
     public bool Required { get; set; }
     public DataType Type { get; set; }
@@ -35,7 +35,7 @@ public enum NodeBehavior {
 
 public class Node {
     public int SelfIndex { get; set; }
-    public string Name { get; set; }
+    public string Name { get; set; } = String.Empty;
 
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public NodeBehavior Behavior { get; set; }

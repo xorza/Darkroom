@@ -16,13 +16,13 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+        <!-- <Grid.ColumnDefinitions> -->
+        <!--     <ColumnDefinition Width="*" /> -->
+        <!-- </Grid.ColumnDefinitions> -->
 
-        <HorizontalStackLayout>
+        <StackLayout Orientation="Horizontal">
             <Button Text="Load" Clicked="Button_OnClicked" />
-        </HorizontalStackLayout>
+        </StackLayout>
 
         <AbsoluteLayout x:Name="NodeAbsoluteLayout"
                         Grid.Row="1"
