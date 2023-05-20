@@ -1,0 +1,126 @@
+{
+  "new_id": 10000,
+
+  "nodes": [
+    {
+      "self_id": 0,
+      "name": "value 0 node",
+      "behavior": "Active",
+      "is_output": false
+    },
+    {
+      "self_id": 1,
+      "name": "value 1 node",
+      "behavior": "Passive",
+      "is_output": false
+    },
+    {
+      "self_id": 2,
+      "name": "sum node",
+      "behavior": "Passive",
+      "is_output": false
+    },
+    {
+      "self_id": 3,
+      "name": "mult node",
+      "behavior": "Passive",
+      "is_output": false
+    },
+    {
+      "self_id": 4,
+      "name": "print node",
+      "behavior": "Passive",
+      "is_output": true
+    }
+  ],
+  "inputs": [
+    {
+      "self_id": 5,
+      "node_id": 2,
+      "name": "A",
+      "data_type": "Int",
+      "is_required": true
+    },
+    {
+      "self_id": 1,
+      "node_id": 2,
+      "name": "B",
+      "data_type": "Int",
+      "is_required": true
+    },
+    {
+      "self_id": 2,
+      "node_id": 3,
+      "name": "A",
+      "data_type": "Int",
+      "is_required": true
+    },
+    {
+      "self_id": 3,
+      "node_id": 3,
+      "name": "B",
+      "data_type": "Int",
+      "is_required": true
+    },
+    {
+      "self_id": 4,
+      "node_id": 4,
+      "name": "Message",
+      "data_type": "Int",
+      "is_required": true
+    }
+  ],
+  "outputs": [
+    {
+      "self_id": 0,
+      "node_id": 0,
+      "name": "Int32 Value",
+      "data_type": "Int"
+    },
+    {
+      "self_id": 1,
+      "node_id": 1,
+      "name": "Int32 Value",
+      "data_type": "Int"
+    },
+    {
+      "self_id": 2,
+      "node_id": 2,
+      "name": "Sum Result",
+      "data_type": "Int"
+    },
+    {
+      "self_id": 3,
+      "node_id": 3,
+      "name": "Mult Result",
+      "data_type": "Int"
+    }
+  ],
+  "edges": [
+    {
+      "input_id": 0,
+      "output_id": 0,
+      "behavior": "Once"
+    },
+    {
+      "input_id": 1,
+      "output_id": 1,
+      "behavior": "Once"
+    },
+    {
+      "output_id": 2,
+      "input_id": 2,
+      "behavior": "Always"
+    },
+    {
+      "output_id": 3,
+      "input_id": 4,
+      "behavior": "Always"
+    },
+    {
+      "output_id": 1,
+      "input_id": 3,
+      "behavior": "Always"
+    }
+  ]
+}
