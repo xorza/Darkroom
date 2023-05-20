@@ -36,7 +36,7 @@ public partial class MainPage : ContentPage {
 
             var sizeRequest = nodeView.Measure(double.PositiveInfinity, double.PositiveInfinity);
             AbsoluteLayout.SetLayoutBounds(nodeView,
-                new Rect(vNode.Point.X, vNode.Point.Y, sizeRequest.Minimum.Width, sizeRequest.Minimum.Height));
+                new Rect(vNode.Point.X, vNode.Point.Y, sizeRequest.Request.Width, sizeRequest.Request.Height));
         }
     }
 

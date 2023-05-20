@@ -5,60 +5,67 @@
              x:Class="csso.Nodeshop.Editor.NodeView"
              BackgroundColor="{StaticResource ActiveElementBackground}"
              HorizontalOptions="Start"
-             VerticalOptions="Start"
-             MinimumWidthRequest="110">
+             VerticalOptions="Start">
     <ContentView.Resources>
         <ResourceDictionary />
     </ContentView.Resources>
-    <Grid HorizontalOptions="Start"
-          VerticalOptions="Start"
-          MaximumHeightRequest="200">
+    <Grid HorizontalOptions="Fill"
+          VerticalOptions="Fill"
+          MaximumHeightRequest="180"
+          MaximumWidthRequest="180">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
-            <ColumnDefinition />
-            <ColumnDefinition />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="*" />
         </Grid.ColumnDefinitions>
 
-        <Label Grid.ColumnSpan="2" Text="{Binding Name}" LineBreakMode="NoWrap"
+        <BoxView Grid.Row="0" Grid.ColumnSpan="2" Grid.Column="0" BackgroundColor="Gray" />
+        <Label Grid.Row="0" Grid.ColumnSpan="2" Grid.Column="0" Text="{Binding Name}" LineBreakMode="NoWrap"
                Margin="10" HorizontalOptions="Start" HorizontalTextAlignment="Start" />
-        <StackLayout Grid.Row="1" Grid.Column="0" Orientation="Vertical" HorizontalOptions="Start"
-                     MaximumWidthRequest="90">
-            <CollectionView x:Name="InputCollectionView" ItemsSource="{Binding Inputs}" HorizontalOptions="Start">
+
+
+        <StackLayout Grid.Row="1" Grid.Column="0" Orientation="Vertical" HorizontalOptions="Fill">
+            <CollectionView x:Name="InputCollectionView" ItemsSource="{Binding Inputs}" HorizontalOptions="Fill">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:Key="ArgumentTemplate">
-                        <StackLayout Orientation="Horizontal"
-                                     HorizontalOptions="Start">
+                        <Grid
+                            HorizontalOptions="Fill">
+                            <BoxView BackgroundColor="Moccasin" HorizontalOptions="Fill" VerticalOptions="Fill" />
+
                             <Button Text="{Binding}"
                                     ContentLayout="Left"
-                                    HorizontalOptions="Start" 
+                                    HorizontalOptions="Fill"
+                                    VerticalOptions="Start"
                                     BackgroundColor="Chocolate"
-                                    
+
                                     MinimumWidthRequest="60"
                                     MinimumHeightRequest="30"
-                                    Padding="0"/>
-                        </StackLayout>
+                                    Padding="0" />
+                        </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
         </StackLayout>
-        <StackLayout Grid.Row="1" Grid.Column="1" Orientation="Vertical"
-                     MaximumWidthRequest="90">
-            <CollectionView x:Name="OutputCollectionView" ItemsSource="{Binding Outputs}">
+        <StackLayout Grid.Row="1" Grid.Column="1" Orientation="Vertical" HorizontalOptions="Fill">
+            <CollectionView x:Name="OutputCollectionView" ItemsSource="{Binding Outputs}" HorizontalOptions="Fill">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:Key="ArgumentTemplate">
-                        <StackLayout Orientation="Horizontal"
-                                     HorizontalOptions="End">
+                        <Grid
+                            HorizontalOptions="Fill">
+
+                            <BoxView BackgroundColor="Salmon" HorizontalOptions="Fill" VerticalOptions="Fill" />
                             <Button Text="{Binding}"
                                     ContentLayout="Right"
-                                    HorizontalOptions="End"
+                                    HorizontalOptions="Fill"
+                                    VerticalOptions="Start"
                                     MinimumWidthRequest="60"
                                     MinimumHeightRequest="30"
                                     Padding="0"
                                     BackgroundColor="Chocolate" />
-                        </StackLayout>
+                        </Grid>
                     </DataTemplate>
                 </CollectionView.ItemTemplate>
             </CollectionView>
