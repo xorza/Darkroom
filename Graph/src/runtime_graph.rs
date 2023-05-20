@@ -1,5 +1,4 @@
 use std::hint::black_box;
-use std::mem;
 use crate::graph::*;
 use crate::node::*;
 
@@ -16,14 +15,12 @@ struct IntermediateNode {
 
 pub struct RuntimeGraph {
     nodes: Vec<IntermediateNode>,
-    prev_run: Vec<IntermediateNode>,
 }
 
 impl RuntimeGraph {
     pub fn new() -> RuntimeGraph {
         RuntimeGraph {
             nodes: Vec::new(),
-            prev_run: Vec::new(),
         }
     }
 
@@ -31,12 +28,10 @@ impl RuntimeGraph {
         self.traverse_backward(graph);
         self.traverse_forward1(graph);
         self.traverse_forward2(graph);
-
-        mem::swap(&mut self.prev_run, &mut self.nodes);
-        self.nodes.clear();
     }
 
     fn traverse_backward(&mut self, graph: &Graph) {
+        let last_run = self.nodes.clone();
         self.nodes.clear();
 
         let active_nodes: Vec<&Node> = graph.nodes.iter().filter(|node| node.is_output).collect();
@@ -76,7 +71,7 @@ impl RuntimeGraph {
                         });
                         output_i_node = self.nodes.last_mut().unwrap();
 
-                        if let Some(_node) = self.prev_run.iter_mut().find(|node| node.node_id == output_node.self_id) {
+                        if let Some(_node) = last_run.iter().find(|node| node.node_id == output_node.self_id) {
                             output_i_node.has_outputs = _node.has_outputs;
                         }
                     }
@@ -123,47 +118,60 @@ impl RuntimeGraph {
     fn traverse_forward2(&mut self, graph: &Graph) {
         for i in 0..self.nodes.len() {
             let mut i_node = self.nodes[i].clone();
-            if i_node.is_complete == false {
+
+            if self.can_skip(graph, &i_node) {
                 continue;
-            }
-
-            if i_node.has_outputs {
-                if i_node.edge_behavior == EdgeBehavior::Once {
-                    continue;
-                }
-
-                if i_node.behavior == NodeBehavior::Passive {
-                    let mut has_updated_inputs = false;
-
-                    let inputs = graph.inputs_by_node_id(i_node.node_id);
-                    for input in inputs {
-                        if let Some(edge) = graph.edge_by_input_id(input.self_id) {
-                            if edge.behavior == EdgeBehavior::Always {
-                                let output = graph.output_by_id(edge.output_id).unwrap();
-                                let output_execution_node =
-                                    self.prev_run.iter_mut()
-                                        .find(|_i_node| _i_node.node_id == output.node_id)
-                                        .unwrap();
-
-                                if output_execution_node.should_execute {
-                                    has_updated_inputs = true;
-                                }
-                            }
-                        } else {
-                            assert_eq!(input.is_required, false);
-                        }
-                    }
-
-                    if !has_updated_inputs {
-                        continue;
-                    }
-                }
             }
 
             i_node.should_execute = true;
             i_node.has_outputs = true;
             self.nodes[i] = i_node;
         }
+    }
+
+    fn can_skip(&mut self, graph: &Graph, i_node: &IntermediateNode) -> bool {
+        if i_node.is_complete == false {
+            return true;
+        }
+
+        if i_node.has_outputs == false {
+            return false;
+        }
+
+        if i_node.edge_behavior == EdgeBehavior::Once {
+            return true;
+        }
+
+        if i_node.behavior == NodeBehavior::Passive
+            && !self.has_updated_inputs(graph, i_node.node_id) {
+            return true;
+        }
+
+
+        return false;
+    }
+
+    fn has_updated_inputs(&mut self, graph: &Graph, node_id: u32) -> bool {
+        let mut has_updated_inputs = false;
+
+        for input in graph.inputs_by_node_id(node_id) {
+            if let Some(edge) = graph.edge_by_input_id(input.self_id) {
+                if edge.behavior == EdgeBehavior::Always {
+                    let output = graph.output_by_id(edge.output_id).unwrap();
+                    let output_i_node =
+                        self.nodes.iter_mut()
+                            .find(|_i_node| _i_node.node_id == output.node_id)
+                            .unwrap();
+
+                    if output_i_node.should_execute {
+                        has_updated_inputs = true;
+                    }
+                }
+            } else {
+                debug_assert_eq!(input.is_required, false);
+            }
+        }
+        return has_updated_inputs;
     }
 
     //if (MyDebug.IsDebug) {
@@ -173,5 +181,4 @@ impl RuntimeGraph {
     //        + Graph.Outputs.Count(_ => _.NodeIndex == node.SelfIndex));
     //    Debug.Assert(@delegate.Method.GetParameters().Length == function.InvokeArgumentsCount);
     //}
-
 }

@@ -11,6 +11,8 @@ mod runtime_tests {
         let mut runtime_graph = RuntimeGraph::new();
         runtime_graph.run(&graph);
 
+        // assert_eq!(runtime_graph., 3);
+
         runtime_graph.run(&graph);
 
         black_box(());
