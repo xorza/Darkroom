@@ -1,4 +1,5 @@
 use std::hint::black_box;
+use std::mem;
 use crate::graph::*;
 use crate::node::*;
 
@@ -30,6 +31,9 @@ impl RuntimeGraph {
         self.traverse_backward(graph);
         self.traverse_forward1(graph);
         self.traverse_forward2(graph);
+
+        mem::swap(&mut self.prev_run, &mut self.nodes);
+        self.nodes.clear();
     }
 
     fn traverse_backward(&mut self, graph: &Graph) {

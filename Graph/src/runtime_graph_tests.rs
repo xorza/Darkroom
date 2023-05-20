@@ -11,6 +11,8 @@ mod runtime_tests {
         let mut runtime_graph = RuntimeGraph::new();
         runtime_graph.run(&graph);
 
-        black_box(graph);
+        runtime_graph.run(&graph);
+
+        black_box(());
     }
 }
