@@ -10,9 +10,6 @@ pub struct Graph {
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
     pub edges: Vec<Edge>,
-
-    pub function_nodes: Vec<FunctionNode>,
-    pub arguments: Vec<Argument>,
 }
 
 impl Graph {
@@ -23,8 +20,6 @@ impl Graph {
             inputs: Vec::new(),
             outputs: Vec::new(),
             edges: Vec::new(),
-            function_nodes: Vec::new(),
-            arguments: Vec::new(),
         }
     }
 
