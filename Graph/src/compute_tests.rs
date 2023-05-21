@@ -1,9 +1,7 @@
 #[cfg(test)]
 mod graph_tests {
-    use std::hint::black_box;
-    use crate::compute::Compute;
-    use crate::graph::*;
-    use crate::workspace::Workspace;
+    use crate::compute::*;
+    use crate::workspace::*;
 
     #[test]
     fn from_json() {
@@ -12,6 +10,6 @@ mod graph_tests {
 
         compute.run(&mut workspace);
 
-        black_box(workspace);
+        drop(workspace);
     }
 }
