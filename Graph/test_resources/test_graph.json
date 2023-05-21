@@ -1,127 +1,129 @@
 {
     "new_id": 10000,
-    "outputs": [
-        {
-            "self_id": 0,
-            "node_id": 0,
-            "name": "Int32 Value",
-            "data_type": "Int"
-        },
+
+    "nodes": [
         {
             "self_id": 1,
+            "name": "value 0 node",
+            "behavior": "Active",
+            "is_output": false
+        },
+        {
+            "self_id": 2,
+            "name": "value 1 node",
+            "behavior": "Passive",
+            "is_output": false
+        },
+        {
+            "self_id": 3,
+            "name": "sum node",
+            "behavior": "Passive",
+            "is_output": false
+        },
+        {
+            "self_id": 4,
+            "name": "mult node",
+            "behavior": "Passive",
+            "is_output": false
+        },
+        {
+            "self_id": 5,
+            "name": "print node",
+            "behavior": "Passive",
+            "is_output": true
+        }
+    ],
+    "outputs": [
+        {
+            "self_id": 6,
             "node_id": 1,
             "name": "Int32 Value",
             "data_type": "Int"
         },
         {
-            "self_id": 2,
+            "self_id": 7,
             "node_id": 2,
+            "name": "Int32 Value",
+            "data_type": "Int"
+        },
+        {
+            "self_id": 8,
+            "node_id": 3,
             "name": "Sum Result",
             "data_type": "Int"
         },
         {
-            "self_id": 3,
-            "node_id": 3,
+            "self_id": 9,
+            "node_id": 4,
             "name": "Mult Result",
             "data_type": "Int"
         }
     ],
     "inputs": [
         {
-            "self_id": 0,
-            "node_id": 2,
-            "name": "A",
-            "is_required": false,
-            "data_type": "Int"
-        },
-        {
-            "self_id": 1,
-            "node_id": 2,
-            "name": "B",
-            "is_required": false,
-            "data_type": "Int"
-        },
-        {
-            "self_id": 2,
+            "self_id": 10,
             "node_id": 3,
             "name": "A",
             "is_required": false,
             "data_type": "Int"
         },
         {
-            "self_id": 3,
+            "self_id": 11,
             "node_id": 3,
             "name": "B",
             "is_required": false,
             "data_type": "Int"
         },
         {
-            "self_id": 4,
+            "self_id": 12,
             "node_id": 4,
+            "name": "A",
+            "is_required": false,
+            "data_type": "Int"
+        },
+        {
+            "self_id": 13,
+            "node_id": 4,
+            "name": "B",
+            "is_required": false,
+            "data_type": "Int"
+        },
+        {
+            "self_id": 14,
+            "node_id": 5,
             "name": "Message",
             "is_required": false,
             "data_type": "Int"
         }
     ],
-    "nodes": [
-        {
-            "self_id": 0,
-            "name": "value 0 node",
-            "behavior": "Active",
-            "is_output": false
-        },
-        {
-            "self_id": 1,
-            "name": "value 1 node",
-            "behavior": "Passive",
-            "is_output": false
-        },
-        {
-            "self_id": 2,
-            "name": "sum node",
-            "behavior": "Passive",
-            "is_output": false
-        },
-        {
-            "self_id": 3,
-            "name": "mult node",
-            "behavior": "Passive",
-            "is_output": false
-        },
-        {
-            "self_id": 4,
-            "name": "print node",
-            "behavior": "Passive",
-            "is_output": true
-        }
-    ],
     "edges": [
         {
-            "output_id": 0,
-            "input_id": 0,
+            "output_id": 6,
+            "input_id": 10,
             "behavior": "Once"
         },
         {
-            "output_id": 1,
-            "input_id": 1,
+            "output_id": 7,
+            "input_id": 11,
             "behavior": "Once"
         },
         {
-            "output_id": 2,
-            "input_id": 2,
+            "output_id": 7,
+            "input_id": 13,
             "behavior": "Always"
         },
         {
-            "output_id": 3,
-            "input_id": 4,
+            "output_id": 8,
+            "input_id": 12,
             "behavior": "Always"
         },
         {
-            "output_id": 1,
-            "input_id": 3,
+            "output_id": 9,
+            "input_id": 14,
             "behavior": "Always"
         }
     ],
+
     "function_nodes": [
         {
             "function_id": 0,
