@@ -4,16 +4,15 @@ use crate::graph::*;
 pub struct IntermediateNode {
     node_id: u32,
 
-    pub behavior: NodeBehavior,
-    pub is_complete: bool,
-    pub edge_behavior: ConnectionBehavior,
-
-    pub should_execute: bool,
-    pub has_outputs: bool,
+    behavior: NodeBehavior,
+    is_complete: bool,
+    edge_behavior: ConnectionBehavior,
+    pub(crate) should_execute: bool,
+    pub(crate) has_outputs: bool,
 }
 
 pub struct RuntimeGraph {
-    pub nodes: Vec<IntermediateNode>,
+    nodes: Vec<IntermediateNode>,
 }
 
 impl RuntimeGraph {
@@ -23,7 +22,13 @@ impl RuntimeGraph {
         }
     }
 
+    pub fn nodes(&self) -> &Vec<IntermediateNode> {
+        &self.nodes
+    }
+
     pub fn run(&mut self, graph: &Graph) {
+        assert!(graph.validate());
+
         let last_run = self.nodes.clone();
         self.nodes.clear();
 

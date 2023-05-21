@@ -89,7 +89,6 @@ impl Graph {
         &self.outputs
     }
 
-
     pub fn add_node(&mut self, node: &mut Node) {
         if node.id() != 0 {
             return;
@@ -155,6 +154,7 @@ impl Graph {
         assert_ne!(id, 0);
         self.outputs.iter_mut().find(|output| output.self_id == id)
     }
+
     pub fn input_by_id(&self, id: u32) -> Option<&Input> {
         assert_ne!(id, 0);
         self.inputs.iter().find(|input| input.self_id == id)
@@ -207,7 +207,6 @@ impl Graph {
             }) {
             return false;
         }
-
 
         return true;
     }
