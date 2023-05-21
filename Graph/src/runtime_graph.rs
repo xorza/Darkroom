@@ -1,9 +1,9 @@
 use crate::graph::*;
-use crate::node::*;
 
 #[derive(Clone)]
 pub struct IntermediateNode {
-    pub node_id: u32,
+    node_id: u32,
+
     pub behavior: NodeBehavior,
     pub is_complete: bool,
     pub edge_behavior: EdgeBehavior,
@@ -33,14 +33,14 @@ impl RuntimeGraph {
     }
 
     pub fn node_by_id(&self, node_id: u32) -> Option<&IntermediateNode> {
-        self.nodes.iter().find(|node| node.node_id == node_id)
+        self.nodes.iter().find(|node| node.node_id() == node_id)
     }
 
     fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<IntermediateNode>) {
-        let active_nodes: Vec<&Node> = graph.nodes.iter().filter(|node| node.is_output).collect();
+        let active_nodes: Vec<&Node> = graph.nodes().iter().filter(|node| node.is_output).collect();
         for node in active_nodes {
             let i_node = IntermediateNode {
-                node_id: node.self_id,
+                node_id: node.id(),
                 behavior: NodeBehavior::Active,
                 edge_behavior: EdgeBehavior::Always,
                 is_complete: true,
@@ -54,18 +54,18 @@ impl RuntimeGraph {
         while i < self.nodes.len() {
             let mut i_node = self.nodes[i].clone();
 
-            let inputs = graph.inputs_by_node_id(i_node.node_id);
+            let inputs = graph.inputs_by_node_id(i_node.node_id());
             for input in inputs {
-                if let Some(edge) = graph.edge_by_input_id(input.self_id) {
-                    let output = graph.output_by_id(edge.output_id).unwrap();
-                    let output_node = graph.node_by_id(output.node_id).unwrap();
+                if let Some(edge) = graph.edge_by_input_id(input.id()) {
+                    let output = graph.output_by_id(edge.output_id()).unwrap();
+                    let output_node = graph.node_by_id(output.node_id()).unwrap();
 
                     let mut output_i_node: &mut IntermediateNode;
-                    if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id == output_node.self_id) {
+                    if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id() == output_node.id()) {
                         output_i_node = _node;
                     } else {
                         self.nodes.push(IntermediateNode {
-                            node_id: output_node.self_id,
+                            node_id: output_node.id(),
                             behavior: output_node.behavior,
                             is_complete: true,
                             edge_behavior: EdgeBehavior::Once,
@@ -74,7 +74,7 @@ impl RuntimeGraph {
                         });
                         output_i_node = self.nodes.last_mut().unwrap();
 
-                        if let Some(_node) = last_run.iter().find(|node| node.node_id == output_node.self_id) {
+                        if let Some(_node) = last_run.iter().find(|node| node.node_id() == output_node.id()) {
                             output_i_node.has_outputs = _node.has_outputs;
                         }
                     }
@@ -99,11 +99,11 @@ impl RuntimeGraph {
         for i in 0..self.nodes.len() {
             let mut i_node = self.nodes[i].clone();
 
-            let inputs = graph.inputs_by_node_id(i_node.node_id);
+            let inputs = graph.inputs_by_node_id(i_node.node_id());
             for input in inputs {
-                if let Some(edge) = graph.edge_by_input_id(input.self_id) {
-                    let output = graph.output_by_id(edge.output_id).unwrap();
-                    let output_i_node = self.nodes.iter().find(|node| node.node_id == output.node_id).unwrap();
+                if let Some(edge) = graph.edge_by_input_id(input.id()) {
+                    let output = graph.output_by_id(edge.output_id()).unwrap();
+                    let output_i_node = self.nodes.iter().find(|node| node.node_id() == output.node_id()).unwrap();
                     if output_i_node.is_complete == false {
                         i_node.is_complete = false;
                     }
@@ -146,7 +146,7 @@ impl RuntimeGraph {
         }
 
         if i_node.behavior == NodeBehavior::Passive
-            && !self.has_updated_inputs(graph, i_node.node_id) {
+            && !self.has_updated_inputs(graph, i_node.node_id()) {
             return true;
         }
 
@@ -158,12 +158,12 @@ impl RuntimeGraph {
         let mut has_updated_inputs = false;
 
         for input in graph.inputs_by_node_id(node_id) {
-            if let Some(edge) = graph.edge_by_input_id(input.self_id) {
+            if let Some(edge) = graph.edge_by_input_id(input.id()) {
                 if edge.behavior == EdgeBehavior::Always {
-                    let output = graph.output_by_id(edge.output_id).unwrap();
+                    let output = graph.output_by_id(edge.output_id()).unwrap();
                     let output_i_node =
                         self.nodes.iter_mut()
-                            .find(|_i_node| _i_node.node_id == output.node_id)
+                            .find(|_i_node| _i_node.node_id() == output.node_id())
                             .unwrap();
 
                     if output_i_node.should_execute {
@@ -175,5 +175,22 @@ impl RuntimeGraph {
             }
         }
         return has_updated_inputs;
+    }
+}
+
+impl IntermediateNode {
+    pub fn new(node_id: u32) -> IntermediateNode {
+        IntermediateNode {
+            node_id,
+            behavior: NodeBehavior::Active,
+            edge_behavior: EdgeBehavior::Always,
+            is_complete: true,
+            should_execute: false,
+            has_outputs: false,
+        }
+    }
+
+    pub fn node_id(&self) -> u32 {
+        self.node_id
     }
 }

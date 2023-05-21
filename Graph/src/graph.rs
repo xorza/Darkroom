@@ -1,14 +1,68 @@
-use crate::node::*;
 use serde::{Serialize, Deserialize};
+
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NodeBehavior {
+    Active,
+    Passive,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataType {
+    None,
+    Float,
+    Int,
+    Bool,
+    String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EdgeBehavior {
+    Always,
+    Once,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Node {
+    self_id: u32,
+    pub name: String,
+    pub behavior: NodeBehavior,
+    pub is_output: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Input {
+    self_id: u32,
+    node_id: u32,
+    pub name: String,
+    pub data_type: DataType,
+    pub is_required: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Output {
+    self_id: u32,
+    node_id: u32,
+    pub name: String,
+    pub data_type: DataType,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Edge {
+     input_id: u32,
+     output_id: u32,
+    pub behavior: EdgeBehavior,
+}
+
 
 #[derive(Serialize, Deserialize)]
 pub struct Graph {
     new_id: u32,
 
-    pub nodes: Vec<Node>,
-    pub inputs: Vec<Input>,
-    pub outputs: Vec<Output>,
-    pub edges: Vec<Edge>,
+    nodes: Vec<Node>,
+    inputs: Vec<Input>,
+    outputs: Vec<Output>,
+    edges: Vec<Edge>,
 }
 
 
@@ -29,18 +83,43 @@ impl Graph {
         return id;
     }
 
+    pub fn nodes(&self) -> &Vec<Node> {
+        &self.nodes
+    }
+    pub fn inputs(&self) -> &Vec<Input> {
+        &self.inputs
+    }
+    pub fn outputs(&self) -> &Vec<Output> {
+        &self.outputs
+    }
+    pub fn edges(&self) -> &Vec<Edge> {
+        &self.edges
+    }
+
 
     pub fn add_node(&mut self, node: &mut Node) {
-        node.self_id = self.new_id();
-        self.nodes.push(node.clone());
+        if node.id() != 0 {
+            return;
+        } else {
+            node.self_id = self.new_id();
+            self.nodes.push(node.clone());
+        }
     }
     pub fn add_input(&mut self, input: &mut Input) {
-        input.self_id = self.new_id();
-        self.inputs.push(input.clone());
+        if input.id() != 0 {
+            return;
+        } else {
+            input.self_id = self.new_id();
+            self.inputs.push(input.clone());
+        }
     }
     pub fn add_output(&mut self, output: &mut Output) {
-        output.self_id = self.new_id();
-        self.outputs.push(output.clone());
+        if output.id() != 0 {
+            return;
+        } else {
+            output.self_id = self.new_id();
+            self.outputs.push(output.clone());
+        }
     }
     pub fn add_edge(&mut self, edge: &Edge) {
         self.edges.retain(|_edge| _edge.input_id != edge.input_id);
@@ -78,9 +157,17 @@ impl Graph {
         assert_ne!(id, 0);
         self.outputs.iter().find(|output| output.self_id == id)
     }
+    pub fn output_by_id_mut(&mut self, id: u32) -> Option<&mut Output> {
+        assert_ne!(id, 0);
+        self.outputs.iter_mut().find(|output| output.self_id == id)
+    }
     pub fn input_by_id(&self, id: u32) -> Option<&Input> {
         assert_ne!(id, 0);
         self.inputs.iter().find(|input| input.self_id == id)
+    }
+    pub fn input_by_id_mut(&mut self, id: u32) -> Option<&mut Input> {
+        assert_ne!(id, 0);
+        self.inputs.iter_mut().find(|input| input.self_id == id)
     }
 
     pub fn inputs_by_node_id(&self, node_id: u32) -> impl Iterator<Item=&Input> {
@@ -153,5 +240,78 @@ impl Graph {
         }
 
         return true;
+    }
+}
+
+
+impl Node {
+    pub fn new() -> Node {
+        Node {
+            self_id: 0,
+            name: String::new(),
+            behavior: NodeBehavior::Active,
+            is_output: false,
+        }
+    }
+
+    pub fn id(&self) -> u32 {
+        self.self_id
+    }
+}
+
+impl Input {
+    pub fn new(node_id: u32) -> Input {
+        assert_ne!(node_id, 0);
+
+        Input {
+            self_id: 0,
+            node_id,
+            name: String::new(),
+            data_type: DataType::None,
+            is_required: false,
+        }
+    }
+    pub fn id(&self) -> u32 {
+        self.self_id
+    }
+
+    pub fn node_id(&self) -> u32 {
+        self.node_id
+    }
+}
+
+impl Output {
+    pub fn new(node_id: u32) -> Output {
+        assert_ne!(node_id, 0);
+
+        Output {
+            self_id: 0,
+            node_id,
+            name: String::new(),
+            data_type: DataType::None,
+        }
+    }
+    pub fn id(&self) -> u32 {
+        self.self_id
+    }
+    pub fn node_id(&self) -> u32 {
+        self.node_id
+    }
+}
+
+impl Edge {
+    pub fn new(output_id: u32, input_id: u32) -> Edge {
+        Edge {
+            input_id,
+            output_id,
+            behavior: EdgeBehavior::Always,
+        }
+    }
+
+    pub fn input_id(&self) -> u32 {
+        self.input_id
+    }
+    pub fn output_id(&self) -> u32 {
+        self.output_id
     }
 }

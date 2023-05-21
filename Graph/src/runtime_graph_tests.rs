@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod runtime_tests {
     use crate::graph::*;
-    use crate::node::*;
     use crate::runtime_graph::RuntimeGraph;
 
     #[test]
