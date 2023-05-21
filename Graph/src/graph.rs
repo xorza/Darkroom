@@ -17,7 +17,7 @@ pub enum DataType {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum EdgeBehavior {
+pub enum ConnectionBehavior {
     Always,
     Once,
 }
@@ -25,33 +25,31 @@ pub enum EdgeBehavior {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: u32,
+
     pub name: String,
     pub behavior: NodeBehavior,
     pub is_output: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Input {
-    self_id: u32,
-    node_id: u32,
-    pub name: String,
-    pub data_type: DataType,
-    pub is_required: bool,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
 pub struct Output {
     self_id: u32,
     node_id: u32,
+
     pub name: String,
     pub data_type: DataType,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct Edge {
-     input_id: u32,
-     output_id: u32,
-    pub behavior: EdgeBehavior,
+pub struct Input {
+    self_id: u32,
+    node_id: u32,
+
+    pub name: String,
+    pub data_type: DataType,
+    pub is_required: bool,
+    pub connected_output_id: u32,
+    pub connection_behavior: ConnectionBehavior,
 }
 
 
@@ -62,7 +60,6 @@ pub struct Graph {
     nodes: Vec<Node>,
     inputs: Vec<Input>,
     outputs: Vec<Output>,
-    edges: Vec<Edge>,
 }
 
 
@@ -73,7 +70,6 @@ impl Graph {
             nodes: Vec::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),
-            edges: Vec::new(),
         }
     }
 
@@ -91,9 +87,6 @@ impl Graph {
     }
     pub fn outputs(&self) -> &Vec<Output> {
         &self.outputs
-    }
-    pub fn edges(&self) -> &Vec<Edge> {
-        &self.edges
     }
 
 
@@ -121,28 +114,29 @@ impl Graph {
             self.outputs.push(output.clone());
         }
     }
-    pub fn add_edge(&mut self, edge: &Edge) {
-        self.edges.retain(|_edge| _edge.input_id != edge.input_id);
-        self.edges.push(edge.clone());
-    }
 
-    pub fn node_remove_by_id(&mut self, id: u32) {
-        let input_ids = self.inputs_by_node_id(id)
-            .map(|input| input.self_id)
-            .collect::<Vec<u32>>();
+    pub fn remove_node_by_id(&mut self, id: u32) {
         let output_ids = self.outputs_by_node_id(id)
             .map(|output| output.self_id)
             .collect::<Vec<u32>>();
 
-        self.edges.retain(|edge| {
-            !input_ids.contains(&edge.input_id)
-                && !output_ids.contains(&edge.output_id)
-        });
+        self.inputs.iter_mut()
+            .filter(|_input| output_ids.contains(&_input.connected_output_id))
+            .for_each(|_input| _input.connected_output_id = 0);
+
         self.inputs.retain(|input| input.node_id != id);
         self.outputs.retain(|output| output.node_id != id);
         self.nodes.retain(|node| node.self_id != id);
     }
-
+    pub fn remove_input_by_id(&mut self, id: u32) {
+        self.inputs.retain(|input| input.self_id != id);
+    }
+    pub fn remove_output_by_id(&mut self, id: u32) {
+        self.inputs.iter_mut()
+            .filter(|_input| _input.connected_output_id == id)
+            .for_each(|_input| _input.connected_output_id = 0);
+        self.outputs.retain(|output| output.self_id != id);
+    }
 
     pub fn node_by_id(&self, id: u32) -> Option<&Node> {
         assert_ne!(id, 0);
@@ -178,22 +172,6 @@ impl Graph {
         assert_ne!(node_id, 0);
         self.outputs.iter().filter(move |output| output.node_id == node_id)
     }
-    pub fn edge_by_input_id(&self, input_id: u32) -> Option<&Edge> {
-        assert_ne!(input_id, 0);
-        self.edges.iter().find(|edge| edge.input_id == input_id)
-    }
-    pub fn edge_by_input_id_mut(&mut self, input_id: u32) -> Option<&mut Edge> {
-        assert_ne!(input_id, 0);
-        self.edges.iter_mut().find(|edge| edge.input_id == input_id)
-    }
-    pub fn output_for_input_id(&self, input_id: u32) -> Option<&Output> {
-        assert_ne!(input_id, 0);
-        let edge = self.edge_by_input_id(input_id);
-        match edge {
-            Some(edge) => self.outputs.iter().find(|output| output.self_id == edge.output_id),
-            None => None,
-        }
-    }
 
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap()
@@ -214,30 +192,22 @@ impl Graph {
             return false;
         }
 
-        if self.inputs.iter().any(|input| input.self_id == 0 || self.node_by_id(input.node_id).is_none()) {
+        if self.inputs.iter().any(|input|
+            {
+                input.self_id == 0
+                    || self.node_by_id(input.node_id).is_none()
+                    || (input.connected_output_id != 0 && self.output_by_id(input.connected_output_id).is_none())
+            }) {
             return false;
         }
-        if self.outputs.iter().any(|output| output.self_id == 0 || self.node_by_id(output.node_id).is_none()) {
+        if self.outputs.iter().any(|output|
+            {
+                output.self_id == 0
+                    || self.node_by_id(output.node_id).is_none()
+            }) {
             return false;
         }
 
-        for edge in &self.edges {
-            if edge.input_id == 0 || edge.output_id == 0 {
-                return false;
-            }
-
-            let input = self.input_by_id(edge.input_id);
-            let output = self.output_by_id(edge.output_id);
-            if input.is_none() || output.is_none() {
-                return false;
-            }
-            if input.unwrap().node_id == output.unwrap().node_id {
-                return false;
-            }
-            if input.unwrap().data_type != output.unwrap().data_type {
-                return false;
-            }
-        }
 
         return true;
     }
@@ -266,6 +236,8 @@ impl Input {
         Input {
             self_id: 0,
             node_id,
+            connected_output_id: 0,
+            connection_behavior: ConnectionBehavior::Always,
             name: String::new(),
             data_type: DataType::None,
             is_required: false,
@@ -296,22 +268,5 @@ impl Output {
     }
     pub fn node_id(&self) -> u32 {
         self.node_id
-    }
-}
-
-impl Edge {
-    pub fn new(output_id: u32, input_id: u32) -> Edge {
-        Edge {
-            input_id,
-            output_id,
-            behavior: EdgeBehavior::Always,
-        }
-    }
-
-    pub fn input_id(&self) -> u32 {
-        self.input_id
-    }
-    pub fn output_id(&self) -> u32 {
-        self.output_id
     }
 }

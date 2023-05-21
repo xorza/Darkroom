@@ -6,7 +6,7 @@ pub struct IntermediateNode {
 
     pub behavior: NodeBehavior,
     pub is_complete: bool,
-    pub edge_behavior: EdgeBehavior,
+    pub edge_behavior: ConnectionBehavior,
 
     pub should_execute: bool,
     pub has_outputs: bool,
@@ -42,7 +42,7 @@ impl RuntimeGraph {
             let i_node = IntermediateNode {
                 node_id: node.id(),
                 behavior: NodeBehavior::Active,
-                edge_behavior: EdgeBehavior::Always,
+                edge_behavior: ConnectionBehavior::Always,
                 is_complete: true,
                 should_execute: false,
                 has_outputs: false,
@@ -56,8 +56,10 @@ impl RuntimeGraph {
 
             let inputs = graph.inputs_by_node_id(i_node.node_id());
             for input in inputs {
-                if let Some(edge) = graph.edge_by_input_id(input.id()) {
-                    let output = graph.output_by_id(edge.output_id()).unwrap();
+                if input.connected_output_id == 0 {
+                    i_node.is_complete = false;
+                } else {
+                    let output = graph.output_by_id(input.connected_output_id).unwrap();
                     let output_node = graph.node_by_id(output.node_id()).unwrap();
 
                     let mut output_i_node: &mut IntermediateNode;
@@ -68,7 +70,7 @@ impl RuntimeGraph {
                             node_id: output_node.id(),
                             behavior: output_node.behavior,
                             is_complete: true,
-                            edge_behavior: EdgeBehavior::Once,
+                            edge_behavior: ConnectionBehavior::Once,
                             should_execute: false,
                             has_outputs: false,
                         });
@@ -79,12 +81,10 @@ impl RuntimeGraph {
                         }
                     }
 
-                    if i_node.edge_behavior == EdgeBehavior::Always
-                        && edge.behavior == EdgeBehavior::Always {
-                        output_i_node.edge_behavior = EdgeBehavior::Always;
+                    if i_node.edge_behavior == ConnectionBehavior::Always
+                        && input.connection_behavior == ConnectionBehavior::Always {
+                        output_i_node.edge_behavior = ConnectionBehavior::Always;
                     }
-                } else {
-                    i_node.is_complete = false;
                 }
             }
 
@@ -101,14 +101,14 @@ impl RuntimeGraph {
 
             let inputs = graph.inputs_by_node_id(i_node.node_id());
             for input in inputs {
-                if let Some(edge) = graph.edge_by_input_id(input.id()) {
-                    let output = graph.output_by_id(edge.output_id()).unwrap();
-                    let output_i_node = self.nodes.iter().find(|node| node.node_id() == output.node_id()).unwrap();
-                    if output_i_node.is_complete == false {
+                if input.connected_output_id == 0 {
+                    if input.is_required {
                         i_node.is_complete = false;
                     }
                 } else {
-                    if input.is_required {
+                    let output = graph.output_by_id(input.connected_output_id).unwrap();
+                    let output_i_node = self.nodes.iter().find(|_node| _node.node_id() == output.node_id()).unwrap();
+                    if output_i_node.is_complete == false {
                         i_node.is_complete = false;
                     }
                 }
@@ -141,7 +141,7 @@ impl RuntimeGraph {
             return false;
         }
 
-        if i_node.edge_behavior == EdgeBehavior::Once {
+        if i_node.edge_behavior == ConnectionBehavior::Once {
             return true;
         }
 
@@ -158,20 +158,18 @@ impl RuntimeGraph {
         let mut has_updated_inputs = false;
 
         for input in graph.inputs_by_node_id(node_id) {
-            if let Some(edge) = graph.edge_by_input_id(input.id()) {
-                if edge.behavior == EdgeBehavior::Always {
-                    let output = graph.output_by_id(edge.output_id()).unwrap();
-                    let output_i_node =
-                        self.nodes.iter_mut()
-                            .find(|_i_node| _i_node.node_id() == output.node_id())
-                            .unwrap();
-
-                    if output_i_node.should_execute {
-                        has_updated_inputs = true;
-                    }
-                }
-            } else {
+            if input.connected_output_id == 0 {
                 debug_assert_eq!(input.is_required, false);
+            } else if input.connection_behavior == ConnectionBehavior::Always {
+                let output = graph.output_by_id(input.connected_output_id).unwrap();
+                let output_i_node =
+                    self.nodes.iter_mut()
+                        .find(|_i_node| _i_node.node_id() == output.node_id())
+                        .unwrap();
+
+                if output_i_node.should_execute {
+                    has_updated_inputs = true;
+                }
             }
         }
         return has_updated_inputs;
@@ -183,7 +181,7 @@ impl IntermediateNode {
         IntermediateNode {
             node_id,
             behavior: NodeBehavior::Active,
-            edge_behavior: EdgeBehavior::Always,
+            edge_behavior: ConnectionBehavior::Always,
             is_complete: true,
             should_execute: false,
             has_outputs: false,

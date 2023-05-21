@@ -59,7 +59,7 @@ mod runtime_tests {
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.should_execute), true);
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
 
-        graph.edge_by_input_id_mut(13).unwrap().behavior = EdgeBehavior::Once;
+        graph.input_by_id_mut(13).unwrap().connection_behavior = ConnectionBehavior::Once;
         runtime_graph.run(&graph);
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);
@@ -78,7 +78,7 @@ mod runtime_tests {
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.should_execute), true);
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
 
-        graph.edge_by_input_id_mut(10).unwrap().behavior = EdgeBehavior::Always;
+        graph.input_by_id_mut(10).unwrap().connection_behavior = ConnectionBehavior::Always;
         runtime_graph.run(&graph);
         assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, true);
@@ -118,7 +118,7 @@ mod runtime_tests {
             assert_eq!(runtime_graph.node_by_id(5).unwrap().should_execute, true);
         }
         {
-            graph.edge_by_input_id_mut(13).unwrap().behavior = EdgeBehavior::Once;
+            graph.input_by_id_mut(13).unwrap().connection_behavior = ConnectionBehavior::Once;
             runtime_graph.run(&graph);
             assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);
@@ -128,7 +128,7 @@ mod runtime_tests {
             assert_eq!(runtime_graph.node_by_id(5).unwrap().should_execute, true);
         }
         {
-            graph.edge_by_input_id_mut(11).unwrap().behavior = EdgeBehavior::Always;
+            graph.input_by_id_mut(11).unwrap().connection_behavior = ConnectionBehavior::Always;
             runtime_graph.run(&graph);
             assert_eq!(runtime_graph.nodes.iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);
