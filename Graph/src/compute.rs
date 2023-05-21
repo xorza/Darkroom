@@ -2,6 +2,7 @@ use crate::function_graph::*;
 use crate::runtime_graph::{RuntimeGraph, RuntimeNode};
 use crate::workspace::Workspace;
 use std::time::{Instant};
+use crate::invoke::{Invoker, LambdaInvoker};
 
 #[derive(Clone)]
 pub struct ComputeNode {
@@ -15,6 +16,7 @@ pub struct ComputeNode {
 pub struct Compute {
     runtime_graph: RuntimeGraph,
     compute_nodes: Vec<ComputeNode>,
+    pub invoker: Box<dyn Invoker>,
 }
 
 impl Compute {
@@ -22,8 +24,10 @@ impl Compute {
         Compute {
             runtime_graph: RuntimeGraph::new(),
             compute_nodes: Vec::new(),
+            invoker: Box::new(LambdaInvoker::new()),
         }
     }
+
 
     pub fn compute_nodes(&self) -> &Vec<ComputeNode> {
         &self.compute_nodes
@@ -42,7 +46,6 @@ impl Compute {
             let args = workspace.function_graph()
                 .arguments_by_node_id(r_node.node_id())
                 .collect::<Vec<&Argument>>();
-
             let input_args = args.iter().cloned()
                 .filter(|arg| arg.direction == Direction::In)
                 .collect::<Vec<&Argument>>();
@@ -51,9 +54,8 @@ impl Compute {
                 .collect::<Vec<&Argument>>();
 
             let mut compute_node = ComputeNode::new(r_node.node_id());
-            if let Some(existing_compute_node) =
-                last_run.iter_mut()
-                    .find(|_node| _node.node_id() == r_node.node_id()) {
+            if let Some(existing_compute_node) = last_run.iter_mut()
+                .find(|_node| _node.node_id() == r_node.node_id()) {
                 compute_node.outputs = existing_compute_node.outputs.clone();
                 compute_node.inputs = existing_compute_node.inputs.clone();
 
@@ -69,6 +71,7 @@ impl Compute {
                     let input = workspace.graph().input_by_id(input_arg.input_output_id()).unwrap();
                     let output = workspace.graph().output_by_id(input.connected_output_id).unwrap();
                     let output_runtime_node = self.runtime_graph.node_by_id(output.node_id()).unwrap();
+
                     if output_runtime_node.should_execute || !r_node.has_outputs {
                         let output_compute_node = self.compute_nodes.iter().find(|node| node.node_id() == output.node_id()).unwrap();
                         let output_arg = workspace.function_graph().argument_by_input_output_id(output.id()).unwrap();
@@ -83,7 +86,7 @@ impl Compute {
                 let function = workspace.function_graph().function_by_node_id(r_node.node_id()).unwrap();
 
                 let start = Instant::now();
-                self.run_function(function, &mut compute_node);
+                self.run_function(&function.name, &compute_node.inputs, &mut compute_node.outputs);
                 compute_node.run_time = start.elapsed().as_secs_f32();
             }
 
@@ -91,25 +94,8 @@ impl Compute {
         }
     }
 
-    fn run_function(&self, function: &Function, compute_node: &mut ComputeNode) {
-        match function.name.as_str() {
-            "val0" => {
-                compute_node.outputs[0] = 2;
-            }
-            "val1" => {
-                compute_node.outputs[0] = 5;
-            }
-            "mult" => {
-                compute_node.outputs[0] = compute_node.inputs[0] * compute_node.inputs[1];
-            }
-            "sum" => {
-                compute_node.outputs[0] = compute_node.inputs[0] + compute_node.inputs[1];
-            }
-            "print" => {
-                println!("{}", compute_node.inputs[0]);
-            }
-            _ => panic!("Unknown function: {}", function.name),
-        }
+    fn run_function(&self, function_name: &str, inputs: &Vec<i32>, outputs: &mut Vec<i32>) {
+        self.invoker.call(function_name, inputs, outputs);
     }
 }
 
