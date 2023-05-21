@@ -12,6 +12,7 @@ pub struct Graph {
     pub edges: Vec<Edge>,
 }
 
+
 impl Graph {
     pub fn new() -> Graph {
         Graph {
@@ -51,6 +52,9 @@ impl Graph {
     pub fn node_by_id(&self, id: u32) -> Option<&Node> {
         self.nodes.iter().find(|node| node.self_id == id)
     }
+    pub fn node_by_id_mut(&mut self, id: u32) -> Option<&mut Node> {
+        self.nodes.iter_mut().find(|node| node.self_id == id)
+    }
 
     pub fn output_by_id(&self, id: u32) -> Option<&Output> {
         self.outputs.iter().find(|output| output.self_id == id)
@@ -67,6 +71,9 @@ impl Graph {
     }
     pub fn edge_by_input_id(&self, input_id: u32) -> Option<&Edge> {
         self.edges.iter().find(|edge| edge.input_id == input_id)
+    }
+    pub fn edge_by_input_id_mut(&mut self, input_id: u32) -> Option<&mut Edge> {
+        self.edges.iter_mut().find(|edge| edge.input_id == input_id)
     }
     pub fn output_for_input_id(&self, input_id: u32) -> Option<&Output> {
         let edge = self.edge_by_input_id(input_id);
