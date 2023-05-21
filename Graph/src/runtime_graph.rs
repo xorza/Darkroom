@@ -4,11 +4,11 @@ use crate::graph::*;
 pub struct IntermediateNode {
     node_id: u32,
 
-    behavior: NodeBehavior,
-    is_complete: bool,
-    edge_behavior: ConnectionBehavior,
-    pub(crate) should_execute: bool,
-    pub(crate) has_outputs: bool,
+    pub behavior: NodeBehavior,
+    pub is_complete: bool,
+    pub edge_behavior: ConnectionBehavior,
+    pub should_execute: bool,
+    pub has_outputs: bool,
 }
 
 pub struct RuntimeGraph {
@@ -44,15 +44,7 @@ impl RuntimeGraph {
     fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<IntermediateNode>) {
         let active_nodes: Vec<&Node> = graph.nodes().iter().filter(|node| node.is_output).collect();
         for node in active_nodes {
-            let i_node = IntermediateNode {
-                node_id: node.id(),
-                behavior: NodeBehavior::Active,
-                edge_behavior: ConnectionBehavior::Always,
-                is_complete: true,
-                should_execute: false,
-                has_outputs: false,
-            };
-            self.nodes.push(i_node);
+            self.nodes.push(IntermediateNode::new(node.id()));
         }
 
         let mut i: usize = 0;
@@ -71,15 +63,10 @@ impl RuntimeGraph {
                     if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id() == output_node.id()) {
                         output_i_node = _node;
                     } else {
-                        self.nodes.push(IntermediateNode {
-                            node_id: output_node.id(),
-                            behavior: output_node.behavior,
-                            is_complete: true,
-                            edge_behavior: ConnectionBehavior::Once,
-                            should_execute: false,
-                            has_outputs: false,
-                        });
+                        self.nodes.push(IntermediateNode::new(output_node.id()));
                         output_i_node = self.nodes.last_mut().unwrap();
+                        output_i_node.behavior = output_node.behavior;
+                        output_i_node.edge_behavior = ConnectionBehavior::Once;
 
                         if let Some(_node) = last_run.iter().find(|node| node.node_id() == output_node.id()) {
                             output_i_node.has_outputs = _node.has_outputs;

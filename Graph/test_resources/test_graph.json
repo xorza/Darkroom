@@ -1,6 +1,5 @@
 {
     "new_id": 10000,
-
     "nodes": [
         {
             "self_id": 1,
@@ -66,8 +65,8 @@
             "name": "A",
             "is_required": false,
             "data_type": "Int",
-            "connected_output_id" : 6,
-            "connection_behavior" : "Once"
+            "connected_output_id": 6,
+            "connection_behavior": "Once"
         },
         {
             "self_id": 11,
@@ -75,8 +74,8 @@
             "name": "B",
             "is_required": false,
             "data_type": "Int",
-            "connected_output_id" : 7,
-            "connection_behavior" : "Once"
+            "connected_output_id": 7,
+            "connection_behavior": "Once"
         },
         {
             "self_id": 12,
@@ -84,8 +83,8 @@
             "name": "A",
             "is_required": false,
             "data_type": "Int",
-            "connected_output_id" : 8,
-            "connection_behavior" : "Always"
+            "connected_output_id": 8,
+            "connection_behavior": "Always"
         },
         {
             "self_id": 13,
@@ -93,8 +92,8 @@
             "name": "B",
             "is_required": false,
             "data_type": "Int",
-            "connected_output_id" : 7,
-            "connection_behavior" : "Always"
+            "connected_output_id": 7,
+            "connection_behavior": "Always"
         },
         {
             "self_id": 14,
@@ -102,11 +101,10 @@
             "name": "Message",
             "is_required": false,
             "data_type": "Int",
-            "connected_output_id" : 9,
-            "connection_behavior" : "Always"
+            "connected_output_id": 9,
+            "connection_behavior": "Always"
         }
     ],
-
     "function_nodes": [
         {
             "function_id": 0,

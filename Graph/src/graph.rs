@@ -89,28 +89,28 @@ impl Graph {
         &self.outputs
     }
 
-    pub fn add_node(&mut self, node: &mut Node) {
-        if node.id() != 0 {
-            return;
+    pub fn add_node(&mut self, mut node: Node) {
+        if let Some(existing_node) = self.node_by_id_mut(node.id()) {
+            *existing_node = node;
         } else {
             node.self_id = self.new_id();
-            self.nodes.push(node.clone());
+            self.nodes.push(node);
         }
     }
-    pub fn add_input(&mut self, input: &mut Input) {
-        if input.id() != 0 {
-            return;
+    pub fn add_input(&mut self, mut input: Input) {
+        if let Some(existing_input) = self.input_by_id_mut(input.id()) {
+            *existing_input = input;
         } else {
             input.self_id = self.new_id();
-            self.inputs.push(input.clone());
+            self.inputs.push(input);
         }
     }
-    pub fn add_output(&mut self, output: &mut Output) {
-        if output.id() != 0 {
-            return;
+    pub fn add_output(&mut self, mut output: Output) {
+        if let Some(existing_output) = self.output_by_id_mut(output.id()) {
+            *existing_output = output;
         } else {
             output.self_id = self.new_id();
-            self.outputs.push(output.clone());
+            self.outputs.push(output);
         }
     }
 

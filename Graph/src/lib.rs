@@ -7,3 +7,4 @@ mod function;
 mod common;
 mod runtime_graph;
 mod graph;
+mod function_graph;

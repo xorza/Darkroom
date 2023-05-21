@@ -19,5 +19,12 @@ mod graph_tests {
         assert_eq!(graph.nodes().len(), 4);
         assert_eq!(graph.inputs().len(), 3);
         assert_eq!(graph.outputs().len(), 3);
+
+        for input in graph.inputs() {
+            if input.connected_output_id != 0 {
+                let output = graph.output_by_id(input.connected_output_id).unwrap();
+                assert_ne!(output.node_id(), 3);
+            }
+        }
     }
 }
