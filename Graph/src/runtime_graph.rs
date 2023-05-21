@@ -1,7 +1,7 @@
 use crate::graph::*;
 
 #[derive(Clone)]
-pub struct IntermediateNode {
+pub struct RuntimeNode {
     node_id: u32,
 
     pub behavior: NodeBehavior,
@@ -12,7 +12,7 @@ pub struct IntermediateNode {
 }
 
 pub struct RuntimeGraph {
-    nodes: Vec<IntermediateNode>,
+    nodes: Vec<RuntimeNode>,
 }
 
 impl RuntimeGraph {
@@ -22,7 +22,7 @@ impl RuntimeGraph {
         }
     }
 
-    pub fn nodes(&self) -> &Vec<IntermediateNode> {
+    pub fn nodes(&self) -> &Vec<RuntimeNode> {
         &self.nodes
     }
 
@@ -37,14 +37,14 @@ impl RuntimeGraph {
         self.traverse_forward2(graph);
     }
 
-    pub fn node_by_id(&self, node_id: u32) -> Option<&IntermediateNode> {
+    pub fn node_by_id(&self, node_id: u32) -> Option<&RuntimeNode> {
         self.nodes.iter().find(|node| node.node_id() == node_id)
     }
 
-    fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<IntermediateNode>) {
+    fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<RuntimeNode>) {
         let active_nodes: Vec<&Node> = graph.nodes().iter().filter(|node| node.is_output).collect();
         for node in active_nodes {
-            self.nodes.push(IntermediateNode::new(node.id()));
+            self.nodes.push(RuntimeNode::new(node.id()));
         }
 
         let mut i: usize = 0;
@@ -59,11 +59,11 @@ impl RuntimeGraph {
                     let output = graph.output_by_id(input.connected_output_id).unwrap();
                     let output_node = graph.node_by_id(output.node_id()).unwrap();
 
-                    let mut output_i_node: &mut IntermediateNode;
+                    let mut output_i_node: &mut RuntimeNode;
                     if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id() == output_node.id()) {
                         output_i_node = _node;
                     } else {
-                        self.nodes.push(IntermediateNode::new(output_node.id()));
+                        self.nodes.push(RuntimeNode::new(output_node.id()));
                         output_i_node = self.nodes.last_mut().unwrap();
                         output_i_node.behavior = output_node.behavior;
                         output_i_node.edge_behavior = ConnectionBehavior::Once;
@@ -124,7 +124,7 @@ impl RuntimeGraph {
         }
     }
 
-    fn can_skip(&mut self, graph: &Graph, i_node: &IntermediateNode) -> bool {
+    fn can_skip(&mut self, graph: &Graph, i_node: &RuntimeNode) -> bool {
         if i_node.is_complete == false {
             return true;
         }
@@ -168,9 +168,9 @@ impl RuntimeGraph {
     }
 }
 
-impl IntermediateNode {
-    pub fn new(node_id: u32) -> IntermediateNode {
-        IntermediateNode {
+impl RuntimeNode {
+    pub fn new(node_id: u32) -> RuntimeNode {
+        RuntimeNode {
             node_id,
             behavior: NodeBehavior::Active,
             edge_behavior: ConnectionBehavior::Always,
