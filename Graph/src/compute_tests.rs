@@ -10,6 +10,8 @@ mod graph_tests {
 
         compute.run(&mut workspace);
 
+        compute.run(&mut workspace);
+
         drop(workspace);
     }
 }

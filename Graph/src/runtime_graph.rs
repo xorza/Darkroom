@@ -69,7 +69,7 @@ impl RuntimeGraph {
                         output_i_node.edge_behavior = ConnectionBehavior::Once;
 
                         if let Some(_node) = last_run.iter().find(|node| node.node_id() == output_node.id()) {
-                            output_i_node.has_outputs = _node.has_outputs;
+                            output_i_node.has_outputs = _node.has_outputs || _node.should_execute;
                         }
                     }
 
@@ -119,7 +119,6 @@ impl RuntimeGraph {
             }
 
             i_node.should_execute = true;
-            i_node.has_outputs = true;
             self.nodes[i] = i_node;
         }
     }
