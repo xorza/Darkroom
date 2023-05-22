@@ -44,7 +44,9 @@ impl RuntimeGraph {
     fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<RuntimeNode>) {
         let active_nodes: Vec<&Node> = graph.nodes().iter().filter(|node| node.is_output).collect();
         for node in active_nodes {
-            self.nodes.push(RuntimeNode::new(node.id()));
+            let mut runtime_node = RuntimeNode::new(node.id());
+            runtime_node.has_outputs = true;
+            self.nodes.push(runtime_node);
         }
 
         let mut i: usize = 0;
