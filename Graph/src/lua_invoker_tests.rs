@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod lua_tests {
+mod lua_invoker_tests {
     use std::fs;
     use rlua::Lua;
 

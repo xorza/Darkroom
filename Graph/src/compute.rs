@@ -86,7 +86,11 @@ impl Compute {
                 let function = workspace.function_graph().function_by_node_id(r_node.node_id()).unwrap();
 
                 let start = Instant::now();
-                self.run_function(&function.name, &compute_node.inputs, &mut compute_node.outputs);
+                self.invoker.call(
+                    &function.name,
+                    r_node.node_id(),
+                    &compute_node.inputs,
+                    &mut compute_node.outputs);
                 compute_node.run_time = start.elapsed().as_secs_f32();
             }
 
@@ -94,10 +98,6 @@ impl Compute {
         }
 
         self.invoker.finish();
-    }
-
-    fn run_function(&self, function_name: &str, inputs: &Args, outputs: &mut Args) {
-        self.invoker.call(function_name, inputs, outputs);
     }
 }
 

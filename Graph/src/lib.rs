@@ -12,4 +12,4 @@ mod workspace;
 mod compute;
 mod invoke;
 mod lua_invoker;
-mod lua_tests;
+mod lua_invoker_tests;
