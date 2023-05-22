@@ -1,3 +1,7 @@
+function sum_func(a, b)
+    return a + b
+end
+
 local num1 = 10
 local num2 = 456
 

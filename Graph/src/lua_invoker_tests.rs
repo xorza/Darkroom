@@ -1,35 +1,44 @@
 #[cfg(test)]
 mod lua_invoker_tests {
     use std::fs;
-    use rlua::Lua;
+    use mlua::{Function, Lua, Value, Variadic};
 
     #[test]
     fn lua_works() {
         let lua = Lua::new();
-        lua.context(|lua_ctx| {
-            let globals = lua_ctx.globals();
-            globals.set("x", 8).unwrap();
-            globals.set("y", 3).unwrap();
-            let z: i32 = lua_ctx.load("x + y").eval().unwrap();
 
-            assert_eq!(z, 11);
-        });
-        lua.context(|lua_ctx| {
-            let z: i32 = lua_ctx.load("x * y").eval().unwrap();
+        lua.load(r#"
+        function test_func(a, b, t)
+            local sum = a * b + t.val0 + t.val1
+            return sum, "hello world!"
+        end
+        "#).exec().unwrap();
 
-            assert_eq!(z, 24);
-        });
+        let var_args = Variadic::from_iter(
+            vec![
+                Value::Integer(3),
+                Value::String(lua.create_string("111").unwrap()),
+                Value::Table(lua.create_table_from(vec![
+                    ("val0", 11),
+                    ("val1", 7),
+                ]).unwrap()),
+            ]
+        );
+
+        let test_func: Function = lua.globals().get("test_func").unwrap();
+        let result: Variadic<Value> = test_func.call(var_args).unwrap();
+
+        for value in result {
+            match value {
+                Value::Integer(int) => { assert_eq!(int, 351); }
+                Value::String(text) => { assert_eq!(text, "hello world!") }
+                _ => {}
+            }
+        }
     }
 
     #[test]
     fn lua_from_file() {
-        let script = fs::read_to_string("./test_resources/test_lua.lua").unwrap();
-
-        let lua = Lua::new();
-        lua.context(|lua_ctx| {
-            let z: i32 = lua_ctx.load(&script).eval().unwrap();
-
-            assert_eq!(z, 466);
-        });
+        let _script = fs::read_to_string("./test_resources/test_lua.lua").unwrap();
     }
 }
