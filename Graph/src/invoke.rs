@@ -1,11 +1,25 @@
 use std::collections::HashMap;
 
+#[derive(Clone)]
+pub struct Args {
+    pub inputs: Vec<i32>,
+    pub outputs: Vec<i32>,
+}
+
 pub trait Invoker {
-    fn call(&self, function_name: &str, inputs: &Vec<i32>, outputs: &mut Vec<i32>);
+    fn call(&self, function_name: &str, args: &mut Args);
+}
+
+pub trait Invokable {
+    fn call(&self, args: &mut Args);
+}
+
+pub struct LambdaInvokable {
+    lambda: Box<dyn Fn(&mut Args)>,
 }
 
 pub struct LambdaInvoker {
-    lambdas: HashMap<String, Box<dyn Fn(&Vec<i32>, &mut Vec<i32>)>>,
+    lambdas: HashMap<String, LambdaInvokable>,
 }
 
 impl LambdaInvoker {
@@ -15,17 +29,29 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(&Vec<i32>, &mut Vec<i32>) + 'static>(&mut self, function_name: &str, lambda: F) {
-        self.lambdas.insert(function_name.to_string(), Box::new(lambda));
+    pub fn add_lambda<F: Fn(&mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
+        let invokable = LambdaInvokable {
+           lambda: Box::new(lambda),
+        };
+        self.lambdas.insert(function_name.to_string(), invokable);
     }
 }
 
 impl Invoker for LambdaInvoker {
-    fn call(&self, function_name: &str, inputs: &Vec<i32>, outputs: &mut Vec<i32>) {
+    fn call(&self, function_name: &str, args: &mut Args) {
         if let Some(func) = self.lambdas.get(function_name) {
-            func(inputs, outputs);
+            (func.lambda)(args);
         } else {
             panic!("Function not found: {}", function_name);
+        }
+    }
+}
+
+impl Args{
+    pub fn new() -> Args {
+        Args {
+            inputs: Vec::new(),
+            outputs: Vec::new(),
         }
     }
 }
