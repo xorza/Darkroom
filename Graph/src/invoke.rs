@@ -8,6 +8,7 @@ pub struct Args {
 
 pub trait Invoker {
     fn call(&self, function_name: &str, args: &mut Args);
+    fn finish(&self);
 }
 
 pub trait Invokable {
@@ -31,7 +32,7 @@ impl LambdaInvoker {
 
     pub fn add_lambda<F: Fn(&mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
         let invokable = LambdaInvokable {
-           lambda: Box::new(lambda),
+            lambda: Box::new(lambda),
         };
         self.lambdas.insert(function_name.to_string(), invokable);
     }
@@ -45,9 +46,10 @@ impl Invoker for LambdaInvoker {
             panic!("Function not found: {}", function_name);
         }
     }
+    fn finish(&self) {}
 }
 
-impl Args{
+impl Args {
     pub fn new() -> Args {
         Args {
             inputs: Vec::new(),

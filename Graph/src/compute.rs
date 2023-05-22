@@ -90,6 +90,8 @@ impl Compute {
 
             self.compute_nodes.push(compute_node);
         }
+
+        self.invoker.finish();
     }
 
     fn run_function(&self, function_name: &str, args: &mut Args) {
