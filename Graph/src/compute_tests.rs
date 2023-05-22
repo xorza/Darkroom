@@ -15,21 +15,21 @@ mod graph_tests {
         static mut B: i32 = 5;
 
         let mut invoker = LambdaInvoker::new();
-        invoker.add_lambda("val0", |args| {
-            args.outputs[0] = unsafe { A };
+        invoker.add_lambda("val0", |_, outputs| {
+            outputs[0] = unsafe { A };
         });
-        invoker.add_lambda("val1", |args| {
-            args.outputs[0] = unsafe { B };
+        invoker.add_lambda("val1", |_, outputs| {
+            outputs[0] = unsafe { B };
         });
-        invoker.add_lambda("sum", |args| {
-            args.outputs[0] = args.inputs[0] + args.inputs[1];
+        invoker.add_lambda("sum", |inputs, outputs| {
+            outputs[0] = inputs[0] + inputs[1];
         });
-        invoker.add_lambda("mult", |args| {
-            args.outputs[0] = args.inputs[0] * args.inputs[1];
+        invoker.add_lambda("mult", |inputs, outputs| {
+            outputs[0] = inputs[0] * inputs[1];
         });
 
-        invoker.add_lambda("print", |args| unsafe {
-            RESULT = args.inputs[0];
+        invoker.add_lambda("print", |inputs, _| unsafe {
+            RESULT = inputs[0];
         });
 
 

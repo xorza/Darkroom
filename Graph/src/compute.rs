@@ -7,7 +7,8 @@ use crate::invoke::{Args, Invoker, LambdaInvoker};
 #[derive(Clone)]
 pub struct ComputeNode {
     node_id: u32,
-    pub args: Args,
+    pub inputs: Args,
+    pub outputs: Args,
     pub run_time: f32,
 
 }
@@ -55,13 +56,14 @@ impl Compute {
             let mut compute_node = ComputeNode::new(r_node.node_id());
             if let Some(existing_compute_node) = last_run.iter_mut()
                 .find(|_node| _node.node_id() == r_node.node_id()) {
-                compute_node.args = existing_compute_node.args.clone();
+                compute_node.inputs = existing_compute_node.inputs.clone();
+                compute_node.outputs = existing_compute_node.outputs.clone();
 
-                assert_eq!(compute_node.args.inputs.len(), input_args.len());
-                assert_eq!(compute_node.args.outputs.len(), output_args.len());
+                assert_eq!(compute_node.inputs.len(), input_args.len());
+                assert_eq!(compute_node.outputs.len(), output_args.len());
             } else {
-                compute_node.args.inputs.resize(input_args.len(), 0);
-                compute_node.args.outputs.resize(output_args.len(), 0);
+                compute_node.inputs.resize(input_args.len(), 0);
+                compute_node.outputs.resize(output_args.len(), 0);
             }
 
             if r_node.should_execute {
@@ -77,14 +79,14 @@ impl Compute {
                         assert!(output_arg.direction == Direction::Out);
                         assert!(output_arg.data_type == input_arg.data_type);
 
-                        compute_node.args.inputs[input_arg.index as usize] = output_compute_node.args.outputs[output_arg.index as usize];
+                        compute_node.inputs[input_arg.index as usize] = output_compute_node.outputs[output_arg.index as usize];
                     }
                 }
 
                 let function = workspace.function_graph().function_by_node_id(r_node.node_id()).unwrap();
 
                 let start = Instant::now();
-                self.run_function(&function.name, &mut compute_node.args);
+                self.run_function(&function.name, &compute_node.inputs, &mut compute_node.outputs);
                 compute_node.run_time = start.elapsed().as_secs_f32();
             }
 
@@ -94,8 +96,8 @@ impl Compute {
         self.invoker.finish();
     }
 
-    fn run_function(&self, function_name: &str, args: &mut Args) {
-        self.invoker.call(function_name, args);
+    fn run_function(&self, function_name: &str, inputs: &Args, outputs: &mut Args) {
+        self.invoker.call(function_name, inputs, outputs);
     }
 }
 
@@ -104,7 +106,8 @@ impl ComputeNode {
         ComputeNode {
             node_id,
             run_time: 0.0,
-            args: Args::new(),
+            inputs: Args::new(),
+            outputs: Args::new(),
         }
     }
 
