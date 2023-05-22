@@ -1,15 +1,21 @@
+use rlua::Lua;
 use crate::invoke::*;
 
-pub struct LuaInvoker {}
+pub struct LuaInvoker {
+    lua: Lua,
+
+}
 
 impl LuaInvoker {
     pub fn new() -> LuaInvoker {
-        LuaInvoker {}
+        LuaInvoker {
+            lua: Lua::new(),
+        }
     }
+
+    pub fn test(&self) {}
 }
 
 impl Invokable for LuaInvoker {
-    fn call(&self, inputs: &Args, outputs: &mut Args) {
-
-    }
+    fn call(&self, _inputs: &Args, _outputs: &mut Args) {}
 }
