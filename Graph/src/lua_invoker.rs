@@ -48,7 +48,7 @@ impl LuaInvoker {
         return result;
     }
 
-
+    //noinspection RsNonExhaustiveMatch
     pub fn load(&self, script: &str) {
         let cache = Rc::clone(&self.cache);
 
@@ -65,9 +65,25 @@ impl LuaInvoker {
 
         let debug_write_function = self.lua.create_function(
             move |_lua: &Lua, args: Variadic<Value>| {
+                let mut output = String::new();
+
                 for arg in args {
-                    println!("{:?}", arg);
+                    match arg {
+                        Value::Nil => { output += "Nil"; }
+                        Value::Boolean(v) => { output += &v.to_string(); }
+                        Value::LightUserData(_) => { output += "LightUserData"; }
+                        Value::Integer(v) => { output += &v.to_string(); }
+                        Value::Number(v) => { output += &v.to_string(); }
+                        Value::String(v) => { output += v.to_str().unwrap(); }
+                        Value::Table(_) => { output += "Table"; }
+                        Value::Function(_) => { output += "Function"; }
+                        Value::Thread(_) => { output += "Thread"; }
+                        Value::UserData(_) => { output += "UserData"; }
+                        Value::Error(err) => { output += &err.to_string() }
+                    }
                 }
+
+                // println!("{}", output);
                 Ok(())
             }
         ).unwrap();
@@ -89,7 +105,7 @@ impl LuaInvoker {
         let functions = cache.funcs.values().cloned().collect::<Vec<FunctionInfo>>();
         drop(cache);
 
-        for function_info in functions.iter().cloned() {
+        for function_info in functions.iter() {
             let backup_name = format!("{}_backup_copy", function_info.name);
 
             self.lua.globals().set(backup_name, function_info.function.clone()).unwrap();
@@ -126,11 +142,15 @@ impl LuaInvoker {
             self.lua.globals().set(function_info.name.clone(), new_function).unwrap();
         }
 
-
         let graph_function: Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
 
-        for function_info in functions.iter().cloned() {
+
+        let cache = self.cache.borrow();
+        let functions = cache.funcs.values().cloned().collect::<Vec<FunctionInfo>>();
+        drop(cache);
+
+        for function_info in functions.iter() {
             let new_name = format!("{}_backup_copy", function_info.name);
             self.lua.globals().set(
                 new_name,
@@ -138,12 +158,11 @@ impl LuaInvoker {
             ).unwrap();
 
             self.lua.globals().set(
-                function_info.name,
-                function_info.function,
+                function_info.name.clone(),
+                function_info.function.clone(),
             ).unwrap();
         }
 
-        let graph_function: Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
     }
 }
