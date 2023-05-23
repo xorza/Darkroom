@@ -1,19 +1,11 @@
 use serde::{Serialize, Deserialize};
+use crate::data_type::DataType;
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeBehavior {
     Active,
     Passive,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DataType {
-    None,
-    Float,
-    Int,
-    Bool,
-    String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

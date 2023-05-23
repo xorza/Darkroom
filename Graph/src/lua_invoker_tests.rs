@@ -2,6 +2,7 @@
 mod lua_invoker_tests {
     use std::fs;
     use mlua::{Function, Lua, Value, Variadic};
+    use crate::lua_invoker::LuaInvoker;
 
     #[test]
     fn lua_works() {
@@ -40,5 +41,41 @@ mod lua_invoker_tests {
     #[test]
     fn lua_from_file() {
         let _script = fs::read_to_string("./test_resources/test_lua.lua").unwrap();
+        drop(_script);
     }
+
+    #[test]
+    fn local_data_test() {
+        struct TestStruct {
+            a: i32,
+            b: i32,
+        }
+        let lua = Lua::new();
+
+        let data = TestStruct { a: 4, b: 5 };
+        let data_ptr = &data as *const TestStruct;
+
+        let test_function = lua.create_function(move |_, ()| {
+            let local_data = unsafe { &*data_ptr };
+
+            return Ok(local_data.a + local_data.b);
+        }).unwrap();
+        lua.globals().set("test_func", test_function).unwrap();
+
+        let r: i32 = lua.load("test_func()").eval().unwrap();
+
+        assert_eq!(r, 9);
+    }
+
+    #[test]
+    fn load_functions_from_lua_file() {
+        let invoker = LuaInvoker::new();
+        invoker.load_file("./test_resources/test_lua.lua");
+
+
+
+
+        drop(invoker);
+    }
+
 }

@@ -11,14 +11,6 @@ pub trait Invokable {
     fn call(&self, context_id: u32, inputs: &Args, outputs: &mut Args);
 }
 
-pub struct Context {
-    self_id: u32,
-}
-
-pub struct ContextManager {
-    contexts: HashMap<u32, Context>,
-}
-
 pub struct LambdaInvokable {
     lambda: Box<dyn Fn(u32, &Args, &mut Args)>,
 }

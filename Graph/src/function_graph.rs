@@ -1,5 +1,5 @@
 use serde::{Serialize, Deserialize};
-use crate::graph::*;
+use crate::data_type::*;
 
 #[derive(Eq, PartialEq, Serialize, Deserialize)]
 pub enum Direction {

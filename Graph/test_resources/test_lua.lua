@@ -1,12 +1,17 @@
-function sum_func(a, b)
+function sum(a, b)
     return a + b
 end
 
-local num1 = 10
-local num2 = 456
+sum_info = {
+    name = "sum",
+    inputs = {
+        { "a", "f64" },
+        { "b", "f64" }
+    },
+    outputs = {
+        { "result", "f64" }
+    }    ,
+    func = sum
+}
 
-local sum = num1 + num2
-
-print("Hello, World! The sum of " .. num1 .. " and " .. num2 .. " is " .. sum .. ".")
-
-return sum
+add_function(sum_info)
