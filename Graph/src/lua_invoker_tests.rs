@@ -2,6 +2,7 @@
 mod lua_invoker_tests {
     use std::fs;
     use mlua::{Function, Lua, Value, Variadic};
+    use crate::invoke::{Args, Invoker};
     use crate::lua_invoker::LuaInvoker;
 
     #[test]
@@ -72,10 +73,10 @@ mod lua_invoker_tests {
         let invoker = LuaInvoker::new();
         invoker.load_file("./test_resources/test_lua.lua");
 
+        let inputs: Args = vec![3, 5];
+        let mut outputs: Args = vec![0];
 
-
-
-        drop(invoker);
+        invoker.call("mult", 0, &inputs, &mut outputs);
+        assert_eq!(outputs[0], 15);
     }
-
 }

@@ -3,8 +3,8 @@ use std::collections::HashMap;
 pub type Args = Vec<i32>;
 
 pub trait Invoker {
-    fn call(&mut self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args);
-    fn finish(&mut self);
+    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args);
+    fn finish(&self);
 }
 
 pub trait Invokable {
@@ -35,12 +35,12 @@ impl LambdaInvoker {
 }
 
 impl Invoker for LambdaInvoker {
-    fn call(&mut self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
+    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
         if let Some(func) = self.lambdas.get(function_name) {
             (func.lambda)(context_id, inputs, outputs);
         } else {
             panic!("Function not found: {}", function_name);
         }
     }
-    fn finish(&mut self) {}
+    fn finish(&self) {}
 }

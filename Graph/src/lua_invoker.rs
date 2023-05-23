@@ -61,6 +61,8 @@ impl LuaInvoker {
         self.lua.globals().set("register_function", register_function).unwrap();
 
         self.lua.load(script).exec().unwrap();
+
+        self.lua.globals().get::<&'static str, Function>("graph").unwrap().call::<_, ()>(()).unwrap();
     }
 
 
@@ -118,12 +120,12 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn call(&mut self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
+    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
         self.lua.globals().set("context_id", context_id).unwrap();
 
-        // let cache = self.cache.borrow_mut();
-        // let _temp_func = cache.funcs.get(function_name).unwrap();
-        let function: Function = self.lua.globals().get(function_name).unwrap();
+        let cache = self.cache.borrow_mut();
+        let function_info = cache.funcs.get(function_name).unwrap();
+        let function: &Function = &function_info.function;
 
         let input_args: Variadic<i32> = Variadic::from_iter(inputs.iter().cloned());
         let output_args: Variadic<i32> = function.call(input_args).unwrap();
@@ -135,5 +137,5 @@ impl Invoker for LuaInvoker {
         self.lua.globals().set("context_id", Value::Nil).unwrap();
     }
 
-    fn finish(&mut self) {}
+    fn finish(&self) {}
 }
