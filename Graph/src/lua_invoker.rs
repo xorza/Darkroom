@@ -49,7 +49,7 @@ impl LuaInvoker {
     pub fn load(&self, script: &str) {
         let cache = Rc::clone(&self.cache);
 
-        let add_function = self.lua.create_function(
+        let register_function = self.lua.create_function(
             move |_lua: &Lua, table: Table| {
                 let function_info = FunctionInfo::new(&table);
 
@@ -58,8 +58,7 @@ impl LuaInvoker {
                 Ok(())
             }
         ).unwrap();
-
-        self.lua.globals().set("add_function", add_function).unwrap();
+        self.lua.globals().set("register_function", register_function).unwrap();
 
         self.lua.load(script).exec().unwrap();
     }

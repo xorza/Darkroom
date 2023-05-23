@@ -14,4 +14,4 @@ sum_info = {
     func = sum
 }
 
-add_function(sum_info)
+register_function(sum_info)
