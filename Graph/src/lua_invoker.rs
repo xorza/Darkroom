@@ -48,6 +48,10 @@ impl LuaInvoker {
         return result;
     }
 
+    pub fn load_file(&self, file: &str) {
+        let script = std::fs::read_to_string(file).unwrap();
+        self.load(&script);
+    }
     //noinspection RsNonExhaustiveMatch
     pub fn load(&self, script: &str) {
         let cache = Rc::clone(&self.cache);
@@ -92,23 +96,28 @@ impl LuaInvoker {
         self.lua.load(script).exec().unwrap();
     }
 
+    pub fn map_graph(&self) {
+        self.substitute_functions();
 
-    pub fn load_file(&self, file: &str) {
-        let script = std::fs::read_to_string(file).unwrap();
-        self.load(&script);
+        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        graph_function.call::<_, ()>(()).unwrap();
+
+        self.restore_functions();
+
+        graph_function.call::<_, ()>(()).unwrap();
     }
 
-    pub fn map_graph(&self) {
-        let mut output_index: i64 = 0;
-
+    fn substitute_functions(&self) {
         let cache = self.cache.borrow();
         let functions = cache.funcs.values().cloned().collect::<Vec<FunctionInfo>>();
         drop(cache);
 
-        for function_info in functions.iter() {
-            let backup_name = format!("{}_backup_copy", function_info.name);
+        let mut output_index: i64 = 0;
 
-            self.lua.globals().set(backup_name, function_info.function.clone()).unwrap();
+        for function_info in functions.iter() {
+            let backup_function_name = format!("{}_backup_copy", function_info.name);
+
+            self.lua.globals().set(backup_function_name, function_info.function.clone()).unwrap();
 
             let function_info_clone = function_info.clone();
             let cache = self.cache.clone();
@@ -141,11 +150,8 @@ impl LuaInvoker {
 
             self.lua.globals().set(function_info.name.clone(), new_function).unwrap();
         }
-
-        let graph_function: Function = self.lua.globals().get("graph").unwrap();
-        graph_function.call::<_, ()>(()).unwrap();
-
-
+    }
+    fn restore_functions(&self) {
         let cache = self.cache.borrow();
         let functions = cache.funcs.values().cloned().collect::<Vec<FunctionInfo>>();
         drop(cache);
@@ -162,8 +168,6 @@ impl LuaInvoker {
                 function_info.function.clone(),
             ).unwrap();
         }
-
-        graph_function.call::<_, ()>(()).unwrap();
     }
 }
 
