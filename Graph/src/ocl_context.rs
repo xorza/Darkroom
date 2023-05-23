@@ -32,9 +32,9 @@ impl Invoker for OclContext {
         *current_queue = Some(queue.clone());
     }
 
-    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
+    fn call(&self, _function_name: &str, _context_id: u32, _inputs: &Args, _outputs: &mut Args) {
         let current_queue = self.current_queue.borrow();
-        let current_queue = current_queue.as_ref().unwrap();
+        let _current_queue = current_queue.as_ref().unwrap();
 
         // todo!("Call OpenCL function");
     }

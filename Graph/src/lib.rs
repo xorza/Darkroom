@@ -16,3 +16,4 @@ pub mod invoke;
 pub mod lua_invoker;
 pub mod data_type;
 pub mod ocl_context;
+mod ecs_tests;

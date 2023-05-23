@@ -1,14 +1,15 @@
 use serde::{Serialize, Deserialize};
+use bevy_ecs::prelude::Component;
 use crate::data_type::*;
 
-#[derive(Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum Direction {
     In,
     Out,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Argument {
+#[derive(Clone, Serialize, Deserialize, Component)]
+pub struct Arg {
     input_output_id: u32,
     node_id: u32,
 
@@ -18,7 +19,7 @@ pub struct Argument {
     pub data_type: DataType,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Component)]
 pub struct Function {
     node_id: u32,
     pub name: String,
@@ -28,7 +29,7 @@ pub struct Function {
 #[derive(Serialize, Deserialize)]
 pub struct FunctionGraph {
     functions: Vec<Function>,
-    arguments: Vec<Argument>,
+    arguments: Vec<Arg>,
 }
 
 impl FunctionGraph {
@@ -42,7 +43,7 @@ impl FunctionGraph {
     pub fn functions(&self) -> &Vec<Function> {
         &self.functions
     }
-    pub fn arguments(&self) -> &Vec<Argument> {
+    pub fn arguments(&self) -> &Vec<Arg> {
         &self.arguments
     }
 
@@ -53,7 +54,7 @@ impl FunctionGraph {
             self.functions.push(function);
         }
     }
-    pub fn add_argument(&mut self, argument: Argument) {
+    pub fn add_argument(&mut self, argument: Arg) {
         if let Some(arg) = self.arguments.iter_mut().find(|arg| arg.input_output_id == argument.input_output_id) {
             *arg = argument;
         } else {
@@ -61,7 +62,7 @@ impl FunctionGraph {
         }
     }
 
-    pub fn argument_by_input_output_id(&self, input_output_id: u32) -> Option<&Argument> {
+    pub fn arg_by_input_output_id(&self, input_output_id: u32) -> Option<&Arg> {
         self.arguments.iter().find(|arg| arg.input_output_id == input_output_id)
     }
 
@@ -72,15 +73,15 @@ impl FunctionGraph {
         self.functions.iter_mut().find(|func| func.node_id == node_id)
     }
 
-    pub fn arguments_by_node_id(&self, node_id: u32) -> impl Iterator<Item=&Argument> {
+    pub fn args_by_node_id(&self, node_id: u32) -> impl Iterator<Item=&Arg> {
         self.arguments.iter().filter(move |arg| arg.node_id == node_id)
     }
 }
 
 
-impl Argument {
-    pub fn new(input_output_id: u32, node_id: u32) -> Argument {
-        Argument {
+impl Arg {
+    pub fn new(input_output_id: u32, node_id: u32) -> Arg {
+        Arg {
             input_output_id,
             node_id,
             index: 0,

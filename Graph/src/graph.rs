@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use crate::data_type::DataType;
+use bevy_ecs::prelude::Component;
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -14,7 +15,7 @@ pub enum ConnectionBehavior {
     Once,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Component, Serialize, Deserialize)]
 pub struct Node {
     self_id: u32,
 
@@ -23,7 +24,7 @@ pub struct Node {
     pub is_output: bool,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Component, Serialize, Deserialize)]
 pub struct Output {
     self_id: u32,
     node_id: u32,
@@ -32,7 +33,7 @@ pub struct Output {
     pub data_type: DataType,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Component, Serialize, Deserialize)]
 pub struct Input {
     self_id: u32,
     node_id: u32,

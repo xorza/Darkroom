@@ -44,14 +44,14 @@ impl Compute {
 
         for r_node in self.runtime_graph.nodes().clone() {
             let args = workspace.function_graph()
-                .arguments_by_node_id(r_node.node_id())
-                .collect::<Vec<&Argument>>();
+                .args_by_node_id(r_node.node_id())
+                .collect::<Vec<&Arg>>();
             let input_args = args.iter().cloned()
                 .filter(|arg| arg.direction == Direction::In)
-                .collect::<Vec<&Argument>>();
+                .collect::<Vec<&Arg>>();
             let output_args = args.iter().cloned()
                 .filter(|arg| arg.direction == Direction::Out)
-                .collect::<Vec<&Argument>>();
+                .collect::<Vec<&Arg>>();
 
             let mut compute_node = ComputeNode::new(r_node.node_id());
             if let Some(existing_compute_node) = last_run.iter_mut()
@@ -74,7 +74,7 @@ impl Compute {
 
                     if output_runtime_node.should_execute || !r_node.has_outputs {
                         let output_compute_node = self.compute_nodes.iter().find(|node| node.node_id() == output.node_id()).unwrap();
-                        let output_arg = workspace.function_graph().argument_by_input_output_id(output.id()).unwrap();
+                        let output_arg = workspace.function_graph().arg_by_input_output_id(output.id()).unwrap();
 
                         assert!(output_arg.direction == Direction::Out);
                         assert!(output_arg.data_type == input_arg.data_type);
