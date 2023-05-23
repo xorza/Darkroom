@@ -213,6 +213,7 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
+    fn start(&self){}
     fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
         self.lua.globals().set("context_id", context_id).unwrap();
 

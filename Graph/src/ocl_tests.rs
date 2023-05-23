@@ -2,7 +2,6 @@
 mod graph_tests {
     use ocl::{Buffer, Platform, Device, Context, Queue};
 
-
     #[test]
     fn it_works() {
         let vec1 = vec![1.0, 2.0, -4.0, 4.0, 5.0];
