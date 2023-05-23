@@ -18,6 +18,7 @@ impl FromStr for DataType {
             "f32" => Ok(DataType::Float),
             "f64" => Ok(DataType::Float),
             "i32" => Ok(DataType::Int),
+            "i64" => Ok(DataType::Int),
             "bool" => Ok(DataType::Bool),
             "string" => Ok(DataType::String),
             _ => Err(()),

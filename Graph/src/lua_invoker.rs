@@ -2,15 +2,18 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
-use mlua::{Function, Lua, Table, Value, Variadic};
+use mlua::{Error, Function, Lua, Table, ToLua, Value, Variadic};
 use crate::data_type::DataType;
+use crate::graph::Graph;
 use crate::invoke::*;
 
+#[derive(Clone)]
 pub struct Argument {
     name: String,
     data_type: DataType,
 }
 
+#[derive(Clone)]
 pub struct FunctionInfo<'lua> {
     name: String,
     function: Function<'lua>,
@@ -61,14 +64,54 @@ impl LuaInvoker {
         self.lua.globals().set("register_function", register_function).unwrap();
 
         self.lua.load(script).exec().unwrap();
-
-        self.lua.globals().get::<&'static str, Function>("graph").unwrap().call::<_, ()>(()).unwrap();
     }
 
 
     pub fn load_file(&self, file: &str) {
         let script = std::fs::read_to_string(file).unwrap();
         self.load(&script);
+    }
+
+    pub fn map_graph(&self) {
+        let cache = self.cache.borrow();
+        let mut output_index: i64 = 0;
+
+        for func in cache.funcs.values().into_iter() {
+            let function_info = func.clone();
+            let function = function_info.function.clone();
+
+            let new_name = format!("{}_backup_copy", function_info.name);
+            self.lua.globals().set(new_name, Value::Function(function)).unwrap();
+
+
+            let new_function = self.lua.create_function(
+                move |_lua: &Lua, inputs: Variadic<Value>| -> Result<Variadic<Value>, Error>  {
+                    for (i, arg) in function_info.inputs.iter().enumerate() {
+                        match inputs.get(i ).unwrap() {
+                            Value::Integer(int) => {
+                                int.clone();
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    let mut output_index = output_index;
+                    let mut result: Variadic<Value> = Variadic::new();
+                    for (i, arg) in function_info.outputs.iter().enumerate() {
+                        result.push(Value::Integer(output_index));
+                        output_index += 1;
+                    }
+                    return Ok(result);
+                }
+            ).unwrap();
+
+            let function_info = func;
+            output_index += function_info.outputs.len() as i64;
+
+            self.lua.globals().set(function_info.name.clone(), new_function).unwrap();
+        }
+
+        self.lua.globals().get::<&'static str, Function>("graph").unwrap().call::<_, ()>(()).unwrap();
     }
 }
 

@@ -78,5 +78,9 @@ mod lua_invoker_tests {
 
         invoker.call("mult", 0, &inputs, &mut outputs);
         assert_eq!(outputs[0], 15);
+
+        invoker.map_graph();
+
+        drop(invoker);
     }
 }

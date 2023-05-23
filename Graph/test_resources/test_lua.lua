@@ -4,11 +4,11 @@ end
 sum_info = {
     name = "sum",
     inputs = {
-        { "a", "f64" },
-        { "b", "f64" }
+        { "a", "i64" },
+        { "b", "i64" }
     },
     outputs = {
-        { "result", "f64" }
+        { "result", "i64" }
     },
     func = sum
 }
@@ -20,11 +20,11 @@ end
 mult_info = {
     name = "mult",
     inputs = {
-        { "a", "f64" },
-        { "b", "f64" }
+        { "a", "i64" },
+        { "b", "i64" }
     },
     outputs = {
-        { "result", "f64" }
+        { "result", "i64" }
     },
     func = mult
 }
@@ -37,7 +37,7 @@ val0_info = {
     name = "val0",
     inputs = { },
     outputs = {
-        { "result", "f64" }
+        { "result", "i64" }
     },
     func = val0
 }
@@ -50,7 +50,7 @@ val1_info = {
     name = "val1",
     inputs = { },
     outputs = {
-        { "result", "f64" }
+        { "result", "i64" }
     },
     func = val1
 }
@@ -61,7 +61,7 @@ function print_func(t)
 end
 print_info = {
     name = "print",
-    inputs = { { "a", "f64" } },
+    inputs = { { "a", "i64" } },
     outputs = { },
     func = print_func
 }
