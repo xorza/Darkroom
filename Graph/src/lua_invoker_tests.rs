@@ -81,6 +81,9 @@ mod lua_invoker_tests {
 
         invoker.map_graph();
 
+        let output = invoker.get_output();
+        assert_eq!(output, "32");
+
         drop(invoker);
     }
 }

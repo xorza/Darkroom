@@ -23,12 +23,12 @@ pub struct FunctionInfo<'lua> {
 
 struct Cache<'lua> {
     funcs: HashMap<String, FunctionInfo<'lua>>,
+    output_stream: Vec<String>,
 }
 
 pub struct LuaInvoker {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache<'static>>>,
-
 }
 
 impl LuaInvoker {
@@ -38,12 +38,8 @@ impl LuaInvoker {
 
         let result = LuaInvoker {
             lua,
-            cache: Rc::new(RefCell::new(Cache { funcs: HashMap::new() })),
+            cache: Rc::new(RefCell::new(Cache::new())),
         };
-
-
-        let cache = Cache { funcs: HashMap::new() };
-        result.lua.set_app_data(cache);
 
         return result;
     }
@@ -55,7 +51,6 @@ impl LuaInvoker {
     //noinspection RsNonExhaustiveMatch
     pub fn load(&self, script: &str) {
         let cache = Rc::clone(&self.cache);
-
         let register_function = self.lua.create_function(
             move |_lua: &Lua, table: Table| {
                 let function_info = FunctionInfo::new(&table);
@@ -67,7 +62,8 @@ impl LuaInvoker {
         ).unwrap();
         self.lua.globals().set("register_function", register_function).unwrap();
 
-        let debug_write_function = self.lua.create_function(
+        let cache = Rc::clone(&self.cache);
+        let print_function = self.lua.create_function(
             move |_lua: &Lua, args: Variadic<Value>| {
                 let mut output = String::new();
 
@@ -87,11 +83,12 @@ impl LuaInvoker {
                     }
                 }
 
-                // println!("{}", output);
+                let mut cache = cache.borrow_mut();
+                cache.output_stream.push(output);
                 Ok(())
             }
         ).unwrap();
-        self.lua.globals().set("debug_write", debug_write_function).unwrap();
+        self.lua.globals().set("print", print_function).unwrap();
 
         self.lua.load(script).exec().unwrap();
     }
@@ -115,10 +112,6 @@ impl LuaInvoker {
         let mut output_index: i64 = 0;
 
         for function_info in functions.iter() {
-            let backup_function_name = format!("{}_backup_copy", function_info.name);
-
-            self.lua.globals().set(backup_function_name, function_info.function.clone()).unwrap();
-
             let function_info_clone = function_info.clone();
             let cache = self.cache.clone();
             let new_function = self.lua.create_function(
@@ -146,9 +139,9 @@ impl LuaInvoker {
                 }
             ).unwrap();
 
-            output_index += function_info.outputs.len() as i64;
-
             self.lua.globals().set(function_info.name.clone(), new_function).unwrap();
+
+            output_index += function_info.outputs.len() as i64;
         }
     }
     fn restore_functions(&self) {
@@ -157,17 +150,18 @@ impl LuaInvoker {
         drop(cache);
 
         for function_info in functions.iter() {
-            let new_name = format!("{}_backup_copy", function_info.name);
-            self.lua.globals().set(
-                new_name,
-                Value::Nil,
-            ).unwrap();
-
             self.lua.globals().set(
                 function_info.name.clone(),
                 function_info.function.clone(),
             ).unwrap();
         }
+    }
+
+    pub fn get_output(&self) -> String {
+        let mut cache = self.cache.borrow_mut();
+        let result = cache.output_stream.join("\n");
+        cache.output_stream.clear();
+        return result;
     }
 }
 
@@ -237,4 +231,13 @@ impl Invoker for LuaInvoker {
     }
 
     fn finish(&self) {}
+}
+
+impl Cache<'_> {
+    pub fn new<'lua>() -> Cache<'lua> {
+        Cache {
+            funcs: HashMap::new(),
+            output_stream: Vec::new(),
+        }
+    }
 }

@@ -57,7 +57,7 @@ val1_info = {
 register_function(val1_info)
 
 function print_func(message)
-    debug_write(message)
+    print(message)
 end
 print_info = {
     name = "print_func",
