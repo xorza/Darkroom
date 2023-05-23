@@ -6,4 +6,4 @@ edition = "2021"
 
 [dependencies]
 graph = { path = "../Graph" }
-
+iced = { version = "0.9.0", features = ["canvas"] }

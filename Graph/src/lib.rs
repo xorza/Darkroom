@@ -6,11 +6,12 @@ mod compute_tests;
 
 mod common;
 mod runtime_graph;
-mod graph;
+pub mod graph;
 mod function_graph;
 mod workspace;
 mod compute;
 mod invoke;
-mod lua_invoker;
+pub mod lua_invoker;
 mod lua_invoker_tests;
 mod data_type;
+mod ocl_tests;
