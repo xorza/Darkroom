@@ -2,15 +2,15 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
-use mlua::{Error, Function, Lua, Table, ToLua, Value, Variadic};
+use mlua::{Error, Function, Lua, Table, Value, Variadic};
 use crate::data_type::DataType;
-use crate::graph::Graph;
 use crate::invoke::*;
 
 #[derive(Clone)]
 pub struct Argument {
     name: String,
     data_type: DataType,
+    index: i64,
 }
 
 #[derive(Clone)]
@@ -63,6 +63,16 @@ impl LuaInvoker {
         ).unwrap();
         self.lua.globals().set("register_function", register_function).unwrap();
 
+        let debug_write_function = self.lua.create_function(
+            move |_lua: &Lua, args: Variadic<Value>| {
+                for arg in args {
+                    println!("{:?}", arg);
+                }
+                Ok(())
+            }
+        ).unwrap();
+        self.lua.globals().set("debug_write", debug_write_function).unwrap();
+
         self.lua.load(script).exec().unwrap();
     }
 
@@ -73,23 +83,28 @@ impl LuaInvoker {
     }
 
     pub fn map_graph(&self) {
-        let cache = self.cache.borrow();
         let mut output_index: i64 = 0;
 
-        for func in cache.funcs.values().into_iter() {
-            let function_info = func.clone();
-            let function = function_info.function.clone();
+        let cache = self.cache.borrow();
+        let functions = cache.funcs.values().cloned().collect::<Vec<FunctionInfo>>();
+        drop(cache);
 
-            let new_name = format!("{}_backup_copy", function_info.name);
-            self.lua.globals().set(new_name, Value::Function(function)).unwrap();
+        for function_info in functions.iter().cloned() {
+            let backup_name = format!("{}_backup_copy", function_info.name);
 
+            self.lua.globals().set(backup_name, function_info.function.clone()).unwrap();
 
+            let function_info_clone = function_info.clone();
+            let cache = self.cache.clone();
             let new_function = self.lua.create_function(
                 move |_lua: &Lua, inputs: Variadic<Value>| -> Result<Variadic<Value>, Error>  {
-                    for (i, arg) in function_info.inputs.iter().enumerate() {
-                        match inputs.get(i ).unwrap() {
-                            Value::Integer(int) => {
-                                int.clone();
+                    let mut cache = cache.borrow_mut();
+                    let function_info = cache.funcs.get_mut(&function_info_clone.name).unwrap();
+
+                    for (i, _arg) in function_info_clone.inputs.iter().enumerate() {
+                        match inputs.get(i).unwrap() {
+                            Value::Integer(output_index) => {
+                                function_info.inputs[i].index = *output_index as i64;
                             }
                             _ => {}
                         }
@@ -97,21 +112,39 @@ impl LuaInvoker {
 
                     let mut output_index = output_index;
                     let mut result: Variadic<Value> = Variadic::new();
-                    for (i, arg) in function_info.outputs.iter().enumerate() {
+                    for (i, _arg) in function_info_clone.outputs.iter().enumerate() {
                         result.push(Value::Integer(output_index));
+                        function_info.outputs[i].index = output_index;
                         output_index += 1;
                     }
                     return Ok(result);
                 }
             ).unwrap();
 
-            let function_info = func;
             output_index += function_info.outputs.len() as i64;
 
             self.lua.globals().set(function_info.name.clone(), new_function).unwrap();
         }
 
-        self.lua.globals().get::<&'static str, Function>("graph").unwrap().call::<_, ()>(()).unwrap();
+
+        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        graph_function.call::<_, ()>(()).unwrap();
+
+        for function_info in functions.iter().cloned() {
+            let new_name = format!("{}_backup_copy", function_info.name);
+            self.lua.globals().set(
+                new_name,
+                Value::Nil,
+            ).unwrap();
+
+            self.lua.globals().set(
+                function_info.name,
+                function_info.function,
+            ).unwrap();
+        }
+
+        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        graph_function.call::<_, ()>(()).unwrap();
     }
 }
 
@@ -133,7 +166,7 @@ impl FunctionInfo<'_> {
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.inputs.push(Argument { name, data_type });
+            function_info.inputs.push(Argument { name, data_type, index: 0 });
         }
 
         let outputs: Table = table.get("outputs").unwrap();
@@ -143,7 +176,7 @@ impl FunctionInfo<'_> {
             let data_type_name: String = output.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.outputs.push(Argument { name, data_type });
+            function_info.outputs.push(Argument { name, data_type, index: 0 });
         }
 
         return function_info;
