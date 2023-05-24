@@ -3,9 +3,9 @@ use std::collections::HashMap;
 pub type Args = Vec<i32>;
 
 pub trait Invoker {
-    fn start(&self);
+    fn start(&self){}
     fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args);
-    fn finish(&self);
+    fn finish(&self){}
 }
 
 pub trait Invokable {

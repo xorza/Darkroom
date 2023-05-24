@@ -20,7 +20,7 @@ mod graph_tests {
 
         for input in graph.nodes().iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_ref() {
-                assert_ne!(binding.node_id, 3);
+                assert_ne!(binding.node_id(), 3);
             }
         }
     }

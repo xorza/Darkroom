@@ -36,8 +36,8 @@ pub enum BindingBehavior {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Binding {
-    pub node_id: u32,
-    pub output_index: usize,
+    node_id: u32,
+    output_index: usize,
     pub behavior: BindingBehavior,
 }
 
@@ -188,5 +188,14 @@ impl Output {
             name: String::new(),
             data_type: DataType::None,
         }
+    }
+}
+
+impl Binding {
+    pub fn node_id(&self) -> u32 {
+        self.node_id
+    }
+    pub fn output_index(&self) -> usize {
+        self.output_index
     }
 }
