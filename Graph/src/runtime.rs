@@ -9,6 +9,7 @@ pub struct RuntimeNode {
     node_id: u32,
 
     pub has_missing_inputs: bool,
+    pub has_updated_bindings: bool,
     pub binding_behavior: BindingBehavior,
     pub should_execute: bool,
     pub has_outputs: bool,
@@ -113,52 +114,41 @@ impl Runtime {
                         if output_rnode.has_missing_inputs {
                             rnode.has_missing_inputs = true;
                         }
+
+                        if binding.behavior == BindingBehavior::Always {
+                            let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
+                            if output_rnode.should_execute {
+                                rnode.has_updated_bindings = true;
+                            }
+                        }
                     }
                 }
             }
 
             rnode.should_execute = self.should_execute(node, &rnode);
-            self.nodes[i] = rnode;
 
+            self.nodes[i] = rnode;
             i += 1;
         }
     }
     fn should_execute(&self, node: &Node, rnode: &RuntimeNode) -> bool {
-        if node.is_output {
-            return true;
-        }
+        if node.is_output
+        { return true; }
 
-        if rnode.has_missing_inputs {
-            return false;
-        }
+        if rnode.has_missing_inputs
+        { return false; }
 
-        if !rnode.has_outputs {
-            return true;
-        }
+        if !rnode.has_outputs
+        { return true; }
 
-        if rnode.binding_behavior == BindingBehavior::Once {
-            return false;
-        }
+        if rnode.binding_behavior == BindingBehavior::Once
+        { return false; }
 
-        if node.behavior == NodeBehavior::Active {
-            return true;
-        }
+        if node.behavior == NodeBehavior::Active
+        { return true; }
 
-        for input in node.inputs.iter() {
-            match &input.binding {
-                None => {
-                    debug_assert_eq!(input.is_required, false);
-                }
-                Some(binding) => {
-                    if binding.behavior == BindingBehavior::Always {
-                        let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
-                        if output_rnode.should_execute {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
+        if rnode.has_updated_bindings
+        { return true; }
 
         return false;
     }
@@ -213,6 +203,7 @@ impl RuntimeNode {
             binding_behavior: BindingBehavior::Always,
             should_execute: true,
             has_outputs: true,
+            has_updated_bindings: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
             run_time: 0.0,
@@ -231,6 +222,7 @@ impl RuntimeNode {
             binding_behavior: BindingBehavior::Once,
             should_execute: true,
             has_outputs: false,
+            has_updated_bindings: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
             run_time: 0.0,
