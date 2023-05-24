@@ -10,7 +10,6 @@ pub mod common;
 pub mod runtime_graph;
 pub mod graph;
 pub mod function_graph;
-pub mod workspace;
 pub mod compute;
 pub mod invoke;
 pub mod lua_invoker;

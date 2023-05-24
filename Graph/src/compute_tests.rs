@@ -1,13 +1,12 @@
 #[cfg(test)]
 mod graph_tests {
     use crate::compute::*;
-    use crate::graph::{BindingBehavior, NodeBehavior};
+    use crate::graph::{BindingBehavior, Graph, NodeBehavior};
     use crate::invoke::LambdaInvoker;
-    use crate::workspace::*;
 
     #[test]
     fn from_json() {
-        let mut workspace = Workspace::from_json_file("./test_resources/test_workspace.json");
+        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
 
         static mut RESULT: i32 = 0;
         static mut A: i32 = 2;
@@ -35,25 +34,25 @@ mod graph_tests {
         let mut compute = Compute::new();
         compute.invoker = Box::new(invoker);
 
-        compute.run(&mut workspace);
+        compute.run(&graph);
         assert_eq!(unsafe { RESULT }, 35);
 
-        compute.run(&mut workspace);
+        compute.run(&graph);
         assert_eq!(unsafe { RESULT }, 35);
 
         unsafe { B = 7; }
-        workspace.graph_mut().node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-        compute.run(&mut workspace);
+        graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
+        compute.run(&graph);
         assert_eq!(unsafe { RESULT }, 49);
 
-        workspace.graph_mut()
+        graph
             .node_by_id_mut(3).unwrap()
             .inputs.get_mut(0).unwrap()
             .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
 
-        compute.run(&mut workspace);
+        compute.run(&graph);
         assert_eq!(unsafe { RESULT }, 63);
 
-        drop(workspace);
+        drop(graph);
     }
 }

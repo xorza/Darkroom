@@ -3,7 +3,7 @@
     "nodes": [
         {
             "self_id": 1,
-            "name": "value 0 node",
+            "name": "val0",
             "behavior": "Active",
             "is_output": false,
             "inputs": [],
@@ -16,7 +16,7 @@
         },
         {
             "self_id": 2,
-            "name": "value 1 node",
+            "name": "val1",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [],
@@ -29,7 +29,7 @@
         },
         {
             "self_id": 3,
-            "name": "sum node",
+            "name": "sum",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [
@@ -63,7 +63,7 @@
         },
         {
             "self_id": 4,
-            "name": "mult node",
+            "name": "mult",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [
@@ -97,7 +97,7 @@
         },
         {
             "self_id": 5,
-            "name": "print node",
+            "name": "print",
             "behavior": "Passive",
             "is_output": true,
             "inputs": [

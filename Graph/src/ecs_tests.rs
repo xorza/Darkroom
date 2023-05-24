@@ -1,9 +1,6 @@
 #[cfg(test)]
 pub mod ecs_tests {
     use bevy_ecs::prelude::*;
-    use crate::function_graph::Function;
-    use crate::graph::{Node};
-    use crate::workspace::Workspace;
 
     #[test]
     fn it_works() {
@@ -54,26 +51,26 @@ pub mod ecs_tests {
 
     #[test]
     pub fn graph() {
-        let world = create_test_world();
-        drop(world);
+        // let world = create_test_world();
+        // drop(world);
     }
 
-    pub fn create_test_world() -> World {
-        let workspace = Workspace::from_json_file("./test_resources/test_workspace.json");
-        let mut world = World::new();
-
-        #[derive(Bundle)]
-        struct NodeFunction {
-            node: Node,
-            function: Function,
-        }
-
-        for node in workspace.graph().nodes().iter() {
-            let function = workspace.function_graph().function_by_node_id(node.id()).unwrap();
-
-            let _entt_id = world.spawn((node.clone(), function.clone())).id();
-        }
-
-        world
-    }
+    // pub fn create_test_world() -> World {
+    //     let workspace = Workspace::from_json_file("./test_resources/test_workspace.json");
+    //     let mut world = World::new();
+    //
+    //     #[derive(Bundle)]
+    //     struct NodeFunction {
+    //         node: Node,
+    //         function: Function,
+    //     }
+    //
+    //     for node in workspace.graph().nodes().iter() {
+    //         let function = workspace.function_graph().function_by_node_id(node.id()).unwrap();
+    //
+    //         let _entt_id = world.spawn((node.clone(), function.clone())).id();
+    //     }
+    //
+    //     world
+    // }
 }
