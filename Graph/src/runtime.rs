@@ -1,3 +1,4 @@
+use std::mem;
 use std::time::Instant;
 use crate::common::is_debug;
 use crate::graph::*;
@@ -14,7 +15,7 @@ pub struct RuntimeNode {
 
     pub inputs: Args,
     pub outputs: Args,
-    pub run_time: f32,
+    pub run_time: f64,
 }
 
 pub struct Runtime {
@@ -44,19 +45,12 @@ impl Runtime {
         self.traverse_forward(graph);
     }
 
-
-    fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<RuntimeNode>) {
+    fn traverse_backward(&mut self, graph: &Graph, mut last_run: Vec<RuntimeNode>) {
         let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
         for node in active_nodes {
-            let mut rnode =
-                RuntimeNode::create_for_output_node(node);
-
-            if let Some(existing_rnode)
-                = last_run.iter().find(|_node| _node.node_id() == node.id()) {
-                rnode.inputs = existing_rnode.inputs.clone();
-            }
-
-            self.nodes.push(rnode);
+            self.nodes.push(
+                RuntimeNode::create_for_output_node(node, &mut last_run)
+            );
         }
 
         let mut i: usize = 0;
@@ -64,38 +58,33 @@ impl Runtime {
             let mut rnode = self.nodes[i].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
-            for input in &node.inputs {
-                match &input.binding {
-                    None => { rnode.has_missing_inputs = true; }
-                    Some(binding) => {
-                        let output_node = graph.node_by_id(binding.node_id()).unwrap();
+            for input in node.inputs.iter() {
+                if input.binding.is_none() {
+                    rnode.has_missing_inputs = true;
+                    continue;
+                }
 
-                        let mut output_rnode: &mut RuntimeNode;
-                        if let Some(existing_output_rnode)
-                            = self.nodes.iter_mut().find(|_node| _node.node_id() == output_node.id()) {
-                            output_rnode = existing_output_rnode;
-                        } else {
-                            self.nodes.push(RuntimeNode::new(output_node.id()));
-                            output_rnode = self.nodes.last_mut().unwrap();
-                            if let Some(last_run_node) = last_run.iter().find(|_last_run_node| _last_run_node.node_id() == output_node.id()) {
-                                output_rnode.has_outputs = last_run_node.has_outputs;
-                                output_rnode.inputs = last_run_node.inputs.clone();
-                                output_rnode.outputs = last_run_node.outputs.clone();
+                let binding = input.binding.as_ref().unwrap();
+                let output_node = graph.node_by_id(binding.node_id()).unwrap();
+                let mut output_rnode: &mut RuntimeNode =
+                    match self.nodes.iter_mut().position(|_node| _node.node_id() == output_node.id()) {
+                        Some(index) =>
+                            &mut self.nodes[index],
+                        None => {
+                            self.nodes.push(
+                                RuntimeNode::new(output_node, &mut last_run)
+                            );
 
-                                assert_eq!(output_rnode.inputs.len(), output_node.inputs.len());
-                                assert_eq!(output_rnode.outputs.len(), output_node.outputs.len());
-                            } else {
-                                output_rnode.has_outputs = false;
-                                output_rnode.inputs.resize(output_node.inputs.len(), 0);
-                                output_rnode.outputs.resize(output_node.outputs.len(), 0);
-                            }
+                            self.nodes.last_mut().unwrap()
                         }
+                    };
 
-                        if rnode.binding_behavior == BindingBehavior::Always
-                            && binding.behavior == BindingBehavior::Always {
-                            output_rnode.binding_behavior = BindingBehavior::Always;
-                        }
-                    }
+                assert_eq!(output_rnode.inputs.len(), output_node.inputs.len());
+                assert_eq!(output_rnode.outputs.len(), output_node.outputs.len());
+
+                if rnode.binding_behavior == BindingBehavior::Always
+                    && binding.behavior == BindingBehavior::Always {
+                    output_rnode.binding_behavior = BindingBehavior::Always;
                 }
             }
 
@@ -200,18 +189,13 @@ impl Runtime {
                 }
 
                 let start = Instant::now();
-                invoker.call(
-                    &node.name,
-                    rnode.node_id(),
-                    &rnode.inputs,
-                    &mut rnode.outputs);
-                rnode.run_time = start.elapsed().as_secs_f32();
+                invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
+                rnode.run_time = start.elapsed().as_secs_f64();
                 rnode.has_outputs = true;
 
                 self.nodes[i] = rnode;
             }
         }
-
 
         invoker.finish();
     }
@@ -222,7 +206,7 @@ impl RuntimeNode {
         self.node_id
     }
 
-    pub fn create_for_output_node(node: &Node) -> RuntimeNode {
+    pub fn create_for_output_node(node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
         let mut result = RuntimeNode {
             node_id: node.id(),
             has_missing_inputs: false,
@@ -233,14 +217,16 @@ impl RuntimeNode {
             outputs: Vec::new(),
             run_time: 0.0,
         };
-
+        let existing_rnode = last_run.iter_mut().find(|_node| _node.node_id() == node.id());
+        if let Some(existing_rnode) = existing_rnode {
+            result.inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
+        }
         result.inputs.resize(node.inputs.len(), 0);
         return result;
     }
-
-    pub fn new(node_id: u32) -> RuntimeNode {
-        RuntimeNode {
-            node_id,
+    pub fn new(node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
+        let mut result = RuntimeNode {
+            node_id: node.id(),
             has_missing_inputs: false,
             binding_behavior: BindingBehavior::Once,
             should_execute: true,
@@ -248,6 +234,19 @@ impl RuntimeNode {
             inputs: Vec::new(),
             outputs: Vec::new(),
             run_time: 0.0,
+        };
+
+        let existing_rnode
+            = last_run.iter_mut().find(|_last_run_node| _last_run_node.node_id() == node.id());
+        if let Some(existing_rnode) = existing_rnode {
+            result.has_outputs = existing_rnode.has_outputs;
+            result.inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
+            result.outputs = mem::replace(&mut existing_rnode.outputs, Args::new());
+        } else {
+            result.inputs.resize(node.inputs.len(), 0);
+            result.outputs.resize(node.outputs.len(), 0);
         }
+
+        return result;
     }
 }
