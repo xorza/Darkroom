@@ -1,14 +1,13 @@
 #[cfg(test)]
 mod graph_tests {
     use crate::compute::*;
-    use crate::graph::{ConnectionBehavior, NodeBehavior};
+    use crate::graph::{BindingBehavior, NodeBehavior};
     use crate::invoke::LambdaInvoker;
     use crate::workspace::*;
 
     #[test]
     fn from_json() {
         let mut workspace = Workspace::from_json_file("./test_resources/test_workspace.json");
-
 
         static mut RESULT: i32 = 0;
         static mut A: i32 = 2;
@@ -47,7 +46,11 @@ mod graph_tests {
         compute.run(&mut workspace);
         assert_eq!(unsafe { RESULT }, 49);
 
-        workspace.graph_mut().input_by_id_mut(10).unwrap().connection_behavior = ConnectionBehavior::Always;
+        workspace.graph_mut()
+            .node_by_id_mut(3).unwrap()
+            .inputs.get_mut(0).unwrap()
+            .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
+
         compute.run(&mut workspace);
         assert_eq!(unsafe { RESULT }, 63);
 

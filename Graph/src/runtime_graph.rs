@@ -4,9 +4,8 @@ use crate::graph::*;
 pub struct RuntimeNode {
     node_id: u32,
 
-    pub behavior: NodeBehavior,
-    pub is_complete: bool,
-    pub edge_behavior: ConnectionBehavior,
+    pub has_missing_inputs: bool,
+    pub binding_behavior: BindingBehavior,
     pub should_execute: bool,
     pub has_outputs: bool,
 }
@@ -33,8 +32,7 @@ impl RuntimeGraph {
         self.nodes.clear();
 
         self.traverse_backward(graph, last_run);
-        self.traverse_forward1(graph);
-        self.traverse_forward2(graph);
+        self.traverse_forward(graph);
     }
 
     pub fn node_by_id(&self, node_id: u32) -> Option<&RuntimeNode> {
@@ -42,9 +40,15 @@ impl RuntimeGraph {
     }
 
     fn traverse_backward(&mut self, graph: &Graph, last_run: Vec<RuntimeNode>) {
-        let active_nodes: Vec<&Node> = graph.nodes().iter().filter(|node| node.is_output).collect();
+        let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
         for node in active_nodes {
-            let mut runtime_node = RuntimeNode::new(node.id());
+            let mut runtime_node = RuntimeNode {
+                node_id: node.id(),
+                has_missing_inputs: false,
+                binding_behavior: BindingBehavior::Always,
+                should_execute: true,
+                has_outputs: true,
+            };
             runtime_node.has_outputs = true;
             self.nodes.push(runtime_node);
         }
@@ -52,32 +56,35 @@ impl RuntimeGraph {
         let mut i: usize = 0;
         while i < self.nodes.len() {
             let mut i_node = self.nodes[i].clone();
+            let node = graph.node_by_id(i_node.node_id()).unwrap();
 
-            let inputs = graph.inputs_by_node_id(i_node.node_id());
-            for input in inputs {
-                if input.connected_output_id == 0 {
-                    i_node.is_complete = false;
-                } else {
-                    let output = graph.output_by_id(input.connected_output_id).unwrap();
-                    let output_node = graph.node_by_id(output.node_id()).unwrap();
+            for input in &node.inputs {
+                match &input.binding {
+                    None => { i_node.has_missing_inputs = true; }
+                    Some(binding) => {
+                        let output_node = graph.node_by_id(binding.node_id).unwrap();
 
-                    let mut output_i_node: &mut RuntimeNode;
-                    if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id() == output_node.id()) {
-                        output_i_node = _node;
-                    } else {
-                        self.nodes.push(RuntimeNode::new(output_node.id()));
-                        output_i_node = self.nodes.last_mut().unwrap();
-                        output_i_node.behavior = output_node.behavior;
-                        output_i_node.edge_behavior = ConnectionBehavior::Once;
-
-                        if let Some(_node) = last_run.iter().find(|node| node.node_id() == output_node.id()) {
-                            output_i_node.has_outputs = _node.has_outputs || _node.should_execute;
+                        let mut output_i_node: &mut RuntimeNode;
+                        if let Some(_node) = self.nodes.iter_mut().find(|node| node.node_id() == output_node.id()) {
+                            output_i_node = _node;
+                        } else {
+                            self.nodes.push(RuntimeNode {
+                                node_id: output_node.id(),
+                                has_missing_inputs: false,
+                                binding_behavior: BindingBehavior::Once,
+                                should_execute: true,
+                                has_outputs: false,
+                            });
+                            output_i_node = self.nodes.last_mut().unwrap();
+                            if let Some(last_run_node) = last_run.iter().find(|_last_run_node| _last_run_node.node_id() == output_node.id()) {
+                                output_i_node.has_outputs = last_run_node.has_outputs || last_run_node.should_execute;
+                            }
                         }
-                    }
 
-                    if i_node.edge_behavior == ConnectionBehavior::Always
-                        && input.connection_behavior == ConnectionBehavior::Always {
-                        output_i_node.edge_behavior = ConnectionBehavior::Always;
+                        if i_node.binding_behavior == BindingBehavior::Always
+                            && binding.behavior == BindingBehavior::Always {
+                            output_i_node.binding_behavior = BindingBehavior::Always;
+                        }
                     }
                 }
             }
@@ -89,98 +96,79 @@ impl RuntimeGraph {
         self.nodes.reverse();
     }
 
-    fn traverse_forward1(&mut self, graph: &Graph) {
-        for i in 0..self.nodes.len() {
-            let mut i_node = self.nodes[i].clone();
 
-            let inputs = graph.inputs_by_node_id(i_node.node_id());
-            for input in inputs {
-                if input.connected_output_id == 0 {
-                    if input.is_required {
-                        i_node.is_complete = false;
+    fn traverse_forward(&mut self, graph: &Graph) {
+        let mut i: usize = 0;
+        while i < self.nodes.len() {
+            let mut i_node = self.nodes[i].clone();
+            let node = graph.node_by_id(i_node.node_id()).unwrap();
+
+            for input in node.inputs.iter() {
+                match input.binding.as_ref() {
+                    None => {
+                        if input.is_required {
+                            i_node.has_missing_inputs = true;
+                        }
                     }
-                } else {
-                    let output = graph.output_by_id(input.connected_output_id).unwrap();
-                    let output_i_node = self.nodes.iter().find(|_node| _node.node_id() == output.node_id()).unwrap();
-                    if output_i_node.is_complete == false {
-                        i_node.is_complete = false;
+                    Some(binding) => {
+                        let output_i_node = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id).unwrap();
+                        assert_eq!(output_i_node.has_outputs || output_i_node.should_execute, true);
+                        if output_i_node.has_missing_inputs {
+                            i_node.has_missing_inputs = true;
+                        }
                     }
                 }
             }
 
+            i_node.should_execute = self.should_execute(node, &i_node);
             self.nodes[i] = i_node;
+
+            i += 1;
         }
     }
 
-    fn traverse_forward2(&mut self, graph: &Graph) {
-        for i in 0..self.nodes.len() {
-            let mut i_node = self.nodes[i].clone();
-
-            if self.can_skip(graph, &i_node) {
-                continue;
-            }
-
-            i_node.should_execute = true;
-            self.nodes[i] = i_node;
-        }
-    }
-
-    fn can_skip(&mut self, graph: &Graph, i_node: &RuntimeNode) -> bool {
-        if i_node.is_complete == false {
+    fn should_execute(&self, node: &Node, i_node: &RuntimeNode) -> bool {
+        if node.is_output {
             return true;
         }
 
-        if i_node.has_outputs == false {
+        if i_node.has_missing_inputs {
             return false;
         }
 
-        if i_node.edge_behavior == ConnectionBehavior::Once {
+        if !i_node.has_outputs {
             return true;
         }
 
-        if i_node.behavior == NodeBehavior::Passive
-            && !self.has_updated_inputs(graph, i_node.node_id()) {
+        if i_node.binding_behavior == BindingBehavior::Once {
+            return false;
+        }
+
+        if node.behavior == NodeBehavior::Active {
             return true;
         }
 
-
-        return false;
-    }
-
-    fn has_updated_inputs(&mut self, graph: &Graph, node_id: u32) -> bool {
-        let mut has_updated_inputs = false;
-
-        for input in graph.inputs_by_node_id(node_id) {
-            if input.connected_output_id == 0 {
-                debug_assert_eq!(input.is_required, false);
-            } else if input.connection_behavior == ConnectionBehavior::Always {
-                let output = graph.output_by_id(input.connected_output_id).unwrap();
-                let output_i_node =
-                    self.nodes.iter_mut()
-                        .find(|_i_node| _i_node.node_id() == output.node_id())
-                        .unwrap();
-
-                if output_i_node.should_execute {
-                    has_updated_inputs = true;
+        for input in node.inputs.iter() {
+            match &input.binding {
+                None => {
+                    debug_assert_eq!(input.is_required, false);
+                }
+                Some(binding) => {
+                    if binding.behavior == BindingBehavior::Always {
+                        let output_i_node = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id).unwrap();
+                        if output_i_node.should_execute {
+                            return true;
+                        }
+                    }
                 }
             }
         }
-        return has_updated_inputs;
+
+        return false;
     }
 }
 
 impl RuntimeNode {
-    pub fn new(node_id: u32) -> RuntimeNode {
-        RuntimeNode {
-            node_id,
-            behavior: NodeBehavior::Active,
-            edge_behavior: ConnectionBehavior::Always,
-            is_complete: true,
-            should_execute: false,
-            has_outputs: false,
-        }
-    }
-
     pub fn node_id(&self) -> u32 {
         self.node_id
     }

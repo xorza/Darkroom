@@ -1,10 +1,8 @@
 #[cfg(test)]
-mod ecs_tests {
-    use std::hint::black_box;
+pub mod ecs_tests {
     use bevy_ecs::prelude::*;
-    use bevy_hierarchy::{BuildWorldChildren};
     use crate::function_graph::Function;
-    use crate::graph::Node;
+    use crate::graph::{Node};
     use crate::workspace::Workspace;
 
     #[test]
@@ -51,12 +49,16 @@ mod ecs_tests {
         let mut query = world.query::<(&mut Position, &Velocity)>();
         for mut q in query.iter_mut(&mut world) {
             q.0.1 += q.1.1;
-
         }
     }
 
     #[test]
-    fn graph() {
+    pub fn graph() {
+        let world = create_test_world();
+        drop(world);
+    }
+
+    pub fn create_test_world() -> World {
         let workspace = Workspace::from_json_file("./test_resources/test_workspace.json");
         let mut world = World::new();
 
@@ -67,24 +69,11 @@ mod ecs_tests {
         }
 
         for node in workspace.graph().nodes().iter() {
-            let inputs = workspace.graph().inputs_by_node_id(node.id());
-            let outputs = workspace.graph().outputs_by_node_id(node.id());
             let function = workspace.function_graph().function_by_node_id(node.id()).unwrap();
 
-            let _entt_id = world.spawn((node.clone(), function.clone()))
-                .with_children(|parent| {
-                    for input in inputs {
-                        let arg = workspace.function_graph().arg_by_input_output_id(input.id()).unwrap();
-                        parent.spawn((input.clone(), arg.clone()));
-                    }
-                    for output in outputs {
-                        let arg = workspace.function_graph().arg_by_input_output_id(output.id()).unwrap();
-                        parent.spawn((output.clone(), arg.clone()));
-                    }
-                }).id();
-
-
-            black_box(());
+            let _entt_id = world.spawn((node.clone(), function.clone())).id();
         }
+
+        world
     }
 }

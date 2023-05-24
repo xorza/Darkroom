@@ -55,7 +55,12 @@ mod runtime_tests {
 
         runtime_graph.run(&graph);
 
-        graph.input_by_id_mut(13).unwrap().connection_behavior = ConnectionBehavior::Once;
+         graph.node_by_id_mut(4).unwrap()
+            .inputs.get_mut(1).unwrap()
+            .binding.as_mut().unwrap()
+            .behavior = BindingBehavior::Once;
+        // graph.input_by_id_mut(13).unwrap().binding.as_mut().unwrap().behavior = BindingBehavior::Once;
+
         runtime_graph.run(&graph);
         assert_eq!(runtime_graph.nodes().iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);
@@ -72,12 +77,16 @@ mod runtime_tests {
 
         runtime_graph.run(&graph);
 
-        graph.input_by_id_mut(10).unwrap().connection_behavior = ConnectionBehavior::Always;
+        graph.node_by_id_mut(3).unwrap()
+            .inputs.get_mut(0).unwrap()
+            .binding.as_mut().unwrap()
+            .behavior = BindingBehavior::Always;
+
         runtime_graph.run(&graph);
         assert_eq!(runtime_graph.nodes().iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, true);
         assert_eq!(runtime_graph.node_by_id(2).unwrap().should_execute, false);
-        assert_eq!(runtime_graph.node_by_id(3).unwrap().should_execute, true);
+        assert_eq!(runtime_graph.node_by_id(3).unwrap().should_execute, true);  //false
         assert_eq!(runtime_graph.node_by_id(4).unwrap().should_execute, true);
         assert_eq!(runtime_graph.node_by_id(5).unwrap().should_execute, true);
     }
@@ -110,7 +119,11 @@ mod runtime_tests {
             assert_eq!(runtime_graph.node_by_id(5).unwrap().should_execute, true);
         }
         {
-            graph.input_by_id_mut(13).unwrap().connection_behavior = ConnectionBehavior::Once;
+            // graph.input_by_id_mut(13).unwrap().binding.as_mut().unwrap().behavior = BindingBehavior::Once;
+            graph.node_by_id_mut(4).unwrap()
+                .inputs.get_mut(1).unwrap()
+                .binding.as_mut().unwrap()
+                .behavior = BindingBehavior::Once;
             runtime_graph.run(&graph);
             assert_eq!(runtime_graph.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);
@@ -120,7 +133,11 @@ mod runtime_tests {
             assert_eq!(runtime_graph.node_by_id(5).unwrap().should_execute, true);
         }
         {
-            graph.input_by_id_mut(11).unwrap().connection_behavior = ConnectionBehavior::Always;
+            // graph.input_by_id_mut(11).unwrap().binding.as_mut().unwrap().behavior = BindingBehavior::Always;
+            graph.node_by_id_mut(3).unwrap()
+                .inputs.get_mut(1).unwrap()
+                .binding.as_mut().unwrap()
+                .behavior = BindingBehavior::Always;
             runtime_graph.run(&graph);
             assert_eq!(runtime_graph.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime_graph.node_by_id(1).unwrap().should_execute, false);

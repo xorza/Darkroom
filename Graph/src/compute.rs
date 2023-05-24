@@ -1,7 +1,7 @@
-use crate::function_graph::*;
 use crate::runtime_graph::{RuntimeGraph, RuntimeNode};
 use crate::workspace::Workspace;
 use std::time::{Instant};
+use crate::common::is_debug;
 use crate::invoke::{Args, Invoker, LambdaInvoker};
 
 #[derive(Clone)]
@@ -43,15 +43,7 @@ impl Compute {
         self.runtime_graph.run(&workspace.graph());
 
         for r_node in self.runtime_graph.nodes().clone() {
-            let args = workspace.function_graph()
-                .args_by_node_id(r_node.node_id())
-                .collect::<Vec<&Arg>>();
-            let input_args = args.iter().cloned()
-                .filter(|arg| arg.direction == Direction::In)
-                .collect::<Vec<&Arg>>();
-            let output_args = args.iter().cloned()
-                .filter(|arg| arg.direction == Direction::Out)
-                .collect::<Vec<&Arg>>();
+            let function = workspace.function_graph().function_by_node_id(r_node.node_id()).unwrap();
 
             let mut compute_node = ComputeNode::new(r_node.node_id());
             if let Some(existing_compute_node) = last_run.iter_mut()
@@ -59,27 +51,30 @@ impl Compute {
                 compute_node.inputs = existing_compute_node.inputs.clone();
                 compute_node.outputs = existing_compute_node.outputs.clone();
 
-                assert_eq!(compute_node.inputs.len(), input_args.len());
-                assert_eq!(compute_node.outputs.len(), output_args.len());
+                assert_eq!(compute_node.inputs.len(), function.inputs.len());
+                assert_eq!(compute_node.outputs.len(), function.outputs.len());
             } else {
-                compute_node.inputs.resize(input_args.len(), 0);
-                compute_node.outputs.resize(output_args.len(), 0);
+                compute_node.inputs.resize(function.inputs.len(), 0);
+                compute_node.outputs.resize(function.outputs.len(), 0);
             }
 
             if r_node.should_execute {
-                for input_arg in input_args {
-                    let input = workspace.graph().input_by_id(input_arg.input_output_id()).unwrap();
-                    let output = workspace.graph().output_by_id(input.connected_output_id).unwrap();
-                    let output_runtime_node = self.runtime_graph.node_by_id(output.node_id()).unwrap();
+                for (i, input_arg) in function.inputs.iter().enumerate() {
+                    let node = workspace.graph().node_by_id(r_node.node_id()).unwrap();
+                    let input = node.inputs.get(i).unwrap();
+                    let binding = input.binding.as_ref().unwrap();
 
+                    let output_runtime_node = self.runtime_graph.node_by_id(binding.node_id).unwrap();
                     if output_runtime_node.should_execute || !r_node.has_outputs {
-                        let output_compute_node = self.compute_nodes.iter().find(|node| node.node_id() == output.node_id()).unwrap();
-                        let output_arg = workspace.function_graph().arg_by_input_output_id(output.id()).unwrap();
+                        let output_compute_node = self.compute_nodes.iter().find(|node| node.node_id() == binding.node_id).unwrap();
 
-                        assert!(output_arg.direction == Direction::Out);
-                        assert!(output_arg.data_type == input_arg.data_type);
+                        if is_debug() {
+                            let function = workspace.function_graph().function_by_node_id(r_node.node_id()).unwrap();
+                            let output_arg = &function.outputs[binding.output_index];
+                            assert!(output_arg.data_type == input_arg.data_type);
+                        }
 
-                        compute_node.inputs[input_arg.index as usize] = output_compute_node.outputs[output_arg.index as usize];
+                        compute_node.inputs[i] = output_compute_node.outputs[binding.output_index];
                     }
                 }
 
