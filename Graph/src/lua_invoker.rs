@@ -12,7 +12,6 @@ use crate::invoke::{Args, Invoker};
 pub struct Argument {
     name: String,
     data_type: DataType,
-    index: i64,
 }
 
 #[derive(Clone)]
@@ -279,7 +278,7 @@ impl FunctionInfo {
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.inputs.push(Argument { name, data_type, index: 0 });
+            function_info.inputs.push(Argument { name, data_type});
         }
 
         let outputs: Table = table.get("outputs").unwrap();
@@ -289,7 +288,7 @@ impl FunctionInfo {
             let data_type_name: String = output.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.outputs.push(Argument { name, data_type, index: 0 });
+            function_info.outputs.push(Argument { name, data_type });
         }
 
         return function_info;

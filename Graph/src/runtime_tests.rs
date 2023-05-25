@@ -16,14 +16,10 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.should_execute), true);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.executed), false);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), false);
-
         runtime.run(&graph, &invoker);
         assert_eq!(runtime.nodes().iter().all(|_node| _node.executed), true);
         assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
+        assert_eq!(runtime.nodes().iter().all(|_node| _node.should_execute), true);
     }
 
     #[test]
@@ -32,12 +28,7 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
-
-        runtime.prepare(&graph);
-        assert_eq!(runtime.nodes().iter().all(|node| node.has_outputs), true);
-        assert_eq!(runtime.nodes().iter().all(|node| node.executed), false);
 
         runtime.run(&graph, &invoker);
         assert_eq!(runtime.nodes().iter().all(|node| node.has_outputs), true);
@@ -54,11 +45,9 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
 
         graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
         assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -74,7 +63,6 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
 
         graph.node_by_id_mut(4).unwrap()
@@ -82,7 +70,6 @@ mod runtime_tests {
             .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Once;
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
         assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -98,7 +85,6 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
 
         graph.node_by_id_mut(3).unwrap()
@@ -106,7 +92,6 @@ mod runtime_tests {
             .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Always;
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
         assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
         assert_eq!(runtime.node_by_id(1).unwrap().executed, true);
@@ -122,11 +107,9 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.prepare(&graph);
         runtime.run(&graph, &invoker);
 
         {
-            runtime.prepare(&graph);
             runtime.run(&graph, &invoker);
             assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -137,7 +120,6 @@ mod runtime_tests {
         }
         {
             graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-            runtime.prepare(&graph);
             runtime.run(&graph, &invoker);
             assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -152,7 +134,6 @@ mod runtime_tests {
                 .inputs.get_mut(1).unwrap()
                 .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Once;
-            runtime.prepare(&graph);
             runtime.run(&graph, &invoker);
             assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -167,7 +148,6 @@ mod runtime_tests {
                 .inputs.get_mut(1).unwrap()
                 .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Always;
-            runtime.prepare(&graph);
             runtime.run(&graph, &invoker);
             assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
             assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
@@ -202,21 +182,18 @@ mod runtime_tests {
             outputs[0] = Value::from(inputs[0].to_int() * inputs[1].to_int());
         });
 
-
         let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
         let mut compute = Runtime::new();
 
-        compute.prepare(&graph);
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 35);
-
-        compute.prepare(&graph);
+        
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 35);
 
         unsafe { B = 7; }
         graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-        compute.prepare(&graph);
+        
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 49);
 
@@ -224,7 +201,7 @@ mod runtime_tests {
             .node_by_id_mut(3).unwrap()
             .inputs.get_mut(0).unwrap()
             .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
-        compute.prepare(&graph);
+        
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 63);
 

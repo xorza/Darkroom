@@ -44,7 +44,7 @@ impl Runtime {
     fn node_by_id_mut(&mut self, node_id: u32) -> &mut RuntimeNode {
         self.nodes.iter_mut().find(|node| node.node_id() == node_id).unwrap()
     }
-    pub fn prepare(&mut self, graph: &Graph) {
+     fn prepare(&mut self, graph: &Graph) {
         assert!(graph.validate());
 
         let mut last_run = self.nodes.clone();
@@ -179,6 +179,8 @@ impl Runtime {
     }
 
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) {
+        self.prepare(graph);
+
         invoker.start();
         let mut execution_index: u32 = 0;
 
@@ -254,6 +256,9 @@ impl RuntimeNode {
         } else {
             result.inputs.resize(node.inputs.len());
             result.outputs.resize(node.outputs.len());
+            for (i, output) in node.outputs.iter().enumerate() {
+                result.outputs[i] = output.data_type.into();
+            }
         }
 
         return result;

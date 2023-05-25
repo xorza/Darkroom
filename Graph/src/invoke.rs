@@ -145,18 +145,34 @@ impl From<f32> for Value {
         Value::Float(value as f64)
     }
 }
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Value::Float(value as f64)
     }
 }
+
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::String(value.to_string())
     }
 }
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value as bool)
     }
 }
+
+impl From<DataType> for Value {
+    fn from(data_type: DataType) -> Self {
+        match data_type {
+            DataType::None => { Value::Null }
+            DataType::Float => { Value::Float(0.0) }
+            DataType::Int => { Value::Int(0) }
+            DataType::Bool => { Value::Bool(false) }
+            DataType::String => { Value::Null }
+        }
+    }
+}
+
