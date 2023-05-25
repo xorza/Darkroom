@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::mem;
 use std::time::Instant;
 use crate::common::is_debug;
@@ -13,6 +14,7 @@ pub struct RuntimeNode {
     pub has_updated_bindings: bool,
     pub binding_behavior: BindingBehavior,
     pub should_execute: bool,
+    pub executed: bool,
     pub has_outputs: bool,
     pub inputs: Args,
     pub outputs: Args,
@@ -22,12 +24,14 @@ pub struct RuntimeNode {
 
 pub struct Runtime {
     nodes: Vec<RuntimeNode>,
+    order: Vec<usize>,
 }
 
 impl Runtime {
     pub fn new() -> Runtime {
         Runtime {
             nodes: Vec::new(),
+            order: Vec::new(),
         }
     }
 
@@ -51,15 +55,15 @@ impl Runtime {
             }
         ).collect();
 
-        let order = self.traverse_backward(graph);
-        self.traverse_forward(graph, order);
+        self.traverse_backward(graph);
+        self.traverse_forward(graph);
     }
 
 
-    fn traverse_backward(&mut self, graph: &Graph) -> Vec<usize> {
+    fn traverse_backward(&mut self, graph: &Graph) {
         let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
+        self.order.clear();
 
-        let mut order: Vec<usize> = Vec::new();
 
         for node in active_nodes {
             let mut rnode = self.node_by_id_mut(node.id());
@@ -67,13 +71,13 @@ impl Runtime {
             rnode.binding_behavior = BindingBehavior::Always;
 
             let index = rnode.index;
-            order.push(index);
+            self.order.push(index);
         }
 
 
         let mut i: usize = 0;
-        while i < order.len() {
-            let index = order[i];
+        while i < self.order.len() {
+            let index = self.order[i];
             let mut rnode = self.nodes[index].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
@@ -95,23 +99,26 @@ impl Runtime {
                     output_rnode.binding_behavior = BindingBehavior::Always;
                 }
 
-                if !order.contains(&output_rnode.index) {
-                    order.push(output_rnode.index);
-                }
+                let output_index = output_rnode.index;
+                self.order.push(output_index);
             }
 
             self.nodes[index] = rnode;
             i += 1;
         }
 
-        order.reverse();
 
-        order
+        self.order.reverse();
+
+        // dedup preserving first occurrence
+        let mut set: HashSet<usize> = HashSet::new();
+        self.order.retain(|e| set.insert(*e));
     }
-    fn traverse_forward(&mut self, graph: &Graph, order: Vec<usize>) {
-        let mut i: usize = 0;
-        while i < order.len() {
-            let index = order[i];
+    fn traverse_forward(&mut self, graph: &Graph) {
+        let mut new_order: Vec<usize> = Vec::new();
+
+        for i in 0..self.order.len() {
+            let index = self.order[i];
             let mut rnode = self.nodes[index].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
@@ -140,10 +147,14 @@ impl Runtime {
             }
 
             rnode.should_execute = self.should_execute(node, &rnode);
+            if rnode.should_execute {
+                new_order.push(index);
+            }
 
             self.nodes[index] = rnode;
-            i += 1;
         }
+
+        self.order = new_order;
     }
     fn should_execute(&self, node: &Node, rnode: &RuntimeNode) -> bool {
         if node.is_output
@@ -171,37 +182,39 @@ impl Runtime {
         invoker.start();
         let mut execution_index: u32 = 0;
 
-        for i in 0..self.nodes().len() {
-            let mut rnode = self.nodes[i].clone();
+        for i in 0..self.order.len() {
+            let index = self.order[i];
+            let mut rnode = self.nodes[index].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
-            if rnode.should_execute {
-                for (i, input) in node.inputs.iter().enumerate() {
-                    let binding = input.binding.as_ref().unwrap();
-                    let output_runtime_node = self.node_by_id(binding.node_id()).unwrap();
+            assert!(rnode.should_execute);
 
-                    assert_eq!(output_runtime_node.has_outputs, true);
+            for (input_index, input) in node.inputs.iter().enumerate() {
+                let binding = input.binding.as_ref().unwrap();
+                let output_runtime_node = self.node_by_id(binding.node_id()).unwrap();
 
-                    if output_runtime_node.should_execute {
-                        if is_debug() {
-                            let output_node = graph.node_by_id(binding.node_id()).unwrap();
-                            let output_arg = output_node.outputs.get(binding.output_index()).unwrap();
-                            assert!(output_arg.data_type == input.data_type);
-                        }
+                assert_eq!(output_runtime_node.has_outputs, true);
 
-                        rnode.inputs[i] = output_runtime_node.outputs[binding.output_index()];
+                if output_runtime_node.executed {
+                    if is_debug() {
+                        let output_node = graph.node_by_id(binding.node_id()).unwrap();
+                        let output_arg = output_node.outputs.get(binding.output_index()).unwrap();
+                        assert!(output_arg.data_type == input.data_type);
                     }
+
+                    rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()];
                 }
-
-                let start = Instant::now();
-                invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
-                rnode.run_time = start.elapsed().as_secs_f64();
-                rnode.has_outputs = true;
-                rnode.execution_index = execution_index;
-                execution_index += 1;
-
-                self.nodes[i] = rnode;
             }
+
+            let start = Instant::now();
+            invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
+            rnode.run_time = start.elapsed().as_secs_f64();
+            rnode.has_outputs = true;
+            rnode.execution_index = execution_index;
+            rnode.executed = true;
+            execution_index += 1;
+
+            self.nodes[index] = rnode;
         }
 
         invoker.finish();
@@ -227,6 +240,7 @@ impl RuntimeNode {
             outputs: Vec::new(),
             run_time: 0.0,
             execution_index: 0,
+            executed: false,
         };
 
         let existing_rnode

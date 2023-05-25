@@ -2,6 +2,40 @@
     "new_id": 10000,
     "nodes": [
         {
+            "self_id": 4,
+            "name": "mult",
+            "behavior": "Passive",
+            "is_output": false,
+            "inputs": [
+                {
+                    "name": "A",
+                    "is_required": true,
+                    "data_type": "Int",
+                    "binding": {
+                        "node_id": 3,
+                        "output_index": 0,
+                        "behavior": "Always"
+                    }
+                },
+                {
+                    "name": "B",
+                    "is_required": true,
+                    "data_type": "Int",
+                    "binding": {
+                        "node_id": 2,
+                        "output_index": 0,
+                        "behavior": "Always"
+                    }
+                }
+            ],
+            "outputs": [
+                {
+                    "name": "Prod",
+                    "data_type": "Int"
+                }
+            ]
+        },
+        {
             "self_id": 1,
             "name": "val0",
             "behavior": "Active",
@@ -57,40 +91,6 @@
             "outputs": [
                 {
                     "name": "Sum",
-                    "data_type": "Int"
-                }
-            ]
-        },
-        {
-            "self_id": 4,
-            "name": "mult",
-            "behavior": "Passive",
-            "is_output": false,
-            "inputs": [
-                {
-                    "name": "A",
-                    "is_required": true,
-                    "data_type": "Int",
-                    "binding": {
-                        "node_id": 3,
-                        "output_index": 0,
-                        "behavior": "Always"
-                    }
-                },
-                {
-                    "name": "B",
-                    "is_required": true,
-                    "data_type": "Int",
-                    "binding": {
-                        "node_id": 2,
-                        "output_index": 0,
-                        "behavior": "Always"
-                    }
-                }
-            ],
-            "outputs": [
-                {
-                    "name": "Prod",
                     "data_type": "Int"
                 }
             ]
