@@ -28,8 +28,9 @@ pub struct Output {
     pub data_type: DataType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BindingBehavior {
+    #[default]
     Always,
     Once,
 }

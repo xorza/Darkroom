@@ -12,7 +12,7 @@ pub enum Value {
 
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Args {
     values: Vec<Value>,
 }

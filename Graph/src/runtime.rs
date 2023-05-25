@@ -5,15 +5,14 @@ use crate::common::is_debug;
 use crate::graph::*;
 use crate::invoke::{Args, Invoker};
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct RuntimeNode {
     pub node_id: u32,
     index: usize,
 
-    pub has_missing_inputs: bool,
-    pub has_updated_bindings: bool,
     pub binding_behavior: BindingBehavior,
     pub should_execute: bool,
+    pub has_missing_inputs: bool,
     pub executed: bool,
     pub has_outputs: bool,
     pub inputs: Args,
@@ -47,8 +46,8 @@ impl Runtime {
     fn prepare(&mut self, graph: &Graph) {
         assert!(graph.validate());
 
-        let mut last_run = self.nodes.clone();
-        self.nodes.clear();
+        let mut last_run = mem::replace(&mut self.nodes, Vec::new());
+
         self.nodes = graph.nodes().iter().enumerate().map(
             |(i, node)| -> RuntimeNode{
                 RuntimeNode::new(i, node, &mut last_run)
@@ -64,37 +63,37 @@ impl Runtime {
         let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
         self.order.clear();
 
-
         for node in active_nodes {
             let mut rnode = self.node_by_id_mut(node.id());
             rnode.has_outputs = true;
             rnode.binding_behavior = BindingBehavior::Always;
+            rnode.should_execute = true;
 
             let index = rnode.index;
             self.order.push(index);
         }
 
-
         let mut i: usize = 0;
         while i < self.order.len() {
             let index = self.order[i];
-            let mut rnode = self.nodes[index].clone();
-            let node = graph.node_by_id(rnode.node_id()).unwrap();
+            let node_id: u32 = self.nodes[index].node_id();
+            let node_binding_behavior: BindingBehavior = self.nodes[index].binding_behavior;
+            let node = graph.node_by_id(node_id).unwrap();
 
             for input in node.inputs.iter() {
                 if input.binding.is_none() {
-                    rnode.has_missing_inputs = true;
                     continue;
                 }
 
                 let binding = input.binding.as_ref().unwrap();
+                assert_ne!(binding.node_id(), node.id());
                 let output_node = graph.node_by_id(binding.node_id()).unwrap();
                 let output_rnode: &mut RuntimeNode = self.node_by_id_mut(output_node.id());
 
                 assert_eq!(output_rnode.inputs.len(), output_node.inputs.len());
                 assert_eq!(output_rnode.outputs.len(), output_node.outputs.len());
 
-                if rnode.binding_behavior == BindingBehavior::Always
+                if node_binding_behavior == BindingBehavior::Always
                     && binding.behavior == BindingBehavior::Always {
                     output_rnode.binding_behavior = BindingBehavior::Always;
                 }
@@ -103,7 +102,6 @@ impl Runtime {
                 self.order.push(output_index);
             }
 
-            self.nodes[index] = rnode;
             i += 1;
         }
 
@@ -119,63 +117,58 @@ impl Runtime {
 
         for i in 0..self.order.len() {
             let index = self.order[i];
-            let mut rnode = self.nodes[index].clone();
+            let rnode = &self.nodes[index];
             let node = graph.node_by_id(rnode.node_id()).unwrap();
+
+            let mut has_missing_inputs: bool = false;
+            let mut should_execute: bool = rnode.should_execute;
 
             for input in node.inputs.iter() {
                 match input.binding.as_ref() {
                     None => {
                         if input.is_required {
-                            rnode.has_missing_inputs = true;
+                            has_missing_inputs = true;
                         }
                     }
                     Some(binding) => {
+                        assert_ne!(binding.node_id(), node.id());
+
                         let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
                         assert_eq!(output_rnode.has_outputs || output_rnode.should_execute, true);
                         if output_rnode.has_missing_inputs {
-                            rnode.has_missing_inputs = true;
+                            has_missing_inputs = true;
                         }
 
                         if binding.behavior == BindingBehavior::Always {
                             let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
                             if output_rnode.should_execute {
-                                rnode.has_updated_bindings = true;
+                                should_execute = true;
                             }
                         }
                     }
                 }
             }
 
-            rnode.should_execute = self.should_execute(node, &rnode);
-            if rnode.should_execute {
-                new_order.push(index);
+            if node.is_output {
+                should_execute = true;
+            } else if has_missing_inputs {
+                should_execute = false;
+            } else if !rnode.has_outputs {
+                should_execute = true;
+            } else if rnode.binding_behavior == BindingBehavior::Once {
+                should_execute = false;
+            } else if node.behavior == NodeBehavior::Active {
+                should_execute = true;
             }
 
-            self.nodes[index] = rnode;
+            self.nodes[index].should_execute = should_execute;
+
+            if should_execute {
+                new_order.push(index);
+            }
         }
 
         self.order = new_order;
-    }
-    fn should_execute(&self, node: &Node, rnode: &RuntimeNode) -> bool {
-        if node.is_output
-        { return true; }
-
-        if rnode.has_missing_inputs
-        { return false; }
-
-        if !rnode.has_outputs
-        { return true; }
-
-        if rnode.binding_behavior == BindingBehavior::Once
-        { return false; }
-
-        if node.behavior == NodeBehavior::Active
-        { return true; }
-
-        if rnode.has_updated_bindings
-        { return true; }
-
-        return false;
     }
 
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) {
@@ -186,13 +179,15 @@ impl Runtime {
 
         for i in 0..self.order.len() {
             let index = self.order[i];
-            let mut rnode = self.nodes[index].clone();
+            let mut rnode = mem::replace(&mut self.nodes[index], RuntimeNode::default());
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
             assert!(rnode.should_execute);
 
             for (input_index, input) in node.inputs.iter().enumerate() {
                 let binding = input.binding.as_ref().unwrap();
+                assert_ne!(binding.node_id(), node.id());
+
                 let output_runtime_node = self.node_by_id(binding.node_id()).unwrap();
 
                 assert_eq!(output_runtime_node.has_outputs, true);
@@ -256,9 +251,8 @@ impl RuntimeNode {
             node_id: node.id(),
             has_missing_inputs: false,
             binding_behavior: BindingBehavior::Once,
-            should_execute: true,
+            should_execute: false,
             has_outputs,
-            has_updated_bindings: false,
             inputs,
             outputs,
             run_time: 0.0,
