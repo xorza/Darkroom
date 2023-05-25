@@ -167,7 +167,7 @@ mod runtime_tests {
 
         let mut invoker = LambdaInvoker::new();
         invoker.add_lambda("print", |_, inputs, _| unsafe {
-            RESULT = inputs[0].to_int();
+            RESULT = inputs[0].as_int();
         });
         invoker.add_lambda("val0", |_, _, outputs| {
             outputs[0] = Value::from(unsafe { A });
@@ -176,10 +176,14 @@ mod runtime_tests {
             outputs[0] = Value::from(unsafe { B });
         });
         invoker.add_lambda("sum", |_, inputs, outputs| {
-            outputs[0] = Value::from(inputs[0].to_int() + inputs[1].to_int());
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
+            outputs[0] = Value::from(a + b);
         });
         invoker.add_lambda("mult", |_, inputs, outputs| {
-            outputs[0] = Value::from(inputs[0].to_int() * inputs[1].to_int());
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
+            outputs[0] = Value::from(a * b);
         });
 
         let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
@@ -187,13 +191,13 @@ mod runtime_tests {
 
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 35);
-        
+
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 35);
 
         unsafe { B = 7; }
         graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-        
+
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 49);
 
@@ -201,7 +205,7 @@ mod runtime_tests {
             .node_by_id_mut(3).unwrap()
             .inputs.get_mut(0).unwrap()
             .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
-        
+
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 63);
 

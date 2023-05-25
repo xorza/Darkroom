@@ -80,7 +80,8 @@ mod lua_invoker_tests {
         let mut outputs: Args = Args::from_vec(vec![0]);
 
         invoker.call("mult", 0, &inputs, &mut outputs);
-        assert_eq!(outputs[0].to_int(), 15);
+        let result: i64 = outputs[0].as_int();
+        assert_eq!(result, 15);
 
         let graph = invoker.map_graph();
         assert_eq!(graph.nodes().len(), 5);

@@ -63,17 +63,6 @@ impl Invoker for LambdaInvoker {
 }
 
 impl Value {
-    pub fn from_int(value: i64) -> Value {
-        Value::Int(value)
-    }
-
-    pub fn to_int(&self) -> i64 {
-        match self {
-            Value::Int(value) => *value,
-            _ => panic!("Value is not an int"),
-        }
-    }
-
     pub fn data_type(&self) -> DataType {
         match self {
             Value::Null => { DataType::None }
@@ -81,6 +70,31 @@ impl Value {
             Value::Int(_) => { DataType::Int }
             Value::Bool(_) => { DataType::Bool }
             Value::String(_) => { DataType::String }
+        }
+    }
+
+    pub fn as_float(&self) -> f64 {
+        match self {
+            Value::Float(value) => { *value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+    pub fn as_int(&self) -> i64 {
+        match self {
+            Value::Int(value) => { *value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Value::Bool(value) => { *value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+    pub fn as_string(&self) -> &str {
+        match self {
+            Value::String(value) => { value }
+            _ => { panic!("Value is not a string") }
         }
     }
 }
@@ -135,6 +149,7 @@ impl IndexMut<usize> for Args {
     }
 }
 
+
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
         Value::Int(value)
@@ -165,6 +180,12 @@ impl From<&str> for Value {
     }
 }
 
+impl From<String> for Value {
+    fn from(value: String) -> Self {
+        Value::String(value)
+    }
+}
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value as bool)
@@ -182,4 +203,3 @@ impl From<DataType> for Value {
         }
     }
 }
-
