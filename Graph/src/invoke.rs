@@ -91,8 +91,15 @@ impl Args {
             values: Vec::new(),
         }
     }
+    pub fn with_size(size: usize) -> Args {
+        let mut result = Args {
+            values: Vec::with_capacity(size),
+        };
+        result.values.resize(size, Value::Null);
+        return result;
+    }
 
-    pub fn resize(&mut self, size: usize) {
+    fn resize(&mut self, size: usize) {
         self.values.resize(size, Value::Null);
     }
 

@@ -44,7 +44,7 @@ impl Runtime {
     fn node_by_id_mut(&mut self, node_id: u32) -> &mut RuntimeNode {
         self.nodes.iter_mut().find(|node| node.node_id() == node_id).unwrap()
     }
-     fn prepare(&mut self, graph: &Graph) {
+    fn prepare(&mut self, graph: &Graph) {
         assert!(graph.validate());
 
         let mut last_run = self.nodes.clone();
@@ -232,34 +232,39 @@ impl RuntimeNode {
 
 
     pub fn new(index: usize, node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
-        let mut result = RuntimeNode {
+        let inputs;
+        let mut outputs;
+        let mut has_outputs = false;
+
+        let existing_rnode
+            = last_run.iter_mut().find(|_last_run_node| _last_run_node.node_id() == node.id());
+        if let Some(existing_rnode) = existing_rnode {
+            has_outputs = existing_rnode.has_outputs;
+            inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
+            outputs = mem::replace(&mut existing_rnode.outputs, Args::new());
+        } else {
+            inputs = Args::with_size(node.inputs.len());
+            outputs = Args::with_size(node.outputs.len());
+
+            for (i, output) in node.outputs.iter().enumerate() {
+                outputs[i] = output.data_type.into();
+            }
+        }
+
+        let result = RuntimeNode {
             index,
             node_id: node.id(),
             has_missing_inputs: false,
             binding_behavior: BindingBehavior::Once,
             should_execute: true,
-            has_outputs: false,
+            has_outputs,
             has_updated_bindings: false,
-            inputs: Args::new(),
-            outputs: Args::new(),
+            inputs,
+            outputs,
             run_time: 0.0,
             execution_index: 0,
             executed: false,
         };
-
-        let existing_rnode
-            = last_run.iter_mut().find(|_last_run_node| _last_run_node.node_id() == node.id());
-        if let Some(existing_rnode) = existing_rnode {
-            result.has_outputs = existing_rnode.has_outputs;
-            result.inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
-            result.outputs = mem::replace(&mut existing_rnode.outputs, Args::new());
-        } else {
-            result.inputs.resize(node.inputs.len());
-            result.outputs.resize(node.outputs.len());
-            for (i, output) in node.outputs.iter().enumerate() {
-                result.outputs[i] = output.data_type.into();
-            }
-        }
 
         return result;
     }
