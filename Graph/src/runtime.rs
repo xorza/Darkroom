@@ -43,6 +43,55 @@ impl Runtime {
     fn node_by_id_mut(&mut self, node_id: u32) -> &mut RuntimeNode {
         self.nodes.iter_mut().find(|node| node.node_id() == node_id).unwrap()
     }
+
+    pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) {
+        self.prepare(graph);
+
+        invoker.start();
+        let mut execution_index: u32 = 0;
+
+        for i in 0..self.order.len() {
+            let index = self.order[i];
+            let mut rnode = mem::replace(&mut self.nodes[index], RuntimeNode::default());
+            let node = graph.node_by_id(rnode.node_id()).unwrap();
+
+            assert!(rnode.should_execute);
+
+            for (input_index, input) in node.inputs.iter().enumerate() {
+                let binding = input.binding.as_ref().unwrap();
+                assert_ne!(binding.node_id(), node.id());
+
+                let output_runtime_node = self.node_by_id(binding.node_id()).unwrap();
+
+                assert_eq!(output_runtime_node.has_outputs, true);
+
+                if output_runtime_node.executed {
+                    if is_debug() {
+                        let output_node = graph.node_by_id(binding.node_id()).unwrap();
+                        let output_arg = output_node.outputs.get(binding.output_index()).unwrap();
+                        let output_value = &output_runtime_node.outputs[binding.output_index()];
+                        assert_eq!(input.data_type, output_arg.data_type);
+                        assert_eq!(input.data_type, output_value.data_type());
+                    }
+
+                    rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()].clone();
+                }
+            }
+
+            let start = Instant::now();
+            invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
+            rnode.run_time = start.elapsed().as_secs_f64();
+            rnode.has_outputs = true;
+            rnode.execution_index = execution_index;
+            rnode.executed = true;
+            execution_index += 1;
+
+            self.nodes[index] = rnode;
+        }
+
+        invoker.finish();
+    }
+
     fn prepare(&mut self, graph: &Graph) {
         assert!(graph.validate());
 
@@ -57,8 +106,6 @@ impl Runtime {
         self.traverse_backward(graph);
         self.traverse_forward(graph);
     }
-
-
     fn traverse_backward(&mut self, graph: &Graph) {
         let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
         self.order.clear();
@@ -132,27 +179,22 @@ impl Runtime {
                     }
                     Some(binding) => {
                         assert_ne!(binding.node_id(), node.id());
-
                         let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
                         assert_eq!(output_rnode.has_outputs || output_rnode.should_execute, true);
                         if output_rnode.has_missing_inputs {
                             has_missing_inputs = true;
                         }
-
-                        if binding.behavior == BindingBehavior::Always {
-                            let output_rnode = self.nodes.iter().find(|_node| _node.node_id() == binding.node_id()).unwrap();
-                            if output_rnode.should_execute {
-                                should_execute = true;
-                            }
+                        if binding.behavior == BindingBehavior::Always && output_rnode.should_execute {
+                            should_execute = true;
                         }
                     }
                 }
             }
 
-            if node.is_output {
-                should_execute = true;
-            } else if has_missing_inputs {
+            if has_missing_inputs {
                 should_execute = false;
+            } else if node.is_output {
+                should_execute = true;
             } else if !rnode.has_outputs {
                 should_execute = true;
             } else if rnode.binding_behavior == BindingBehavior::Once {
@@ -169,54 +211,6 @@ impl Runtime {
         }
 
         self.order = new_order;
-    }
-
-    pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) {
-        self.prepare(graph);
-
-        invoker.start();
-        let mut execution_index: u32 = 0;
-
-        for i in 0..self.order.len() {
-            let index = self.order[i];
-            let mut rnode = mem::replace(&mut self.nodes[index], RuntimeNode::default());
-            let node = graph.node_by_id(rnode.node_id()).unwrap();
-
-            assert!(rnode.should_execute);
-
-            for (input_index, input) in node.inputs.iter().enumerate() {
-                let binding = input.binding.as_ref().unwrap();
-                assert_ne!(binding.node_id(), node.id());
-
-                let output_runtime_node = self.node_by_id(binding.node_id()).unwrap();
-
-                assert_eq!(output_runtime_node.has_outputs, true);
-
-                if output_runtime_node.executed {
-                    if is_debug() {
-                        let output_node = graph.node_by_id(binding.node_id()).unwrap();
-                        let output_arg = output_node.outputs.get(binding.output_index()).unwrap();
-                        let output_value = &output_runtime_node.outputs[binding.output_index()];
-                        assert_eq!(input.data_type, output_arg.data_type);
-                        assert_eq!(input.data_type, output_value.data_type());
-                    }
-
-                    rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()].clone();
-                }
-            }
-
-            let start = Instant::now();
-            invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
-            rnode.run_time = start.elapsed().as_secs_f64();
-            rnode.has_outputs = true;
-            rnode.execution_index = execution_index;
-            rnode.executed = true;
-            execution_index += 1;
-
-            self.nodes[index] = rnode;
-        }
-
-        invoker.finish();
     }
 }
 
