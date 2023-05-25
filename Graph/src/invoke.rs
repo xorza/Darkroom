@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
+use crate::data_type::DataType;
 
 #[derive(Clone, PartialEq)]
 pub enum Value {
@@ -72,6 +73,16 @@ impl Value {
             _ => panic!("Value is not an int"),
         }
     }
+
+    pub fn data_type(&self) -> DataType {
+        match self {
+            Value::Null => { DataType::None }
+            Value::Float(_) => { DataType::Float }
+            Value::Int(_) => { DataType::Int }
+            Value::Bool(_) => { DataType::Bool }
+            Value::String(_) => { DataType::String }
+        }
+    }
 }
 
 impl Args {
@@ -123,9 +134,29 @@ impl From<i64> for Value {
     }
 }
 
-
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
         Value::Int(value as i64)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(value: f32) -> Self {
+        Value::Float(value as f64)
+    }
+}
+impl From<f64> for Value {
+    fn from(value: f64) -> Self {
+        Value::Float(value as f64)
+    }
+}
+impl From<&str> for Value {
+    fn from(value: &str) -> Self {
+        Value::String(value.to_string())
+    }
+}
+impl From<bool> for Value {
+    fn from(value: bool) -> Self {
+        Value::Bool(value as bool)
     }
 }

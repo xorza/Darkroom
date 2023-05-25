@@ -322,14 +322,20 @@ impl Invoker for LuaInvoker<'_> {
     fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
         self.lua.globals().set("context_id", context_id).unwrap();
 
-        let function = &self.funcs.get(function_name).unwrap().lua_func;
+        let function_info = self.funcs.get(function_name).unwrap();
 
-        let mlua_inputs = inputs.iter().map(|input| mlua::Value::from(input));
-        let input_args: Variadic<mlua::Value> = Variadic::from_iter(mlua_inputs);
-        let output_args: Variadic<mlua::Value> = function.call(input_args).unwrap();
+        let mut input_args: Variadic<mlua::Value> = Variadic::new();
+        for (i, input) in function_info.info.inputs.iter().enumerate() {
+            assert_eq!(input.data_type, inputs[i].data_type());
+            input_args.push(from_lua_value(&inputs[i], self.lua));
+        }
 
-        for (i, output) in output_args.iter().enumerate() {
-            outputs[i] = invoke::Value::from(output);
+        let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args).unwrap();
+
+        for (i, output) in function_info.info.outputs.iter().enumerate() {
+            let output_arg = output_args.get(i).unwrap();
+            outputs[i] = from_invoke_value(output_arg);
+            assert_eq!(output.data_type, outputs[i].data_type());
         }
 
         self.lua.globals().set("context_id", mlua::Value::Nil).unwrap();
@@ -337,29 +343,27 @@ impl Invoker for LuaInvoker<'_> {
     fn finish(&self) {}
 }
 
-impl From<&invoke::Value> for mlua::Value<'_> {
-    fn from(value: &invoke::Value) -> Self {
-        match value {
-            invoke::Value::Null => { mlua::Value::Nil }
-            invoke::Value::Float(_v) => { mlua::Value::Nil }
-            invoke::Value::Int(v) => { mlua::Value::Integer(*v) }
-            invoke::Value::Bool(_v) => { mlua::Value::Nil }
-            invoke::Value::String(_v) => { mlua::Value::Nil }
+fn from_lua_value<'lua>(value: &'lua invoke::Value, lua: &'lua Lua) -> mlua::Value<'lua> {
+    match value {
+        invoke::Value::Null => { mlua::Value::Nil }
+        invoke::Value::Float(v) => { mlua::Value::Number(*v) }
+        invoke::Value::Int(v) => { mlua::Value::Integer(*v) }
+        invoke::Value::Bool(v) => { mlua::Value::Boolean(*v) }
+        invoke::Value::String(v) => {
+            let lua_string = lua.create_string(v).unwrap();
+            mlua::Value::String(lua_string)
         }
     }
 }
 
-impl From<&mlua::Value<'_>> for invoke::Value {
-    fn from(value: &mlua::Value) -> Self {
-        match value {
-            mlua::Value::Nil => { invoke::Value::Null }
-            mlua::Value::Boolean(_v) => { invoke::Value::Null }
-            mlua::Value::Integer(v) => { (*v as i64).into() }
-            mlua::Value::Number(v) => { (*v as i64).into() }
-            mlua::Value::String(_v) => { invoke::Value::Null }
-            mlua::Value::Table(_v) => { invoke::Value::Null }
-            _ => { panic!("not supported") }
-        }
+fn from_invoke_value(value: &mlua::Value) -> invoke::Value {
+    match value {
+        mlua::Value::Nil => { invoke::Value::Null }
+        mlua::Value::Boolean(v) => { (*v).into() }
+        mlua::Value::Integer(v) => { (*v).into() }
+        mlua::Value::Number(v) => { (*v).into() }
+        mlua::Value::String(v) => { v.to_str().unwrap().into() }
+        _ => { panic!("not supported") }
     }
 }
 
