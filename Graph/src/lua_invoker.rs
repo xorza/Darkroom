@@ -97,7 +97,6 @@ impl LuaInvoker<'_> {
 
         self.read_function_info();
     }
-
     fn read_function_info(&mut self) {
         let functions_table: Table = self.lua.globals().get("functions").unwrap();
         while let Ok(function_table) = functions_table.pop() {
@@ -123,6 +122,61 @@ impl LuaInvoker<'_> {
         graph_function.call::<_, ()>(()).unwrap();
 
         self.create_graph()
+    }
+    fn substitute_functions(&self) {
+        let functions = self.functions_info();
+
+        let mut output_index: u32 = 0;
+
+        for lua_func_info in functions {
+            let function_info_clone = lua_func_info.clone();
+            let connections = self.connections.clone();
+
+            let new_function = self.lua.create_function(
+                move |_lua: &Lua, mut inputs: Variadic<mlua::Value>| -> Result<Variadic<mlua::Value>, Error>  {
+                    let mut connection = FuncConnections {
+                        name: function_info_clone.name.clone(),
+                        inputs: Vec::new(),
+                        outputs: Vec::new(),
+                    };
+
+                    while let Some(input) = inputs.pop() {
+                        match input {
+                            mlua::Value::Integer(output_index) => {
+                                connection.inputs.push(output_index as u32);
+                            }
+                            _ => { () }
+                        }
+                    }
+
+                    let mut result: Variadic<mlua::Value> = Variadic::new();
+                    for i in 0..function_info_clone.outputs.len() {
+                        let index = output_index + i as u32;
+                        result.push(mlua::Value::Integer(index as i64));
+                        connection.outputs.push(index);
+                    }
+
+                    let mut connections = connections.borrow_mut();
+                    connections.push(connection);
+
+                    return Ok(result);
+                }
+            ).unwrap();
+
+            self.lua.globals().set(lua_func_info.name.clone(), new_function).unwrap();
+
+            output_index += lua_func_info.outputs.len() as u32;
+        }
+    }
+    fn restore_functions(&self) {
+        let functions = self.funcs.values().collect::<Vec<&LuaFuncInfo>>();
+
+        for lua_func_info in functions.iter() {
+            self.lua.globals().set(
+                lua_func_info.info.name.clone(),
+                lua_func_info.lua_func.clone(),
+            ).unwrap();
+        }
     }
     fn create_graph(&self) -> Graph {
         let mut graph = Graph::new();
@@ -194,62 +248,6 @@ impl LuaInvoker<'_> {
         assert!(graph.validate());
 
         return graph;
-    }
-
-    fn substitute_functions(&self) {
-        let functions = self.functions_info();
-
-        let mut output_index: u32 = 0;
-
-        for lua_func_info in functions {
-            let function_info_clone = lua_func_info.clone();
-            let connections = self.connections.clone();
-
-            let new_function = self.lua.create_function(
-                move |_lua: &Lua, mut inputs: Variadic<mlua::Value>| -> Result<Variadic<mlua::Value>, Error>  {
-                    let mut connection = FuncConnections {
-                        name: function_info_clone.name.clone(),
-                        inputs: Vec::new(),
-                        outputs: Vec::new(),
-                    };
-
-                    while let Some(input) = inputs.pop() {
-                        match input {
-                            mlua::Value::Integer(output_index) => {
-                                connection.inputs.push(output_index as u32);
-                            }
-                            _ => { () }
-                        }
-                    }
-
-                    let mut result: Variadic<mlua::Value> = Variadic::new();
-                    for i in 0..function_info_clone.outputs.len() {
-                        let index = output_index + i as u32;
-                        result.push(mlua::Value::Integer(index as i64));
-                        connection.outputs.push(index);
-                    }
-
-                    let mut connections = connections.borrow_mut();
-                    connections.push(connection);
-
-                    return Ok(result);
-                }
-            ).unwrap();
-
-            self.lua.globals().set(lua_func_info.name.clone(), new_function).unwrap();
-
-            output_index += lua_func_info.outputs.len() as u32;
-        }
-    }
-    fn restore_functions(&self) {
-        let functions = self.funcs.values().collect::<Vec<&LuaFuncInfo>>();
-
-        for lua_func_info in functions.iter() {
-            self.lua.globals().set(
-                lua_func_info.info.name.clone(),
-                lua_func_info.lua_func.clone(),
-            ).unwrap();
-        }
     }
 
     pub fn get_output(&self) -> String {
