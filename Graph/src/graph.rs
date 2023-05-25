@@ -75,13 +75,16 @@ impl Graph {
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
     }
+    pub fn nodes_mut(&mut self) -> Vec<&mut Node> {
+        self.nodes.iter_mut().collect()
+    }
 
-    pub fn add_node(&mut self, mut node: Node) {
+    pub fn add_node(&mut self, node: &mut Node) {
         if let Some(existing_node) = self.node_by_id_mut(node.id()) {
-            *existing_node = node;
+            *existing_node = node.clone();
         } else {
             node.self_id = self.new_id();
-            self.nodes.push(node);
+            self.nodes.push(node.clone());
         }
     }
 
@@ -99,7 +102,6 @@ impl Graph {
 
 
     pub fn node_by_id(&self, id: u32) -> Option<&Node> {
-        assert_ne!(id, 0);
         if id == 0 {
             return None;
         }
@@ -107,7 +109,6 @@ impl Graph {
     }
 
     pub fn node_by_id_mut(&mut self, id: u32) -> Option<&mut Node> {
-        assert_ne!(id, 0);
         if id == 0 {
             return None;
         }
@@ -197,5 +198,13 @@ impl Binding {
     }
     pub fn output_index(&self) -> usize {
         self.output_index
+    }
+
+    pub fn new(node_id: u32, output_index: usize) -> Binding {
+        Binding {
+            node_id,
+            output_index,
+            behavior: BindingBehavior::Always,
+        }
     }
 }
