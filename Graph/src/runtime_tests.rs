@@ -190,16 +190,16 @@ mod runtime_tests {
             RESULT = inputs[0].to_int();
         });
         invoker.add_lambda("val0", |_, _, outputs| {
-            outputs[0] = Value::from_int(unsafe { A });
+            outputs[0] = Value::from(unsafe { A });
         });
         invoker.add_lambda("val1", |_, _, outputs| {
-            outputs[0] = Value::from_int(unsafe { B });
+            outputs[0] = Value::from(unsafe { B });
         });
         invoker.add_lambda("sum", |_, inputs, outputs| {
-            outputs[0] = Value::from_int(inputs[0].to_int() + inputs[1].to_int());
+            outputs[0] = Value::from(inputs[0].to_int() + inputs[1].to_int());
         });
         invoker.add_lambda("mult", |_, inputs, outputs| {
-            outputs[0] = Value::from_int(inputs[0].to_int() * inputs[1].to_int());
+            outputs[0] = Value::from(inputs[0].to_int() * inputs[1].to_int());
         });
 
 

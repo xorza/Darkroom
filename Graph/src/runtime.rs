@@ -199,7 +199,9 @@ impl Runtime {
                     if is_debug() {
                         let output_node = graph.node_by_id(binding.node_id()).unwrap();
                         let output_arg = output_node.outputs.get(binding.output_index()).unwrap();
-                        assert!(output_arg.data_type == input.data_type);
+                        let output_value = &output_runtime_node.outputs[binding.output_index()];
+                        assert_eq!(input.data_type, output_arg.data_type);
+                        assert_eq!(input.data_type, output_value.data_type());
                     }
 
                     rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()].clone();
