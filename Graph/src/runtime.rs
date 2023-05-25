@@ -202,7 +202,7 @@ impl Runtime {
                         assert!(output_arg.data_type == input.data_type);
                     }
 
-                    rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()];
+                    rnode.inputs[input_index] = output_runtime_node.outputs[binding.output_index()].clone();
                 }
             }
 
@@ -236,8 +236,8 @@ impl RuntimeNode {
             should_execute: true,
             has_outputs: false,
             has_updated_bindings: false,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            inputs: Args::new(),
+            outputs: Args::new(),
             run_time: 0.0,
             execution_index: 0,
             executed: false,
@@ -250,8 +250,8 @@ impl RuntimeNode {
             result.inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
             result.outputs = mem::replace(&mut existing_rnode.outputs, Args::new());
         } else {
-            result.inputs.resize(node.inputs.len(), 0);
-            result.outputs.resize(node.outputs.len(), 0);
+            result.inputs.resize(node.inputs.len());
+            result.outputs.resize(node.outputs.len());
         }
 
         return result;

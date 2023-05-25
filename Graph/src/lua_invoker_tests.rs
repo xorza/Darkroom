@@ -76,11 +76,11 @@ mod lua_invoker_tests {
         let funcs = invoker.functions_info().collect::<Vec<&FunctionInfo>>();
         assert_eq!(funcs.len(), 5);
 
-        let inputs: Args = vec![3, 5];
-        let mut outputs: Args = vec![0];
+        let inputs: Args = Args::from_vec(vec![3, 5]);
+        let mut outputs: Args = Args::from_vec(vec![0]);
 
         invoker.call("mult", 0, &inputs, &mut outputs);
-        assert_eq!(outputs[0], 15);
+        assert_eq!(outputs[0].to_int(), 15);
 
         let graph = invoker.map_graph();
         assert_eq!(graph.nodes().len(), 5);

@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod runtime_tests {
     use crate::graph::*;
-    use crate::invoke::{Args, Invoker, LambdaInvoker};
+    use crate::invoke::{Args, Invoker, LambdaInvoker, Value};
     use crate::runtime::Runtime;
 
     struct EmptyInvoker {}
@@ -181,27 +181,26 @@ mod runtime_tests {
 
     #[test]
     fn simple_compute_test() {
-        static mut RESULT: i32 = 0;
-        static mut A: i32 = 2;
-        static mut B: i32 = 5;
+        static mut RESULT: i64 = 0;
+        static mut A: i64 = 2;
+        static mut B: i64 = 5;
 
         let mut invoker = LambdaInvoker::new();
         invoker.add_lambda("print", |_, inputs, _| unsafe {
-            RESULT = inputs[0];
+            RESULT = inputs[0].to_int();
         });
         invoker.add_lambda("val0", |_, _, outputs| {
-            outputs[0] = unsafe { A };
+            outputs[0] = Value::from_int(unsafe { A });
         });
         invoker.add_lambda("val1", |_, _, outputs| {
-            outputs[0] = unsafe { B };
+            outputs[0] = Value::from_int(unsafe { B });
         });
         invoker.add_lambda("sum", |_, inputs, outputs| {
-            outputs[0] = inputs[0] + inputs[1];
+            outputs[0] = Value::from_int(inputs[0].to_int() + inputs[1].to_int());
         });
         invoker.add_lambda("mult", |_, inputs, outputs| {
-            outputs[0] = inputs[0] * inputs[1];
+            outputs[0] = Value::from_int(inputs[0].to_int() * inputs[1].to_int());
         });
-
 
 
         let mut graph = Graph::from_json_file("./test_resources/test_graph.json");

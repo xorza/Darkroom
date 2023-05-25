@@ -1,6 +1,20 @@
 use std::collections::HashMap;
+use std::ops::{Index, IndexMut};
 
-pub type Args = Vec<i32>;
+#[derive(Clone, PartialEq)]
+pub enum Value {
+    Null,
+    Float(f64),
+    Int(i64),
+    Bool(bool),
+    String(String),
+
+}
+
+#[derive(Clone)]
+pub struct Args {
+    values: Vec<Value>,
+}
 
 pub trait Invoker {
     fn start(&self) {}
@@ -45,4 +59,73 @@ impl Invoker for LambdaInvoker {
         }
     }
     fn finish(&self) {}
+}
+
+impl Value {
+    pub fn from_int(value: i64) -> Value {
+        Value::Int(value)
+    }
+
+    pub fn to_int(&self) -> i64 {
+        match self {
+            Value::Int(value) => *value,
+            _ => panic!("Value is not an int"),
+        }
+    }
+}
+
+impl Args {
+    pub fn new() -> Args {
+        Args {
+            values: Vec::new(),
+        }
+    }
+
+    pub fn resize(&mut self, size: usize) {
+        self.values.resize(size, Value::Null);
+    }
+
+    pub fn iter(&self) -> std::slice::Iter<Value> {
+        self.values.iter()
+    }
+
+    pub fn from_vec<T: Into<Value>>(values: Vec<T>) -> Args {
+        let mut result = Args::new();
+        for value in values {
+            result.values.push(value.into());
+        }
+
+        result
+    }
+
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+}
+
+impl Index<usize> for Args {
+    type Output = Value;
+
+    fn index(&self, idx: usize) -> &Value {
+        &self.values[idx]
+    }
+}
+
+impl IndexMut<usize> for Args {
+    fn index_mut(&mut self, index: usize) -> &mut Value {
+        &mut self.values[index]
+    }
+}
+
+impl From<i64> for Value {
+    fn from(value: i64) -> Self {
+        Value::Int(value)
+    }
+}
+
+
+impl From<i32> for Value {
+    fn from(value: i32) -> Self {
+        Value::Int(value as i64)
+    }
 }

@@ -2,10 +2,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
-use mlua::{Error, Function, Lua, Table, Value, Variadic};
+use mlua::{Error, Function, Lua, Table, Variadic};
 use crate::data_type::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
-use crate::invoke::*;
+use crate::invoke;
+use crate::invoke::{Args, Invoker};
 
 #[derive(Clone)]
 pub struct Argument {
@@ -67,22 +68,22 @@ impl LuaInvoker<'_> {
     pub fn load(&mut self, script: &str) {
         let cache = Rc::clone(&self.cache);
         let print_function = self.lua.create_function(
-            move |_lua: &Lua, args: Variadic<Value>| {
+            move |_lua: &Lua, args: Variadic<mlua::Value>| {
                 let mut output = String::new();
 
                 for arg in args {
                     match arg {
-                        Value::Nil => { output += "Nil"; }
-                        Value::Boolean(v) => { output += &v.to_string(); }
-                        Value::LightUserData(_) => { output += "LightUserData"; }
-                        Value::Integer(v) => { output += &v.to_string(); }
-                        Value::Number(v) => { output += &v.to_string(); }
-                        Value::String(v) => { output += v.to_str().unwrap(); }
-                        Value::Table(_) => { output += "Table"; }
-                        Value::Function(_) => { output += "Function"; }
-                        Value::Thread(_) => { output += "Thread"; }
-                        Value::UserData(_) => { output += "UserData"; }
-                        Value::Error(err) => { output += &err.to_string() }
+                        mlua::Value::Nil => { output += "Nil"; }
+                        mlua::Value::Boolean(v) => { output += &v.to_string(); }
+                        mlua::Value::LightUserData(_) => { output += "LightUserData"; }
+                        mlua::Value::Integer(v) => { output += &v.to_string(); }
+                        mlua::Value::Number(v) => { output += &v.to_string(); }
+                        mlua::Value::String(v) => { output += v.to_str().unwrap(); }
+                        mlua::Value::Table(_) => { output += "Table"; }
+                        mlua::Value::Function(_) => { output += "Function"; }
+                        mlua::Value::Thread(_) => { output += "Thread"; }
+                        mlua::Value::UserData(_) => { output += "UserData"; }
+                        mlua::Value::Error(err) => { output += &err.to_string() }
                     }
                 }
 
@@ -206,7 +207,7 @@ impl LuaInvoker<'_> {
             let connections = self.connections.clone();
 
             let new_function = self.lua.create_function(
-                move |_lua: &Lua, mut inputs: Variadic<Value>| -> Result<Variadic<Value>, Error>  {
+                move |_lua: &Lua, mut inputs: Variadic<mlua::Value>| -> Result<Variadic<mlua::Value>, Error>  {
                     let mut connection = FuncConnections {
                         name: function_info_clone.name.clone(),
                         inputs: Vec::new(),
@@ -215,17 +216,17 @@ impl LuaInvoker<'_> {
 
                     while let Some(input) = inputs.pop() {
                         match input {
-                            Value::Integer(output_index) => {
+                            mlua::Value::Integer(output_index) => {
                                 connection.inputs.push(output_index as u32);
                             }
-                            _ => {}
+                            _ => { () }
                         }
                     }
 
-                    let mut result: Variadic<Value> = Variadic::new();
+                    let mut result: Variadic<mlua::Value> = Variadic::new();
                     for i in 0..function_info_clone.outputs.len() {
                         let index = output_index + i as u32;
-                        result.push(Value::Integer(index as i64));
+                        result.push(mlua::Value::Integer(index as i64));
                         connection.outputs.push(index);
                     }
 
@@ -323,17 +324,45 @@ impl Invoker for LuaInvoker<'_> {
 
         let function = &self.funcs.get(function_name).unwrap().lua_func;
 
-        let input_args: Variadic<i32> = Variadic::from_iter(inputs.iter().cloned());
-        let output_args: Variadic<i32> = function.call(input_args).unwrap();
+        let mlua_inputs = inputs.iter().map(|input| mlua::Value::from(input));
+        let input_args: Variadic<mlua::Value> = Variadic::from_iter(mlua_inputs);
+        let output_args: Variadic<mlua::Value> = function.call(input_args).unwrap();
 
         for (i, output) in output_args.iter().enumerate() {
-            outputs[i] = *output;
+            outputs[i] = invoke::Value::from(output);
         }
 
-        self.lua.globals().set("context_id", Value::Nil).unwrap();
+        self.lua.globals().set("context_id", mlua::Value::Nil).unwrap();
     }
     fn finish(&self) {}
 }
+
+impl From<&invoke::Value> for mlua::Value<'_> {
+    fn from(value: &invoke::Value) -> Self {
+        match value {
+            invoke::Value::Null => { mlua::Value::Nil }
+            invoke::Value::Float(_v) => { mlua::Value::Nil }
+            invoke::Value::Int(v) => { mlua::Value::Integer(*v) }
+            invoke::Value::Bool(_v) => { mlua::Value::Nil }
+            invoke::Value::String(_v) => { mlua::Value::Nil }
+        }
+    }
+}
+
+impl From<&mlua::Value<'_>> for invoke::Value {
+    fn from(value: &mlua::Value) -> Self {
+        match value {
+            mlua::Value::Nil => { invoke::Value::Null }
+            mlua::Value::Boolean(_v) => { invoke::Value::Null }
+            mlua::Value::Integer(v) => { (*v as i64).into() }
+            mlua::Value::Number(v) => { (*v as i64).into() }
+            mlua::Value::String(_v) => { invoke::Value::Null }
+            mlua::Value::Table(_v) => { invoke::Value::Null }
+            _ => { panic!("not supported") }
+        }
+    }
+}
+
 
 impl Cache {
     pub fn new() -> Cache {
