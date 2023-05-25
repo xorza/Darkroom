@@ -6,17 +6,18 @@ use crate::invoke::{Args, Invoker};
 
 #[derive(Clone)]
 pub struct RuntimeNode {
-    node_id: u32,
+    pub node_id: u32,
+    index: usize,
 
     pub has_missing_inputs: bool,
     pub has_updated_bindings: bool,
     pub binding_behavior: BindingBehavior,
     pub should_execute: bool,
     pub has_outputs: bool,
-
     pub inputs: Args,
     pub outputs: Args,
     pub run_time: f64,
+    pub execution_index: u32,
 }
 
 pub struct Runtime {
@@ -36,27 +37,44 @@ impl Runtime {
     pub fn node_by_id(&self, node_id: u32) -> Option<&RuntimeNode> {
         self.nodes.iter().find(|node| node.node_id() == node_id)
     }
+    fn node_by_id_mut(&mut self, node_id: u32) -> &mut RuntimeNode {
+        self.nodes.iter_mut().find(|node| node.node_id() == node_id).unwrap()
+    }
     pub fn prepare(&mut self, graph: &Graph) {
         assert!(graph.validate());
 
-        let last_run = self.nodes.clone();
+        let mut last_run = self.nodes.clone();
         self.nodes.clear();
+        self.nodes = graph.nodes().iter().enumerate().map(
+            |(i, node)| -> RuntimeNode{
+                RuntimeNode::new(i, node, &mut last_run)
+            }
+        ).collect();
 
-        self.traverse_backward(graph, last_run);
-        self.traverse_forward(graph);
+        let order = self.traverse_backward(graph);
+        self.traverse_forward(graph, order);
     }
 
-    fn traverse_backward(&mut self, graph: &Graph, mut last_run: Vec<RuntimeNode>) {
+
+    fn traverse_backward(&mut self, graph: &Graph) -> Vec<usize> {
         let active_nodes = graph.nodes().iter().filter(|node| node.is_output);
+
+        let mut order: Vec<usize> = Vec::new();
+
         for node in active_nodes {
-            self.nodes.push(
-                RuntimeNode::create_for_output_node(node, &mut last_run)
-            );
+            let mut rnode = self.node_by_id_mut(node.id());
+            rnode.has_outputs = true;
+            rnode.binding_behavior = BindingBehavior::Always;
+
+            let index = rnode.index;
+            order.push(index);
         }
 
+
         let mut i: usize = 0;
-        while i < self.nodes.len() {
-            let mut rnode = self.nodes[i].clone();
+        while i < order.len() {
+            let index = order[i];
+            let mut rnode = self.nodes[index].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
             for input in node.inputs.iter() {
@@ -67,18 +85,7 @@ impl Runtime {
 
                 let binding = input.binding.as_ref().unwrap();
                 let output_node = graph.node_by_id(binding.node_id()).unwrap();
-                let mut output_rnode: &mut RuntimeNode =
-                    match self.nodes.iter_mut().position(|_node| _node.node_id() == output_node.id()) {
-                        Some(index) =>
-                            &mut self.nodes[index],
-                        None => {
-                            self.nodes.push(
-                                RuntimeNode::new(output_node, &mut last_run)
-                            );
-
-                            self.nodes.last_mut().unwrap()
-                        }
-                    };
+                let output_rnode: &mut RuntimeNode = self.node_by_id_mut(output_node.id());
 
                 assert_eq!(output_rnode.inputs.len(), output_node.inputs.len());
                 assert_eq!(output_rnode.outputs.len(), output_node.outputs.len());
@@ -87,18 +94,25 @@ impl Runtime {
                     && binding.behavior == BindingBehavior::Always {
                     output_rnode.binding_behavior = BindingBehavior::Always;
                 }
+
+                if !order.contains(&output_rnode.index) {
+                    order.push(output_rnode.index);
+                }
             }
 
-            self.nodes[i] = rnode;
+            self.nodes[index] = rnode;
             i += 1;
         }
 
-        self.nodes.reverse();
+        order.reverse();
+
+        order
     }
-    fn traverse_forward(&mut self, graph: &Graph) {
+    fn traverse_forward(&mut self, graph: &Graph, order: Vec<usize>) {
         let mut i: usize = 0;
-        while i < self.nodes.len() {
-            let mut rnode = self.nodes[i].clone();
+        while i < order.len() {
+            let index = order[i];
+            let mut rnode = self.nodes[index].clone();
             let node = graph.node_by_id(rnode.node_id()).unwrap();
 
             for input in node.inputs.iter() {
@@ -127,7 +141,7 @@ impl Runtime {
 
             rnode.should_execute = self.should_execute(node, &rnode);
 
-            self.nodes[i] = rnode;
+            self.nodes[index] = rnode;
             i += 1;
         }
     }
@@ -155,6 +169,7 @@ impl Runtime {
 
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) {
         invoker.start();
+        let mut execution_index: u32 = 0;
 
         for i in 0..self.nodes().len() {
             let mut rnode = self.nodes[i].clone();
@@ -182,6 +197,8 @@ impl Runtime {
                 invoker.call(&node.name, rnode.node_id(), &rnode.inputs, &mut rnode.outputs);
                 rnode.run_time = start.elapsed().as_secs_f64();
                 rnode.has_outputs = true;
+                rnode.execution_index = execution_index;
+                execution_index += 1;
 
                 self.nodes[i] = rnode;
             }
@@ -196,27 +213,10 @@ impl RuntimeNode {
         self.node_id
     }
 
-    pub fn create_for_output_node(node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
+
+    pub fn new(index: usize, node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
         let mut result = RuntimeNode {
-            node_id: node.id(),
-            has_missing_inputs: false,
-            binding_behavior: BindingBehavior::Always,
-            should_execute: true,
-            has_outputs: true,
-            has_updated_bindings: false,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-            run_time: 0.0,
-        };
-        let existing_rnode = last_run.iter_mut().find(|_node| _node.node_id() == node.id());
-        if let Some(existing_rnode) = existing_rnode {
-            result.inputs = mem::replace(&mut existing_rnode.inputs, Args::new());
-        }
-        result.inputs.resize(node.inputs.len(), 0);
-        return result;
-    }
-    pub fn new(node: &Node, last_run: &mut Vec<RuntimeNode>) -> RuntimeNode {
-        let mut result = RuntimeNode {
+            index,
             node_id: node.id(),
             has_missing_inputs: false,
             binding_behavior: BindingBehavior::Once,
@@ -226,6 +226,7 @@ impl RuntimeNode {
             inputs: Vec::new(),
             outputs: Vec::new(),
             run_time: 0.0,
+            execution_index: 0,
         };
 
         let existing_rnode
