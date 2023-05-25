@@ -82,7 +82,18 @@ mod lua_invoker_tests {
         invoker.call("mult", 0, &inputs, &mut outputs);
         assert_eq!(outputs[0], 15);
 
-        invoker.map_graph();
+        let graph = invoker.map_graph();
+        assert_eq!(graph.nodes().len(), 5);
+        let sum_node = graph.nodes().iter().find(|node| node.name == "mult").unwrap();
+        assert_eq!(sum_node.inputs.len(), 2);
+        assert!(sum_node.inputs[0].binding.is_some());
+        let binding = sum_node.inputs[0].binding.as_ref().unwrap();
+        let bound_node = graph.node_by_id(binding.node_id()).unwrap();
+        assert_eq!(bound_node.name, "sum");
+
+        let binding = sum_node.inputs[1].binding.as_ref().unwrap();
+        let bound_node = graph.node_by_id(binding.node_id()).unwrap();
+        assert_eq!(bound_node.name, "val1");
 
         let output = invoker.get_output();
         assert_eq!(output, "32");

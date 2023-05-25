@@ -137,14 +137,14 @@ impl LuaInvoker<'_> {
             node_id: u32,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
-        let mut node_ids: HashMap<String, u32> = HashMap::new();
+        let mut nodes: Vec<Node> = Vec::new();
 
         for connection in connections.iter_mut() {
             let function = &self.funcs.get(&connection.name).unwrap().info;
             let mut node = Node::new();
             node.name = function.name.clone();
             graph.add_node(&mut node); //to get node.id
-            node_ids.insert(function.name.clone(), node.id());
+
 
             for (i, _input_id) in connection.inputs.iter().enumerate() {
                 let input = function.inputs.get(i).unwrap();
@@ -169,12 +169,12 @@ impl LuaInvoker<'_> {
                 });
             }
 
-            graph.add_node(&mut node);
+            graph.add_node(&mut node); //to update its state with the same id
+            nodes.push(node);
         }
 
-        for connection in connections.iter() {
-            let node_id = node_ids.get(&connection.name).unwrap();
-            let node = graph.node_by_id_mut(*node_id).unwrap();
+        for (i, connection) in connections.iter().enumerate() {
+            let node = &mut nodes[i];
 
             for (i, output_id) in connection.inputs.iter().enumerate() {
                 let input = &mut node.inputs[i];
@@ -183,11 +183,17 @@ impl LuaInvoker<'_> {
 
                 input.binding = Some(binding);
             }
+
+            graph.add_node(node); //to update its state with the same id
         }
+
+        drop(nodes);
+        drop(output_ids);
+        drop(connections);
 
         assert!(graph.validate());
 
-        graph
+        return graph;
     }
 
     fn substitute_functions(&self) {
