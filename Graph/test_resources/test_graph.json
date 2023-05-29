@@ -12,7 +12,7 @@
                     "is_required": true,
                     "data_type": "Int",
                     "binding": {
-                        "node_id": 3,
+                        "output_node_id": 3,
                         "output_index": 0,
                         "behavior": "Always"
                     }
@@ -22,7 +22,7 @@
                     "is_required": true,
                     "data_type": "Int",
                     "binding": {
-                        "node_id": 2,
+                        "output_node_id": 2,
                         "output_index": 0,
                         "behavior": "Always"
                     }
@@ -72,7 +72,7 @@
                     "is_required": true,
                     "data_type": "Int",
                     "binding": {
-                        "node_id": 1,
+                        "output_node_id": 1,
                         "output_index": 0,
                         "behavior": "Once"
                     }
@@ -82,7 +82,7 @@
                     "is_required": true,
                     "data_type": "Int",
                     "binding": {
-                        "node_id": 2,
+                        "output_node_id": 2,
                         "output_index": 0,
                         "behavior": "Once"
                     }
@@ -106,7 +106,7 @@
                     "is_required": true,
                     "data_type": "Int",
                     "binding": {
-                        "node_id": 4,
+                        "output_node_id": 4,
                         "output_index": 0,
                         "behavior": "Always"
                     }

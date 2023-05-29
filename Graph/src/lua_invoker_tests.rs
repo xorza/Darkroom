@@ -91,11 +91,11 @@ mod lua_invoker_tests {
         assert!(mult_node.inputs[0].binding.is_some());
 
         let binding = mult_node.inputs[0].binding.as_ref().unwrap();
-        let bound_node = graph.node_by_id(binding.node_id()).unwrap();
+        let bound_node = graph.node_by_id(binding.output_node_id()).unwrap();
         assert_eq!(bound_node.name, "sum");
 
         let binding = mult_node.inputs[1].binding.as_ref().unwrap();
-        let bound_node = graph.node_by_id(binding.node_id()).unwrap();
+        let bound_node = graph.node_by_id(binding.output_node_id()).unwrap();
         assert_eq!(bound_node.name, "val1");
 
         let output = invoker.get_output();

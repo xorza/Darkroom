@@ -187,7 +187,7 @@ impl LuaInvoker<'_> {
 
 
         struct OutputAddr {
-            index: usize,
+            index: u32,
             node_id: u32,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
@@ -218,7 +218,7 @@ impl LuaInvoker<'_> {
 
                 assert_ne!(node.id(), 0);
                 output_ids.insert(output_id, OutputAddr {
-                    index: i,
+                    index: i as u32,
                     node_id: node.id(),
                 });
             }

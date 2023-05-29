@@ -16,10 +16,9 @@ mod runtime_tests {
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
-        runtime.run(&graph, &invoker);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.executed), true);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.should_execute), true);
+        let nodes = runtime.run(&graph, &invoker);
+        assert_eq!(nodes.nodes.iter().all(|_node| _node.executed), true);
+        assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
     }
 
     #[test]
@@ -30,13 +29,13 @@ mod runtime_tests {
 
         runtime.run(&graph, &invoker);
 
-        runtime.run(&graph, &invoker);
-        assert_eq!(runtime.nodes().iter().all(|node| node.has_outputs), true);
-        assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(2).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(4).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+        let nodes = runtime.run(&graph, &invoker);
+        assert_eq!(nodes.nodes.iter().all(|node| node.has_arguments), true);
+        assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(2).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(4).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
     }
 
     #[test]
@@ -48,13 +47,13 @@ mod runtime_tests {
         runtime.run(&graph, &invoker);
 
         graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-        runtime.run(&graph, &invoker);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-        assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(2).unwrap().executed, true);
-        assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(4).unwrap().executed, true);
-        assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+        let nodes = runtime.run(&graph, &invoker);
+        assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
+        assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(2).unwrap().executed, true);
+        assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(4).unwrap().executed, true);
+        assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
     }
 
     #[test]
@@ -70,13 +69,13 @@ mod runtime_tests {
             .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Once;
 
-        runtime.run(&graph, &invoker);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-        assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(2).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(4).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+        let nodes = runtime.run(&graph, &invoker);
+        assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
+        assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(2).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(4).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
     }
 
     #[test]
@@ -92,13 +91,13 @@ mod runtime_tests {
             .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Always;
 
-        runtime.run(&graph, &invoker);
-        assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-        assert_eq!(runtime.node_by_id(1).unwrap().executed, true);
-        assert_eq!(runtime.node_by_id(2).unwrap().executed, false);
-        assert_eq!(runtime.node_by_id(3).unwrap().executed, true);
-        assert_eq!(runtime.node_by_id(4).unwrap().executed, true);
-        assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+        let nodes = runtime.run(&graph, &invoker);
+        assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
+        assert_eq!(nodes.node_by_id(1).unwrap().executed, true);
+        assert_eq!(nodes.node_by_id(2).unwrap().executed, false);
+        assert_eq!(nodes.node_by_id(3).unwrap().executed, true);
+        assert_eq!(nodes.node_by_id(4).unwrap().executed, true);
+        assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
     }
 
     #[test]
@@ -110,51 +109,46 @@ mod runtime_tests {
         runtime.run(&graph, &invoker);
 
         {
-            runtime.run(&graph, &invoker);
-            assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-            assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(2).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(4).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+            let nodes = runtime.run(&graph, &invoker);
+            assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(2).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(4).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
         }
         {
             graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-            runtime.run(&graph, &invoker);
-            assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-            assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(2).unwrap().executed, true);
-            assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(4).unwrap().executed, true);
-            assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+            let nodes = runtime.run(&graph, &invoker);
+            assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(2).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(4).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
         }
         {
-            // graph.input_by_id_mut(13).unwrap().binding.as_mut().unwrap().behavior = BindingBehavior::Once;
             graph.node_by_id_mut(4).unwrap()
                 .inputs.get_mut(1).unwrap()
                 .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Once;
-            runtime.run(&graph, &invoker);
-            assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-            assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(2).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(3).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(4).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+            let nodes = runtime.run(&graph, &invoker);
+            assert_eq!(nodes.node_by_id(1).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(2).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(3).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(4).unwrap().executed, false);
+            assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
         }
         {
-            // graph.input_by_id_mut(11).unwrap().binding.as_mut().unwrap().behavior = BindingBehavior::Always;
             graph.node_by_id_mut(3).unwrap()
                 .inputs.get_mut(1).unwrap()
                 .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Always;
-            runtime.run(&graph, &invoker);
-            assert_eq!(runtime.nodes().iter().all(|_node| _node.has_outputs), true);
-            assert_eq!(runtime.node_by_id(1).unwrap().executed, false);
-            assert_eq!(runtime.node_by_id(2).unwrap().executed, true);
-            assert_eq!(runtime.node_by_id(3).unwrap().executed, true);
-            assert_eq!(runtime.node_by_id(4).unwrap().executed, true);
-            assert_eq!(runtime.node_by_id(5).unwrap().executed, true);
+            let nodes = runtime.run(&graph, &invoker);
+            assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
+            assert_eq!(nodes.node_by_id(1).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(2).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(3).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(4).unwrap().executed, true);
+            assert_eq!(nodes.node_by_id(5).unwrap().executed, true);
         }
     }
 

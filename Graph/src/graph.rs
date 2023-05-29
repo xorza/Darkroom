@@ -3,7 +3,7 @@ use crate::data_type::DataType;
 use bevy_ecs::prelude::Component;
 
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum NodeBehavior {
     Active,
     Passive,
@@ -37,8 +37,8 @@ pub enum BindingBehavior {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Binding {
-    node_id: u32,
-    output_index: usize,
+    output_node_id: u32,
+    output_index: u32,
     pub behavior: BindingBehavior,
 }
 
@@ -95,7 +95,7 @@ impl Graph {
         self.nodes.retain(|node| node.self_id != id);
 
         self.nodes.iter_mut().flat_map(|node| node.inputs.iter_mut())
-            .filter(|input| input.binding.is_some() && input.binding.as_ref().unwrap().node_id == id)
+            .filter(|input| input.binding.is_some() && input.binding.as_ref().unwrap().output_node_id == id)
             .for_each(|input| {
                 input.binding = None;
             });
@@ -144,7 +144,7 @@ impl Graph {
 
             for input in node.inputs.iter() {
                 if let Some(binding) = &input.binding {
-                    if self.node_by_id(binding.node_id).is_none() {
+                    if self.node_by_id(binding.output_node_id).is_none() {
                         return false;
                     }
                 }
@@ -194,16 +194,16 @@ impl Output {
 }
 
 impl Binding {
-    pub fn node_id(&self) -> u32 {
-        self.node_id
+    pub fn output_node_id(&self) -> u32 {
+        self.output_node_id
     }
-    pub fn output_index(&self) -> usize {
+    pub fn output_index(&self) -> u32 {
         self.output_index
     }
 
-    pub fn new(node_id: u32, output_index: usize) -> Binding {
+    pub fn new(node_id: u32, output_index: u32) -> Binding {
         Binding {
-            node_id,
+            output_node_id: node_id,
             output_index,
             behavior: BindingBehavior::Always,
         }
