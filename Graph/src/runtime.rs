@@ -63,16 +63,17 @@ impl Runtime {
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> RuntimeInfo {
         assert!(graph.validate());
 
-        let r_inputs = self.traverse1(graph);
-        let mut r_nodes = self.traverse2(graph, r_inputs);
-        let order = self.traverse3(graph, &mut r_nodes);
-        self.traverse4(graph, &mut r_nodes, order, invoker);
+        let r_inputs = self.collect_all_inputs(graph);
+        let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
+        let r_nodes = self.traverse3(graph, r_nodes);
+        let exec_order = self.create_exec_order(graph, &r_nodes);
+        let r_nodes = self.execute(graph, r_nodes, exec_order, invoker);
 
         return r_nodes;
     }
 
 
-    fn traverse1(&self, graph: &Graph) -> Vec<RuntimeInput> {
+    fn collect_all_inputs(&self, graph: &Graph) -> Vec<RuntimeInput> {
         let mut inputs_bindings
             = graph.nodes().iter()
             .filter(|node| node.is_output)
@@ -96,15 +97,16 @@ impl Runtime {
             i += 1;
             let i = i - 1;
 
-            let mut node_input_binding = inputs_bindings[i].clone();
+            let node_input_binding = &inputs_bindings[i];
             if !node_ids.insert(node_input_binding.output_node_id) {
                 continue;
             }
 
+            let mut has_missing_inputs = false;
             let node = graph.node_by_id(node_input_binding.output_node_id).unwrap();
             for (input_index, input) in node.inputs.iter().enumerate() {
                 if input.binding.is_none() {
-                    node_input_binding.has_missing_inputs |= input.is_required;
+                    has_missing_inputs |= input.is_required;
                     continue;
                 }
 
@@ -122,12 +124,12 @@ impl Runtime {
                 });
             }
 
-            inputs_bindings[i] = node_input_binding;
+            inputs_bindings[i].has_missing_inputs = has_missing_inputs;
         }
 
         return inputs_bindings;
     }
-    fn traverse2(&mut self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
+    fn gather_inputs_to_runtime(&self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
         let mut r_nodes = RuntimeInfo::new();
         let mut node_ids: HashSet<u32> = HashSet::new();
 
@@ -175,13 +177,14 @@ impl Runtime {
 
         return r_nodes;
     }
-    fn traverse3(&self, graph: &Graph, r_nodes: &mut RuntimeInfo) -> Vec<u32> {
+    fn traverse3(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
         for i in 0..r_nodes.nodes.len() {
             let node_id = r_nodes.nodes[i].node_id;
-            let node = graph.node_by_id(node_id).unwrap();
             let has_arguments = r_nodes.nodes[i].has_arguments;
             let mut has_missing_inputs = r_nodes.nodes[i].has_missing_inputs;
             let mut behavior = r_nodes.nodes[i].behavior;
+
+            let node = graph.node_by_id(node_id).unwrap();
 
             if !has_arguments {
                 behavior = NodeBehavior::Active;
@@ -189,12 +192,9 @@ impl Runtime {
             if behavior != NodeBehavior::Active {
                 for input in node.inputs.iter() {
                     let binding = input.binding.as_ref().unwrap();
-                    // let output_node = graph.node_by_id(binding.output_node_id()).unwrap();
                     let output_r_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
 
-                    if output_r_node.has_missing_inputs {
-                        has_missing_inputs = true;
-                    }
+                    has_missing_inputs |= output_r_node.has_missing_inputs;
 
                     if binding.behavior == BindingBehavior::Always
                         && output_r_node.behavior == NodeBehavior::Active {
@@ -207,6 +207,10 @@ impl Runtime {
             r_nodes.nodes[i].has_missing_inputs = has_missing_inputs;
         }
 
+        return r_nodes;
+    }
+
+    fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<u32> {
         let mut exec_order = r_nodes.nodes.iter()
             .rev()
             .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
@@ -240,7 +244,7 @@ impl Runtime {
         return exec_order;
     }
 
-    fn traverse4(&mut self, graph: &Graph, r_nodes: &mut RuntimeInfo, order: Vec<u32>, invoker: &dyn Invoker) {
+    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<u32>, invoker: &dyn Invoker) -> RuntimeInfo {
         invoker.start();
 
         let mut execution_index: u32 = 0;
@@ -259,6 +263,8 @@ impl Runtime {
                 assert_ne!(binding.output_node_id(), node.id());
 
                 let output_r_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
+
+                assert!(output_r_node.has_arguments);
 
                 if output_r_node.executed {
                     let output_args = self.arg_cache.get(&binding.output_node_id()).unwrap();
@@ -290,6 +296,8 @@ impl Runtime {
         }
 
         invoker.finish();
+
+        return r_nodes;
     }
 }
 
