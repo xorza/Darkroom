@@ -191,7 +191,6 @@ mod runtime_tests {
 
         unsafe { B = 7; }
         graph.node_by_id_mut(2).unwrap().behavior = NodeBehavior::Active;
-
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 49);
 
