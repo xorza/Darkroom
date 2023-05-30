@@ -59,19 +59,17 @@ impl Runtime {
         }
     }
 
-
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> RuntimeInfo {
         assert!(graph.validate());
 
         let r_inputs = self.collect_all_inputs(graph);
         let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
-        let r_nodes = self.traverse3(graph, r_nodes);
+        let r_nodes = self.mark_active_and_missing_inputs(graph, r_nodes);
         let exec_order = self.create_exec_order(graph, &r_nodes);
         let r_nodes = self.execute(graph, r_nodes, exec_order, invoker);
 
         return r_nodes;
     }
-
 
     fn collect_all_inputs(&self, graph: &Graph) -> Vec<RuntimeInput> {
         let mut inputs_bindings
@@ -177,7 +175,7 @@ impl Runtime {
 
         return r_nodes;
     }
-    fn traverse3(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
+    fn mark_active_and_missing_inputs(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
         for i in 0..r_nodes.nodes.len() {
             let node_id = r_nodes.nodes[i].node_id;
             let has_arguments = r_nodes.nodes[i].has_arguments;
@@ -209,7 +207,6 @@ impl Runtime {
 
         return r_nodes;
     }
-
     fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<u32> {
         let mut exec_order = r_nodes.nodes.iter()
             .rev()
@@ -243,7 +240,6 @@ impl Runtime {
         exec_order.reverse();
         return exec_order;
     }
-
     fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<u32>, invoker: &dyn Invoker) -> RuntimeInfo {
         invoker.start();
 
