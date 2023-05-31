@@ -17,6 +17,6 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Build
-      run: cd ./Graph && cargo build --verbose
+      run: cd ./Graph && cargo build --verbose --no-default-features --features ""
     - name: Run tests
       run: cd ./Graph && cargo test --verbose
