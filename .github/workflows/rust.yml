@@ -19,4 +19,4 @@ jobs:
     - name: Build
       run: cd ./Graph && cargo build --verbose --no-default-features --features ""
     - name: Run tests
-      run: cd ./Graph && cargo test --verbose
+      run: cd ./Graph && cargo test --verbose --no-default-features --features ""
