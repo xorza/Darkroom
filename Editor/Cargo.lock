@@ -1279,6 +1279,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "lua-src"
+version = "546.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cb00c1380f1b4b4928dd211c07301ffa34872a239e590bd3219d9e5b213face"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "luajit-src"
+version = "210.4.5+resty2cf5186"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b7992a40e602786272d84c6f2beca44a588ededcfd57b48ec6f82008a7cb97"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "lyon"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1431,6 +1449,8 @@ checksum = "07366ed2cd22a3b000aed076e2b68896fb46f06f1f5786c5962da73c0af01577"
 dependencies = [
  "bstr",
  "cc",
+ "lua-src",
+ "luajit-src",
  "num-traits 0.2.15",
  "once_cell",
  "pkg-config",

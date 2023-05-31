@@ -178,6 +178,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b00cc1c228a6782d0f076e7b232802e0c5689d41bb5df366f2a6b6621cfdfe1"
 
 [[package]]
+name = "lua-src"
+version = "546.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8cb00c1380f1b4b4928dd211c07301ffa34872a239e590bd3219d9e5b213face"
+dependencies = [
+ "cc",
+]
+
+[[package]]
+name = "luajit-src"
+version = "210.4.5+resty2cf5186"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b7992a40e602786272d84c6f2beca44a588ededcfd57b48ec6f82008a7cb97"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "memchr"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -200,6 +218,8 @@ checksum = "07366ed2cd22a3b000aed076e2b68896fb46f06f1f5786c5962da73c0af01577"
 dependencies = [
  "bstr",
  "cc",
+ "lua-src",
+ "luajit-src",
  "num-traits 0.2.15",
  "once_cell",
  "pkg-config",
