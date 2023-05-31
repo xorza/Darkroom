@@ -1,0 +1,79 @@
+nodes:
+- self_id: 4
+  uid: b3e13e40-6e38-40d2-9979-8cb6899dcd46
+  name: mult
+  behavior: Passive
+  is_output: false
+  inputs:
+  - name: A
+    data_type: Int
+    is_required: true
+    binding:
+      output_node_id: 3
+      output_index: 0
+      behavior: Always
+  - name: B
+    data_type: Int
+    is_required: true
+    binding:
+      output_node_id: 2
+      output_index: 0
+      behavior: Always
+  outputs:
+  - name: Prod
+    data_type: Int
+- self_id: 1
+  uid: 3b78bb22-7246-40fb-b309-2faa9ef6c8a3
+  name: val0
+  behavior: Active
+  is_output: false
+  inputs: []
+  outputs:
+  - name: Int32 Value
+    data_type: Int
+- self_id: 2
+  uid: fe3e7344-d4b6-487a-a042-5fa5fd63deaf
+  name: val1
+  behavior: Passive
+  is_output: false
+  inputs: []
+  outputs:
+  - name: Int32 Value
+    data_type: Int
+- self_id: 3
+  uid: ceb69c13-e7ff-4255-a3ad-ff0cba058708
+  name: sum
+  behavior: Passive
+  is_output: false
+  inputs:
+  - name: A
+    data_type: Int
+    is_required: true
+    binding:
+      output_node_id: 1
+      output_index: 0
+      behavior: Once
+  - name: B
+    data_type: Int
+    is_required: true
+    binding:
+      output_node_id: 2
+      output_index: 0
+      behavior: Once
+  outputs:
+  - name: Sum
+    data_type: Int
+- self_id: 5
+  uid: 511d57a5-25fc-44fa-b8ba-d46b37748d96
+  name: print
+  behavior: Passive
+  is_output: true
+  inputs:
+  - name: message
+    data_type: Int
+    is_required: true
+    binding:
+      output_node_id: 4
+      output_index: 0
+      behavior: Always
+  outputs: []

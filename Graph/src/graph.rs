@@ -1,6 +1,6 @@
 use serde::{Serialize, Deserialize};
+use uuid::Uuid;
 use crate::data_type::DataType;
-use bevy_ecs::prelude::Component;
 
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -10,9 +10,11 @@ pub enum NodeBehavior {
 }
 
 
-#[derive(Clone, Component, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: u32,
+    #[serde(default = "Uuid::new_v4")]
+    uid: Uuid,
 
     pub name: String,
     pub behavior: NodeBehavior,
@@ -120,10 +122,20 @@ impl Graph {
     pub fn to_json(&self) -> String {
         serde_json::to_string(&self).unwrap()
     }
+    pub fn to_yaml(&self) -> String { serde_yaml::to_string(&self).unwrap() }
 
     pub fn from_json_file(path: &str) -> Graph {
         let json = std::fs::read_to_string(path).unwrap();
         let graph: Graph = serde_json::from_str(&json).unwrap();
+
+        if !graph.validate() {
+            panic!("Invalid graph");
+        }
+
+        return graph;
+    }
+    pub fn from_yaml(yaml:&str) -> Graph {
+        let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
 
         if !graph.validate() {
             panic!("Invalid graph");
@@ -165,6 +177,7 @@ impl Node {
             is_output: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
+            uid: Uuid::nil(),
         }
     }
 

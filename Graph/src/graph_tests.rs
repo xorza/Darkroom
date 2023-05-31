@@ -6,6 +6,8 @@ mod graph_tests {
     #[test]
     fn from_json() {
         let graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let yaml = graph.to_yaml();
+        let graph = Graph::from_yaml(&yaml);
         black_box(graph);
     }
 

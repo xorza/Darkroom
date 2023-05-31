@@ -1,15 +1,14 @@
 use serde::{Serialize, Deserialize};
-use bevy_ecs::prelude::Component;
 use crate::data_type::*;
 
 
-#[derive(Clone, Serialize, Deserialize, Component)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Arg {
     pub name: String,
     pub data_type: DataType,
 }
 
-#[derive(Clone, Serialize, Deserialize, Component)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Function {
     self_id: u32,
     pub name: String,
