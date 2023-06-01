@@ -1,6 +1,5 @@
-use serde::{Serialize, Deserialize};
 use crate::data_type::*;
-
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Arg {
@@ -15,7 +14,6 @@ pub struct Function {
     pub inputs: Vec<Arg>,
     pub outputs: Vec<Arg>,
 }
-
 
 #[derive(Serialize, Deserialize)]
 pub struct FunctionGraph {
@@ -34,22 +32,26 @@ impl FunctionGraph {
     }
 
     pub fn add_function(&mut self, function: Function) {
-        if let Some(func) = self.functions.iter_mut().find(|_func| _func.self_id == function.self_id) {
+        if let Some(func) = self
+            .functions
+            .iter_mut()
+            .find(|_func| _func.self_id == function.self_id)
+        {
             *func = function;
         } else {
             self.functions.push(function);
         }
     }
 
-
     pub fn function_by_node_id(&self, node_id: u32) -> Option<&Function> {
         self.functions.iter().find(|func| func.self_id == node_id)
     }
     pub fn function_by_node_id_mut(&mut self, node_id: u32) -> Option<&mut Function> {
-        self.functions.iter_mut().find(|func| func.self_id == node_id)
+        self.functions
+            .iter_mut()
+            .find(|func| func.self_id == node_id)
     }
 }
-
 
 impl Arg {
     pub fn new() -> Arg {
@@ -58,7 +60,6 @@ impl Arg {
             data_type: DataType::None,
         }
     }
-
 }
 
 impl Function {

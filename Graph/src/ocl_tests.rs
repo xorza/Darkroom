@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod graph_tests {
-    use ocl::{Buffer, Platform, Device, Context, Queue};
+    use ocl::{Buffer, Context, Device, Platform, Queue};
 
     #[test]
     fn it_works() {
@@ -27,9 +27,23 @@ mod graph_tests {
             .build(&context)
             .unwrap();
 
-        let buffer_vec1 = Buffer::<f32>::builder().queue(queue.clone()).len(vec1.len()).copy_host_slice(&vec1).build().unwrap();
-        let buffer_vec2 = Buffer::<f32>::builder().queue(queue.clone()).len(vec2.len()).copy_host_slice(&vec2).build().unwrap();
-        let buffer_vec3 = Buffer::<f32>::builder().queue(queue.clone()).len(vec3.len()).build().unwrap();
+        let buffer_vec1 = Buffer::<f32>::builder()
+            .queue(queue.clone())
+            .len(vec1.len())
+            .copy_host_slice(&vec1)
+            .build()
+            .unwrap();
+        let buffer_vec2 = Buffer::<f32>::builder()
+            .queue(queue.clone())
+            .len(vec2.len())
+            .copy_host_slice(&vec2)
+            .build()
+            .unwrap();
+        let buffer_vec3 = Buffer::<f32>::builder()
+            .queue(queue.clone())
+            .len(vec3.len())
+            .build()
+            .unwrap();
 
         let kernel = ocl::Kernel::builder()
             .name("add")

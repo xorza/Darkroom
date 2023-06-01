@@ -1,7 +1,7 @@
+use crate::data_type::DataType;
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 use uuid::Uuid;
-use crate::data_type::DataType;
 
 #[derive(Clone, PartialEq)]
 pub enum Value {
@@ -10,7 +10,6 @@ pub enum Value {
     Int(i64),
     Bool(bool),
     String(String),
-
 }
 
 #[derive(Clone, Default)]
@@ -43,7 +42,11 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
+    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(
+        &mut self,
+        function_name: &str,
+        lambda: F,
+    ) {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
@@ -66,45 +69,51 @@ impl Invoker for LambdaInvoker {
 impl Value {
     pub fn data_type(&self) -> DataType {
         match self {
-            Value::Null => { DataType::None }
-            Value::Float(_) => { DataType::Float }
-            Value::Int(_) => { DataType::Int }
-            Value::Bool(_) => { DataType::Bool }
-            Value::String(_) => { DataType::String }
+            Value::Null => DataType::None,
+            Value::Float(_) => DataType::Float,
+            Value::Int(_) => DataType::Int,
+            Value::Bool(_) => DataType::Bool,
+            Value::String(_) => DataType::String,
         }
     }
 
     pub fn as_float(&self) -> f64 {
         match self {
-            Value::Float(value) => { *value }
-            _ => { panic!("Value is not a float") }
+            Value::Float(value) => *value,
+            _ => {
+                panic!("Value is not a float")
+            }
         }
     }
     pub fn as_int(&self) -> i64 {
         match self {
-            Value::Int(value) => { *value }
-            _ => { panic!("Value is not an int") }
+            Value::Int(value) => *value,
+            _ => {
+                panic!("Value is not an int")
+            }
         }
     }
     pub fn as_bool(&self) -> bool {
         match self {
-            Value::Bool(value) => { *value }
-            _ => { panic!("Value is not a bool") }
+            Value::Bool(value) => *value,
+            _ => {
+                panic!("Value is not a bool")
+            }
         }
     }
     pub fn as_string(&self) -> &str {
         match self {
-            Value::String(value) => { value }
-            _ => { panic!("Value is not a string") }
+            Value::String(value) => value,
+            _ => {
+                panic!("Value is not a string")
+            }
         }
     }
 }
 
 impl Args {
     pub fn new() -> Args {
-        Args {
-            values: Vec::new(),
-        }
+        Args { values: Vec::new() }
     }
     pub fn with_size(size: usize) -> Args {
         let mut result = Args {
@@ -149,7 +158,6 @@ impl IndexMut<usize> for Args {
         &mut self.values[index]
     }
 }
-
 
 impl From<i64> for Value {
     fn from(value: i64) -> Self {
@@ -196,11 +204,11 @@ impl From<bool> for Value {
 impl From<DataType> for Value {
     fn from(data_type: DataType) -> Self {
         match data_type {
-            DataType::None => { Value::Null }
-            DataType::Float => { Value::Float(0.0) }
-            DataType::Int => { Value::Int(0) }
-            DataType::Bool => { Value::Bool(false) }
-            DataType::String => { Value::Null }
+            DataType::None => Value::Null,
+            DataType::Float => Value::Float(0.0),
+            DataType::Int => Value::Int(0),
+            DataType::Bool => Value::Bool(false),
+            DataType::String => Value::Null,
         }
     }
 }

@@ -1,10 +1,9 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Instant;
-use uuid::Uuid;
 use crate::common::is_debug;
 use crate::graph::*;
 use crate::invoke::{Args, Invoker, Value};
-
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
+use uuid::Uuid;
 
 pub struct Runtime {
     arg_cache: HashMap<Uuid, ArgSet>,
@@ -74,19 +73,18 @@ impl Runtime {
     }
 
     fn collect_all_inputs(&self, graph: &Graph) -> Vec<RuntimeInput> {
-        let mut inputs_bindings
-            = graph.nodes().iter()
+        let mut inputs_bindings = graph
+            .nodes()
+            .iter()
             .filter(|node| node.is_output)
-            .map(|node| {
-                RuntimeInput {
-                    output_node_id: node.id(),
-                    output_index: 0,
-                    input_node_id: Uuid::nil(),
-                    input_index: 0,
-                    has_missing_inputs: false,
-                    connection_behavior: BindingBehavior::Always,
-                    is_output: true,
-                }
+            .map(|node| RuntimeInput {
+                output_node_id: node.id(),
+                output_index: 0,
+                input_node_id: Uuid::nil(),
+                input_index: 0,
+                has_missing_inputs: false,
+                connection_behavior: BindingBehavior::Always,
+                is_output: true,
             })
             .collect::<Vec<RuntimeInput>>();
 
@@ -141,11 +139,13 @@ impl Runtime {
 
             let node = graph.node_by_id(output_node_id).unwrap();
 
-            let output_node_r_inputs = r_inputs.iter()
+            let output_node_r_inputs = r_inputs
+                .iter()
                 .filter(|node| node.output_node_id == output_node_id)
                 .collect::<Vec<&RuntimeInput>>();
 
-            let has_missing_inputs = output_node_r_inputs.iter()
+            let has_missing_inputs = output_node_r_inputs
+                .iter()
                 .any(|node| node.has_missing_inputs);
 
             let mut r_outputs: Vec<RuntimeOutput> = Vec::new();
@@ -160,7 +160,8 @@ impl Runtime {
             }
 
             let has_outputs = self.arg_cache.contains_key(&output_node_id);
-            let is_output = node.is_output || output_node_r_inputs.iter().any(|r_input| r_input.is_output);
+            let is_output =
+                node.is_output || output_node_r_inputs.iter().any(|r_input| r_input.is_output);
 
             r_nodes.nodes.push(RuntimeNode {
                 node_id: output_node_id,
@@ -172,13 +173,17 @@ impl Runtime {
                 run_time: 0.0,
                 is_output,
                 behavior: node.behavior,
-                name : node.name.clone(),
+                name: node.name.clone(),
             });
         }
 
         return r_nodes;
     }
-    fn mark_active_and_missing_inputs(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
+    fn mark_active_and_missing_inputs(
+        &self,
+        graph: &Graph,
+        mut r_nodes: RuntimeInfo,
+    ) -> RuntimeInfo {
         for i in 0..r_nodes.nodes.len() {
             let node_id = r_nodes.nodes[i].node_id;
             let has_arguments = r_nodes.nodes[i].has_arguments;
@@ -198,7 +203,8 @@ impl Runtime {
                     has_missing_inputs |= output_r_node.has_missing_inputs;
 
                     if binding.behavior == BindingBehavior::Always
-                        && output_r_node.behavior == NodeBehavior::Active {
+                        && output_r_node.behavior == NodeBehavior::Active
+                    {
                         behavior = NodeBehavior::Active;
                     }
                 }
@@ -211,7 +217,9 @@ impl Runtime {
         return r_nodes;
     }
     fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<Uuid> {
-        let mut exec_order = r_nodes.nodes.iter()
+        let mut exec_order = r_nodes
+            .nodes
+            .iter()
             .rev()
             .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
             .map(|r_node| r_node.node_id)
@@ -243,7 +251,13 @@ impl Runtime {
         exec_order.reverse();
         return exec_order;
     }
-    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> RuntimeInfo {
+    fn execute(
+        &mut self,
+        graph: &Graph,
+        mut r_nodes: RuntimeInfo,
+        order: Vec<Uuid>,
+        invoker: &dyn Invoker,
+    ) -> RuntimeInfo {
         invoker.start();
 
         let mut execution_index: u32 = 0;
@@ -254,7 +268,7 @@ impl Runtime {
 
             let mut input_args = match self.arg_cache.remove(&node_id) {
                 Some(value) => value,
-                None => { ArgSet::from_node(node) }
+                None => ArgSet::from_node(node),
             };
 
             for (input_index, input) in node.inputs.iter().enumerate() {
@@ -277,14 +291,24 @@ impl Runtime {
                         assert_eq!(input.data_type, output.data_type);
                     }
 
-                    input_args.inputs[input_index] = output_args.outputs[binding.output_index() as usize].clone();
+                    input_args.inputs[input_index] =
+                        output_args.outputs[binding.output_index() as usize].clone();
                 }
             }
 
             let start = Instant::now();
-            invoker.call(&node.name, node_id, &input_args.inputs, &mut input_args.outputs);
+            invoker.call(
+                &node.name,
+                node_id,
+                &input_args.inputs,
+                &mut input_args.outputs,
+            );
 
-            let rnode = r_nodes.nodes.iter_mut().find(|rnode| rnode.node_id == node_id).unwrap();
+            let rnode = r_nodes
+                .nodes
+                .iter_mut()
+                .find(|rnode| rnode.node_id == node_id)
+                .unwrap();
             rnode.run_time = start.elapsed().as_secs_f64();
             rnode.has_arguments = true;
             rnode.execution_index = execution_index;
@@ -333,9 +357,7 @@ impl RuntimeOutput {
 
 impl RuntimeInfo {
     fn new() -> RuntimeInfo {
-        RuntimeInfo {
-            nodes: Vec::new(),
-        }
+        RuntimeInfo { nodes: Vec::new() }
     }
 
     pub fn node_by_name(&self, name: &str) -> Option<&RuntimeNode> {

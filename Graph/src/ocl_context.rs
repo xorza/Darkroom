@@ -1,6 +1,6 @@
+use crate::invoke::{Args, Invoker};
 use std::cell::RefCell;
 use uuid::Uuid;
-use crate::invoke::{Args, Invoker};
 
 pub struct OclContext {
     context: ocl::Context,
