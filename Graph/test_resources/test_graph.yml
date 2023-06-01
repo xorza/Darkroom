@@ -21,6 +21,7 @@ nodes:
     outputs:
       - name: Prod
         data_type: Int
+    subgraph: null
   - self_id: 5f110618-8faa-4629-8f5d-473c236de7d1
     name: val 1
     behavior: Active
@@ -29,6 +30,7 @@ nodes:
     outputs:
       - name: Int32 Value
         data_type: Int
+    subgraph: null
   - self_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
     name: val 2
     behavior: Passive
@@ -37,6 +39,7 @@ nodes:
     outputs:
       - name: Int32 Value
         data_type: Int
+    subgraph: null
   - self_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
     name: sum
     behavior: Passive
@@ -59,6 +62,7 @@ nodes:
     outputs:
       - name: Sum
         data_type: Int
+    subgraph: null
   - self_id: b88ab7e2-17b7-46cb-bc8e-b428bb45141e
     name: print
     behavior: Passive
@@ -72,3 +76,4 @@ nodes:
           output_index: 0
           behavior: Always
     outputs: [ ]
+    subgraph: null
