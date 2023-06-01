@@ -124,7 +124,7 @@ impl Graph {
     }
 
     pub fn node_by_id(&self, id: Uuid) -> Option<&Node> {
-      assert_ne!(id, Uuid::nil());
+        assert_ne!(id, Uuid::nil());
 
         self.nodes
             .iter()
@@ -169,7 +169,7 @@ impl Graph {
     pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
             if let Some(subgraph_id) = node.subgraph_id {
-                 self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
+                self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
             }
 
             if node.self_id == Uuid::nil() {
@@ -181,6 +181,17 @@ impl Graph {
                     if self.node_by_id(binding.output_node_id).is_none() {
                         return Err(anyhow::Error::msg("Node has invalid binding"));
                     }
+                }
+            }
+        }
+
+        for subgraph in self.subgraphs.iter() {
+            for input in subgraph.inputs.iter() {
+                let node = self
+                    .node_by_id(input.node_id)
+                    .ok_or(anyhow::Error::msg("Subgraph has invalid input"))?;
+                if node.subgraph_id != Some(subgraph.self_id) {
+                    return Err(anyhow::Error::msg("Subgraph has invalid input"));
                 }
             }
         }
