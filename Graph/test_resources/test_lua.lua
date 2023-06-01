@@ -19,7 +19,7 @@ functions = {
         name = "val0",
         inputs = { },
         outputs = {
-            { "result", "i64" }
+            { "result", "int" }
         },
         func = val0
     },
@@ -27,35 +27,35 @@ functions = {
         name = "val1",
         inputs = { },
         outputs = {
-            { "result", "i64" }
+            { "result", "int" }
         },
         func = val1
     },
     {
         name = "sum",
         inputs = {
-            { "a", "i64" },
-            { "b", "i64" }
+            { "a", "int" },
+            { "b", "int" }
         },
         outputs = {
-            { "result", "i64" }
+            { "result", "int" }
         },
         func = sum
     },
     {
         name = "mult",
         inputs = {
-            { "a", "i64" },
-            { "b", "i64" }
+            { "a", "int" },
+            { "b", "int" }
         },
         outputs = {
-            { "result", "i64" }
+            { "result", "int" }
         },
         func = mult
     },
     {
         name = "print_func",
-        inputs = { { "a", "i64" } },
+        inputs = { { "a", "int" } },
         outputs = { },
         func = print_func
     }
