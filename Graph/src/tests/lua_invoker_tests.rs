@@ -1,5 +1,3 @@
-use std::fs;
-
 use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
@@ -41,12 +39,6 @@ fn lua_works() {
 }
 
 #[test]
-fn lua_from_file() {
-    let _script = fs::read_to_string("./test_resources/test_lua.lua").unwrap();
-    drop(_script);
-}
-
-#[test]
 fn local_data_test() {
     struct TestStruct {
         a: i32,
@@ -70,9 +62,9 @@ fn local_data_test() {
 }
 
 #[test]
-fn load_functions_from_lua_file() {
+fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut invoker = LuaInvoker::new();
-    invoker.load_file("./test_resources/test_lua.lua");
+    invoker.load_file("./test_resources/test_lua.lua")?;
 
     let funcs = invoker.functions_info().collect::<Vec<&FunctionInfo>>();
     assert_eq!(funcs.len(), 5);
@@ -80,7 +72,7 @@ fn load_functions_from_lua_file() {
     let inputs: Args = Args::from_vec(vec![3, 5]);
     let mut outputs: Args = Args::from_vec(vec![0]);
 
-    invoker.call("mult", Uuid::nil(), &inputs, &mut outputs);
+    invoker.call("mult", Uuid::nil(), &inputs, &mut outputs)?;
     let result: i64 = outputs[0].as_int();
     assert_eq!(result, 15);
 
@@ -101,4 +93,6 @@ fn load_functions_from_lua_file() {
 
     let output = invoker.get_output();
     assert_eq!(output, "32");
+
+    Ok(())
 }

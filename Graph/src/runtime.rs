@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
-use anyhow::anyhow;
 
+use anyhow::anyhow;
 use uuid::Uuid;
 
 use crate::common::is_debug;
@@ -71,7 +71,7 @@ impl Runtime {
         let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
         let r_nodes = self.mark_active_and_missing_inputs(graph, r_nodes);
         let exec_order = self.create_exec_order(graph, &r_nodes);
-        let runtime_info = self.execute(graph, r_nodes, exec_order, invoker);
+        let runtime_info = self.execute(graph, r_nodes, exec_order, invoker)?;
 
         Ok(runtime_info)
     }
@@ -246,7 +246,7 @@ impl Runtime {
         exec_order.reverse();
         exec_order
     }
-    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> RuntimeInfo {
+    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> anyhow::Result<RuntimeInfo> {
         invoker.start();
 
         let mut execution_index: u32 = 0;
@@ -285,7 +285,7 @@ impl Runtime {
             }
 
             let start = Instant::now();
-            invoker.call(&node.name, node_id, &input_args.inputs, &mut input_args.outputs);
+            invoker.call(&node.name, node_id, &input_args.inputs, &mut input_args.outputs)?;
 
             let rnode = r_nodes.nodes.iter_mut().find(|rnode| rnode.node_id == node_id).unwrap();
             rnode.run_time = start.elapsed().as_secs_f64();
@@ -299,7 +299,7 @@ impl Runtime {
 
         invoker.finish();
 
-        r_nodes
+        Ok(r_nodes)
     }
 }
 

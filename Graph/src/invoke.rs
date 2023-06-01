@@ -22,7 +22,9 @@ pub struct Args {
 
 pub trait Invoker {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args);
+    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
+        Ok(())
+    }
     fn finish(&self) {}
 }
 
@@ -55,12 +57,14 @@ impl LambdaInvoker {
 
 impl Invoker for LambdaInvoker {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) {
-        if let Some(func) = self.lambdas.get(function_name) {
-            (func.lambda)(context_id, inputs, outputs);
-        } else {
-            panic!("Function not found: {}", function_name);
-        }
+    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
+        let func = self.lambdas
+            .get(function_name)
+            .ok_or(anyhow::anyhow!("Function not found: {}", function_name))?;
+
+        (func.lambda)(context_id, inputs, outputs);
+
+        Ok(())
     }
     fn finish(&self) {}
 }
