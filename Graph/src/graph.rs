@@ -75,12 +75,11 @@ impl Graph {
         if let Some(existing_node) = self.node_by_id_mut(node.id()) {
             *existing_node = node.clone();
         } else {
-            node.self_id = Uuid::new_v4();
             self.nodes.push(node.clone());
         }
     }
 
-    pub fn remove_node_by_name(&mut self, name:&str) -> Result<(),()> {
+    pub fn remove_node_by_name(&mut self, name: &str) -> Result<(), ()> {
         let node = self.nodes.iter().find(|node| node.name == name).ok_or(())?;
         self.remove_node_by_id(node.self_id);
 
@@ -107,28 +106,24 @@ impl Graph {
     }
 
     pub fn node_by_id(&self, id: Uuid) -> Option<&Node> {
-        if id ==  Uuid::nil() {
+        if id == Uuid::nil() {
             return None;
         }
         self.nodes.iter().find(|node| node.self_id == id)
     }
 
     pub fn node_by_id_mut(&mut self, id: Uuid) -> Option<&mut Node> {
-        if id ==  Uuid::nil() {
+        if id == Uuid::nil() {
             return None;
         }
         self.nodes.iter_mut().find(|node| node.self_id == id)
     }
 
 
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(&self).unwrap()
-    }
     pub fn to_yaml(&self) -> String { serde_yaml::to_string(&self).unwrap() }
-
-    pub fn from_json_file(path: &str) -> Graph {
-        let json = std::fs::read_to_string(path).unwrap();
-        let graph: Graph = serde_json::from_str(&json).unwrap();
+    pub fn from_yaml_file(path: &str) -> Graph {
+        let yaml = std::fs::read_to_string(path).unwrap();
+        let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
 
         if !graph.validate() {
             panic!("Invalid graph");
@@ -136,7 +131,7 @@ impl Graph {
 
         return graph;
     }
-    pub fn from_yaml(yaml:&str) -> Graph {
+    pub fn from_yaml(yaml: &str) -> Graph {
         let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
 
         if !graph.validate() {
@@ -173,7 +168,7 @@ impl Graph {
 impl Node {
     pub fn new() -> Node {
         Node {
-            self_id:Uuid::nil(),
+            self_id: Uuid::new_v4(),
             name: String::new(),
             behavior: NodeBehavior::Active,
             is_output: false,

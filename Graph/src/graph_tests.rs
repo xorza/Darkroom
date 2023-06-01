@@ -5,16 +5,15 @@ mod graph_tests {
 
     #[test]
     fn from_json() {
-        let graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let yaml = graph.to_yaml();
-        let _json = graph.to_json();
         let graph = Graph::from_yaml(&yaml);
         black_box(graph);
     }
 
     #[test]
     fn node_remove_test() {
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
 
         let node_id = graph.node_by_name("sum").unwrap().id();
         graph.remove_node_by_id(node_id);

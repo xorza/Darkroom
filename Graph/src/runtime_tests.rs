@@ -13,7 +13,7 @@ mod runtime_tests {
 
     #[test]
     fn simple_run() {
-        let graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -24,7 +24,7 @@ mod runtime_tests {
 
     #[test]
     fn double_run() {
-        let graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -41,7 +41,7 @@ mod runtime_tests {
 
     #[test]
     fn node_behavior_active_test() {
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -59,7 +59,7 @@ mod runtime_tests {
 
     #[test]
     fn edge_behavior_once_test() {
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -81,7 +81,7 @@ mod runtime_tests {
 
     #[test]
     fn edge_behavior_always_test() {
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -103,7 +103,7 @@ mod runtime_tests {
 
     #[test]
     fn multiple_runs_with_various_modifications() {
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut runtime = Runtime::new();
         let invoker = EmptyInvoker {};
 
@@ -181,7 +181,7 @@ mod runtime_tests {
             outputs[0] = Value::from(a * b);
         });
 
-        let mut graph = Graph::from_json_file("./test_resources/test_graph.json");
+        let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
         let mut compute = Runtime::new();
 
         compute.run(&graph, &invoker);
