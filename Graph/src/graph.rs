@@ -120,16 +120,19 @@ impl Graph {
     }
 
 
-    pub fn to_yaml(&self) -> String { serde_yaml::to_string(&self).unwrap() }
-    pub fn from_yaml_file(path: &str) -> Graph {
-        let yaml = std::fs::read_to_string(path).unwrap();
-        let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
+    pub fn to_yaml(&self) -> anyhow::Result<String> {
+        let yaml = serde_yaml::to_string(&self)?;
+        Ok(yaml)
+    }
+    pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
+        let yaml = std::fs::read_to_string(path)?;
+        let graph: Graph = serde_yaml::from_str(&yaml)?;
 
         if !graph.validate() {
             panic!("Invalid graph");
         }
 
-        graph
+        Ok(graph)
     }
     pub fn from_yaml(yaml: &str) -> Graph {
         let graph: Graph = serde_yaml::from_str(yaml).unwrap();

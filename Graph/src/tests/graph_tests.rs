@@ -3,16 +3,18 @@ use std::hint::black_box;
 use crate::graph::*;
 
 #[test]
-fn from_json() {
-    let graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
-    let yaml: String = graph.to_yaml();
+fn from_json() -> anyhow::Result<()> {
+    let graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let yaml: String = graph.to_yaml()?;
     let graph = Graph::from_yaml(&yaml);
     black_box(graph);
+
+    Ok(())
 }
 
 #[test]
-fn node_remove_test() {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml");
+fn node_remove_test()  -> anyhow::Result<()>{
+    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
 
     let node_id = graph.node_by_name("sum").unwrap().id();
     graph.remove_node_by_id(node_id);
@@ -25,5 +27,7 @@ fn node_remove_test() {
             assert_ne!(binding.output_node_id(), node_id);
         }
     }
+
+    Ok(())
 }
 
