@@ -18,9 +18,12 @@ pub struct Node {
     pub behavior: NodeBehavior,
     pub is_output: bool,
 
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<Output>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subgraph: Option<Graph>,
 }
 
@@ -49,12 +52,23 @@ pub struct Input {
     pub name: String,
     pub data_type: DataType,
     pub is_required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<Binding>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Argument {
+    node_id: Uuid,
+    arg_index: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    inputs: Vec<Argument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    outputs: Vec<Argument>,
 }
 
 
@@ -62,6 +76,8 @@ impl Graph {
     pub fn new() -> Graph {
         Graph {
             nodes: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
         }
     }
 
