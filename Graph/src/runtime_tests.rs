@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod runtime_tests {
+    use uuid::Uuid;
     use crate::graph::*;
     use crate::invoke::{Args, Invoker, LambdaInvoker, Value};
     use crate::runtime::Runtime;
-    use uuid::Uuid;
 
     struct EmptyInvoker {}
 
@@ -34,8 +34,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|node| node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -52,8 +52,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -65,23 +65,17 @@ mod runtime_tests {
 
         runtime.run(&graph, &invoker);
 
-        graph
-            .node_by_name_mut("mult")
-            .unwrap()
-            .inputs
-            .get_mut(1)
-            .unwrap()
-            .binding
-            .as_mut()
-            .unwrap()
+        graph.node_by_name_mut("mult").unwrap()
+            .inputs.get_mut(1).unwrap()
+            .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Once;
 
         let nodes = runtime.run(&graph, &invoker);
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -93,23 +87,17 @@ mod runtime_tests {
 
         runtime.run(&graph, &invoker);
 
-        graph
-            .node_by_name_mut("sum")
-            .unwrap()
-            .inputs
-            .get_mut(0)
-            .unwrap()
-            .binding
-            .as_mut()
-            .unwrap()
+        graph.node_by_name_mut("sum").unwrap()
+            .inputs.get_mut(0).unwrap()
+            .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Always;
 
         let nodes = runtime.run(&graph, &invoker);
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name("sum").unwrap().executed, true);
-        assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -125,8 +113,8 @@ mod runtime_tests {
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
@@ -134,48 +122,37 @@ mod runtime_tests {
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
-            graph
-                .node_by_name_mut("mult")
-                .unwrap()
-                .inputs
-                .get_mut(1)
-                .unwrap()
-                .binding
-                .as_mut()
-                .unwrap()
+            graph.node_by_name_mut("mult").unwrap()
+                .inputs.get_mut(1).unwrap()
+                .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Once;
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
-            graph
-                .node_by_name_mut("sum")
-                .unwrap()
-                .inputs
-                .get_mut(1)
-                .unwrap()
-                .binding
-                .as_mut()
-                .unwrap()
+            graph.node_by_name_mut("sum").unwrap()
+                .inputs.get_mut(1).unwrap()
+                .binding.as_mut().unwrap()
                 .behavior = BindingBehavior::Always;
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name("sum").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
     }
+
 
     #[test]
     fn simple_compute_test() {
@@ -213,23 +190,15 @@ mod runtime_tests {
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 35);
 
-        unsafe {
-            B = 7;
-        }
+        unsafe { B = 7; }
         graph.node_by_name_mut("val 2").unwrap().behavior = NodeBehavior::Active;
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 49);
 
         graph
-            .node_by_name_mut("sum")
-            .unwrap()
-            .inputs
-            .get_mut(0)
-            .unwrap()
-            .binding
-            .as_mut()
-            .unwrap()
-            .behavior = BindingBehavior::Always;
+            .node_by_name_mut("sum").unwrap()
+            .inputs.get_mut(0).unwrap()
+            .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
 
         compute.run(&graph, &invoker);
         assert_eq!(unsafe { RESULT }, 63);

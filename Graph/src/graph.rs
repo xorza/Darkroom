@@ -1,6 +1,7 @@
-use crate::data_type::DataType;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 use uuid::Uuid;
+use crate::data_type::DataType;
+
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum NodeBehavior {
@@ -55,9 +56,12 @@ pub struct Graph {
     nodes: Vec<Node>,
 }
 
+
 impl Graph {
     pub fn new() -> Graph {
-        Graph { nodes: Vec::new() }
+        Graph {
+            nodes: Vec::new(),
+        }
     }
 
     pub fn nodes(&self) -> &Vec<Node> {
@@ -86,16 +90,13 @@ impl Graph {
 
         self.nodes.retain(|node| node.self_id != id);
 
-        self.nodes
-            .iter_mut()
-            .flat_map(|node| node.inputs.iter_mut())
-            .filter(|input| {
-                input.binding.is_some() && input.binding.as_ref().unwrap().output_node_id == id
-            })
+        self.nodes.iter_mut().flat_map(|node| node.inputs.iter_mut())
+            .filter(|input| input.binding.is_some() && input.binding.as_ref().unwrap().output_node_id == id)
             .for_each(|input| {
                 input.binding = None;
             });
     }
+
 
     pub fn node_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes.iter().find(|node| node.name == name)
@@ -118,9 +119,8 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.self_id == id)
     }
 
-    pub fn to_yaml(&self) -> String {
-        serde_yaml::to_string(&self).unwrap()
-    }
+
+    pub fn to_yaml(&self) -> String { serde_yaml::to_string(&self).unwrap() }
     pub fn from_yaml_file(path: &str) -> Graph {
         let yaml = std::fs::read_to_string(path).unwrap();
         let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
@@ -163,6 +163,7 @@ impl Graph {
         return true;
     }
 }
+
 
 impl Node {
     pub fn new() -> Node {
