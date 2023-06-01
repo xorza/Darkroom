@@ -1,12 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use uuid::Uuid;
 use crate::common::is_debug;
 use crate::graph::*;
 use crate::invoke::{Args, Invoker, Value};
 
 
 pub struct Runtime {
-    arg_cache: HashMap<u32, ArgSet>,
+    arg_cache: HashMap<Uuid, ArgSet>,
 }
 
 #[derive(Clone)]
@@ -17,7 +18,8 @@ pub struct RuntimeOutput {
 
 #[derive(Clone)]
 pub struct RuntimeNode {
-    node_id: u32,
+    node_id: Uuid,
+    pub name: String,
     pub outputs: Vec<RuntimeOutput>,
 
     pub is_output: bool,
@@ -33,9 +35,9 @@ pub struct RuntimeNode {
 
 #[derive(Clone)]
 struct RuntimeInput {
-    output_node_id: u32,
+    output_node_id: Uuid,
     output_index: u32,
-    input_node_id: u32,
+    input_node_id: Uuid,
     input_index: u32,
     has_missing_inputs: bool,
     connection_behavior: BindingBehavior,
@@ -45,7 +47,7 @@ struct RuntimeInput {
 struct ArgSet {
     inputs: Args,
     outputs: Args,
-    node_id: u32,
+    node_id: Uuid,
 }
 
 pub struct RuntimeInfo {
@@ -79,7 +81,7 @@ impl Runtime {
                 RuntimeInput {
                     output_node_id: node.id(),
                     output_index: 0,
-                    input_node_id: 0,
+                    input_node_id: Uuid::nil(),
                     input_index: 0,
                     has_missing_inputs: false,
                     connection_behavior: BindingBehavior::Always,
@@ -88,7 +90,7 @@ impl Runtime {
             })
             .collect::<Vec<RuntimeInput>>();
 
-        let mut node_ids: HashSet<u32> = HashSet::new();
+        let mut node_ids: HashSet<Uuid> = HashSet::new();
 
         let mut i: usize = 0;
         while i < inputs_bindings.len() {
@@ -129,7 +131,7 @@ impl Runtime {
     }
     fn gather_inputs_to_runtime(&self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
         let mut r_nodes = RuntimeInfo::new();
-        let mut node_ids: HashSet<u32> = HashSet::new();
+        let mut node_ids: HashSet<Uuid> = HashSet::new();
 
         for r_input in r_inputs.iter().rev() {
             let output_node_id = r_input.output_node_id;
@@ -170,6 +172,7 @@ impl Runtime {
                 run_time: 0.0,
                 is_output,
                 behavior: node.behavior,
+                name : node.name.clone(),
             });
         }
 
@@ -207,12 +210,12 @@ impl Runtime {
 
         return r_nodes;
     }
-    fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<u32> {
+    fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<Uuid> {
         let mut exec_order = r_nodes.nodes.iter()
             .rev()
             .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
             .map(|r_node| r_node.node_id)
-            .collect::<Vec<u32>>();
+            .collect::<Vec<Uuid>>();
 
         let mut i: usize = 0;
         while i < exec_order.len() {
@@ -240,7 +243,7 @@ impl Runtime {
         exec_order.reverse();
         return exec_order;
     }
-    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<u32>, invoker: &dyn Invoker) -> RuntimeInfo {
+    fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> RuntimeInfo {
         invoker.start();
 
         let mut execution_index: u32 = 0;
@@ -298,7 +301,7 @@ impl Runtime {
 }
 
 impl RuntimeNode {
-    pub fn node_id(&self) -> u32 {
+    pub fn node_id(&self) -> Uuid {
         self.node_id
     }
 }
@@ -335,7 +338,11 @@ impl RuntimeInfo {
         }
     }
 
-    pub fn node_by_id(&self, node_id: u32) -> Option<&RuntimeNode> {
+    pub fn node_by_name(&self, name: &str) -> Option<&RuntimeNode> {
+        self.nodes.iter().find(|node| node.name == name)
+    }
+
+    pub fn node_by_id(&self, node_id: Uuid) -> Option<&RuntimeNode> {
         self.nodes.iter().find(|node| node.node_id == node_id)
     }
 }

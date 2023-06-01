@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
 use mlua::{Error, Function, Lua, Table, Variadic};
+use uuid::Uuid;
 use crate::data_type::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
 use crate::invoke;
@@ -188,7 +189,7 @@ impl LuaInvoker<'_> {
 
         struct OutputAddr {
             index: u32,
-            node_id: u32,
+            node_id: Uuid,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
         let mut nodes: Vec<Node> = Vec::new();
@@ -216,7 +217,7 @@ impl LuaInvoker<'_> {
                     data_type: output.data_type,
                 });
 
-                assert_ne!(node.id(), 0);
+                assert_ne!(node.id(), Uuid::nil());
                 output_ids.insert(output_id, OutputAddr {
                     index: i as u32,
                     node_id: node.id(),
@@ -316,8 +317,8 @@ impl Drop for LuaInvoker<'_> {
 
 impl Invoker for LuaInvoker<'_> {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
-        self.lua.globals().set("context_id", context_id).unwrap();
+    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) {
+        self.lua.globals().set("context_id", context_id.to_string()).unwrap();
 
         let function_info = self.funcs.get(function_name).unwrap();
 

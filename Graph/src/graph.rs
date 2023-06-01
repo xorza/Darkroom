@@ -12,9 +12,7 @@ pub enum NodeBehavior {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
-    self_id: u32,
-    #[serde(default = "Uuid::new_v4")]
-    uid: Uuid,
+    self_id: Uuid,
 
     pub name: String,
     pub behavior: NodeBehavior,
@@ -39,7 +37,7 @@ pub enum BindingBehavior {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Binding {
-    output_node_id: u32,
+    output_node_id: Uuid,
     output_index: u32,
     pub behavior: BindingBehavior,
 }
@@ -55,8 +53,6 @@ pub struct Input {
 
 #[derive(Serialize, Deserialize)]
 pub struct Graph {
-    new_id: u32,
-
     nodes: Vec<Node>,
 }
 
@@ -64,15 +60,8 @@ pub struct Graph {
 impl Graph {
     pub fn new() -> Graph {
         Graph {
-            new_id: 5000,
             nodes: Vec::new(),
         }
-    }
-
-    fn new_id(&mut self) -> u32 {
-        let id = self.new_id;
-        self.new_id += 1;
-        return id;
     }
 
     pub fn nodes(&self) -> &Vec<Node> {
@@ -86,13 +75,19 @@ impl Graph {
         if let Some(existing_node) = self.node_by_id_mut(node.id()) {
             *existing_node = node.clone();
         } else {
-            node.self_id = self.new_id();
+            node.self_id = Uuid::new_v4();
             self.nodes.push(node.clone());
         }
     }
 
-    pub fn remove_node_by_id(&mut self, id: u32) {
-        assert_ne!(id, 0);
+    pub fn remove_node_by_name(&mut self, name:&str) -> Result<(),()> {
+        let node = self.nodes.iter().find(|node| node.name == name).ok_or(())?;
+        self.remove_node_by_id(node.self_id);
+
+        Ok(())
+    }
+    pub fn remove_node_by_id(&mut self, id: Uuid) {
+        assert_ne!(id, Uuid::nil());
 
         self.nodes.retain(|node| node.self_id != id);
 
@@ -104,15 +99,22 @@ impl Graph {
     }
 
 
-    pub fn node_by_id(&self, id: u32) -> Option<&Node> {
-        if id == 0 {
+    pub fn node_by_name(&self, name: &str) -> Option<&Node> {
+        self.nodes.iter().find(|node| node.name == name)
+    }
+    pub fn node_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
+        self.nodes.iter_mut().find(|node| node.name == name)
+    }
+
+    pub fn node_by_id(&self, id: Uuid) -> Option<&Node> {
+        if id ==  Uuid::nil() {
             return None;
         }
         self.nodes.iter().find(|node| node.self_id == id)
     }
 
-    pub fn node_by_id_mut(&mut self, id: u32) -> Option<&mut Node> {
-        if id == 0 {
+    pub fn node_by_id_mut(&mut self, id: Uuid) -> Option<&mut Node> {
+        if id ==  Uuid::nil() {
             return None;
         }
         self.nodes.iter_mut().find(|node| node.self_id == id)
@@ -145,12 +147,12 @@ impl Graph {
     }
 
     pub fn validate(&self) -> bool {
-        if self.nodes.iter().any(|node| node.self_id == 0) {
+        if self.nodes.iter().any(|node| node.self_id == Uuid::nil()) {
             return false;
         }
 
         for node in self.nodes.iter() {
-            if node.self_id == 0 {
+            if node.self_id == Uuid::nil() {
                 return false;
             }
 
@@ -171,17 +173,16 @@ impl Graph {
 impl Node {
     pub fn new() -> Node {
         Node {
-            self_id: 0,
+            self_id:Uuid::nil(),
             name: String::new(),
             behavior: NodeBehavior::Active,
             is_output: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            uid: Uuid::nil(),
         }
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> Uuid {
         self.self_id
     }
 }
@@ -207,14 +208,14 @@ impl Output {
 }
 
 impl Binding {
-    pub fn output_node_id(&self) -> u32 {
+    pub fn output_node_id(&self) -> Uuid {
         self.output_node_id
     }
     pub fn output_index(&self) -> u32 {
         self.output_index
     }
 
-    pub fn new(node_id: u32, output_index: u32) -> Binding {
+    pub fn new(node_id: Uuid, output_index: u32) -> Binding {
         Binding {
             output_node_id: node_id,
             output_index,

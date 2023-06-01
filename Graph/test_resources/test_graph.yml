@@ -1,6 +1,5 @@
 nodes:
-- self_id: 4
-  uid: b3e13e40-6e38-40d2-9979-8cb6899dcd46
+- self_id: 579ae1d6-10a3-4906-8948-135cb7d7508b
   name: mult
   behavior: Passive
   is_output: false
@@ -9,39 +8,36 @@ nodes:
     data_type: Int
     is_required: true
     binding:
-      output_node_id: 3
+      output_node_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
       output_index: 0
       behavior: Always
   - name: B
     data_type: Int
     is_required: true
     binding:
-      output_node_id: 2
+      output_node_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
       output_index: 0
       behavior: Always
   outputs:
   - name: Prod
     data_type: Int
-- self_id: 1
-  uid: 3b78bb22-7246-40fb-b309-2faa9ef6c8a3
-  name: val0
+- self_id: 5f110618-8faa-4629-8f5d-473c236de7d1
+  name: val1
   behavior: Active
   is_output: false
   inputs: []
   outputs:
   - name: Int32 Value
     data_type: Int
-- self_id: 2
-  uid: fe3e7344-d4b6-487a-a042-5fa5fd63deaf
-  name: val1
+- self_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
+  name: val2
   behavior: Passive
   is_output: false
   inputs: []
   outputs:
   - name: Int32 Value
     data_type: Int
-- self_id: 3
-  uid: ceb69c13-e7ff-4255-a3ad-ff0cba058708
+- self_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
   name: sum
   behavior: Passive
   is_output: false
@@ -50,21 +46,20 @@ nodes:
     data_type: Int
     is_required: true
     binding:
-      output_node_id: 1
+      output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
       output_index: 0
       behavior: Once
   - name: B
     data_type: Int
     is_required: true
     binding:
-      output_node_id: 2
+      output_node_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
       output_index: 0
       behavior: Once
   outputs:
   - name: Sum
     data_type: Int
-- self_id: 5
-  uid: 511d57a5-25fc-44fa-b8ba-d46b37748d96
+- self_id: b88ab7e2-17b7-46cb-bc8e-b428bb45141e
   name: print
   behavior: Passive
   is_output: true
@@ -73,7 +68,7 @@ nodes:
     data_type: Int
     is_required: true
     binding:
-      output_node_id: 4
+      output_node_id: 579ae1d6-10a3-4906-8948-135cb7d7508b
       output_index: 0
       behavior: Always
   outputs: []

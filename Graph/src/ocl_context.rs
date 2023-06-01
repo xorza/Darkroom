@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use uuid::Uuid;
 use crate::invoke::{Args, Invoker};
 
 pub struct OclContext {
@@ -32,7 +33,7 @@ impl Invoker for OclContext {
         *current_queue = Some(queue.clone());
     }
 
-    fn call(&self, _function_name: &str, _context_id: u32, _inputs: &Args, _outputs: &mut Args) {
+    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) {
         let current_queue = self.current_queue.borrow();
         let _current_queue = current_queue.as_ref().unwrap();
 

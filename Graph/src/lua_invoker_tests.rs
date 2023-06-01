@@ -2,6 +2,7 @@
 mod lua_invoker_tests {
     use std::fs;
     use mlua::{Function, Lua, Value, Variadic};
+    use uuid::Uuid;
     use crate::invoke::{Args, Invoker};
     use crate::lua_invoker::{FunctionInfo, LuaInvoker};
 
@@ -79,7 +80,7 @@ mod lua_invoker_tests {
         let inputs: Args = Args::from_vec(vec![3, 5]);
         let mut outputs: Args = Args::from_vec(vec![0]);
 
-        invoker.call("mult", 0, &inputs, &mut outputs);
+        invoker.call("mult", Uuid::nil(), &inputs, &mut outputs);
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 15);
 

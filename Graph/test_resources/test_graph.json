@@ -1,28 +1,27 @@
 {
-    "new_id": 10000,
     "nodes": [
         {
-            "self_id": 4,
+            "self_id": "579ae1d6-10a3-4906-8948-135cb7d7508b",
             "name": "mult",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [
                 {
                     "name": "A",
-                    "is_required": true,
                     "data_type": "Int",
+                    "is_required": true,
                     "binding": {
-                        "output_node_id": 3,
+                        "output_node_id": "999c4d37-e0eb-4856-be3f-ad2090c84d8c",
                         "output_index": 0,
                         "behavior": "Always"
                     }
                 },
                 {
                     "name": "B",
-                    "is_required": true,
                     "data_type": "Int",
+                    "is_required": true,
                     "binding": {
-                        "output_node_id": 2,
+                        "output_node_id": "6fc6b533-c375-451c-ba3a-a14ea217cb30",
                         "output_index": 0,
                         "behavior": "Always"
                     }
@@ -36,8 +35,8 @@
             ]
         },
         {
-            "self_id": 1,
-            "name": "val0",
+            "self_id": "5f110618-8faa-4629-8f5d-473c236de7d1",
+            "name": "val 1",
             "behavior": "Active",
             "is_output": false,
             "inputs": [],
@@ -49,8 +48,8 @@
             ]
         },
         {
-            "self_id": 2,
-            "name": "val1",
+            "self_id": "6fc6b533-c375-451c-ba3a-a14ea217cb30",
+            "name": "val 2",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [],
@@ -62,27 +61,27 @@
             ]
         },
         {
-            "self_id": 3,
+            "self_id": "999c4d37-e0eb-4856-be3f-ad2090c84d8c",
             "name": "sum",
             "behavior": "Passive",
             "is_output": false,
             "inputs": [
                 {
                     "name": "A",
-                    "is_required": true,
                     "data_type": "Int",
+                    "is_required": true,
                     "binding": {
-                        "output_node_id": 1,
+                        "output_node_id": "5f110618-8faa-4629-8f5d-473c236de7d1",
                         "output_index": 0,
                         "behavior": "Once"
                     }
                 },
                 {
                     "name": "B",
-                    "is_required": true,
                     "data_type": "Int",
+                    "is_required": true,
                     "binding": {
-                        "output_node_id": 2,
+                        "output_node_id": "6fc6b533-c375-451c-ba3a-a14ea217cb30",
                         "output_index": 0,
                         "behavior": "Once"
                     }
@@ -96,17 +95,17 @@
             ]
         },
         {
-            "self_id": 5,
+            "self_id": "b88ab7e2-17b7-46cb-bc8e-b428bb45141e",
             "name": "print",
             "behavior": "Passive",
             "is_output": true,
             "inputs": [
                 {
                     "name": "message",
-                    "is_required": true,
                     "data_type": "Int",
+                    "is_required": true,
                     "binding": {
-                        "output_node_id": 4,
+                        "output_node_id": "579ae1d6-10a3-4906-8948-135cb7d7508b",
                         "output_index": 0,
                         "behavior": "Always"
                     }
@@ -116,4 +115,3 @@
         }
     ]
 }
-

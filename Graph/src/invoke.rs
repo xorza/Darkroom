@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
+use uuid::Uuid;
 use crate::data_type::DataType;
 
 #[derive(Clone, PartialEq)]
@@ -19,16 +20,16 @@ pub struct Args {
 
 pub trait Invoker {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args);
+    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args);
     fn finish(&self) {}
 }
 
 pub trait Invokable {
-    fn call(&self, context_id: u32, inputs: &Args, outputs: &mut Args);
+    fn call(&self, context_id: Uuid, inputs: &Args, outputs: &mut Args);
 }
 
 pub struct LambdaInvokable {
-    lambda: Box<dyn Fn(u32, &Args, &mut Args)>,
+    lambda: Box<dyn Fn(Uuid, &Args, &mut Args)>,
 }
 
 pub struct LambdaInvoker {
@@ -42,7 +43,7 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(u32, &Args, &mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
+    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
@@ -52,7 +53,7 @@ impl LambdaInvoker {
 
 impl Invoker for LambdaInvoker {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: u32, inputs: &Args, outputs: &mut Args) {
+    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) {
         if let Some(func) = self.lambdas.get(function_name) {
             (func.lambda)(context_id, inputs, outputs);
         } else {
