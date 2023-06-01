@@ -16,8 +16,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up cargo cache
-      uses: actions/cache@v3
+    - uses: actions/cache@v3
       continue-on-error: false
       with:
         path: |
@@ -28,6 +27,8 @@ jobs:
           ./target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: ${{ runner.os }}-cargo-
+
+    - uses: dtolnay/rust-toolchain@stable
 
     - name: Build
       run: cd ./Graph && cargo build --verbose --no-default-features --features ""
