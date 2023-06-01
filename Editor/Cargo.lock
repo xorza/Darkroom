@@ -992,7 +992,6 @@ dependencies = [
  "mlua",
  "ocl",
  "serde",
- "serde_json",
  "serde_yaml",
  "uuid",
 ]
@@ -2142,17 +2141,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.16",
-]
-
-[[package]]
-name = "serde_json"
-version = "1.0.96"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "057d394a50403bcac12672b2b18fb387ab6d289d957dab67dd201875391e52f1"
-dependencies = [
- "itoa",
- "ryu",
- "serde",
 ]
 
 [[package]]

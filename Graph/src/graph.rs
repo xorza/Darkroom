@@ -9,7 +9,6 @@ pub enum NodeBehavior {
     Passive,
 }
 
-
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: Uuid,
@@ -20,6 +19,8 @@ pub struct Node {
 
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
+
+    pub subgraph: Option<Graph>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -50,8 +51,7 @@ pub struct Input {
     pub binding: Option<Binding>,
 }
 
-
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
 }
@@ -174,6 +174,7 @@ impl Node {
             is_output: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
+            subgraph: None,
         }
     }
 
