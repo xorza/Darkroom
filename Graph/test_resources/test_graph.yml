@@ -28,7 +28,6 @@ nodes:
     outputs:
       - name: Int32 Value
         data_type: Int
-    subgraph: null
   - self_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
     name: val 2
     behavior: Passive
