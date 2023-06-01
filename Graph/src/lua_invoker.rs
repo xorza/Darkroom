@@ -251,7 +251,7 @@ impl LuaInvoker<'_> {
         drop(output_ids);
         drop(connections);
 
-        assert!(graph.validate());
+        assert!(graph.validate().is_ok());
 
         graph
     }

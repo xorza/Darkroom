@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -24,7 +23,7 @@ pub struct Node {
     pub outputs: Vec<Output>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subgraph: Option<Graph>,
+    pub subgraph_id: Option<Uuid>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -33,7 +32,7 @@ pub struct Output {
     pub data_type: DataType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Debug)]
 pub enum BindingBehavior {
     #[default]
     Always,
@@ -58,17 +57,25 @@ pub struct Input {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Argument {
-    node_id: Uuid,
-    arg_index: u32,
+    pub node_id: Uuid,
+    pub arg_index: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SubGraph {
+    self_id: Uuid,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<Argument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<Argument>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    inputs: Vec<Argument>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    outputs: Vec<Argument>,
+    subgraphs: Vec<SubGraph>,
 }
 
 
@@ -76,8 +83,7 @@ impl Graph {
     pub fn new() -> Graph {
         Graph {
             nodes: Vec::new(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            subgraphs: Vec::new(),
         }
     }
 
@@ -95,16 +101,6 @@ impl Graph {
             self.nodes.push(node.clone());
         }
     }
-
-    pub fn remove_node_by_name(&mut self, name: &str) -> anyhow::Result<()> {
-        let node = self.nodes
-            .iter()
-            .find(|node| node.name == name)
-            .ok_or(anyhow!("Node not found: {}", name))?;
-        self.remove_node_by_id(node.self_id);
-
-        Ok(())
-    }
     pub fn remove_node_by_id(&mut self, id: Uuid) {
         assert_ne!(id, Uuid::nil());
 
@@ -116,7 +112,6 @@ impl Graph {
                 input.binding = None;
             });
     }
-
 
     pub fn node_by_name(&self, name: &str) -> Option<&Node> {
         self.nodes.iter().find(|node| node.name == name)
@@ -138,7 +133,6 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.self_id == id)
     }
 
-
     pub fn to_yaml(&self) -> anyhow::Result<String> {
         let yaml = serde_yaml::to_string(&self)?;
         Ok(yaml)
@@ -147,42 +141,63 @@ impl Graph {
         let yaml = std::fs::read_to_string(path)?;
         let graph: Graph = serde_yaml::from_str(&yaml)?;
 
-        if !graph.validate() {
-            panic!("Invalid graph");
-        }
+        graph.validate()?;
 
         Ok(graph)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Graph> {
         let graph: Graph = serde_yaml::from_str(yaml)?;
 
-        if !graph.validate() {
-            panic!("Invalid graph");
-        }
+        graph.validate()?;
 
         Ok(graph)
     }
 
-    pub fn validate(&self) -> bool {
-        if self.nodes.iter().any(|node| node.self_id == Uuid::nil()) {
-            return false;
-        }
-
+    pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
             if node.self_id == Uuid::nil() {
-                return false;
+                return Err(anyhow::Error::msg("Node has invalid id"));
             }
 
             for input in node.inputs.iter() {
                 if let Some(binding) = &input.binding {
                     if self.node_by_id(binding.output_node_id).is_none() {
-                        return false;
+                        return Err(anyhow::Error::msg("Node has invalid binding"));
                     }
                 }
             }
         }
 
-        true
+        Ok(())
+    }
+
+    pub fn add_subgraph(&mut self, subgraph: &mut SubGraph) {
+        if let Some(existing_subgraph) = self.subgraph_by_id_mut(subgraph.self_id) {
+            *existing_subgraph = subgraph.clone();
+        } else {
+            self.subgraphs.push(subgraph.clone());
+        }
+    }
+    pub fn remove_subgraph_by_id(&mut self, id: Uuid) {
+        assert_ne!(id, Uuid::nil());
+
+        self.subgraphs.retain(|subgraph| subgraph.self_id != id);
+        self.nodes.iter()
+            .filter(|node| node.subgraph_id == Some(id))
+            .map(|node| node.self_id)
+            .collect::<Vec<Uuid>>()
+            .iter()
+            .cloned()
+            .for_each(|node_id| {
+                self.remove_node_by_id(node_id);
+            });
+    }
+
+    pub fn subgraph_by_id_mut(&mut self, id: Uuid) -> Option<&mut SubGraph> {
+        self.subgraphs.iter_mut().find(|subgraph| subgraph.self_id == id)
+    }
+    pub fn subgraph_by_id(&self, id: Uuid) -> Option<&SubGraph> {
+        self.subgraphs.iter().find(|subgraph| subgraph.self_id == id)
     }
 }
 
@@ -195,7 +210,7 @@ impl Node {
             is_output: false,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            subgraph: None,
+            subgraph_id: None,
         }
     }
 
@@ -238,5 +253,19 @@ impl Binding {
             output_index,
             behavior: BindingBehavior::Always,
         }
+    }
+}
+
+impl SubGraph {
+    pub fn new() -> SubGraph {
+        SubGraph {
+            self_id: Uuid::new_v4(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+        }
+    }
+
+    pub fn id(&self) -> Uuid {
+        self.self_id
     }
 }

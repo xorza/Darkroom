@@ -65,7 +65,7 @@ impl Runtime {
     }
 
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> anyhow::Result<RuntimeInfo> {
-        assert!(graph.validate());
+        assert!(graph.validate().is_ok());
 
         let r_inputs = self.collect_all_inputs(graph)?;
         let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
