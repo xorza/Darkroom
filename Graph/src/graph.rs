@@ -3,8 +3,9 @@ use uuid::Uuid;
 
 use crate::data_type::DataType;
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum NodeBehavior {
+    #[default]
     Active,
     Passive,
 }
@@ -32,7 +33,7 @@ pub struct Output {
     pub data_type: DataType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub enum BindingBehavior {
     #[default]
     Always,
@@ -55,7 +56,7 @@ pub struct Input {
     pub binding: Option<Binding>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Argument {
     pub node_id: Uuid,
     pub arg_index: u32,
@@ -106,7 +107,9 @@ impl Graph {
 
         self.nodes.retain(|node| node.self_id != id);
 
-        self.nodes.iter_mut().flat_map(|node| node.inputs.iter_mut())
+        self.nodes
+            .iter_mut()
+            .flat_map(|node| node.inputs.iter_mut())
             .filter(|input| input.binding.is_some() && input.binding.as_ref().unwrap().output_node_id == id)
             .for_each(|input| {
                 input.binding = None;
@@ -121,16 +124,26 @@ impl Graph {
     }
 
     pub fn node_by_id(&self, id: Uuid) -> Option<&Node> {
-        if id == Uuid::nil() {
-            return None;
-        }
-        self.nodes.iter().find(|node| node.self_id == id)
+      assert_ne!(id, Uuid::nil());
+
+        self.nodes
+            .iter()
+            .find(|node| node.self_id == id)
     }
     pub fn node_by_id_mut(&mut self, id: Uuid) -> Option<&mut Node> {
-        if id == Uuid::nil() {
-            return None;
-        }
-        self.nodes.iter_mut().find(|node| node.self_id == id)
+        assert_ne!(id, Uuid::nil());
+
+        self.nodes
+            .iter_mut()
+            .find(|node| node.self_id == id)
+    }
+    pub fn nodes_by_subgraph_id(&self, subgraph_id: Uuid) -> Vec<&Node> {
+        assert_ne!(subgraph_id, Uuid::nil());
+
+        self.nodes
+            .iter()
+            .filter(|node| node.subgraph_id == Some(subgraph_id))
+            .collect()
     }
 
     pub fn to_yaml(&self) -> anyhow::Result<String> {
@@ -155,6 +168,10 @@ impl Graph {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
+            if let Some(subgraph_id) = node.subgraph_id {
+                 self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
+            }
+
             if node.self_id == Uuid::nil() {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
@@ -181,8 +198,11 @@ impl Graph {
     pub fn remove_subgraph_by_id(&mut self, id: Uuid) {
         assert_ne!(id, Uuid::nil());
 
-        self.subgraphs.retain(|subgraph| subgraph.self_id != id);
-        self.nodes.iter()
+        self.subgraphs
+            .retain(|subgraph| subgraph.self_id != id);
+
+        self.nodes
+            .iter()
             .filter(|node| node.subgraph_id == Some(id))
             .map(|node| node.self_id)
             .collect::<Vec<Uuid>>()
@@ -194,10 +214,16 @@ impl Graph {
     }
 
     pub fn subgraph_by_id_mut(&mut self, id: Uuid) -> Option<&mut SubGraph> {
-        self.subgraphs.iter_mut().find(|subgraph| subgraph.self_id == id)
+        assert_ne!(id, Uuid::nil());
+        self.subgraphs
+            .iter_mut()
+            .find(|subgraph| subgraph.self_id == id)
     }
     pub fn subgraph_by_id(&self, id: Uuid) -> Option<&SubGraph> {
-        self.subgraphs.iter().find(|subgraph| subgraph.self_id == id)
+        assert_ne!(id, Uuid::nil());
+        self.subgraphs
+            .iter()
+            .find(|subgraph| subgraph.self_id == id)
     }
 }
 
