@@ -95,11 +95,10 @@ impl Graph {
         self.nodes.iter_mut().collect()
     }
 
-    pub fn add_node(&mut self, node: &mut Node) {
-        if let Some(existing_node) = self.node_by_id_mut(node.id()) {
-            *existing_node = node.clone();
-        } else {
-            self.nodes.push(node.clone());
+    pub fn add_node(&mut self, node: &Node) {
+        match self.nodes.iter().position(|n| n.self_id == node.self_id) {
+            Some(index) => self.nodes[index] = node.clone(),
+            None => self.nodes.push(node.clone()),
         }
     }
     pub fn remove_node_by_id(&mut self, id: Uuid) {
@@ -199,11 +198,10 @@ impl Graph {
         Ok(())
     }
 
-    pub fn add_subgraph(&mut self, subgraph: &mut SubGraph) {
-        if let Some(existing_subgraph) = self.subgraph_by_id_mut(subgraph.self_id) {
-            *existing_subgraph = subgraph.clone();
-        } else {
-            self.subgraphs.push(subgraph.clone());
+    pub fn add_subgraph(&mut self, subgraph: &SubGraph) {
+        match self.subgraphs.iter().position(|sg| sg.self_id == subgraph.self_id) {
+            Some(index) => self.subgraphs[index] = subgraph.clone(),
+            None => self.subgraphs.push(subgraph.clone()),
         }
     }
     pub fn remove_subgraph_by_id(&mut self, id: Uuid) {
