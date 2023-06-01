@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod graph_tests {
-    use ocl::{Buffer, Platform, Device, Context, Queue};
+    use ocl::{Buffer, Context, Device, Platform, Queue};
 
     #[test]
     fn it_works() {

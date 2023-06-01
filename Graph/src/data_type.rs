@@ -1,5 +1,6 @@
 use std::str::FromStr;
-use serde::{Serialize, Deserialize};
+
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
 pub enum DataType {

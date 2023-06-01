@@ -1,9 +1,10 @@
-use iced::widget::{button, column, text};
 use iced::{Alignment, Element, Length, Sandbox, Settings};
+use iced::widget::{button, column, text};
+
 use graph::lua_invoker::LuaInvoker;
 
 pub fn main() -> iced::Result {
-    let invoker =  LuaInvoker::new();
+    let invoker = LuaInvoker::new();
     drop(invoker);
 
     Example::run(Settings {
@@ -62,12 +63,12 @@ impl Sandbox for Example {
 }
 
 mod bezier {
+    use iced::{Element, Length, Point, Rectangle, Theme};
     use iced::mouse;
-    use iced::widget::canvas::event::{self, Event};
     use iced::widget::canvas::{
         self, Canvas, Cursor, Frame, Geometry, Path, Stroke,
     };
-    use iced::{Element, Length, Point, Rectangle, Theme};
+    use iced::widget::canvas::event::{self, Event};
 
     #[derive(Default)]
     pub struct State {

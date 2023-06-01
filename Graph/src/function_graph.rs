@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use crate::data_type::*;
+use serde::{Deserialize, Serialize};
 
+use crate::data_type::*;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Arg {
@@ -58,7 +58,6 @@ impl Arg {
             data_type: DataType::None,
         }
     }
-
 }
 
 impl Function {

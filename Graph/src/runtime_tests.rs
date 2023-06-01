@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod runtime_tests {
     use uuid::Uuid;
+
     use crate::graph::*;
     use crate::invoke::{Args, Invoker, LambdaInvoker, Value};
     use crate::runtime::Runtime;
@@ -34,8 +35,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|node| node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -52,8 +53,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -74,8 +75,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+        assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -96,8 +97,8 @@ mod runtime_tests {
         assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
         assert_eq!(nodes.node_by_name("val 1").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-        assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, true);
-        assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name("sum").unwrap().executed, true);
+        assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
         assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
     }
 
@@ -113,8 +114,8 @@ mod runtime_tests {
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
@@ -122,8 +123,8 @@ mod runtime_tests {
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
@@ -134,8 +135,8 @@ mod runtime_tests {
             let nodes = runtime.run(&graph, &invoker);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, false);
-            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name("sum").unwrap().executed, false);
+            assert_eq!(nodes.node_by_name("mult").unwrap().executed, false);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
         {
@@ -147,8 +148,8 @@ mod runtime_tests {
             assert_eq!(nodes.nodes.iter().all(|_node| _node.has_arguments), true);
             assert_eq!(nodes.node_by_name("val 1").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("val 2").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name(  "sum").unwrap().executed, true);
-            assert_eq!(nodes.node_by_name( "mult").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name("sum").unwrap().executed, true);
+            assert_eq!(nodes.node_by_name("mult").unwrap().executed, true);
             assert_eq!(nodes.node_by_name("print").unwrap().executed, true);
         }
     }

@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+
 use uuid::Uuid;
+
 use crate::common::is_debug;
 use crate::graph::*;
 use crate::invoke::{Args, Invoker, Value};
-
 
 pub struct Runtime {
     arg_cache: HashMap<Uuid, ArgSet>,
@@ -172,7 +173,7 @@ impl Runtime {
                 run_time: 0.0,
                 is_output,
                 behavior: node.behavior,
-                name : node.name.clone(),
+                name: node.name.clone(),
             });
         }
 

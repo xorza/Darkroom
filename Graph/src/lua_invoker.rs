@@ -2,8 +2,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
+
 use mlua::{Error, Function, Lua, Table, Variadic};
 use uuid::Uuid;
+
 use crate::data_type::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
 use crate::invoke;
@@ -277,7 +279,7 @@ impl FunctionInfo {
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.inputs.push(Argument { name, data_type});
+            function_info.inputs.push(Argument { name, data_type });
         }
 
         let outputs: Table = table.get("outputs").unwrap();

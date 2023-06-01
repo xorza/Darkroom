@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
+
 use uuid::Uuid;
+
 use crate::data_type::DataType;
 
 #[derive(Clone, PartialEq)]
