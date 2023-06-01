@@ -10,19 +10,18 @@ pub struct OclContext {
 }
 
 impl OclContext {
-    pub fn new() -> OclContext {
+    pub fn new() -> anyhow::Result<OclContext> {
         let platform = ocl::Platform::default();
-        let device = ocl::Device::first(platform).unwrap();
+        let device = ocl::Device::first(platform)?;
         let context = ocl::Context::builder()
             .platform(platform)
             .devices(device)
-            .build()
-            .unwrap();
+            .build()?;
 
-        OclContext {
+        Ok(OclContext {
             context,
             current_queue: RefCell::new(None),
-        }
+        })
     }
 
     pub fn start_queue(&mut self) {}
@@ -35,12 +34,11 @@ impl Invoker for OclContext {
         *current_queue = Some(queue);
     }
 
-    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()>{
+    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
         let current_queue = self.current_queue.borrow();
         let _current_queue = current_queue.as_ref().unwrap();
 
-        // todo!("Call OpenCL function");
-        Ok(())
+        todo!("Call OpenCL function");
     }
 
     fn finish(&self) {
