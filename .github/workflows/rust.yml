@@ -29,6 +29,8 @@ jobs:
         restore-keys: ${{ runner.os }}-cargo-
 
     - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt, clippy
 
     - name: Build
       run: cd ./Graph && cargo build --verbose --no-default-features --features ""
