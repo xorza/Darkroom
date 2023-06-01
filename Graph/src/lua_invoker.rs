@@ -19,6 +19,7 @@ pub struct Argument {
 
 #[derive(Clone)]
 pub struct FunctionInfo {
+    id: Uuid,
     name: String,
     inputs: Vec<Argument>,
     outputs: Vec<Argument>,
@@ -43,8 +44,7 @@ struct FuncConnections {
 pub struct LuaInvoker<'lua> {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache>>,
-    funcs: HashMap<String, LuaFuncInfo<'lua>>,
-    connections: Rc<RefCell<Vec<FuncConnections>>>,
+    funcs: HashMap<Uuid, LuaFuncInfo<'lua>>,
 }
 
 impl LuaInvoker<'_> {
@@ -57,7 +57,6 @@ impl LuaInvoker<'_> {
             lua,
             cache: Rc::new(RefCell::new(Cache::new())),
             funcs: HashMap::new(),
-            connections: Rc::new(RefCell::new(Vec::new())),
         }
     }
 
@@ -99,44 +98,48 @@ impl LuaInvoker<'_> {
 
         self.lua.load(script).exec()?;
 
-        self.read_function_info();
+        self.read_function_info()?;
 
         Ok(())
     }
-    fn read_function_info(&mut self) {
+    fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: Table = self.lua.globals().get("functions").unwrap();
         while let Ok(function_table) = functions_table.pop() {
-            let function_info = FunctionInfo::new(&function_table);
+            let function_info = FunctionInfo::from(&function_table)?;
             let function: Function = function_table.get("func").unwrap();
-            self.funcs.insert(function_info.name.clone(),
+            self.funcs.insert(function_info.id,
                               LuaFuncInfo {
                                   info: function_info,
                                   lua_func: function,
                               },
             );
         }
+
+        Ok(())
     }
 
-    pub fn map_graph(&self) -> Graph {
-        self.substitute_functions();
+    pub fn map_graph(&self) -> anyhow::Result<Graph> {
+        let connections = self.substitute_functions();
+
+        self.restore_functions();
 
         let graph_function: Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
 
-        self.restore_functions();
+        let graph = self.create_graph(&connections);
 
-        graph_function.call::<_, ()>(()).unwrap();
-
-        self.create_graph()
+        Ok(graph)
     }
-    fn substitute_functions(&self) {
+    fn substitute_functions(&self) -> Vec<FuncConnections> {
+        let connections: Rc<RefCell<Vec<FuncConnections>>> = Rc::new(RefCell::new(Vec::new()));
+
         let functions = self.functions_info();
 
         let mut output_index: u32 = 0;
 
         for lua_func_info in functions {
             let function_info_clone = lua_func_info.clone();
-            let connections = self.connections.clone();
+            let connections = connections.clone();
 
             let new_function = self.lua.create_function(
                 move |_lua: &Lua, mut inputs: Variadic<mlua::Value>| -> Result<Variadic<mlua::Value>, Error>  {
@@ -147,11 +150,8 @@ impl LuaInvoker<'_> {
                     };
 
                     while let Some(input) = inputs.pop() {
-                        match input {
-                            mlua::Value::Integer(output_index) => {
-                                connection.inputs.push(output_index as u32);
-                            }
-                            _ => {}
+                        if let mlua::Value::Integer(output_index) = input {
+                            connection.inputs.push(output_index as u32);
                         }
                     }
 
@@ -173,6 +173,11 @@ impl LuaInvoker<'_> {
 
             output_index += lua_func_info.outputs.len() as u32;
         }
+
+        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        graph_function.call::<_, ()>(()).unwrap();
+
+        connections.take()
     }
     fn restore_functions(&self) {
         let functions = self.funcs.values().collect::<Vec<&LuaFuncInfo>>();
@@ -184,13 +189,8 @@ impl LuaInvoker<'_> {
             ).unwrap();
         }
     }
-    fn create_graph(&self) -> Graph {
+    fn create_graph(&self, connections: &Vec<FuncConnections>) -> Graph {
         let mut graph = Graph::new();
-        let mut connections_ref = self.connections.borrow_mut();
-        let mut connections = connections_ref.clone();
-        connections_ref.clear();
-        drop(connections_ref);
-
 
         struct OutputAddr {
             index: u32,
@@ -199,11 +199,15 @@ impl LuaInvoker<'_> {
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
         let mut nodes: Vec<Node> = Vec::new();
 
-        for connection in connections.iter_mut() {
-            let function = &self.funcs.get(&connection.name).unwrap().info;
+        for connection in connections.iter() {
+            let function = &self.funcs
+                .iter()
+                .find(|(_, func)| func.info.name == connection.name)
+                .unwrap()
+                .1.info;
             let mut node = Node::new();
             node.name = function.name.clone();
-            graph.add_node(&mut node); //to get node.id
+            graph.add_node(&node); //to get node.id
 
 
             for (i, _input_id) in connection.inputs.iter().enumerate() {
@@ -229,7 +233,7 @@ impl LuaInvoker<'_> {
                 });
             }
 
-            graph.add_node(&mut node); //to update its state with the same id
+            graph.add_node(&node); //to update its state with the same id
             nodes.push(node);
         }
 
@@ -249,7 +253,6 @@ impl LuaInvoker<'_> {
 
         drop(nodes);
         drop(output_ids);
-        drop(connections);
 
         assert!(graph.validate().is_ok());
 
@@ -262,21 +265,25 @@ impl LuaInvoker<'_> {
         cache.output_stream.clear();
         result
     }
-    pub fn functions_info(&self) -> impl Iterator<Item=&FunctionInfo> {
-        self.funcs.values().map(|f| &f.info)
+
+    pub fn functions_info(&self) -> Vec<&FunctionInfo> {
+        self.funcs.values().map(|f| &f.info).collect()
     }
 }
 
 impl FunctionInfo {
-    fn new(table: &Table) -> FunctionInfo {
+    fn from(table: &Table) -> anyhow::Result<FunctionInfo> {
+        let id_str: String = table.get("id")?;
+
         let mut function_info = FunctionInfo {
-            name: table.get("name").unwrap(),
+            id: Uuid::parse_str(&id_str)?,
+            name: table.get("name")?,
             inputs: Vec::new(),
             outputs: Vec::new(),
         };
 
-        let inputs: Table = table.get("inputs").unwrap();
-        for i in 1..=inputs.len().unwrap() {
+        let inputs: Table = table.get("inputs")?;
+        for i in 1..=inputs.len()? {
             let input: Table = inputs.get(i).unwrap();
             let name: String = input.get(1).unwrap();
             let data_type_name: String = input.get(2).unwrap();
@@ -285,8 +292,8 @@ impl FunctionInfo {
             function_info.inputs.push(Argument { name, data_type });
         }
 
-        let outputs: Table = table.get("outputs").unwrap();
-        for i in 1..=outputs.len().unwrap() {
+        let outputs: Table = table.get("outputs")?;
+        for i in 1..=outputs.len()? {
             let output: Table = outputs.get(i).unwrap();
             let name: String = output.get(1).unwrap();
             let data_type_name: String = output.get(2).unwrap();
@@ -295,7 +302,7 @@ impl FunctionInfo {
             function_info.outputs.push(Argument { name, data_type });
         }
 
-        function_info
+        Ok(function_info)
     }
 
     pub fn name(&self) -> &str {
@@ -322,11 +329,11 @@ impl Drop for LuaInvoker<'_> {
 
 impl Invoker for LuaInvoker<'_> {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
         self.lua.globals().set("context_id", context_id.to_string())?;
 
         let function_info = self.funcs
-            .get(function_name)
+            .get(&function_id)
             .unwrap();
 
         let mut input_args: Variadic<mlua::Value> = Variadic::new();
@@ -380,7 +387,6 @@ impl From<&mlua::Value<'_>> for invoke::Value {
         }
     }
 }
-
 
 impl Cache {
     pub fn new() -> Cache {

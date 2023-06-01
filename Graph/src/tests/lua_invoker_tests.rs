@@ -1,8 +1,10 @@
+use std::str::FromStr;
+
 use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
 use crate::invoke::{Args, Invoker};
-use crate::lua_invoker::{FunctionInfo, LuaInvoker};
+use crate::lua_invoker::{LuaInvoker};
 
 #[test]
 fn lua_works() {
@@ -66,17 +68,23 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut invoker = LuaInvoker::new();
     invoker.load_file("./test_resources/test_lua.lua")?;
 
-    let funcs = invoker.functions_info().collect::<Vec<&FunctionInfo>>();
+    let funcs = invoker.functions_info();
     assert_eq!(funcs.len(), 5);
 
     let inputs: Args = Args::from_vec(vec![3, 5]);
     let mut outputs: Args = Args::from_vec(vec![0]);
 
-    invoker.call("mult", Uuid::nil(), &inputs, &mut outputs)?;
+
+    // call 'mult' function
+    invoker.call(
+        Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+        Uuid::nil(),
+        &inputs,
+        &mut outputs)?;
     let result: i64 = outputs[0].as_int();
     assert_eq!(result, 15);
 
-    let graph = invoker.map_graph();
+    let graph = invoker.map_graph()?;
     assert_eq!(graph.nodes().len(), 5);
 
     let mult_node = graph.nodes().iter().find(|node| node.name == "mult").unwrap();
@@ -92,7 +100,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     assert_eq!(bound_node.name, "val1");
 
     let output = invoker.get_output();
-    assert_eq!(output, "32");
+    assert_eq!(output, "52");
 
     Ok(())
 }

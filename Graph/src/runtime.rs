@@ -285,7 +285,7 @@ impl Runtime {
             }
 
             let start = Instant::now();
-            invoker.call(&node.name, node_id, &input_args.inputs, &mut input_args.outputs)?;
+            invoker.call(node.function_id, node_id, &input_args.inputs, &mut input_args.outputs)?;
 
             let rnode = r_nodes.nodes.iter_mut().find(|rnode| rnode.node_id == node_id).unwrap();
             rnode.run_time = start.elapsed().as_secs_f64();

@@ -34,7 +34,7 @@ impl Invoker for OclContext {
         *current_queue = Some(queue);
     }
 
-    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, _function_id: Uuid, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
         let current_queue = self.current_queue.borrow();
         let _current_queue = current_queue.as_ref().unwrap();
 

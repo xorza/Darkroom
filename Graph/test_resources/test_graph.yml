@@ -1,5 +1,6 @@
 nodes:
   - self_id: 579ae1d6-10a3-4906-8948-135cb7d7508b
+    function_id: 432b9bf1-f478-476c-a9c9-9a6e190124fc
     name: mult
     behavior: Passive
     is_output: false
@@ -22,20 +23,23 @@ nodes:
       - name: Prod
         data_type: Int
   - self_id: 5f110618-8faa-4629-8f5d-473c236de7d1
-    name: val 1
+    function_id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
+    name: val1
     behavior: Active
     is_output: false
     outputs:
       - name: Int32 Value
         data_type: Int
   - self_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
-    name: val 2
+    function_id: a937baff-822d-48fd-9154-58751539b59b
+    name: val2
     behavior: Passive
     is_output: false
     outputs:
       - name: Int32 Value
         data_type: Int
   - self_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+    function_id: 2d3b389d-7b58-44d9-b3d1-a595765b21a5
     name: sum
     behavior: Passive
     is_output: false
@@ -58,6 +62,7 @@ nodes:
       - name: Sum
         data_type: Int
   - self_id: b88ab7e2-17b7-46cb-bc8e-b428bb45141e
+    function_id: f22cd316-1cdf-4a80-b86c-1277acd1408a
     name: print
     behavior: Passive
     is_output: true

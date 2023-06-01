@@ -22,9 +22,7 @@ pub struct Args {
 
 pub trait Invoker {
     fn start(&self) {}
-    fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
-        Ok(())
-    }
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()>;
     fn finish(&self) {}
 }
 
@@ -37,7 +35,7 @@ pub struct LambdaInvokable {
 }
 
 pub struct LambdaInvoker {
-    lambdas: HashMap<String, LambdaInvokable>,
+    lambdas: HashMap<Uuid, LambdaInvokable>,
 }
 
 impl LambdaInvoker {
@@ -47,20 +45,20 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(&mut self, function_name: &str, lambda: F) {
+    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(&mut self, function_id: Uuid, lambda: F) {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
-        self.lambdas.insert(function_name.to_string(), invokable);
+        self.lambdas.insert(function_id, invokable);
     }
 }
 
 impl Invoker for LambdaInvoker {
     fn start(&self) {}
-    fn call(&self, function_name: &str, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
         let func = self.lambdas
-            .get(function_name)
-            .ok_or(anyhow::anyhow!("Function not found: {}", function_name))?;
+            .get(&function_id)
+            .ok_or(anyhow::anyhow!("Function not found: {}", function_id))?;
 
         (func.lambda)(context_id, inputs, outputs);
 

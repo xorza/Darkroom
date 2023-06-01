@@ -2,8 +2,9 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
+    #[default]
     None,
     Float,
     Int,
@@ -11,7 +12,7 @@ pub enum DataType {
     String,
 }
 
-impl ToString for DataType{
+impl ToString for DataType {
     fn to_string(&self) -> String {
         match self {
             DataType::Float => "float".to_string(),

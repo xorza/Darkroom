@@ -14,6 +14,8 @@ pub enum NodeBehavior {
 pub struct Node {
     self_id: Uuid,
 
+    pub function_id: Uuid,
+
     pub name: String,
     pub behavior: NodeBehavior,
     pub is_output: bool,
@@ -240,6 +242,7 @@ impl Node {
     pub fn new() -> Node {
         Node {
             self_id: Uuid::new_v4(),
+            function_id: Uuid::nil(),
             name: String::new(),
             behavior: NodeBehavior::Active,
             is_output: false,

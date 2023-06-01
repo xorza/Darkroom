@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use uuid::Uuid;
 
 use crate::graph::*;
@@ -7,7 +9,7 @@ use crate::runtime::Runtime;
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
-    fn call(&self, _: &str, _: Uuid, _: &Args, _: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, _: Uuid, _: Uuid, _: &Args, _: &mut Args) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -35,8 +37,8 @@ fn double_run() -> anyhow::Result<()> {
 
     let nodes = runtime.run(&graph, &invoker)?;
     assert!(nodes.nodes.iter().all(|node| node.has_arguments));
-    assert!(!nodes.node_by_name("val 1").unwrap().executed);
-    assert!(!nodes.node_by_name("val 2").unwrap().executed);
+    assert!(!nodes.node_by_name("val1").unwrap().executed);
+    assert!(!nodes.node_by_name("val2").unwrap().executed);
     assert!(!nodes.node_by_name("sum").unwrap().executed);
     assert!(!nodes.node_by_name("mult").unwrap().executed);
     assert!(nodes.node_by_name("print").unwrap().executed);
@@ -52,11 +54,11 @@ fn node_behavior_active_test() -> anyhow::Result<()> {
 
     runtime.run(&graph, &invoker)?;
 
-    graph.node_by_name_mut("val 2").unwrap().behavior = NodeBehavior::Active;
+    graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
     let nodes = runtime.run(&graph, &invoker)?;
     assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(!nodes.node_by_name("val 1").unwrap().executed);
-    assert!(nodes.node_by_name("val 2").unwrap().executed);
+    assert!(!nodes.node_by_name("val1").unwrap().executed);
+    assert!(nodes.node_by_name("val2").unwrap().executed);
     assert!(!nodes.node_by_name("sum").unwrap().executed);
     assert!(nodes.node_by_name("mult").unwrap().executed);
     assert!(nodes.node_by_name("print").unwrap().executed);
@@ -79,8 +81,8 @@ fn edge_behavior_once_test() -> anyhow::Result<()> {
 
     let nodes = runtime.run(&graph, &invoker)?;
     assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(!nodes.node_by_name("val 1").unwrap().executed);
-    assert!(!nodes.node_by_name("val 2").unwrap().executed);
+    assert!(!nodes.node_by_name("val1").unwrap().executed);
+    assert!(!nodes.node_by_name("val2").unwrap().executed);
     assert!(!nodes.node_by_name("sum").unwrap().executed);
     assert!(!nodes.node_by_name("mult").unwrap().executed);
     assert!(nodes.node_by_name("print").unwrap().executed);
@@ -103,8 +105,8 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
 
     let nodes = runtime.run(&graph, &invoker)?;
     assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(nodes.node_by_name("val 1").unwrap().executed);
-    assert!(!nodes.node_by_name("val 2").unwrap().executed);
+    assert!(nodes.node_by_name("val1").unwrap().executed);
+    assert!(!nodes.node_by_name("val2").unwrap().executed);
     assert!(nodes.node_by_name("sum").unwrap().executed);
     assert!(nodes.node_by_name("mult").unwrap().executed);
     assert!(nodes.node_by_name("print").unwrap().executed);
@@ -122,17 +124,17 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
 
     {
         let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val 1").unwrap().executed);
-        assert!(!nodes.node_by_name("val 2").unwrap().executed);
+        assert!(!nodes.node_by_name("val1").unwrap().executed);
+        assert!(!nodes.node_by_name("val2").unwrap().executed);
         assert!(!nodes.node_by_name("sum").unwrap().executed);
         assert!(!nodes.node_by_name("mult").unwrap().executed);
         assert!(nodes.node_by_name("print").unwrap().executed);
     }
     {
-        graph.node_by_name_mut("val 2").unwrap().behavior = NodeBehavior::Active;
+        graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
         let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val 1").unwrap().executed);
-        assert!(nodes.node_by_name("val 2").unwrap().executed);
+        assert!(!nodes.node_by_name("val1").unwrap().executed);
+        assert!(nodes.node_by_name("val2").unwrap().executed);
         assert!(!nodes.node_by_name("sum").unwrap().executed);
         assert!(nodes.node_by_name("mult").unwrap().executed);
         assert!(nodes.node_by_name("print").unwrap().executed);
@@ -143,8 +145,8 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
             .binding.as_mut().unwrap()
             .behavior = BindingBehavior::Once;
         let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val 1").unwrap().executed);
-        assert!(!nodes.node_by_name("val 2").unwrap().executed);
+        assert!(!nodes.node_by_name("val1").unwrap().executed);
+        assert!(!nodes.node_by_name("val2").unwrap().executed);
         assert!(!nodes.node_by_name("sum").unwrap().executed);
         assert!(!nodes.node_by_name("mult").unwrap().executed);
         assert!(nodes.node_by_name("print").unwrap().executed);
@@ -156,8 +158,8 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
             .behavior = BindingBehavior::Always;
         let nodes = runtime.run(&graph, &invoker)?;
         assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-        assert!(nodes.node_by_name("val 1").unwrap().executed);
-        assert!(nodes.node_by_name("val 2").unwrap().executed);
+        assert!(nodes.node_by_name("val1").unwrap().executed);
+        assert!(nodes.node_by_name("val2").unwrap().executed);
         assert!(nodes.node_by_name("sum").unwrap().executed);
         assert!(nodes.node_by_name("mult").unwrap().executed);
         assert!(nodes.node_by_name("print").unwrap().executed);
@@ -174,21 +176,27 @@ fn simple_compute_test() -> anyhow::Result<()> {
     static mut B: i64 = 5;
 
     let mut invoker = LambdaInvoker::new();
-    invoker.add_lambda("print", |_, inputs, _| unsafe {
+
+    // print func
+    invoker.add_lambda(Uuid::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, |_, inputs, _| unsafe {
         RESULT = inputs[0].as_int();
     });
-    invoker.add_lambda("val 1", |_, _, outputs| {
+    // val 1 func
+    invoker.add_lambda(Uuid::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?, |_, _, outputs| {
         outputs[0] = Value::from(unsafe { A });
     });
-    invoker.add_lambda("val 2", |_, _, outputs| {
+    // val 2 func
+    invoker.add_lambda(Uuid::from_str("a937baff-822d-48fd-9154-58751539b59b")?, |_, _, outputs| {
         outputs[0] = Value::from(unsafe { B });
     });
-    invoker.add_lambda("sum", |_, inputs, outputs| {
+    // sum func
+    invoker.add_lambda(Uuid::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?, |_, inputs, outputs| {
         let a: i64 = inputs[0].as_int();
         let b: i64 = inputs[1].as_int();
         outputs[0] = Value::from(a + b);
     });
-    invoker.add_lambda("mult", |_, inputs, outputs| {
+    // mult func
+    invoker.add_lambda(Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?, |_, inputs, outputs| {
         let a: i64 = inputs[0].as_int();
         let b: i64 = inputs[1].as_int();
         outputs[0] = Value::from(a * b);
@@ -204,7 +212,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
-    graph.node_by_name_mut("val 2").unwrap().behavior = NodeBehavior::Active;
+    graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
     compute.run(&graph, &invoker)?;
     assert_eq!(unsafe { RESULT }, 49);
 
