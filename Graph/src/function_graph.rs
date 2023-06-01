@@ -41,7 +41,6 @@ impl FunctionGraph {
         }
     }
 
-
     pub fn function_by_node_id(&self, node_id: u32) -> Option<&Function> {
         self.functions.iter().find(|func| func.self_id == node_id)
     }

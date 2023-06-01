@@ -6,14 +6,14 @@ use crate::graph::*;
 fn from_json() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
     let yaml: String = graph.to_yaml()?;
-    let graph = Graph::from_yaml(&yaml);
+    let graph = Graph::from_yaml(&yaml)?;
     black_box(graph);
 
     Ok(())
 }
 
 #[test]
-fn node_remove_test()  -> anyhow::Result<()>{
+fn node_remove_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
 
     let node_id = graph.node_by_name("sum").unwrap().id();

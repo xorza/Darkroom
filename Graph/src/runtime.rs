@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use anyhow::anyhow;
 
 use uuid::Uuid;
 
@@ -20,6 +21,7 @@ pub struct RuntimeOutput {
 #[derive(Clone)]
 pub struct RuntimeNode {
     node_id: Uuid,
+
     pub name: String,
     pub outputs: Vec<RuntimeOutput>,
 
@@ -62,19 +64,19 @@ impl Runtime {
         }
     }
 
-    pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> RuntimeInfo {
+    pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> anyhow::Result<RuntimeInfo> {
         assert!(graph.validate());
 
-        let r_inputs = self.collect_all_inputs(graph);
+        let r_inputs = self.collect_all_inputs(graph)?;
         let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
         let r_nodes = self.mark_active_and_missing_inputs(graph, r_nodes);
         let exec_order = self.create_exec_order(graph, &r_nodes);
-        
+        let runtime_info = self.execute(graph, r_nodes, exec_order, invoker);
 
-        self.execute(graph, r_nodes, exec_order, invoker)
+        Ok(runtime_info)
     }
 
-    fn collect_all_inputs(&self, graph: &Graph) -> Vec<RuntimeInput> {
+    fn collect_all_inputs(&self, graph: &Graph) -> anyhow::Result<Vec<RuntimeInput>> {
         let mut inputs_bindings
             = graph.nodes().iter()
             .filter(|node| node.is_output)
@@ -104,7 +106,7 @@ impl Runtime {
             }
 
             let mut has_missing_inputs = false;
-            let node = graph.node_by_id(node_input_binding.output_node_id).unwrap();
+            let node = graph.node_by_id(node_input_binding.output_node_id).ok_or(anyhow!("Node not found"))?;
             for (input_index, input) in node.inputs.iter().enumerate() {
                 if input.binding.is_none() {
                     has_missing_inputs |= input.is_required;
@@ -128,7 +130,7 @@ impl Runtime {
             inputs_bindings[i].has_missing_inputs = has_missing_inputs;
         }
 
-        inputs_bindings
+        Ok(inputs_bindings)
     }
     fn gather_inputs_to_runtime(&self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
         let mut r_nodes = RuntimeInfo::new();

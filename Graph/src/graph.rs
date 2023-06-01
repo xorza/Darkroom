@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -79,8 +80,11 @@ impl Graph {
         }
     }
 
-    pub fn remove_node_by_name(&mut self, name: &str) -> Result<(), ()> {
-        let node = self.nodes.iter().find(|node| node.name == name).ok_or(())?;
+    pub fn remove_node_by_name(&mut self, name: &str) -> anyhow::Result<()> {
+        let node = self.nodes
+            .iter()
+            .find(|node| node.name == name)
+            .ok_or(anyhow!("Node not found: {}", name))?;
         self.remove_node_by_id(node.self_id);
 
         Ok(())
@@ -111,7 +115,6 @@ impl Graph {
         }
         self.nodes.iter().find(|node| node.self_id == id)
     }
-
     pub fn node_by_id_mut(&mut self, id: Uuid) -> Option<&mut Node> {
         if id == Uuid::nil() {
             return None;
@@ -134,14 +137,14 @@ impl Graph {
 
         Ok(graph)
     }
-    pub fn from_yaml(yaml: &str) -> Graph {
-        let graph: Graph = serde_yaml::from_str(yaml).unwrap();
+    pub fn from_yaml(yaml: &str) -> anyhow::Result<Graph> {
+        let graph: Graph = serde_yaml::from_str(yaml)?;
 
         if !graph.validate() {
             panic!("Invalid graph");
         }
 
-        graph
+        Ok(graph)
     }
 
     pub fn validate(&self) -> bool {
@@ -166,7 +169,6 @@ impl Graph {
         true
     }
 }
-
 
 impl Node {
     pub fn new() -> Node {
