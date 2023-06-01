@@ -1,5 +1,4 @@
-#[cfg(test)]
-mod runtime_tests {
+
     use uuid::Uuid;
 
     use crate::graph::*;
@@ -206,4 +205,3 @@ mod runtime_tests {
 
         drop(graph);
     }
-}
