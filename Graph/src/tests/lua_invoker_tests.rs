@@ -60,7 +60,7 @@ fn local_data_test() {
     let test_function = lua.create_function(move |_, ()| {
         let local_data = unsafe { &*data_ptr };
 
-        return Ok(local_data.a + local_data.b);
+        Ok(local_data.a + local_data.b)
     }).unwrap();
     lua.globals().set("test_func", test_function).unwrap();
 

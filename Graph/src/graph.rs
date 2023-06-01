@@ -129,16 +129,16 @@ impl Graph {
             panic!("Invalid graph");
         }
 
-        return graph;
+        graph
     }
     pub fn from_yaml(yaml: &str) -> Graph {
-        let graph: Graph = serde_yaml::from_str(&yaml).unwrap();
+        let graph: Graph = serde_yaml::from_str(yaml).unwrap();
 
         if !graph.validate() {
             panic!("Invalid graph");
         }
 
-        return graph;
+        graph
     }
 
     pub fn validate(&self) -> bool {
@@ -160,7 +160,7 @@ impl Graph {
             }
         }
 
-        return true;
+        true
     }
 }
 

@@ -12,7 +12,7 @@ mod graph_tests {
         let device = Device::first(platform).unwrap();
         let context = Context::builder()
             .platform(platform)
-            .devices(device.clone())
+            .devices(device)
             .build()
             .unwrap();
         let queue = Queue::new(&context, device, None).unwrap();
@@ -34,7 +34,7 @@ mod graph_tests {
         let kernel = ocl::Kernel::builder()
             .name("add")
             .program(&program)
-            .queue(queue.clone())
+            .queue(queue)
             .global_work_size(vec1.len())
             .arg(&buffer_vec1)
             .arg(&buffer_vec2)

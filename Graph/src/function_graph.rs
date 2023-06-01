@@ -63,7 +63,7 @@ impl Arg {
 impl Function {
     pub fn new(self_id: u32) -> Function {
         Function {
-            self_id: self_id,
+            self_id,
             name: String::new(),
             inputs: Vec::new(),
             outputs: Vec::new(),

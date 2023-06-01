@@ -69,9 +69,9 @@ impl Runtime {
         let r_nodes = self.gather_inputs_to_runtime(graph, r_inputs);
         let r_nodes = self.mark_active_and_missing_inputs(graph, r_nodes);
         let exec_order = self.create_exec_order(graph, &r_nodes);
-        let r_nodes = self.execute(graph, r_nodes, exec_order, invoker);
+        
 
-        return r_nodes;
+        self.execute(graph, r_nodes, exec_order, invoker)
     }
 
     fn collect_all_inputs(&self, graph: &Graph) -> Vec<RuntimeInput> {
@@ -128,7 +128,7 @@ impl Runtime {
             inputs_bindings[i].has_missing_inputs = has_missing_inputs;
         }
 
-        return inputs_bindings;
+        inputs_bindings
     }
     fn gather_inputs_to_runtime(&self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
         let mut r_nodes = RuntimeInfo::new();
@@ -152,7 +152,7 @@ impl Runtime {
             let mut r_outputs: Vec<RuntimeOutput> = Vec::new();
             r_outputs.resize(node.outputs.len(), RuntimeOutput::new());
 
-            if r_outputs.len() > 0 {
+            if !r_outputs.is_empty() {
                 for edge in output_node_r_inputs.iter() {
                     let r_output = &mut r_outputs[edge.output_index as usize];
                     r_output.connection_count += 1;
@@ -177,7 +177,7 @@ impl Runtime {
             });
         }
 
-        return r_nodes;
+        r_nodes
     }
     fn mark_active_and_missing_inputs(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
         for i in 0..r_nodes.nodes.len() {
@@ -209,7 +209,7 @@ impl Runtime {
             r_nodes.nodes[i].has_missing_inputs = has_missing_inputs;
         }
 
-        return r_nodes;
+        r_nodes
     }
     fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<Uuid> {
         let mut exec_order = r_nodes.nodes.iter()
@@ -242,7 +242,7 @@ impl Runtime {
         }
 
         exec_order.reverse();
-        return exec_order;
+        exec_order
     }
     fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> RuntimeInfo {
         invoker.start();
@@ -297,7 +297,7 @@ impl Runtime {
 
         invoker.finish();
 
-        return r_nodes;
+        r_nodes
     }
 }
 

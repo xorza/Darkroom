@@ -113,7 +113,7 @@ impl Args {
             values: Vec::with_capacity(size),
         };
         result.values.resize(size, Value::Null);
-        return result;
+        result
     }
 
     fn resize(&mut self, size: usize) {
@@ -173,7 +173,7 @@ impl From<f32> for Value {
 
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
-        Value::Float(value as f64)
+        Value::Float(value)
     }
 }
 
@@ -191,9 +191,10 @@ impl From<String> for Value {
 
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
-        Value::Bool(value as bool)
+        Value::Bool(value)
     }
 }
+
 
 impl From<DataType> for Value {
     fn from(data_type: DataType) -> Self {

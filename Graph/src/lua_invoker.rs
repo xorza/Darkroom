@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
 
-use mlua::{Error, Function, Lua, Table, Variadic};
+use mlua::{Error, Function, Lua, Table, Value, Variadic};
 use uuid::Uuid;
 
 use crate::data_type::DataType;
@@ -52,14 +52,14 @@ impl LuaInvoker<'_> {
         let lua = Box::new(Lua::new());
         let lua: &'static Lua = Box::leak(lua);
 
-        let result = LuaInvoker {
+        
+
+        LuaInvoker {
             lua,
             cache: Rc::new(RefCell::new(Cache::new())),
             funcs: HashMap::new(),
             connections: Rc::new(RefCell::new(Vec::new())),
-        };
-
-        return result;
+        }
     }
 
     pub fn load_file(&mut self, file: &str) {
@@ -148,7 +148,7 @@ impl LuaInvoker<'_> {
                             mlua::Value::Integer(output_index) => {
                                 connection.inputs.push(output_index as u32);
                             }
-                            _ => { () }
+                            _ => {  }
                         }
                     }
 
@@ -162,7 +162,7 @@ impl LuaInvoker<'_> {
                     let mut connections = connections.borrow_mut();
                     connections.push(connection);
 
-                    return Ok(result);
+                    Ok(result)
                 }
             ).unwrap();
 
@@ -250,14 +250,14 @@ impl LuaInvoker<'_> {
 
         assert!(graph.validate());
 
-        return graph;
+        graph
     }
 
     pub fn get_output(&self) -> String {
         let mut cache = self.cache.borrow_mut();
         let result = cache.output_stream.join("\n");
         cache.output_stream.clear();
-        return result;
+        result
     }
     pub fn functions_info(&self) -> impl Iterator<Item=&FunctionInfo> {
         self.funcs.values().map(|f| &f.info)
@@ -292,7 +292,7 @@ impl FunctionInfo {
             function_info.outputs.push(Argument { name, data_type });
         }
 
-        return function_info;
+        function_info
     }
 
     pub fn name(&self) -> &str {
@@ -327,14 +327,14 @@ impl Invoker for LuaInvoker<'_> {
         let mut input_args: Variadic<mlua::Value> = Variadic::new();
         for (i, input) in function_info.info.inputs.iter().enumerate() {
             assert_eq!(input.data_type, inputs[i].data_type());
-            input_args.push(from_lua_value(&inputs[i], self.lua));
+            input_args.push(from_invoke_value(&inputs[i], self.lua));
         }
 
         let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args).unwrap();
 
         for (i, output) in function_info.info.outputs.iter().enumerate() {
             let output_arg = output_args.get(i).unwrap();
-            outputs[i] = from_invoke_value(output_arg);
+            outputs[i] = invoke::Value::from(output_arg);
             assert_eq!(output.data_type, outputs[i].data_type());
         }
 
@@ -343,7 +343,7 @@ impl Invoker for LuaInvoker<'_> {
     fn finish(&self) {}
 }
 
-fn from_lua_value<'lua>(value: &'lua invoke::Value, lua: &'lua Lua) -> mlua::Value<'lua> {
+fn from_invoke_value<'lua>(value: &'lua invoke::Value, lua: &'lua Lua) -> mlua::Value<'lua> {
     match value {
         invoke::Value::Null => { mlua::Value::Nil }
         invoke::Value::Float(v) => { mlua::Value::Number(*v) }
@@ -356,14 +356,16 @@ fn from_lua_value<'lua>(value: &'lua invoke::Value, lua: &'lua Lua) -> mlua::Val
     }
 }
 
-fn from_invoke_value(value: &mlua::Value) -> invoke::Value {
-    match value {
-        mlua::Value::Nil => { invoke::Value::Null }
-        mlua::Value::Boolean(v) => { (*v).into() }
-        mlua::Value::Integer(v) => { (*v).into() }
-        mlua::Value::Number(v) => { (*v).into() }
-        mlua::Value::String(v) => { v.to_str().unwrap().into() }
-        _ => { panic!("not supported") }
+impl From<&mlua::Value<'_>> for invoke::Value{
+    fn from(value: &Value) -> Self {
+        match value {
+            mlua::Value::Nil => { invoke::Value::Null }
+            mlua::Value::Boolean(v) => { (*v).into() }
+            mlua::Value::Integer(v) => { (*v).into() }
+            mlua::Value::Number(v) => { (*v).into() }
+            mlua::Value::String(v) => { v.to_str().unwrap().into() }
+            _ => { panic!("not supported") }
+        }
     }
 }
 

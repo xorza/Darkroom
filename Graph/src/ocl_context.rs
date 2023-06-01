@@ -15,7 +15,7 @@ impl OclContext {
         let device = ocl::Device::first(platform).unwrap();
         let context = ocl::Context::builder()
             .platform(platform)
-            .devices(device.clone())
+            .devices(device)
             .build()
             .unwrap();
 
@@ -32,7 +32,7 @@ impl Invoker for OclContext {
     fn start(&self) {
         let queue = ocl::Queue::new(&self.context, self.context.devices()[0], None).unwrap();
         let mut current_queue = self.current_queue.borrow_mut();
-        *current_queue = Some(queue.clone());
+        *current_queue = Some(queue);
     }
 
     fn call(&self, _function_name: &str, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) {
