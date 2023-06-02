@@ -59,22 +59,34 @@ pub struct Input {
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
-pub struct Argument {
-    pub node_id: Uuid,
-    pub arg_index: u32,
+pub struct SubArgument {
+    pub name: String,
+    pub data_type: DataType,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct SubArgumentConnection {
+    pub subargument_index: u32,
+    pub subnode_id: Uuid,
+    pub subnode_argument_index: u32,
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct SubGraph {
     self_id: Uuid,
 
+    pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<Argument>,
+    pub inputs: Vec<SubArgument>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<Argument>,
+    pub input_subnode_connections: Vec<SubArgumentConnection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<SubArgument>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_subnode_connections: Vec<SubArgumentConnection>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -83,13 +95,6 @@ pub struct Graph {
 
 
 impl Graph {
-    pub fn new() -> Graph {
-        Graph {
-            nodes: Vec::new(),
-            subgraphs: Vec::new(),
-        }
-    }
-
     pub fn nodes(&self) -> &Vec<Node> {
         &self.nodes
     }
@@ -188,16 +193,21 @@ impl Graph {
 
         for subgraph in self.subgraphs.iter() {
             for input in subgraph.inputs.iter() {
-                let node = self
-                    .node_by_id(input.node_id)
-                    .ok_or(anyhow::Error::msg("Subgraph has invalid input"))?;
-                if node.subgraph_id != Some(subgraph.self_id) {
-                    return Err(anyhow::Error::msg("Subgraph has invalid input"));
-                }
+                // todo!("validate subgraph inputs")
+                // let node = self
+                //     .node_by_id(input.node_id)
+                //     .ok_or(anyhow::Error::msg("Subgraph has invalid input"))?;
+                // if node.subgraph_id != Some(subgraph.self_id) {
+                //     return Err(anyhow::Error::msg("Subgraph has invalid input"));
+                // }
             }
         }
 
         Ok(())
+    }
+
+    pub fn subgraphs(&self) -> &Vec<SubGraph> {
+        &self.subgraphs
     }
 
     pub fn add_subgraph(&mut self, subgraph: &SubGraph) {
@@ -298,8 +308,11 @@ impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
             self_id: Uuid::new_v4(),
+            name: String::new(),
             inputs: Vec::new(),
+            input_subnode_connections: Vec::new(),
             outputs: Vec::new(),
+            output_subnode_connections: Vec::new(),
         }
     }
 

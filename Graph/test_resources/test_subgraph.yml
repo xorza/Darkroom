@@ -1,0 +1,89 @@
+subgraphs:
+  - self_id: 36fdb206-8c7e-4c15-8dc5-27215d45af2d
+    name: circle
+    inputs:
+      - name: radius
+        data_type: Float
+    input_subnode_connections:
+      - subargument_index: 0
+        subnode_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+        subnode_argument_index: 0
+      - subargument_index: 0
+        subnode_id: 81493aae-1d24-46f6-9364-c167620985ac
+        subnode_argument_index: 1
+    outputs:
+      - name: circumference
+        data_type: Float
+      - name: area
+        data_type: Float
+    output_subnode_connections:
+      - subargument_index: 0
+        subnode_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+        subnode_argument_index: 0
+      - subargument_index: 1
+        subnode_id: 81493aae-1d24-46f6-9364-c167620985ac
+        subnode_argument_index: 0
+
+nodes:
+  - self_id: 5f110618-8faa-4629-8f5d-473c236de7d1
+    function_id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
+    name: value
+    behavior: Passive
+    is_output: false
+    outputs:
+      - name: Value
+        data_type: Float
+  - self_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+    function_id: 2d3b389d-7b58-44d9-b3d1-a595765b21a5
+    subgraph_id: 36fdb206-8c7e-4c15-8dc5-27215d45af2d
+    name: circumference
+    behavior: Passive
+    is_output: false
+    inputs:
+      - name: radius
+        data_type: Float
+        is_required: true
+        binding:
+          output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
+          output_index: 0
+          behavior: Once
+    outputs:
+      - name: circumference
+        data_type: Float
+  - self_id: 81493aae-1d24-46f6-9364-c167620985ac
+    function_id: ef819c76-73e6-4f6d-8bd7-87cf1e6541cb
+    subgraph_id: 36fdb206-8c7e-4c15-8dc5-27215d45af2d
+    name: area
+    behavior: Passive
+    is_output: false
+    inputs:
+      - name: circumference
+        data_type: Float
+        is_required: true
+        binding:
+          output_node_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+          output_index: 0
+          behavior: Once
+      - name: radius
+        data_type: Float
+        is_required: true
+        binding:
+          output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
+          output_index: 0
+          behavior: Once
+    outputs:
+      - name: area
+        data_type: Float
+  - self_id: b88ab7e2-17b7-46cb-bc8e-b428bb45141e
+    function_id: f22cd316-1cdf-4a80-b86c-1277acd1408a
+    name: print
+    behavior: Passive
+    is_output: true
+    inputs:
+      - name: message
+        data_type: Float
+        is_required: true
+        binding:
+          output_node_id: 81493aae-1d24-46f6-9364-c167620985ac
+          output_index: 0
+          behavior: Always

@@ -191,7 +191,7 @@ impl LuaInvoker {
         }
     }
     fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
-        let mut graph = Graph::new();
+        let mut graph = Graph::default();
 
         struct OutputAddr {
             index: u32,
