@@ -105,12 +105,14 @@ impl LuaInvoker {
         let functions_table: Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
             let function_info = FunctionInfo::from(&function_table)?;
-            let function: Function = function_table.get("func").unwrap();
-            self.funcs.insert(function_info.id,
-                              LuaFuncInfo {
-                                  info: function_info,
-                                  lua_func: function,
-                              },
+            let function: Function = self.lua.globals().get(function_info.name.as_str())?;
+
+            self.funcs.insert(
+                function_info.id,
+                LuaFuncInfo {
+                    info: function_info,
+                    lua_func: function,
+                },
             );
         }
 
