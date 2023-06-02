@@ -4,25 +4,22 @@ subgraphs:
     inputs:
       - name: radius
         data_type: Float
-    input_subnode_connections:
-      - subargument_index: 0
+    subnode_input_connections:
+      - subinput_index: 0
         subnode_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
-        subnode_argument_index: 0
-      - subargument_index: 0
+        subnode_input_index: 0
+      - subinput_index: 0
         subnode_id: 81493aae-1d24-46f6-9364-c167620985ac
-        subnode_argument_index: 1
+        subnode_input_index: 1
     outputs:
       - name: circumference
         data_type: Float
+        subnode_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
+        subnode_output_index: 0
       - name: area
         data_type: Float
-    output_subnode_connections:
-      - subargument_index: 0
-        subnode_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
-        subnode_argument_index: 0
-      - subargument_index: 1
         subnode_id: 81493aae-1d24-46f6-9364-c167620985ac
-        subnode_argument_index: 0
+        subnode_output_index: 0
 
 nodes:
   - self_id: 5f110618-8faa-4629-8f5d-473c236de7d1

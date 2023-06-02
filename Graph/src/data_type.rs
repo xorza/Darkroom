@@ -12,6 +12,15 @@ pub enum DataType {
     String,
 }
 
+impl DataType {
+    pub fn can_assign(from: &DataType, to: &DataType) -> bool {
+        assert_ne!(from, &DataType::None);
+        assert_ne!(to, &DataType::None);
+        
+        from == to
+    }
+}
+
 impl ToString for DataType {
     fn to_string(&self) -> String {
         match self {

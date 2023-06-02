@@ -58,32 +58,38 @@ pub struct Input {
     pub binding: Option<Binding>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubArgument {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SubInput {
     pub name: String,
     pub data_type: DataType,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubArgumentConnection {
-    pub subargument_index: u32,
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SubInputConnection {
+    pub subinput_index: u32,
     pub subnode_id: Uuid,
-    pub subnode_argument_index: u32,
+    pub subnode_input_index: u32,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SubOutput {
+    pub name: String,
+    pub data_type: DataType,
+    pub subnode_id: Uuid,
+    pub subnode_output_index: u32,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SubGraph {
     self_id: Uuid,
 
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<SubArgument>,
+    pub inputs: Vec<SubInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub input_subnode_connections: Vec<SubArgumentConnection>,
+    pub subnode_input_connections: Vec<SubInputConnection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<SubArgument>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub output_subnode_connections: Vec<SubArgumentConnection>,
+    pub outputs: Vec<SubOutput>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -174,32 +180,60 @@ impl Graph {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
-            if let Some(subgraph_id) = node.subgraph_id {
-                self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
-            }
-
             if node.self_id == Uuid::nil() {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
 
+            // validate node has a valid subgraph
+            if let Some(subgraph_id) = node.subgraph_id {
+                self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
+            }
+
+            // validate node has valid bindings
             for input in node.inputs.iter() {
                 if let Some(binding) = &input.binding {
                     if self.node_by_id(binding.output_node_id).is_none() {
-                        return Err(anyhow::Error::msg("Node has invalid binding"));
+                        return Err(anyhow::Error::msg("Node input connected to a non-existent node"));
                     }
                 }
             }
         }
 
         for subgraph in self.subgraphs.iter() {
-            for input in subgraph.inputs.iter() {
-                // todo!("validate subgraph inputs")
-                // let node = self
-                //     .node_by_id(input.node_id)
-                //     .ok_or(anyhow::Error::msg("Subgraph has invalid input"))?;
-                // if node.subgraph_id != Some(subgraph.self_id) {
-                //     return Err(anyhow::Error::msg("Subgraph has invalid input"));
-                // }
+            // validate all subgraph inputs are connected
+            for (i, _input) in subgraph.inputs.iter().enumerate() {
+                if !subgraph.subnode_input_connections.iter()
+                    .any(|c| c.subinput_index == i as u32) {
+                    return Err(anyhow::Error::msg("Input is not connected"));
+                }
+            }
+
+            for input_connection in subgraph.subnode_input_connections.iter() {
+                let node = self.node_by_id(input_connection.subnode_id)
+                    .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent node"))?;
+                if node.subgraph_id != Some(subgraph.self_id) {
+                    return Err(anyhow::Error::msg("Subgraph input connected to an external node"));
+                }
+                let input = node.inputs.get(input_connection.subnode_input_index as usize)
+                    .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent input"))?;
+                let subinput = &subgraph.inputs[input_connection.subinput_index as usize];
+                if !DataType::can_assign(&subinput.data_type, &input.data_type) {
+                    return Err(anyhow::Error::msg("Subgraph input connected to a node input with an incompatible data type"));
+                }
+            }
+
+            for suboutput in subgraph.outputs.iter() {
+                let node = self.node_by_id(suboutput.subnode_id)
+                    .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent node"))?;
+                if node.subgraph_id != Some(subgraph.self_id) {
+                    return Err(anyhow::Error::msg("Subgraph output connected to an external node"));
+                }
+
+                let output = node.outputs.get(suboutput.subnode_output_index as usize)
+                    .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent output"))?;
+                if !DataType::can_assign(&suboutput.data_type, &output.data_type) {
+                    return Err(anyhow::Error::msg("Subgraph output connected to a node output with an incompatible data type"));
+                }
             }
         }
 
@@ -310,9 +344,8 @@ impl SubGraph {
             self_id: Uuid::new_v4(),
             name: String::new(),
             inputs: Vec::new(),
-            input_subnode_connections: Vec::new(),
+            subnode_input_connections: Vec::new(),
             outputs: Vec::new(),
-            output_subnode_connections: Vec::new(),
         }
     }
 
