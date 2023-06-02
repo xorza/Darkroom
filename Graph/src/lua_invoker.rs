@@ -29,9 +29,9 @@ struct Cache {
     output_stream: Vec<String>,
 }
 
-struct LuaFuncInfo<'lua> {
+struct LuaFuncInfo {
     info: FunctionInfo,
-    lua_func: Function<'lua>,
+    lua_func: Function<'static>,
 }
 
 #[derive(Clone)]
@@ -41,14 +41,14 @@ struct FuncConnections {
     outputs: Vec<u32>,
 }
 
-pub struct LuaInvoker<'lua> {
+pub struct LuaInvoker {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache>>,
-    funcs: HashMap<Uuid, LuaFuncInfo<'lua>>,
+    funcs: HashMap<Uuid, LuaFuncInfo>,
 }
 
-impl LuaInvoker<'_> {
-    pub fn new<'lua>() -> LuaInvoker<'lua> {
+impl LuaInvoker {
+    pub fn new<'lua>() -> LuaInvoker {
         let lua = Box::new(Lua::new());
         let lua: &'static Lua = Box::leak(lua);
 
@@ -126,7 +126,7 @@ impl LuaInvoker<'_> {
         let graph_function: Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
 
-        let graph = self.create_graph(&connections);
+        let graph = self.create_graph(connections);
 
         Ok(graph)
     }
@@ -189,7 +189,7 @@ impl LuaInvoker<'_> {
             ).unwrap();
         }
     }
-    fn create_graph(&self, connections: &Vec<FuncConnections>) -> Graph {
+    fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
         let mut graph = Graph::new();
 
         struct OutputAddr {
@@ -205,10 +205,10 @@ impl LuaInvoker<'_> {
                 .find(|(_, func)| func.info.name == connection.name)
                 .unwrap()
                 .1.info;
-            let mut node = Node::new();
-            node.name = function.name.clone();
-            graph.add_node(&node); //to get node.id
+            nodes.push(Node::new());
+            let node = nodes.last_mut().unwrap();
 
+            node.name = function.name.clone();
 
             for (i, _input_id) in connection.inputs.iter().enumerate() {
                 let input = function.inputs.get(i).unwrap();
@@ -232,27 +232,21 @@ impl LuaInvoker<'_> {
                     node_id: node.id(),
                 });
             }
-
-            graph.add_node(&node); //to update its state with the same id
-            nodes.push(node);
         }
 
-        for (i, connection) in connections.iter().enumerate() {
-            let node = &mut nodes[i];
+        while let Some(connection) = connections.pop() {
+            let mut node = nodes.pop().unwrap();
 
-            for (i, output_id) in connection.inputs.iter().enumerate() {
-                let input = &mut node.inputs[i];
+            for (input_index, output_id) in connection.inputs.iter().enumerate() {
+                let input = &mut node.inputs[input_index];
                 let output_addr = output_ids.get(output_id).unwrap();
                 let binding = Binding::new(output_addr.node_id, output_addr.index);
 
                 input.binding = Some(binding);
             }
 
-            graph.add_node(node); //to update its state with the same id
+            graph.add_node(node);
         }
-
-        drop(nodes);
-        drop(output_ids);
 
         assert!(graph.validate().is_ok());
 
@@ -316,7 +310,7 @@ impl FunctionInfo {
     }
 }
 
-impl Drop for LuaInvoker<'_> {
+impl Drop for LuaInvoker {
     fn drop(&mut self) {
         self.funcs.clear();
 
@@ -327,7 +321,7 @@ impl Drop for LuaInvoker<'_> {
     }
 }
 
-impl Invoker for LuaInvoker<'_> {
+impl Invoker for LuaInvoker {
     fn start(&self) {}
     fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
         self.lua.globals().set("context_id", context_id.to_string())?;

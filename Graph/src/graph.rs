@@ -97,10 +97,10 @@ impl Graph {
         self.nodes.iter_mut().collect()
     }
 
-    pub fn add_node(&mut self, node: &Node) {
+    pub fn add_node(&mut self, node: Node) {
         match self.nodes.iter().position(|n| n.self_id == node.self_id) {
-            Some(index) => self.nodes[index] = node.clone(),
-            None => self.nodes.push(node.clone()),
+            Some(index) => self.nodes[index] = node,
+            None => self.nodes.push(node),
         }
     }
     pub fn remove_node_by_id(&mut self, id: Uuid) {
