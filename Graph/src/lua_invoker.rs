@@ -48,10 +48,9 @@ pub struct LuaInvoker {
 }
 
 impl LuaInvoker {
-    pub fn new<'lua>() -> LuaInvoker {
+    pub fn new() -> LuaInvoker {
         let lua = Box::new(Lua::new());
         let lua: &'static Lua = Box::leak(lua);
-
 
         LuaInvoker {
             lua,
@@ -103,7 +102,7 @@ impl LuaInvoker {
         Ok(())
     }
     fn read_function_info(&mut self) -> anyhow::Result<()> {
-        let functions_table: Table = self.lua.globals().get("functions").unwrap();
+        let functions_table: Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
             let function_info = FunctionInfo::from(&function_table)?;
             let function: Function = function_table.get("func").unwrap();
