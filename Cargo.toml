@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "Graph",
+    "Editor",
+]
+resolver = "2"

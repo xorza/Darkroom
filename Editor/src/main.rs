@@ -1,12 +1,7 @@
 use iced::{Alignment, Element, Length, Sandbox, Settings};
 use iced::widget::{button, column, text};
 
-use graph::lua_invoker::LuaInvoker;
-
 pub fn main() -> iced::Result {
-    let invoker = LuaInvoker::new();
-    drop(invoker);
-
     Example::run(Settings {
         antialiasing: true,
         ..Settings::default()
