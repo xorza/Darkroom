@@ -32,4 +32,4 @@ jobs:
         run: cargo build --verbose --no-default-features --features ""
 
       - name: Run tests
-        run: cd ./Graph && cargo test --verbose --no-default-features --features ""
+        run: cargo test --verbose --no-default-features --features ""
