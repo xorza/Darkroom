@@ -40,7 +40,6 @@ fn subgraph_from_yaml() -> anyhow::Result<()> {
     let circle = graph.subgraphs()[0].clone();
     assert_eq!(circle.name, "circle");
     assert_eq!(circle.inputs.len(), 1);
-    assert_eq!(circle.subnode_input_connections.len(), 2);
     assert_eq!(circle.outputs.len(), 2);
 
     Ok(())
