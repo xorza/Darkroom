@@ -4,7 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Nodeshop GUI App"
 
+[features]
+default = ["opencl"]
+opencl = ["graph/opencl"]
 
 [dependencies]
-graph = { path = "../Graph" }
+graph = { path = "../Graph", default-features = false }
 iced = { version = "0.9.0", features = ["canvas"] }
