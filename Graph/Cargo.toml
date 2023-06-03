@@ -5,7 +5,7 @@ edition = "2021"
 description = "A graph library for Nodeshop"
 
 [features]
-default = ["opencl"]
+default = []
 opencl = ["ocl"]
 
 [dependencies]
