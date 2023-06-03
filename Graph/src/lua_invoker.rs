@@ -25,6 +25,7 @@ pub struct FunctionInfo {
     outputs: Vec<Argument>,
 }
 
+#[derive(Default)]
 struct Cache {
     output_stream: Vec<String>,
 }
@@ -47,18 +48,20 @@ pub struct LuaInvoker {
     funcs: HashMap<Uuid, LuaFuncInfo>,
 }
 
-impl LuaInvoker {
-    pub fn new() -> LuaInvoker {
+impl Default for LuaInvoker {
+    fn default() -> Self {
         let lua = Box::new(Lua::new());
         let lua: &'static Lua = Box::leak(lua);
 
         LuaInvoker {
             lua,
-            cache: Rc::new(RefCell::new(Cache::new())),
+            cache: Rc::new(RefCell::new(Cache::default())),
             funcs: HashMap::new(),
         }
     }
+}
 
+impl LuaInvoker {
     pub fn load_file(&mut self, file: &str) -> anyhow::Result<()> {
         let script = std::fs::read_to_string(file)?;
         self.load(&script)?;
@@ -379,14 +382,6 @@ impl From<&mlua::Value<'_>> for invoke::Value {
             mlua::Value::Number(v) => { (*v).into() }
             mlua::Value::String(v) => { v.to_str().unwrap().into() }
             _ => { panic!("not supported") }
-        }
-    }
-}
-
-impl Cache {
-    pub fn new() -> Cache {
-        Cache {
-            output_stream: Vec::new(),
         }
     }
 }

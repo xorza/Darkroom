@@ -8,11 +8,12 @@ use crate::common::is_debug;
 use crate::graph::*;
 use crate::invoke::{Args, Invoker, Value};
 
+#[derive(Default)]
 pub struct Runtime {
     arg_cache: HashMap<Uuid, ArgSet>,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 pub struct RuntimeOutput {
     connection_count: u32,
     behavior: BindingBehavior,
@@ -36,7 +37,7 @@ pub struct RuntimeNode {
     pub run_time: f64,
 }
 
-#[derive(Clone)]
+#[derive(Default, Clone)]
 struct RuntimeInput {
     output_node_id: Uuid,
     output_index: u32,
@@ -47,23 +48,19 @@ struct RuntimeInput {
     is_output: bool,
 }
 
+#[derive(Default)]
 struct ArgSet {
     inputs: Args,
     outputs: Args,
     node_id: Uuid,
 }
 
+#[derive(Default)]
 pub struct RuntimeInfo {
     pub nodes: Vec<RuntimeNode>,
 }
 
 impl Runtime {
-    pub fn new() -> Runtime {
-        Runtime {
-            arg_cache: HashMap::new(),
-        }
-    }
-
     pub fn run(&mut self, graph: &Graph, invoker: &dyn Invoker) -> anyhow::Result<RuntimeInfo> {
         assert!(graph.validate().is_ok());
 
@@ -133,7 +130,7 @@ impl Runtime {
         Ok(inputs_bindings)
     }
     fn gather_inputs_to_runtime(&self, graph: &Graph, r_inputs: Vec<RuntimeInput>) -> RuntimeInfo {
-        let mut r_nodes = RuntimeInfo::new();
+        let mut r_nodes = RuntimeInfo::default();
         let mut node_ids: HashSet<Uuid> = HashSet::new();
 
         for r_input in r_inputs.iter().rev() {
@@ -249,9 +246,7 @@ impl Runtime {
     fn execute(&mut self, graph: &Graph, mut r_nodes: RuntimeInfo, order: Vec<Uuid>, invoker: &dyn Invoker) -> anyhow::Result<RuntimeInfo> {
         invoker.start();
 
-        let mut execution_index: u32 = 0;
-
-        for i in 0..order.len() {
+        for (execution_index, i) in (0_u32..).zip(0..order.len()) {
             let node_id = order[i];
             let node = graph.node_by_id(node_id).unwrap();
 
@@ -292,7 +287,6 @@ impl Runtime {
             rnode.has_arguments = true;
             rnode.execution_index = execution_index;
             rnode.executed = true;
-            execution_index += 1;
 
             self.arg_cache.insert(node_id, input_args);
         }
@@ -328,19 +322,13 @@ impl ArgSet {
 impl RuntimeOutput {
     pub fn new() -> RuntimeOutput {
         RuntimeOutput {
-            connection_count: 0,
             behavior: BindingBehavior::Once,
+            ..Self::default()
         }
     }
 }
 
 impl RuntimeInfo {
-    fn new() -> RuntimeInfo {
-        RuntimeInfo {
-            nodes: Vec::new(),
-        }
-    }
-
     pub fn node_by_name(&self, name: &str) -> Option<&RuntimeNode> {
         self.nodes.iter().find(|node| node.name == name)
     }

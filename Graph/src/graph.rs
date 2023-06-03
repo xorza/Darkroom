@@ -281,11 +281,11 @@ impl Node {
         Node {
             self_id: Uuid::new_v4(),
             function_id: Uuid::nil(),
-            name: String::new(),
-            behavior: NodeBehavior::Active,
+            name: "".to_string(),
+            behavior:  NodeBehavior::Active,
             is_output: false,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            inputs: vec![],
+            outputs: vec![],
             subgraph_id: None,
         }
     }
@@ -303,9 +303,9 @@ impl Binding {
         self.output_index
     }
 
-    pub fn new(node_id: Uuid, output_index: u32) -> Binding {
+    pub fn new(output_node_id: Uuid, output_index: u32) -> Binding {
         Binding {
-            output_node_id: node_id,
+            output_node_id,
             output_index,
             behavior: BindingBehavior::Always,
         }
@@ -316,7 +316,7 @@ impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
             self_id: Uuid::new_v4(),
-            name: String::new(),
+            name: String::default(),
             inputs: Vec::new(),
             outputs: Vec::new(),
         }

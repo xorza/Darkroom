@@ -65,7 +65,7 @@ fn local_data_test() {
 
 #[test]
 fn load_functions_from_lua_file() -> anyhow::Result<()> {
-    let mut invoker = LuaInvoker::new();
+    let mut invoker = LuaInvoker::default();
     invoker.load_file("./test_resources/test_lua.lua")?;
 
     let funcs = invoker.functions_info();

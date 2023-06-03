@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::data_type::*;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Arg {
     pub name: String,
     pub data_type: DataType,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Function {
     self_id: u32,
     pub name: String,
@@ -16,19 +16,12 @@ pub struct Function {
     pub outputs: Vec<Arg>,
 }
 
-
-#[derive(Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct FunctionGraph {
     functions: Vec<Function>,
 }
 
 impl FunctionGraph {
-    pub fn new() -> FunctionGraph {
-        FunctionGraph {
-            functions: Vec::new(),
-        }
-    }
-
     pub fn functions(&self) -> &Vec<Function> {
         &self.functions
     }
@@ -49,23 +42,11 @@ impl FunctionGraph {
     }
 }
 
-
-impl Arg {
-    pub fn new() -> Arg {
-        Arg {
-            name: String::new(),
-            data_type: DataType::None,
-        }
-    }
-}
-
 impl Function {
     pub fn new(self_id: u32) -> Function {
         Function {
             self_id,
-            name: String::new(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+            ..Self::default()
         }
     }
 
