@@ -9,5 +9,5 @@ default = ["opencl"]
 opencl = ["graph/opencl"]
 
 [dependencies]
-graph = { path = "../Graph", default-features = false }
+graph = { path = "../Graph" }
 iced = { version = "0.9.0", features = ["canvas"] }
