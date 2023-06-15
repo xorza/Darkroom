@@ -9,12 +9,14 @@ set(CMAKE_AUTOMOC ON) # For meta-object compilation (moc)
 set(CMAKE_AUTOUIC ON) # For user interface files compilation (uic)
 set(CMAKE_AUTORCC ON) # For resource files compilation (rcc)
 set(CMAKE_PREFIX_PATH "~/Qt/6.5.1/macos/lib/cmake/")
-find_package(Qt6 COMPONENTS Core Quick Gui Qml REQUIRED)
+find_package(Qt6 COMPONENTS Core Quick Qml REQUIRED)
 
 
 file(GLOB_RECURSE PROJECT_SOURCES ${CMAKE_SOURCE_DIR}/src/*.cpp)
 add_executable(editor ${PROJECT_SOURCES} qml.qrc)
-target_link_libraries(editor Qt6::Core Qt6::Quick Qt6::Gui Qt6::Qml)
+
+
+target_link_libraries(editor Qt6::Core Qt6::Quick Qt6::Qml)
 
 
 set(GRAPH_LIB_NAME graph)

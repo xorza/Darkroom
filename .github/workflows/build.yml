@@ -31,8 +31,11 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
-      - name: Build
-        run: cd graph && cargo build --verbose
+      - name: Build graph
+        run: cargo build --manifest-path=Graph/Cargo.toml --verbose
 
-      - name: Run tests
-        run: cd graph && cargo test --verbose
+      - name: Run graph tests
+        run: cargo test --manifest-path=Graph/Cargo.toml --verbose
+
+      - name: Build editor
+        run: cmake -S ./Editor -B ./Editor/build && cmake --build ./Editor/build
