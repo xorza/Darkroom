@@ -5,7 +5,7 @@ edition = "2021"
 description = "A graph library for Nodeshop"
 
 [lib]
-name = "graph_lib"
+name = "graph"
 crate-type = ["cdylib"]
 
 [features]
