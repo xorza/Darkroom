@@ -4,6 +4,10 @@ version = "0.1.1"
 edition = "2021"
 description = "A graph library for Nodeshop"
 
+[lib]
+name = "graph_lib"
+crate-type = ["cdylib"]
+
 [features]
 default = []
 opencl = ["ocl"]

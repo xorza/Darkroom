@@ -2,6 +2,9 @@
 mod graph_tests {
     use ocl::{Buffer, Context, Device, Platform, Queue};
 
+    use crate::invoke::Invoker;
+    use crate::ocl_context::OclContext;
+
     #[test]
     fn it_works() -> anyhow::Result<()> {
         let vec1 = vec![1.0, 2.0, -4.0, 4.0, 5.0];
@@ -56,6 +59,17 @@ mod graph_tests {
         for (i, v) in vec3.iter().cloned().enumerate() {
             assert_eq!(v, 6.0, "The value of vec3[{}] is not equal to 6.0", i);
         }
+
+        Ok(())
+    }
+
+
+    #[test]
+    fn ocl_context() -> anyhow::Result<()> {
+        let ocl = OclContext::new()?;
+        ocl.start();
+
+        ocl.finish();
 
         Ok(())
     }

@@ -24,7 +24,6 @@ impl OclContext {
         })
     }
 
-    pub fn start_queue(&mut self) {}
 }
 
 impl Invoker for OclContext {
