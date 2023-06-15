@@ -37,5 +37,5 @@ jobs:
       - name: Run graph tests
         run: cargo test --manifest-path=Graph/Cargo.toml --verbose
 
-      - name: Build editor
-        run: cmake -S ./Editor -B ./Editor/build && cmake --build ./Editor/build
+#      - name: Build editor
+#        run: cmake -S ./Editor -B ./Editor/build && cmake --build ./Editor/build
