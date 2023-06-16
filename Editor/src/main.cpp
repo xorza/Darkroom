@@ -5,7 +5,11 @@
 
 #include "Counter.h"
 
+import test_module;
+
 int main(int argc, char *argv[]) {
+    test();
+
     QGuiApplication app(argc, argv);
 
     Counter counter;
