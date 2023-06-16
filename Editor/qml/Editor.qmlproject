@@ -1,11 +1,11 @@
 import QmlProject
 
 Project {
-    mainFile: "qml/main.qml"
-    mainUiFile: "qml/main.qml"
+    mainFile: "./main.qml"
+    mainUiFile: "./main.qml"
 
     QmlFiles {
-        directory: "qml"
+        directory: "."
     }
 
     QmlFiles {
