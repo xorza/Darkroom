@@ -20,5 +20,10 @@ Rectangle {
         }
     }
 
+    Node {
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.horizontalCenter: parent.horizontalCenter
+    }
+
 }
 

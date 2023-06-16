@@ -1,8 +1,8 @@
 import QmlProject
 
 Project {
-    mainFile: "./main.qml"
-    mainUiFile: "./main.qml"
+    mainFile: "./Main.qml"
+    mainUiFile: "./Main.qml"
 
     QmlFiles {
         directory: "."
