@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
+        <file>qml/qmldir</file>
         <file>qml/Window.qml</file>
         <file>qml/Main.qml</file>
         <file>qml/Constants.qml</file>

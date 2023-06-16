@@ -2,10 +2,12 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
+import "."
+
 Rectangle {
     color: Constants.backgroundColor
 
-    RowLayout {
+    Row {
         Button {
             id: button
             text: "Increment"
@@ -14,7 +16,7 @@ Rectangle {
 
         Label {
             text: "Count: " + counter.count
-            Layout.alignment: Qt.AlignVCenter
+            anchors.verticalCenter: parent.verticalCenter
         }
     }
 

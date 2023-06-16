@@ -6,6 +6,6 @@ QtObject {
     readonly property int width: 800
     readonly property int height: 600
 
-    readonly property color backgroundColor: "#000000"
+    readonly property color backgroundColor: "#303030"
 
 }
