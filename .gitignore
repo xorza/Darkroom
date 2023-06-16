@@ -12,3 +12,6 @@
 **/.idea/dataSources.local.xml
 **/.idea/.name
 **/.idea/misc.xml
+
+
+*.qmlproject.qtds

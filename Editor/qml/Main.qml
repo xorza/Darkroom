@@ -6,6 +6,7 @@ Item {
 
     RowLayout {
         Button {
+            id: button
             text: "Increment"
             onClicked: counter.increment()
         }
