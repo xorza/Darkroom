@@ -1,6 +1,6 @@
 #include <string>
 
-#include "graph.hpp"
+#include "graph_c_api.hpp"
 
 
 extern "C" {
@@ -38,7 +38,7 @@ namespace graph_c_api {
         c_graph_deinit();
     }
 
-    std::vector<FunctionInfo> get_functions_info() {
+    std::vector<FunctionInfo> get_functions() {
         C_FunctionInfoArray const *const funcs = c_graph_get_functions();
 
         std::vector<FunctionInfo> result{};

@@ -3,29 +3,16 @@
 #include <QQmlContext>
 #include <QtQuick>
 
-#include "graph.hpp"
-
-void init() {
-    graph_c_api::init();
-
-    auto funcs = graph_c_api::get_functions_info();
-
-}
-
-void deinit() {
-    graph_c_api::deinit();
-}
+#include "app_model.hpp"
 
 int main(int argc, char *argv[]) {
-    init();
-
     QGuiApplication app(argc, argv);
     QQmlApplicationEngine engine;
     engine.load("qrc:/qml/Window.qml");
-//    engine.rootContext()->setContextProperty("counter", &counter);
+
+    AppModel app_model{};
+    engine.rootContext()->setContextProperty("counter", &app_model);
+
     int result = QGuiApplication::exec();
-
-    deinit();
-
     return result;
 }

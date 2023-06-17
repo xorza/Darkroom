@@ -4,6 +4,7 @@
 #include <uuid/uuid.h>
 
 namespace graph_c_api {
+
     struct ArgInfo {
         std::string m_name;
         int32_t m_type;
@@ -16,9 +17,10 @@ namespace graph_c_api {
         std::vector<ArgInfo> m_outputs;
     };
 
+
     void init();
 
     void deinit();
 
-    std::vector<FunctionInfo> get_functions_info();
+    std::vector<FunctionInfo> get_functions();
 }
