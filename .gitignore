@@ -1,17 +1,5 @@
 **/target/
-
 **/cmake-build-*/
-
-**/.idea/workspace.xml
-**/.idea/tasks.xml
-**/.idea/usage.statistics.xml
-**/.idea/dictionaries
-**/.idea/shelf
-**/.idea/httpRequests/
-**/.idea/dataSources/
-**/.idea/dataSources.local.xml
-**/.idea/.name
-**/.idea/misc.xml
-
+**/.idea/
 
 *.qmlproject.qtds

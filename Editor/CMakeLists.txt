@@ -5,10 +5,10 @@ set(CMAKE_CXX_STANDARD 23)
 
 
 # Enable modules
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API 2182bf5c-ef0d-489a-91da-49dbc3090d2a)
-set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP 1)
+#set(CMAKE_CXX_STANDARD_REQUIRED ON)
+#set(CMAKE_CXX_EXTENSIONS OFF)
+#set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API 2182bf5c-ef0d-489a-91da-49dbc3090d2a)
+#set(CMAKE_EXPERIMENTAL_CXX_MODULE_DYNDEP 1)
 
 
 # Qt6 setup
@@ -25,14 +25,19 @@ add_executable(${PROJECT_NAME})
 target_link_libraries(${PROJECT_NAME} Qt6::Core Qt6::Quick Qt6::Qml)
 
 
-file(GLOB_RECURSE PROJECT_MODULES ${CMAKE_SOURCE_DIR}/src/*.cxx)
-target_sources(
-        ${PROJECT_NAME} PRIVATE
-        FILE_SET cxx_modules TYPE CXX_MODULES FILES
-        ${PROJECT_MODULES}
-)
+#file(GLOB_RECURSE PROJECT_MODULES ${CMAKE_SOURCE_DIR}/src/*.cxx)
+#target_sources(
+#        ${PROJECT_NAME} PRIVATE
+#        FILE_SET cxx_modules TYPE CXX_MODULES FILES
+#        ${PROJECT_MODULES}
+#)
 file(GLOB_RECURSE PROJECT_SOURCES ${CMAKE_SOURCE_DIR}/src/*.cpp)
 target_sources(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCES})
+target_include_directories(
+        ${PROJECT_NAME}
+        PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/
+)
 target_sources(${PROJECT_NAME} PRIVATE qml.qrc)
 
 

@@ -7,19 +7,6 @@ import "."
 Rectangle {
     color: Constants.backgroundColor
 
-    Row {
-        Button {
-            id: button
-            text: "Increment"
-            onClicked: counter.increment()
-        }
-
-        Label {
-            text: "Count: " + counter.count
-            anchors.verticalCenter: parent.verticalCenter
-        }
-    }
-
     Node {
         anchors.verticalCenter: parent.verticalCenter
         anchors.horizontalCenter: parent.horizontalCenter

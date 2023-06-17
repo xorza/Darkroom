@@ -3,20 +3,29 @@
 #include <QQmlContext>
 #include <QtQuick>
 
-#include "Counter.h"
+#include "graph.hpp"
 
-import graph;
+void init() {
+    graph_c_api::init();
+
+    auto funcs = graph_c_api::get_functions_info();
+
+}
+
+void deinit() {
+    graph_c_api::deinit();
+}
 
 int main(int argc, char *argv[]) {
-    Graph graph{};
+    init();
 
     QGuiApplication app(argc, argv);
-
-    Counter counter;
-
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("counter", &counter);
     engine.load("qrc:/qml/Window.qml");
+//    engine.rootContext()->setContextProperty("counter", &counter);
+    int result = QGuiApplication::exec();
 
-    return QGuiApplication::exec();
+    deinit();
+
+    return result;
 }
