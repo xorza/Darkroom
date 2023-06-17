@@ -24,8 +24,7 @@ public:
             QObject *parent
     ) : QObject(parent), m_name(std::move(name)), m_type(type) {}
 
-    QString name() const { return m_name; }
-
+    [[nodiscard]] const QString &name() const { return m_name; }
     int type() const { return m_type; }
 
 private:
@@ -53,14 +52,10 @@ public:
             QObject *parent
     );
 
-    const QString &name() const { return m_name; }
-
-    const QUuid &uuid() const { return m_uuid; }
-
+    [[nodiscard]] const QString &name() const { return m_name; }
+    [[nodiscard]] const QUuid &uuid() const { return m_uuid; }
     [[nodiscard]] const QList<QmlArgInfo *> &inputs() const { return m_inputs; }
-
     [[nodiscard]] const QList<QmlArgInfo *> &outputs() const { return m_outputs; }
-
 
 private:
     QString m_name;

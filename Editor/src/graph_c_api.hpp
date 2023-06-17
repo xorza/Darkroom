@@ -19,7 +19,6 @@ namespace graph_c_api {
 
 
     void init();
-
     void deinit();
 
     std::vector<FunctionInfo> get_functions();
