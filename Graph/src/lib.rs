@@ -9,7 +9,7 @@ pub mod ocl_context;
 pub mod common;
 pub mod runtime;
 pub mod graph;
-pub mod function_graph;
+pub mod functions;
 pub mod invoke;
 pub mod lua_invoker;
 pub mod data_type;

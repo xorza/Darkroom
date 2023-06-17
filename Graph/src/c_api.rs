@@ -3,6 +3,7 @@ use crate::graph::Graph;
 #[no_mangle]
 pub extern "C" fn graph_new() -> *mut Graph {
     let graph = Graph::default();
+
     Box::into_raw(Box::new(graph))
 }
 

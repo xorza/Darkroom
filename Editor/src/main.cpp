@@ -5,10 +5,10 @@
 
 #include "Counter.h"
 
-import test_module;
+import graph;
 
 int main(int argc, char *argv[]) {
-    test();
+    Graph graph{};
 
     QGuiApplication app(argc, argv);
 
