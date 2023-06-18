@@ -3,3 +3,5 @@
 **/.idea/
 
 *.qmlproject.qtds
+*.qmlproject.user
+**/xcuserdata/

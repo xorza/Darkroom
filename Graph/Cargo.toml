@@ -6,7 +6,7 @@ description = "A graph library for Nodeshop"
 
 [lib]
 name = "graph"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib", "staticlib"]
 
 [features]
 default = []
