@@ -7,10 +7,27 @@ import "."
 Rectangle {
     color: Constants.backgroundColor
 
-    Node {
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.horizontalCenter: parent.horizontalCenter
-    }
+    ColumnLayout {
+        width: parent.width
 
+        ListView {
+            id: functionListView
+            width: 250
+            height: contentHeight
+
+            model: app_model.functions
+
+            delegate: Item {
+                width: functionNode.width + Constants.defaultMargin
+                height: functionNode.height + Constants.defaultMargin
+
+                Node {
+                    id: functionNode
+                    anchors.centerIn: parent
+                    func: modelData
+                }
+            }
+        }
+    }
 }
 

@@ -6,6 +6,7 @@
 #include <QVariant>
 #include <utility>
 
+
 namespace graph_c_api {
     struct FunctionInfo;
 }

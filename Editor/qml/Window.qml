@@ -4,9 +4,9 @@ import QtQuick.Layouts
 
 ApplicationWindow {
     visible: true
-    width: 640
-    height: 480
-    title: qsTr("Nodeshop")
+    width: 600
+    height: 600
+    title: "Nodeshop"
 
     Main {
         anchors.fill: parent

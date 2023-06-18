@@ -1,10 +1,13 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import com.csso
 
 import "."
 
 Rectangle {
+    required property QmlFunctionInfo func
+
     width: columnLayout.implicitWidth + 2
     height: columnLayout.implicitHeight + 2
     border.color: "#327eea"
@@ -14,13 +17,14 @@ Rectangle {
     clip: true
 
 
+
     ColumnLayout {
         id: columnLayout
         spacing: 0
 
         Text {
             id: title
-            text: "<b>Node name</b>"
+            text: func.name
             Layout.alignment: Qt.AlignHCenter
         }
 
@@ -39,11 +43,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.horizontalCenter: parent.horizontalCenter
 
-                    model: ListModel {
-                        ListElement { name: "Alice" }
-                        ListElement { name: "Bob" }
-                        ListElement { name: "Charlie" }
-                    }
+                    model: func.inputs
 
                     delegate: RowLayout {
 
@@ -57,7 +57,7 @@ Rectangle {
                         }
 
                         Text {
-                            text: model.name
+                            text: modelData.name
                         }
                     }
 
@@ -78,17 +78,13 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.horizontalCenter: parent.horizontalCenter
 
-                    model: ListModel {
-                        ListElement { name: "Alice" }
-                        ListElement { name: "Bob" }
-                        ListElement { name: "Charlie" }
-                    }
+                    model: func.outputs
 
                     delegate: RowLayout {
                         anchors.right: parent.right
 
                         Text {
-                            text: model.name
+                            text: modelData.name
                         }
 
                         Rectangle {
