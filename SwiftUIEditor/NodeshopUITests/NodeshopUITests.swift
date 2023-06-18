@@ -1,10 +1,3 @@
-//
-//  NodeshopUITests.swift
-//  NodeshopUITests
-//
-//  Created by illia tulupov on 6/18/23.
-//
-
 import XCTest
 
 final class NodeshopUITests: XCTestCase {

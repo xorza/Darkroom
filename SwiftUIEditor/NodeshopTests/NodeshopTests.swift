@@ -1,10 +1,3 @@
-//
-//  NodeshopTests.swift
-//  NodeshopTests
-//
-//  Created by illia tulupov on 6/18/23.
-//
-
 import XCTest
 @testable import Nodeshop
 
