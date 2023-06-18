@@ -51,21 +51,13 @@ struct NodeView: View {
     let outputs:[String]
     
     var body: some View {
-        VStack(alignment: .center){
+        VStack(alignment: .center) {
             
             Text(name)
                 .font(.headline)
                 .padding(.vertical, 5.0)
             
-            
-            
-            
-            //                .overlay(
-            //                    Rectangle()
-            //                        .fill(Color.blue)
-            //                )
-            
-            HStack(alignment: .top, spacing: 10.0){
+            HStack(alignment: .top, spacing: 15.0){
                 VStack{
                     ForEach(inputs, id: \.self) { name in
                         PinButton(name: name, direction: .input)
