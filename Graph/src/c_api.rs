@@ -21,7 +21,9 @@ pub unsafe extern "C" fn c_graph_init() {
 
     let functions = FUNCTIONS.as_mut().unwrap();
 
-    let mut func = Function::new(Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap());
+    let mut func = Function::new(
+        Uuid::parse_str("00000000-0000-0000-0000-000000000000").unwrap()
+    );
     func.name = "Add".to_string();
     func.inputs.push(Arg {
         name: "a".to_string(),
@@ -33,6 +35,25 @@ pub unsafe extern "C" fn c_graph_init() {
     });
     func.outputs.push(Arg {
         name: "sum".to_string(),
+        data_type: DataType::Int,
+    });
+    functions.add_function(func);
+
+
+    let mut func = Function::new(
+        Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap()
+    );
+    func.name = "Mult".to_string();
+    func.inputs.push(Arg {
+        name: "a".to_string(),
+        data_type: DataType::Int,
+    });
+    func.inputs.push(Arg {
+        name: "b".to_string(),
+        data_type: DataType::Int,
+    });
+    func.outputs.push(Arg {
+        name: "prod".to_string(),
         data_type: DataType::Int,
     });
     functions.add_function(func);
