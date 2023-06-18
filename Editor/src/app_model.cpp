@@ -6,7 +6,9 @@
 #include <QtQml>
 
 AppModel::AppModel() {
-
+    qmlRegisterUncreatableType<QmlFunctionInfo>("com.csso", 1, 0, "QmlFunctionInfo", "");
+    qmlRegisterUncreatableType<QmlArgInfo>("com.csso", 1, 0, "QmlArgInfo", "");
+    
     graph_c_api::init();
 
     auto functions = graph_c_api::get_functions();

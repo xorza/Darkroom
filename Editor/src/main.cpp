@@ -8,10 +8,6 @@
 
 int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
-
-    qmlRegisterUncreatableType<QmlFunctionInfo>("com.csso", 1, 0, "QmlFunctionInfo", "");
-    qmlRegisterUncreatableType<QmlArgInfo>("com.csso", 1, 0, "QmlArgInfo", "");
-
     QScopedPointer<AppModel> app_model(new AppModel);
     QQmlApplicationEngine engine;
 

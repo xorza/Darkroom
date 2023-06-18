@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.26)
 project(editor)
 
+
 option(ENABLE_TESTS "Enable tests" ON)
 option(ENABLE_MODULES "Enable modules" OFF)
+
 
 set(CMAKE_CXX_STANDARD 23)
 
 if (ENABLE_MODULES)
-    # Enable modules
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
     set(CMAKE_CXX_EXTENSIONS OFF)
     set(CMAKE_EXPERIMENTAL_CXX_MODULE_CMAKE_API 2182bf5c-ef0d-489a-91da-49dbc3090d2a)
@@ -40,13 +41,10 @@ if (ENABLE_MODULES)
     )
 endif ()
 
+
 file(GLOB_RECURSE PROJECT_SOURCES ${CMAKE_SOURCE_DIR}/src/*.cpp)
 target_sources(editor_lib PRIVATE ${PROJECT_SOURCES})
-target_include_directories(
-        editor_lib
-        PRIVATE
-        ${CMAKE_SOURCE_DIR}/src/
-)
+target_include_directories(editor_lib PRIVATE ${CMAKE_SOURCE_DIR}/src/)
 target_sources(editor_exe PRIVATE qml.qrc)
 
 
