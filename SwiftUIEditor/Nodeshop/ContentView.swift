@@ -2,13 +2,14 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundColor(.accentColor)
-            Text("Hello, world!")
+        ZStack {
+            NodeView(
+                name:"Add",
+                inputs: ["input a", "input b"],
+                outputs: ["output 1", "output 2"]
+            )
+            .position(x: 150, y: 50)
         }
-        .padding()
     }
 }
 

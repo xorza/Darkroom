@@ -14,6 +14,7 @@
 		D464AC722A3EDFB3007A9FD4 /* NodeshopTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D464AC712A3EDFB3007A9FD4 /* NodeshopTests.swift */; };
 		D464AC7C2A3EDFB3007A9FD4 /* NodeshopUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D464AC7B2A3EDFB3007A9FD4 /* NodeshopUITests.swift */; };
 		D464AC7E2A3EDFB3007A9FD4 /* NodeshopUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D464AC7D2A3EDFB3007A9FD4 /* NodeshopUITestsLaunchTests.swift */; };
+		D4D1B4112A3F263800FEE9C7 /* NodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D1B4102A3F263800FEE9C7 /* NodeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -45,6 +46,7 @@
 		D464AC772A3EDFB3007A9FD4 /* NodeshopUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NodeshopUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D464AC7B2A3EDFB3007A9FD4 /* NodeshopUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeshopUITests.swift; sourceTree = "<group>"; };
 		D464AC7D2A3EDFB3007A9FD4 /* NodeshopUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeshopUITestsLaunchTests.swift; sourceTree = "<group>"; };
+		D4D1B4102A3F263800FEE9C7 /* NodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NodeView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -100,6 +102,7 @@
 				D464AC632A3EDFB3007A9FD4 /* Assets.xcassets */,
 				D464AC682A3EDFB3007A9FD4 /* Nodeshop.entitlements */,
 				D464AC652A3EDFB3007A9FD4 /* Preview Content */,
+				D4D1B4102A3F263800FEE9C7 /* NodeView.swift */,
 			);
 			path = Nodeshop;
 			sourceTree = "<group>";
@@ -261,6 +264,7 @@
 			files = (
 				D464AC622A3EDFB1007A9FD4 /* ContentView.swift in Sources */,
 				D464AC602A3EDFB1007A9FD4 /* NodeshopApp.swift in Sources */,
+				D4D1B4112A3F263800FEE9C7 /* NodeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
