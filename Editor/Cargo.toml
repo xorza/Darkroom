@@ -1,0 +1,11 @@
+[package]
+name = "nodeshop"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+opencl = ["graph/opencl"]
+
+[dependencies]
+graph = { path = "../Graph" }
