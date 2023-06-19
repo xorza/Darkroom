@@ -108,7 +108,7 @@ pub struct SampleApp {
 
 impl App for SampleApp {
     fn init(
-        config: &wgpu::SurfaceConfiguration,
+        surface_config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -117,13 +117,12 @@ impl App for SampleApp {
         let (vertex_data, index_data) = create_vertices();
 
         let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Vertex Buffer"),
+            label: Some("Cube Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertex_data),
             usage: wgpu::BufferUsages::VERTEX,
         });
-
         let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Index Buffer"),
+            label: Some("Cube Index Buffer"),
             contents: bytemuck::cast_slice(&index_data),
             usage: wgpu::BufferUsages::INDEX,
         });
@@ -167,7 +166,7 @@ impl App for SampleApp {
             depth_or_array_layers: 1,
         };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
+            label: Some("Mandelbrot Set Texture"),
             size: texture_extent,
             mip_level_count: 1,
             sample_count: 1,
@@ -243,7 +242,7 @@ impl App for SampleApp {
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(config.view_formats[0].into())],
+                targets: &[Some(surface_config.view_formats[0].into())],
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
@@ -261,19 +260,24 @@ impl App for SampleApp {
             bind_group,
             uniform_buf,
             pipeline,
-            window_size: UVec2::new(config.width, config.height),
+            window_size: UVec2::new(surface_config.width, surface_config.height),
         }
+    }
+
+    fn resize(&mut self, window_size: UVec2) {
+        self.window_size = window_size;
     }
 
     fn update(&mut self, event: Event) -> EventResult {
         match event {
-            Event::Resize { size } => {
-                self.window_size = size;
+            Event::WindowClose => {
+                EventResult::Exit
             }
-            _ => {}
-        }
 
-        EventResult::Continue
+            _ => {
+                EventResult::Continue
+            }
+        }
     }
 
     fn render(

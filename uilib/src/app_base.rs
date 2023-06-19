@@ -17,6 +17,7 @@ pub trait App: 'static + Sized {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self;
+    fn resize(&mut self, window_size: UVec2);
     fn update(&mut self, event: Event) -> EventResult;
     fn render(
         &mut self,
@@ -63,8 +64,8 @@ fn setup(title: &str) -> Setup {
         .block_on()
         .expect("No suitable GPU adapters found on the system.");
 
-    let adapter_info = adapter.get_info();
-    println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
+    // let adapter_info = adapter.get_info();
+    // println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
 
     // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
     let limits = adapter.limits().using_resolution(adapter.limits());
@@ -141,9 +142,7 @@ fn start<E: App>(
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
 
-                result = app.update(Event::Resize {
-                    size: UVec2::new(config.width, config.height),
-                });
+                app.resize(UVec2::new(config.width, config.height));
 
                 surface.configure(&device, &config);
             }
@@ -183,7 +182,10 @@ fn start<E: App>(
             }
 
             _ => {
-                result = app.update(Event::Unknown);
+                let event = Event::from(event);
+                if event != Event::Unknown {
+                    result = app.update(event);
+                }
             }
         }
 
