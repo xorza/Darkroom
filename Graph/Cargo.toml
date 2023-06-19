@@ -17,5 +17,5 @@ serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 mlua = { version = "*", features = ["lua54", "vendored"] }
 ocl = { version = "*", optional = true }
-uuid = { version = "*", features = ["v4", "macro-diagnostics", "serde"] }
+uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = "*"
