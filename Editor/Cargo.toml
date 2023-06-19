@@ -12,8 +12,6 @@ graph = { path = "../Graph" }
 wgpu = { version = "0" }
 winit = { version = "0" }
 bytemuck = { version = "1", features = ["derive"] }
-log = { version = "0" }
 glam = "0"
 async-executor = "1"
-env_logger= "0"
 pollster = "0"

@@ -3,9 +3,9 @@ use std::{borrow::Cow, f32::consts, future::Future, mem, pin::Pin, task};
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::example::{Example, run, Spawner};
+use crate::base_app::{BaseApp, run, Spawner};
 
-mod example;
+mod base_app;
 
 
 #[repr(C)]
@@ -108,7 +108,7 @@ impl<F: Future<Output = Option<wgpu::Error>>> Future for ErrorFuture<F> {
     }
 }
 
-struct CubeExample {
+struct App {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
@@ -118,7 +118,7 @@ struct CubeExample {
     pipeline_wire: Option<wgpu::RenderPipeline>,
 }
 
-impl CubeExample {
+impl App {
     fn generate_matrix(aspect_ratio: f32) -> glam::Mat4 {
         let projection = glam::Mat4::perspective_rh(consts::FRAC_PI_4, aspect_ratio, 1.0, 10.0);
         let view = glam::Mat4::look_at_rh(
@@ -130,7 +130,7 @@ impl CubeExample {
     }
 }
 
-impl Example for CubeExample {
+impl BaseApp for App {
     fn optional_features() -> wgpu::Features {
         wgpu::Features::POLYGON_MODE_LINE
     }
@@ -332,7 +332,7 @@ impl Example for CubeExample {
         };
 
         // Done
-        CubeExample {
+        App {
             vertex_buf,
             index_buf,
             index_count: index_data.len(),
@@ -410,5 +410,5 @@ impl Example for CubeExample {
 }
 
 fn main() {
-    run::<CubeExample>("cube");
+    run::<App>("Window");
 }
