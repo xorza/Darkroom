@@ -1,9 +1,6 @@
-use crate::app::App;
-use crate::base_app::run;
-
-mod app;
-mod base_app;
+use uilib::app_base::run;
+use uilib::sample_app::SampleApp;
 
 fn main() {
-    run::<App>();
+    run::<SampleApp>("Sample App");
 }

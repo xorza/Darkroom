@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use glam::UVec2;
 use pollster::FutureExt;
 use wgpu::{Dx12Compiler, Features, RequestAdapterOptions};
 use winit::{
@@ -7,21 +8,16 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-pub(crate) trait BaseApp: 'static + Sized {
-    fn title() -> &'static str;
+use crate::event::{Event, EventResult};
+
+pub trait App: 'static + Sized {
     fn init(
         config: &wgpu::SurfaceConfiguration,
         adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self;
-    fn resize(
-        &mut self,
-        config: &wgpu::SurfaceConfiguration,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    );
-    fn update(&mut self, event: WindowEvent);
+    fn update(&mut self, event: Event) -> EventResult;
     fn render(
         &mut self,
         view: &wgpu::TextureView,
@@ -41,12 +37,11 @@ struct Setup {
     queue: wgpu::Queue,
 }
 
-
-fn setup<E: BaseApp>() -> Setup {
+fn setup(title: &str) -> Setup {
     let event_loop = EventLoop::new();
     let window =
         winit::window::WindowBuilder::new()
-            .with_title(E::title())
+            .with_title(title)
             .build(&event_loop)
             .expect("Failed to create window.");
 
@@ -98,7 +93,7 @@ fn setup<E: BaseApp>() -> Setup {
     }
 }
 
-fn start<E: BaseApp>(
+fn start<E: App>(
     Setup {
         window,
         event_loop,
@@ -122,13 +117,10 @@ fn start<E: BaseApp>(
     let mut last_frame_inst = Instant::now();
     let (mut frame_count, mut accum_time) = (0, 0.0);
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run(move |event, _target, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
-        *control_flow = if cfg!(feature = "metal-auto-capture") {
-            ControlFlow::Exit
-        } else {
-            ControlFlow::Poll
-        };
+        let mut result: EventResult = EventResult::Continue;
+
         match event {
             event::Event::RedrawEventsCleared => {
                 if let Some(error) = device.pop_error_scope().block_on() {
@@ -148,38 +140,14 @@ fn start<E: BaseApp>(
             } => {
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
-                app.resize(&config, &device, &queue);
+
+                result = app.update(Event::Resize {
+                    size: UVec2::new(config.width, config.height),
+                });
+
                 surface.configure(&device, &config);
             }
-            event::Event::WindowEvent { event, .. } => match event {
-                WindowEvent::KeyboardInput {
-                    input:
-                    event::KeyboardInput {
-                        virtual_keycode: Some(event::VirtualKeyCode::Escape),
-                        state: event::ElementState::Pressed,
-                        ..
-                    },
-                    ..
-                }
-                | WindowEvent::CloseRequested => {
-                    *control_flow = ControlFlow::Exit;
-                }
 
-                WindowEvent::KeyboardInput {
-                    input:
-                    event::KeyboardInput {
-                        virtual_keycode: Some(event::VirtualKeyCode::R),
-                        state: event::ElementState::Pressed,
-                        ..
-                    },
-                    ..
-                } => {
-                    println!("{:#?}", instance.generate_report());
-                }
-                _ => {
-                    app.update(event);
-                }
-            },
             event::Event::RedrawRequested(_) => {
                 {
                     accum_time += last_frame_inst.elapsed().as_secs_f32();
@@ -214,12 +182,18 @@ fn start<E: BaseApp>(
                 frame.present();
             }
 
-            _ => {}
+            _ => {
+                result = app.update(Event::Unknown);
+            }
+        }
+
+        if result == EventResult::Exit {
+            *control_flow = ControlFlow::Exit;
         }
     });
 }
 
-pub(crate) fn run<E: BaseApp>() {
-    let setup = setup::<E>();
+pub fn run<E: App>(title: &str) {
+    let setup = setup(title);
     start::<E>(setup);
 }

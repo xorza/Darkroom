@@ -9,8 +9,5 @@ opencl = ["graph/opencl"]
 
 [dependencies]
 graph = { path = "../Graph" }
-wgpu = "*"
-winit = "*"
-glam = "*"
-pollster = "*"
-bytemuck = { version = "*", features = ["derive"] }
+uilib = { path = "../uilib" }
+

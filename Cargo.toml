@@ -2,6 +2,7 @@
 members = [
     "Editor",
     "Graph",
+    "uilib"
 ]
 
 resolver = "2"

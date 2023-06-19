@@ -1,9 +1,11 @@
 use std::{borrow::Cow, f32::consts, mem};
 
 use bytemuck::{Pod, Zeroable};
+use glam::UVec2;
 use wgpu::util::DeviceExt;
 
-use crate::base_app::BaseApp;
+use crate::app_base::App;
+use crate::event::{Event, EventResult};
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -93,22 +95,18 @@ fn create_matrix(aspect_ratio: f32) -> glam::Mat4 {
 }
 
 
-pub(crate) struct App {
+pub struct SampleApp {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     index_count: usize,
     bind_group: wgpu::BindGroup,
     uniform_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
-    pipeline_wire: Option<wgpu::RenderPipeline>,
+    window_size: UVec2,
 }
 
 
-impl BaseApp for App {
-    fn title() -> &'static str {
-        "Nodeshop"
-    }
-
+impl App for SampleApp {
     fn init(
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
@@ -190,12 +188,11 @@ impl BaseApp for App {
             texture_extent,
         );
 
-        let mx_total = create_matrix(config.width as f32 / config.height as f32);
-        let mx_ref: &[f32; 16] = mx_total.as_ref();
-        let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Uniform Buffer"),
-            contents: bytemuck::cast_slice(mx_ref),
+            size: 64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
         });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -257,30 +254,26 @@ impl BaseApp for App {
             multiview: None,
         });
 
-        App {
+        SampleApp {
             vertex_buf,
             index_buf,
             index_count: index_data.len(),
             bind_group,
             uniform_buf,
             pipeline,
-            pipeline_wire: None,
+            window_size: UVec2::new(config.width, config.height),
         }
     }
 
-    fn resize(
-        &mut self,
-        config: &wgpu::SurfaceConfiguration,
-        _device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) {
-        let mx_total = create_matrix(config.width as f32 / config.height as f32);
-        let mx_ref: &[f32; 16] = mx_total.as_ref();
-        queue.write_buffer(&self.uniform_buf, 0, bytemuck::cast_slice(mx_ref));
-    }
+    fn update(&mut self, event: Event) -> EventResult {
+        match event {
+            Event::Resize { size } => {
+                self.window_size = size;
+            }
+            _ => {}
+        }
 
-    fn update(&mut self, _event: winit::event::WindowEvent) {
-        //empty
+        EventResult::Continue
     }
 
     fn render(
@@ -290,6 +283,15 @@ impl BaseApp for App {
         queue: &wgpu::Queue,
     ) {
         device.push_error_scope(wgpu::ErrorFilter::Validation);
+
+        let view_projection = create_matrix(
+            self.window_size.x as f32 / self.window_size.y as f32
+        );
+        queue.write_buffer(
+            &self.uniform_buf,
+            0,
+            bytemuck::cast_slice(view_projection.as_ref()),
+        );
 
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -315,10 +317,6 @@ impl BaseApp for App {
             render_pass.pop_debug_group();
             render_pass.insert_debug_marker("Draw!");
             render_pass.draw_indexed(0..self.index_count as u32, 0, 0..1);
-            if let Some(ref pipe) = self.pipeline_wire {
-                render_pass.set_pipeline(pipe);
-                render_pass.draw_indexed(0..self.index_count as u32, 0, 0..1);
-            }
         }
 
         queue.submit(Some(encoder.finish()));
