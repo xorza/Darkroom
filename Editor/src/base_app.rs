@@ -7,7 +7,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-pub trait BaseApp: 'static + Sized {
+pub(crate)  trait BaseApp: 'static + Sized {
     fn init(
         config: &wgpu::SurfaceConfiguration,
         adapter: &wgpu::Adapter,
@@ -219,7 +219,7 @@ fn start<E: BaseApp>(
 }
 
 
-pub fn run<E: BaseApp>(title: &str) {
+pub(crate) fn run<E: BaseApp>(title: &str) {
     let setup = setup::<E>(title);
     start::<E>(setup);
 }
