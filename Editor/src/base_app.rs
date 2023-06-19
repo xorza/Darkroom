@@ -48,7 +48,7 @@ fn setup<E: BaseApp>() -> Setup {
         winit::window::WindowBuilder::new()
             .with_title(E::title())
             .build(&event_loop)
-            .unwrap();
+            .expect("Failed to create window.");
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
@@ -66,7 +66,7 @@ fn setup<E: BaseApp>() -> Setup {
             compatible_surface: Some(&surface),
         })
         .block_on()
-        .expect("No suitable GPU adapters found on the system!");
+        .expect("No suitable GPU adapters found on the system.");
 
     let adapter_info = adapter.get_info();
     println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
@@ -84,7 +84,7 @@ fn setup<E: BaseApp>() -> Setup {
             None,
         )
         .block_on()
-        .expect("Unable to find a suitable GPU adapter!");
+        .expect("Unable to find a suitable GPU adapter.");
 
     Setup {
         window,
@@ -201,7 +201,7 @@ fn start<E: BaseApp>(
                         surface.configure(&device, &config);
                         surface
                             .get_current_texture()
-                            .expect("Failed to acquire next surface texture!")
+                            .expect("Failed to acquire next surface texture.")
                     }
                 };
                 let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
