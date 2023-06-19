@@ -1,28 +1,13 @@
 use std::time::Instant;
 
 use pollster::FutureExt;
+use wgpu::{Dx12Compiler, Features, RequestAdapterOptions};
 use winit::{
     event::{self, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
 };
 
 pub trait BaseApp: 'static + Sized {
-    fn optional_features() -> wgpu::Features {
-        wgpu::Features::empty()
-    }
-    fn required_features() -> wgpu::Features {
-        wgpu::Features::empty()
-    }
-    fn required_downlevel_capabilities() -> wgpu::DownlevelCapabilities {
-        wgpu::DownlevelCapabilities {
-            flags: wgpu::DownlevelFlags::empty(),
-            shader_model: wgpu::ShaderModel::Sm5,
-            ..wgpu::DownlevelCapabilities::default()
-        }
-    }
-    fn required_limits() -> wgpu::Limits {
-        wgpu::Limits::downlevel_webgl2_defaults() // These downlevel limits will allow the code to run on all possible hardware
-    }
     fn init(
         config: &wgpu::SurfaceConfiguration,
         adapter: &wgpu::Adapter,
@@ -58,71 +43,44 @@ struct Setup {
 
 fn setup<E: BaseApp>(title: &str) -> Setup {
     let event_loop = EventLoop::new();
-    let builder =
+    let window =
         winit::window::WindowBuilder::new()
-        .with_title(title);
-
-    let window = builder.build(&event_loop).unwrap();
-
-    let backends =
-        wgpu::util::backend_bits_from_env()
-        .unwrap_or_else(|| wgpu::Backends::PRIMARY);
-    let dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env().unwrap_or_default();
+            .with_title(title)
+            .build(&event_loop)
+            .unwrap();
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        backends,
-        dx12_shader_compiler,
+        backends: wgpu::Backends::PRIMARY,
+        dx12_shader_compiler: Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
     });
-    let (size, surface) = unsafe {
-        let size = window.inner_size();
-        let surface = instance.create_surface(&window).unwrap();
-
-        (size, surface)
+    let size = window.inner_size();
+    let surface = unsafe {
+        instance.create_surface(&window).unwrap()
     };
-    let adapter =
-        wgpu::util::initialize_adapter_from_env_or_default(&instance, backends, Some(&surface))
-            .block_on()
-            .expect("No suitable GPU adapters found on the system!");
+
+    let adapter = instance
+        .request_adapter(&RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::LowPower,
+            force_fallback_adapter: false,
+            compatible_surface: Some(&surface),
+        })
+        .block_on()
+        .expect("No suitable GPU adapters found on the system!");
 
     let adapter_info = adapter.get_info();
     println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
 
-    let optional_features = E::optional_features();
-    let required_features = E::required_features();
-    let adapter_features = adapter.features();
-    assert!(
-        adapter_features.contains(required_features),
-        "Adapter does not support required features for this example: {:?}",
-        required_features - adapter_features
-    );
-
-    let required_downlevel_capabilities = E::required_downlevel_capabilities();
-    let downlevel_capabilities = adapter.get_downlevel_capabilities();
-    assert!(
-        downlevel_capabilities.shader_model >= required_downlevel_capabilities.shader_model,
-        "Adapter does not support the minimum shader model required to run this example: {:?}",
-        required_downlevel_capabilities.shader_model
-    );
-    assert!(
-        downlevel_capabilities
-            .flags
-            .contains(required_downlevel_capabilities.flags),
-        "Adapter does not support the downlevel capabilities required to run this example: {:?}",
-        required_downlevel_capabilities.flags - downlevel_capabilities.flags
-    );
-
     // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
-    let needed_limits = E::required_limits().using_resolution(adapter.limits());
+    let limits = adapter.limits().using_resolution(adapter.limits());
 
-    let trace_dir = std::env::var("WGPU_TRACE");
     let (device, queue) = adapter
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
-                features: (optional_features & adapter_features) | required_features,
-                limits: needed_limits,
+                features: Features::empty(),
+                limits,
             },
-            trace_dir.ok().as_ref().map(std::path::Path::new),
+            None,
         )
         .block_on()
         .expect("Unable to find a suitable GPU adapter!");
@@ -173,7 +131,7 @@ fn start<E: BaseApp>(
         match event {
             event::Event::RedrawEventsCleared => {
                 if let Some(error) = device.pop_error_scope().block_on() {
-                    panic!("Error: {:?}", error);
+                    panic!("Device error: {:?}", error);
                 }
 
                 window.request_redraw();
@@ -254,6 +212,7 @@ fn start<E: BaseApp>(
 
                 frame.present();
             }
+
             _ => {}
         }
     });

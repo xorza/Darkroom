@@ -110,17 +110,12 @@ impl App {
 }
 
 impl BaseApp for App {
-    fn optional_features() -> wgpu::Features {
-        wgpu::Features::POLYGON_MODE_LINE
-    }
-
     fn init(
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self {
-        // Create the vertex and index buffers
         let vertex_size = mem::size_of::<Vertex>();
         let (vertex_data, index_data) = create_vertices();
 
@@ -136,7 +131,6 @@ impl BaseApp for App {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        // Create pipeline layout
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
             entries: &[
@@ -168,7 +162,6 @@ impl BaseApp for App {
             push_constant_ranges: &[],
         });
 
-        // Create the texture
         let size = 256u32;
         let texels = create_texels(size as usize);
         let texture_extent = wgpu::Extent3d {
@@ -198,7 +191,6 @@ impl BaseApp for App {
             texture_extent,
         );
 
-        // Create other resources
         let mx_total = Self::generate_matrix(config.width as f32 / config.height as f32);
         let mx_ref: &[f32; 16] = mx_total.as_ref();
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -207,7 +199,6 @@ impl BaseApp for App {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        // Create bind group
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
             entries: &[
@@ -310,7 +301,6 @@ impl BaseApp for App {
             None
         };
 
-        // Done
         App {
             vertex_buf,
             index_buf,
@@ -379,9 +369,6 @@ impl BaseApp for App {
         }
 
         queue.submit(Some(encoder.finish()));
-
-
-
     }
 }
 
