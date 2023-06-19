@@ -13,5 +13,4 @@ wgpu = { version = "0" }
 winit = { version = "0" }
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0"
-async-executor = "1"
 pollster = "0"

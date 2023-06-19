@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::time::Instant;
 
 use pollster::FutureExt;
@@ -42,7 +41,6 @@ pub trait BaseApp: 'static + Sized {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        spawner: &Spawner,
     );
 }
 
@@ -60,13 +58,15 @@ struct Setup {
 
 fn setup<E: BaseApp>(title: &str) -> Setup {
     let event_loop = EventLoop::new();
-    let builder = winit::window::WindowBuilder::new()
+    let builder =
+        winit::window::WindowBuilder::new()
         .with_title(title);
 
     let window = builder.build(&event_loop).unwrap();
 
-
-    let backends = wgpu::util::backend_bits_from_env().unwrap_or_else(wgpu::Backends::all);
+    let backends =
+        wgpu::util::backend_bits_from_env()
+        .unwrap_or_else(|| wgpu::Backends::PRIMARY);
     let dx12_shader_compiler = wgpu::util::dx12_shader_compiler_from_env().unwrap_or_default();
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -151,7 +151,6 @@ fn start<E: BaseApp>(
         queue,
     }: Setup,
 ) {
-    let spawner = Spawner::new();
     let mut config = surface
         .get_default_config(&adapter, size.width, size.height)
         .expect("Surface isn't supported by the adapter.");
@@ -159,7 +158,7 @@ fn start<E: BaseApp>(
     config.view_formats.push(surface_view_format);
     surface.configure(&device, &config);
 
-    let mut example = E::init(&config, &adapter, &device, &queue);
+    let mut app = E::init(&config, &adapter, &device, &queue);
 
     let mut last_frame_inst = Instant::now();
     let (mut frame_count, mut accum_time) = (0, 0.0);
@@ -173,7 +172,9 @@ fn start<E: BaseApp>(
         };
         match event {
             event::Event::RedrawEventsCleared => {
-                spawner.run_until_stalled();
+                if let Some(error) = device.pop_error_scope().block_on() {
+                    panic!("Error: {:?}", error);
+                }
 
                 window.request_redraw();
             }
@@ -188,7 +189,7 @@ fn start<E: BaseApp>(
             } => {
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
-                example.resize(&config, &device, &queue);
+                app.resize(&config, &device, &queue);
                 surface.configure(&device, &config);
             }
             event::Event::WindowEvent { event, .. } => match event {
@@ -217,7 +218,7 @@ fn start<E: BaseApp>(
                     println!("{:#?}", instance.generate_report());
                 }
                 _ => {
-                    example.update(event);
+                    app.update(event);
                 }
             },
             event::Event::RedrawRequested(_) => {
@@ -249,33 +250,13 @@ fn start<E: BaseApp>(
                     ..wgpu::TextureViewDescriptor::default()
                 });
 
-                example.render(&view, &device, &queue, &spawner);
+                app.render(&view, &device, &queue);
 
                 frame.present();
             }
             _ => {}
         }
     });
-}
-
-pub struct Spawner<'a> {
-    executor: async_executor::LocalExecutor<'a>,
-}
-
-impl<'a> Spawner<'a> {
-    fn new() -> Self {
-        Self {
-            executor: async_executor::LocalExecutor::new(),
-        }
-    }
-
-    pub fn spawn_local(&self, future: impl Future<Output=()> + 'a) {
-        self.executor.spawn(future).detach();
-    }
-
-    fn run_until_stalled(&self) {
-        while self.executor.try_tick() {}
-    }
 }
 
 
