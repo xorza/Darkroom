@@ -20,19 +20,16 @@ impl App for UiAppInternal {
         }
     }
 
-    fn resize(&mut self, window_size: UVec2) {
-        self.window_size = window_size;
-    }
-
-    fn update(
-        &mut self,
-        event: Event)
-        -> EventResult {
+    fn update(&mut self, event: Event) -> EventResult {
         match event {
-            Event::WindowClose => {
-                EventResult::Exit
+            Event::WindowClose => EventResult::Exit,
+            Event::Resize(size) => {
+                self.window_size = size;
+
+                EventResult::Redraw
             }
-            _ => { EventResult::Continue }
+
+            _ => EventResult::Continue
         }
     }
 
@@ -40,7 +37,8 @@ impl App for UiAppInternal {
         &mut self,
         _view: &TextureView,
         _device: &Device,
-        _queue: &Queue) {
+        _queue: &Queue,
+        _time: f64) {
         todo!()
     }
 }

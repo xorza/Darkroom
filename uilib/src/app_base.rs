@@ -17,13 +17,13 @@ pub trait App: 'static + Sized {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Self;
-    fn resize(&mut self, window_size: UVec2);
     fn update(&mut self, event: Event) -> EventResult;
     fn render(
         &mut self,
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        time: f64,
     );
 }
 
@@ -63,9 +63,6 @@ fn setup(title: &str) -> Setup {
         })
         .block_on()
         .expect("No suitable GPU adapters found on the system.");
-
-    // let adapter_info = adapter.get_info();
-    // println!("Using {} ({:?})", adapter_info.name, adapter_info.backend);
 
     // Make sure we use the texture resolution limits from the adapter, so we can support images the size of the surface.
     let limits = adapter.limits().using_resolution(adapter.limits());
@@ -114,9 +111,8 @@ fn start<E: App>(
     surface.configure(&device, &config);
 
     let mut app = E::init(&config, &adapter, &device, &queue);
-
-    let mut last_frame_inst = Instant::now();
-    let (mut frame_count, mut accum_time) = (0, 0.0);
+    let start = Instant::now();
+    let mut has_error_scope = false;
 
     event_loop.run(move |event, _target, control_flow| {
         let _ = (&instance, &adapter); // force ownership by the closure
@@ -124,11 +120,14 @@ fn start<E: App>(
 
         match event {
             event::Event::RedrawEventsCleared => {
-                if let Some(error) = device.pop_error_scope().block_on() {
-                    panic!("Device error: {:?}", error);
+                if has_error_scope {
+                    if let Some(error) = device.pop_error_scope().block_on() {
+                        panic!("Device error: {:?}", error);
+                    }
+                    has_error_scope = false;
                 }
 
-                window.request_redraw();
+                result = app.update(Event::RedrawFinished);
             }
             event::Event::WindowEvent {
                 event:
@@ -141,27 +140,12 @@ fn start<E: App>(
             } => {
                 config.width = size.width.max(1);
                 config.height = size.height.max(1);
-
-                app.resize(UVec2::new(config.width, config.height));
-
                 surface.configure(&device, &config);
+
+                result = app.update(Event::Resize(UVec2::new(config.width, config.height)));
             }
 
             event::Event::RedrawRequested(_) => {
-                {
-                    accum_time += last_frame_inst.elapsed().as_secs_f32();
-                    last_frame_inst = Instant::now();
-                    frame_count += 1;
-                    if frame_count == 100 {
-                        println!(
-                            "Avg frame time {}ms",
-                            accum_time * 1000.0 / frame_count as f32
-                        );
-                        accum_time = 0.0;
-                        frame_count = 0;
-                    }
-                }
-
                 let frame = match surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -176,7 +160,11 @@ fn start<E: App>(
                     ..wgpu::TextureViewDescriptor::default()
                 });
 
-                app.render(&view, &device, &queue);
+                assert!(!has_error_scope);
+                device.push_error_scope(wgpu::ErrorFilter::Validation);
+                has_error_scope = true;
+
+                app.render(&view, &device, &queue, start.elapsed().as_secs_f64());
 
                 frame.present();
             }
@@ -189,8 +177,10 @@ fn start<E: App>(
             }
         }
 
-        if result == EventResult::Exit {
-            *control_flow = ControlFlow::Exit;
+        match result {
+            EventResult::Continue => {}
+            EventResult::Redraw => window.request_redraw(),
+            EventResult::Exit => *control_flow = ControlFlow::Exit
         }
     });
 }

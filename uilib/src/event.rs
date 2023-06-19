@@ -2,16 +2,16 @@ use glam::UVec2;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event {
-    Resize {
-        size: UVec2,
-    },
+    Resize(UVec2),
     WindowClose,
+    RedrawFinished,
     Unknown,
 }
 
 #[derive(PartialEq, Debug, Copy, Clone)]
 pub enum EventResult {
     Continue,
+    Redraw,
     Exit,
 }
 
@@ -19,9 +19,9 @@ impl<'a, T> From<winit::event::Event<'a, T>> for Event {
     fn from(event: winit::event::Event<'a, T>) -> Self {
         match event {
             winit::event::Event::WindowEvent { event, .. } => match event {
-                winit::event::WindowEvent::Resized(size) => Event::Resize {
-                    size: UVec2::new(size.width.max(1), size.height.max(1)),
-                },
+                winit::event::WindowEvent::Resized(size) => Event::Resize(
+                    UVec2::new(size.width.max(1), size.height.max(1)),
+                ),
                 winit::event::WindowEvent::Focused(_is_focused) => {
                     Event::Unknown
                 }

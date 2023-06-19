@@ -84,10 +84,10 @@ fn create_texels(size: usize) -> Vec<u8> {
         .collect()
 }
 
-fn create_matrix(aspect_ratio: f32) -> glam::Mat4 {
+fn create_matrix(aspect_ratio: f32, angle: f32) -> glam::Mat4 {
     let projection = glam::Mat4::perspective_rh(consts::FRAC_PI_4, aspect_ratio, 1.0, 10.0);
     let view = glam::Mat4::look_at_rh(
-        glam::Vec3::new(1.5f32, -5.0, 3.0),
+        glam::Vec3::new(5.0 * angle.cos(), 5.0 * angle.sin(), 3.0),
         glam::Vec3::ZERO,
         glam::Vec3::Z,
     );
@@ -264,19 +264,17 @@ impl App for SampleApp {
         }
     }
 
-    fn resize(&mut self, window_size: UVec2) {
-        self.window_size = window_size;
-    }
-
     fn update(&mut self, event: Event) -> EventResult {
         match event {
-            Event::WindowClose => {
-                EventResult::Exit
-            }
+            Event::WindowClose => EventResult::Exit,
+            Event::RedrawFinished => EventResult::Redraw,
+            Event::Resize(size) => {
+                self.window_size = size;
 
-            _ => {
                 EventResult::Continue
             }
+
+            _ => EventResult::Continue
         }
     }
 
@@ -285,11 +283,11 @@ impl App for SampleApp {
         view: &wgpu::TextureView,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        time: f64,
     ) {
-        device.push_error_scope(wgpu::ErrorFilter::Validation);
-
         let view_projection = create_matrix(
-            self.window_size.x as f32 / self.window_size.y as f32
+            self.window_size.x as f32 / self.window_size.y as f32,
+            time as f32,
         );
         queue.write_buffer(
             &self.uniform_buf,
