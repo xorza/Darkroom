@@ -7,7 +7,8 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
 };
 
-pub(crate)  trait BaseApp: 'static + Sized {
+pub(crate) trait BaseApp: 'static + Sized {
+    fn title() -> &'static str;
     fn init(
         config: &wgpu::SurfaceConfiguration,
         adapter: &wgpu::Adapter,
@@ -41,11 +42,11 @@ struct Setup {
 }
 
 
-fn setup<E: BaseApp>(title: &str) -> Setup {
+fn setup<E: BaseApp>() -> Setup {
     let event_loop = EventLoop::new();
     let window =
         winit::window::WindowBuilder::new()
-            .with_title(title)
+            .with_title(E::title())
             .build(&event_loop)
             .unwrap();
 
@@ -218,8 +219,7 @@ fn start<E: BaseApp>(
     });
 }
 
-
-pub(crate) fn run<E: BaseApp>(title: &str) {
-    let setup = setup::<E>(title);
+pub(crate) fn run<E: BaseApp>() {
+    let setup = setup::<E>();
     start::<E>(setup);
 }

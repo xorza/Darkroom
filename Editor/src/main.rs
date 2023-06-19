@@ -5,5 +5,5 @@ mod app;
 mod base_app;
 
 fn main() {
-    run::<App>("Window");
+    run::<App>();
 }

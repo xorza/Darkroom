@@ -105,6 +105,10 @@ pub(crate) struct App {
 
 
 impl BaseApp for App {
+    fn title() -> &'static str {
+        "Nodeshop"
+    }
+
     fn init(
         config: &wgpu::SurfaceConfiguration,
         _adapter: &wgpu::Adapter,
