@@ -13,9 +13,9 @@ default = []
 opencl = ["ocl"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0"
-mlua = { version = "0", features = ["lua54", "vendored"] }
-ocl = { version = "0", optional = true }
-uuid = { version = "1", features = ["v4", "macro-diagnostics", "serde"] }
-anyhow = "1"
+serde = { version = "*", features = ["derive"] }
+serde_yaml = "*"
+mlua = { version = "*", features = ["lua54", "vendored"] }
+ocl = { version = "*", optional = true }
+uuid = { version = "*", features = ["v4", "macro-diagnostics", "serde"] }
+anyhow = "*"
