@@ -49,10 +49,10 @@ struct NodeView: View {
     let name:String
     let inputs:[String]
     let outputs:[String]
+
     
     var body: some View {
         VStack(alignment: .center) {
-            
             Text(name)
                 .font(.headline)
                 .padding(.vertical, 5.0)
