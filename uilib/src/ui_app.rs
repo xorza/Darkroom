@@ -3,29 +3,33 @@ use std::rc::Rc;
 use glam::UVec2;
 use wgpu::{Adapter, Device, Queue, SurfaceConfiguration, Texture, TextureView};
 
-use crate::app_base::{App, InitInfo, RenderInfo};
+use crate::app_base::{App, RenderInfo};
 use crate::canvas::Canvas;
 use crate::event::{Event, EventResult};
-use crate::renderer::{Renderer, WgpuRenderer};
+use crate::renderer::{RenderCache, Renderer, WgpuRenderer};
 use crate::view::View;
 
 pub struct UiApp {
     window_size: UVec2,
-    renderer: WgpuRenderer,
+    renderer_cache: RenderCache,
     view: Rc<dyn View>,
-    id_texture: Option<Texture>,
 }
 
 impl App for UiApp {
-    fn init(init: InitInfo) -> Self {
-        let window_size = UVec2::new(init.surface_config.width, init.surface_config.height);
+    fn init(device: &Device,
+            queue: &Queue,
+            surface_config: &SurfaceConfiguration) -> Self {
+        let window_size = UVec2::new(surface_config.width, surface_config.height);
+        let renderer_cache = RenderCache::new(device, queue, surface_config, window_size);
 
-        Self {
-            window_size,
-            renderer: WgpuRenderer::new(init),
+        let mut result = Self {
+            window_size: UVec2::new(0, 0),
+            renderer_cache,
             view: Rc::new(Canvas::new()),
-            id_texture: None,
-        }
+        };
+        result.resize(device, queue, window_size);
+
+        result
     }
 
     fn update(&mut self, event: Event) -> EventResult {
@@ -38,40 +42,14 @@ impl App for UiApp {
     }
 
     fn render(&self, render_info: RenderInfo) {
-        self.renderer.render_view(render_info, self.window_size, self.view.as_ref());
+        let renderer = WgpuRenderer::new(&self.renderer_cache, self.window_size);
+        renderer.begin_frame(&render_info);
+        renderer.render_view(&render_info, self.view.as_ref());
     }
 
-    fn resize(&mut self, device: &Device,_queue: &wgpu::Queue,window_size: UVec2) {
+    fn resize(&mut self, device: &Device, queue: &Queue, window_size: UVec2) {
         self.window_size = window_size;
-
-        let mut should_recreate: bool = false;
-        if self.id_texture.is_none() {
-            should_recreate = true;
-        } else {
-            let texture = self.id_texture.as_ref().unwrap();
-            if texture.width() != self.window_size.x || texture.height() != self.window_size.y {
-                should_recreate = true;
-            }
-        }
-
-        if should_recreate {
-            let id_texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("Id Texture"),
-                size: wgpu::Extent3d {
-                    width: self.window_size.x,
-                    height: self.window_size.y,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::R32Uint,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
-
-            self.id_texture = Some(id_texture);
-        }
+        self.renderer_cache.resize(device,queue, window_size);
     }
 }
 

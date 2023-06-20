@@ -5,7 +5,7 @@ use glam::UVec2;
 use wgpu::Device;
 use wgpu::util::DeviceExt;
 
-use crate::app_base::{App, InitInfo, RenderInfo};
+use crate::app_base::{App, RenderInfo};
 use crate::event::{Event, EventResult};
 
 #[repr(C)]
@@ -107,12 +107,9 @@ pub struct SampleApp {
 }
 
 impl App for SampleApp {
-    fn init(
-        InitInfo {
-            surface_config,
-            device,
-            queue,
-        }: InitInfo) -> Self {
+    fn init(device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            surface_config: &wgpu::SurfaceConfiguration) -> Self {
         let vertex_size = mem::size_of::<Vertex>();
         let (vertex_data, index_data) = create_vertices();
 

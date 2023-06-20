@@ -9,11 +9,6 @@ use winit::{
 
 use crate::event::{Event, EventResult};
 
-pub struct InitInfo<'a> {
-    pub device: &'a wgpu::Device,
-    pub queue: &'a wgpu::Queue,
-    pub surface_config: &'a wgpu::SurfaceConfiguration,
-}
 pub struct RenderInfo<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -22,7 +17,9 @@ pub struct RenderInfo<'a> {
 }
 
 pub trait App: 'static + Sized {
-    fn init(init: InitInfo) -> Self;
+    fn init(device: &wgpu::Device,
+            queue: &wgpu::Queue,
+            surface_config: &wgpu::SurfaceConfiguration) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
     fn render(&self, render: RenderInfo);
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: UVec2);
@@ -111,12 +108,7 @@ fn start<E: App>(
     config.view_formats.push(surface_view_format);
     surface.configure(&device, &config);
 
-    let mut app = E::init(InitInfo {
-        surface_config: &config,
-        device: &device,
-        queue: &queue,
-    });
-
+    let mut app = E::init(&device, &queue, &config);
 
     let start = Instant::now();
     let mut has_error_scope = false;
