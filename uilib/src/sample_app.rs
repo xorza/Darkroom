@@ -2,6 +2,7 @@ use std::{borrow::Cow, f32::consts, mem};
 
 use bytemuck::{Pod, Zeroable};
 use glam::UVec2;
+use wgpu::Device;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::{App, InitInfo, RenderInfo};
@@ -109,7 +110,6 @@ impl App for SampleApp {
     fn init(
         InitInfo {
             surface_config,
-            adapter: _adapter,
             device,
             queue,
         }: InitInfo) -> Self {
@@ -268,11 +268,6 @@ impl App for SampleApp {
         match event {
             Event::WindowClose => EventResult::Exit,
             Event::RedrawFinished => EventResult::Redraw,
-            Event::Resize(size) => {
-                self.window_size = size;
-
-                EventResult::Continue
-            }
 
             _ => EventResult::Continue
         }
@@ -324,5 +319,9 @@ impl App for SampleApp {
         }
 
         queue.submit(Some(encoder.finish()));
+    }
+
+    fn resize(&mut self, _device: &Device, window_size: UVec2) {
+        self.window_size = window_size;
     }
 }

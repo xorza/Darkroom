@@ -210,8 +210,7 @@ impl WgpuRenderer {
                 },
             ],
         }];
-
-
+        
         let pipeline = init.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),

@@ -2,7 +2,6 @@ use std::time::Instant;
 
 use glam::UVec2;
 use pollster::FutureExt;
-use wgpu::{Dx12Compiler, Features, RequestAdapterOptions};
 use winit::{
     event::{self, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
@@ -11,10 +10,9 @@ use winit::{
 use crate::event::{Event, EventResult};
 
 pub struct InitInfo<'a> {
-    pub surface_config: &'a wgpu::SurfaceConfiguration,
-    pub adapter: &'a wgpu::Adapter,
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
+    pub surface_config: &'a wgpu::SurfaceConfiguration,
 }
 pub struct RenderInfo<'a> {
     pub device: &'a wgpu::Device,
@@ -27,6 +25,7 @@ pub trait App: 'static + Sized {
     fn init(init: InitInfo) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
     fn render(&self, render: RenderInfo);
+    fn resize(&mut self, device: &wgpu::Device, window_size: UVec2);
 }
 
 struct Setup {
@@ -50,7 +49,7 @@ fn setup(title: &str) -> Setup {
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
-        dx12_shader_compiler: Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+        dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
     });
     let size = window.inner_size();
     let surface = unsafe {
@@ -58,7 +57,7 @@ fn setup(title: &str) -> Setup {
     };
 
     let adapter = instance
-        .request_adapter(&RequestAdapterOptions {
+        .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::LowPower,
             force_fallback_adapter: false,
             compatible_surface: Some(&surface),
@@ -73,7 +72,7 @@ fn setup(title: &str) -> Setup {
         .request_device(
             &wgpu::DeviceDescriptor {
                 label: None,
-                features: Features::empty(),
+                features: wgpu::Features::empty(),
                 limits,
             },
             None,
@@ -114,7 +113,6 @@ fn start<E: App>(
 
     let mut app = E::init(InitInfo {
         surface_config: &config,
-        adapter: &adapter,
         device: &device,
         queue: &queue,
     });
@@ -150,7 +148,10 @@ fn start<E: App>(
                 config.height = size.height.max(1);
                 surface.configure(&device, &config);
 
-                result = app.update(Event::Resize(UVec2::new(config.width, config.height)));
+                let window_size = UVec2::new(size.width, size.height);
+
+                app.resize(&device, window_size);
+                result = app.update(Event::Resize(window_size));
             }
 
             event::Event::RedrawRequested(_) => {
@@ -163,10 +164,11 @@ fn start<E: App>(
                             .expect("Failed to acquire next surface texture.")
                     }
                 };
-                let surface_texture_view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor {
-                    format: Some(surface_view_format),
-                    ..wgpu::TextureViewDescriptor::default()
-                });
+                let surface_texture_view = surface_texture.texture.create_view(
+                    &wgpu::TextureViewDescriptor {
+                        format: Some(surface_view_format),
+                        ..wgpu::TextureViewDescriptor::default()
+                    });
 
                 assert!(!has_error_scope);
                 device.push_error_scope(wgpu::ErrorFilter::Validation);
