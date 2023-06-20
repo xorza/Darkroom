@@ -38,7 +38,7 @@ impl App for UiApp {
     }
 
     fn render(&self, render: RenderInfo) {
-        self.renderer.render_view(render, self.view.as_ref());
+        self.renderer.render_view(render,self.window_size, self.view.as_ref());
 
     }
 }

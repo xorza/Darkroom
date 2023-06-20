@@ -3,11 +3,12 @@ use std::f32::consts;
 use std::mem;
 
 use bytemuck::{Pod, Zeroable};
-use glam::UVec2;
+use glam::{Mat4, UVec2};
 use wgpu::{Adapter, Device, Queue, SurfaceConfiguration};
 use wgpu::util::DeviceExt;
 
-use crate::app_base::InitInfo;
+use crate::app_base::{InitInfo, RenderInfo};
+use crate::view::View;
 
 pub trait Renderer {
     fn background(&self);
@@ -15,12 +16,10 @@ pub trait Renderer {
 
 pub(crate) struct WgpuRenderer {
     vertex_buf: wgpu::Buffer,
-    index_buf: wgpu::Buffer,
-    index_count: u32,
+    vertex_count: u32,
     bind_group: wgpu::BindGroup,
     uniform_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
-    window_size: UVec2,
 }
 
 impl Renderer for WgpuRenderer {
@@ -32,60 +31,32 @@ impl Renderer for WgpuRenderer {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     _pos: [f32; 4],
+    _color: [f32; 4],
     _tex_coord: [f32; 2],
 }
 
-fn vertex(pos: [i8; 3], tc: [i8; 2]) -> Vertex {
+fn vertex(pos: [f32; 3], tc: [f32; 2], col: [f32; 4]) -> Vertex {
     Vertex {
-        _pos: [pos[0] as f32, pos[1] as f32, pos[2] as f32, 1.0],
-        _tex_coord: [tc[0] as f32, tc[1] as f32],
+        _pos: [pos[0], pos[1], pos[2], 1.0],
+        _color: [col[0], col[1], col[2], col[3]],
+        _tex_coord: [tc[0], tc[1]],
     }
 }
 
-fn create_vertices() -> (Vec<Vertex>, Vec<u16>) {
+fn create_vertices() -> Vec<Vertex> {
+    // @formatter:off
     let vertex_data = [
-        // top (0, 0, 1)
-        vertex([-1, -1, 1], [0, 0]),
-        vertex([1, -1, 1], [1, 0]),
-        vertex([1, 1, 1], [1, 1]),
-        vertex([-1, 1, 1], [0, 1]),
-        // bottom (0, 0, -1)
-        vertex([-1, 1, -1], [1, 0]),
-        vertex([1, 1, -1], [0, 0]),
-        vertex([1, -1, -1], [0, 1]),
-        vertex([-1, -1, -1], [1, 1]),
-        // right (1, 0, 0)
-        vertex([1, -1, -1], [0, 0]),
-        vertex([1, 1, -1], [1, 0]),
-        vertex([1, 1, 1], [1, 1]),
-        vertex([1, -1, 1], [0, 1]),
-        // left (-1, 0, 0)
-        vertex([-1, -1, 1], [1, 0]),
-        vertex([-1, 1, 1], [0, 0]),
-        vertex([-1, 1, -1], [0, 1]),
-        vertex([-1, -1, -1], [1, 1]),
-        // front (0, 1, 0)
-        vertex([1, 1, -1], [1, 0]),
-        vertex([-1, 1, -1], [0, 0]),
-        vertex([-1, 1, 1], [0, 1]),
-        vertex([1, 1, 1], [1, 1]),
-        // back (0, -1, 0)
-        vertex([1, -1, 1], [0, 0]),
-        vertex([-1, -1, 1], [1, 0]),
-        vertex([-1, -1, -1], [1, 1]),
-        vertex([1, -1, -1], [0, 1]),
-    ];
+        vertex([ 0.0, 0.0, 0.0], [ 0.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([ 0.3, 0.0, 0.0], [ 1.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([ 0.3, 0.3, 0.0], [ 1.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
 
-    let index_data: &[u16] = &[
-        0, 1, 2, 2, 3, 0, // top
-        4, 5, 6, 6, 7, 4, // bottom
-        8, 9, 10, 10, 11, 8, // right
-        12, 13, 14, 14, 15, 12, // left
-        16, 17, 18, 18, 19, 16, // front
-        20, 21, 22, 22, 23, 20, // back
+        vertex([ 0.0, 0.0, 0.0], [ 0.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([ 0.3, 0.3, 0.0], [ 1.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([ 0.0, 0.3, 0.0], [ 0.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
     ];
+    // @formatter:off
 
-    (vertex_data.to_vec(), index_data.to_vec())
+    vertex_data.to_vec()
 }
 
 fn create_texels(size: usize) -> Vec<u8> {
@@ -105,32 +76,33 @@ fn create_texels(size: usize) -> Vec<u8> {
         .collect()
 }
 
-fn create_matrix(aspect_ratio: f32, angle: f32) -> glam::Mat4 {
-    let projection = glam::Mat4::perspective_rh(consts::FRAC_PI_4, aspect_ratio, 1.0, 10.0);
-    let view = glam::Mat4::look_at_rh(
-        glam::Vec3::new(5.0 * angle.cos(), 5.0 * angle.sin(), 3.0),
-        glam::Vec3::ZERO,
-        glam::Vec3::Z,
+
+fn create_matrix(size: UVec2) -> Mat4 {
+    let projection = Mat4::orthographic_rh(
+        0.0,
+        size.x as f32 / size.y as f32,
+        0.0,
+        1.0,
+        -1.0,
+        1.0,
     );
 
-    projection * view
+    // let scale = Mat4::from_scale(glam::Vec3::new(1.0, 1.0, -1.0));
+    // let translation = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 0.0));
+
+    projection
 }
 
 
 impl WgpuRenderer {
     pub fn new(init: InitInfo) -> Self {
         let vertex_size = mem::size_of::<Vertex>();
-        let (vertex_data, index_data) = create_vertices();
+        let vertex_data = create_vertices();
 
         let vertex_buf = init.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Cube Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertex_data),
             usage: wgpu::BufferUsages::VERTEX,
-        });
-        let index_buf = init.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Cube Index Buffer"),
-            contents: bytemuck::cast_slice(&index_data),
-            usage: wgpu::BufferUsages::INDEX,
         });
 
         let bind_group_layout = init.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -230,9 +202,14 @@ impl WgpuRenderer {
                     shader_location: 0,
                 },
                 wgpu::VertexAttribute {
-                    format: wgpu::VertexFormat::Float32x2,
+                    format: wgpu::VertexFormat::Float32x4,
                     offset: 4 * 4,
                     shader_location: 1,
+                },
+                wgpu::VertexAttribute {
+                    format: wgpu::VertexFormat::Float32x2,
+                    offset: 4 * 8,
+                    shader_location: 2,
                 },
             ],
         }];
@@ -261,19 +238,14 @@ impl WgpuRenderer {
 
         WgpuRenderer {
             vertex_buf,
-            index_buf,
-            index_count: index_data.len() as u32,
+            vertex_count: vertex_data.len() as u32,
             bind_group,
             uniform_buf,
             pipeline,
-            window_size: UVec2::new(init.surface_config.width, init.surface_config.height),
         }
     }
-    pub fn render_view(&self, render: crate::app_base::RenderInfo, _view: &dyn crate::view::View) {
-        let view_projection = create_matrix(
-            self.window_size.x as f32 / self.window_size.y as f32,
-            render.time as f32,
-        );
+    pub fn render_view(&self, render: RenderInfo, window_size: UVec2, _view: &dyn View) {
+        let view_projection = create_matrix(window_size);
         render.queue.write_buffer(
             &self.uniform_buf,
             0,
@@ -300,11 +272,10 @@ impl WgpuRenderer {
             render_pass.push_debug_group("Prepare data for draw.");
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);
-            render_pass.set_index_buffer(self.index_buf.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             render_pass.pop_debug_group();
             render_pass.insert_debug_marker("Draw!");
-            render_pass.draw_indexed(0..self.index_count, 0, 0..1);
+            render_pass.draw(0..self.vertex_count, 0..1);
         }
 
         render.queue.submit(Some(encoder.finish()));
