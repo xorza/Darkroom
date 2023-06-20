@@ -50,6 +50,14 @@ fn create_texels(size: usize) -> Vec<u8> {
         .collect()
 }
 
+fn aligned_size_of_uniform<U: Sized>() -> BufferAddress {
+    let uniform_size = std::mem::size_of::<U>();
+    let uniform_align = 256;
+    let uniform_padded_size = (uniform_size + uniform_align - 1) / uniform_align * uniform_align;  // round up to next multiple of uniform_align
+
+    uniform_padded_size as BufferAddress
+}
+
 
 pub trait Renderer {
     fn background(&self);
@@ -68,7 +76,7 @@ pub(crate) struct RenderCache {
 pub(crate) struct WgpuRenderer<'a> {
     cache: &'a RenderCache,
     window_size: UVec2,
-    uniform_buf1: UniformBuffer1,
+    vertex_uniform_buffer: VertexUniformBuffer,
     uniform_buf2: UniformBuffer2,
 }
 
@@ -87,7 +95,7 @@ struct Vertex {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct UniformBuffer1 {
+struct VertexUniformBuffer {
     projection: [f32; 16],
     model: [f32; 16],
 }
@@ -120,8 +128,8 @@ impl RenderCache {
                         visibility: ShaderStages::VERTEX,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(mem::size_of::<UniformBuffer1>() as u64),
+                            has_dynamic_offset: true,
+                            min_binding_size: BufferSize::new(mem::size_of::<VertexUniformBuffer>() as u64),
                         },
                         count: None,
                     },
@@ -185,13 +193,13 @@ impl RenderCache {
 
         let vertex_uniform_buf = device.create_buffer(&BufferDescriptor {
             label: Some("Vertex Uniform Buffer"),
-            size: mem::size_of::<UniformBuffer1>() as BufferAddress,
+            size: 100 * aligned_size_of_uniform::<VertexUniformBuffer>(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let fragment_uniform_buf = device.create_buffer(&BufferDescriptor {
             label: Some("Fragment Uniform Buffer"),
-            size: mem::size_of::<UniformBuffer2>() as BufferAddress,
+            size: aligned_size_of_uniform::<UniformBuffer2>(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -201,7 +209,13 @@ impl RenderCache {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: vertex_uniform_buf.as_entire_binding(),
+                    resource: BindingResource::Buffer(
+                        BufferBinding {
+                            buffer: &vertex_uniform_buf,
+                            offset: 0,
+                            size: BufferSize::new(aligned_size_of_uniform::<VertexUniformBuffer>()),
+                        }
+                    ),
                 },
                 BindGroupEntry {
                     binding: 1,
@@ -308,12 +322,12 @@ impl<'a> WgpuRenderer<'a> {
         Self {
             cache: render_cache,
             window_size,
-            uniform_buf1: UniformBuffer1::zeroed(),
+            vertex_uniform_buffer: VertexUniformBuffer::zeroed(),
             uniform_buf2: UniformBuffer2::zeroed(),
         }
     }
 
-    pub fn begin_frame(&mut self, render: &RenderInfo) {
+    pub fn begin_frame(&mut self, _render: &RenderInfo) {
         let size = self.window_size;
 
         let projection = Mat4::orthographic_lh(
@@ -324,25 +338,26 @@ impl<'a> WgpuRenderer<'a> {
             -1.0,
             1.0,
         );
-        self.uniform_buf1.projection = projection.to_cols_array();
+        self.vertex_uniform_buffer.projection = projection.to_cols_array();
+    }
+
+    pub fn render_view(&mut self, render: &RenderInfo, _view: &dyn View) {
+        self.vertex_uniform_buffer.model = (
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0))
+                * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
+        ).to_cols_array();
+
+        render.queue.write_buffer(
+            &self.cache.vertex_uniform_buf,
+            0,
+            bytemuck::bytes_of(&self.vertex_uniform_buffer),
+        );
 
         self.uniform_buf2.color = [1.0, 1.0, 1.0, 1.0];
         render.queue.write_buffer(
             &self.cache.fragment_uniform_buf,
             0,
             bytemuck::bytes_of(&self.uniform_buf2),
-        );
-    }
-
-    pub fn render_view(&mut self, render: &RenderInfo, _view: &dyn View) {
-        self.uniform_buf1.model = Mat4::from_scale(
-            Vec3::new(1000.0, 1000.0, 1.0)
-        ).to_cols_array();
-
-        render.queue.write_buffer(
-            &self.cache.vertex_uniform_buf,
-            0,
-            bytemuck::bytes_of(&self.uniform_buf1),
         );
 
         let mut encoder =
@@ -376,12 +391,29 @@ impl<'a> WgpuRenderer<'a> {
                 });
             render_pass.push_debug_group("Prepare data for draw.");
             render_pass.set_pipeline(&self.cache.pipeline);
-            render_pass.set_bind_group(0, &self.cache.bind_group, &[]);
+            render_pass.set_bind_group(0, &self.cache.bind_group, &[0]);
             render_pass.set_vertex_buffer(0, self.cache.vertex_buf.slice(..));
             render_pass.pop_debug_group();
             render_pass.insert_debug_marker("Draw!");
             render_pass.draw(0..self.cache.vertex_count, 0..1);
+
+            self.vertex_uniform_buffer.model = (
+                Mat4::from_translation(Vec3::new(150.0, 300.0, 0.0))
+                    * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
+            ).to_cols_array();
+
+            let offset = aligned_size_of_uniform::<VertexUniformBuffer>();
+
+            render.queue.write_buffer(
+                &self.cache.vertex_uniform_buf,
+                aligned_size_of_uniform::<VertexUniformBuffer>(),
+                bytemuck::bytes_of(&self.vertex_uniform_buffer),
+            );
+
+            render_pass.set_bind_group(0, &self.cache.bind_group, &[offset as u32]);
+            render_pass.draw(0..self.cache.vertex_count, 0..1);
         }
+
 
         render.queue.submit(Some(encoder.finish()));
     }
