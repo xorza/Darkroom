@@ -10,10 +10,9 @@ use wgpu::util::DeviceExt;
 use crate::app_base::RenderInfo;
 use crate::view::View;
 
-fn vertex(pos: [f32; 3], tc: [f32; 2], col: [f32; 4]) -> Vertex {
+fn vertex(pos: [f32; 3], tc: [f32; 2]) -> Vertex {
     Vertex {
         _pos: [pos[0], pos[1], pos[2], 1.0],
-        _color: [col[0], col[1], col[2], col[3]],
         _tex_coord: [tc[0], tc[1]],
     }
 }
@@ -21,13 +20,13 @@ fn vertex(pos: [f32; 3], tc: [f32; 2], col: [f32; 4]) -> Vertex {
 fn create_vertices() -> Vec<Vertex> {
     // @formatter:off
     let vertex_data = [
-        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
-        vertex([ 200.0,   0.0, 0.0], [ 1.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
-        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0]),
+        vertex([ 200.0,   0.0, 0.0], [ 1.0, 0.0]),
+        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0]),
 
-        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0],[ 1.0, 1.0, 1.0, 1.0]),
-        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
-        vertex([   0.0, 200.0, 0.0], [ 0.0, 1.0],[ 1.0, 1.0, 1.0, 1.0]),
+        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0]),
+        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0]),
+        vertex([   0.0, 200.0, 0.0], [ 0.0, 1.0]),
     ];
     // @formatter:on
 
@@ -80,7 +79,6 @@ impl Renderer for WgpuRenderer<'_> {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Vertex {
     _pos: [f32; 4],
-    _color: [f32; 4],
     _tex_coord: [f32; 2],
 }
 
@@ -197,14 +195,9 @@ impl RenderCache {
                     shader_location: 0,
                 },
                 VertexAttribute {
-                    format: VertexFormat::Float32x4,
+                    format: VertexFormat::Float32x2,
                     offset: 4 * 4,
                     shader_location: 1,
-                },
-                VertexAttribute {
-                    format: VertexFormat::Float32x2,
-                    offset: 4 * 8,
-                    shader_location: 2,
                 },
             ],
         }];
