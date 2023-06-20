@@ -42,7 +42,7 @@ impl App for UiApp {
     }
 
     fn render(&self, render_info: RenderInfo) {
-        let renderer = WgpuRenderer::new(&self.renderer_cache, self.window_size);
+        let mut renderer = WgpuRenderer::new(&self.renderer_cache, self.window_size);
         renderer.begin_frame(&render_info);
         renderer.render_view(&render_info, self.view.as_ref());
     }

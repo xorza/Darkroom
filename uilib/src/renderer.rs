@@ -20,13 +20,13 @@ fn vertex(pos: [f32; 3], tc: [f32; 2]) -> Vertex {
 fn create_vertices() -> Vec<Vertex> {
     // @formatter:off
     let vertex_data = [
-        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0]),
-        vertex([ 200.0,   0.0, 0.0], [ 1.0, 0.0]),
-        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0]),
+        vertex([ 0.0, 0.0, 0.0], [ 0.0, 0.0]),
+        vertex([ 1.0, 0.0, 0.0], [ 1.0, 0.0]),
+        vertex([ 1.0, 1.0, 0.0], [ 1.0, 1.0]),
 
-        vertex([   0.0,   0.0, 0.0], [ 0.0, 0.0]),
-        vertex([ 200.0, 200.0, 0.0], [ 1.0, 1.0]),
-        vertex([   0.0, 200.0, 0.0], [ 0.0, 1.0]),
+        vertex([ 0.0, 0.0, 0.0], [ 0.0, 0.0]),
+        vertex([ 1.0, 1.0, 0.0], [ 1.0, 1.0]),
+        vertex([ 0.0, 1.0, 0.0], [ 0.0, 1.0]),
     ];
     // @formatter:on
 
@@ -51,23 +51,25 @@ fn create_texels(size: usize) -> Vec<u8> {
 }
 
 
+pub trait Renderer {
+    fn background(&self);
+}
+
 pub(crate) struct RenderCache {
     vertex_buf: Buffer,
     vertex_count: u32,
     bind_group: BindGroup,
-    uniform_buf: Buffer,
+    vertex_uniform_buf: Buffer,
+    fragment_uniform_buf: Buffer,
     pipeline: RenderPipeline,
     id_texture: Texture,
-}
-
-
-pub trait Renderer {
-    fn background(&self);
 }
 
 pub(crate) struct WgpuRenderer<'a> {
     cache: &'a RenderCache,
     window_size: UVec2,
+    uniform_buf1: UniformBuffer1,
+    uniform_buf2: UniformBuffer2,
 }
 
 impl Renderer for WgpuRenderer<'_> {
@@ -80,6 +82,19 @@ impl Renderer for WgpuRenderer<'_> {
 struct Vertex {
     _pos: [f32; 4],
     _tex_coord: [f32; 2],
+}
+
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct UniformBuffer1 {
+    projection: [f32; 16],
+    model: [f32; 16],
+}
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct UniformBuffer2 {
+    color: [f32; 4],
 }
 
 impl RenderCache {
@@ -106,7 +121,7 @@ impl RenderCache {
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(64),
+                            min_binding_size: BufferSize::new(mem::size_of::<UniformBuffer1>() as u64),
                         },
                         count: None,
                     },
@@ -117,6 +132,16 @@ impl RenderCache {
                             multisampled: false,
                             sample_type: TextureSampleType::Uint,
                             view_dimension: TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Buffer {
+                            ty: BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: BufferSize::new(mem::size_of::<UniformBuffer2>() as u64),
                         },
                         count: None,
                     },
@@ -158,9 +183,15 @@ impl RenderCache {
             texture_extent,
         );
 
-        let uniform_buf = device.create_buffer(&BufferDescriptor {
-            label: Some("Uniform Buffer"),
-            size: 64,
+        let vertex_uniform_buf = device.create_buffer(&BufferDescriptor {
+            label: Some("Vertex Uniform Buffer"),
+            size: mem::size_of::<UniformBuffer1>() as BufferAddress,
+            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let fragment_uniform_buf = device.create_buffer(&BufferDescriptor {
+            label: Some("Fragment Uniform Buffer"),
+            size: mem::size_of::<UniformBuffer2>() as BufferAddress,
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -170,11 +201,15 @@ impl RenderCache {
             entries: &[
                 BindGroupEntry {
                     binding: 0,
-                    resource: uniform_buf.as_entire_binding(),
+                    resource: vertex_uniform_buf.as_entire_binding(),
                 },
                 BindGroupEntry {
                     binding: 1,
                     resource: BindingResource::TextureView(&texture_view),
+                },
+                BindGroupEntry {
+                    binding: 2,
+                    resource: fragment_uniform_buf.as_entire_binding(),
                 },
             ],
             label: None,
@@ -213,7 +248,10 @@ impl RenderCache {
             fragment: Some(FragmentState {
                 module: &shader,
                 entry_point: "fs_main",
-                targets: &[Some(surface_config.view_formats[0].into())],
+                targets: &[
+                    Some(surface_config.view_formats[0].into()),
+                    Some(TextureFormat::R32Uint.into())
+                ],
             }),
             primitive: PrimitiveState {
                 cull_mode: Some(Face::Back),
@@ -228,12 +266,12 @@ impl RenderCache {
 
         let id_texture = Self::create_id_texture(device, window_size);
 
-
         RenderCache {
             vertex_buf,
             vertex_count: vertex_data.len() as u32,
             bind_group,
-            uniform_buf,
+            vertex_uniform_buf,
+            fragment_uniform_buf,
             pipeline,
             id_texture,
         }
@@ -257,7 +295,7 @@ impl RenderCache {
             sample_count: 1,
             dimension: TextureDimension::D2,
             format: TextureFormat::R32Uint,
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
             view_formats: &[],
         });
 
@@ -270,10 +308,12 @@ impl<'a> WgpuRenderer<'a> {
         Self {
             cache: render_cache,
             window_size,
+            uniform_buf1: UniformBuffer1::zeroed(),
+            uniform_buf2: UniformBuffer2::zeroed(),
         }
     }
 
-    pub fn begin_frame(&self, render: &RenderInfo) {
+    pub fn begin_frame(&mut self, render: &RenderInfo) {
         let size = self.window_size;
 
         let projection = Mat4::orthographic_lh(
@@ -284,30 +324,54 @@ impl<'a> WgpuRenderer<'a> {
             -1.0,
             1.0,
         );
+        self.uniform_buf1.projection = projection.to_cols_array();
 
+        self.uniform_buf2.color = [1.0, 1.0, 1.0, 1.0];
         render.queue.write_buffer(
-            &self.cache.uniform_buf,
+            &self.cache.fragment_uniform_buf,
             0,
-            bytemuck::cast_slice(projection.as_ref()),
+            bytemuck::bytes_of(&self.uniform_buf2),
         );
     }
 
-    pub fn render_view(&self, render: &RenderInfo, _view: &dyn View) {
+    pub fn render_view(&mut self, render: &RenderInfo, _view: &dyn View) {
+        self.uniform_buf1.model = Mat4::from_scale(
+            Vec3::new(1000.0, 1000.0, 1.0)
+        ).to_cols_array();
+
+        render.queue.write_buffer(
+            &self.cache.vertex_uniform_buf,
+            0,
+            bytemuck::bytes_of(&self.uniform_buf1),
+        );
+
         let mut encoder =
             render.device.create_command_encoder(&CommandEncoderDescriptor { label: None });
 
         {
+            let id_tex_view = self.cache.id_texture.create_view(&TextureViewDescriptor::default());
+
             let mut render_pass = encoder.begin_render_pass(
                 &RenderPassDescriptor {
                     label: None,
-                    color_attachments: &[Some(RenderPassColorAttachment {
-                        view: render.view,
-                        resolve_target: None,
-                        ops: Operations {
-                            load: LoadOp::Clear(Color::RED),
-                            store: true,
-                        },
-                    })],
+                    color_attachments: &[
+                        Some(RenderPassColorAttachment {
+                            view: render.view,
+                            resolve_target: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color::RED),
+                                store: true,
+                            },
+                        }),
+                        Some(RenderPassColorAttachment {
+                            view: &id_tex_view,
+                            resolve_target: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                    ],
                     depth_stencil_attachment: None,
                 });
             render_pass.push_debug_group("Prepare data for draw.");

@@ -3,9 +3,19 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
+struct UniformBuffer1 {
+    projection: mat4x4<f32>,
+    model: mat4x4<f32>
+};
+
+struct UniformBuffer2 {
+    color: vec4<f32>,
+};
+
 @group(0)
 @binding(0)
-var<uniform> transform: mat4x4<f32>;
+var<uniform> vertex_data: UniformBuffer1;
+
 
 @vertex
 fn vs_main(
@@ -13,7 +23,7 @@ fn vs_main(
     @location(1) tex_coord: vec2<f32>,
 ) -> VertexOutput {
     var result: VertexOutput;
-    result.position = transform * position;
+    result.position = vertex_data.projection * vertex_data.model *  position;
     result.tex_coord = tex_coord;
     return result;
 }
@@ -22,9 +32,14 @@ fn vs_main(
 @binding(1)
 var r_color: texture_2d<u32>;
 
+
+@group(0)
+@binding(2)
+var<uniform> fragment_data: UniformBuffer2;
+
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let tex = textureLoad(r_color, vec2<i32>(vertex.tex_coord * 256.0), 0);
     let v = f32(tex.x) / 255.0;
-    return vec4<f32>(v, v, v, 1.0);
+    return vec4<f32>(v, v, v, 1.0) * fragment_data.color;
 }
