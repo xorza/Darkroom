@@ -41,7 +41,7 @@ impl App for UiApp {
         self.renderer.render_view(render_info, self.window_size, self.view.as_ref());
     }
 
-    fn resize(&mut self, device: &Device, window_size: UVec2) {
+    fn resize(&mut self, device: &Device,_queue: &wgpu::Queue,window_size: UVec2) {
         self.window_size = window_size;
 
         let mut should_recreate: bool = false;

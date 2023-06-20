@@ -175,7 +175,6 @@ impl App for SampleApp {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         queue.write_texture(
             texture.as_image_copy(),
             &texels,
@@ -193,6 +192,8 @@ impl App for SampleApp {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+
+        let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
@@ -321,7 +322,7 @@ impl App for SampleApp {
         queue.submit(Some(encoder.finish()));
     }
 
-    fn resize(&mut self, _device: &Device, window_size: UVec2) {
+    fn resize(&mut self, _device: &Device, _queue: &wgpu::Queue, window_size: UVec2) {
         self.window_size = window_size;
     }
 }

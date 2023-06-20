@@ -25,7 +25,7 @@ pub trait App: 'static + Sized {
     fn init(init: InitInfo) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
     fn render(&self, render: RenderInfo);
-    fn resize(&mut self, device: &wgpu::Device, window_size: UVec2);
+    fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: UVec2);
 }
 
 struct Setup {
@@ -117,6 +117,7 @@ fn start<E: App>(
         queue: &queue,
     });
 
+
     let start = Instant::now();
     let mut has_error_scope = false;
 
@@ -150,7 +151,7 @@ fn start<E: App>(
 
                 let window_size = UVec2::new(size.width, size.height);
 
-                app.resize(&device, window_size);
+                app.resize(&device, &queue, window_size);
                 result = app.update(Event::Resize(window_size));
             }
 
