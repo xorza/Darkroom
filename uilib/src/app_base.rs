@@ -10,21 +10,23 @@ use winit::{
 
 use crate::event::{Event, EventResult};
 
+pub struct InitInfo<'a> {
+    pub surface_config: &'a wgpu::SurfaceConfiguration,
+    pub adapter: &'a wgpu::Adapter,
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+}
+pub struct RenderInfo<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub view: &'a wgpu::TextureView,
+    pub time: f64,
+}
+
 pub trait App: 'static + Sized {
-    fn init(
-        config: &wgpu::SurfaceConfiguration,
-        adapter: &wgpu::Adapter,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Self;
+    fn init(init: InitInfo) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
-    fn render(
-        &mut self,
-        view: &wgpu::TextureView,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        time: f64,
-    );
+    fn render(&self, render: RenderInfo);
 }
 
 struct Setup {
@@ -110,7 +112,13 @@ fn start<E: App>(
     config.view_formats.push(surface_view_format);
     surface.configure(&device, &config);
 
-    let mut app = E::init(&config, &adapter, &device, &queue);
+    let mut app = E::init(InitInfo {
+        surface_config: &config,
+        adapter: &adapter,
+        device: &device,
+        queue: &queue,
+    });
+
     let start = Instant::now();
     let mut has_error_scope = false;
 
@@ -146,7 +154,7 @@ fn start<E: App>(
             }
 
             event::Event::RedrawRequested(_) => {
-                let frame = match surface.get_current_texture() {
+                let surface_texture = match surface.get_current_texture() {
                     Ok(frame) => frame,
                     Err(_) => {
                         surface.configure(&device, &config);
@@ -155,7 +163,7 @@ fn start<E: App>(
                             .expect("Failed to acquire next surface texture.")
                     }
                 };
-                let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+                let surface_texture_view = surface_texture.texture.create_view(&wgpu::TextureViewDescriptor {
                     format: Some(surface_view_format),
                     ..wgpu::TextureViewDescriptor::default()
                 });
@@ -164,9 +172,14 @@ fn start<E: App>(
                 device.push_error_scope(wgpu::ErrorFilter::Validation);
                 has_error_scope = true;
 
-                app.render(&view, &device, &queue, start.elapsed().as_secs_f64());
+                app.render(RenderInfo {
+                    device: &device,
+                    queue: &queue,
+                    view: &surface_texture_view,
+                    time: start.elapsed().as_secs_f64(),
+                });
 
-                frame.present();
+                surface_texture.present();
             }
 
             _ => {

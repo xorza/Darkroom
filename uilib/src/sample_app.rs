@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use glam::UVec2;
 use wgpu::util::DeviceExt;
 
-use crate::app_base::App;
+use crate::app_base::{App, InitInfo, RenderInfo};
 use crate::event::{Event, EventResult};
 
 #[repr(C)]
@@ -98,21 +98,21 @@ fn create_matrix(aspect_ratio: f32, angle: f32) -> glam::Mat4 {
 pub struct SampleApp {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
-    index_count: usize,
+    index_count: u32,
     bind_group: wgpu::BindGroup,
     uniform_buf: wgpu::Buffer,
     pipeline: wgpu::RenderPipeline,
     window_size: UVec2,
 }
 
-
 impl App for SampleApp {
     fn init(
-        surface_config: &wgpu::SurfaceConfiguration,
-        _adapter: &wgpu::Adapter,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Self {
+        InitInfo {
+            surface_config,
+            adapter: _adapter,
+            device,
+            queue,
+        }: InitInfo) -> Self {
         let vertex_size = mem::size_of::<Vertex>();
         let (vertex_data, index_data) = create_vertices();
 
@@ -256,7 +256,7 @@ impl App for SampleApp {
         SampleApp {
             vertex_buf,
             index_buf,
-            index_count: index_data.len(),
+            index_count: index_data.len() as u32,
             bind_group,
             uniform_buf,
             pipeline,
@@ -279,11 +279,13 @@ impl App for SampleApp {
     }
 
     fn render(
-        &mut self,
-        view: &wgpu::TextureView,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        time: f64,
+        &self,
+        RenderInfo {
+            device,
+            queue,
+            view,
+            time
+        }: RenderInfo,
     ) {
         let view_projection = create_matrix(
             self.window_size.x as f32 / self.window_size.y as f32,
@@ -318,7 +320,7 @@ impl App for SampleApp {
             render_pass.set_vertex_buffer(0, self.vertex_buf.slice(..));
             render_pass.pop_debug_group();
             render_pass.insert_debug_marker("Draw!");
-            render_pass.draw_indexed(0..self.index_count as u32, 0, 0..1);
+            render_pass.draw_indexed(0..self.index_count, 0, 0..1);
         }
 
         queue.submit(Some(encoder.finish()));

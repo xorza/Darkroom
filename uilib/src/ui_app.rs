@@ -1,22 +1,26 @@
+use std::rc::Rc;
+
 use glam::UVec2;
 use wgpu::{Adapter, Device, Queue, SurfaceConfiguration, TextureView};
 
-use crate::app_base::App;
+use crate::app_base::{App, InitInfo, RenderInfo};
+use crate::canvas::Canvas;
 use crate::event::{Event, EventResult};
+use crate::renderer::{Renderer, WgpuRenderer};
+use crate::view::View;
 
-pub struct UiAppInternal {
+pub struct UiApp {
     window_size: UVec2,
+    renderer: WgpuRenderer,
+    view: Rc<dyn View>,
 }
 
-impl App for UiAppInternal {
-    fn init(
-        config: &SurfaceConfiguration,
-        _adapter: &Adapter,
-        _device: &Device,
-        _queue: &Queue)
-        -> Self {
+impl App for UiApp {
+    fn init(init: InitInfo) -> Self {
         Self {
-            window_size: UVec2::new(config.width, config.height),
+            window_size: UVec2::new(init.surface_config.width, init.surface_config.height),
+            renderer: WgpuRenderer::new(init),
+            view: Rc::new(Canvas::new()),
         }
     }
 
@@ -33,17 +37,13 @@ impl App for UiAppInternal {
         }
     }
 
-    fn render(
-        &mut self,
-        _view: &TextureView,
-        _device: &Device,
-        _queue: &Queue,
-        _time: f64) {
-        todo!()
+    fn render(&self, render: RenderInfo) {
+        self.renderer.render_view(render, self.view.as_ref());
+
     }
 }
 
-impl UiAppInternal {
+impl UiApp {
     pub fn window_size(&self) -> UVec2 {
         self.window_size
     }

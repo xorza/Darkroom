@@ -1,6 +1,10 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 use uilib::app_base::run;
 use uilib::sample_app::SampleApp;
+use uilib::ui_app::UiApp;
 
 fn main() {
-    run::<SampleApp>("Sample App");
+    run::<UiApp>("UI App");
 }
