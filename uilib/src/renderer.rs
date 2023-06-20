@@ -3,7 +3,7 @@ use std::f32::consts;
 use std::mem;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, UVec2};
+use glam::{Mat4, UVec2, Vec3};
 use wgpu::{Adapter, Device, Queue, SurfaceConfiguration};
 use wgpu::util::DeviceExt;
 
@@ -78,17 +78,14 @@ fn create_texels(size: usize) -> Vec<u8> {
 
 
 fn create_matrix(size: UVec2) -> Mat4 {
-    let projection = Mat4::orthographic_rh(
+    let projection = Mat4::orthographic_lh(
         0.0,
         size.x as f32 / size.y as f32,
-        0.0,
         1.0,
+        0.0,
         -1.0,
         1.0,
     );
-
-    // let scale = Mat4::from_scale(glam::Vec3::new(1.0, 1.0, -1.0));
-    // let translation = Mat4::from_translation(glam::Vec3::new(0.0, 0.0, 0.0));
 
     projection
 }
@@ -214,6 +211,7 @@ impl WgpuRenderer {
             ],
         }];
 
+
         let pipeline = init.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&pipeline_layout),
@@ -229,6 +227,8 @@ impl WgpuRenderer {
             }),
             primitive: wgpu::PrimitiveState {
                 cull_mode: Some(wgpu::Face::Back),
+                front_face:wgpu::FrontFace::Cw,
+
                 ..Default::default()
             },
             depth_stencil: None,
