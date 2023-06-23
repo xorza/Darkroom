@@ -3,11 +3,12 @@ use std::f32::consts;
 use std::mem;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, UVec2, Vec3};
+use glam::{Mat4, Vec3};
 use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
+use crate::math::{FVec4, UVec2, UVec4};
 use crate::view::View;
 
 fn vertex(pos: [f32; 3], tc: [f32; 2]) -> Vertex {
@@ -59,6 +60,32 @@ fn aligned_size_of_uniform<U: Sized>() -> BufferAddress {
 }
 
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct Vertex {
+    _pos: [f32; 4],
+    _tex_coord: [f32; 2],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct VertexUniform {
+    projection: [f32; 16],
+    model: [f32; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FragmentUniform {
+    color: FVec4,
+}
+
+
+pub(crate) enum Draw {
+    Rect { pos: UVec2, size: UVec2, color: UVec4 },
+}
+
+
 pub(crate) struct Renderer {
     window_size: UVec2,
     vertex_buffer: Buffer,
@@ -70,28 +97,6 @@ pub(crate) struct Renderer {
     id_texture: Texture,
     id_tex_view: TextureView,
 }
-
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Vertex {
-    _pos: [f32; 4],
-    _tex_coord: [f32; 2],
-}
-
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct VertexUniform {
-    projection: [f32; 16],
-    model: [f32; 16],
-}
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct FragmentUniform {
-    color: [f32; 4],
-}
-
 
 impl Renderer {
     pub fn new(
@@ -289,7 +294,7 @@ impl Renderer {
         result
     }
 
-    pub fn render_view(&self, render: &RenderInfo) {
+    pub fn go(&self, render: &RenderInfo) {
         let mut vertex_uniform: VertexUniform = VertexUniform::zeroed();
         let projection = Mat4::orthographic_lh(
             0.0,
@@ -306,7 +311,7 @@ impl Renderer {
         ).to_cols_array();
 
         let mut fragment_uniform: FragmentUniform = FragmentUniform::zeroed();
-        fragment_uniform.color = [1.0, 1.0, 1.0, 1.0];
+        fragment_uniform.color = FVec4::all(1.0);
 
         render.queue.write_buffer(
             &self.vertex_uniform_buffer,
@@ -376,10 +381,13 @@ impl Renderer {
     }
 
     pub(crate) fn resize(&mut self, device: &Device, _queue: &Queue, window_size: UVec2) {
-        if self.id_texture.width() != window_size.x || self.id_texture.height() != window_size.y {
-            self.id_texture = Self::create_id_texture(device, window_size);
-            self.id_tex_view = self.id_texture.create_view(&TextureViewDescriptor::default());
+        if self.window_size == window_size {
+            return;
         }
+
+        self.window_size = window_size;
+        self.id_texture = Self::create_id_texture(device, window_size);
+        self.id_tex_view = self.id_texture.create_view(&TextureViewDescriptor::default());
     }
 
     fn create_id_texture(device: &Device, window_size: UVec2) -> Texture {

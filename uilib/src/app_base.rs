@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use glam::UVec2;
 use pollster::FutureExt;
 use winit::{
     event::{self, WindowEvent},
@@ -8,6 +7,7 @@ use winit::{
 };
 
 use crate::event::{Event, EventResult};
+use crate::math::UVec2;
 
 pub struct RenderInfo<'a> {
     pub device: &'a wgpu::Device,

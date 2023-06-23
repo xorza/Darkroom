@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use glam::UVec2;
-use wgpu::{Adapter, Device, Queue, SurfaceConfiguration, Texture, TextureView};
+use wgpu::*;
 
 use crate::app_base::{App, RenderInfo};
 use crate::canvas::Canvas;
 use crate::event::{Event, EventResult};
+use crate::math::UVec2;
 use crate::renderer::Renderer;
 use crate::view::View;
 
@@ -42,10 +42,16 @@ impl App for UiApp {
     }
 
     fn render(&self, render_info: RenderInfo) {
-        self.renderer.render_view(&render_info);
+
+
+        self.renderer.go(&render_info);
     }
 
     fn resize(&mut self, device: &Device, queue: &Queue, window_size: UVec2) {
+        if self.window_size == window_size {
+            return;
+        }
+
         self.window_size = window_size;
         self.renderer.resize(device, queue, window_size);
     }

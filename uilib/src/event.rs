@@ -1,4 +1,4 @@
-use glam::UVec2;
+use crate::math::UVec2;
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Event {

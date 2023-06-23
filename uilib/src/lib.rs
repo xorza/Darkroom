@@ -7,4 +7,5 @@ pub mod ui_app;
 pub mod view;
 pub mod event;
 pub mod canvas;
-pub mod renderer;
+pub(crate) mod renderer;
+pub mod math;

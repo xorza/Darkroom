@@ -1,12 +1,12 @@
 use std::{borrow::Cow, f32::consts, mem};
 
 use bytemuck::{Pod, Zeroable};
-use glam::UVec2;
 use wgpu::Device;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::{App, RenderInfo};
 use crate::event::{Event, EventResult};
+use crate::math::UVec2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
