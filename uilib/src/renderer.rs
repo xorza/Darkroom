@@ -81,12 +81,17 @@ struct FragmentUniform {
 }
 
 
-pub(crate) enum Draw {
-    Rect { pos: UVec2, size: UVec2, color: UVec4 },
+pub enum Draw {
+    Rect { pos: UVec2, size: UVec2, color: FVec4 },
+}
+
+#[derive(Default)]
+pub struct Renderer {
+    draw_list: Vec<Draw>,
 }
 
 
-pub(crate) struct Renderer {
+pub(crate) struct WgpuRenderer {
     window_size: UVec2,
     vertex_buffer: Buffer,
     vertex_count: u32,
@@ -99,6 +104,16 @@ pub(crate) struct Renderer {
 }
 
 impl Renderer {
+    pub fn draw(&mut self, draw: Draw) {
+        self.draw_list.push(draw);
+    }
+
+    pub(crate) fn draw_list(&self) -> &Vec<Draw> {
+        &self.draw_list
+    }
+}
+
+impl WgpuRenderer {
     pub fn new(
         device: &Device,
         queue: &Queue,
@@ -143,7 +158,7 @@ impl Renderer {
                         visibility: ShaderStages::FRAGMENT,
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
+                            has_dynamic_offset: true,
                             min_binding_size: BufferSize::new(mem::size_of::<FragmentUniform>() as u64),
                         },
                         count: None,
@@ -194,7 +209,7 @@ impl Renderer {
         });
         let fragment_uniform_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Fragment Uniform Buffer"),
-            size: aligned_size_of_uniform::<FragmentUniform>(),
+            size: 100 * aligned_size_of_uniform::<FragmentUniform>(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -218,7 +233,13 @@ impl Renderer {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: fragment_uniform_buffer.as_entire_binding(),
+                    resource: BindingResource::Buffer(
+                        BufferBinding {
+                            buffer: &fragment_uniform_buffer,
+                            offset: 0,
+                            size: BufferSize::new(aligned_size_of_uniform::<FragmentUniform>()),
+                        }
+                    ),
                 },
             ],
             label: None,
@@ -294,8 +315,11 @@ impl Renderer {
         result
     }
 
-    pub fn go(&self, render: &RenderInfo) {
+
+    pub fn go(&self, render: &RenderInfo, draw_list: &Vec<Draw>) {
         let mut vertex_uniform: VertexUniform = VertexUniform::zeroed();
+        let mut fragment_uniform: FragmentUniform = FragmentUniform::zeroed();
+
         let projection = Mat4::orthographic_lh(
             0.0,
             self.window_size.x as f32,
@@ -305,24 +329,7 @@ impl Renderer {
             1.0,
         );
         vertex_uniform.projection = projection.to_cols_array();
-        vertex_uniform.model = (
-            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0))
-                * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
-        ).to_cols_array();
 
-        let mut fragment_uniform: FragmentUniform = FragmentUniform::zeroed();
-        fragment_uniform.color = FVec4::all(1.0);
-
-        render.queue.write_buffer(
-            &self.vertex_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&vertex_uniform),
-        );
-        render.queue.write_buffer(
-            &self.fragment_uniform_buffer,
-            0,
-            bytemuck::bytes_of(&fragment_uniform),
-        );
 
         let mut command_encoder = render.device
             .create_command_encoder(&CommandEncoderDescriptor { label: None });
@@ -353,31 +360,60 @@ impl Renderer {
                 });
             render_pass.push_debug_group("Prepare data for draw.");
             render_pass.set_pipeline(&self.pipeline);
-            render_pass.set_bind_group(0, &self.bind_group, &[0]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.pop_debug_group();
-            render_pass.insert_debug_marker("Draw!");
-            render_pass.draw(0..self.vertex_count, 0..1);
+
+
+            for (i, draw) in draw_list.iter().enumerate() {
+                match draw {
+                    Draw::Rect { pos, size, color } => {
+                        vertex_uniform.model = (
+                            Mat4::from_translation(Vec3::new(pos.x as f32, pos.y as f32, 0.0))
+                                * Mat4::from_scale(Vec3::new(size.x as f32, size.y as f32, 1.0))
+                        ).to_cols_array();
+
+                        fragment_uniform.color = color.clone();
+                    }
+                }
+
+                let offset = aligned_size_of_uniform::<VertexUniform>() * i as u64;
+                let label = format!("Draw i: {}.", i);
+
+                self.write_uniforms(render.queue, &mut vertex_uniform, &mut fragment_uniform, offset);
+
+
+                render_pass.set_bind_group(0, &self.bind_group, &[offset as u32, offset as u32]);
+                render_pass.insert_debug_marker(&label);
+                render_pass.draw(0..self.vertex_count, 0..1);
+            }
+
 
             vertex_uniform.model = (
-                Mat4::from_translation(Vec3::new(150.0, 300.0, 0.0))
-                    * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
+                Mat4::from_translation(Vec3::new(250.0, 250.0, 0.0))
+                    * Mat4::from_scale(Vec3::new(250.0, 250.0, 1.0))
             ).to_cols_array();
+            fragment_uniform.color = FVec4::all(1.0);
+            let offset = aligned_size_of_uniform::<VertexUniform>() * 99u64;
 
-            let offset = aligned_size_of_uniform::<VertexUniform>();
+            self.write_uniforms(render.queue, &mut vertex_uniform, &mut fragment_uniform, offset);
 
-            render.queue.write_buffer(
-                &self.vertex_uniform_buffer,
-                offset,
-                bytemuck::bytes_of(&vertex_uniform),
-            );
-
-            render_pass.set_bind_group(0, &self.bind_group, &[offset as u32]);
+            render_pass.set_bind_group(0, &self.bind_group, &[offset as u32, offset as u32]);
+            render_pass.insert_debug_marker("Draw mandelbrot.");
             render_pass.draw(0..self.vertex_count, 0..1);
         }
 
 
         render.queue.submit(Some(command_encoder.finish()));
+    }
+
+    fn write_uniforms(
+        &self,
+        queue: &Queue,
+        vertex_uniform: &mut VertexUniform,
+        fragment_uniform: &mut FragmentUniform,
+        offset: BufferAddress) {
+        queue.write_buffer(&self.vertex_uniform_buffer, offset, bytemuck::bytes_of(vertex_uniform));
+        queue.write_buffer(&self.fragment_uniform_buffer, offset, bytemuck::bytes_of(fragment_uniform));
     }
 
     pub(crate) fn resize(&mut self, device: &Device, _queue: &Queue, window_size: UVec2) {

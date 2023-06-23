@@ -1,7 +1,7 @@
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
 pub struct UVec2 {
     pub x: u32,
     pub y: u32,
@@ -18,7 +18,7 @@ impl UVec2 {
 
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
 pub struct UVec4 {
     pub x: u32,
     pub y: u32,
@@ -37,7 +37,7 @@ impl UVec4 {
 
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
+#[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
 pub struct FVec4 {
     pub x: f32,
     pub y: f32,

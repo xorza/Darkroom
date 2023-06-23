@@ -6,12 +6,12 @@ use crate::app_base::{App, RenderInfo};
 use crate::canvas::Canvas;
 use crate::event::{Event, EventResult};
 use crate::math::UVec2;
-use crate::renderer::Renderer;
+use crate::renderer::{Renderer, WgpuRenderer};
 use crate::view::View;
 
 pub struct UiApp {
     window_size: UVec2,
-    renderer: Renderer,
+    renderer: WgpuRenderer,
     view: Rc<dyn View>,
 }
 
@@ -20,7 +20,7 @@ impl App for UiApp {
             queue: &Queue,
             surface_config: &SurfaceConfiguration) -> Self {
         let window_size = UVec2::new(surface_config.width, surface_config.height);
-        let renderer = Renderer::new(device, queue, surface_config, window_size);
+        let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
         let mut result = Self {
             window_size: UVec2::new(0, 0),
@@ -42,9 +42,11 @@ impl App for UiApp {
     }
 
     fn render(&self, render_info: RenderInfo) {
+        let mut renderer = Renderer::default();
 
+        self.view.draw(&mut renderer);
 
-        self.renderer.go(&render_info);
+        self.renderer.go(&render_info, renderer.draw_list());
     }
 
     fn resize(&mut self, device: &Device, queue: &Queue, window_size: UVec2) {

@@ -3,18 +3,18 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct UniformBuffer1 {
+struct VertexUniformBuffer {
     projection: mat4x4<f32>,
     model: mat4x4<f32>
 };
 
-struct UniformBuffer2 {
+struct FragmentUniformBuffer {
     color: vec4<f32>,
 };
 
 @group(0)
 @binding(0)
-var<uniform> vertex_data: UniformBuffer1;
+var<uniform> vertex_data: VertexUniformBuffer;
 
 
 @vertex
@@ -35,7 +35,7 @@ var r_color: texture_2d<u32>;
 
 @group(0)
 @binding(2)
-var<uniform> fragment_data: UniformBuffer2;
+var<uniform> fragment_data: FragmentUniformBuffer;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
