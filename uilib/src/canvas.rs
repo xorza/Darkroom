@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::renderer::Renderer;
 use crate::view::*;
 
 pub struct Canvas {
@@ -9,9 +8,6 @@ pub struct Canvas {
 
 impl View for Canvas {
 
-    fn render(&self, renderer: &dyn Renderer) {
-        renderer.background();
-    }
 }
 
 impl ViewWithChildren for Canvas {

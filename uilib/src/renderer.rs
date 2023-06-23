@@ -59,29 +59,16 @@ fn aligned_size_of_uniform<U: Sized>() -> BufferAddress {
 }
 
 
-pub trait Renderer {
-    fn background(&self);
-}
-
-pub(crate) struct RenderCache {
-    vertex_buf: Buffer,
+pub(crate) struct Renderer {
+    window_size: UVec2,
+    vertex_buffer: Buffer,
     vertex_count: u32,
     bind_group: BindGroup,
-    vertex_uniform_buf: Buffer,
-    fragment_uniform_buf: Buffer,
+    vertex_uniform_buffer: Buffer,
+    fragment_uniform_buffer: Buffer,
     pipeline: RenderPipeline,
     id_texture: Texture,
-}
-
-pub(crate) struct WgpuRenderer<'a> {
-    cache: &'a RenderCache,
-    window_size: UVec2,
-    vertex_uniform_buffer: VertexUniformBuffer,
-    uniform_buf2: UniformBuffer2,
-}
-
-impl Renderer for WgpuRenderer<'_> {
-    fn background(&self) {}
+    id_tex_view: TextureView,
 }
 
 
@@ -95,25 +82,28 @@ struct Vertex {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct VertexUniformBuffer {
+struct VertexUniform {
     projection: [f32; 16],
     model: [f32; 16],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct UniformBuffer2 {
+struct FragmentUniform {
     color: [f32; 4],
 }
 
-impl RenderCache {
-    pub fn new(device: &Device,
-               queue: &Queue,
-               surface_config: &SurfaceConfiguration,
-               window_size: UVec2) -> Self {
+
+impl Renderer {
+    pub fn new(
+        device: &Device,
+        queue: &Queue,
+        surface_config: &SurfaceConfiguration,
+        window_size: UVec2,
+    ) -> Self {
         let vertex_size = mem::size_of::<Vertex>();
         let vertex_data = create_vertices();
 
-        let vertex_buf = device.create_buffer_init(&util::BufferInitDescriptor {
+        let vertex_buffer = device.create_buffer_init(&util::BufferInitDescriptor {
             label: Some("Cube Vertex Buffer"),
             contents: bytemuck::cast_slice(&vertex_data),
             usage: BufferUsages::VERTEX,
@@ -129,7 +119,7 @@ impl RenderCache {
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
                             has_dynamic_offset: true,
-                            min_binding_size: BufferSize::new(mem::size_of::<VertexUniformBuffer>() as u64),
+                            min_binding_size: BufferSize::new(mem::size_of::<VertexUniform>() as u64),
                         },
                         count: None,
                     },
@@ -149,7 +139,7 @@ impl RenderCache {
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(mem::size_of::<UniformBuffer2>() as u64),
+                            min_binding_size: BufferSize::new(mem::size_of::<FragmentUniform>() as u64),
                         },
                         count: None,
                     },
@@ -191,15 +181,15 @@ impl RenderCache {
             texture_extent,
         );
 
-        let vertex_uniform_buf = device.create_buffer(&BufferDescriptor {
+        let vertex_uniform_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Vertex Uniform Buffer"),
-            size: 100 * aligned_size_of_uniform::<VertexUniformBuffer>(),
+            size: 100 * aligned_size_of_uniform::<VertexUniform>(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let fragment_uniform_buf = device.create_buffer(&BufferDescriptor {
+        let fragment_uniform_buffer = device.create_buffer(&BufferDescriptor {
             label: Some("Fragment Uniform Buffer"),
-            size: aligned_size_of_uniform::<UniformBuffer2>(),
+            size: aligned_size_of_uniform::<FragmentUniform>(),
             usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -211,9 +201,9 @@ impl RenderCache {
                     binding: 0,
                     resource: BindingResource::Buffer(
                         BufferBinding {
-                            buffer: &vertex_uniform_buf,
+                            buffer: &vertex_uniform_buffer,
                             offset: 0,
-                            size: BufferSize::new(aligned_size_of_uniform::<VertexUniformBuffer>()),
+                            size: BufferSize::new(aligned_size_of_uniform::<VertexUniform>()),
                         }
                     ),
                 },
@@ -223,7 +213,7 @@ impl RenderCache {
                 },
                 BindGroupEntry {
                     binding: 2,
-                    resource: fragment_uniform_buf.as_entire_binding(),
+                    resource: fragment_uniform_buffer.as_entire_binding(),
                 },
             ],
             label: None,
@@ -279,21 +269,116 @@ impl RenderCache {
         });
 
         let id_texture = Self::create_id_texture(device, window_size);
+        let id_tex_view = id_texture.create_view(&TextureViewDescriptor::default());
 
-        RenderCache {
-            vertex_buf,
+
+        let mut result = Self {
+            window_size,
+            vertex_buffer,
             vertex_count: vertex_data.len() as u32,
             bind_group,
-            vertex_uniform_buf,
-            fragment_uniform_buf,
+            vertex_uniform_buffer,
+            fragment_uniform_buffer,
             pipeline,
             id_texture,
+            id_tex_view,
+        };
+
+        result.resize(device, queue, window_size);
+
+        result
+    }
+
+    pub fn render_view(&self, render: &RenderInfo) {
+        let mut vertex_uniform: VertexUniform = VertexUniform::zeroed();
+        let projection = Mat4::orthographic_lh(
+            0.0,
+            self.window_size.x as f32,
+            self.window_size.y as f32,
+            0.0,
+            -1.0,
+            1.0,
+        );
+        vertex_uniform.projection = projection.to_cols_array();
+        vertex_uniform.model = (
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0))
+                * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
+        ).to_cols_array();
+
+        let mut fragment_uniform: FragmentUniform = FragmentUniform::zeroed();
+        fragment_uniform.color = [1.0, 1.0, 1.0, 1.0];
+
+        render.queue.write_buffer(
+            &self.vertex_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&vertex_uniform),
+        );
+        render.queue.write_buffer(
+            &self.fragment_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&fragment_uniform),
+        );
+
+        let mut command_encoder = render.device
+            .create_command_encoder(&CommandEncoderDescriptor { label: None });
+
+        {
+            let mut render_pass = command_encoder.begin_render_pass(
+                &RenderPassDescriptor {
+                    label: None,
+                    color_attachments: &[
+                        Some(RenderPassColorAttachment {
+                            view: render.view,
+                            resolve_target: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color::RED),
+                                store: true,
+                            },
+                        }),
+                        Some(RenderPassColorAttachment {
+                            view: &self.id_tex_view,
+                            resolve_target: None,
+                            ops: Operations {
+                                load: LoadOp::Clear(Color::BLACK),
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                });
+            render_pass.push_debug_group("Prepare data for draw.");
+            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_bind_group(0, &self.bind_group, &[0]);
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            render_pass.pop_debug_group();
+            render_pass.insert_debug_marker("Draw!");
+            render_pass.draw(0..self.vertex_count, 0..1);
+
+            vertex_uniform.model = (
+                Mat4::from_translation(Vec3::new(150.0, 300.0, 0.0))
+                    * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
+            ).to_cols_array();
+
+            let offset = aligned_size_of_uniform::<VertexUniform>();
+
+            render.queue.write_buffer(
+                &self.vertex_uniform_buffer,
+                offset,
+                bytemuck::bytes_of(&vertex_uniform),
+            );
+
+            render_pass.set_bind_group(0, &self.bind_group, &[offset as u32]);
+            render_pass.draw(0..self.vertex_count, 0..1);
         }
+
+
+        render.queue.submit(Some(command_encoder.finish()));
     }
 
     pub(crate) fn resize(&mut self, device: &Device, _queue: &Queue, window_size: UVec2) {
         if self.id_texture.width() != window_size.x || self.id_texture.height() != window_size.y {
             self.id_texture = Self::create_id_texture(device, window_size);
+            self.id_tex_view = self.id_texture.create_view(&TextureViewDescriptor::default());
         }
     }
 
@@ -314,107 +399,5 @@ impl RenderCache {
         });
 
         id_texture
-    }
-}
-
-impl<'a> WgpuRenderer<'a> {
-    pub fn new(render_cache: &'a RenderCache, window_size: UVec2) -> Self {
-        Self {
-            cache: render_cache,
-            window_size,
-            vertex_uniform_buffer: VertexUniformBuffer::zeroed(),
-            uniform_buf2: UniformBuffer2::zeroed(),
-        }
-    }
-
-    pub fn begin_frame(&mut self, _render: &RenderInfo) {
-        let size = self.window_size;
-
-        let projection = Mat4::orthographic_lh(
-            0.0,
-            size.x as f32,
-            size.y as f32,
-            0.0,
-            -1.0,
-            1.0,
-        );
-        self.vertex_uniform_buffer.projection = projection.to_cols_array();
-    }
-
-    pub fn render_view(&mut self, render: &RenderInfo, _view: &dyn View) {
-        self.vertex_uniform_buffer.model = (
-            Mat4::from_translation(Vec3::new(0.0, 0.0, 0.0))
-                * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
-        ).to_cols_array();
-
-        render.queue.write_buffer(
-            &self.cache.vertex_uniform_buf,
-            0,
-            bytemuck::bytes_of(&self.vertex_uniform_buffer),
-        );
-
-        self.uniform_buf2.color = [1.0, 1.0, 1.0, 1.0];
-        render.queue.write_buffer(
-            &self.cache.fragment_uniform_buf,
-            0,
-            bytemuck::bytes_of(&self.uniform_buf2),
-        );
-
-        let mut encoder =
-            render.device.create_command_encoder(&CommandEncoderDescriptor { label: None });
-
-        {
-            let id_tex_view = self.cache.id_texture.create_view(&TextureViewDescriptor::default());
-
-            let mut render_pass = encoder.begin_render_pass(
-                &RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[
-                        Some(RenderPassColorAttachment {
-                            view: render.view,
-                            resolve_target: None,
-                            ops: Operations {
-                                load: LoadOp::Clear(Color::RED),
-                                store: true,
-                            },
-                        }),
-                        Some(RenderPassColorAttachment {
-                            view: &id_tex_view,
-                            resolve_target: None,
-                            ops: Operations {
-                                load: LoadOp::Clear(Color::BLACK),
-                                store: true,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: None,
-                });
-            render_pass.push_debug_group("Prepare data for draw.");
-            render_pass.set_pipeline(&self.cache.pipeline);
-            render_pass.set_bind_group(0, &self.cache.bind_group, &[0]);
-            render_pass.set_vertex_buffer(0, self.cache.vertex_buf.slice(..));
-            render_pass.pop_debug_group();
-            render_pass.insert_debug_marker("Draw!");
-            render_pass.draw(0..self.cache.vertex_count, 0..1);
-
-            self.vertex_uniform_buffer.model = (
-                Mat4::from_translation(Vec3::new(150.0, 300.0, 0.0))
-                    * Mat4::from_scale(Vec3::new(500.0, 500.0, 1.0))
-            ).to_cols_array();
-
-            let offset = aligned_size_of_uniform::<VertexUniformBuffer>();
-
-            render.queue.write_buffer(
-                &self.cache.vertex_uniform_buf,
-                aligned_size_of_uniform::<VertexUniformBuffer>(),
-                bytemuck::bytes_of(&self.vertex_uniform_buffer),
-            );
-
-            render_pass.set_bind_group(0, &self.cache.bind_group, &[offset as u32]);
-            render_pass.draw(0..self.cache.vertex_count, 0..1);
-        }
-
-
-        render.queue.submit(Some(encoder.finish()));
     }
 }

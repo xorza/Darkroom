@@ -46,6 +46,9 @@ impl<'a, T> From<winit::event::Event<'a, T>> for Event {
                 winit::event::WindowEvent::CloseRequested => {
                     Event::WindowClose
                 }
+                winit::event::WindowEvent::Moved(_position) => {
+                    Event::Unknown
+                }
                 _ => Event::Unknown,
             },
             _ => Event::Unknown,

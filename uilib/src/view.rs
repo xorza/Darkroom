@@ -1,10 +1,7 @@
 use std::rc::Rc;
 
-use crate::renderer::Renderer;
-
 pub trait View {
     fn update(&mut self) {}
-    fn render(&self, renderer: &dyn Renderer);
 }
 
 pub trait ViewWithChildren: View {
