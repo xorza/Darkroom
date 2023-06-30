@@ -9,5 +9,8 @@ opencl = ["graph/opencl"]
 
 [dependencies]
 graph = { path = "../Graph" }
-uilib = { path = "../uilib" }
+# uilib = { path = "../uilib" }
 
+eframe = "0.21.3"
+egui_node_graph =  { path = "../../egui_node_graph/egui_node_graph" }
+anyhow = "*"

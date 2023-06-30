@@ -42,9 +42,9 @@ impl App for UiApp {
     }
 
     fn render(&self, render_info: RenderInfo) {
-        let mut renderer = Renderer::default();
+        let renderer = Renderer::default();
 
-        self.view.draw(&mut renderer);
+        // self.view.draw(& renderer);
 
         self.renderer.go(&render_info, renderer.draw_list());
     }

@@ -2,6 +2,9 @@
 **/cmake-build-*/
 **/.idea/
 
+**/Cargo.lock
+
 *.qmlproject.qtds
 *.qmlproject.user
 **/xcuserdata/
+
