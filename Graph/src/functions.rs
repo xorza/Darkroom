@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::data_type::*;
+use crate::data::*;
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Arg {

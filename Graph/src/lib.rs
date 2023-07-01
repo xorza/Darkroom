@@ -13,5 +13,5 @@ pub mod graph;
 pub mod functions;
 pub mod invoke;
 pub mod lua_invoker;
-pub mod data_type;
+pub mod data;
 pub mod c_api;

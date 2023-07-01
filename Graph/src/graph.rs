@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::data_type::DataType;
+use crate::data::{DataType, Value};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum NodeBehavior {
@@ -56,6 +56,8 @@ pub struct Input {
     pub is_required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub binding: Option<Binding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<Value>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]

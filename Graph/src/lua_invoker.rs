@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
 
-use mlua::{Error, Function, Lua, Table, Value, Variadic};
+use mlua::{Error, Function, Lua, Table, Variadic};
 use uuid::Uuid;
 
-use crate::{functions, invoke};
-use crate::data_type::DataType;
+use crate::{data, functions, invoke};
+use crate::data::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
 use crate::invoke::{Args, Invoker};
 
@@ -90,7 +90,7 @@ impl LuaInvoker {
 
         Ok(())
     }
-    
+
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
@@ -115,7 +115,7 @@ impl LuaInvoker {
         function_info.name = table.get("name")?;
         function_info.inputs = Vec::new();
         function_info.outputs = Vec::new();
-        
+
         let inputs: Table = table.get("inputs")?;
         for i in 1..=inputs.len()? {
             let input: Table = inputs.get(i).unwrap();
@@ -151,7 +151,7 @@ impl LuaInvoker {
 
         Ok(graph)
     }
-    
+
     fn substitute_functions(&self) -> Vec<FuncConnections> {
         let connections: Rc<RefCell<Vec<FuncConnections>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -239,6 +239,7 @@ impl LuaInvoker {
                     data_type: input.data_type,
                     is_required: true,
                     binding: None,
+                    default_value: None,
                 });
             }
             for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
@@ -274,7 +275,7 @@ impl LuaInvoker {
 
         graph
     }
-    
+
 
     pub fn get_output(&self) -> String {
         let mut cache = self.cache.borrow_mut();
@@ -320,10 +321,10 @@ impl Invoker for LuaInvoker {
         let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
 
         for (i, output) in function_info.info.outputs.iter().enumerate() {
-            let output_arg = output_args
+            let output_arg: &mlua::Value = output_args
                 .get(i)
                 .unwrap();
-            outputs[i] = invoke::Value::from(output_arg);
+            outputs[i] = data::Value::from(output_arg);
 
             assert_eq!(output.data_type, outputs[i].data_type());
         }
@@ -335,23 +336,23 @@ impl Invoker for LuaInvoker {
     fn finish(&self) {}
 }
 
-fn from_invoke_value<'lua>(value: &'lua invoke::Value, lua: &'lua Lua) -> anyhow::Result<mlua::Value<'lua>> {
+fn from_invoke_value<'lua>(value: &'lua data::Value, lua: &'lua Lua) -> anyhow::Result<mlua::Value<'lua>> {
     match value {
-        invoke::Value::Null => { Ok(mlua::Value::Nil) }
-        invoke::Value::Float(v) => { Ok(mlua::Value::Number(*v)) }
-        invoke::Value::Int(v) => { Ok(mlua::Value::Integer(*v)) }
-        invoke::Value::Bool(v) => { Ok(mlua::Value::Boolean(*v)) }
-        invoke::Value::String(v) => {
+        data::Value::Null => { Ok(mlua::Value::Nil) }
+        data::Value::Float(v) => { Ok(mlua::Value::Number(*v as mlua::Number)) }
+        data::Value::Int(v) => { Ok(mlua::Value::Integer(*v as mlua::Integer)) }
+        data::Value::Bool(v) => { Ok(mlua::Value::Boolean(*v)) }
+        data::Value::String(v) => {
             let lua_string = lua.create_string(v)?;
             Ok(mlua::Value::String(lua_string))
         }
     }
 }
 
-impl From<&mlua::Value<'_>> for invoke::Value {
-    fn from(value: &Value) -> Self {
+impl From<&mlua::Value<'_>> for data::Value {
+    fn from(value: &mlua::Value) -> Self {
         match value {
-            mlua::Value::Nil => { invoke::Value::Null }
+            mlua::Value::Nil => { data::Value::Null }
             mlua::Value::Boolean(v) => { (*v).into() }
             mlua::Value::Integer(v) => { (*v).into() }
             mlua::Value::Number(v) => { (*v).into() }

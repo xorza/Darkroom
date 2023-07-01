@@ -4,52 +4,25 @@ use eframe::egui::{self, DragValue, TextStyle, Widget};
 use egui_node_graph::*;
 use uuid::Uuid;
 
+use graph_lib::data::{DataType, Value};
+
 pub struct MyNodeData {
-    template: FunctionTemplate,
-    is_active: bool,
+    pub(crate) template: FunctionTemplate,
+    pub(crate) is_active: bool,
 }
 
-#[derive(PartialEq, Eq)]
-pub enum MyDataType {
-    Scalar,
-    Vec2,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum MyValueType {
-    Vec2 { value: egui::Vec2 },
-    Scalar { value: f32 },
-}
-
-impl Default for MyValueType {
-    fn default() -> Self {
-        Self::Scalar { value: 0.0 }
-    }
-}
-
-impl MyValueType {
-    pub fn try_to_vec2(self) -> anyhow::Result<egui::Vec2> {
-        if let MyValueType::Vec2 { value } = self {
-            Ok(value)
-        } else {
-            anyhow::bail!("Invalid cast from {:?} to vec2", self)
-        }
-    }
-
-    pub fn try_to_scalar(self) -> anyhow::Result<f32> {
-        if let MyValueType::Scalar { value } = self {
-            Ok(value)
-        } else {
-            anyhow::bail!("Invalid cast from {:?} to scalar", self)
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct FunctionTemplate {
-    pub function_id: Uuid,
-    pub function_name: String,
+    pub(crate) function_id: Uuid,
+    pub(crate) function_name: String,
 }
+
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct EditorValue(Value);
+
+type EditorGraph = Graph<MyNodeData, DataType, EditorValue>;
+type EditorState = GraphEditorState<MyNodeData, DataType, EditorValue, FunctionTemplate, MyGraphState>;
 
 pub enum NodeCategory {}
 
@@ -70,26 +43,23 @@ pub struct MyGraphState {
     pub(crate) functions: graph_lib::functions::Functions,
 }
 
-impl DataTypeTrait<MyGraphState> for MyDataType {
+impl DataTypeTrait<MyGraphState> for DataType {
     fn data_type_color(&self, _user_state: &mut MyGraphState) -> egui::Color32 {
         match self {
-            MyDataType::Scalar => egui::Color32::from_rgb(38, 109, 211),
-            MyDataType::Vec2 => egui::Color32::from_rgb(238, 207, 109),
+            DataType::Int => egui::Color32::from_rgb(38, 109, 211),
+            _ => egui::Color32::from_rgb(0, 0, 0),
         }
     }
 
     fn name(&self) -> Cow<'static, str> {
-        match self {
-            MyDataType::Scalar => Cow::Borrowed("scalar"),
-            MyDataType::Vec2 => Cow::Borrowed("2d vector"),
-        }
+        self.to_string().into()
     }
 }
 
 impl NodeTemplateTrait for FunctionTemplate {
     type NodeData = MyNodeData;
-    type DataType = MyDataType;
-    type ValueType = MyValueType;
+    type DataType = DataType;
+    type ValueType = EditorValue;
     type UserState = MyGraphState;
     type CategoryType = NodeCategory;
 
@@ -115,23 +85,23 @@ impl NodeTemplateTrait for FunctionTemplate {
 
     fn build_node(
         &self,
-        graph: &mut Graph<Self::NodeData, Self::DataType, Self::ValueType>,
+        graph: &mut EditorGraph,
         user_state: &mut Self::UserState,
         node_id: NodeId,
     ) {
-        let input_scalar = |graph: &mut MyGraph, name: &str| {
+        let input_scalar = |graph: &mut EditorGraph, name: &str| {
             graph.add_input_param(
                 node_id,
                 name.to_string(),
-                MyDataType::Scalar,
-                MyValueType::Scalar { value: 0.0 },
+                DataType::Int,
+                EditorValue(Value::Int(0)),
                 InputParamKind::ConnectionOrConstant,
                 true,
             );
         };
 
-        let output_scalar = |graph: &mut MyGraph, name: &str| {
-            graph.add_output_param(node_id, name.to_string(), MyDataType::Scalar);
+        let output_scalar = |graph: &mut EditorGraph, name: &str| {
+            graph.add_output_param(node_id, name.to_string(), DataType::Int);
         };
 
         let function = user_state.functions.function_by_node_id(self.function_id).unwrap();
@@ -144,7 +114,8 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 }
 
-impl WidgetValueTrait for MyValueType {
+
+impl WidgetValueTrait for EditorValue {
     type Response = MyResponse;
     type UserState = MyGraphState;
     type NodeData = MyNodeData;
@@ -157,22 +128,15 @@ impl WidgetValueTrait for MyValueType {
         _user_state: &mut MyGraphState,
         _node_data: &MyNodeData,
     ) -> Vec<Self::Response> {
-        match self {
-            MyValueType::Vec2 { value } => {
-                ui.label(param_name);
-                ui.horizontal(|ui| {
-                    ui.label("x");
-                    ui.add(DragValue::new(&mut value.x));
-                    ui.label("y");
-                    ui.add(DragValue::new(&mut value.y));
-                });
-            }
-            MyValueType::Scalar { value } => {
+        match &mut self.0 {
+            Value::Int(value) => {
                 ui.horizontal(|ui| {
                     ui.label(param_name);
                     ui.add(DragValue::new(value));
                 });
             }
+
+            _ => {}
         }
 
         // This allows you to return your responses from the inline widgets.
@@ -185,14 +149,14 @@ impl UserResponseTrait for MyResponse {}
 impl NodeDataTrait for MyNodeData {
     type Response = MyResponse;
     type UserState = MyGraphState;
-    type DataType = MyDataType;
-    type ValueType = MyValueType;
+    type DataType = DataType;
+    type ValueType = EditorValue;
 
     fn bottom_ui(
         &self,
         ui: &mut egui::Ui,
         node_id: NodeId,
-        _graph: &Graph<MyNodeData, MyDataType, MyValueType>,
+        _graph: &EditorGraph,
         _user_state: &mut Self::UserState,
     ) -> Vec<NodeResponse<MyResponse, MyNodeData>>
         where
@@ -222,12 +186,10 @@ impl NodeDataTrait for MyNodeData {
     }
 }
 
-type MyGraph = Graph<MyNodeData, MyDataType, MyValueType>;
-type MyEditorState = GraphEditorState<MyNodeData, MyDataType, MyValueType, FunctionTemplate, MyGraphState>;
 
 #[derive(Default)]
 pub struct NodeshopApp {
-    state: MyEditorState,
+    state: EditorState,
     pub(crate) user_state: MyGraphState,
 }
 

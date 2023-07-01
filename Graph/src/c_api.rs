@@ -2,7 +2,7 @@ use std::ffi::{c_char, CString};
 
 use uuid::Uuid;
 
-use crate::data_type::DataType;
+use crate::data::DataType;
 use crate::functions::{Arg, Function, Functions};
 use crate::graph::Graph;
 
