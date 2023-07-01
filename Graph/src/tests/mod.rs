@@ -6,3 +6,5 @@ mod graph_tests;
 mod lua_invoker_tests;
 #[cfg(all(feature = "opencl", test))]
 mod ocl_tests;
+#[cfg(test)]
+mod invoker_tests;

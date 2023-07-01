@@ -106,23 +106,22 @@ impl Runtime {
             let mut has_missing_inputs = false;
             let node = graph.node_by_id(node_input_binding.output_node_id).ok_or(anyhow!("Node not found"))?;
             for (input_index, input) in node.inputs.iter().enumerate() {
-                if input.binding.is_none() {
+                if input.binding.is_some() {
+                    let binding = input.binding.as_ref().unwrap();
+                    assert_ne!(binding.output_node_id(), node.id());
+
+                    inputs_bindings.push(RuntimeInput {
+                        output_node_id: binding.output_node_id(),
+                        output_index: binding.output_index(),
+                        input_node_id: binding.output_node_id(),
+                        input_index: input_index as u32,
+                        has_missing_inputs: false,
+                        connection_behavior: binding.behavior,
+                        is_output: false,
+                    });
+                } else if input.default_value.is_some() {} else {
                     has_missing_inputs |= input.is_required;
-                    continue;
                 }
-
-                let binding = input.binding.as_ref().unwrap();
-                assert_ne!(binding.output_node_id(), node.id());
-
-                inputs_bindings.push(RuntimeInput {
-                    output_node_id: binding.output_node_id(),
-                    output_index: binding.output_index(),
-                    input_node_id: binding.output_node_id(),
-                    input_index: input_index as u32,
-                    has_missing_inputs: false,
-                    connection_behavior: binding.behavior,
-                    is_output: false,
-                });
             }
 
             inputs_bindings[i].has_missing_inputs = has_missing_inputs;
@@ -229,13 +228,14 @@ impl Runtime {
 
             if !r_node.has_arguments || r_node.behavior == NodeBehavior::Active {
                 for (_, input) in node.inputs.iter().enumerate() {
-                    let binding = input.binding.as_ref().unwrap();
-                    let r_output_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
+                    if let Some(binding) = input.binding.as_ref() {
+                        let r_output_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
 
-                    assert!(!r_output_node.has_missing_inputs);
+                        assert!(!r_output_node.has_missing_inputs);
 
-                    if r_output_node.behavior == NodeBehavior::Active {
-                        exec_order.push(binding.output_node_id());
+                        if r_output_node.behavior == NodeBehavior::Active {
+                            exec_order.push(binding.output_node_id());
+                        }
                     }
                 }
             }
@@ -257,26 +257,31 @@ impl Runtime {
             };
 
             for (input_index, input) in node.inputs.iter().enumerate() {
-                let binding = input.binding.as_ref().unwrap();
-                assert_ne!(binding.output_node_id(), node.id());
+                if let Some(binding) = input.binding.as_ref() {
+                    assert_ne!(binding.output_node_id(), node.id());
 
-                let output_r_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
+                    let output_r_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
 
-                assert!(output_r_node.has_arguments);
+                    assert!(output_r_node.has_arguments);
 
-                if output_r_node.executed {
-                    let output_args = self.arg_cache.get(&binding.output_node_id()).unwrap();
+                    if output_r_node.executed {
+                        let output_args = self.arg_cache.get(&binding.output_node_id()).unwrap();
 
-                    if is_debug() {
-                        let output_value = &output_args.outputs[binding.output_index() as usize];
-                        assert_eq!(input.data_type, output_value.data_type());
+                        if is_debug() {
+                            let output_value = &output_args.outputs[binding.output_index() as usize];
+                            assert_eq!(input.data_type, output_value.data_type());
 
-                        let output_node = graph.node_by_id(binding.output_node_id()).unwrap();
-                        let output = &output_node.outputs[binding.output_index() as usize];
-                        assert_eq!(input.data_type, output.data_type);
+                            let output_node = graph.node_by_id(binding.output_node_id()).unwrap();
+                            let output = &output_node.outputs[binding.output_index() as usize];
+                            assert_eq!(input.data_type, output.data_type);
+                        }
+
+                        input_args.inputs[input_index] = output_args.outputs[binding.output_index() as usize].clone();
                     }
-
-                    input_args.inputs[input_index] = output_args.outputs[binding.output_index() as usize].clone();
+                } else if let Some(value) = input.default_value.as_ref() {
+                    input_args.inputs[input_index] = value.clone();
+                } else {
+                    panic!("Missing input value for node: {}", node.name);
                 }
             }
 
