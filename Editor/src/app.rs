@@ -1,6 +1,7 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use eframe::egui::{self, DragValue, TextStyle, Widget};
+use egui_file::FileDialog;
 use egui_node_graph::*;
 use uuid::Uuid;
 
@@ -39,9 +40,19 @@ type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
 type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyGraphState>;
 
 #[derive(Default)]
+pub enum FileDialogResponse {
+    #[default]
+    OpenGraph,
+    SaveGraph,
+}
+
+#[derive(Default)]
 pub struct NodeshopApp {
     state: EditorState,
     user_state: MyGraphState,
+
+    file_dialog: Option<FileDialog>,
+    file_dialog_response: FileDialogResponse,
 }
 struct AllNodeTemplates {
     funcs: Vec<FunctionTemplate>,
@@ -222,7 +233,31 @@ impl eframe::App for NodeshopApp {
         egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
                 if ui.button("Save").clicked() {
-                    self.save_graph_to_yaml();
+                    let mut dialog = FileDialog::open_file(None);
+                    dialog.open();
+                    self.file_dialog = Some(dialog);
+                    self.file_dialog_response = FileDialogResponse::SaveGraph;
+                }
+
+                if (ui.button("Open")).clicked() {
+                    let mut dialog = FileDialog::open_file(None);
+                    dialog.open();
+                    self.file_dialog = Some(dialog);
+                    self.file_dialog_response = FileDialogResponse::OpenGraph;
+                }
+
+                if let Some(dialog) = &mut self.file_dialog {
+                    if dialog.show(ctx).selected() {
+                        if let Some(file) = dialog.path() {
+                            if let Some(filename) = file.to_str() {
+                                match self.file_dialog_response {
+                                    FileDialogResponse::OpenGraph => self.load_graph_from_yaml(filename),
+                                    FileDialogResponse::SaveGraph => self.save_graph_to_yaml(filename)
+                                }
+                            }
+                        }
+                        self.file_dialog = None;
+                    }
                 }
             });
 
@@ -259,11 +294,13 @@ impl NodeshopApp {
             .expect("Failed to load test_functions.yml");
     }
 
-    fn save_graph_to_yaml(&self) {
+    fn save_graph_to_yaml(&self, filename: &str) {
         let graph = self.create_graph();
         let yaml = graph.to_yaml().expect("Failed to save graph to yaml");
-        std::fs::write("graph.yml", yaml).expect("Failed to write test_graph.yml");
+        std::fs::write(filename, yaml).expect("Failed to write test_graph.yml");
     }
+
+    fn load_graph_from_yaml(&mut self, _filename: &str) {}
 
     fn create_graph(&self) -> graph_lib::graph::Graph {
         let editor_graph = &self.state.graph;
