@@ -11,8 +11,8 @@ opencl = ["graph_lib/opencl"]
 graph_lib = { path = "../Graph", package = "graph" }
 # uilib = { path = "../uilib" }
 
-eframe = "0.21.3"
-egui_node_graph =  { path = "../../egui_node_graph/egui_node_graph" }
+eframe = { version = "*", features = ["wgpu"] }
+egui_node_graph = { path = "../../egui_node_graph/egui_node_graph" }
 
 serde = { workspace = true }
 serde_yaml = { workspace = true }

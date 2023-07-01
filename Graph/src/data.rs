@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
-    None,
+    Null,
     Float,
     Int,
     Bool,
@@ -15,8 +15,8 @@ pub enum DataType {
 
 impl DataType {
     pub fn can_assign(from: &DataType, to: &DataType) -> bool {
-        assert_ne!(from, &DataType::None);
-        assert_ne!(to, &DataType::None);
+        assert_ne!(from, &DataType::Null);
+        assert_ne!(to, &DataType::Null);
 
         from == to
     }
@@ -61,8 +61,42 @@ pub enum Value {
     String(String),
 }
 
-impl Value {}
+impl Value {
+    pub fn data_type(&self) -> DataType {
+        match self {
+            Value::Null => DataType::Null,
+            Value::Float(_) => DataType::Float,
+            Value::Int(_) => DataType::Int,
+            Value::Bool(_) => DataType::Bool,
+            Value::String(_) => DataType::String,
+        }
+    }
 
+    pub fn as_float(&self) -> f64 {
+        match self {
+            Value::Float(value) => { *value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+    pub fn as_int(&self) -> i64 {
+        match self {
+            Value::Int(value) => { *value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Value::Bool(value) => { *value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+    pub fn as_string(&self) -> &str {
+        match self {
+            Value::String(value) => { value }
+            _ => { panic!("Value is not a string") }
+        }
+    }
+}
 
 impl From<DataType> for Value {
     fn from(data_type: DataType) -> Self {
@@ -117,4 +151,3 @@ impl From<bool> for Value {
         Value::Bool(value)
     }
 }
-

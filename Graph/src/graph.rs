@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::data::{DataType, Value};
+use crate::functions::Function;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-pub enum NodeBehavior {
+pub enum FunctionBehavior {
     #[default]
     Active,
     Passive,
@@ -17,7 +18,7 @@ pub struct Node {
     pub function_id: Uuid,
 
     pub name: String,
-    pub behavior: NodeBehavior,
+    pub behavior: FunctionBehavior,
     pub is_output: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -284,10 +285,40 @@ impl Node {
             self_id: Uuid::new_v4(),
             function_id: Uuid::nil(),
             name: "".to_string(),
-            behavior:  NodeBehavior::Active,
+            behavior: FunctionBehavior::Active,
             is_output: false,
             inputs: vec![],
             outputs: vec![],
+            subgraph_id: None,
+        }
+    }
+
+    pub fn from_function(function: &Function) -> Node {
+        let inputs: Vec<Input> = function.inputs.iter().map(|input| {
+            Input {
+                name: input.name.clone(),
+                data_type: input.data_type.clone(),
+                is_required: true,
+                binding: None,
+                default_value: None,
+            }
+        }).collect();
+
+        let outputs: Vec<Output> = function.outputs.iter().map(|output| {
+            Output {
+                name: output.name.clone(),
+                data_type: output.data_type.clone(),
+            }
+        }).collect();
+
+        Node {
+            self_id: Uuid::new_v4(),
+            function_id: function.id(),
+            name: function.name.clone(),
+            behavior: FunctionBehavior::Active,
+            is_output: false,
+            inputs,
+            outputs,
             subgraph_id: None,
         }
     }
@@ -298,13 +329,6 @@ impl Node {
 }
 
 impl Binding {
-    pub fn output_node_id(&self) -> Uuid {
-        self.output_node_id
-    }
-    pub fn output_index(&self) -> u32 {
-        self.output_index
-    }
-
     pub fn new(output_node_id: Uuid, output_index: u32) -> Binding {
         Binding {
             output_node_id,
@@ -312,6 +336,14 @@ impl Binding {
             behavior: BindingBehavior::Always,
         }
     }
+
+    pub fn output_node_id(&self) -> Uuid {
+        self.output_node_id
+    }
+    pub fn output_index(&self) -> u32 {
+        self.output_index
+    }
+
 }
 
 impl SubGraph {
@@ -326,5 +358,14 @@ impl SubGraph {
 
     pub fn id(&self) -> Uuid {
         self.self_id
+    }
+}
+
+impl FunctionBehavior {
+    pub fn toggle(&mut self) {
+        *self = match *self {
+            FunctionBehavior::Active => FunctionBehavior::Passive,
+            FunctionBehavior::Passive => FunctionBehavior::Active,
+        };
     }
 }

@@ -56,7 +56,7 @@ fn node_behavior_active_test() -> anyhow::Result<()> {
 
     runtime.run(&graph, &invoker)?;
 
-    graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
+    graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     let nodes = runtime.run(&graph, &invoker)?;
     assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
     assert!(!nodes.node_by_name("val1").unwrap().executed);
@@ -133,7 +133,7 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
         assert!(nodes.node_by_name("print").unwrap().executed);
     }
     {
-        graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
+        graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
         let nodes = runtime.run(&graph, &invoker)?;
         assert!(!nodes.node_by_name("val1").unwrap().executed);
         assert!(nodes.node_by_name("val2").unwrap().executed);

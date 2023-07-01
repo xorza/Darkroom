@@ -5,32 +5,24 @@ use egui_node_graph::*;
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
+use graph_lib::graph::{Binding, FunctionBehavior};
 
-pub struct MyNodeData {
-    pub(crate) template: FunctionTemplate,
-    pub(crate) is_active: bool,
+#[derive(Clone, Debug, Default)]
+pub struct EditorNode {
+    template: FunctionTemplate,
+    behavior: FunctionBehavior,
 }
 
-
-#[derive(Clone)]
-pub struct FunctionTemplate {
-    pub(crate) function_id: Uuid,
-    pub(crate) function_name: String,
+#[derive(Clone, Debug, Default)]
+struct FunctionTemplate {
+    function_id: Uuid,
+    function_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct EditorValue(Value);
 
-type EditorGraph = Graph<MyNodeData, DataType, EditorValue>;
-type EditorState = GraphEditorState<MyNodeData, DataType, EditorValue, FunctionTemplate, MyGraphState>;
-
-pub enum NodeCategory {}
-
-impl CategoryTrait for NodeCategory {
-    fn name(&self) -> String {
-        "test_category".to_string()
-    }
-}
+enum NodeCategory {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
@@ -39,8 +31,26 @@ pub enum MyResponse {
 
 #[derive(Default)]
 pub struct MyGraphState {
-    pub(crate) graph: graph_lib::graph::Graph,
-    pub(crate) functions: graph_lib::functions::Functions,
+    functions: graph_lib::functions::Functions,
+}
+
+type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
+type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyGraphState>;
+
+#[derive(Default)]
+pub struct NodeshopApp {
+    state: EditorState,
+    user_state: MyGraphState,
+}
+struct AllNodeTemplates {
+    funcs: Vec<FunctionTemplate>,
+}
+
+
+impl CategoryTrait for NodeCategory {
+    fn name(&self) -> String {
+        "test_category".to_string()
+    }
 }
 
 impl DataTypeTrait<MyGraphState> for DataType {
@@ -57,7 +67,7 @@ impl DataTypeTrait<MyGraphState> for DataType {
 }
 
 impl NodeTemplateTrait for FunctionTemplate {
-    type NodeData = MyNodeData;
+    type NodeData = EditorNode;
     type DataType = DataType;
     type ValueType = EditorValue;
     type UserState = MyGraphState;
@@ -80,7 +90,7 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        MyNodeData { template: self.clone(), is_active: false }
+        EditorNode { template: self.clone(), behavior: FunctionBehavior::Passive }
     }
 
     fn build_node(
@@ -114,11 +124,10 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 }
 
-
 impl WidgetValueTrait for EditorValue {
     type Response = MyResponse;
     type UserState = MyGraphState;
-    type NodeData = MyNodeData;
+    type NodeData = EditorNode;
 
     fn value_widget(
         &mut self,
@@ -126,7 +135,7 @@ impl WidgetValueTrait for EditorValue {
         _node_id: NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut MyGraphState,
-        _node_data: &MyNodeData,
+        _node_data: &EditorNode,
     ) -> Vec<Self::Response> {
         match &mut self.0 {
             Value::Int(value) => {
@@ -146,7 +155,7 @@ impl WidgetValueTrait for EditorValue {
 
 impl UserResponseTrait for MyResponse {}
 
-impl NodeDataTrait for MyNodeData {
+impl NodeDataTrait for EditorNode {
     type Response = MyResponse;
     type UserState = MyGraphState;
     type DataType = DataType;
@@ -158,12 +167,12 @@ impl NodeDataTrait for MyNodeData {
         node_id: NodeId,
         _graph: &EditorGraph,
         _user_state: &mut Self::UserState,
-    ) -> Vec<NodeResponse<MyResponse, MyNodeData>>
+    ) -> Vec<NodeResponse<MyResponse, EditorNode>>
         where
             MyResponse: UserResponseTrait,
     {
         let mut button: egui::Button;
-        if self.is_active {
+        if self.behavior == FunctionBehavior::Active {
             button =
                 egui::Button::new(
                     egui::RichText::new("Active")
@@ -172,7 +181,7 @@ impl NodeDataTrait for MyNodeData {
         } else {
             button =
                 egui::Button::new(
-                    egui::RichText::new("Inactive"))
+                    egui::RichText::new("Passive"))
                     .min_size(egui::Vec2::new(70.0, 0.0));
         }
         button = button.min_size(egui::Vec2::new(70.0, 0.0));
@@ -186,16 +195,6 @@ impl NodeDataTrait for MyNodeData {
     }
 }
 
-
-#[derive(Default)]
-pub struct NodeshopApp {
-    state: EditorState,
-    pub(crate) user_state: MyGraphState,
-}
-
-struct AllNodeTemplates {
-    funcs: Vec<FunctionTemplate>,
-}
 impl AllNodeTemplates {
     fn new(funcs: &graph_lib::functions::Functions) -> Self {
         let funcs = funcs.functions().iter().map(|f|
@@ -210,6 +209,7 @@ impl AllNodeTemplates {
         }
     }
 }
+
 impl NodeTemplateIter for AllNodeTemplates {
     type Item = FunctionTemplate;
 
@@ -223,7 +223,7 @@ impl eframe::App for NodeshopApp {
         egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
                 if ui.button("Save").clicked() {
-                    println!("test");
+                    self.save_graph_to_yaml();
                 }
             });
 
@@ -243,12 +243,97 @@ impl eframe::App for NodeshopApp {
                     match user_event {
                         MyResponse::SetActiveNode(node) => {
                             let node = &mut self.state.graph.nodes[node].user_data;
-                            node.is_active = !node.is_active;
+                            node.behavior.toggle();
                         }
                     }
                 }
                 _ => {}
             }
         }
+    }
+}
+
+impl NodeshopApp {
+    pub fn load_functions_from_yaml_file(&mut self, path: &str) {
+        self.user_state.functions
+            .load_yaml_file(path)
+            .expect("Failed to load test_functions.yml");
+    }
+
+    fn save_graph_to_yaml(&self) {
+        let graph = self.create_graph();
+        let yaml = graph.to_yaml().expect("Failed to save graph to yaml");
+        std::fs::write("graph.yml", yaml).expect("Failed to write test_graph.yml");
+    }
+
+    fn create_graph(&self) -> graph_lib::graph::Graph {
+        let mut graph = graph_lib::graph::Graph::default();
+
+        struct ArgAddress {
+            node_id: Uuid,
+            arg_index: usize,
+        }
+        let mut input_addresses = HashMap::<InputId, ArgAddress>::new();
+        let mut output_addresses = HashMap::<OutputId, ArgAddress>::new();
+
+        for (_editor_node_id, editor_node) in self.state.graph.nodes.iter() {
+            let function = self.user_state.functions
+                .function_by_node_id(editor_node.user_data.template.function_id)
+                .unwrap();
+
+            let mut node = graph_lib::graph::Node::from_function(function);
+            node.behavior = editor_node.user_data.behavior;
+
+            editor_node.inputs.iter().enumerate()
+                .for_each(|(index, (_editor_input_name, editor_input_id))| {
+                    let editor_input = self.state.graph.inputs.get(*editor_input_id).unwrap();
+                    let editor_value = &editor_input.value.0;
+                    let input = node.inputs.get_mut(index).unwrap();
+
+                    assert_eq!(input.data_type, editor_input.typ);
+                    assert_eq!(input.data_type, editor_value.data_type());
+
+                    input.default_value = Some(editor_value.clone());
+
+                    input_addresses.insert(*editor_input_id, ArgAddress {
+                        node_id: node.id(),
+                        arg_index: index,
+                    });
+                });
+
+            editor_node.outputs.iter().enumerate()
+                .for_each(|(index, (_editor_output_name, editor_output_id))| {
+                    let editor_output = self.state.graph.outputs.get(*editor_output_id).unwrap();
+                    let output = node.outputs.get_mut(index).unwrap();
+
+                    assert_eq!(output.data_type, editor_output.typ);
+
+                    output_addresses.insert(*editor_output_id, ArgAddress {
+                        node_id: node.id(),
+                        arg_index: index,
+                    });
+                });
+
+            graph.add_node(node);
+        }
+
+        for (editor_input_id, editor_output_id) in self.state.graph.connections.iter() {
+            let input_address = input_addresses.get(&editor_input_id).unwrap();
+            let output_address = output_addresses.get(&editor_output_id).unwrap();
+
+            let input = graph
+                .node_by_id_mut(input_address.node_id)
+                .unwrap()
+                .inputs
+                .get_mut(input_address.arg_index)
+                .unwrap();
+
+            input.binding = Some(Binding::new(
+                output_address.node_id,
+                output_address.arg_index as u32,
+            ));
+        }
+
+        graph
     }
 }

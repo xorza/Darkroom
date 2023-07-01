@@ -15,6 +15,7 @@ pub struct Function {
     pub name: String,
     pub inputs: Vec<Arg>,
     pub outputs: Vec<Arg>,
+    pub is_output: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]

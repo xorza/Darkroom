@@ -29,7 +29,7 @@ pub struct RuntimeNode {
 
     pub is_output: bool,
 
-    pub behavior: NodeBehavior,
+    pub behavior: FunctionBehavior,
     pub has_missing_inputs: bool,
     pub has_arguments: bool,
 
@@ -188,9 +188,9 @@ impl Runtime {
             let node = graph.node_by_id(node_id).unwrap();
 
             if !has_arguments {
-                behavior = NodeBehavior::Active;
+                behavior = FunctionBehavior::Active;
             }
-            if behavior != NodeBehavior::Active {
+            if behavior != FunctionBehavior::Active {
                 for input in node.inputs.iter() {
                     let binding = input.binding.as_ref().unwrap();
                     let output_r_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
@@ -198,8 +198,8 @@ impl Runtime {
                     has_missing_inputs |= output_r_node.has_missing_inputs;
 
                     if binding.behavior == BindingBehavior::Always
-                        && output_r_node.behavior == NodeBehavior::Active {
-                        behavior = NodeBehavior::Active;
+                        && output_r_node.behavior == FunctionBehavior::Active {
+                        behavior = FunctionBehavior::Active;
                     }
                 }
             }
@@ -226,14 +226,14 @@ impl Runtime {
             let node = graph.node_by_id(node_id).unwrap();
             let r_node = r_nodes.node_by_id(node_id).unwrap();
 
-            if !r_node.has_arguments || r_node.behavior == NodeBehavior::Active {
+            if !r_node.has_arguments || r_node.behavior == FunctionBehavior::Active {
                 for (_, input) in node.inputs.iter().enumerate() {
                     if let Some(binding) = input.binding.as_ref() {
                         let r_output_node = r_nodes.node_by_id(binding.output_node_id()).unwrap();
 
                         assert!(!r_output_node.has_missing_inputs);
 
-                        if r_output_node.behavior == NodeBehavior::Active {
+                        if r_output_node.behavior == FunctionBehavior::Active {
                             exec_order.push(binding.output_node_id());
                         }
                     }

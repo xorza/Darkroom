@@ -57,42 +57,6 @@ impl Invoker for LambdaInvoker {
     fn finish(&self) {}
 }
 
-impl Value {
-    pub fn data_type(&self) -> DataType {
-        match self {
-            Value::Null => { DataType::None }
-            Value::Float(_) => { DataType::Float }
-            Value::Int(_) => { DataType::Int }
-            Value::Bool(_) => { DataType::Bool }
-            Value::String(_) => { DataType::String }
-        }
-    }
-
-    pub fn as_float(&self) -> f64 {
-        match self {
-            Value::Float(value) => { *value }
-            _ => { panic!("Value is not a float") }
-        }
-    }
-    pub fn as_int(&self) -> i64 {
-        match self {
-            Value::Int(value) => { *value }
-            _ => { panic!("Value is not an int") }
-        }
-    }
-    pub fn as_bool(&self) -> bool {
-        match self {
-            Value::Bool(value) => { *value }
-            _ => { panic!("Value is not a bool") }
-        }
-    }
-    pub fn as_string(&self) -> &str {
-        match self {
-            Value::String(value) => { value }
-            _ => { panic!("Value is not a string") }
-        }
-    }
-}
 
 impl Args {
     pub fn new() -> Args {

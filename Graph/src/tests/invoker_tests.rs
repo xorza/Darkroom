@@ -3,7 +3,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::data::Value;
-use crate::graph::{BindingBehavior, Graph, NodeBehavior};
+use crate::graph::{BindingBehavior, FunctionBehavior, Graph};
 use crate::invoke::LambdaInvoker;
 use crate::runtime::Runtime;
 
@@ -115,7 +115,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
-    graph.node_by_name_mut("val2").unwrap().behavior = NodeBehavior::Active;
+    graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     compute.run(&graph, &invoker)?;
     assert_eq!(unsafe { RESULT }, 49);
 
