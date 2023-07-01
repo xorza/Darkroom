@@ -20,7 +20,7 @@ mod app;
 fn main() {
     let mut app = Box::<NodeshopApp>::default();
     app.user_state.functions
-        .load_yaml_file("../test_resources/test_functions.yml")
+        .load_yaml_file("./test_resources/test_functions.yml")
         .expect("Failed to load test_functions.yml");
 
     eframe::run_native(
