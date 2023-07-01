@@ -4,18 +4,27 @@ use uuid::Uuid;
 use crate::data::*;
 
 #[derive(Default, Clone, Serialize, Deserialize)]
-pub struct Arg {
+pub struct OutputInfo {
     pub name: String,
     pub data_type: DataType,
+}
+#[derive(Default, Clone, Serialize, Deserialize)]
+pub struct InputInfo {
+    pub name: String,
+    pub data_type: DataType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<Value>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Function {
     self_id: Uuid,
     pub name: String,
-    pub inputs: Vec<Arg>,
-    pub outputs: Vec<Arg>,
     pub is_output: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<InputInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<OutputInfo>,
 }
 
 #[derive(Default, Serialize, Deserialize)]

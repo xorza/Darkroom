@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::common::is_debug;
 use crate::data::Value;
 use crate::graph::*;
-use crate::invoke::{Args, Invoker};
+use crate::invoke::{InvokeArgs, Invoker};
 
 #[derive(Default)]
 pub struct Runtime {
@@ -51,8 +51,8 @@ struct RuntimeInput {
 
 #[derive(Default)]
 struct ArgSet {
-    inputs: Args,
-    outputs: Args,
+    inputs: InvokeArgs,
+    outputs: InvokeArgs,
     node_id: Uuid,
 }
 
@@ -311,8 +311,8 @@ impl RuntimeNode {
 
 impl ArgSet {
     pub fn from_node(node: &Node) -> ArgSet {
-        let inputs: Args = Args::with_size(node.inputs.len());
-        let mut outputs: Args = Args::with_size(node.outputs.len());
+        let inputs: InvokeArgs = InvokeArgs::with_size(node.inputs.len());
+        let mut outputs: InvokeArgs = InvokeArgs::with_size(node.outputs.len());
         for (i, output) in node.outputs.iter().enumerate() {
             outputs[i] = Value::from(output.data_type);
         }

@@ -5,7 +5,7 @@ use egui_node_graph::*;
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
-use graph_lib::graph::{Binding, FunctionBehavior};
+use graph_lib::graph::{Binding, FunctionBehavior, Input, Output};
 
 #[derive(Clone, Debug, Default)]
 pub struct EditorNode {
@@ -16,7 +16,8 @@ pub struct EditorNode {
 #[derive(Clone, Debug, Default)]
 struct FunctionTemplate {
     function_id: Uuid,
-    function_name: String,
+    name: String,
+    is_output: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -179,10 +180,7 @@ impl NodeDataTrait for EditorNode {
                         .color(egui::Color32::BLACK))
                     .fill(egui::Color32::GOLD);
         } else {
-            button =
-                egui::Button::new(
-                    egui::RichText::new("Passive"))
-                    .min_size(egui::Vec2::new(70.0, 0.0));
+            button = egui::Button::new(egui::RichText::new("Passive"));
         }
         button = button.min_size(egui::Vec2::new(70.0, 0.0));
 
@@ -199,8 +197,9 @@ impl AllNodeTemplates {
     fn new(funcs: &graph_lib::functions::Functions) -> Self {
         let funcs = funcs.functions().iter().map(|f|
             FunctionTemplate {
-                function_name: f.name.clone(),
+                name: f.name.clone(),
                 function_id: f.id(),
+                is_output: f.is_output,
             }
         ).collect();
 
@@ -267,6 +266,8 @@ impl NodeshopApp {
     }
 
     fn create_graph(&self) -> graph_lib::graph::Graph {
+        let editor_graph = &self.state.graph;
+
         let mut graph = graph_lib::graph::Graph::default();
 
         struct ArgAddress {
@@ -276,48 +277,54 @@ impl NodeshopApp {
         let mut input_addresses = HashMap::<InputId, ArgAddress>::new();
         let mut output_addresses = HashMap::<OutputId, ArgAddress>::new();
 
-        for (_editor_node_id, editor_node) in self.state.graph.nodes.iter() {
-            let function = self.user_state.functions
-                .function_by_node_id(editor_node.user_data.template.function_id)
-                .unwrap();
-
-            let mut node = graph_lib::graph::Node::from_function(function);
+        for (_editor_node_id, editor_node) in editor_graph.nodes.iter() {
+            let mut node = graph_lib::graph::Node::new();
+            node.name = editor_node.user_data.template.name.clone();
+            node.function_id = editor_node.user_data.template.function_id;
+            node.is_output = editor_node.user_data.template.is_output;
             node.behavior = editor_node.user_data.behavior;
 
-            editor_node.inputs.iter().enumerate()
-                .for_each(|(index, (_editor_input_name, editor_input_id))| {
-                    let editor_input = self.state.graph.inputs.get(*editor_input_id).unwrap();
+            editor_node.inputs.iter()
+                .for_each(|(editor_input_name, editor_input_id)| {
+                    let editor_input = editor_graph.inputs
+                        .get(*editor_input_id).unwrap();
                     let editor_value = &editor_input.value.0;
-                    let input = node.inputs.get_mut(index).unwrap();
 
-                    assert_eq!(input.data_type, editor_input.typ);
-                    assert_eq!(input.data_type, editor_value.data_type());
+                    assert_eq!(editor_input.typ, editor_value.data_type());
 
-                    input.default_value = Some(editor_value.clone());
+                    node.inputs.push(Input {
+                        name: editor_input_name.clone(),
+                        data_type: editor_input.typ,
+                        is_required: true,
+                        binding: None,
+                        default_value: Some(editor_value.clone()),
+                    });
 
                     input_addresses.insert(*editor_input_id, ArgAddress {
                         node_id: node.id(),
-                        arg_index: index,
+                        arg_index: node.inputs.len() - 1,
                     });
                 });
 
-            editor_node.outputs.iter().enumerate()
-                .for_each(|(index, (_editor_output_name, editor_output_id))| {
-                    let editor_output = self.state.graph.outputs.get(*editor_output_id).unwrap();
-                    let output = node.outputs.get_mut(index).unwrap();
+            editor_node.outputs.iter()
+                .for_each(|(editor_output_name, editor_output_id)| {
+                    let editor_output = editor_graph.outputs.get(*editor_output_id).unwrap();
 
-                    assert_eq!(output.data_type, editor_output.typ);
+                    node.outputs.push(Output {
+                        name: editor_output_name.clone(),
+                        data_type: editor_output.typ,
+                    });
 
                     output_addresses.insert(*editor_output_id, ArgAddress {
                         node_id: node.id(),
-                        arg_index: index,
+                        arg_index: node.outputs.len() - 1,
                     });
                 });
 
             graph.add_node(node);
         }
 
-        for (editor_input_id, editor_output_id) in self.state.graph.connections.iter() {
+        for (editor_input_id, editor_output_id) in editor_graph.connections.iter() {
             let input_address = input_addresses.get(&editor_input_id).unwrap();
             let output_address = output_addresses.get(&editor_output_id).unwrap();
 

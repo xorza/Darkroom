@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
 
-use mlua::{Error, Function, Lua, Table, Variadic};
+use mlua::{Error, Function, Lua, Table, Value, Variadic};
 use uuid::Uuid;
 
 use crate::{data, functions, invoke};
 use crate::data::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
-use crate::invoke::{Args, Invoker};
+use crate::invoke::{InvokeArgs, Invoker};
 
 #[derive(Default)]
 struct Cache {
@@ -123,7 +123,12 @@ impl LuaInvoker {
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.inputs.push(functions::Arg { name, data_type });
+            let mut default_value: Option<data::Value> = None;
+            if input.len()? > 2 {
+                default_value = None;
+            }
+
+            function_info.inputs.push(functions::InputInfo { name, data_type, default_value });
         }
 
         let outputs: Table = table.get("outputs")?;
@@ -133,7 +138,7 @@ impl LuaInvoker {
             let data_type_name: String = output.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.outputs.push(functions::Arg { name, data_type });
+            function_info.outputs.push(functions::OutputInfo { name, data_type });
         }
 
         Ok(function_info)
@@ -303,7 +308,7 @@ impl Drop for LuaInvoker {
 
 impl Invoker for LuaInvoker {
     fn start(&self) {}
-    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
         self.lua.globals().set("context_id", context_id.to_string())?;
 
         let function_info = self.funcs

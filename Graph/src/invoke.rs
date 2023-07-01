@@ -6,22 +6,22 @@ use uuid::Uuid;
 use crate::data::{DataType, Value};
 
 #[derive(Clone, Default)]
-pub struct Args {
+pub struct InvokeArgs {
     values: Vec<Value>,
 }
 
 pub trait Invoker {
     fn start(&self) {}
-    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()>;
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()>;
     fn finish(&self) {}
 }
 
 pub trait Invokable {
-    fn call(&self, context_id: Uuid, inputs: &Args, outputs: &mut Args);
+    fn call(&self, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
 }
 
 pub struct LambdaInvokable {
-    lambda: Box<dyn Fn(Uuid, &Args, &mut Args)>,
+    lambda: Box<dyn Fn(Uuid, &InvokeArgs, &mut InvokeArgs)>,
 }
 
 pub struct LambdaInvoker {
@@ -35,7 +35,7 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(Uuid, &Args, &mut Args) + 'static>(&mut self, function_id: Uuid, lambda: F) {
+    pub fn add_lambda<F: Fn(Uuid, &InvokeArgs, &mut InvokeArgs) + 'static>(&mut self, function_id: Uuid, lambda: F) {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
@@ -45,7 +45,7 @@ impl LambdaInvoker {
 
 impl Invoker for LambdaInvoker {
     fn start(&self) {}
-    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &Args, outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
         let func = self.lambdas
             .get(&function_id)
             .ok_or(anyhow::anyhow!("Function not found: {}", function_id))?;
@@ -58,14 +58,14 @@ impl Invoker for LambdaInvoker {
 }
 
 
-impl Args {
-    pub fn new() -> Args {
-        Args {
+impl InvokeArgs {
+    pub fn new() -> InvokeArgs {
+        InvokeArgs {
             values: Vec::new(),
         }
     }
-    pub fn with_size(size: usize) -> Args {
-        let mut result = Args {
+    pub fn with_size(size: usize) -> InvokeArgs {
+        let mut result = InvokeArgs {
             values: Vec::with_capacity(size),
         };
         result.values.resize(size, Value::Null);
@@ -80,8 +80,8 @@ impl Args {
         self.values.iter()
     }
 
-    pub fn from_vec<T: Into<Value>>(values: Vec<T>) -> Args {
-        let mut result = Args::new();
+    pub fn from_vec<T: Into<Value>>(values: Vec<T>) -> InvokeArgs {
+        let mut result = InvokeArgs::new();
         for value in values {
             result.values.push(value.into());
         }
@@ -94,7 +94,7 @@ impl Args {
     }
 }
 
-impl Index<usize> for Args {
+impl Index<usize> for InvokeArgs {
     type Output = Value;
 
     fn index(&self, idx: usize) -> &Value {
@@ -102,7 +102,7 @@ impl Index<usize> for Args {
     }
 }
 
-impl IndexMut<usize> for Args {
+impl IndexMut<usize> for InvokeArgs {
     fn index_mut(&mut self, index: usize) -> &mut Value {
         &mut self.values[index]
     }

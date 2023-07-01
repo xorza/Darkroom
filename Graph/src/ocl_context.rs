@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use uuid::Uuid;
 
-use crate::invoke::{Args, Invoker};
+use crate::invoke::{InvokeArgs, Invoker};
 
 pub struct OclContext {
     context: ocl::Context,
@@ -33,7 +33,7 @@ impl Invoker for OclContext {
         *current_queue = Some(queue);
     }
 
-    fn call(&self, _function_id: Uuid, _context_id: Uuid, _inputs: &Args, _outputs: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, _function_id: Uuid, _context_id: Uuid, _inputs: &InvokeArgs, _outputs: &mut InvokeArgs) -> anyhow::Result<()> {
         let current_queue = self.current_queue.borrow();
         let _current_queue = current_queue.as_ref().unwrap();
 

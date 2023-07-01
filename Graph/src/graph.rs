@@ -333,7 +333,7 @@ impl Binding {
         Binding {
             output_node_id,
             output_index,
-            behavior: BindingBehavior::Always,
+            ..Default::default()
         }
     }
 
@@ -343,16 +343,16 @@ impl Binding {
     pub fn output_index(&self) -> u32 {
         self.output_index
     }
-
 }
 
 impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
             self_id: Uuid::new_v4(),
-            name: String::default(),
-            inputs: Vec::new(),
-            outputs: Vec::new(),
+
+            name: "".to_string(),
+            inputs: vec![],
+            outputs: vec![],
         }
     }
 

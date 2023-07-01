@@ -4,13 +4,13 @@ use uuid::Uuid;
 
 use crate::data::Value;
 use crate::graph::*;
-use crate::invoke::{Args, Invoker, LambdaInvoker};
+use crate::invoke::{InvokeArgs, Invoker, LambdaInvoker};
 use crate::runtime::Runtime;
 
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
-    fn call(&self, _: Uuid, _: Uuid, _: &Args, _: &mut Args) -> anyhow::Result<()> {
+    fn call(&self, _: Uuid, _: Uuid, _: &InvokeArgs, _: &mut InvokeArgs) -> anyhow::Result<()> {
         Ok(())
     }
 }
