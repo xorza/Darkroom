@@ -45,8 +45,8 @@ pub enum BindingBehavior {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Binding {
-    output_node_id: Uuid,
-    output_index: u32,
+    pub output_node_id: Uuid,
+    pub output_index: u32,
     pub behavior: BindingBehavior,
 }
 

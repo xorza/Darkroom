@@ -1,8 +1,9 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use eframe::egui::{self, DragValue, TextStyle, Widget};
-use egui_file::FileDialog;
+use egui_file::{DialogType, FileDialog};
 use egui_node_graph::*;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
@@ -40,19 +41,11 @@ type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
 type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyGraphState>;
 
 #[derive(Default)]
-pub enum FileDialogResponse {
-    #[default]
-    OpenGraph,
-    SaveGraph,
-}
-
-#[derive(Default)]
 pub struct NodeshopApp {
     state: EditorState,
     user_state: MyGraphState,
 
     file_dialog: Option<FileDialog>,
-    file_dialog_response: FileDialogResponse,
 }
 struct AllNodeTemplates {
     funcs: Vec<FunctionTemplate>,
@@ -87,7 +80,7 @@ impl NodeTemplateTrait for FunctionTemplate {
 
     fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
         let function = user_state.functions
-            .function_by_node_id(self.function_id)
+            .function_by_id(self.function_id)
             .unwrap();
 
         function.name.clone().into()
@@ -126,7 +119,7 @@ impl NodeTemplateTrait for FunctionTemplate {
             graph.add_output_param(node_id, name.to_string(), DataType::Int);
         };
 
-        let function = user_state.functions.function_by_node_id(self.function_id).unwrap();
+        let function = user_state.functions.function_by_id(self.function_id).unwrap();
         for input in function.inputs.iter() {
             input_scalar(graph, &input.name);
         }
@@ -232,33 +225,19 @@ impl eframe::App for NodeshopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
-                if ui.button("Save").clicked() {
-                    let mut dialog = FileDialog::open_file(None);
-                    dialog.open();
-                    self.file_dialog = Some(dialog);
-                    self.file_dialog_response = FileDialogResponse::SaveGraph;
-                }
-
-                if (ui.button("Open")).clicked() {
-                    let mut dialog = FileDialog::open_file(None);
-                    dialog.open();
-                    self.file_dialog = Some(dialog);
-                    self.file_dialog_response = FileDialogResponse::OpenGraph;
-                }
-
-                if let Some(dialog) = &mut self.file_dialog {
-                    if dialog.show(ctx).selected() {
-                        if let Some(file) = dialog.path() {
-                            if let Some(filename) = file.to_str() {
-                                match self.file_dialog_response {
-                                    FileDialogResponse::OpenGraph => self.load_graph_from_yaml(filename),
-                                    FileDialogResponse::SaveGraph => self.save_graph_to_yaml(filename)
-                                }
-                            }
-                        }
-                        self.file_dialog = None;
+                ui.horizontal(|ui| {
+                    if ui.button("Open").clicked() {
+                        let mut dialog = FileDialog::open_file(None);
+                        dialog.open();
+                        self.file_dialog = Some(dialog);
                     }
-                }
+
+                    if ui.button("Save").clicked() {
+                        let mut dialog = FileDialog::save_file(None);
+                        dialog.open();
+                        self.file_dialog = Some(dialog);
+                    }
+                });
             });
 
         let graph_response = egui::CentralPanel::default()
@@ -284,7 +263,35 @@ impl eframe::App for NodeshopApp {
                 _ => {}
             }
         }
+
+        if let Some(dialog) = &mut self.file_dialog {
+            if dialog.show(ctx).selected() {
+                if let Some(file) = dialog.path() {
+                    if let Some(filename) = file.to_str() {
+                        match dialog.dialog_type() {
+                            DialogType::OpenFile => self.load_graph_from_yaml(filename).unwrap_or_default(),
+                            DialogType::SaveFile => self.save_graph_to_yaml(filename).unwrap_or_default(),
+
+                            _ => panic!("Invalid dialog type")
+                        }
+                    }
+                }
+                self.file_dialog = None;
+            }
+        }
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+struct ArgAddress {
+    node_id: Uuid,
+    arg_index: usize,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct SerializedGraph {
+    graph: graph_lib::graph::Graph,
+    positions: HashMap<Uuid, (f32, f32)>,
 }
 
 impl NodeshopApp {
@@ -294,27 +301,15 @@ impl NodeshopApp {
             .expect("Failed to load test_functions.yml");
     }
 
-    fn save_graph_to_yaml(&self, filename: &str) {
-        let graph = self.create_graph();
-        let yaml = graph.to_yaml().expect("Failed to save graph to yaml");
-        std::fs::write(filename, yaml).expect("Failed to write test_graph.yml");
-    }
-
-    fn load_graph_from_yaml(&mut self, _filename: &str) {}
-
-    fn create_graph(&self) -> graph_lib::graph::Graph {
+    fn save_graph_to_yaml(&self, filename: &str) -> anyhow::Result<()> {
         let editor_graph = &self.state.graph;
 
-        let mut graph = graph_lib::graph::Graph::default();
+        let mut graph = SerializedGraph::default();
 
-        struct ArgAddress {
-            node_id: Uuid,
-            arg_index: usize,
-        }
         let mut input_addresses = HashMap::<InputId, ArgAddress>::new();
         let mut output_addresses = HashMap::<OutputId, ArgAddress>::new();
 
-        for (_editor_node_id, editor_node) in editor_graph.nodes.iter() {
+        for (editor_node_id, editor_node) in editor_graph.nodes.iter() {
             let mut node = graph_lib::graph::Node::new();
             node.name = editor_node.user_data.template.name.clone();
             node.function_id = editor_node.user_data.template.function_id;
@@ -358,14 +353,17 @@ impl NodeshopApp {
                     });
                 });
 
-            graph.add_node(node);
+            let position = self.state.node_positions.get(editor_node_id).unwrap();
+            graph.positions.insert(node.id(), (position.x, position.y));
+
+            graph.graph.add_node(node);
         }
 
         for (editor_input_id, editor_output_id) in editor_graph.connections.iter() {
             let input_address = input_addresses.get(&editor_input_id).unwrap();
             let output_address = output_addresses.get(&editor_output_id).unwrap();
 
-            let input = graph
+            let input = graph.graph
                 .node_by_id_mut(input_address.node_id)
                 .unwrap()
                 .inputs
@@ -378,6 +376,105 @@ impl NodeshopApp {
             ));
         }
 
-        graph
+        let yaml = serde_yaml::to_string(&graph)?;
+        std::fs::write(filename, yaml)?;
+
+        Ok(())
+    }
+
+    fn load_graph_from_yaml(&mut self, filename: &str) -> anyhow::Result<()> {
+        let yaml = std::fs::read_to_string(filename)?;
+        let graph: SerializedGraph = serde_yaml::from_str(&yaml)?;
+
+        let editor_graph = &mut self.state.graph;
+
+        let mut input_addresses = HashMap::<ArgAddress, InputId>::new();
+        let mut output_addresses = HashMap::<ArgAddress, OutputId>::new();
+
+        for (_index, node) in graph.graph.nodes().iter().enumerate() {
+            let function = self.user_state.functions
+                .function_by_id(node.function_id)
+                .unwrap();
+
+            let node_data = EditorNode {
+                template: FunctionTemplate {
+                    function_id: node.function_id,
+                    name: function.name.clone(),
+                    is_output: node.is_output,
+                },
+                behavior: node.behavior,
+            };
+
+            let node_add =
+                |editor_graph: &mut EditorGraph, editor_node_id: NodeId| {
+                    for (index, input) in node.inputs.iter().enumerate() {
+                        let default_value = input.default_value.clone()
+                            .unwrap_or(Value::from(input.data_type));
+
+                        let input_id = editor_graph.add_input_param(
+                            editor_node_id,
+                            input.name.clone(),
+                            input.data_type,
+                            EditorValue(default_value),
+                            InputParamKind::ConnectionOrConstant,
+                            true);
+
+                        input_addresses.insert(
+                            ArgAddress {
+                                node_id: node.id(),
+                                arg_index: index,
+                            },
+                            input_id);
+                    }
+
+                    for (index, output) in node.outputs.iter().enumerate() {
+                        let output_id = editor_graph.add_output_param(
+                            editor_node_id,
+                            output.name.clone(),
+                            output.data_type);
+
+                        output_addresses.insert(
+                            ArgAddress {
+                                node_id: node.id(),
+                                arg_index: index,
+                            },
+                            output_id);
+                    }
+                };
+
+            let node_id = editor_graph.add_node(node.name.clone(), node_data, node_add);
+            self.state.node_order.push(node_id);
+
+            graph.positions
+                .get(&node.id())
+                .map(|(x, y)| {
+                    self.state.node_positions.insert(
+                        node_id,
+                        egui::Pos2 { x: *x, y: *y },
+                    );
+                });
+        }
+
+        for node in graph.graph.nodes().iter() {
+            for (index, input) in node.inputs.iter().enumerate() {
+                if let Some(binding) = &input.binding {
+                    let input_id = input_addresses.get(
+                        &ArgAddress {
+                            node_id: node.id(),
+                            arg_index: index,
+                        }).unwrap();
+
+                    let output_id = output_addresses.get(
+                        &ArgAddress {
+                            node_id: binding.output_node_id,
+                            arg_index: binding.output_index as usize,
+                        }).unwrap();
+
+                    editor_graph.add_connection(*output_id, *input_id);
+                }
+            }
+        }
+
+        Ok(())
     }
 }

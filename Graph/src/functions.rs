@@ -56,10 +56,10 @@ impl Functions {
         }
     }
 
-    pub fn function_by_node_id(&self, func_id: Uuid) -> Option<&Function> {
+    pub fn function_by_id(&self, func_id: Uuid) -> Option<&Function> {
         self.functions.iter().find(|func| func.self_id == func_id)
     }
-    pub fn function_by_node_id_mut(&mut self, func_id: Uuid) -> Option<&mut Function> {
+    pub fn function_by_id_mut(&mut self, func_id: Uuid) -> Option<&mut Function> {
         self.functions.iter_mut().find(|func| func.self_id == func_id)
     }
 
