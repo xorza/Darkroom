@@ -23,6 +23,17 @@ pub struct Functions {
 }
 
 impl Functions {
+    pub fn new(funcs: &Vec<&Function>) -> Functions {
+        let functions = funcs.iter()
+            .cloned()
+            .cloned()
+            .collect::<Vec<Function>>();
+
+        Functions {
+            functions,
+        }
+    }
+
     pub fn functions(&self) -> &Vec<Function> {
         &self.functions
     }
@@ -40,6 +51,18 @@ impl Functions {
     }
     pub fn function_by_node_id_mut(&mut self, func_id: Uuid) -> Option<&mut Function> {
         self.functions.iter_mut().find(|func| func.self_id == func_id)
+    }
+
+    pub fn to_yaml(&self) -> anyhow::Result<String> {
+        let yaml = serde_yaml::to_string(&self)?;
+        Ok(yaml)
+    }
+    pub fn load_yaml_file(&mut self, path: &str) -> anyhow::Result<()> {
+        let yaml = std::fs::read_to_string(path)?;
+        let functions: Functions = serde_yaml::from_str(&yaml)?;
+        self.functions = functions.functions;
+
+        Ok(())
     }
 }
 

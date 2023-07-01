@@ -16,7 +16,7 @@ impl Invoker for EmptyInvoker {
 
 #[test]
 fn simple_run() -> anyhow::Result<()> {
-    let graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -29,7 +29,7 @@ fn simple_run() -> anyhow::Result<()> {
 
 #[test]
 fn double_run() -> anyhow::Result<()> {
-    let graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -48,7 +48,7 @@ fn double_run() -> anyhow::Result<()> {
 
 #[test]
 fn node_behavior_active_test() -> anyhow::Result<()> {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -68,7 +68,7 @@ fn node_behavior_active_test() -> anyhow::Result<()> {
 
 #[test]
 fn edge_behavior_once_test() -> anyhow::Result<()> {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -92,7 +92,7 @@ fn edge_behavior_once_test() -> anyhow::Result<()> {
 
 #[test]
 fn edge_behavior_always_test() -> anyhow::Result<()> {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -116,7 +116,7 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
 
 #[test]
 fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
     let invoker = EmptyInvoker {};
 
@@ -202,7 +202,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
         outputs[0] = Value::from(a * b);
     });
 
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut compute = Runtime::default();
 
     compute.run(&graph, &invoker)?;

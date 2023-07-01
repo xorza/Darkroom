@@ -6,24 +6,10 @@ use std::rc::Rc;
 use mlua::{Error, Function, Lua, Table, Value, Variadic};
 use uuid::Uuid;
 
+use crate::{functions, invoke};
 use crate::data_type::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
-use crate::invoke;
 use crate::invoke::{Args, Invoker};
-
-#[derive(Clone)]
-pub struct Argument {
-    name: String,
-    data_type: DataType,
-}
-
-#[derive(Clone)]
-pub struct FunctionInfo {
-    id: Uuid,
-    name: String,
-    inputs: Vec<Argument>,
-    outputs: Vec<Argument>,
-}
 
 #[derive(Default)]
 struct Cache {
@@ -31,7 +17,7 @@ struct Cache {
 }
 
 struct LuaFuncInfo {
-    info: FunctionInfo,
+    info: functions::Function,
     lua_func: Function<'static>,
 }
 
@@ -104,14 +90,15 @@ impl LuaInvoker {
 
         Ok(())
     }
+    
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
-            let function_info = FunctionInfo::from(&function_table)?;
+            let function_info = Self::function_from_table(&function_table)?;
             let function: Function = self.lua.globals().get(function_info.name.as_str())?;
 
             self.funcs.insert(
-                function_info.id,
+                function_info.id(),
                 LuaFuncInfo {
                     info: function_info,
                     lua_func: function,
@@ -120,6 +107,36 @@ impl LuaInvoker {
         }
 
         Ok(())
+    }
+    fn function_from_table(table: &Table) -> anyhow::Result<functions::Function> {
+        let id_str: String = table.get("id")?;
+
+        let mut function_info = functions::Function::new(Uuid::parse_str(&id_str)?);
+        function_info.name = table.get("name")?;
+        function_info.inputs = Vec::new();
+        function_info.outputs = Vec::new();
+        
+        let inputs: Table = table.get("inputs")?;
+        for i in 1..=inputs.len()? {
+            let input: Table = inputs.get(i).unwrap();
+            let name: String = input.get(1).unwrap();
+            let data_type_name: String = input.get(2).unwrap();
+            let data_type = data_type_name.parse::<DataType>().unwrap();
+
+            function_info.inputs.push(functions::Arg { name, data_type });
+        }
+
+        let outputs: Table = table.get("outputs")?;
+        for i in 1..=outputs.len()? {
+            let output: Table = outputs.get(i).unwrap();
+            let name: String = output.get(1).unwrap();
+            let data_type_name: String = output.get(2).unwrap();
+            let data_type = data_type_name.parse::<DataType>().unwrap();
+
+            function_info.outputs.push(functions::Arg { name, data_type });
+        }
+
+        Ok(function_info)
     }
 
     pub fn map_graph(&self) -> anyhow::Result<Graph> {
@@ -134,10 +151,11 @@ impl LuaInvoker {
 
         Ok(graph)
     }
+    
     fn substitute_functions(&self) -> Vec<FuncConnections> {
         let connections: Rc<RefCell<Vec<FuncConnections>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let functions = self.functions_info();
+        let functions = self.get_all_functions();
 
         let mut output_index: u32 = 0;
 
@@ -256,6 +274,7 @@ impl LuaInvoker {
 
         graph
     }
+    
 
     pub fn get_output(&self) -> String {
         let mut cache = self.cache.borrow_mut();
@@ -264,55 +283,11 @@ impl LuaInvoker {
         result
     }
 
-    pub fn functions_info(&self) -> Vec<&FunctionInfo> {
+    pub fn get_all_functions(&self) -> Vec<&functions::Function> {
         self.funcs.values().map(|f| &f.info).collect()
     }
 }
 
-impl FunctionInfo {
-    fn from(table: &Table) -> anyhow::Result<FunctionInfo> {
-        let id_str: String = table.get("id")?;
-
-        let mut function_info = FunctionInfo {
-            id: Uuid::parse_str(&id_str)?,
-            name: table.get("name")?,
-            inputs: Vec::new(),
-            outputs: Vec::new(),
-        };
-
-        let inputs: Table = table.get("inputs")?;
-        for i in 1..=inputs.len()? {
-            let input: Table = inputs.get(i).unwrap();
-            let name: String = input.get(1).unwrap();
-            let data_type_name: String = input.get(2).unwrap();
-            let data_type = data_type_name.parse::<DataType>().unwrap();
-
-            function_info.inputs.push(Argument { name, data_type });
-        }
-
-        let outputs: Table = table.get("outputs")?;
-        for i in 1..=outputs.len()? {
-            let output: Table = outputs.get(i).unwrap();
-            let name: String = output.get(1).unwrap();
-            let data_type_name: String = output.get(2).unwrap();
-            let data_type = data_type_name.parse::<DataType>().unwrap();
-
-            function_info.outputs.push(Argument { name, data_type });
-        }
-
-        Ok(function_info)
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-    pub fn inputs(&self) -> &Vec<Argument> {
-        &self.inputs
-    }
-    pub fn outputs(&self) -> &Vec<Argument> {
-        &self.outputs
-    }
-}
 
 impl Drop for LuaInvoker {
     fn drop(&mut self) {

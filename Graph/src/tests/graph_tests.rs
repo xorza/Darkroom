@@ -4,7 +4,7 @@ use crate::graph::*;
 
 #[test]
 fn graph_from_yaml() -> anyhow::Result<()> {
-    let graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let yaml: String = graph.to_yaml()?;
     let graph = Graph::from_yaml(&yaml)?;
     black_box(graph);
@@ -14,7 +14,7 @@ fn graph_from_yaml() -> anyhow::Result<()> {
 
 #[test]
 fn node_remove_test() -> anyhow::Result<()> {
-    let mut graph = Graph::from_yaml_file("./test_resources/test_graph.yml")?;
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
     let node_id = graph.node_by_name("sum").unwrap().id();
     graph.remove_node_by_id(node_id);
@@ -33,7 +33,7 @@ fn node_remove_test() -> anyhow::Result<()> {
 
 #[test]
 fn subgraph_from_yaml() -> anyhow::Result<()> {
-    let graph = Graph::from_yaml_file("./test_resources/test_subgraph.yml")?;
+    let graph = Graph::from_yaml_file("../test_resources/test_subgraph.yml")?;
     let _yaml: String = graph.to_yaml()?;
 
     assert_eq!(graph.subgraphs().len(), 1);

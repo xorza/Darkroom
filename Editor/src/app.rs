@@ -1,10 +1,12 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use eframe::egui::{self, DragValue, TextStyle};
+use eframe::egui::{self, DragValue, TextStyle, Widget};
 use egui_node_graph::*;
+use uuid::Uuid;
 
 pub struct MyNodeData {
-    template: MyNodeTemplate,
+    template: FunctionTemplate,
+    is_active: bool,
 }
 
 #[derive(PartialEq, Eq)]
@@ -43,26 +45,29 @@ impl MyValueType {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum MyNodeTemplate {
-    MakeScalar,
-    AddScalar,
-    SubtractScalar,
-    MakeVector,
-    AddVector,
-    SubtractVector,
-    VectorTimesScalar,
+#[derive(Clone)]
+pub struct FunctionTemplate {
+    pub function_id: Uuid,
+    pub function_name: String,
+}
+
+pub enum NodeCategory {}
+
+impl CategoryTrait for NodeCategory {
+    fn name(&self) -> String {
+        "test_category".to_string()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
     SetActiveNode(NodeId),
-    ClearActiveNode,
 }
 
 #[derive(Default)]
 pub struct MyGraphState {
-    pub active_node: Option<NodeId>,
+    pub(crate) graph: graph_lib::graph::Graph,
+    pub(crate) functions: graph_lib::functions::Functions,
 }
 
 impl DataTypeTrait<MyGraphState> for MyDataType {
@@ -73,7 +78,7 @@ impl DataTypeTrait<MyGraphState> for MyDataType {
         }
     }
 
-    fn name(&self) -> Cow<'_, str> {
+    fn name(&self) -> Cow<'static, str> {
         match self {
             MyDataType::Scalar => Cow::Borrowed("scalar"),
             MyDataType::Vec2 => Cow::Borrowed("2d vector"),
@@ -81,35 +86,23 @@ impl DataTypeTrait<MyGraphState> for MyDataType {
     }
 }
 
-impl NodeTemplateTrait for MyNodeTemplate {
+impl NodeTemplateTrait for FunctionTemplate {
     type NodeData = MyNodeData;
     type DataType = MyDataType;
     type ValueType = MyValueType;
     type UserState = MyGraphState;
-    type CategoryType = &'static str;
+    type CategoryType = NodeCategory;
 
-    fn node_finder_label(&self, _user_state: &mut Self::UserState) -> Cow<'_, str> {
-        Cow::Borrowed(match self {
-            MyNodeTemplate::MakeScalar => "New scalar",
-            MyNodeTemplate::AddScalar => "Scalar add",
-            MyNodeTemplate::SubtractScalar => "Scalar subtract",
-            MyNodeTemplate::MakeVector => "New vector",
-            MyNodeTemplate::AddVector => "Vector add",
-            MyNodeTemplate::SubtractVector => "Vector subtract",
-            MyNodeTemplate::VectorTimesScalar => "Vector times scalar",
-        })
+    fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
+        let function = user_state.functions
+            .function_by_node_id(self.function_id)
+            .unwrap();
+
+        function.name.clone().into()
     }
 
-    fn node_finder_categories(&self, _user_state: &mut Self::UserState) -> Vec<&'static str> {
-        match self {
-            MyNodeTemplate::MakeScalar
-            | MyNodeTemplate::AddScalar
-            | MyNodeTemplate::SubtractScalar => vec!["Scalar"],
-            MyNodeTemplate::MakeVector
-            | MyNodeTemplate::AddVector
-            | MyNodeTemplate::SubtractVector => vec!["Vector"],
-            MyNodeTemplate::VectorTimesScalar => vec!["Vector", "Scalar"],
-        }
+    fn node_finder_categories(&self, _user_state: &mut Self::UserState) -> Vec<Self::CategoryType> {
+        vec![]
     }
 
     fn node_graph_label(&self, user_state: &mut Self::UserState) -> String {
@@ -117,13 +110,13 @@ impl NodeTemplateTrait for MyNodeTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        MyNodeData { template: *self }
+        MyNodeData { template: self.clone(), is_active: false }
     }
 
     fn build_node(
         &self,
         graph: &mut Graph<Self::NodeData, Self::DataType, Self::ValueType>,
-        _user_state: &mut Self::UserState,
+        user_state: &mut Self::UserState,
         node_id: NodeId,
     ) {
         let input_scalar = |graph: &mut MyGraph, name: &str| {
@@ -136,61 +129,17 @@ impl NodeTemplateTrait for MyNodeTemplate {
                 true,
             );
         };
-        let input_vector = |graph: &mut MyGraph, name: &str| {
-            graph.add_input_param(
-                node_id,
-                name.to_string(),
-                MyDataType::Vec2,
-                MyValueType::Vec2 {
-                    value: egui::vec2(0.0, 0.0),
-                },
-                InputParamKind::ConnectionOrConstant,
-                true,
-            );
-        };
 
         let output_scalar = |graph: &mut MyGraph, name: &str| {
             graph.add_output_param(node_id, name.to_string(), MyDataType::Scalar);
         };
-        let output_vector = |graph: &mut MyGraph, name: &str| {
-            graph.add_output_param(node_id, name.to_string(), MyDataType::Vec2);
-        };
 
-        match self {
-            MyNodeTemplate::AddScalar => {
-                input_scalar(graph, "A");
-                input_scalar(graph, "B");
-                output_scalar(graph, "out");
-            }
-            MyNodeTemplate::SubtractScalar => {
-                input_scalar(graph, "A");
-                input_scalar(graph, "B");
-                output_scalar(graph, "out");
-            }
-            MyNodeTemplate::VectorTimesScalar => {
-                input_scalar(graph, "scalar");
-                input_vector(graph, "vector");
-                output_vector(graph, "out");
-            }
-            MyNodeTemplate::AddVector => {
-                input_vector(graph, "v1");
-                input_vector(graph, "v2");
-                output_vector(graph, "out");
-            }
-            MyNodeTemplate::SubtractVector => {
-                input_vector(graph, "v1");
-                input_vector(graph, "v2");
-                output_vector(graph, "out");
-            }
-            MyNodeTemplate::MakeVector => {
-                input_scalar(graph, "x");
-                input_scalar(graph, "y");
-                output_vector(graph, "out");
-            }
-            MyNodeTemplate::MakeScalar => {
-                input_scalar(graph, "value");
-                output_scalar(graph, "out");
-            }
+        let function = user_state.functions.function_by_node_id(self.function_id).unwrap();
+        for input in function.inputs.iter() {
+            input_scalar(graph, &input.name);
+        }
+        for output in function.outputs.iter() {
+            output_scalar(graph, &output.name);
         }
     }
 }
@@ -208,8 +157,6 @@ impl WidgetValueTrait for MyValueType {
         _user_state: &mut MyGraphState,
         _node_data: &MyNodeData,
     ) -> Vec<Self::Response> {
-        // This trait is used to tell the library which UI to display for the
-        // inline parameter widgets.
         match self {
             MyValueType::Vec2 { value } => {
                 ui.label(param_name);
@@ -241,52 +188,34 @@ impl NodeDataTrait for MyNodeData {
     type DataType = MyDataType;
     type ValueType = MyValueType;
 
-    // This method will be called when drawing each node. This allows adding
-    // extra ui elements inside the nodes. In this case, we create an "active"
-    // button which introduces the concept of having an active node in the
-    // graph. This is done entirely from user code with no modifications to the
-    // node graph library.
     fn bottom_ui(
         &self,
         ui: &mut egui::Ui,
         node_id: NodeId,
         _graph: &Graph<MyNodeData, MyDataType, MyValueType>,
-        user_state: &mut Self::UserState,
+        _user_state: &mut Self::UserState,
     ) -> Vec<NodeResponse<MyResponse, MyNodeData>>
         where
             MyResponse: UserResponseTrait,
     {
-        // This logic is entirely up to the user. In this case, we check if the
-        // current node we're drawing is the active one, by comparing against
-        // the value stored in the global user state, and draw different button
-        // UIs based on that.
+        let mut button: egui::Button;
+        if self.is_active {
+            button =
+                egui::Button::new(
+                    egui::RichText::new("Active")
+                        .color(egui::Color32::BLACK))
+                    .fill(egui::Color32::GOLD);
+        } else {
+            button =
+                egui::Button::new(
+                    egui::RichText::new("Inactive"))
+                    .min_size(egui::Vec2::new(70.0, 0.0));
+        }
+        button = button.min_size(egui::Vec2::new(70.0, 0.0));
 
         let mut responses = vec![];
-        let is_active = user_state
-            .active_node
-            .map(|id| id == node_id)
-            .unwrap_or(false);
-
-        // Pressing the button will emit a custom user response to either set,
-        // or clear the active node. These responses do nothing by themselves,
-        // the library only makes the responses available to you after the graph
-        // has been drawn. See below at the update method for an example.
-        if !is_active {
-            let button =
-                egui::Button::new(egui::RichText::new("Inactive"))
-                    .min_size(egui::Vec2::new(70.0, 0.0));
-
-            if ui.add(button).clicked() {
-                responses.push(NodeResponse::User(MyResponse::SetActiveNode(node_id)));
-            }
-        } else {
-            let button =
-                egui::Button::new(egui::RichText::new("Active").color(egui::Color32::BLACK))
-                    .fill(egui::Color32::GOLD)
-                    .min_size(egui::Vec2::new(70.0, 0.0));
-            if ui.add(button).clicked() {
-                responses.push(NodeResponse::User(MyResponse::ClearActiveNode));
-            }
+        if button.ui(ui).clicked() {
+            responses.push(NodeResponse::User(MyResponse::SetActiveNode(node_id)));
         }
 
         responses
@@ -294,39 +223,42 @@ impl NodeDataTrait for MyNodeData {
 }
 
 type MyGraph = Graph<MyNodeData, MyDataType, MyValueType>;
-type MyEditorState = GraphEditorState<MyNodeData, MyDataType, MyValueType, MyNodeTemplate, MyGraphState>;
+type MyEditorState = GraphEditorState<MyNodeData, MyDataType, MyValueType, FunctionTemplate, MyGraphState>;
 
 #[derive(Default)]
-pub struct NodeGraphExample {
-    // The `GraphEditorState` is the top-level object. You "register" all your
-    // custom types by specifying it as its generic parameters.
+pub struct NodeshopApp {
     state: MyEditorState,
-    user_state: MyGraphState,
+    pub(crate) user_state: MyGraphState,
 }
 
-pub struct AllMyNodeTemplates;
-impl NodeTemplateIter for AllMyNodeTemplates {
-    type Item = MyNodeTemplate;
+struct AllNodeTemplates {
+    funcs: Vec<FunctionTemplate>,
+}
+impl AllNodeTemplates {
+    fn new(funcs: &graph_lib::functions::Functions) -> Self {
+        let funcs = funcs.functions().iter().map(|f|
+            FunctionTemplate {
+                function_name: f.name.clone(),
+                function_id: f.id(),
+            }
+        ).collect();
+
+        Self {
+            funcs
+        }
+    }
+}
+impl NodeTemplateIter for AllNodeTemplates {
+    type Item = FunctionTemplate;
 
     fn all_kinds(&self) -> Vec<Self::Item> {
-        // This function must return a list of node kinds, which the node finder
-        // will use to display it to the user. Crates like strum can reduce the
-        // boilerplate in enumerating all variants of an enum.
-        vec![
-            MyNodeTemplate::MakeScalar,
-            MyNodeTemplate::MakeVector,
-            MyNodeTemplate::AddScalar,
-            MyNodeTemplate::SubtractScalar,
-            MyNodeTemplate::AddVector,
-            MyNodeTemplate::SubtractVector,
-            MyNodeTemplate::VectorTimesScalar,
-        ]
+        self.funcs.clone()
     }
 }
 
-impl eframe::App for NodeGraphExample {
+impl eframe::App for NodeshopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("test")
+        egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
                 if ui.button("Save").clicked() {
                     println!("test");
@@ -337,7 +269,7 @@ impl eframe::App for NodeGraphExample {
             .show(ctx, |ui| {
                 self.state.draw_graph_editor(
                     ui,
-                    AllMyNodeTemplates,
+                    AllNodeTemplates::new(&self.user_state.functions),
                     &mut self.user_state,
                     Vec::default(),
                 )
@@ -347,16 +279,14 @@ impl eframe::App for NodeGraphExample {
             match node_response {
                 NodeResponse::User(user_event) => {
                     match user_event {
-                        MyResponse::SetActiveNode(node) => self.user_state.active_node = Some(node),
-                        MyResponse::ClearActiveNode => self.user_state.active_node = None,
+                        MyResponse::SetActiveNode(node) => {
+                            let node = &mut self.state.graph.nodes[node].user_data;
+                            node.is_active = !node.is_active;
+                        }
                     }
                 }
-                _ => {
-                    update_model();
-                }
+                _ => {}
             }
         }
     }
 }
-
-fn update_model() {}

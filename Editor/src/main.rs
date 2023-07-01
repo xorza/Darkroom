@@ -11,17 +11,25 @@
 // }
 
 
-use crate::app::NodeGraphExample;
+use serde::Serialize;
+
+use crate::app::NodeshopApp;
 
 mod app;
+
 fn main() {
+    let mut app = Box::<NodeshopApp>::default();
+    app.user_state.functions
+        .load_yaml_file("../test_resources/test_functions.yml")
+        .expect("Failed to load test_functions.yml");
+
     eframe::run_native(
         "Nodeshop",
         eframe::NativeOptions::default(),
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
 
-            Box::<NodeGraphExample>::default()
+            app
         }),
     )
         .expect("Failed to run native example");

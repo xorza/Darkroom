@@ -3,8 +3,9 @@ use std::str::FromStr;
 use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
+use crate::functions::Functions;
 use crate::invoke::{Args, Invoker};
-use crate::lua_invoker::{LuaInvoker};
+use crate::lua_invoker::LuaInvoker;
 
 #[test]
 fn lua_works() {
@@ -66,14 +67,17 @@ fn local_data_test() {
 #[test]
 fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut invoker = LuaInvoker::default();
-    invoker.load_file("./test_resources/test_lua.lua")?;
+    invoker.load_file("../test_resources/test_lua.lua")?;
 
-    let funcs = invoker.functions_info();
+    let funcs = invoker.get_all_functions();
     assert_eq!(funcs.len(), 5);
+
+    let functions = Functions::new(&funcs);
+    let _yaml = functions.to_yaml()?;
+
 
     let inputs: Args = Args::from_vec(vec![3, 5]);
     let mut outputs: Args = Args::from_vec(vec![0]);
-
 
     // call 'mult' function
     invoker.call(

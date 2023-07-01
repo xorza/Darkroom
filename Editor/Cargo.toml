@@ -5,12 +5,16 @@ edition = "2021"
 
 [features]
 default = []
-opencl = ["graph/opencl"]
+opencl = ["graph_lib/opencl"]
 
 [dependencies]
-graph = { path = "../Graph" }
+graph_lib = { path = "../Graph", package = "graph" }
 # uilib = { path = "../uilib" }
 
 eframe = "0.21.3"
 egui_node_graph =  { path = "../../egui_node_graph/egui_node_graph" }
-anyhow = "*"
+
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
