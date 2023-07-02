@@ -13,3 +13,4 @@ anyhow = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }
 bytemuck = { workspace = true }
+num-traits = "*"

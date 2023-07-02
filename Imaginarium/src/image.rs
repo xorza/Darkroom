@@ -3,14 +3,18 @@ use std::path::Path;
 
 use bytemuck::Pod;
 use image::EncodableLayout;
+use num_traits::{Bounded, NumCast, ToPrimitive};
 use tiff::decoder::DecodingResult;
 
+use crate::image_convert::{*};
+
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
-pub enum ColorFormat {
-    Gray,
-    GrayAlpha,
+#[repr(u32)]
+pub enum ChannelCount {
+    Gray = 1,
+    GrayAlpha = 2,
     #[default]
-    Rgba,
+    Rgba = 3,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
@@ -30,12 +34,12 @@ pub enum ChannelType {
     Float,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub color_format: ColorFormat,
+    pub channel_count: ChannelCount,
     pub channel_size: ChannelSize,
     pub channel_type: ChannelType,
     pub bytes: Vec<u8>,
@@ -74,7 +78,38 @@ fn get_file_extension(filename: &str) -> anyhow::Result<&str> {
     Ok(extension)
 }
 
+fn align_up_2(n: u32) -> u32 {
+    // (n + 3) & !3
+    if n % 2 == 0 {
+        n
+    } else {
+        n + 1
+    }
+}
+
 impl Image {
+    pub fn new(
+        width: u32,
+        height: u32,
+        channel_count: ChannelCount,
+        channel_size: ChannelSize,
+        channel_type: ChannelType)
+        -> Image
+    {
+        let stride = align_up_2(width * channel_count as u32 * channel_size as u32);
+        let bytes = vec![0; (stride * height) as usize];
+
+        Image {
+            width,
+            height,
+            stride,
+            channel_count,
+            channel_size,
+            channel_type,
+            bytes,
+        }
+    }
+
     pub fn read_file(filename: &str) -> anyhow::Result<Image> {
         let extension = get_file_extension(filename)?;
 
@@ -110,18 +145,18 @@ impl Image {
             // @formatter:on
         };
 
-        let (color_format, pixel_size, channel_type) = match img.color() {
+        let (channel_count, channel_size, channel_type) = match img.color() {
             // @formatter:off
-            image::ColorType::L8      => (ColorFormat::Gray,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::L16     => (ColorFormat::Gray,      ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::La8     => (ColorFormat::GrayAlpha, ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::La16    => (ColorFormat::GrayAlpha, ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgb8    => (ColorFormat::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::Rgba8   => (ColorFormat::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::Rgb16   => (ColorFormat::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgba16  => (ColorFormat::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgb32F  => (ColorFormat::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
-            image::ColorType::Rgba32F => (ColorFormat::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
+            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::Int   ),
+            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::Int   ),
+            image::ColorType::Rgb8    => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::Rgb16   => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
+            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
+            image::ColorType::Rgb32F  => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
+            image::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
             _ =>  panic!("Unsupported color type: {:?}", img.color()),
             // @formatter:on
         };
@@ -130,8 +165,8 @@ impl Image {
             width: img.width(),
             height: img.height(),
             stride: bytes.len() as u32 / img.height(),
-            color_format,
-            channel_size: pixel_size,
+            channel_count,
+            channel_size,
             channel_type,
             bytes,
         };
@@ -144,12 +179,12 @@ impl Image {
             File::open(filename)?
         )?;
 
-        let (channel_count, channel_bits, color_format) = match decoder.colortype()? {
+        let (read_channel_count, channel_bits, supported_channel_count) = match decoder.colortype()? {
             // @formatter:off
-            tiff::ColorType::Gray  (b) => (1, b, ColorFormat::Gray      ),
-            tiff::ColorType::GrayA (b) => (2, b, ColorFormat::GrayAlpha ),
-            tiff::ColorType::RGB   (b) => (3, b, ColorFormat::Rgba      ),
-            tiff::ColorType::RGBA  (b) => (4, b, ColorFormat::Rgba      ),
+            tiff::ColorType::Gray  (b) => (1, b, ChannelCount::Gray      ),
+            tiff::ColorType::GrayA (b) => (2, b, ChannelCount::GrayAlpha ),
+            tiff::ColorType::RGB   (b) => (3, b, ChannelCount::Rgba      ),
+            tiff::ColorType::RGBA  (b) => (4, b, ChannelCount::Rgba      ),
             _ => panic!("Unsupported color type: {:?}", decoder.colortype()?),
             // @formatter:on
         };
@@ -157,16 +192,16 @@ impl Image {
         let img = decoder.read_image()?;
         let bytes: Vec<u8> = match &img {
             // @formatter:off
-            DecodingResult::U8 (buf) => align_channels(buf, channel_count, u8::MAX),
-            DecodingResult::I8 (buf) => align_channels(buf, channel_count, i8::MAX),
-            DecodingResult::U16(buf) => align_channels(buf, channel_count, u16::MAX),
-            DecodingResult::I16(buf) => align_channels(buf, channel_count, i16::MAX),
-            DecodingResult::U32(buf) => align_channels(buf, channel_count, u32::MAX),
-            DecodingResult::I32(buf) => align_channels(buf, channel_count, i32::MAX),
-            DecodingResult::U64(buf) => align_channels(buf, channel_count, u64::MAX),
-            DecodingResult::I64(buf) => align_channels(buf, channel_count, i64::MAX),
-            DecodingResult::F32(buf) => align_channels(buf, channel_count, 1.0f32),
-            DecodingResult::F64(buf) => align_channels(buf, channel_count, 1.0f64),
+            DecodingResult::U8 (buf) => align_channels(buf, read_channel_count, u8::MAX),
+            DecodingResult::I8 (buf) => align_channels(buf, read_channel_count, i8::max_value()),
+            DecodingResult::U16(buf) => align_channels(buf, read_channel_count, u16::MAX),
+            DecodingResult::I16(buf) => align_channels(buf, read_channel_count, i16::max_value()),
+            DecodingResult::U32(buf) => align_channels(buf, read_channel_count, u32::MAX),
+            DecodingResult::I32(buf) => align_channels(buf, read_channel_count, i32::max_value()),
+            DecodingResult::U64(buf) => align_channels(buf, read_channel_count, u64::MAX),
+            DecodingResult::I64(buf) => align_channels(buf, read_channel_count, i64::max_value()),
+            DecodingResult::F32(buf) => align_channels(buf, read_channel_count, 1.0f32),
+            DecodingResult::F64(buf) => align_channels(buf, read_channel_count, 1.0f64),
             // @formatter:on
         };
 
@@ -191,7 +226,7 @@ impl Image {
             width: w,
             height: h,
             stride: bytes.len() as u32 / h,
-            color_format,
+            channel_count: supported_channel_count,
             channel_size: ChannelSize::from_bit_count(channel_bits as u32),
             channel_type,
             bytes,
@@ -218,27 +253,115 @@ impl Image {
         Ok(())
     }
 
+    fn save_jpg(&self, filename: &str) -> anyhow::Result<()> {
+        if self.channel_type != ChannelType::Int {
+            return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.channel_type));
+        }
+
+        let color_type = match self.channel_size {
+            ChannelSize::_8bit => match self.channel_count {
+                ChannelCount::Gray => image::ColorType::L8,
+                // ColorFormat::Rgba => image::ColorType::Rgb8,
+
+                _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.channel_count)),
+            },
+
+            _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.channel_size)),
+        };
+
+        image::save_buffer(filename, &self.bytes, self.width, self.height, color_type)?;
+
+        Ok(())
+    }
+
     fn save_png(&self, filename: &str) -> anyhow::Result<()> {
         if self.channel_type != ChannelType::Int {
             return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.channel_type));
         }
-        if self.channel_size != ChannelSize::_8bit {
-            return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.channel_size));
-        }
 
-        let color_type = match self.color_format {
-            ColorFormat::Gray => image::ColorType::L8,
-            ColorFormat::GrayAlpha => image::ColorType::La8,
-            ColorFormat::Rgba => image::ColorType::Rgba8,
+        let color_type = match self.channel_size {
+            ChannelSize::_8bit => match self.channel_count {
+                ChannelCount::Gray => image::ColorType::L8,
+                ChannelCount::GrayAlpha => image::ColorType::La8,
+                ChannelCount::Rgba => image::ColorType::Rgba8,
+            },
+            ChannelSize::_16bit => match self.channel_count {
+                ChannelCount::Gray => image::ColorType::L16,
+                ChannelCount::GrayAlpha => image::ColorType::La16,
+                ChannelCount::Rgba => image::ColorType::Rgba16,
+            },
+
+            _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.channel_size)),
         };
 
         image::save_buffer(filename, &self.bytes, self.width, self.height, color_type)?;
+
         Ok(())
+    }
+
+
+    pub fn convert(
+        &mut self,
+        channel_count: ChannelCount,
+        channel_size: ChannelSize,
+        channel_type: ChannelType)
+        -> anyhow::Result<Image>
+    {
+        if channel_type == ChannelType::Float {
+            match channel_size {
+                ChannelSize::_8bit | ChannelSize::_16bit =>
+                    return Err(anyhow::anyhow!("Unsupported channel size for float: {:?}", channel_size)),
+                _ => {}
+            }
+        }
+
+        let mut result = Image::new(
+            self.width,
+            self.height,
+            channel_count,
+            channel_size,
+            channel_type,
+        );
+
+        match self.channel_size {
+            // @formatter:off
+            ChannelSize::_8bit =>
+                match result.channel_size {
+                    ChannelSize:: _8bit => convert::<u8,  u8>(self, &mut result,  u8_to_u8, avg_u8),
+                    ChannelSize::_16bit => convert::<u8, u16>(self, &mut result, u8_to_u16, avg_u8),
+                    ChannelSize::_32bit => convert::<u8, u32>(self, &mut result, u8_to_u32, avg_u8),
+                    ChannelSize::_64bit => convert::<u8, u64>(self, &mut result, u8_to_u64, avg_u8),
+                }
+            ChannelSize::_16bit =>
+                match result.channel_size {
+                    ChannelSize:: _8bit => convert::<u16,  u8>(self, &mut result, u16_to_u8 , avg_u16),
+                    ChannelSize::_16bit => convert::<u16, u16>(self, &mut result, u16_to_u16, avg_u16),
+                    ChannelSize::_32bit => convert::<u16, u32>(self, &mut result, u16_to_u32, avg_u16),
+                    ChannelSize::_64bit => convert::<u16, u64>(self, &mut result, u16_to_u64, avg_u16),
+                }
+            ChannelSize::_32bit =>
+                match result.channel_size {
+                    ChannelSize:: _8bit => convert::<u32,  u8>(self, &mut result, u32_to_u8 , avg_u32),
+                    ChannelSize::_16bit => convert::<u32, u16>(self, &mut result, u32_to_u16, avg_u32),
+                    ChannelSize::_32bit => convert::<u32, u32>(self, &mut result, u32_to_u32, avg_u32),
+                    ChannelSize::_64bit => convert::<u32, u64>(self, &mut result, u32_to_u64, avg_u32),
+                }
+            ChannelSize::_64bit =>
+                match result.channel_size {
+                    ChannelSize:: _8bit => convert::<u64,  u8>(self, &mut result, u64_to_u8 , avg_u64),
+                    ChannelSize::_16bit => convert::<u64, u16>(self, &mut result, u64_to_u16, avg_u64),
+                    ChannelSize::_32bit => convert::<u64, u32>(self, &mut result, u64_to_u32, avg_u64),
+                    ChannelSize::_64bit => convert::<u64, u64>(self, &mut result, u64_to_u64, avg_u64),
+                }
+            // @formatter:on
+        }
+
+        Ok(result)
     }
 }
 
 impl ChannelSize {
-    fn byte_count(&self) -> u32 {
+    pub(crate) fn byte_count(&self) -> u32 {
         *self as u32
     }
     fn from_bit_count(bit_count: u32) -> ChannelSize {
@@ -254,15 +377,15 @@ impl ChannelSize {
     }
 }
 
-impl ColorFormat {
+impl ChannelCount {
     fn channel_count(&self) -> u32 {
         match self {
-            ColorFormat::Gray => 1,
-            ColorFormat::GrayAlpha => 2,
-            ColorFormat::Rgba => 4,
+            ChannelCount::Gray => 1,
+            ChannelCount::GrayAlpha => 2,
+            ChannelCount::Rgba => 4,
         }
     }
-    fn byte_count(&self, channel_size: ChannelSize) -> u32 {
+    pub(crate) fn byte_count(&self, channel_size: ChannelSize) -> u32 {
         self.channel_count() * channel_size.byte_count()
     }
 }
