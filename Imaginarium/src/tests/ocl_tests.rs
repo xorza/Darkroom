@@ -65,7 +65,7 @@ mod graph_tests {
 
     #[test]
     fn ocl_context() -> anyhow::Result<()> {
-        let ocl = OclContext::new()?;
+        let _ocl = OclContext::new()?;
 
         Ok(())
     }

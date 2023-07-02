@@ -6,3 +6,4 @@ mod tests;
 
 pub mod wgpu_context;
 pub mod ocl_context;
+pub mod image;

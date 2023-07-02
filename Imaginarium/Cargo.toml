@@ -6,8 +6,10 @@ edition = "2021"
 
 [dependencies]
 tiff = "*"
+png = "*"
 image = "*"
 ocl = "*"
 anyhow = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }
+bytemuck = { workspace = true }
