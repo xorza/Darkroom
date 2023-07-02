@@ -4,12 +4,12 @@ use uuid::Uuid;
 use crate::data::*;
 use crate::graph::FunctionBehavior;
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct OutputInfo {
     pub name: String,
     pub data_type: DataType,
 }
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct InputInfo {
     pub name: String,
     pub data_type: DataType,
@@ -17,7 +17,7 @@ pub struct InputInfo {
     pub default_value: Option<Value>,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Function {
     self_id: Uuid,
     pub name: String,
@@ -29,7 +29,7 @@ pub struct Function {
     pub outputs: Vec<OutputInfo>,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Functions {
     functions: Vec<Function>,
 }

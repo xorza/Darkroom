@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
+use graph_lib::functions::Function;
 use graph_lib::graph::{Binding, FunctionBehavior, Input, Output};
 
 #[derive(Clone, Debug, Default)]
@@ -16,12 +17,7 @@ pub struct EditorNode {
 }
 
 #[derive(Clone, Debug, Default)]
-struct FunctionTemplate {
-    function_id: Uuid,
-    name: String,
-    is_output: bool,
-    behavior: FunctionBehavior,
-}
+struct FunctionTemplate(Function);
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct EditorValue(Value);
@@ -33,23 +29,26 @@ pub enum MyResponse {
     ToggleNodeOutput(NodeId),
 }
 
-#[derive(Default)]
-pub struct MyState {
-    functions: graph_lib::functions::Functions,
-}
-
 type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
 type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyState>;
+
+#[derive(Default, Clone, Debug)]
+struct FunctionTemplates {
+    templates: Vec<FunctionTemplate>,
+}
+
+#[derive(Default)]
+pub struct MyState {
+    function_templates: FunctionTemplates,
+}
 
 #[derive(Default)]
 pub struct NodeshopApp {
     state: EditorState,
     user_state: MyState,
+    function_templates: FunctionTemplates,
 
     file_dialog: Option<FileDialog>,
-}
-struct AllNodeTemplates {
-    funcs: Vec<FunctionTemplate>,
 }
 
 
@@ -80,8 +79,8 @@ impl NodeTemplateTrait for FunctionTemplate {
     type CategoryType = NodeCategory;
 
     fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
-        let function = user_state.functions
-            .function_by_id(self.function_id)
+        let function = user_state.function_templates
+            .function_by_id(self.0.id())
             .unwrap();
 
         function.name.clone().into()
@@ -96,7 +95,7 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        EditorNode { template: self.clone(), is_output: self.is_output }
+        EditorNode { template: self.clone(), is_output: self.0.is_output }
     }
 
     fn build_node(
@@ -120,7 +119,7 @@ impl NodeTemplateTrait for FunctionTemplate {
             graph.add_output_param(node_id, name.to_string(), DataType::Int);
         };
 
-        let function = user_state.functions.function_by_id(self.function_id).unwrap();
+        let function = user_state.function_templates.function_by_id(self.0.id()).unwrap();
         for input in function.inputs.iter() {
             input_scalar(graph, &input.name);
         }
@@ -197,28 +196,27 @@ impl NodeDataTrait for EditorNode {
     }
 }
 
-impl AllNodeTemplates {
-    fn new(funcs: &graph_lib::functions::Functions) -> Self {
-        let funcs = funcs.functions().iter().map(|f|
-            FunctionTemplate {
-                name: f.name.clone(),
-                function_id: f.id(),
-                is_output: f.is_output,
-                behavior: f.behavior,
-            }
-        ).collect();
+impl FunctionTemplates {
+    fn load(&mut self, funcs: &graph_lib::functions::Functions) {
+        let funcs = funcs
+            .functions()
+            .iter()
+            .map(|f| FunctionTemplate(f.clone()))
+            .collect();
 
-        Self {
-            funcs
-        }
+        self.templates = funcs;
+    }
+
+    fn function_by_id(&self, id: Uuid) -> Option<&graph_lib::functions::Function> {
+        self.templates.iter().find(|f| f.0.id() == id).map(|f| &f.0)
     }
 }
 
-impl NodeTemplateIter for AllNodeTemplates {
+impl NodeTemplateIter for FunctionTemplates {
     type Item = FunctionTemplate;
 
-    fn all_kinds(&self) -> Vec<Self::Item> {
-        self.funcs.clone()
+    fn all_kinds(&self) -> &Vec<Self::Item> {
+        &self.templates
     }
 }
 
@@ -245,7 +243,7 @@ impl eframe::App for NodeshopApp {
             .show(ctx, |ui| {
                 self.state.draw_graph_editor(
                     ui,
-                    AllNodeTemplates::new(&self.user_state.functions),
+                    &self.function_templates,
                     &mut self.user_state,
                     Vec::default(),
                 )
@@ -297,7 +295,10 @@ struct SerializedGraph {
 
 impl NodeshopApp {
     pub fn load_functions_from_yaml_file(&mut self, path: &str) -> anyhow::Result<()> {
-        self.user_state.functions.load_yaml_file(path)?;
+        let mut funcs = graph_lib::functions::Functions::default();
+        funcs.load_yaml_file(path)?;
+        self.function_templates.load(&funcs);
+        self.user_state.function_templates = self.function_templates.clone();
 
         Ok(())
     }
@@ -312,10 +313,10 @@ impl NodeshopApp {
 
         for (editor_node_id, editor_node) in editor_graph.nodes.iter() {
             let mut node = graph_lib::graph::Node::new();
-            node.name = editor_node.user_data.template.name.clone();
-            node.function_id = editor_node.user_data.template.function_id;
-            node.is_output = editor_node.user_data.template.is_output;
-            node.behavior = editor_node.user_data.template.behavior;
+            node.name = editor_node.user_data.template.0.name.clone();
+            node.function_id = editor_node.user_data.template.0.id();
+            node.is_output = editor_node.user_data.template.0.is_output;
+            node.behavior = editor_node.user_data.template.0.behavior;
 
             editor_node.inputs.iter()
                 .for_each(|(editor_input_name, editor_input_id)| {
@@ -395,17 +396,12 @@ impl NodeshopApp {
         let mut output_addresses = HashMap::<ArgAddress, OutputId>::new();
 
         for (_index, node) in graph.graph.nodes().iter().enumerate() {
-            let function = self.user_state.functions
+            let function = self.user_state.function_templates
                 .function_by_id(node.function_id)
                 .unwrap();
 
             let node_data = EditorNode {
-                template: FunctionTemplate {
-                    function_id: node.function_id,
-                    name: function.name.clone(),
-                    is_output: node.is_output,
-                    behavior: function.behavior,
-                },
+                template: FunctionTemplate(function.clone()),
                 is_output: node.is_output,
             };
 
