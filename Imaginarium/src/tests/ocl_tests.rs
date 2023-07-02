@@ -2,7 +2,6 @@
 mod graph_tests {
     use ocl::{Buffer, Context, Device, Platform, Queue};
 
-    use crate::invoke::Invoker;
     use crate::ocl_context::OclContext;
 
     #[test]
@@ -67,9 +66,6 @@ mod graph_tests {
     #[test]
     fn ocl_context() -> anyhow::Result<()> {
         let ocl = OclContext::new()?;
-        ocl.start();
-
-        ocl.finish();
 
         Ok(())
     }

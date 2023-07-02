@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 default = []
-opencl = ["graph_lib/opencl"]
 
 [dependencies]
 graph_lib = { path = "../Graph", package = "graph" }

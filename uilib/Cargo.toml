@@ -4,9 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-wgpu = "*"
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
 winit = "*"
 glam = "*"
 pollster = "*"
-bytemuck = { version = "*", features = ["derive"] }
 glyph_brush = "*"

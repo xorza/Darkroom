@@ -6,7 +6,6 @@ mod tests;
 
 #[cfg(feature = "opencl")]
 pub mod ocl_context;
-
 pub mod common;
 pub mod runtime;
 pub mod graph;

@@ -1,0 +1,13 @@
+[package]
+name = "imaginarium"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+tiff = "*"
+image = "*"
+ocl = "*"
+anyhow = { workspace = true }
+wgpu = { workspace = true }
+pollster = { workspace = true }

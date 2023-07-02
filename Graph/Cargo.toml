@@ -8,14 +8,10 @@ description = "A graph library for Nodeshop"
 name = "graph"
 crate-type = ["lib"]
 
-[features]
-default = []
-opencl = ["ocl"]
-
 [dependencies]
 mlua = { version = "*", features = ["lua54", "vendored"] }
-ocl = { version = "*", optional = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
+

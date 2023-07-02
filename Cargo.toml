@@ -2,7 +2,8 @@
 members = [
     "Editor",
     "Graph",
-    "uilib"
+    "uilib",
+    "Imaginarium"
 ]
 
 resolver = "2"
@@ -12,3 +13,6 @@ serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = "*"
+wgpu = "*"
+bytemuck = { version = "*", features = ["derive"] }
+pollster = "*"
