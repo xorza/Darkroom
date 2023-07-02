@@ -94,7 +94,7 @@ pub(crate) fn convert<From, To>(
     avg_fn: fn(From, From, From) -> From,
 )
     where From: Copy + Pod,
-          To: Copy + Pod + Bounded
+          To: Copy + Pod + Bounded,
 {
     assert_eq!(from.width, to.width);
     assert_eq!(from.height, to.height);
@@ -109,6 +109,82 @@ pub(crate) fn convert<From, To>(
     let to_pixel_size = to.channel_count.byte_count(to.channel_size) as usize;
     let from_pixel_size = from.channel_count.byte_count(from.channel_size) as usize;
 
+    let convert_pixel: fn(&[From], &mut [To], fn(From) -> To, fn(From, From, From) -> From) =
+        match (to.channel_count, from.channel_count) {
+            (ChannelCount::Gray, ChannelCount::GrayAlpha) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                },
+            (ChannelCount::Gray, ChannelCount::Rgb) =>
+                |from_pixel, to_pixel, convert_fn, avg_fn| {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+                },
+            (ChannelCount::Gray, ChannelCount::Rgba) =>
+                |from_pixel, to_pixel, convert_fn, avg_fn| {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+                },
+
+            (ChannelCount::GrayAlpha, ChannelCount::Gray) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = To::max_value();
+                },
+            (ChannelCount::GrayAlpha, ChannelCount::Rgb) =>
+                |from_pixel, to_pixel, convert_fn, avg_fn| {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+                    to_pixel[1] = To::max_value();
+                },
+            (ChannelCount::GrayAlpha, ChannelCount::Rgba) =>
+                |from_pixel, to_pixel, convert_fn, avg_fn| {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+                    to_pixel[1] = convert_fn(from_pixel[1]);
+                },
+
+            (ChannelCount::Rgb, ChannelCount::Gray) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                },
+            (ChannelCount::Rgb, ChannelCount::GrayAlpha) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                },
+            (ChannelCount::Rgb, ChannelCount::Rgba) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = convert_fn(from_pixel[1]);
+                    to_pixel[2] = convert_fn(from_pixel[2]);
+                },
+
+            (ChannelCount::Rgba, ChannelCount::Gray) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                    to_pixel[3] = To::max_value();
+                },
+            (ChannelCount::Rgba, ChannelCount::GrayAlpha) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                    to_pixel[3] = convert_fn(from_pixel[1]);
+                },
+            (ChannelCount::Rgba, ChannelCount::Rgb) =>
+                |from_pixel, to_pixel, convert_fn, _avg_fn| {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = convert_fn(from_pixel[1]);
+                    to_pixel[2] = convert_fn(from_pixel[2]);
+                    to_pixel[3] = To::max_value();
+                },
+
+            _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
+        };
+
+
     for i in 0..from.height as usize {
         for j in 0..from.width as usize {
             let from_offset = i * from.stride as usize + j * from_pixel_size;
@@ -121,67 +197,70 @@ pub(crate) fn convert<From, To>(
                 &mut to.bytes[to_offset..to_offset + to_pixel_size]
             );
 
-            match (to.channel_count, from.channel_count) {
-                (ChannelCount::Gray, ChannelCount::GrayAlpha) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                }
-                (ChannelCount::Gray, ChannelCount::Rgb) => {
-                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-                }
-                (ChannelCount::Gray, ChannelCount::Rgba) => {
-                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-                }
-
-                (ChannelCount::GrayAlpha, ChannelCount::Gray) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = To::max_value();
-                }
-                (ChannelCount::GrayAlpha, ChannelCount::Rgb) => {
-                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-                    to_pixel[1] = To::max_value();
-                }
-                (ChannelCount::GrayAlpha, ChannelCount::Rgba) => {
-                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-                    to_pixel[1] = convert_fn(from_pixel[1]);
-                }
-
-                (ChannelCount::Rgb, ChannelCount::Gray) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = to_pixel[0];
-                    to_pixel[2] = to_pixel[0];
-                }
-                (ChannelCount::Rgb, ChannelCount::GrayAlpha) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = to_pixel[0];
-                    to_pixel[2] = to_pixel[0];
-                }
-                (ChannelCount::Rgb, ChannelCount::Rgba) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = convert_fn(from_pixel[1]);
-                    to_pixel[2] = convert_fn(from_pixel[2]);
-                }
-
-                (ChannelCount::Rgba, ChannelCount::Gray) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = to_pixel[0];
-                    to_pixel[2] = to_pixel[0];
-                    to_pixel[3] = To::max_value();
-                }
-                (ChannelCount::Rgba, ChannelCount::GrayAlpha) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = to_pixel[0];
-                    to_pixel[2] = to_pixel[0];
-                    to_pixel[3] = convert_fn(from_pixel[1]);
-                }
-                (ChannelCount::Rgba, ChannelCount::Rgb) => {
-                    to_pixel[0] = convert_fn(from_pixel[0]);
-                    to_pixel[1] = convert_fn(from_pixel[1]);
-                    to_pixel[2] = convert_fn(from_pixel[2]);
-                    to_pixel[3] = To::max_value();
-                }
-
-                _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
-            }
+            convert_pixel(from_pixel, to_pixel, convert_fn, avg_fn);
         }
     }
 }
+
+
+// match (to.channel_count, from.channel_count) {
+// (ChannelCount::Gray, ChannelCount::GrayAlpha) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// }
+// (ChannelCount::Gray, ChannelCount::Rgb) => {
+// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+// }
+// (ChannelCount::Gray, ChannelCount::Rgba) => {
+// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+// }
+//
+// (ChannelCount::GrayAlpha, ChannelCount::Gray) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = To::max_value();
+// }
+// (ChannelCount::GrayAlpha, ChannelCount::Rgb) => {
+// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+// to_pixel[1] = To::max_value();
+// }
+// (ChannelCount::GrayAlpha, ChannelCount::Rgba) => {
+// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+// to_pixel[1] = convert_fn(from_pixel[1]);
+// }
+//
+// (ChannelCount::Rgb, ChannelCount::Gray) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = to_pixel[0];
+// to_pixel[2] = to_pixel[0];
+// }
+// (ChannelCount::Rgb, ChannelCount::GrayAlpha) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = to_pixel[0];
+// to_pixel[2] = to_pixel[0];
+// }
+// (ChannelCount::Rgb, ChannelCount::Rgba) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = convert_fn(from_pixel[1]);
+// to_pixel[2] = convert_fn(from_pixel[2]);
+// }
+//
+// (ChannelCount::Rgba, ChannelCount::Gray) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = to_pixel[0];
+// to_pixel[2] = to_pixel[0];
+// to_pixel[3] = To::max_value();
+// }
+// (ChannelCount::Rgba, ChannelCount::GrayAlpha) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = to_pixel[0];
+// to_pixel[2] = to_pixel[0];
+// to_pixel[3] = convert_fn(from_pixel[1]);
+// }
+// (ChannelCount::Rgba, ChannelCount::Rgb) => {
+// to_pixel[0] = convert_fn(from_pixel[0]);
+// to_pixel[1] = convert_fn(from_pixel[1]);
+// to_pixel[2] = convert_fn(from_pixel[2]);
+// to_pixel[3] = To::max_value();
+// }
+//
+// _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
+// }
