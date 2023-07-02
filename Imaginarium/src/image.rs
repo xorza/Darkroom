@@ -13,8 +13,9 @@ use crate::image_convert::{*};
 pub enum ChannelCount {
     Gray = 1,
     GrayAlpha = 2,
+    Rgb = 3,
     #[default]
-    Rgba = 3,
+    Rgba = 4,
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
@@ -46,29 +47,6 @@ pub struct Image {
 }
 
 
-fn align_channels<T>(buf: &Vec<T>, channel_count: u32, filler: T) -> Vec<u8>
-    where T: Copy + Pod
-{
-    let mut result: Vec<u8>;
-
-    if channel_count == 3 {
-        result = Vec::new();
-        result.resize(std::mem::size_of::<T>() * buf.len() * 4 / 3, 0);
-
-        let slice: &mut [T] = bytemuck::cast_slice_mut(&mut result);
-        for i in 0..(buf.len() / 3) {
-            slice[i * 4 + 0] = buf[i * 3 + 0];
-            slice[i * 4 + 1] = buf[i * 3 + 1];
-            slice[i * 4 + 2] = buf[i * 3 + 2];
-            slice[i * 4 + 3] = filler;
-        }
-    } else {
-        result = bytemuck::cast_slice(buf).to_vec()
-    }
-
-    result
-}
-
 fn get_file_extension(filename: &str) -> anyhow::Result<&str> {
     let extension = Path::new(filename)
         .extension()
@@ -78,13 +56,19 @@ fn get_file_extension(filename: &str) -> anyhow::Result<&str> {
     Ok(extension)
 }
 
-fn align_up_2(n: u32) -> u32 {
+#[inline]
+fn align_stride(n: u32) -> u32 {
+    // align to 4
     // (n + 3) & !3
-    if n % 2 == 0 {
-        n
-    } else {
-        n + 1
-    }
+
+    // align to 2
+    // if n % 2 == 0 {
+    //     n
+    // } else {
+    //     n + 1
+    // }
+
+    n
 }
 
 impl Image {
@@ -96,7 +80,7 @@ impl Image {
         channel_type: ChannelType)
         -> Image
     {
-        let stride = align_up_2(width * channel_count as u32 * channel_size as u32);
+        let stride = align_stride(width * channel_count as u32 * channel_size as u32);
         let bytes = vec![0; (stride * height) as usize];
 
         Image {
@@ -126,24 +110,9 @@ impl Image {
     }
 
     fn load_png_jpeg(filename: &str) -> anyhow::Result<Image> {
-        let img = image::open(filename)
-            .expect("Failed to open image");
-
-        let bytes = match img.color() {
-            // @formatter:off
-            image::ColorType::L8      => img.to_luma8()        .as_bytes().to_vec(),
-            image::ColorType::L16     => img.to_luma16()       .as_bytes().to_vec(),
-            image::ColorType::La8     => img.to_luma_alpha8()  .as_bytes().to_vec(),
-            image::ColorType::La16    => img.to_luma_alpha16() .as_bytes().to_vec(),
-            image::ColorType::Rgb8    => img.to_rgba8()        .as_bytes().to_vec(),
-            image::ColorType::Rgba8   => img.to_rgba8()        .as_bytes().to_vec(),
-            image::ColorType::Rgb16   => img.to_rgba16()       .as_bytes().to_vec(),
-            image::ColorType::Rgba16  => img.to_rgba16()       .as_bytes().to_vec(),
-            image::ColorType::Rgb32F  => img.to_rgba32f()      .as_bytes().to_vec(),
-            image::ColorType::Rgba32F => img.to_rgba32f()      .as_bytes().to_vec(),
-            _ =>  panic!("Unsupported color type: {:?}", img.color()),
-            // @formatter:on
-        };
+        let img =
+            image::open(filename)
+                .expect("Failed to open image");
 
         let (channel_count, channel_size, channel_type) = match img.color() {
             // @formatter:off
@@ -151,15 +120,32 @@ impl Image {
             image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::Int   ),
             image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize::_8bit,  ChannelType::Int   ),
             image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgb8    => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize::_8bit,  ChannelType::Int   ),
+            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::Int   ),
             image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::Rgb16   => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
             image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgb32F  => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
+            image::ColorType::Rgb32F  => (ChannelCount::Rgb,       ChannelSize::_32bit, ChannelType::Float ),
             image::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
             _ =>  panic!("Unsupported color type: {:?}", img.color()),
             // @formatter:on
         };
+
+        let bytes = img.as_bytes().to_vec();
+        // match img.color() {
+        //     // @formatter:off
+        //     image::ColorType::L8      => img.to_luma8()        .as_bytes().to_vec(),
+        //     image::ColorType::L16     => img.to_luma16()       .as_bytes().to_vec(),
+        //     image::ColorType::La8     => img.to_luma_alpha8()  .as_bytes().to_vec(),
+        //     image::ColorType::La16    => img.to_luma_alpha16() .as_bytes().to_vec(),
+        //     image::ColorType::Rgb8    => img.to_rgba8()        .as_bytes().to_vec(),
+        //     image::ColorType::Rgba8   => img.to_rgba8()        .as_bytes().to_vec(),
+        //     image::ColorType::Rgb16   => img.to_rgba16()       .as_bytes().to_vec(),
+        //     image::ColorType::Rgba16  => img.to_rgba16()       .as_bytes().to_vec(),
+        //     image::ColorType::Rgb32F  => img.to_rgba32f()      .as_bytes().to_vec(),
+        //     image::ColorType::Rgba32F => img.to_rgba32f()      .as_bytes().to_vec(),
+        //     _ =>  panic!("Unsupported color type: {:?}", img.color()),
+        //     // @formatter:on
+        // };
 
         let image = Image {
             width: img.width(),
@@ -179,12 +165,12 @@ impl Image {
             File::open(filename)?
         )?;
 
-        let (read_channel_count, channel_bits, supported_channel_count) = match decoder.colortype()? {
+        let (channel_bits, channel_count) = match decoder.colortype()? {
             // @formatter:off
-            tiff::ColorType::Gray  (b) => (1, b, ChannelCount::Gray      ),
-            tiff::ColorType::GrayA (b) => (2, b, ChannelCount::GrayAlpha ),
-            tiff::ColorType::RGB   (b) => (3, b, ChannelCount::Rgba      ),
-            tiff::ColorType::RGBA  (b) => (4, b, ChannelCount::Rgba      ),
+            tiff::ColorType::Gray  (b) => (b, ChannelCount::Gray      ),
+            tiff::ColorType::GrayA (b) => (b, ChannelCount::GrayAlpha ),
+            tiff::ColorType::RGB   (b) => (b, ChannelCount::Rgb      ),
+            tiff::ColorType::RGBA  (b) => (b, ChannelCount::Rgba      ),
             _ => panic!("Unsupported color type: {:?}", decoder.colortype()?),
             // @formatter:on
         };
@@ -192,16 +178,16 @@ impl Image {
         let img = decoder.read_image()?;
         let bytes: Vec<u8> = match &img {
             // @formatter:off
-            DecodingResult::U8 (buf) => align_channels(buf, read_channel_count, u8::MAX),
-            DecodingResult::I8 (buf) => align_channels(buf, read_channel_count, i8::max_value()),
-            DecodingResult::U16(buf) => align_channels(buf, read_channel_count, u16::MAX),
-            DecodingResult::I16(buf) => align_channels(buf, read_channel_count, i16::max_value()),
-            DecodingResult::U32(buf) => align_channels(buf, read_channel_count, u32::MAX),
-            DecodingResult::I32(buf) => align_channels(buf, read_channel_count, i32::max_value()),
-            DecodingResult::U64(buf) => align_channels(buf, read_channel_count, u64::MAX),
-            DecodingResult::I64(buf) => align_channels(buf, read_channel_count, i64::max_value()),
-            DecodingResult::F32(buf) => align_channels(buf, read_channel_count, 1.0f32),
-            DecodingResult::F64(buf) => align_channels(buf, read_channel_count, 1.0f64),
+            DecodingResult::U8 (buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::I8 (buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::U16(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::I16(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::U32(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::I32(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::U64(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::I64(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::F32(buf) => bytemuck::cast_slice(buf).to_vec(),
+            DecodingResult::F64(buf) => bytemuck::cast_slice(buf).to_vec(),
             // @formatter:on
         };
 
@@ -226,7 +212,7 @@ impl Image {
             width: w,
             height: h,
             stride: bytes.len() as u32 / h,
-            channel_count: supported_channel_count,
+            channel_count,
             channel_size: ChannelSize::from_bit_count(channel_bits as u32),
             channel_type,
             bytes,
@@ -283,11 +269,13 @@ impl Image {
             ChannelSize::_8bit => match self.channel_count {
                 ChannelCount::Gray => image::ColorType::L8,
                 ChannelCount::GrayAlpha => image::ColorType::La8,
+                ChannelCount::Rgb => image::ColorType::Rgb8,
                 ChannelCount::Rgba => image::ColorType::Rgba8,
             },
             ChannelSize::_16bit => match self.channel_count {
                 ChannelCount::Gray => image::ColorType::L16,
                 ChannelCount::GrayAlpha => image::ColorType::La16,
+                ChannelCount::Rgb => image::ColorType::Rgb16,
                 ChannelCount::Rgba => image::ColorType::Rgba16,
             },
 
@@ -379,11 +367,7 @@ impl ChannelSize {
 
 impl ChannelCount {
     fn channel_count(&self) -> u32 {
-        match self {
-            ChannelCount::Gray => 1,
-            ChannelCount::GrayAlpha => 2,
-            ChannelCount::Rgba => 4,
-        }
+        *self as u32
     }
     pub(crate) fn byte_count(&self, channel_size: ChannelSize) -> u32 {
         self.channel_count() * channel_size.byte_count()

@@ -125,17 +125,42 @@ pub(crate) fn convert<From, To>(
                 (ChannelCount::Gray, ChannelCount::GrayAlpha) => {
                     to_pixel[0] = convert_fn(from_pixel[0]);
                 }
+                (ChannelCount::Gray, ChannelCount::Rgb) => {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
+                }
                 (ChannelCount::Gray, ChannelCount::Rgba) => {
                     to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
                 }
+
                 (ChannelCount::GrayAlpha, ChannelCount::Gray) => {
                     to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = To::max_value();
+                }
+                (ChannelCount::GrayAlpha, ChannelCount::Rgb) => {
+                    to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
                     to_pixel[1] = To::max_value();
                 }
                 (ChannelCount::GrayAlpha, ChannelCount::Rgba) => {
                     to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
                     to_pixel[1] = convert_fn(from_pixel[1]);
                 }
+
+                (ChannelCount::Rgb, ChannelCount::Gray) => {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                }
+                (ChannelCount::Rgb, ChannelCount::GrayAlpha) => {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = to_pixel[0];
+                    to_pixel[2] = to_pixel[0];
+                }
+                (ChannelCount::Rgb, ChannelCount::Rgba) => {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = convert_fn(from_pixel[1]);
+                    to_pixel[2] = convert_fn(from_pixel[2]);
+                }
+
                 (ChannelCount::Rgba, ChannelCount::Gray) => {
                     to_pixel[0] = convert_fn(from_pixel[0]);
                     to_pixel[1] = to_pixel[0];
@@ -148,6 +173,13 @@ pub(crate) fn convert<From, To>(
                     to_pixel[2] = to_pixel[0];
                     to_pixel[3] = convert_fn(from_pixel[1]);
                 }
+                (ChannelCount::Rgba, ChannelCount::Rgb) => {
+                    to_pixel[0] = convert_fn(from_pixel[0]);
+                    to_pixel[1] = convert_fn(from_pixel[1]);
+                    to_pixel[2] = convert_fn(from_pixel[2]);
+                    to_pixel[3] = To::max_value();
+                }
+
                 _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
             }
         }
