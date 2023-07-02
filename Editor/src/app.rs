@@ -12,7 +12,7 @@ use graph_lib::graph::{Binding, FunctionBehavior, Input, Output};
 #[derive(Clone, Debug, Default)]
 pub struct EditorNode {
     template: FunctionTemplate,
-    behavior: FunctionBehavior,
+    is_output: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -20,6 +20,7 @@ struct FunctionTemplate {
     function_id: Uuid,
     name: String,
     is_output: bool,
+    behavior: FunctionBehavior,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -29,21 +30,21 @@ enum NodeCategory {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
-    SetActiveNode(NodeId),
+    ToggleNodeOutput(NodeId),
 }
 
 #[derive(Default)]
-pub struct MyGraphState {
+pub struct MyState {
     functions: graph_lib::functions::Functions,
 }
 
 type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
-type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyGraphState>;
+type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyState>;
 
 #[derive(Default)]
 pub struct NodeshopApp {
     state: EditorState,
-    user_state: MyGraphState,
+    user_state: MyState,
 
     file_dialog: Option<FileDialog>,
 }
@@ -58,8 +59,8 @@ impl CategoryTrait for NodeCategory {
     }
 }
 
-impl DataTypeTrait<MyGraphState> for DataType {
-    fn data_type_color(&self, _user_state: &mut MyGraphState) -> egui::Color32 {
+impl DataTypeTrait<MyState> for DataType {
+    fn data_type_color(&self, _user_state: &mut MyState) -> egui::Color32 {
         match self {
             DataType::Int => egui::Color32::from_rgb(38, 109, 211),
             _ => egui::Color32::from_rgb(0, 0, 0),
@@ -75,7 +76,7 @@ impl NodeTemplateTrait for FunctionTemplate {
     type NodeData = EditorNode;
     type DataType = DataType;
     type ValueType = EditorValue;
-    type UserState = MyGraphState;
+    type UserState = MyState;
     type CategoryType = NodeCategory;
 
     fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
@@ -95,7 +96,7 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        EditorNode { template: self.clone(), behavior: FunctionBehavior::Passive }
+        EditorNode { template: self.clone(), is_output: self.is_output }
     }
 
     fn build_node(
@@ -131,7 +132,7 @@ impl NodeTemplateTrait for FunctionTemplate {
 
 impl WidgetValueTrait for EditorValue {
     type Response = MyResponse;
-    type UserState = MyGraphState;
+    type UserState = MyState;
     type NodeData = EditorNode;
 
     fn value_widget(
@@ -139,7 +140,7 @@ impl WidgetValueTrait for EditorValue {
         param_name: &str,
         _node_id: NodeId,
         ui: &mut egui::Ui,
-        _user_state: &mut MyGraphState,
+        _user_state: &mut MyState,
         _node_data: &EditorNode,
     ) -> Vec<Self::Response> {
         match &mut self.0 {
@@ -162,7 +163,7 @@ impl UserResponseTrait for MyResponse {}
 
 impl NodeDataTrait for EditorNode {
     type Response = MyResponse;
-    type UserState = MyGraphState;
+    type UserState = MyState;
     type DataType = DataType;
     type ValueType = EditorValue;
 
@@ -177,23 +178,22 @@ impl NodeDataTrait for EditorNode {
             MyResponse: UserResponseTrait,
     {
         let mut button: egui::Button;
-        if self.behavior == FunctionBehavior::Active {
+        if self.is_output {
             button =
                 egui::Button::new(
-                    egui::RichText::new("Active")
+                    egui::RichText::new("Output")
                         .color(egui::Color32::BLACK))
                     .fill(egui::Color32::GOLD);
         } else {
-            button = egui::Button::new(egui::RichText::new("Passive"));
+            button = egui::Button::new(egui::RichText::new("Output"));
         }
         button = button.min_size(egui::Vec2::new(70.0, 0.0));
 
-        let mut responses = vec![];
         if button.ui(ui).clicked() {
-            responses.push(NodeResponse::User(MyResponse::SetActiveNode(node_id)));
+            vec![NodeResponse::User(MyResponse::ToggleNodeOutput(node_id))]
+        } else {
+            vec![]
         }
-
-        responses
     }
 }
 
@@ -204,6 +204,7 @@ impl AllNodeTemplates {
                 name: f.name.clone(),
                 function_id: f.id(),
                 is_output: f.is_output,
+                behavior: f.behavior,
             }
         ).collect();
 
@@ -254,9 +255,9 @@ impl eframe::App for NodeshopApp {
             match node_response {
                 NodeResponse::User(user_event) => {
                     match user_event {
-                        MyResponse::SetActiveNode(node) => {
+                        MyResponse::ToggleNodeOutput(node) => {
                             let node = &mut self.state.graph.nodes[node].user_data;
-                            node.behavior.toggle();
+                            node.is_output = !node.is_output;
                         }
                     }
                 }
@@ -314,7 +315,7 @@ impl NodeshopApp {
             node.name = editor_node.user_data.template.name.clone();
             node.function_id = editor_node.user_data.template.function_id;
             node.is_output = editor_node.user_data.template.is_output;
-            node.behavior = editor_node.user_data.behavior;
+            node.behavior = editor_node.user_data.template.behavior;
 
             editor_node.inputs.iter()
                 .for_each(|(editor_input_name, editor_input_id)| {
@@ -386,7 +387,9 @@ impl NodeshopApp {
         let yaml = std::fs::read_to_string(filename)?;
         let graph: SerializedGraph = serde_yaml::from_str(&yaml)?;
 
+        self.state = EditorState::default();
         let editor_graph = &mut self.state.graph;
+
 
         let mut input_addresses = HashMap::<ArgAddress, InputId>::new();
         let mut output_addresses = HashMap::<ArgAddress, OutputId>::new();
@@ -401,8 +404,9 @@ impl NodeshopApp {
                     function_id: node.function_id,
                     name: function.name.clone(),
                     is_output: node.is_output,
+                    behavior: function.behavior,
                 },
-                behavior: node.behavior,
+                is_output: node.is_output,
             };
 
             let node_add =

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::data::*;
+use crate::graph::FunctionBehavior;
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct OutputInfo {
@@ -20,6 +21,7 @@ pub struct InputInfo {
 pub struct Function {
     self_id: Uuid,
     pub name: String,
+    pub behavior: FunctionBehavior,
     pub is_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<InputInfo>,
