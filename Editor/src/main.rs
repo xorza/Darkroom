@@ -19,7 +19,9 @@ mod app;
 
 fn main() {
     let mut app = Box::<NodeshopApp>::default();
-    app.load_functions_from_yaml_file("./test_resources/test_functions.yml");
+    app
+        .load_functions_from_yaml_file("./test_resources/test_functions.yml")
+        .expect("Failed to load functions from yaml file");
 
     eframe::run_native(
         "Nodeshop",

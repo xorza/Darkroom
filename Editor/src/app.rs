@@ -296,10 +296,10 @@ struct SerializedGraph {
 }
 
 impl NodeshopApp {
-    pub fn load_functions_from_yaml_file(&mut self, path: &str) {
-        self.user_state.functions
-            .load_yaml_file(path)
-            .expect("Failed to load test_functions.yml");
+    pub fn load_functions_from_yaml_file(&mut self, path: &str) -> anyhow::Result<()> {
+        self.user_state.functions.load_yaml_file(path)?;
+
+        Ok(())
     }
 
     fn save_graph_to_yaml(&self, filename: &str) -> anyhow::Result<()> {
