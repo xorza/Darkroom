@@ -156,7 +156,6 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f64, u32>(from, to, f64_to_u32, avg_f64),
                 (ChannelType::Float, ChannelType::Float) => convert_pixels::<f64, f32>(from, to, f64_to_f32, avg_f64),
             }
-
         (ChannelSize::_64bit, ChannelSize::_64bit) =>
             match (from.channel_type, to.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i64>(from, to, i64_to_i64, avg_i64),
@@ -174,7 +173,6 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
 
     Ok(())
 }
-
 
 fn convert_pixels<From, To>(
     from: &Image,
@@ -450,7 +448,7 @@ fn convert_pixels<From, To>(
     (value / 2) as i64
 }
 
-#[inline] pub(crate) fn  i8_to_u8 (value: i8) -> u8 {
+#[inline] pub(crate) fn  i8_to_u8 (value: i8) ->  u8 {
     value.max(0) as u8 * 2
 }
 #[inline] pub(crate) fn  i8_to_u16(value: i8) -> u16 {
@@ -463,7 +461,7 @@ fn convert_pixels<From, To>(
     u8_to_u64(i8_to_u8(value))
 }
 
-#[inline] pub(crate) fn i16_to_u8 (value: i16) -> u8 {
+#[inline] pub(crate) fn i16_to_u8 (value: i16) ->  u8 {
     u16_to_u8(i16_to_u16(value))
 }
 #[inline] pub(crate) fn i16_to_u16(value: i16) -> u16 {
@@ -476,7 +474,7 @@ fn convert_pixels<From, To>(
     u16_to_u64(i16_to_u16(value))
 }
 
-#[inline] pub(crate) fn i32_to_u8 (value: i32) -> u8 {
+#[inline] pub(crate) fn i32_to_u8 (value: i32) ->  u8 {
     u32_to_u8(i32_to_u32(value))
 }
 #[inline] pub(crate) fn i32_to_u16(value: i32) -> u16 {
@@ -489,7 +487,7 @@ fn convert_pixels<From, To>(
     u32_to_u64(i32_to_u32(value))
 }
 
-#[inline] pub(crate) fn i64_to_u8 (value: i64) -> u8 {
+#[inline] pub(crate) fn i64_to_u8 (value: i64) ->  u8 {
     u64_to_u8(i64_to_u64(value))
 }
 #[inline] pub(crate) fn i64_to_u16(value: i64) -> u16 {
@@ -562,100 +560,3 @@ fn convert_pixels<From, To>(
 #[inline] pub(crate) fn avg_f64(v0: f64, v1: f64, v2: f64) -> f64 { ((v0 as f64 + v1 as f64 + v2 as f64) / 3.0) as f64 }
 
 // @formatter:on
-
-
-// match (to.channel_count, from.channel_count) {
-// (ChannelCount::Gray, ChannelCount::GrayAlpha) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// }
-// (ChannelCount::Gray, ChannelCount::Rgb) => {
-// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-// }
-// (ChannelCount::Gray, ChannelCount::Rgba) => {
-// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-// }
-//
-// (ChannelCount::GrayAlpha, ChannelCount::Gray) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = To::max_value();
-// }
-// (ChannelCount::GrayAlpha, ChannelCount::Rgb) => {
-// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-// to_pixel[1] = To::max_value();
-// }
-// (ChannelCount::GrayAlpha, ChannelCount::Rgba) => {
-// to_pixel[0] = convert_fn(avg_fn(from_pixel[0], from_pixel[1], from_pixel[2]));
-// to_pixel[1] = convert_fn(from_pixel[1]);
-// }
-//
-// (ChannelCount::Rgb, ChannelCount::Gray) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = to_pixel[0];
-// to_pixel[2] = to_pixel[0];
-// }
-// (ChannelCount::Rgb, ChannelCount::GrayAlpha) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = to_pixel[0];
-// to_pixel[2] = to_pixel[0];
-// }
-// (ChannelCount::Rgb, ChannelCount::Rgba) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = convert_fn(from_pixel[1]);
-// to_pixel[2] = convert_fn(from_pixel[2]);
-// }
-//
-// (ChannelCount::Rgba, ChannelCount::Gray) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = to_pixel[0];
-// to_pixel[2] = to_pixel[0];
-// to_pixel[3] = To::max_value();
-// }
-// (ChannelCount::Rgba, ChannelCount::GrayAlpha) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = to_pixel[0];
-// to_pixel[2] = to_pixel[0];
-// to_pixel[3] = convert_fn(from_pixel[1]);
-// }
-// (ChannelCount::Rgba, ChannelCount::Rgb) => {
-// to_pixel[0] = convert_fn(from_pixel[0]);
-// to_pixel[1] = convert_fn(from_pixel[1]);
-// to_pixel[2] = convert_fn(from_pixel[2]);
-// to_pixel[3] = To::max_value();
-// }
-//
-// _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
-// }
-
-
-// match from.channel_size {
-// // @formatter:off
-// ChannelSize::_8bit =>
-// match to.channel_size {
-// ChannelSize:: _8bit => convert_pixels::< u8, u8 >(from, to,  u8_to_u8 , avg_u8),
-// ChannelSize::_16bit => convert_pixels::< u8, u16>(from, to,  u8_to_u16, avg_u8),
-// ChannelSize::_32bit => convert_pixels::< u8, u32>(from, to,  u8_to_u32, avg_u8),
-// ChannelSize::_64bit => convert_pixels::< u8, u64>(from, to,  u8_to_u64, avg_u8),
-// }
-// ChannelSize::_16bit =>
-// match to.channel_size {
-// ChannelSize:: _8bit => convert_pixels::<u16, u8 >(from, to, u16_to_u8 , avg_u16),
-// ChannelSize::_16bit => convert_pixels::<u16, u16>(from, to, u16_to_u16, avg_u16),
-// ChannelSize::_32bit => convert_pixels::<u16, u32>(from, to, u16_to_u32, avg_u16),
-// ChannelSize::_64bit => convert_pixels::<u16, u64>(from, to, u16_to_u64, avg_u16),
-// }
-// ChannelSize::_32bit =>
-// match to.channel_size {
-// ChannelSize:: _8bit => convert_pixels::<u32, u8 >(from, to, u32_to_u8 , avg_u32),
-// ChannelSize::_16bit => convert_pixels::<u32, u16>(from, to, u32_to_u16, avg_u32),
-// ChannelSize::_32bit => convert_pixels::<u32, u32>(from, to, u32_to_u32, avg_u32),
-// ChannelSize::_64bit => convert_pixels::<u32, u64>(from, to, u32_to_u64, avg_u32),
-// }
-// ChannelSize::_64bit =>
-// match to.channel_size {
-// ChannelSize:: _8bit => convert_pixels::<u64, u8 >(from, to, u64_to_u8 , avg_u64),
-// ChannelSize::_16bit => convert_pixels::<u64, u16>(from, to, u64_to_u16, avg_u64),
-// ChannelSize::_32bit => convert_pixels::<u64, u32>(from, to, u64_to_u32, avg_u64),
-// ChannelSize::_64bit => convert_pixels::<u64, u64>(from, to, u64_to_u64, avg_u64),
-// }
-// // @formatter:on
-// }
