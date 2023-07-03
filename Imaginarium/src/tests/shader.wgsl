@@ -9,7 +9,7 @@ fn vs_main(
     @location(1) tex_coord: vec2<f32>
 ) -> VertexOutput {
     var result: VertexOutput;
-    result.position = vec4<f32>(position * 2.0 - vec2<f32>(1.0), 0.0, 1.0);
+    result.position = vec4<f32>(position * 2.0 - 1.0, 0.0, 1.0);
     result.tex_coord = tex_coord;
     return result;
 }
