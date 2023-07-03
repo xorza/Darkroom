@@ -34,7 +34,7 @@ fn save_rgb_png() {
 
 #[test]
 fn image_convertion() {
-    let mut png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
+    let png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
 
     let png = png.convert(ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt)
         .expect("Failed to convert image");

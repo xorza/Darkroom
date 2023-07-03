@@ -33,7 +33,7 @@ pub enum ChannelType {
     #[default]
     UInt,
     Float,
-    Int
+    Int,
 }
 
 #[derive(Clone, Default)]
@@ -290,7 +290,7 @@ impl Image {
 
 
     pub fn convert(
-        &mut self,
+        &self,
         channel_count: ChannelCount,
         channel_size: ChannelSize,
         channel_type: ChannelType)
@@ -312,41 +312,12 @@ impl Image {
             channel_type,
         );
 
-        match self.channel_size {
-            // @formatter:off
-            ChannelSize::_8bit =>
-                match result.channel_size {
-                    ChannelSize:: _8bit => convert::<u8,  u8>(self, &mut result,  u8_to_u8, avg_u8),
-                    ChannelSize::_16bit => convert::<u8, u16>(self, &mut result, u8_to_u16, avg_u8),
-                    ChannelSize::_32bit => convert::<u8, u32>(self, &mut result, u8_to_u32, avg_u8),
-                    ChannelSize::_64bit => convert::<u8, u64>(self, &mut result, u8_to_u64, avg_u8),
-                }
-            ChannelSize::_16bit =>
-                match result.channel_size {
-                    ChannelSize:: _8bit => convert::<u16,  u8>(self, &mut result, u16_to_u8 , avg_u16),
-                    ChannelSize::_16bit => convert::<u16, u16>(self, &mut result, u16_to_u16, avg_u16),
-                    ChannelSize::_32bit => convert::<u16, u32>(self, &mut result, u16_to_u32, avg_u16),
-                    ChannelSize::_64bit => convert::<u16, u64>(self, &mut result, u16_to_u64, avg_u16),
-                }
-            ChannelSize::_32bit =>
-                match result.channel_size {
-                    ChannelSize:: _8bit => convert::<u32,  u8>(self, &mut result, u32_to_u8 , avg_u32),
-                    ChannelSize::_16bit => convert::<u32, u16>(self, &mut result, u32_to_u16, avg_u32),
-                    ChannelSize::_32bit => convert::<u32, u32>(self, &mut result, u32_to_u32, avg_u32),
-                    ChannelSize::_64bit => convert::<u32, u64>(self, &mut result, u32_to_u64, avg_u32),
-                }
-            ChannelSize::_64bit =>
-                match result.channel_size {
-                    ChannelSize:: _8bit => convert::<u64,  u8>(self, &mut result, u64_to_u8 , avg_u64),
-                    ChannelSize::_16bit => convert::<u64, u16>(self, &mut result, u64_to_u16, avg_u64),
-                    ChannelSize::_32bit => convert::<u64, u32>(self, &mut result, u64_to_u32, avg_u64),
-                    ChannelSize::_64bit => convert::<u64, u64>(self, &mut result, u64_to_u64, avg_u64),
-                }
-            // @formatter:on
-        }
+        asd(self, &mut result);
 
         Ok(result)
     }
+
+
 }
 
 impl ChannelSize {

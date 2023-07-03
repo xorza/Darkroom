@@ -3,7 +3,43 @@ use std::mem::size_of;
 use bytemuck::Pod;
 use num_traits::{Bounded, NumCast, ToPrimitive};
 
-use crate::image::{ChannelCount, Image};
+use crate::image::{ChannelCount, ChannelSize, Image};
+
+pub(crate) fn asd(from: &Image, to: &mut Image) {
+    match from.channel_size {
+        // @formatter:off
+        ChannelSize::_8bit =>
+            match to.channel_size {
+                ChannelSize:: _8bit => convert::< u8, u8 >(from, to,  u8_to_u8 , avg_u8),
+                ChannelSize::_16bit => convert::< u8, u16>(from, to,  u8_to_u16, avg_u8),
+                ChannelSize::_32bit => convert::< u8, u32>(from, to,  u8_to_u32, avg_u8),
+                ChannelSize::_64bit => convert::< u8, u64>(from, to,  u8_to_u64, avg_u8),
+            }
+        ChannelSize::_16bit =>
+            match to.channel_size {
+                ChannelSize:: _8bit => convert::<u16, u8 >(from, to, u16_to_u8 , avg_u16),
+                ChannelSize::_16bit => convert::<u16, u16>(from, to, u16_to_u16, avg_u16),
+                ChannelSize::_32bit => convert::<u16, u32>(from, to, u16_to_u32, avg_u16),
+                ChannelSize::_64bit => convert::<u16, u64>(from, to, u16_to_u64, avg_u16),
+            }
+        ChannelSize::_32bit =>
+            match to.channel_size {
+                ChannelSize:: _8bit => convert::<u32, u8 >(from, to, u32_to_u8 , avg_u32),
+                ChannelSize::_16bit => convert::<u32, u16>(from, to, u32_to_u16, avg_u32),
+                ChannelSize::_32bit => convert::<u32, u32>(from, to, u32_to_u32, avg_u32),
+                ChannelSize::_64bit => convert::<u32, u64>(from, to, u32_to_u64, avg_u32),
+            }
+        ChannelSize::_64bit =>
+            match to.channel_size {
+                ChannelSize:: _8bit => convert::<u64, u8 >(from, to, u64_to_u8 , avg_u64),
+                ChannelSize::_16bit => convert::<u64, u16>(from, to, u64_to_u16, avg_u64),
+                ChannelSize::_32bit => convert::<u64, u32>(from, to, u64_to_u32, avg_u64),
+                ChannelSize::_64bit => convert::<u64, u64>(from, to, u64_to_u64, avg_u64),
+            }
+        // @formatter:on
+    }
+}
+
 
 pub(crate) fn convert<From, To>(
     from: &Image,
