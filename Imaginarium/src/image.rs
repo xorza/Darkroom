@@ -31,8 +31,9 @@ pub enum ChannelSize {
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 pub enum ChannelType {
     #[default]
-    Int,
+    UInt,
     Float,
+    Int
 }
 
 #[derive(Clone, Default)]
@@ -116,14 +117,14 @@ impl Image {
 
         let (channel_count, channel_size, channel_type) = match img.color() {
             // @formatter:off
-            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::Int   ),
-            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::Int   ),
-            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::Int   ),
+            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize::_8bit,  ChannelType::UInt   ),
+            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::UInt   ),
+            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize::_8bit,  ChannelType::UInt   ),
+            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt   ),
+            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize::_8bit,  ChannelType::UInt   ),
+            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::UInt   ),
+            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::UInt   ),
+            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::UInt   ),
             image::ColorType::Rgb32F  => (ChannelCount::Rgb,       ChannelSize::_32bit, ChannelType::Float ),
             image::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
             _ =>  panic!("Unsupported color type: {:?}", img.color()),
@@ -193,13 +194,13 @@ impl Image {
 
         let channel_type = match &img {
             // @formatter:off
-            DecodingResult::U8 (_) => ChannelType::Int,
+            DecodingResult::U8 (_) => ChannelType::UInt,
+            DecodingResult::U16(_) => ChannelType::UInt,
+            DecodingResult::U32(_) => ChannelType::UInt,
+            DecodingResult::U64(_) => ChannelType::UInt,
             DecodingResult::I8 (_) => ChannelType::Int,
-            DecodingResult::U16(_) => ChannelType::Int,
             DecodingResult::I16(_) => ChannelType::Int,
-            DecodingResult::U32(_) => ChannelType::Int,
             DecodingResult::I32(_) => ChannelType::Int,
-            DecodingResult::U64(_) => ChannelType::Int,
             DecodingResult::I64(_) => ChannelType::Int,
             DecodingResult::F32(_) => ChannelType::Float,
             DecodingResult::F64(_) => ChannelType::Float,
@@ -240,7 +241,7 @@ impl Image {
     }
 
     fn save_jpg(&self, filename: &str) -> anyhow::Result<()> {
-        if self.channel_type != ChannelType::Int {
+        if self.channel_type != ChannelType::UInt {
             return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.channel_type));
         }
 
@@ -261,7 +262,7 @@ impl Image {
     }
 
     fn save_png(&self, filename: &str) -> anyhow::Result<()> {
-        if self.channel_type != ChannelType::Int {
+        if self.channel_type != ChannelType::UInt {
             return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.channel_type));
         }
 

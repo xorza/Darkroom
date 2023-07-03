@@ -5,88 +5,6 @@ use num_traits::{Bounded, NumCast, ToPrimitive};
 
 use crate::image::{ChannelCount, Image};
 
-#[inline]
-pub(crate) fn u8_to_u8(value: u8) -> u8 {
-    value
-}
-#[inline]
-pub(crate) fn u8_to_u16(value: u8) -> u16 {
-    (value as u16) << 8 | value as u16
-}
-#[inline]
-pub(crate) fn u8_to_u32(value: u8) -> u32 {
-    (value as u32) << 24 | (value as u32) << 16 | (value as u32) << 8 | value as u32
-}
-#[inline]
-pub(crate) fn u8_to_u64(value: u8) -> u64 {
-    (value as u64) << 56 | (value as u64) << 48 | (value as u64) << 40 | (value as u64) << 32
-        | (value as u64) << 24 | (value as u64) << 16 | (value as u64) << 8 | value as u64
-}
-#[inline]
-pub(crate) fn u16_to_u8(value: u16) -> u8 {
-    (value >> 8) as u8
-}
-#[inline]
-pub(crate) fn u16_to_u16(value: u16) -> u16 {
-    value
-}
-#[inline]
-pub(crate) fn u16_to_u32(value: u16) -> u32 {
-    (value as u32) << 16 | value as u32
-}
-#[inline]
-pub(crate) fn u16_to_u64(value: u16) -> u64 {
-    (value as u64) << 48 | (value as u64) << 32 | (value as u64) << 16 | value as u64
-}
-#[inline]
-pub(crate) fn u32_to_u8(value: u32) -> u8 {
-    (value >> 24) as u8
-}
-#[inline]
-pub(crate) fn u32_to_u16(value: u32) -> u16 {
-    (value >> 16) as u16
-}
-#[inline]
-pub(crate) fn u32_to_u32(value: u32) -> u32 {
-    value
-}
-#[inline]
-pub(crate) fn u32_to_u64(value: u32) -> u64 {
-    (value as u64) << 32 | value as u64
-}
-#[inline]
-pub(crate) fn u64_to_u8(value: u64) -> u8 {
-    (value >> 56) as u8
-}
-#[inline]
-pub(crate) fn u64_to_u16(value: u64) -> u16 {
-    (value >> 48) as u16
-}
-#[inline]
-pub(crate) fn u64_to_u32(value: u64) -> u32 {
-    (value >> 32) as u32
-}
-#[inline]
-pub(crate) fn u64_to_u64(value: u64) -> u64 {
-    value
-}
-#[inline]
-pub(crate) fn avg_u8(v0: u8, v1: u8, v2: u8) -> u8 {
-    ((v0 as u32 + v1 as u32 + v2 as u32) / 3) as u8
-}
-#[inline]
-pub(crate) fn avg_u16(v0: u16, v1: u16, v2: u16) -> u16 {
-    ((v0 as u32 + v1 as u32 + v2 as u32) / 3) as u16
-}
-#[inline]
-pub(crate) fn avg_u32(v0: u32, v1: u32, v2: u32) -> u32 {
-    ((v0 as u64 + v1 as u64 + v2 as u64) / 3) as u32
-}
-#[inline]
-pub(crate) fn avg_u64(v0: u64, v1: u64, v2: u64) -> u64 {
-    ((v0 as u128 + v1 as u128 + v2 as u128) / 3) as u64
-}
-
 pub(crate) fn convert<From, To>(
     from: &Image,
     to: &mut Image,
@@ -201,6 +119,276 @@ pub(crate) fn convert<From, To>(
         }
     }
 }
+
+// @formatter:off
+#[inline] pub(crate) fn  i8_to_i8 (value: i8) ->  i8 {
+    value
+}
+#[inline] pub(crate) fn  i8_to_i16(value: i8) -> i16 {
+    (value as i16) << 8 | value as i16
+}
+#[inline] pub(crate) fn  i8_to_i32(value: i8) -> i32 {
+    (value as i32) << 24 | (value as i32) << 16 | (value as i32) << 8 | value as i32
+}
+#[inline] pub(crate) fn  i8_to_i64(value: i8) -> i64 {
+    (value as i64) << 56 | (value as i64) << 48 | (value as i64) << 40 | (value as i64) << 32
+        | (value as i64) << 24 | (value as i64) << 16 | (value as i64) << 8 | value as i64
+}
+
+#[inline] pub(crate) fn i16_to_i8 (value: i16) ->  i8 {
+    (value >> 8) as i8
+}
+#[inline] pub(crate) fn i16_to_i16(value: i16) -> i16 {
+    value
+}
+#[inline] pub(crate) fn i16_to_i32(value: i16) -> i32 {
+    (value as i32) << 16 | value as i32
+}
+#[inline] pub(crate) fn i16_to_i64(value: i16) -> i64 {
+    (value as i64) << 48 | value as i64
+}
+
+#[inline] pub(crate) fn i32_to_i8 (value: i32) ->  i8 {
+    (value >> 24) as i8
+}
+#[inline] pub(crate) fn i32_to_i16(value: i32) -> i16 {
+    (value >> 16) as i16
+}
+#[inline] pub(crate) fn i32_to_i32(value: i32) -> i32 {
+    value
+}
+#[inline] pub(crate) fn i32_to_i64(value: i32) -> i64 {
+    (value as i64) << 32 | value as i64
+}
+
+#[inline] pub(crate) fn i64_to_i8 (value: i64) ->  i8 {
+    (value >> 56) as i8
+}
+#[inline] pub(crate) fn i64_to_i16(value: i64) -> i16 {
+    (value >> 48) as i16 
+} 
+#[inline] pub(crate) fn i64_to_i32(value: i64) -> i32 {
+    (value >> 32) as i32 
+} 
+#[inline] pub(crate) fn i64_to_i64(value: i64) -> i64 {
+    value
+}
+
+#[inline] pub(crate) fn  u8_to_u8 (value: u8) ->  u8 {
+    value
+}
+#[inline] pub(crate) fn  u8_to_u16(value: u8) -> u16 {
+    (value as u16) << 8 | value as u16
+}
+#[inline] pub(crate) fn  u8_to_u32(value: u8) -> u32 {
+    (value as u32) << 24 | (value as u32) << 16 | (value as u32) << 8 | value as u32
+}
+#[inline] pub(crate) fn  u8_to_u64(value: u8) -> u64 {
+    (value as u64) << 56 | (value as u64) << 48 | (value as u64) << 40 | (value as u64) << 32
+        | (value as u64) << 24 | (value as u64) << 16 | (value as u64) << 8 | value as u64
+}
+
+#[inline] pub(crate) fn u16_to_u8 (value: u16) ->  u8 {
+    (value >> 8) as u8
+}
+#[inline] pub(crate) fn u16_to_u16(value: u16) -> u16 {
+    value
+}
+#[inline] pub(crate) fn u16_to_u32(value: u16) -> u32 {
+    (value as u32) << 16 | value as u32
+}
+#[inline] pub(crate) fn u16_to_u64(value: u16) -> u64 {
+    (value as u64) << 48 | (value as u64) << 32 | (value as u64) << 16 | value as u64
+}
+
+#[inline] pub(crate) fn u32_to_u8 (value: u32) ->  u8 {
+    (value >> 24) as u8
+}
+#[inline] pub(crate) fn u32_to_u16(value: u32) -> u16 {
+    (value >> 16) as u16
+}
+#[inline] pub(crate) fn u32_to_u32(value: u32) -> u32 {
+    value
+}
+#[inline] pub(crate) fn u32_to_u64(value: u32) -> u64 {
+    (value as u64) << 32 | value as u64
+}
+
+#[inline] pub(crate) fn u64_to_u8 (value: u64) ->  u8 {
+    (value >> 56) as u8
+}
+#[inline] pub(crate) fn u64_to_u16(value: u64) -> u16 {
+    (value >> 48) as u16
+}
+#[inline] pub(crate) fn u64_to_u32(value: u64) -> u32 {
+    (value >> 32) as u32
+}
+#[inline] pub(crate) fn u64_to_u64(value: u64) -> u64 {
+    value
+}
+
+#[inline] pub(crate) fn  u8_to_i8 (value: u8) ->  i8 {
+    (value / 2) as i8
+}
+#[inline] pub(crate) fn  u8_to_i16(value: u8) -> i16 {
+    i8_to_i16(u8_to_i8(value))
+}
+#[inline] pub(crate) fn  u8_to_i32(value: u8) -> i32 {
+    i8_to_i32(u8_to_i8(value))
+}
+#[inline] pub(crate) fn  u8_to_i64(value: u8) -> i64 {
+    i8_to_i64(u8_to_i8(value))
+}
+
+#[inline] pub(crate) fn u16_to_i8 (value: u16) ->  i8 {
+    i16_to_i8(u16_to_i16(value))
+}
+#[inline] pub(crate) fn u16_to_i16(value: u16) -> i16 {
+    (value / 2) as i16
+}
+#[inline] pub(crate) fn u16_to_i32(value: u16) -> i32 {
+    i16_to_i32(u16_to_i16(value))
+}
+#[inline] pub(crate) fn u16_to_i64(value: u16) -> i64 {
+    i16_to_i64(u16_to_i16(value))
+}
+
+#[inline] pub(crate) fn u32_to_i8 (value: u32) ->  i8 {
+    i32_to_i8(u32_to_i32(value))
+}
+#[inline] pub(crate) fn u32_to_i16(value: u32) -> i16 {
+    i32_to_i16(u32_to_i32(value))
+}
+#[inline] pub(crate) fn u32_to_i32(value: u32) -> i32 {
+    (value / 2) as i32
+}
+#[inline] pub(crate) fn u32_to_i64(value: u32) -> i64 {
+    i32_to_i64(u32_to_i32(value))
+}
+
+#[inline] pub(crate) fn u64_to_i8 (value: u64) ->  i8 {
+    i64_to_i8(u64_to_i64(value))
+}
+#[inline] pub(crate) fn u64_to_i16(value: u64) -> i16 {
+    i64_to_i16(u64_to_i64(value))
+}
+#[inline] pub(crate) fn u64_to_i32(value: u64) -> i32 {
+    i64_to_i32(u64_to_i64(value))
+}
+#[inline] pub(crate) fn u64_to_i64(value: u64) -> i64 {
+    (value / 2) as i64
+}
+
+#[inline] pub(crate) fn  i8_to_u8 (value: i8) -> u8 {
+    value.max(0) as u8 * 2
+}
+#[inline] pub(crate) fn  i8_to_u16(value: i8) -> u16 {
+    u8_to_u16(i8_to_u8(value))
+}
+#[inline] pub(crate) fn  i8_to_u32(value: i8) -> u32 {
+    u8_to_u32(i8_to_u8(value))
+}
+#[inline] pub(crate) fn  i8_to_u64(value: i8) -> u64 {
+    u8_to_u64(i8_to_u8(value))
+}
+
+#[inline] pub(crate) fn i16_to_u8 (value: i16) -> u8 {
+    u16_to_u8(i16_to_u16(value))
+}
+#[inline] pub(crate) fn i16_to_u16(value: i16) -> u16 {
+    value.max(0) as u16 * 2
+}
+#[inline] pub(crate) fn i16_to_u32(value: i16) -> u32 {
+    u16_to_u32(i16_to_u16(value))
+}
+#[inline] pub(crate) fn i16_to_u64(value: i16) -> u64 {
+    u16_to_u64(i16_to_u16(value))
+}
+
+#[inline] pub(crate) fn i32_to_u8 (value: i32) -> u8 {
+    u32_to_u8(i32_to_u32(value))
+}
+#[inline] pub(crate) fn i32_to_u16(value: i32) -> u16 {
+    u32_to_u16(i32_to_u32(value))
+}
+#[inline] pub(crate) fn i32_to_u32(value: i32) -> u32 {
+    value.max(0) as u32 * 2
+}
+#[inline] pub(crate) fn i32_to_u64(value: i32) -> u64 {
+    u32_to_u64(i32_to_u32(value))
+}
+
+#[inline] pub(crate) fn i64_to_u8 (value: i64) -> u8 {
+    u64_to_u8(i64_to_u64(value))
+}
+#[inline] pub(crate) fn i64_to_u16(value: i64) -> u16 {
+    u64_to_u16(i64_to_u64(value))
+}
+#[inline] pub(crate) fn i64_to_u32(value: i64) -> u32 {
+    u64_to_u32(i64_to_u64(value))
+}
+#[inline] pub(crate) fn i64_to_u64(value: i64) -> u64 {
+    value.max(0) as u64 * 2
+}
+
+#[inline] pub(crate) fn  u8_to_f32(value:  u8) -> f32 { value as f32 /  u8::MAX as f32 }
+#[inline] pub(crate) fn u16_to_f32(value: u16) -> f32 { value as f32 / u16::MAX as f32 }
+#[inline] pub(crate) fn u32_to_f32(value: u32) -> f32 { value as f32 / u32::MAX as f32 }
+#[inline] pub(crate) fn u64_to_f32(value: u64) -> f32 { value as f32 / u64::MAX as f32 }
+
+#[inline] pub(crate) fn  u8_to_f64(value:  u8) -> f64 { value as f64 /  u8::MAX as f64 }
+#[inline] pub(crate) fn u16_to_f64(value: u16) -> f64 { value as f64 / u16::MAX as f64 }
+#[inline] pub(crate) fn u32_to_f64(value: u32) -> f64 { value as f64 / u32::MAX as f64 }
+#[inline] pub(crate) fn u64_to_f64(value: u64) -> f64 { value as f64 / u64::MAX as f64 }
+
+#[inline] pub(crate) fn  i8_to_f32(value:  i8) -> f32 { value as f32 /  i8::MAX as f32 }
+#[inline] pub(crate) fn i16_to_f32(value: i16) -> f32 { value as f32 / i16::MAX as f32 }
+#[inline] pub(crate) fn i32_to_f32(value: i32) -> f32 { value as f32 / i32::MAX as f32 }
+#[inline] pub(crate) fn i64_to_f32(value: i64) -> f32 { value as f32 / i64::MAX as f32 }
+
+#[inline] pub(crate) fn  i8_to_f64(value:  i8) -> f64 { value as f64 /  i8::MAX as f64 }
+#[inline] pub(crate) fn i16_to_f64(value: i16) -> f64 { value as f64 / i16::MAX as f64 }
+#[inline] pub(crate) fn i32_to_f64(value: i32) -> f64 { value as f64 / i32::MAX as f64 }
+#[inline] pub(crate) fn i64_to_f64(value: i64) -> f64 { value as f64 / i64::MAX as f64 }
+
+#[inline] pub(crate) fn f32_to_u8 (value: f32) ->  u8 { (value as f64 *  u8::MAX as f64) as  u8 }
+#[inline] pub(crate) fn f32_to_u16(value: f32) -> u16 { (value as f64 * u16::MAX as f64) as u16 }
+#[inline] pub(crate) fn f32_to_u32(value: f32) -> u32 { (value as f64 * u32::MAX as f64) as u32 }
+#[inline] pub(crate) fn f32_to_u64(value: f32) -> u64 { (value as f64 * u64::MAX as f64) as u64 }
+
+#[inline] pub(crate) fn f64_to_u8 (value: f64) ->  u8 { (value as f64 *  u8::MAX as f64) as  u8 }
+#[inline] pub(crate) fn f64_to_u16(value: f64) -> u16 { (value as f64 * u16::MAX as f64) as u16 }
+#[inline] pub(crate) fn f64_to_u32(value: f64) -> u32 { (value as f64 * u32::MAX as f64) as u32 }
+#[inline] pub(crate) fn f64_to_u64(value: f64) -> u64 { (value as f64 * u64::MAX as f64) as u64 }
+
+#[inline] pub(crate) fn f32_to_i8 (value: f32) ->  i8 { (value as f64 *  i8::MAX as f64) as  i8 }
+#[inline] pub(crate) fn f32_to_i16(value: f32) -> i16 { (value as f64 * i16::MAX as f64) as i16 }
+#[inline] pub(crate) fn f32_to_i32(value: f32) -> i32 { (value as f64 * i32::MAX as f64) as i32 }
+#[inline] pub(crate) fn f32_to_i64(value: f32) -> i64 { (value as f64 * i64::MAX as f64) as i64 }
+
+#[inline] pub(crate) fn f64_to_i8 (value: f64) ->  i8 { (value as f64 *  i8::MAX as f64) as  i8 }
+#[inline] pub(crate) fn f64_to_i16(value: f64) -> i16 { (value as f64 * i16::MAX as f64) as i16 }
+#[inline] pub(crate) fn f64_to_i32(value: f64) -> i32 { (value as f64 * i32::MAX as f64) as i32 }
+#[inline] pub(crate) fn f64_to_i64(value: f64) -> i64 { (value as f64 * i64::MAX as f64) as i64 }
+
+#[inline] pub(crate) fn f32_to_f64(value: f32) -> f64 { value as f64 }
+#[inline] pub(crate) fn f64_to_f32(value: f64) -> f32 { value as f32 }
+
+
+#[inline] pub(crate) fn avg_u8 (v0:  u8, v1:  u8, v2:  u8) ->  u8 { ((v0 as  u16 + v1 as  u16 + v2 as  u16) / 3) as  u8 }
+#[inline] pub(crate) fn avg_u16(v0: u16, v1: u16, v2: u16) -> u16 { ((v0 as  u32 + v1 as  u32 + v2 as  u32) / 3) as u16 }
+#[inline] pub(crate) fn avg_u32(v0: u32, v1: u32, v2: u32) -> u32 { ((v0 as  u64 + v1 as  u64 + v2 as  u64) / 3) as u32 }
+#[inline] pub(crate) fn avg_u64(v0: u64, v1: u64, v2: u64) -> u64 { ((v0 as u128 + v1 as u128 + v2 as u128) / 3) as u64 }
+
+#[inline] pub(crate) fn avg_i8 (v0:  i8, v1:  i8, v2:  i8) ->  i8 { ((v0 as  i16 + v1 as  i16 + v2 as  i16) / 3) as  i8 }
+#[inline] pub(crate) fn avg_i16(v0: i16, v1: i16, v2: i16) -> i16 { ((v0 as  i32 + v1 as  i32 + v2 as  i32) / 3) as i16 }
+#[inline] pub(crate) fn avg_i32(v0: i32, v1: i32, v2: i32) -> i32 { ((v0 as  i64 + v1 as  i64 + v2 as  i64) / 3) as i32 }
+#[inline] pub(crate) fn avg_i64(v0: i64, v1: i64, v2: i64) -> i64 { ((v0 as i128 + v1 as i128 + v2 as i128) / 3) as i64 }
+
+#[inline] pub(crate) fn avg_f32(v0: f32, v1: f32, v2: f32) -> f32 { ((v0 as f64 + v1 as f64 + v2 as f64) / 3.0) as f32 }
+#[inline] pub(crate) fn avg_f64(v0: f64, v1: f64, v2: f64) -> f64 { ((v0 as f64 + v1 as f64 + v2 as f64) / 3.0) as f64 }
+
+// @formatter:on
 
 
 // match (to.channel_count, from.channel_count) {
