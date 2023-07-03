@@ -3,45 +3,180 @@ use std::mem::size_of;
 use bytemuck::Pod;
 use num_traits::{Bounded, NumCast, ToPrimitive};
 
-use crate::image::{ChannelCount, ChannelSize, Image};
+use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
 
-pub(crate) fn asd(from: &Image, to: &mut Image) {
-    match from.channel_size {
+pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> {
+    match (from.channel_size, to.channel_size) {
         // @formatter:off
-        ChannelSize::_8bit =>
-            match to.channel_size {
-                ChannelSize:: _8bit => convert::< u8, u8 >(from, to,  u8_to_u8 , avg_u8),
-                ChannelSize::_16bit => convert::< u8, u16>(from, to,  u8_to_u16, avg_u8),
-                ChannelSize::_32bit => convert::< u8, u32>(from, to,  u8_to_u32, avg_u8),
-                ChannelSize::_64bit => convert::< u8, u64>(from, to,  u8_to_u64, avg_u8),
+        (ChannelSize:: _8bit, ChannelSize:: _8bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i8 >(from, to,  i8_to_i8 , avg_i8 ),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u8 >(from, to,  i8_to_u8 , avg_i8 ),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i8 >(from, to,  u8_to_i8 , avg_u8 ),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u8 , u8 >(from, to,  u8_to_u8 , avg_u8 ),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
-        ChannelSize::_16bit =>
-            match to.channel_size {
-                ChannelSize:: _8bit => convert::<u16, u8 >(from, to, u16_to_u8 , avg_u16),
-                ChannelSize::_16bit => convert::<u16, u16>(from, to, u16_to_u16, avg_u16),
-                ChannelSize::_32bit => convert::<u16, u32>(from, to, u16_to_u32, avg_u16),
-                ChannelSize::_64bit => convert::<u16, u64>(from, to, u16_to_u64, avg_u16),
+        (ChannelSize:: _8bit, ChannelSize::_16bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i16>(from, to,  i8_to_i16, avg_i8 ),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u16>(from, to,  i8_to_u16, avg_i8 ),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i16>(from, to,  u8_to_i16, avg_u8 ),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u8 , u16>(from, to,  u8_to_u16, avg_u8 ),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
-        ChannelSize::_32bit =>
-            match to.channel_size {
-                ChannelSize:: _8bit => convert::<u32, u8 >(from, to, u32_to_u8 , avg_u32),
-                ChannelSize::_16bit => convert::<u32, u16>(from, to, u32_to_u16, avg_u32),
-                ChannelSize::_32bit => convert::<u32, u32>(from, to, u32_to_u32, avg_u32),
-                ChannelSize::_64bit => convert::<u32, u64>(from, to, u32_to_u64, avg_u32),
+        (ChannelSize:: _8bit, ChannelSize::_32bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i32>(from, to,  i8_to_i32, avg_i8 ),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u32>(from, to,  i8_to_u32, avg_i8 ),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i8 , f32>(from, to,  i8_to_f32, avg_i8 ),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i32>(from, to,  u8_to_i32, avg_u8 ),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u8 , u32>(from, to,  u8_to_u32, avg_u8 ),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u8 , f32>(from, to,  u8_to_f32, avg_u8 ),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
-        ChannelSize::_64bit =>
-            match to.channel_size {
-                ChannelSize:: _8bit => convert::<u64, u8 >(from, to, u64_to_u8 , avg_u64),
-                ChannelSize::_16bit => convert::<u64, u16>(from, to, u64_to_u16, avg_u64),
-                ChannelSize::_32bit => convert::<u64, u32>(from, to, u64_to_u32, avg_u64),
-                ChannelSize::_64bit => convert::<u64, u64>(from, to, u64_to_u64, avg_u64),
+        (ChannelSize:: _8bit, ChannelSize::_64bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i64>(from, to,  i8_to_i64, avg_i8 ),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u64>(from, to,  i8_to_u64, avg_i8 ),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i8 , f64>(from, to,  i8_to_f64, avg_i8 ),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i64>(from, to,  u8_to_i64, avg_u8 ),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u8 , u64>(from, to,  u8_to_u64, avg_u8 ),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u8 , f64>(from, to,  u8_to_f64, avg_u8 ),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_16bit, ChannelSize:: _8bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i8 >(from, to, i16_to_i8 , avg_i16),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u8 >(from, to, i16_to_u8 , avg_i16),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i8 >(from, to, u16_to_i8 , avg_u16),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u16, u8 >(from, to, u16_to_u8 , avg_u16),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_16bit, ChannelSize::_16bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i16>(from, to, i16_to_i16, avg_i16),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u16>(from, to, i16_to_u16, avg_i16),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i16>(from, to, u16_to_i16, avg_u16),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u16, u16>(from, to, u16_to_u16, avg_u16),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_16bit, ChannelSize::_32bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i32>(from, to, i16_to_i32, avg_i16),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u32>(from, to, i16_to_u32, avg_i16),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i16, f32>(from, to, i16_to_f32, avg_i16),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i32>(from, to, u16_to_i32, avg_u16),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u16, u32>(from, to, u16_to_u32, avg_u16),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u16, f32>(from, to, u16_to_f32, avg_u16),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_16bit, ChannelSize::_64bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i64>(from, to, i16_to_i64, avg_i16),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u64>(from, to, i16_to_u64, avg_i16),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i16, f64>(from, to, i16_to_f64, avg_i16),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i64>(from, to, u16_to_i64, avg_u16),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u16, u64>(from, to, u16_to_u64, avg_u16),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u16, f64>(from, to, u16_to_f64, avg_u16),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_32bit, ChannelSize:: _8bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i8 >(from, to, i32_to_i8 , avg_i32),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u8 >(from, to, i32_to_u8 , avg_i32),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i8 >(from, to, u32_to_i8 , avg_u32),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u32, u8 >(from, to, u32_to_u8 , avg_u32),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f32, i8 >(from, to, f32_to_i8 , avg_f32),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f32, u8 >(from, to, f32_to_u8 , avg_f32),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_32bit, ChannelSize::_16bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i16>(from, to, i32_to_i16, avg_i32),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u16>(from, to, i32_to_u16, avg_i32),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i16>(from, to, u32_to_i16, avg_u32),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u32, u16>(from, to, u32_to_u16, avg_u32),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f32, i16>(from, to, f32_to_i16, avg_f32),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f32, u16>(from, to, f32_to_u16, avg_f32),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_32bit, ChannelSize::_32bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i32>(from, to, i32_to_i32, avg_i32),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u32>(from, to, i32_to_u32, avg_i32),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i32, f32>(from, to, i32_to_f32, avg_i32),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i32>(from, to, u32_to_i32, avg_u32),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u32, u32>(from, to, u32_to_u32, avg_u32),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u32, f32>(from, to, u32_to_f32, avg_u32),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f32, i32>(from, to, f32_to_i32, avg_f32),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f32, u32>(from, to, f32_to_u32, avg_f32),
+                (ChannelType::Float, ChannelType::Float) => convert_pixels::<f32, f32>(from, to, f32_to_f32, avg_f32),
+            }
+        (ChannelSize::_32bit, ChannelSize::_64bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i64>(from, to, i32_to_i64, avg_i32),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u64>(from, to, i32_to_u64, avg_i32),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i32, f64>(from, to, i32_to_f64, avg_i32),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i64>(from, to, u32_to_i64, avg_u32),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u32, u64>(from, to, u32_to_u64, avg_u32),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u32, f64>(from, to, u32_to_f64, avg_u32),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f32, i64>(from, to, f32_to_i64, avg_f32),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f32, u64>(from, to, f32_to_u64, avg_f32),
+                (ChannelType::Float, ChannelType::Float) => convert_pixels::<f32, f64>(from, to, f32_to_f64, avg_f32),
+            }
+        (ChannelSize::_64bit, ChannelSize::_8bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i8 >(from, to, i64_to_i8 , avg_i64),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u8 >(from, to, i64_to_u8 , avg_i64),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i8 >(from, to, u64_to_i8 , avg_u64),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u64, u8 >(from, to, u64_to_u8 , avg_u64),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f64, i8 >(from, to, f64_to_i8 , avg_f64),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f64, u8 >(from, to, f64_to_u8 , avg_f64),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_64bit, ChannelSize::_16bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i16>(from, to, i64_to_i16, avg_i64),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u16>(from, to, i64_to_u16, avg_i64),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i16>(from, to, u64_to_i16, avg_u64),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u64, u16>(from, to, u64_to_u16, avg_u64),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f64, i16>(from, to, f64_to_i16, avg_f64),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f64, u16>(from, to, f64_to_u16, avg_f64),
+                (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
+            }
+        (ChannelSize::_64bit, ChannelSize::_32bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i32>(from, to, i64_to_i32, avg_i64),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u32>(from, to, i64_to_u32, avg_i64),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i64, f32>(from, to, i64_to_f32, avg_i64),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i32>(from, to, u64_to_i32, avg_u64),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u64, u32>(from, to, u64_to_u32, avg_u64),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u64, f32>(from, to, u64_to_f32, avg_u64),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f64, i32>(from, to, f64_to_i32, avg_f64),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f64, u32>(from, to, f64_to_u32, avg_f64),
+                (ChannelType::Float, ChannelType::Float) => convert_pixels::<f64, f32>(from, to, f64_to_f32, avg_f64),
+            }
+
+        (ChannelSize::_64bit, ChannelSize::_64bit) =>
+            match (from.channel_type, to.channel_type) {
+                (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i64>(from, to, i64_to_i64, avg_i64),
+                (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u64>(from, to, i64_to_u64, avg_i64),
+                (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i64, f64>(from, to, i64_to_f64, avg_i64),
+                (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i64>(from, to, u64_to_i64, avg_u64),
+                (ChannelType:: UInt, ChannelType:: UInt) => convert_pixels::<u64, u64>(from, to, u64_to_u64, avg_u64),
+                (ChannelType:: UInt, ChannelType::Float) => convert_pixels::<u64, f64>(from, to, u64_to_f64, avg_u64),
+                (ChannelType::Float, ChannelType::  Int) => convert_pixels::<f64, i64>(from, to, f64_to_i64, avg_f64),
+                (ChannelType::Float, ChannelType:: UInt) => convert_pixels::<f64, u64>(from, to, f64_to_u64, avg_f64),
+                (ChannelType::Float, ChannelType::Float) => convert_pixels::<f64, f64>(from, to, f64_to_f64, avg_f64),
             }
         // @formatter:on
     }
+
+    Ok(())
 }
 
 
-pub(crate) fn convert<From, To>(
+fn convert_pixels<From, To>(
     from: &Image,
     to: &mut Image,
     convert_fn: fn(From) -> To,
@@ -408,7 +543,9 @@ pub(crate) fn convert<From, To>(
 #[inline] pub(crate) fn f64_to_i64(value: f64) -> i64 { (value as f64 * i64::MAX as f64) as i64 }
 
 #[inline] pub(crate) fn f32_to_f64(value: f32) -> f64 { value as f64 }
+#[inline] pub(crate) fn f32_to_f32(value: f32) -> f32 { value as f32 }
 #[inline] pub(crate) fn f64_to_f32(value: f64) -> f32 { value as f32 }
+#[inline] pub(crate) fn f64_to_f64(value: f64) -> f64 { value as f64 }
 
 
 #[inline] pub(crate) fn avg_u8 (v0:  u8, v1:  u8, v2:  u8) ->  u8 { ((v0 as  u16 + v1 as  u16 + v2 as  u16) / 3) as  u8 }
@@ -487,4 +624,38 @@ pub(crate) fn convert<From, To>(
 // }
 //
 // _ => panic!("Unsupported channel count conversion: {:?} -> {:?}", from.channel_count, to.channel_count),
+// }
+
+
+// match from.channel_size {
+// // @formatter:off
+// ChannelSize::_8bit =>
+// match to.channel_size {
+// ChannelSize:: _8bit => convert_pixels::< u8, u8 >(from, to,  u8_to_u8 , avg_u8),
+// ChannelSize::_16bit => convert_pixels::< u8, u16>(from, to,  u8_to_u16, avg_u8),
+// ChannelSize::_32bit => convert_pixels::< u8, u32>(from, to,  u8_to_u32, avg_u8),
+// ChannelSize::_64bit => convert_pixels::< u8, u64>(from, to,  u8_to_u64, avg_u8),
+// }
+// ChannelSize::_16bit =>
+// match to.channel_size {
+// ChannelSize:: _8bit => convert_pixels::<u16, u8 >(from, to, u16_to_u8 , avg_u16),
+// ChannelSize::_16bit => convert_pixels::<u16, u16>(from, to, u16_to_u16, avg_u16),
+// ChannelSize::_32bit => convert_pixels::<u16, u32>(from, to, u16_to_u32, avg_u16),
+// ChannelSize::_64bit => convert_pixels::<u16, u64>(from, to, u16_to_u64, avg_u16),
+// }
+// ChannelSize::_32bit =>
+// match to.channel_size {
+// ChannelSize:: _8bit => convert_pixels::<u32, u8 >(from, to, u32_to_u8 , avg_u32),
+// ChannelSize::_16bit => convert_pixels::<u32, u16>(from, to, u32_to_u16, avg_u32),
+// ChannelSize::_32bit => convert_pixels::<u32, u32>(from, to, u32_to_u32, avg_u32),
+// ChannelSize::_64bit => convert_pixels::<u32, u64>(from, to, u32_to_u64, avg_u32),
+// }
+// ChannelSize::_64bit =>
+// match to.channel_size {
+// ChannelSize:: _8bit => convert_pixels::<u64, u8 >(from, to, u64_to_u8 , avg_u64),
+// ChannelSize::_16bit => convert_pixels::<u64, u16>(from, to, u64_to_u16, avg_u64),
+// ChannelSize::_32bit => convert_pixels::<u64, u32>(from, to, u64_to_u32, avg_u64),
+// ChannelSize::_64bit => convert_pixels::<u64, u64>(from, to, u64_to_u64, avg_u64),
+// }
+// // @formatter:on
 // }

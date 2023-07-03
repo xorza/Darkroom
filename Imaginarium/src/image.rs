@@ -312,7 +312,7 @@ impl Image {
             channel_type,
         );
 
-        asd(self, &mut result);
+        convert_image(self, &mut result)?;
 
         Ok(result)
     }
