@@ -1,9 +1,11 @@
 use bytemuck::{Pod, Zeroable};
 use pollster::FutureExt;
+use wgpu::util::DeviceExt;
 
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    pub one_vertex_buffer: wgpu::Buffer,
 }
 
 fn aligned_size_of_uniform<U: Sized>() -> wgpu::BufferAddress {
@@ -34,7 +36,130 @@ impl WgpuContext {
             .block_on()
             .expect("Unable to find a suitable GPU device.");
 
-        Ok(WgpuContext { device, queue })
+        let rect = Rect::one();
+
+        let one_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            contents: rect.as_bytes(),
+            usage: wgpu::BufferUsages::VERTEX,
+            label: Some("Vertex Buffer"),
+        });
+
+        Ok(WgpuContext {
+            device,
+            queue,
+            one_vertex_buffer,
+        })
+    }
+
+    pub fn draw_one(
+        &self,
+        encoder:&mut wgpu::CommandEncoder,
+        tex_view: &wgpu::TextureView,
+        target_tex_view: &wgpu::TextureView,
+        shader: &wgpu::ShaderModule,
+    ) {
+        let device = &self.device;
+
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    },
+                ],
+                label: None,
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(tex_view),
+                },
+            ],
+            label: None,
+        });
+
+
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[],
+                label: None,
+            });
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Rect::desc()],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Max,
+                        },
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            label: None,
+        });
+
+
+        {
+            let mut render_pass = encoder.begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: target_tex_view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: true,
+                            },
+                        }),
+                    ],
+                    depth_stencil_attachment: None,
+                    label: None,
+                });
+
+            render_pass.push_debug_group("Prepare data for draw.");
+
+            render_pass.set_pipeline(&pipeline);
+            render_pass.set_bind_group(0, &bind_group, &[]);
+
+            render_pass.insert_debug_marker("Draw.");
+            render_pass.set_vertex_buffer(0, self.one_vertex_buffer.slice(..));
+            render_pass.draw(0..Rect::vert_count(), 0..1);
+
+            render_pass.pop_debug_group();
+        }
     }
 }
 
@@ -88,11 +213,11 @@ impl Rect {
     pub fn as_bytes(&self) -> &[u8] {
         bytemuck::cast_slice(&self.0)
     }
-    pub fn size_in_bytes(&self) -> u32 {
+    pub fn size_in_bytes() -> u32 {
         std::mem::size_of::<Rect>() as u32
     }
-    pub fn vert_count(&self) -> u32 {
-        self.0.len() as u32
+    pub fn vert_count() -> u32 {
+        4u32
     }
     pub fn stride(&self) -> u32 {
         std::mem::size_of::<Vert>() as u32

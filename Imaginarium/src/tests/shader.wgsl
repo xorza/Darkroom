@@ -10,7 +10,7 @@ fn vs_main(
 ) -> VertexOutput {
     var result: VertexOutput;
     result.position = vec4<f32>(position * 2.0 - 1.0, 0.0, 1.0);
-    result.tex_coord = tex_coord;
+    result.tex_coord = tex_coord * 255.0;
     return result;
 }
 
