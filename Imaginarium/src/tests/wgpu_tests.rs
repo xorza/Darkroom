@@ -34,8 +34,8 @@ fn it_works() {
     let vertex_size = std::mem::size_of::<Vert>();
     let vertex_data = [
         Vert([0.0, 0.0], [0.0, 0.0]),
-        Vert([0.0, 1.0], [0.0, 255.0]),
         Vert([1.0, 0.0], [255.0, 0.0]),
+        Vert([0.0, 1.0], [0.0, 255.0]),
         Vert([1.0, 1.0], [255.0, 255.0])
     ];
 
@@ -44,7 +44,6 @@ fn it_works() {
         contents: bytemuck::cast_slice(&vertex_data),
         usage: wgpu::BufferUsages::VERTEX,
     });
-
 
     let tex1_extent = wgpu::Extent3d {
         width: img1.width,
@@ -185,7 +184,7 @@ fn it_works() {
         }),
         primitive: wgpu::PrimitiveState {
             cull_mode: Some(wgpu::Face::Back),
-            front_face: wgpu::FrontFace::Cw,
+            front_face: wgpu::FrontFace::Ccw,
             topology: wgpu::PrimitiveTopology::TriangleStrip,
 
             ..Default::default()
@@ -208,7 +207,6 @@ fn it_works() {
                         view: &tex2_view,
                         resolve_target: None,
                         ops: wgpu::Operations {
-                            // load: wgpu::LoadOp::Clear(wgpu::Color::RED),
                             load: wgpu::LoadOp::Load,
                             store: true,
                         },
