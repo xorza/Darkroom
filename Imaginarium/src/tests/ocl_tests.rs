@@ -6,9 +6,9 @@ mod graph_tests {
 
     #[test]
     fn it_works() -> anyhow::Result<()> {
-        let vec1 = vec![1.0, 2.0, -4.0, 4.0, 5.0];
-        let vec2 = vec![5.0, 4.0, 10.0, 2.0, 1.0];
-        let mut vec3 = vec![0.0; 5];
+        let vec1: Vec<f32> = vec![1.0, 2.0, -4.0, 4.0, 5.0];
+        let vec2: Vec<f32> = vec![5.0, 4.0, 10.0, 2.0, 1.0];
+        let mut vec3: Vec<f32> = vec![0.0; 5];
 
         let platform = Platform::default();
         let device = Device::first(platform)?;

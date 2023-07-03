@@ -9,9 +9,8 @@ name = "graph"
 crate-type = ["lib"]
 
 [dependencies]
-mlua = { version = "*", features = ["lua54", "vendored"] }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
-
+mlua ={ workspace = true }

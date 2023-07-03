@@ -7,13 +7,11 @@ edition = "2021"
 default = []
 
 [dependencies]
-graph_lib = { path = "../Graph", package = "graph" }
-egui_node_graph = { path = "../../egui_node_graph/egui_node_graph" }
-
-egui_file = "*"
-eframe = { version = "*", features = ["wgpu"] }
-
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
+graph_lib = { workspace = true }
+egui_node_graph ={ workspace = true }
+egui_file = { workspace = true }
+eframe ={ workspace = true }

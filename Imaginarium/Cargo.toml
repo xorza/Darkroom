@@ -5,12 +5,12 @@ edition = "2021"
 
 
 [dependencies]
-tiff = "*"
-png = "*"
-image = "*"
-ocl = "*"
+tiff =  { workspace = true }
+png =  { workspace = true }
+image =  { workspace = true }
+ocl =  { workspace = true }
 anyhow = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }
 bytemuck = { workspace = true }
-num-traits = "*"
+num-traits = { workspace = true }

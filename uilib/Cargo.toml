@@ -6,7 +6,8 @@ edition = "2021"
 [dependencies]
 wgpu = { workspace = true }
 bytemuck = { workspace = true }
-winit = "*"
-glam = "*"
-pollster = "*"
-glyph_brush = "*"
+winit =  { workspace = true }
+glam =  { workspace = true }
+pollster =  { workspace = true }
+glyph_brush =  { workspace = true }
+

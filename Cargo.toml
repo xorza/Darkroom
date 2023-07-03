@@ -9,6 +9,9 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+graph_lib = { path = "./Graph", package = "graph" }
+egui_node_graph = { path = "../egui_node_graph/egui_node_graph" }
+
 serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
@@ -16,3 +19,14 @@ anyhow = "*"
 wgpu = "*"
 bytemuck = { version = "*", features = ["derive"] }
 pollster = "*"
+tiff = "*"
+png = "*"
+image = "*"
+ocl = "*"
+num-traits = "*"
+winit = "*"
+glam = "*"
+glyph_brush = "*"
+mlua = { version = "*", features = ["lua54", "vendored"] }
+egui_file = "*"
+eframe = { version = "*", features = ["wgpu"] }
