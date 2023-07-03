@@ -8,3 +8,4 @@
 *.qmlproject.user
 **/xcuserdata/
 
+/test_output/*

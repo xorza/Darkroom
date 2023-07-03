@@ -9,6 +9,8 @@ fn it_works() {
     assert_eq!(tiff.channel_size, ChannelSize::_32bit);
     assert_eq!(tiff.channel_count, ChannelCount::Rgb);
 
+    tiff.save_file("../test_output/test.tiff").unwrap();
+
     let png = Image::read_file("../test_resources/rgba-sample-8bit.png").unwrap();
     assert_eq!(png.width, 864);
     assert_eq!(png.height, 409);
@@ -29,7 +31,7 @@ fn it_works() {
 fn save_rgb_png() {
     let png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
 
-    png.save_file("test.png").unwrap();
+    png.save_file("../test_output/save_rgb_png.png").unwrap();
 }
 
 #[test]
@@ -39,5 +41,5 @@ fn image_convertion() {
     let png = png.convert(ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt)
         .expect("Failed to convert image");
 
-    // png.save_file("test.png").unwrap();
+    png.save_file("../test_output/image_convertion.png").unwrap();
 }

@@ -1,10 +1,15 @@
 use std::fs::File;
+use std::io::Cursor;
+use std::mem::{align_of, size_of};
 use std::path::Path;
 
-use bytemuck::Pod;
-use image::EncodableLayout;
+use bytemuck::{Pod, PodCastError};
+use image::{EncodableLayout, ImageFormat};
 use num_traits::{Bounded, NumCast, ToPrimitive};
 use tiff::decoder::DecodingResult;
+use tiff::encoder::{colortype, TiffEncoder, TiffValue};
+use tiff::encoder::colortype::ColorType;
+use wgpu::Color;
 
 use crate::image_convert::{*};
 
@@ -117,14 +122,14 @@ impl Image {
 
         let (channel_count, channel_size, channel_type) = match img.color() {
             // @formatter:off
-            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize::_8bit,  ChannelType::UInt   ),
-            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::UInt   ),
-            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize::_8bit,  ChannelType::UInt   ),
-            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt   ),
-            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize::_8bit,  ChannelType::UInt   ),
-            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::UInt   ),
-            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize::_8bit,  ChannelType::UInt   ),
-            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::UInt   ),
+            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize:: _8bit, ChannelType::UInt  ),
+            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::UInt  ),
+            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::UInt  ),
+            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt  ),
+            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize:: _8bit, ChannelType::UInt  ),
+            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::UInt  ),
+            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize:: _8bit, ChannelType::UInt  ),
+            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::UInt  ),
             image::ColorType::Rgb32F  => (ChannelCount::Rgb,       ChannelSize::_32bit, ChannelType::Float ),
             image::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
             _ =>  panic!("Unsupported color type: {:?}", img.color()),
@@ -132,21 +137,6 @@ impl Image {
         };
 
         let bytes = img.as_bytes().to_vec();
-        // match img.color() {
-        //     // @formatter:off
-        //     image::ColorType::L8      => img.to_luma8()        .as_bytes().to_vec(),
-        //     image::ColorType::L16     => img.to_luma16()       .as_bytes().to_vec(),
-        //     image::ColorType::La8     => img.to_luma_alpha8()  .as_bytes().to_vec(),
-        //     image::ColorType::La16    => img.to_luma_alpha16() .as_bytes().to_vec(),
-        //     image::ColorType::Rgb8    => img.to_rgba8()        .as_bytes().to_vec(),
-        //     image::ColorType::Rgba8   => img.to_rgba8()        .as_bytes().to_vec(),
-        //     image::ColorType::Rgb16   => img.to_rgba16()       .as_bytes().to_vec(),
-        //     image::ColorType::Rgba16  => img.to_rgba16()       .as_bytes().to_vec(),
-        //     image::ColorType::Rgb32F  => img.to_rgba32f()      .as_bytes().to_vec(),
-        //     image::ColorType::Rgba32F => img.to_rgba32f()      .as_bytes().to_vec(),
-        //     _ =>  panic!("Unsupported color type: {:?}", img.color()),
-        //     // @formatter:on
-        // };
 
         let image = Image {
             width: img.width(),
@@ -230,10 +220,12 @@ impl Image {
             "png" => {
                 self.save_png(filename)?;
             },
-            // "jpeg" | "jpg" => {
-            //     image::save_buffer(filename, &self.bytes, self.width, self.height, image::ColorType::Rgb8)?;
-            // },
-            // "tiff" => {},
+            "jpeg" | "jpg" => {
+                self.save_jpg(filename)?;
+            },
+            "tiff" => {
+                self.save_tiff(filename)?;
+            },
             _ => return Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
         };
 
@@ -248,7 +240,7 @@ impl Image {
         let color_type = match self.channel_size {
             ChannelSize::_8bit => match self.channel_count {
                 ChannelCount::Gray => image::ColorType::L8,
-                // ColorFormat::Rgba => image::ColorType::Rgb8,
+                ChannelCount::Rgb => image::ColorType::Rgb8,
 
                 _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.channel_count)),
             },
@@ -256,7 +248,14 @@ impl Image {
             _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.channel_size)),
         };
 
-        image::save_buffer(filename, &self.bytes, self.width, self.height, color_type)?;
+        image::save_buffer_with_format(
+            filename,
+            &self.bytes,
+            self.width,
+            self.height,
+            color_type,
+            ImageFormat::Jpeg,
+        )?;
 
         Ok(())
     }
@@ -283,11 +282,73 @@ impl Image {
             _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.channel_size)),
         };
 
-        image::save_buffer(filename, &self.bytes, self.width, self.height, color_type)?;
+        image::save_buffer_with_format(
+            filename,
+            &self.bytes,
+            self.width,
+            self.height,
+            color_type,
+            ImageFormat::Png,
+        )?;
 
         Ok(())
     }
 
+    fn save_tiff(&self, filename: &str) -> anyhow::Result<()> {
+        match (self.channel_count, self.channel_size, self.channel_type) {
+            (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::UInt) => {
+                self.asd::<colortype::Gray8>(filename)?;
+            }
+
+            (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::UInt) => {
+                self.asd::<colortype::RGB32>(filename)?;
+            }
+
+            // (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::Int) =>{}
+            // (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt) => {}
+            // (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::Int) => {}
+
+            (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", self.channel_count, self.channel_size, self.channel_type)),
+        };
+
+
+        Ok(())
+    }
+
+    fn asd<ColorType>(&self, filename: &str) -> anyhow::Result<()>
+        where ColorType: colortype::ColorType,
+              [ColorType::Inner]: TiffValue,
+    {
+        let buf: &[ColorType::Inner] = Self::cast_slice(&self.bytes).unwrap();
+
+        let mut file = File::create(filename)?;
+        let mut tiff = TiffEncoder::new(&mut file)?;
+        let img = tiff.new_image::<ColorType>(self.width, self.height)?;
+
+        img.write_data(buf).unwrap();
+
+        Ok(())
+    }
+
+
+    fn cast_slice<A, B>(a: &[A]) -> Result<&[B], PodCastError>
+        where A: Pod + Copy,
+              [B]: TiffValue,
+    {
+        if align_of::<B>() > align_of::<A>()
+            && (a.as_ptr() as usize) % align_of::<B>() != 0 {
+            Err(PodCastError::TargetAlignmentGreaterAndInputNotAligned)
+        } else if size_of::<B>() == size_of::<A>() {
+            Ok(unsafe { core::slice::from_raw_parts(a.as_ptr() as *const B, a.len()) })
+        } else if size_of::<A>() == 0 || size_of::<B>() == 0 {
+            Err(PodCastError::SizeMismatch)
+        } else if core::mem::size_of_val(a) % size_of::<B>() == 0 {
+            let new_len = core::mem::size_of_val(a) / size_of::<B>();
+            Ok(unsafe { core::slice::from_raw_parts(a.as_ptr() as *const B, new_len) })
+        } else {
+            Err(PodCastError::OutputSliceWouldHaveSlop)
+        }
+    }
 
     pub fn convert(
         &self,
@@ -316,8 +377,6 @@ impl Image {
 
         Ok(result)
     }
-
-
 }
 
 impl ChannelSize {
