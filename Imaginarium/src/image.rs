@@ -7,12 +7,10 @@ use bytemuck::{Pod, PodCastError};
 use image::{EncodableLayout, ImageFormat};
 use num_traits::{Bounded, NumCast, ToPrimitive};
 use tiff::decoder::DecodingResult;
-use tiff::encoder::{colortype, TiffEncoder, TiffValue};
-use tiff::encoder::colortype::*;
 use wgpu::Color;
 
-use crate::image_convertion::*;
-use crate::tiff_extentions::*;
+use crate::image_convertion::convert_image;
+use crate::tiff_extentions::save_tiff;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
 #[repr(u32)]
@@ -106,10 +104,9 @@ impl Image {
 
         let image =
             match extension {
-                "png" | "jpeg" | "jpg" =>
-                    Image::load_png_jpeg(filename)?,
-                "tiff" =>
-                    Image::load_tiff(filename)?,
+                "png" | "jpeg" | "jpg" => Image::load_png_jpeg(filename)?,
+                "tiff" => Image::load_tiff(filename)?,
+
                 _ => return Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
             };
 
@@ -151,7 +148,6 @@ impl Image {
 
         Ok(image)
     }
-
     fn load_tiff(filename: &str) -> anyhow::Result<Image> {
         let mut decoder = tiff::decoder::Decoder::new(
             File::open(filename)?
@@ -218,15 +214,10 @@ impl Image {
         let extension = get_file_extension(filename)?;
 
         match extension {
-            "png" => {
-                self.save_png(filename)?;
-            },
-            "jpeg" | "jpg" => {
-                self.save_jpg(filename)?;
-            },
-            "tiff" => {
-                self.save_tiff(filename)?;
-            },
+            "png" => self.save_png(filename)?,
+            "jpeg" | "jpg" => self.save_jpg(filename)?,
+            "tiff" => self.save_tiff(filename)?,
+
             _ => return Err(anyhow::anyhow!("Unsupported file extension: {}", extension)),
         };
 
@@ -260,7 +251,6 @@ impl Image {
 
         Ok(())
     }
-
     fn save_png(&self, filename: &str) -> anyhow::Result<()> {
         if self.channel_type != ChannelType::UInt {
             return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.channel_type));
@@ -294,107 +284,10 @@ impl Image {
 
         Ok(())
     }
-
     fn save_tiff(&self, filename: &str) -> anyhow::Result<()> {
-        match (self.channel_count, self.channel_size, self.channel_type) {
-            // @formatter:off
-            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI8          >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI16         >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI32         >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI64         >(filename)?,
-
-            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray8           >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray16          >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray32          >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray64          >(filename)?,
-
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<Gray32Float     >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<Gray64Float     >(filename)?,
-
-
-            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI8     >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI16    >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI32    >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI64    >(filename)?,
-
-            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha8      >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha16     >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha32     >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha64     >(filename)?,
-
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha32Float>(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha64Float>(filename)?,
-
-
-            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI8           >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI16          >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI32          >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI64          >(filename)?,
-
-            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB8            >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB16           >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB32           >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB64           >(filename)?,
-
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<RGB32Float      >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<RGB64Float      >(filename)?,
-
-
-            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI8          >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI16         >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI32         >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI64         >(filename)?,
-
-            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA8           >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA16          >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA32          >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA64          >(filename)?,
-
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<RGBA32Float     >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<RGBA64Float     >(filename)?,
-
-            // @formatter:on
-            (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", self.channel_count, self.channel_size, self.channel_type)),
-        };
-
-
-        Ok(())
+        save_tiff(self, filename)
     }
 
-    fn save_tiff_internal<ColorType>(&self, filename: &str) -> anyhow::Result<()>
-        where ColorType: colortype::ColorType,
-              [ColorType::Inner]: TiffValue,
-    {
-        let buf: &[ColorType::Inner] = Self::cast_slice(&self.bytes).unwrap();
-
-        let mut file = File::create(filename)?;
-        let mut tiff = TiffEncoder::new(&mut file)?;
-        let img = tiff.new_image::<ColorType>(self.width, self.height)?;
-
-        img.write_data(buf).unwrap();
-
-        Ok(())
-    }
-
-
-    fn cast_slice<A, B>(a: &[A]) -> Result<&[B], PodCastError>
-        where A: Pod + Copy,
-              [B]: TiffValue,
-    {
-        if align_of::<B>() > align_of::<A>()
-            && (a.as_ptr() as usize) % align_of::<B>() != 0 {
-            Err(PodCastError::TargetAlignmentGreaterAndInputNotAligned)
-        } else if size_of::<B>() == size_of::<A>() {
-            Ok(unsafe { core::slice::from_raw_parts(a.as_ptr() as *const B, a.len()) })
-        } else if size_of::<A>() == 0 || size_of::<B>() == 0 {
-            Err(PodCastError::SizeMismatch)
-        } else if core::mem::size_of_val(a) % size_of::<B>() == 0 {
-            let new_len = core::mem::size_of_val(a) / size_of::<B>();
-            Ok(unsafe { core::slice::from_raw_parts(a.as_ptr() as *const B, new_len) })
-        } else {
-            Err(PodCastError::OutputSliceWouldHaveSlop)
-        }
-    }
 
     pub fn convert(
         &self,
@@ -426,7 +319,7 @@ impl Image {
 }
 
 impl ChannelSize {
-    pub(crate) fn byte_count(&self) -> u32 {
+    pub fn byte_count(&self) -> u32 {
         *self as u32
     }
     fn from_bit_count(bit_count: u32) -> ChannelSize {
@@ -443,10 +336,10 @@ impl ChannelSize {
 }
 
 impl ChannelCount {
-    fn channel_count(&self) -> u32 {
+    pub fn channel_count(&self) -> u32 {
         *self as u32
     }
-    pub(crate) fn byte_count(&self, channel_size: ChannelSize) -> u32 {
+    pub fn byte_count(&self, channel_size: ChannelSize) -> u32 {
         self.channel_count() * channel_size.byte_count()
     }
 }
