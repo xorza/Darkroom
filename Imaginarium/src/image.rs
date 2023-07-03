@@ -77,7 +77,7 @@ fn align_stride(n: u32) -> u32 {
 }
 
 impl Image {
-    pub fn new(
+    pub fn new_empty(
         width: u32,
         height: u32,
         channel_count: ChannelCount,
@@ -87,6 +87,28 @@ impl Image {
     {
         let stride = align_stride(width * channel_count as u32 * channel_size as u32);
         let bytes = vec![0; (stride * height) as usize];
+
+        Image {
+            width,
+            height,
+            stride,
+            channel_count,
+            channel_size,
+            channel_type,
+            bytes,
+        }
+    }
+
+    pub fn new_with_data(
+        width: u32,
+        height: u32,
+        channel_count: ChannelCount,
+        channel_size: ChannelSize,
+        channel_type: ChannelType,
+        bytes: Vec<u8>)
+        -> Image
+    {
+        let stride = align_stride(width * channel_count as u32 * channel_size as u32);
 
         Image {
             width,
@@ -303,8 +325,13 @@ impl Image {
                 _ => {}
             }
         }
+        if self.channel_count == channel_count &&
+            self.channel_size == channel_size &&
+            self.channel_type == channel_type {
+            return Err(anyhow::anyhow!("Image is already in the requested format"));
+        }
 
-        let mut result = Image::new(
+        let mut result = Image::new_empty(
             self.width,
             self.height,
             channel_count,
@@ -315,6 +342,10 @@ impl Image {
         convert_image(self, &mut result)?;
 
         Ok(result)
+    }
+
+    pub fn bytes_per_pixel(&self) -> u32 {
+        self.channel_count.byte_count(self.channel_size)
     }
 }
 

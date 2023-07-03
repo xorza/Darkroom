@@ -1,8 +1,8 @@
 use pollster::FutureExt;
 
-pub struct WgpuContext {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+pub(crate) struct WgpuContext {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
 }
 
 impl WgpuContext {
