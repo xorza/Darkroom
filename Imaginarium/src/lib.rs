@@ -7,4 +7,5 @@ mod tests;
 pub mod wgpu_context;
 pub mod ocl_context;
 pub mod image;
-mod image_convert;
+mod image_convertion;
+mod tiff_extentions;

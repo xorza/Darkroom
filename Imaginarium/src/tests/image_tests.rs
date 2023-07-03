@@ -71,6 +71,12 @@ fn image_convertion() {
     tiff.convert(ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float).unwrap()
         .save_file("../test_output/convertion-rgba-f32.tiff").unwrap();
 
+    tiff.convert(ChannelCount::GrayAlpha, ChannelSize::_8bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-ga-u8.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Int).unwrap()
+        .save_file("../test_output/convertion-rgb-i32.tiff").unwrap();
+
     tiff.convert(ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float).unwrap()
         .convert(ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt).unwrap()
         .save_file("../test_output/convertion-x2-rgba-u16.tiff").unwrap();
