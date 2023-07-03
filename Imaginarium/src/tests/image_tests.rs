@@ -9,8 +9,6 @@ fn it_works() {
     assert_eq!(tiff.channel_size, ChannelSize::_32bit);
     assert_eq!(tiff.channel_count, ChannelCount::Rgb);
 
-    tiff.save_file("../test_output/test.tiff").unwrap();
-
     let png = Image::read_file("../test_resources/rgba-sample-8bit.png").unwrap();
     assert_eq!(png.width, 864);
     assert_eq!(png.height, 409);
@@ -36,10 +34,40 @@ fn save_rgb_png() {
 
 #[test]
 fn image_convertion() {
-    let png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
+    let png = Image::read_file("../test_resources/rgba-sample-8bit.png").unwrap();
+    png.save_file("../test_output/rgba-sample-8bit.png").unwrap();
 
-    let png = png.convert(ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt)
-        .expect("Failed to convert image");
+    png.convert(ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-gray-u16.png").unwrap();
 
-    png.save_file("../test_output/image_convertion.png").unwrap();
+    png.convert(ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-rgb-u16.png").unwrap();
+
+
+    let tiff = Image::read_file("../test_resources/rgb-sample-32bit.tiff").unwrap();
+    tiff.save_file("../test_output/rgb-sample-32bit.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-gray-u16.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-rgba-u16.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-rgba-u8.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Gray, ChannelSize::_8bit, ChannelType::Int).unwrap()
+        .save_file("../test_output/convertion-gray-i8.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgba, ChannelSize::_64bit, ChannelType::Float).unwrap()
+        .save_file("../test_output/convertion-rgba-f64.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgba, ChannelSize::_64bit, ChannelType::UInt).unwrap()
+        .save_file("../test_output/convertion-rgba-u64.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Gray, ChannelSize::_32bit, ChannelType::Int).unwrap()
+        .save_file("../test_output/convertion-gray-i64.tiff").unwrap();
+
+    tiff.convert(ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float).unwrap()
+        .save_file("../test_output/convertion-rgba-f32.tiff").unwrap();
 }

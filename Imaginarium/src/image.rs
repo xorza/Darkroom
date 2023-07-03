@@ -296,18 +296,34 @@ impl Image {
 
     fn save_tiff(&self, filename: &str) -> anyhow::Result<()> {
         match (self.channel_count, self.channel_size, self.channel_type) {
-            (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::UInt) => {
-                self.asd::<colortype::Gray8>(filename)?;
-            }
 
-            (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::UInt) => {
-                self.asd::<colortype::RGB32>(filename)?;
-            }
+            // @formatter:off
+            (ChannelCount::Gray, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI8     >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI16    >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI32    >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI64    >(filename)?,
+            (ChannelCount::Gray, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray8      >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray16     >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray32     >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray64     >(filename)?,
+            (ChannelCount::Gray, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::Gray32Float>(filename)?,
+            (ChannelCount::Gray, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::Gray64Float>(filename)?,
 
-            // (ChannelCount::Gray, ChannelSize::_8bit, ChannelType::Int) =>{}
-            // (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt) => {}
-            // (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::Int) => {}
+            (ChannelCount::Rgb, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB8      >(filename)?,
+            (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB16     >(filename)?,
+            (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB32     >(filename)?,
+            (ChannelCount::Rgb, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB64     >(filename)?,
+            (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGB32Float>(filename)?,
+            (ChannelCount::Rgb, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGB64Float>(filename)?,
 
+            (ChannelCount::Rgba, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA8      >(filename)?,
+            (ChannelCount::Rgba, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA16     >(filename)?,
+            (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA32     >(filename)?,
+            (ChannelCount::Rgba, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA64     >(filename)?,
+            (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGBA32Float>(filename)?,
+            (ChannelCount::Rgba, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGBA64Float>(filename)?,
+
+            // @formatter:on
             (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", self.channel_count, self.channel_size, self.channel_type)),
         };
 
@@ -315,7 +331,7 @@ impl Image {
         Ok(())
     }
 
-    fn asd<ColorType>(&self, filename: &str) -> anyhow::Result<()>
+    fn save_tiff_internal<ColorType>(&self, filename: &str) -> anyhow::Result<()>
         where ColorType: colortype::ColorType,
               [ColorType::Inner]: TiffValue,
     {
