@@ -8,7 +8,7 @@ use image::{EncodableLayout, ImageFormat};
 use num_traits::{Bounded, NumCast, ToPrimitive};
 use tiff::decoder::DecodingResult;
 use tiff::encoder::{colortype, TiffEncoder, TiffValue};
-use tiff::encoder::colortype::ColorType;
+use tiff::encoder::colortype::*;
 use wgpu::Color;
 
 use crate::image_convertion::*;
@@ -297,62 +297,61 @@ impl Image {
 
     fn save_tiff(&self, filename: &str) -> anyhow::Result<()> {
         match (self.channel_count, self.channel_size, self.channel_type) {
-
             // @formatter:off
-            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI8     >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI16    >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI32    >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<colortype::GrayI64    >(filename)?,
+            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI8          >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI16         >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI32         >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<GrayI64         >(filename)?,
 
-            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray8      >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray16     >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray32     >(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::Gray64     >(filename)?,
+            (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray8           >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray16          >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray32          >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<Gray64          >(filename)?,
 
-            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::Gray32Float>(filename)?,
-            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::Gray64Float>(filename)?,
-
-
-            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI8           >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI16          >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI32          >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI64          >(filename)?,
-
-            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha8            >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha16           >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha32           >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha64           >(filename)?,
-
-            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha32Float      >(filename)?,
-            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha64Float      >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<Gray32Float     >(filename)?,
+            (ChannelCount::     Gray, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<Gray64Float     >(filename)?,
 
 
-            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI8                 >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI16                >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI32                >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI64                >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI8     >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI16    >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI32    >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<GrayAlphaI64    >(filename)?,
 
-            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB8       >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB16      >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB32      >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGB64      >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha8      >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha16     >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha32     >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<GrayAlpha64     >(filename)?,
 
-            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGB32Float >(filename)?,
-            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGB64Float >(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha32Float>(filename)?,
+            (ChannelCount::GrayAlpha, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<GrayAlpha64Float>(filename)?,
 
 
-            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI8                >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI16               >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI32               >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI64               >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI8           >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI16          >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI32          >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBI64          >(filename)?,
 
-            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA8      >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA16     >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA32     >(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<colortype::RGBA64     >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB8            >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB16           >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB32           >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<RGB64           >(filename)?,
 
-            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGBA32Float>(filename)?,
-            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<colortype::RGBA64Float>(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<RGB32Float      >(filename)?,
+            (ChannelCount::      Rgb, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<RGB64Float      >(filename)?,
+
+
+            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI8          >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI16         >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI32         >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::  Int) => self.save_tiff_internal::<RGBAI64         >(filename)?,
+
+            (ChannelCount::     Rgba, ChannelSize:: _8bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA8           >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_16bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA16          >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA32          >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType:: UInt) => self.save_tiff_internal::<RGBA64          >(filename)?,
+
+            (ChannelCount::     Rgba, ChannelSize::_32bit, ChannelType::Float) => self.save_tiff_internal::<RGBA32Float     >(filename)?,
+            (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::Float) => self.save_tiff_internal::<RGBA64Float     >(filename)?,
 
             // @formatter:on
             (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", self.channel_count, self.channel_size, self.channel_type)),
