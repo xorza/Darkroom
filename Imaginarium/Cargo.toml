@@ -8,7 +8,6 @@ edition = "2021"
 tiff =  { workspace = true }
 png =  { workspace = true }
 image =  { workspace = true }
-ocl =  { workspace = true }
 anyhow = { workspace = true }
 wgpu = { workspace = true }
 pollster = { workspace = true }
