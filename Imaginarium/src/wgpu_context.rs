@@ -197,7 +197,6 @@ impl VertexBuffer {
 pub(crate) struct Shader {
     pub(crate) module: wgpu::ShaderModule,
     pub(crate) bind_group_layout: wgpu::BindGroupLayout,
-    pub(crate) pipeline_layout: wgpu::PipelineLayout,
     pub(crate) pipeline: wgpu::RenderPipeline,
 }
 
@@ -289,7 +288,6 @@ impl Shader {
         Self {
             module,
             bind_group_layout,
-            pipeline_layout,
             pipeline,
         }
     }
