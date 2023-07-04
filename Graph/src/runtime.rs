@@ -12,7 +12,7 @@ pub struct Runtime {}
 
 #[derive(Default, Clone)]
 pub struct RuntimeOutput {
-    connection_count: u32,
+    pub connection_count: u32,
 }
 
 #[derive(Clone)]

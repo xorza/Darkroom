@@ -117,6 +117,7 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
     let mut runtime = Runtime::default();
 
     let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
+    assert_eq!(runtime_info.node_by_name("sum").unwrap().outputs[0].connection_count, 1);
 
     let runtime_info = runtime.run(&graph, &runtime_info)?;
     assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
@@ -124,6 +125,7 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
     assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
     assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
     assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    assert_eq!(runtime_info.node_by_name("sum").unwrap().outputs[0].connection_count, 0);
 
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     let runtime_info = runtime.run(&graph, &runtime_info)?;
