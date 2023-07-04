@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
-use crate::wgpu_context::{Rect, Vert, WgpuContext};
+use crate::wgpu_context::{Shader, TextureSize, Vert2D, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -42,6 +42,34 @@ fn it_works() {
         src_tex1_extent,
     );
 
+    let src_tex2_extent = wgpu::Extent3d {
+        width: img2.width,
+        height: img2.height,
+        depth_or_array_layers: 1,
+    };
+    let src_tex2 = device.create_texture(&wgpu::TextureDescriptor {
+        size: src_tex2_extent,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+        label: Some("tex 2"),
+    });
+    let src_tex2_view = src_tex2.create_view(&wgpu::TextureViewDescriptor::default());
+    queue.write_texture(
+        src_tex2.as_image_copy(),
+        &img2.bytes,
+        wgpu::ImageDataLayout {
+            offset: 0,
+            bytes_per_row: Some(img2.stride),
+            rows_per_image: None,
+        },
+        src_tex2_extent,
+    );
+
+
     let dst_tex_extent = wgpu::Extent3d {
         width: img2.width,
         height: img2.height,
@@ -53,28 +81,19 @@ fn it_works() {
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::COPY_SRC,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
-        label: Some("tex 2"),
+        label: Some("target texture"),
     });
     let dst_tex_view = dst_tex.create_view(&wgpu::TextureViewDescriptor::default());
-    queue.write_texture(
-        dst_tex.as_image_copy(),
-        &img2.bytes,
-        wgpu::ImageDataLayout {
-            offset: 0,
-            bytes_per_row: Some(img2.stride),
-            rows_per_image: None,
-        },
-        dst_tex_extent,
-    );
 
 
-    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-        label: None,
-    });
 
+    let shader = Shader::new(device, include_str!("shader.wgsl"));
+    let texture_size = [
+        TextureSize([img1.width as f32, img1.height as f32]),
+        TextureSize([img2.width as f32, img2.height as f32]),
+    ];
 
 
     let mut encoder = device
@@ -82,9 +101,11 @@ fn it_works() {
 
     context.draw_one(
         &mut encoder,
-        &src_tex1_view,
-        &dst_tex_view,
         &shader,
+        &src_tex1_view,
+        &src_tex2_view,
+        &dst_tex_view,
+        &texture_size,
     );
 
 
