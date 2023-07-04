@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::data::Value;
 use crate::graph::{BindingBehavior, FunctionBehavior, Graph};
 use crate::invoke::LambdaInvoker;
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, RuntimeInfo};
 
 static mut RESULT: i64 = 0;
 static mut A: i64 = 2;
@@ -61,7 +61,7 @@ fn create_invoker<GetA, GetB, SetResult>(
 
 #[test]
 fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
-    let invoker = create_invoker(
+    let _invoker = create_invoker(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
         |result| unsafe { RESULT = result; },
@@ -88,7 +88,8 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         mult_inputs[1].binding = None;
     }
 
-    compute.run(&graph, &invoker)?;
+    let _runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
+    todo!("call invoker");
     assert_eq!(unsafe { RESULT }, 360);
 
     drop(graph);
@@ -99,7 +100,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
 #[test]
 fn simple_compute_test() -> anyhow::Result<()> {
-    let invoker = create_invoker(
+    let _invoker = create_invoker(
         || unsafe { A },
         || unsafe { B },
         |result| unsafe { RESULT = result; },
@@ -108,15 +109,15 @@ fn simple_compute_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut compute = Runtime::default();
 
-    compute.run(&graph, &invoker)?;
+    let runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 35);
 
-    compute.run(&graph, &invoker)?;
+    let runtime_info = compute.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    compute.run(&graph, &invoker)?;
+    let runtime_info = compute.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 49);
 
     graph
@@ -124,7 +125,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
         .inputs.get_mut(0).unwrap()
         .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
 
-    compute.run(&graph, &invoker)?;
+    compute.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 63);
 
     drop(graph);

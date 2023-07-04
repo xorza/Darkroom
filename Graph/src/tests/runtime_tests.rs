@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::data::Value;
 use crate::graph::*;
 use crate::invoke::{InvokeArgs, Invoker, LambdaInvoker};
-use crate::runtime::Runtime;
+use crate::runtime::{Runtime, RuntimeInfo};
 
 struct EmptyInvoker {}
 
@@ -20,11 +20,10 @@ impl Invoker for EmptyInvoker {
 fn simple_run() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    let nodes = runtime.run(&graph, &invoker)?;
-    assert!(nodes.nodes.iter().all(|_node| _node.executed));
-    assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
+    let nodes = runtime.run(&graph, &RuntimeInfo::default())?;
+    assert!(nodes.nodes.iter().all(|_node| _node.should_execute));
+    assert!(nodes.nodes.iter().all(|_node| _node.has_outputs));
 
     Ok(())
 }
@@ -33,17 +32,16 @@ fn simple_run() -> anyhow::Result<()> {
 fn double_run() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    runtime.run(&graph, &invoker)?;
+    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
 
-    let nodes = runtime.run(&graph, &invoker)?;
-    assert!(nodes.nodes.iter().all(|node| node.has_arguments));
-    assert!(!nodes.node_by_name("val1").unwrap().executed);
-    assert!(!nodes.node_by_name("val2").unwrap().executed);
-    assert!(!nodes.node_by_name("sum").unwrap().executed);
-    assert!(!nodes.node_by_name("mult").unwrap().executed);
-    assert!(nodes.node_by_name("print").unwrap().executed);
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(runtime_info.nodes.iter().all(|node| node.has_outputs));
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -52,18 +50,17 @@ fn double_run() -> anyhow::Result<()> {
 fn node_behavior_active_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    runtime.run(&graph, &invoker)?;
+    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
 
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let nodes = runtime.run(&graph, &invoker)?;
-    assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(!nodes.node_by_name("val1").unwrap().executed);
-    assert!(nodes.node_by_name("val2").unwrap().executed);
-    assert!(!nodes.node_by_name("sum").unwrap().executed);
-    assert!(nodes.node_by_name("mult").unwrap().executed);
-    assert!(nodes.node_by_name("print").unwrap().executed);
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -72,22 +69,21 @@ fn node_behavior_active_test() -> anyhow::Result<()> {
 fn edge_behavior_once_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    runtime.run(&graph, &invoker)?;
+    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
 
     graph.node_by_name_mut("mult").unwrap()
         .inputs.get_mut(1).unwrap()
         .binding.as_mut().unwrap()
         .behavior = BindingBehavior::Once;
 
-    let nodes = runtime.run(&graph, &invoker)?;
-    assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(!nodes.node_by_name("val1").unwrap().executed);
-    assert!(!nodes.node_by_name("val2").unwrap().executed);
-    assert!(!nodes.node_by_name("sum").unwrap().executed);
-    assert!(!nodes.node_by_name("mult").unwrap().executed);
-    assert!(nodes.node_by_name("print").unwrap().executed);
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -96,22 +92,21 @@ fn edge_behavior_once_test() -> anyhow::Result<()> {
 fn edge_behavior_always_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    runtime.run(&graph, &invoker)?;
+    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
 
     graph.node_by_name_mut("sum").unwrap()
         .inputs.get_mut(0).unwrap()
         .binding.as_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
-    let nodes = runtime.run(&graph, &invoker)?;
-    assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-    assert!(nodes.node_by_name("val1").unwrap().executed);
-    assert!(!nodes.node_by_name("val2").unwrap().executed);
-    assert!(nodes.node_by_name("sum").unwrap().executed);
-    assert!(nodes.node_by_name("mult").unwrap().executed);
-    assert!(nodes.node_by_name("print").unwrap().executed);
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -120,52 +115,47 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
 fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let mut runtime = Runtime::default();
-    let invoker = EmptyInvoker {};
 
-    runtime.run(&graph, &invoker)?;
+    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
 
-    {
-        let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val1").unwrap().executed);
-        assert!(!nodes.node_by_name("val2").unwrap().executed);
-        assert!(!nodes.node_by_name("sum").unwrap().executed);
-        assert!(!nodes.node_by_name("mult").unwrap().executed);
-        assert!(nodes.node_by_name("print").unwrap().executed);
-    }
-    {
-        graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-        let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val1").unwrap().executed);
-        assert!(nodes.node_by_name("val2").unwrap().executed);
-        assert!(!nodes.node_by_name("sum").unwrap().executed);
-        assert!(nodes.node_by_name("mult").unwrap().executed);
-        assert!(nodes.node_by_name("print").unwrap().executed);
-    }
-    {
-        graph.node_by_name_mut("mult").unwrap()
-            .inputs.get_mut(1).unwrap()
-            .binding.as_mut().unwrap()
-            .behavior = BindingBehavior::Once;
-        let nodes = runtime.run(&graph, &invoker)?;
-        assert!(!nodes.node_by_name("val1").unwrap().executed);
-        assert!(!nodes.node_by_name("val2").unwrap().executed);
-        assert!(!nodes.node_by_name("sum").unwrap().executed);
-        assert!(!nodes.node_by_name("mult").unwrap().executed);
-        assert!(nodes.node_by_name("print").unwrap().executed);
-    }
-    {
-        graph.node_by_name_mut("sum").unwrap()
-            .inputs.get_mut(1).unwrap()
-            .binding.as_mut().unwrap()
-            .behavior = BindingBehavior::Always;
-        let nodes = runtime.run(&graph, &invoker)?;
-        assert!(nodes.nodes.iter().all(|_node| _node.has_arguments));
-        assert!(nodes.node_by_name("val1").unwrap().executed);
-        assert!(nodes.node_by_name("val2").unwrap().executed);
-        assert!(nodes.node_by_name("sum").unwrap().executed);
-        assert!(nodes.node_by_name("mult").unwrap().executed);
-        assert!(nodes.node_by_name("print").unwrap().executed);
-    }
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+
+    graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+
+    graph.node_by_name_mut("mult").unwrap()
+        .inputs.get_mut(1).unwrap()
+        .binding.as_mut().unwrap()
+        .behavior = BindingBehavior::Once;
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+
+    graph.node_by_name_mut("sum").unwrap()
+        .inputs.get_mut(1).unwrap()
+        .binding.as_mut().unwrap()
+        .behavior = BindingBehavior::Always;
+    let runtime_info = runtime.run(&graph, &runtime_info)?;
+    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(runtime_info.node_by_name("val1").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("sum").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
+    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+
 
     Ok(())
 }
