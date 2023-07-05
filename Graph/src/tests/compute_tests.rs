@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use uuid::Uuid;
 
-use crate::compute::{Compute, ComputeInfo, LambdaInvoker};
+use crate::compute::{Compute, ComputeInfo, LambdaCompute};
 use crate::data::Value;
 use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
 use crate::preprocess::{Preprocess, PreprocessInfo};
@@ -22,13 +22,13 @@ fn setup() {
 
 fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
-) -> anyhow::Result<LambdaInvoker>
+) -> anyhow::Result<LambdaCompute>
     where
         SetResult: Fn(i64) + 'static,
         GetA: Fn() -> i64 + 'static,
         GetB: Fn() -> i64 + 'static,
 {
-    let mut compute = LambdaInvoker::new();
+    let mut compute = LambdaCompute::new();
 
     // print func
     compute.add_lambda(Uuid::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, move |_, inputs, _| {

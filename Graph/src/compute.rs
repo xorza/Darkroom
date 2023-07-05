@@ -33,11 +33,13 @@ pub struct NodeInvokeInfo {
 pub struct ComputeInfo {
     arg_cache: ArgCache,
     node_invoke_infos: Vec<NodeInvokeInfo>,
-    context_cache: HashMap<Uuid, RefCell<Box<dyn Any>>>,
+    context_cache: HashMap<Uuid, RefCell<DynamicContext>>,
 }
 
+pub type DynamicContext = Box<dyn Any>;
+
 pub trait Invokable {
-    fn call(&self, ctx: &mut Box<dyn Any>, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
+    fn call(&self, ctx: &mut DynamicContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
 }
 
 pub trait Compute {
@@ -128,31 +130,31 @@ pub trait Compute {
 
     fn invoke(&self,
               function_id: Uuid,
-              ctx: &mut Box<dyn Any>,
+              ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>;
 }
 
-pub type Lambda = dyn Fn(&mut Box<dyn Any>, &InvokeArgs, &mut InvokeArgs) + 'static;
+pub type Lambda = dyn Fn(&mut DynamicContext, &InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
     lambda: Box<Lambda>,
 }
 
-pub struct LambdaInvoker {
+pub struct LambdaCompute {
     lambdas: HashMap<Uuid, LambdaInvokable>,
 }
 
-impl LambdaInvoker {
-    pub fn new() -> LambdaInvoker {
-        LambdaInvoker {
+impl LambdaCompute {
+    pub fn new() -> LambdaCompute {
+        LambdaCompute {
             lambdas: HashMap::new(),
         }
     }
 
     pub fn add_lambda<F>(&mut self, function_id: Uuid, lambda: F)
-        where F: Fn(&mut Box<dyn Any>, &InvokeArgs, &mut InvokeArgs) + 'static
+        where F: Fn(&mut DynamicContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
@@ -161,10 +163,10 @@ impl LambdaInvoker {
     }
 }
 
-impl Compute for LambdaInvoker {
+impl Compute for LambdaCompute {
     fn invoke(&self,
               function_id: Uuid,
-              ctx: &mut Box<dyn Any>,
+              ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>

@@ -8,7 +8,7 @@ use mlua::{Error, Function, Lua, Table, Variadic};
 use uuid::Uuid;
 
 use crate::{compute, data, functions};
-use crate::compute::{Compute, InvokeArgs};
+use crate::compute::{Compute, DynamicContext, InvokeArgs};
 use crate::data::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
 use crate::preprocess::PreprocessInfo;
@@ -310,7 +310,7 @@ impl Drop for LuaInvoker {
 impl Compute for LuaInvoker {
     fn invoke(&self,
               function_id: Uuid,
-              _ctx: &mut Box<dyn Any>,
+              _ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
         -> anyhow::Result<()>

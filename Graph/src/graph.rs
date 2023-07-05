@@ -11,6 +11,7 @@ pub enum FunctionBehavior {
     Passive,
 }
 
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: Uuid,

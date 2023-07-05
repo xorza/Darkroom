@@ -4,7 +4,7 @@ use std::str::FromStr;
 use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
-use crate::compute::{ArgSet, Compute, InvokeArgs};
+use crate::compute::{ArgSet, Compute, DynamicContext, InvokeArgs};
 use crate::functions::Functions;
 use crate::lua_invoker::LuaInvoker;
 
@@ -80,7 +80,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
     let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
 
-    let mut ctx:Box<dyn Any> =  Box::new(());
+    let mut ctx: DynamicContext = Box::new(());
     // call 'mult' function
     invoker.invoke(
         Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
