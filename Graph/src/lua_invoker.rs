@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::mem::transmute;
 use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, Table, Variadic};
@@ -301,10 +300,7 @@ impl Drop for LuaInvoker {
     fn drop(&mut self) {
         self.funcs.clear();
 
-        unsafe {
-            let lua = transmute::<&'static Lua, Box<Lua>>(self.lua);
-            drop(lua);
-        }
+        let _: Box<Lua> = unsafe { Box::from_raw((self.lua as *const Lua) as *mut Lua) };
     }
 }
 
@@ -314,7 +310,7 @@ impl Compute for LuaInvoker {
               _ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
-        -> anyhow::Result<()>
+              -> anyhow::Result<()>
     {
         // self.lua.globals().set("context_id", context_id.to_string())?;
 
