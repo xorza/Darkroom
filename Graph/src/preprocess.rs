@@ -144,12 +144,10 @@ impl Preprocess {
                 .collect::<Vec<&PreprocessInput>>();
 
             let has_missing_inputs = pp_inputs.iter()
-                .any(|node| node.has_missing_inputs);
-
-            let pp_outputs: Vec<PreprocessOutput> = vec![PreprocessOutput::default(); node.outputs.len()];
+                .any(|pp_input| pp_input.has_missing_inputs);
 
             let has_outputs = prev_run.nodes.iter()
-                .any(|node| node.node_id == node_id && node.has_outputs);
+                .any(|pp_node| pp_node.node_id == node_id && pp_node.has_outputs);
 
             let is_output = pp_inputs.iter()
                 .any(|pp_input| pp_input.is_output);
@@ -157,7 +155,7 @@ impl Preprocess {
             pp_nodes.nodes.push(PreprocessNode {
                 node_id,
                 has_missing_inputs,
-                outputs: pp_outputs,
+                outputs: vec![PreprocessOutput::default(); node.outputs.len()],
                 has_outputs,
                 should_execute: false,
                 execution_index: None,

@@ -74,9 +74,9 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
             .node_by_name_mut("sum").unwrap()
             .inputs;
         sum_inputs[0].const_value = Some(Value::from(29));
-        sum_inputs[0].binding = Binding::None;
+        sum_inputs[0].binding = Binding::Const;
         sum_inputs[1].const_value = Some(Value::from(11));
-        sum_inputs[1].binding = Binding::None;
+        sum_inputs[1].binding = Binding::Const;
     }
 
     {
@@ -84,7 +84,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
             .node_by_name_mut("mult").unwrap()
             .inputs;
         mult_inputs[1].const_value = Some(Value::from(9));
-        mult_inputs[1].binding = Binding::None;
+        mult_inputs[1].binding = Binding::Const;
     }
 
     let preprocess = Preprocess::default();
