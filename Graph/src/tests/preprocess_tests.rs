@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::compute::{Compute, DynamicContext, InvokeArgs, LambdaCompute};
 use crate::data::Value;
+use crate::functions::FunctionId;
 use crate::graph::*;
 use crate::preprocess::{Preprocess, PreprocessInfo};
 
@@ -12,7 +13,7 @@ struct EmptyInvoker {}
 
 impl Compute for EmptyInvoker {
     fn invoke(&self,
-              _function_id: Uuid,
+              _function_id: FunctionId,
               _ctx: &mut DynamicContext,
               _inputs: &InvokeArgs,
               _outputs: &mut InvokeArgs)

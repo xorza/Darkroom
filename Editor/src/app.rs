@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
-use graph_lib::functions::Function;
+use graph_lib::functions::{Function, FunctionId};
 use graph_lib::graph::{Binding, FunctionBehavior, Input, NodeId, Output};
 
 #[derive(Clone, Debug, Default)]
@@ -207,7 +207,7 @@ impl FunctionTemplates {
         self.templates = funcs;
     }
 
-    fn function_by_id(&self, id: Uuid) -> Option<&graph_lib::functions::Function> {
+    fn function_by_id(&self, id: FunctionId) -> Option<&graph_lib::functions::Function> {
         self.templates.iter().find(|f| f.0.id() == id).map(|f| &f.0)
     }
 }

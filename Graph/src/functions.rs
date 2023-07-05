@@ -9,6 +9,7 @@ pub struct OutputInfo {
     pub name: String,
     pub data_type: DataType,
 }
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct InputInfo {
     pub name: String,
@@ -17,9 +18,12 @@ pub struct InputInfo {
     pub const_value: Option<Value>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default,Hash, Serialize, Deserialize)]
+pub struct FunctionId(Uuid);
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Function {
-    self_id: Uuid,
+    self_id: FunctionId,
     pub name: String,
     pub behavior: FunctionBehavior,
     pub is_output: bool,
@@ -58,10 +62,10 @@ impl Functions {
         }
     }
 
-    pub fn function_by_id(&self, func_id: Uuid) -> Option<&Function> {
+    pub fn function_by_id(&self, func_id: FunctionId) -> Option<&Function> {
         self.functions.iter().find(|func| func.self_id == func_id)
     }
-    pub fn function_by_id_mut(&mut self, func_id: Uuid) -> Option<&mut Function> {
+    pub fn function_by_id_mut(&mut self, func_id: FunctionId) -> Option<&mut Function> {
         self.functions.iter_mut().find(|func| func.self_id == func_id)
     }
 
@@ -79,14 +83,33 @@ impl Functions {
 }
 
 impl Function {
-    pub fn new(func_id: Uuid) -> Function {
+    pub fn new(func_id: FunctionId) -> Function {
         Function {
             self_id: func_id,
             ..Self::default()
         }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> FunctionId {
         self.self_id
     }
 }
+
+impl FunctionId {
+    pub fn new() -> FunctionId {
+        FunctionId(Uuid::new_v4())
+    }
+    pub fn nil() -> FunctionId {
+        FunctionId(Uuid::nil())
+    }
+
+    pub fn is_nil(&self) -> bool {
+        self.0 == Uuid::nil()
+    }
+
+    pub fn from_str(id: &str) -> anyhow::Result<FunctionId> {
+        let uuid = Uuid::parse_str(id)?;
+        Ok(FunctionId(uuid))
+    }
+}
+

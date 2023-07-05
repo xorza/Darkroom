@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::data::{DataType, Value};
-use crate::functions::Function;
+use crate::functions::{Function, FunctionId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FunctionBehavior {
@@ -18,7 +18,7 @@ pub struct NodeId(Uuid);
 pub struct Node {
     self_id: NodeId,
 
-    pub function_id: Uuid,
+    pub function_id: FunctionId,
 
     pub name: String,
     pub behavior: FunctionBehavior,
@@ -297,7 +297,7 @@ impl Node {
     pub fn new() -> Node {
         Node {
             self_id: NodeId::new(),
-            function_id: Uuid::nil(),
+            function_id: FunctionId::nil(),
             name: "".to_string(),
             behavior: FunctionBehavior::Active,
             is_output: false,

@@ -5,7 +5,7 @@ use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
 use crate::compute::{ArgSet, Compute, DynamicContext, InvokeArgs};
-use crate::functions::Functions;
+use crate::functions::{FunctionId, Functions};
 use crate::lua_invoker::LuaInvoker;
 
 #[test]
@@ -83,7 +83,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut ctx: DynamicContext = Box::new(());
     // call 'mult' function
     invoker.invoke(
-        Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+        FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
         &mut ctx,
         inputs.as_slice(),
         outputs.as_mut_slice(),

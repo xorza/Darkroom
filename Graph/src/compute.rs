@@ -6,6 +6,7 @@ use std::ops::{Index, IndexMut};
 use uuid::Uuid;
 
 use crate::data::{DataType, Value};
+use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, NodeId};
 use crate::preprocess::PreprocessInfo;
 
@@ -129,7 +130,7 @@ pub trait Compute {
     }
 
     fn invoke(&self,
-              function_id: Uuid,
+              function_id: FunctionId,
               ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
@@ -143,7 +144,7 @@ pub struct LambdaInvokable {
 }
 
 pub struct LambdaCompute {
-    lambdas: HashMap<Uuid, LambdaInvokable>,
+    lambdas: HashMap<FunctionId, LambdaInvokable>,
 }
 
 impl LambdaCompute {
@@ -153,7 +154,7 @@ impl LambdaCompute {
         }
     }
 
-    pub fn add_lambda<F>(&mut self, function_id: Uuid, lambda: F)
+    pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
         where F: Fn(&mut DynamicContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
         let invokable = LambdaInvokable {
@@ -165,7 +166,7 @@ impl LambdaCompute {
 
 impl Compute for LambdaCompute {
     fn invoke(&self,
-              function_id: Uuid,
+              function_id: FunctionId,
               ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)

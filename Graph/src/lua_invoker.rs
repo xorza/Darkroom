@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::{compute, data, functions};
 use crate::compute::{Compute, DynamicContext, InvokeArgs};
 use crate::data::DataType;
+use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
 use crate::preprocess::PreprocessInfo;
 
@@ -33,7 +34,7 @@ struct FuncConnections {
 pub(crate) struct LuaInvoker {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache>>,
-    funcs: HashMap<Uuid, LuaFuncInfo>,
+    funcs: HashMap<FunctionId, LuaFuncInfo>,
 }
 
 impl Default for LuaInvoker {
@@ -113,7 +114,7 @@ impl LuaInvoker {
     fn function_from_table(table: &Table) -> anyhow::Result<functions::Function> {
         let id_str: String = table.get("id")?;
 
-        let mut function_info = functions::Function::new(Uuid::parse_str(&id_str)?);
+        let mut function_info = functions::Function::new(FunctionId::from_str(&id_str)?);
         function_info.name = table.get("name")?;
         function_info.inputs = Vec::new();
         function_info.outputs = Vec::new();
@@ -309,7 +310,7 @@ impl Drop for LuaInvoker {
 
 impl Compute for LuaInvoker {
     fn invoke(&self,
-              function_id: Uuid,
+              function_id: FunctionId,
               _ctx: &mut DynamicContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
