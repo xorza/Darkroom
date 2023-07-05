@@ -1,3 +1,5 @@
+use std::any::Any;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
@@ -31,6 +33,11 @@ pub struct NodeInvokeInfo {
 pub struct ComputeInfo {
     arg_cache: ArgCache,
     node_invoke_infos: Vec<NodeInvokeInfo>,
+    context_cache: HashMap<Uuid, RefCell<Box<dyn Any>>>,
+}
+
+pub trait Invokable {
+    fn call(&self, ctx: &mut Box<dyn Any>, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
 }
 
 pub trait Compute {
@@ -81,9 +88,20 @@ pub trait Compute {
                 .enumerate()
                 .for_each(|(index, value)| inputs[index] = value);
 
+            let mut ctx = prev_compute_info.context_cache
+                .get(&node.id())
+                .and_then(|ctx|
+                    Some(ctx.replace(Box::new(())))
+                )
+                .unwrap_or_else(|| Box::new(()));
+
             let start = std::time::Instant::now();
-            self.invoke(node.function_id, node.id(), inputs.as_slice(), outputs.as_mut_slice())?;
+            self.invoke(node.function_id, &mut ctx, inputs.as_slice(), outputs.as_mut_slice())?;
             let elapsed = start.elapsed();
+
+            let insert_result
+                = compute_info.context_cache.insert(node.id(), RefCell::new(ctx));
+            assert!(insert_result.is_none());
 
             compute_info.node_invoke_infos.push(NodeInvokeInfo {
                 node_id: node.id(),
@@ -110,18 +128,16 @@ pub trait Compute {
 
     fn invoke(&self,
               function_id: Uuid,
-              context_id: Uuid,
+              ctx: &mut Box<dyn Any>,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>;
 }
 
-pub trait Invokable {
-    fn call(&self, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
-}
+pub type Lambda = dyn Fn(&mut Box<dyn Any>, &InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
-    lambda: Box<dyn Fn(Uuid, &InvokeArgs, &mut InvokeArgs)>,
+    lambda: Box<Lambda>,
 }
 
 pub struct LambdaInvoker {
@@ -135,7 +151,9 @@ impl LambdaInvoker {
         }
     }
 
-    pub fn add_lambda<F: Fn(Uuid, &InvokeArgs, &mut InvokeArgs) + 'static>(&mut self, function_id: Uuid, lambda: F) {
+    pub fn add_lambda<F>(&mut self, function_id: Uuid, lambda: F)
+        where F: Fn(&mut Box<dyn Any>, &InvokeArgs, &mut InvokeArgs) + 'static
+    {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
@@ -146,13 +164,13 @@ impl LambdaInvoker {
 impl Compute for LambdaInvoker {
     fn invoke(&self,
               function_id: Uuid,
-              context_id: Uuid,
+              ctx: &mut Box<dyn Any>,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>
     {
         let invokable = self.lambdas.get(&function_id).unwrap();
-        (invokable.lambda)(context_id, inputs, outputs);
+        (invokable.lambda)(ctx, inputs, outputs);
 
         Ok(())
     }

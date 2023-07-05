@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::mem::transmute;
@@ -307,8 +308,14 @@ impl Drop for LuaInvoker {
 }
 
 impl Compute for LuaInvoker {
-    fn invoke(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
-        self.lua.globals().set("context_id", context_id.to_string())?;
+    fn invoke(&self,
+              function_id: Uuid,
+              _ctx: &mut Box<dyn Any>,
+              inputs: &InvokeArgs,
+              outputs: &mut InvokeArgs)
+        -> anyhow::Result<()>
+    {
+        // self.lua.globals().set("context_id", context_id.to_string())?;
 
         let function_info = self.funcs
             .get(&function_id)

@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::str::FromStr;
 
 use uuid::Uuid;
@@ -12,7 +13,7 @@ struct EmptyInvoker {}
 impl Compute for EmptyInvoker {
     fn invoke(&self,
               _function_id: Uuid,
-              _context_id: Uuid,
+              _ctx: &mut Box<dyn Any>,
               _inputs: &InvokeArgs,
               _outputs: &mut InvokeArgs)
         -> anyhow::Result<()> {

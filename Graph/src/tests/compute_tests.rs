@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::str::FromStr;
 
 use uuid::Uuid;
@@ -18,7 +19,6 @@ fn setup() {
         B = 5;
     }
 }
-
 
 fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
@@ -58,7 +58,6 @@ fn create_compute<GetA, GetB, SetResult>(
     Ok(compute)
 }
 
-
 #[test]
 fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
     let compute = create_compute(
@@ -96,7 +95,6 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
     Ok(())
 }
-
 
 #[test]
 fn simple_compute_test() -> anyhow::Result<()> {
@@ -137,3 +135,4 @@ fn simple_compute_test() -> anyhow::Result<()> {
 
     Ok(())
 }
+
