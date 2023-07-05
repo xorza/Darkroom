@@ -2,13 +2,13 @@ use std::{borrow::Cow, collections::HashMap};
 
 use eframe::egui::{self, DragValue, TextStyle, Widget};
 use egui_file::{DialogType, FileDialog};
-use egui_node_graph::*;
+use egui_node_graph as eng;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use graph_lib::data::{DataType, Value};
 use graph_lib::functions::Function;
-use graph_lib::graph::{Binding, FunctionBehavior, Input, Output};
+use graph_lib::graph::{Binding, FunctionBehavior, Input, NodeId, Output};
 
 #[derive(Clone, Debug, Default)]
 pub struct EditorNode {
@@ -26,11 +26,11 @@ enum NodeCategory {}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MyResponse {
-    ToggleNodeOutput(NodeId),
+    ToggleNodeOutput(eng::NodeId),
 }
 
-type EditorGraph = Graph<EditorNode, DataType, EditorValue>;
-type EditorState = GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyState>;
+type EditorGraph = eng::Graph<EditorNode, DataType, EditorValue>;
+type EditorState = eng::GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, MyState>;
 
 #[derive(Default, Clone, Debug)]
 struct FunctionTemplates {
@@ -52,13 +52,13 @@ pub struct NodeshopApp {
 }
 
 
-impl CategoryTrait for NodeCategory {
+impl eng::CategoryTrait for NodeCategory {
     fn name(&self) -> String {
         "test_category".to_string()
     }
 }
 
-impl DataTypeTrait<MyState> for DataType {
+impl eng::DataTypeTrait<MyState> for DataType {
     fn data_type_color(&self, _user_state: &mut MyState) -> egui::Color32 {
         match self {
             DataType::Int => egui::Color32::from_rgb(38, 109, 211),
@@ -71,7 +71,7 @@ impl DataTypeTrait<MyState> for DataType {
     }
 }
 
-impl NodeTemplateTrait for FunctionTemplate {
+impl eng::NodeTemplateTrait for FunctionTemplate {
     type NodeData = EditorNode;
     type DataType = DataType;
     type ValueType = EditorValue;
@@ -102,7 +102,7 @@ impl NodeTemplateTrait for FunctionTemplate {
         &self,
         graph: &mut EditorGraph,
         user_state: &mut Self::UserState,
-        node_id: NodeId,
+        node_id: eng::NodeId,
     ) {
         let input_scalar = |graph: &mut EditorGraph, name: &str| {
             graph.add_input_param(
@@ -110,7 +110,7 @@ impl NodeTemplateTrait for FunctionTemplate {
                 name.to_string(),
                 DataType::Int,
                 EditorValue(Value::Int(0)),
-                InputParamKind::ConnectionOrConstant,
+                eng::InputParamKind::ConnectionOrConstant,
                 true,
             );
         };
@@ -129,7 +129,7 @@ impl NodeTemplateTrait for FunctionTemplate {
     }
 }
 
-impl WidgetValueTrait for EditorValue {
+impl eng::WidgetValueTrait for EditorValue {
     type Response = MyResponse;
     type UserState = MyState;
     type NodeData = EditorNode;
@@ -137,7 +137,7 @@ impl WidgetValueTrait for EditorValue {
     fn value_widget(
         &mut self,
         param_name: &str,
-        _node_id: NodeId,
+        _node_id: eng::NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut MyState,
         _node_data: &EditorNode,
@@ -158,9 +158,9 @@ impl WidgetValueTrait for EditorValue {
     }
 }
 
-impl UserResponseTrait for MyResponse {}
+impl eng::UserResponseTrait for MyResponse {}
 
-impl NodeDataTrait for EditorNode {
+impl eng::NodeDataTrait for EditorNode {
     type Response = MyResponse;
     type UserState = MyState;
     type DataType = DataType;
@@ -169,12 +169,12 @@ impl NodeDataTrait for EditorNode {
     fn bottom_ui(
         &self,
         ui: &mut egui::Ui,
-        node_id: NodeId,
+        node_id: eng::NodeId,
         _graph: &EditorGraph,
         _user_state: &mut Self::UserState,
-    ) -> Vec<NodeResponse<MyResponse, EditorNode>>
+    ) -> Vec<eng::NodeResponse<MyResponse, EditorNode>>
         where
-            MyResponse: UserResponseTrait,
+            MyResponse: eng::UserResponseTrait,
     {
         let mut button: egui::Button;
         if self.is_output {
@@ -189,7 +189,7 @@ impl NodeDataTrait for EditorNode {
         button = button.min_size(egui::Vec2::new(70.0, 0.0));
 
         if button.ui(ui).clicked() {
-            vec![NodeResponse::User(MyResponse::ToggleNodeOutput(node_id))]
+            vec![eng::NodeResponse::User(MyResponse::ToggleNodeOutput(node_id))]
         } else {
             vec![]
         }
@@ -212,7 +212,7 @@ impl FunctionTemplates {
     }
 }
 
-impl NodeTemplateIter for FunctionTemplates {
+impl eng::NodeTemplateIter for FunctionTemplates {
     type Item = FunctionTemplate;
 
     fn all_kinds(&self) -> &Vec<Self::Item> {
@@ -251,7 +251,7 @@ impl eframe::App for NodeshopApp {
             .inner;
         for node_response in graph_response.node_responses {
             match node_response {
-                NodeResponse::User(user_event) => {
+                eng::NodeResponse::User(user_event) => {
                     match user_event {
                         MyResponse::ToggleNodeOutput(node) => {
                             let node = &mut self.state.graph.nodes[node].user_data;
@@ -283,14 +283,14 @@ impl eframe::App for NodeshopApp {
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 struct ArgAddress {
-    node_id: Uuid,
+    node_id: NodeId,
     arg_index: usize,
 }
 
 #[derive(Default, Serialize, Deserialize)]
 struct SerializedGraph {
     graph: graph_lib::graph::Graph,
-    positions: HashMap<Uuid, (f32, f32)>,
+    positions: HashMap<NodeId, (f32, f32)>,
 }
 
 impl NodeshopApp {
@@ -308,8 +308,8 @@ impl NodeshopApp {
 
         let mut graph = SerializedGraph::default();
 
-        let mut input_addresses = HashMap::<InputId, ArgAddress>::new();
-        let mut output_addresses = HashMap::<OutputId, ArgAddress>::new();
+        let mut input_addresses = HashMap::<eng::InputId, ArgAddress>::new();
+        let mut output_addresses = HashMap::<eng::OutputId, ArgAddress>::new();
 
         for (editor_node_id, editor_node) in editor_graph.nodes.iter() {
             let mut node = graph_lib::graph::Node::new();
@@ -392,8 +392,8 @@ impl NodeshopApp {
         let editor_graph = &mut self.state.graph;
 
 
-        let mut input_addresses = HashMap::<ArgAddress, InputId>::new();
-        let mut output_addresses = HashMap::<ArgAddress, OutputId>::new();
+        let mut input_addresses = HashMap::<ArgAddress, eng::InputId>::new();
+        let mut output_addresses = HashMap::<ArgAddress, eng::OutputId>::new();
 
         for (_index, node) in graph.graph.nodes().iter().enumerate() {
             let function = self.user_state.function_templates
@@ -406,7 +406,7 @@ impl NodeshopApp {
             };
 
             let node_add =
-                |editor_graph: &mut EditorGraph, editor_node_id: NodeId| {
+                |editor_graph: &mut EditorGraph, editor_node_id: eng::NodeId| {
                     for (index, input) in node.inputs.iter().enumerate() {
                         let default_value = input.const_value.clone()
                             .unwrap_or(Value::from(input.data_type));
@@ -416,7 +416,7 @@ impl NodeshopApp {
                             input.name.clone(),
                             input.data_type,
                             EditorValue(default_value),
-                            InputParamKind::ConnectionOrConstant,
+                            eng::InputParamKind::ConnectionOrConstant,
                             true);
 
                         input_addresses.insert(

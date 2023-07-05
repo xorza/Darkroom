@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::{compute, data, functions};
 use crate::compute::{Compute, DynamicContext, InvokeArgs};
 use crate::data::DataType;
-use crate::graph::{Binding, Graph, Input, Node, Output};
+use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
 use crate::preprocess::PreprocessInfo;
 
 #[derive(Default)]
@@ -223,7 +223,7 @@ impl LuaInvoker {
 
         struct OutputAddr {
             index: u32,
-            node_id: Uuid,
+            node_id: NodeId,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
         let mut nodes: Vec<Node> = Vec::new();
@@ -256,7 +256,7 @@ impl LuaInvoker {
                     data_type: output.data_type,
                 });
 
-                assert_ne!(node.id(), Uuid::nil());
+                assert!(!node.id().is_nil());
                 output_ids.insert(output_id, OutputAddr {
                     index: i as u32,
                     node_id: node.id(),

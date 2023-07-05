@@ -11,10 +11,12 @@ pub enum FunctionBehavior {
     Passive,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default,Hash, Serialize, Deserialize)]
+pub struct NodeId(Uuid);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
-    self_id: Uuid,
+    self_id: NodeId,
 
     pub function_id: Uuid,
 
@@ -46,7 +48,7 @@ pub enum BindingBehavior {
 
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputBinding {
-    pub output_node_id: Uuid,
+    pub output_node_id: NodeId,
     pub output_index: u32,
     pub behavior: BindingBehavior,
 }
@@ -71,7 +73,7 @@ pub struct Input {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct SubInputNodeConnection {
-    pub subnode_id: Uuid,
+    pub subnode_id: NodeId,
     pub subnode_input_index: u32,
 }
 
@@ -87,7 +89,7 @@ pub struct SubInput {
 pub struct SubOutput {
     pub name: String,
     pub data_type: DataType,
-    pub subnode_id: Uuid,
+    pub subnode_id: NodeId,
     pub subnode_output_index: u32,
 }
 
@@ -124,8 +126,8 @@ impl Graph {
             None => self.nodes.push(node),
         }
     }
-    pub fn remove_node_by_id(&mut self, id: Uuid) {
-        assert_ne!(id, Uuid::nil());
+    pub fn remove_node_by_id(&mut self, id: NodeId) {
+        assert_ne!(id.0, Uuid::nil());
 
         self.nodes.retain(|node| node.self_id != id);
 
@@ -149,15 +151,15 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.name == name)
     }
 
-    pub fn node_by_id(&self, id: Uuid) -> Option<&Node> {
-        assert_ne!(id, Uuid::nil());
+    pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
+        assert!(!id.is_nil());
 
         self.nodes
             .iter()
             .find(|node| node.self_id == id)
     }
-    pub fn node_by_id_mut(&mut self, id: Uuid) -> Option<&mut Node> {
-        assert_ne!(id, Uuid::nil());
+    pub fn node_by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+        assert!(!id.is_nil());
 
         self.nodes
             .iter_mut()
@@ -194,7 +196,7 @@ impl Graph {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
-            if node.self_id == Uuid::nil() {
+            if node.self_id == NodeId::nil() {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
 
@@ -269,7 +271,7 @@ impl Graph {
             .iter()
             .filter(|node| node.subgraph_id == Some(id))
             .map(|node| node.self_id)
-            .collect::<Vec<Uuid>>()
+            .collect::<Vec<NodeId>>()
             .iter()
             .cloned()
             .for_each(|node_id| {
@@ -294,7 +296,7 @@ impl Graph {
 impl Node {
     pub fn new() -> Node {
         Node {
-            self_id: Uuid::new_v4(),
+            self_id: NodeId::new(),
             function_id: Uuid::nil(),
             name: "".to_string(),
             behavior: FunctionBehavior::Active,
@@ -324,7 +326,7 @@ impl Node {
         }).collect();
 
         Node {
-            self_id: Uuid::new_v4(),
+            self_id: NodeId::new(),
             function_id: function.id(),
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
@@ -335,13 +337,13 @@ impl Node {
         }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> NodeId {
         self.self_id
     }
 }
 
 impl Binding {
-    pub fn from_output_binding(output_node_id: Uuid, output_index: u32) -> Binding {
+    pub fn from_output_binding(output_node_id: NodeId, output_index: u32) -> Binding {
         Binding::Output(OutputBinding {
             output_node_id,
             output_index,
@@ -399,5 +401,18 @@ impl FunctionBehavior {
             FunctionBehavior::Active => FunctionBehavior::Passive,
             FunctionBehavior::Passive => FunctionBehavior::Active,
         };
+    }
+}
+
+impl NodeId {
+    pub fn new() -> NodeId {
+        NodeId(Uuid::new_v4())
+    }
+    pub fn nil() -> NodeId {
+        NodeId(Uuid::nil())
+    }
+
+    pub fn is_nil(&self) -> bool {
+        self.0 == Uuid::nil()
     }
 }

@@ -6,12 +6,12 @@ use std::ops::{Index, IndexMut};
 use uuid::Uuid;
 
 use crate::data::{DataType, Value};
-use crate::graph::{Binding, Graph};
+use crate::graph::{Binding, Graph, NodeId};
 use crate::preprocess::PreprocessInfo;
 
 #[derive(Clone, Default, Hash, PartialEq, Eq)]
 pub struct OutputAddress {
-    node_id: Uuid,
+    node_id: NodeId,
     output_index: u32,
 }
 
@@ -25,7 +25,7 @@ pub(crate) struct ArgSet {
 pub type ArgCache = HashMap<OutputAddress, Option<Value>>;
 
 pub struct NodeInvokeInfo {
-    node_id: Uuid,
+    node_id: NodeId,
     runtime: f64,
 }
 
@@ -33,7 +33,7 @@ pub struct NodeInvokeInfo {
 pub struct ComputeInfo {
     arg_cache: ArgCache,
     node_invoke_infos: Vec<NodeInvokeInfo>,
-    context_cache: HashMap<Uuid, RefCell<DynamicContext>>,
+    context_cache: HashMap<NodeId, RefCell<DynamicContext>>,
 }
 
 pub type DynamicContext = Box<dyn Any>;

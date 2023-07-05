@@ -17,7 +17,7 @@ pub struct PreprocessOutput {
 
 #[derive(Clone)]
 pub struct PreprocessNode {
-    node_id: Uuid,
+    node_id: NodeId,
 
     pub name: String,
     pub outputs: Vec<PreprocessOutput>,
@@ -34,9 +34,9 @@ pub struct PreprocessNode {
 
 #[derive(Default, Clone)]
 struct PreprocessInput {
-    output_node_id: Uuid,
+    output_node_id: NodeId,
     output_index: u32,
-    input_node_id: Uuid,
+    input_node_id: NodeId,
     input_index: u32,
     has_missing_inputs: bool,
     connection_behavior: BindingBehavior,
@@ -69,7 +69,7 @@ impl Preprocess {
                 PreprocessInput {
                     output_node_id: node.id(),
                     output_index: 0,
-                    input_node_id: Uuid::nil(),
+                    input_node_id: NodeId::nil(),
                     input_index: 0,
                     has_missing_inputs: false,
                     connection_behavior: BindingBehavior::Always,
@@ -78,7 +78,7 @@ impl Preprocess {
             })
             .collect::<Vec<PreprocessInput>>();
 
-        let mut node_ids: HashSet<Uuid> = HashSet::new();
+        let mut node_ids: HashSet<NodeId> = HashSet::new();
 
         let mut i: usize = 0;
         while i < input_bindings.len() {
@@ -129,7 +129,7 @@ impl Preprocess {
         -> PreprocessInfo
     {
         let mut pp_nodes = PreprocessInfo::default();
-        let mut node_ids: HashSet<Uuid> = HashSet::new();
+        let mut node_ids: HashSet<NodeId> = HashSet::new();
 
         for pp_input in all_pp_inputs.iter().rev() {
             let node_id = pp_input.output_node_id;
@@ -205,12 +205,12 @@ impl Preprocess {
 
         pp_nodes
     }
-    fn create_exec_order(&self, graph: &Graph, pp_nodes: &PreprocessInfo) -> Vec<Uuid> {
+    fn create_exec_order(&self, graph: &Graph, pp_nodes: &PreprocessInfo) -> Vec<NodeId> {
         let mut exec_order = pp_nodes.nodes.iter()
             .rev()
             .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
             .map(|r_node| r_node.node_id)
-            .collect::<Vec<Uuid>>();
+            .collect::<Vec<NodeId>>();
 
         let mut i: usize = 0;
         while i < exec_order.len() {
@@ -248,7 +248,7 @@ impl Preprocess {
         &self,
         graph: &Graph,
         mut pp_nodes: PreprocessInfo,
-        order: Vec<Uuid>,
+        order: Vec<NodeId>,
     ) -> anyhow::Result<PreprocessInfo>
     {
         for (execution_index, i) in (0_u32..).zip(0..order.len()) {
@@ -291,7 +291,7 @@ impl Preprocess {
 }
 
 impl PreprocessNode {
-    pub fn node_id(&self) -> Uuid {
+    pub fn node_id(&self) -> NodeId {
         self.node_id
     }
 }
@@ -301,12 +301,12 @@ impl PreprocessInfo {
         self.nodes.iter().find(|node| node.name == name)
     }
 
-    pub fn node_by_id(&self, node_id: Uuid) -> &PreprocessNode {
+    pub fn node_by_id(&self, node_id: NodeId) -> &PreprocessNode {
         self.nodes.iter()
             .find(|node| node.node_id == node_id)
             .unwrap()
     }
-    pub fn node_by_id_mut(&mut self, node_id: Uuid) -> &mut PreprocessNode {
+    pub fn node_by_id_mut(&mut self, node_id: NodeId) -> &mut PreprocessNode {
         self.nodes.iter_mut()
             .find(|node| node.node_id == node_id)
             .unwrap()
