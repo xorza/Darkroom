@@ -8,17 +8,18 @@ nodes:
       - name: A
         data_type: Int
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
           output_index: 0
           behavior: Always
       - name: B
         data_type: Int
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
           output_index: 0
           behavior: Always
+        const_value: !Int 55
     outputs:
       - name: Prod
         data_type: Int
@@ -47,17 +48,19 @@ nodes:
       - name: A
         data_type: Int
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
           output_index: 0
           behavior: Once
+        const_value: !Int 123
       - name: B
         data_type: Int
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
           output_index: 0
           behavior: Once
+        const_value: !Int 12
     outputs:
       - name: Sum
         data_type: Int
@@ -70,7 +73,7 @@ nodes:
       - name: message
         data_type: Int
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 579ae1d6-10a3-4906-8948-135cb7d7508b
           output_index: 0
           behavior: Always

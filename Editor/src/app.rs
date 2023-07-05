@@ -331,7 +331,7 @@ impl NodeshopApp {
                         data_type: editor_input.typ,
                         is_required: true,
                         binding: None,
-                        default_value: Some(editor_value.clone()),
+                        const_value: Some(editor_value.clone()),
                     });
 
                     input_addresses.insert(*editor_input_id, ArgAddress {
@@ -372,7 +372,7 @@ impl NodeshopApp {
                 .get_mut(input_address.arg_index)
                 .unwrap();
 
-            input.binding = Some(Binding::new(
+            input.binding = Some(Binding::from_output_binding(
                 output_address.node_id,
                 output_address.arg_index as u32,
             ));
@@ -408,7 +408,7 @@ impl NodeshopApp {
             let node_add =
                 |editor_graph: &mut EditorGraph, editor_node_id: NodeId| {
                     for (index, input) in node.inputs.iter().enumerate() {
-                        let default_value = input.default_value.clone()
+                        let default_value = input.const_value.clone()
                             .unwrap_or(Value::from(input.data_type));
 
                         let input_id = editor_graph.add_input_param(

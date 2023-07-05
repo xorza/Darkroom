@@ -14,7 +14,7 @@ pub struct InputInfo {
     pub name: String,
     pub data_type: DataType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<Value>,
+    pub const_value: Option<Value>,
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]

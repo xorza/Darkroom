@@ -3,8 +3,8 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::data::Value;
-use crate::graph::{BindingBehavior, FunctionBehavior, Graph};
-use crate::invoke::LambdaInvoker;
+use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
+use crate::invoker::LambdaInvoker;
 use crate::runtime::{Runtime, RuntimeInfo};
 
 static mut RESULT: i64 = 0;
@@ -74,18 +74,18 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         let sum_inputs = &mut graph
             .node_by_name_mut("sum").unwrap()
             .inputs;
-        sum_inputs[0].default_value = Some(Value::from(29));
-        sum_inputs[0].binding = None;
-        sum_inputs[1].default_value = Some(Value::from(11));
-        sum_inputs[1].binding = None;
+        sum_inputs[0].const_value = Some(Value::from(29));
+        sum_inputs[0].binding = Binding::None;
+        sum_inputs[1].const_value = Some(Value::from(11));
+        sum_inputs[1].binding = Binding::None;
     }
 
     {
         let mult_inputs = &mut graph
             .node_by_name_mut("mult").unwrap()
             .inputs;
-        mult_inputs[1].default_value = Some(Value::from(9));
-        mult_inputs[1].binding = None;
+        mult_inputs[1].const_value = Some(Value::from(9));
+        mult_inputs[1].binding = Binding::None;
     }
 
     let _runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
@@ -123,9 +123,12 @@ fn simple_compute_test() -> anyhow::Result<()> {
     graph
         .node_by_name_mut("sum").unwrap()
         .inputs.get_mut(0).unwrap()
-        .binding.as_mut().unwrap().behavior = BindingBehavior::Always;
+        .binding.as_output_binding_mut().unwrap()
+        .behavior = BindingBehavior::Always;
 
-    compute.run(&graph, &runtime_info)?;
+    let _runtime_info =  compute.run(&graph, &runtime_info)?;
+    todo!("call invoker");
+
     assert_eq!(unsafe { RESULT }, 63);
 
     drop(graph);

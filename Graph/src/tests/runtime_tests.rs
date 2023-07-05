@@ -4,14 +4,14 @@ use uuid::Uuid;
 
 use crate::data::Value;
 use crate::graph::*;
-use crate::invoke::{InvokeArgs, Invoker, LambdaInvoker};
+use crate::invoker::{InvokeArgs, Invoker, LambdaInvoker};
 use crate::runtime::{Runtime, RuntimeInfo};
 
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
-    fn call(&self, _: Uuid, _: Uuid, _: &InvokeArgs, _: &mut InvokeArgs) -> anyhow::Result<()> {
-        Ok(())
+    fn invoke(function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
+        todo!()
     }
 }
 
@@ -74,7 +74,7 @@ fn edge_behavior_once_test() -> anyhow::Result<()> {
 
     graph.node_by_name_mut("mult").unwrap()
         .inputs.get_mut(1).unwrap()
-        .binding.as_mut().unwrap()
+        .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Once;
 
     let runtime_info = runtime.run(&graph, &runtime_info)?;
@@ -97,7 +97,7 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
 
     graph.node_by_name_mut("sum").unwrap()
         .inputs.get_mut(0).unwrap()
-        .binding.as_mut().unwrap()
+        .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
     let runtime_info = runtime.run(&graph, &runtime_info)?;
@@ -107,6 +107,8 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
     assert!(runtime_info.node_by_name("sum").unwrap().should_execute);
     assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
     assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    assert_eq!(runtime_info.node_by_name("val1").unwrap().outputs[0].connection_count, 1);
+    assert_eq!(runtime_info.node_by_name("val2").unwrap().outputs[0].connection_count, 0);
 
     Ok(())
 }
@@ -137,7 +139,7 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
 
     graph.node_by_name_mut("mult").unwrap()
         .inputs.get_mut(1).unwrap()
-        .binding.as_mut().unwrap()
+        .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Once;
     let runtime_info = runtime.run(&graph, &runtime_info)?;
     assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
@@ -148,7 +150,7 @@ fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
 
     graph.node_by_name_mut("sum").unwrap()
         .inputs.get_mut(1).unwrap()
-        .binding.as_mut().unwrap()
+        .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
     let runtime_info = runtime.run(&graph, &runtime_info)?;
     assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));

@@ -43,11 +43,19 @@ pub enum BindingBehavior {
     Once,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct Binding {
+#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputBinding {
     pub output_node_id: Uuid,
     pub output_index: u32,
     pub behavior: BindingBehavior,
+}
+
+#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+pub enum Binding {
+    #[default]
+    None,
+    Const,
+    Output(OutputBinding),
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -55,10 +63,9 @@ pub struct Input {
     pub name: String,
     pub data_type: DataType,
     pub is_required: bool,
+    pub binding: Binding,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub binding: Option<Binding>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<Value>,
+    pub const_value: Option<Value>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -124,9 +131,13 @@ impl Graph {
         self.nodes
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
-            .filter(|input| input.binding.is_some() && input.binding.as_ref().unwrap().output_node_id == id)
+            .filter_map(|input| match &input.binding {
+                Binding::Output(output_binding) if output_binding.output_node_id == id => Some(input),
+                _ => None,
+            })
             .for_each(|input| {
-                input.binding = None;
+                input.binding = input.const_value.as_ref()
+                    .map_or(Binding::None, |_| Binding::Const);
             });
     }
 
@@ -193,8 +204,8 @@ impl Graph {
 
             // validate node has valid bindings
             for input in node.inputs.iter() {
-                if let Some(binding) = &input.binding {
-                    if self.node_by_id(binding.output_node_id).is_none() {
+                if let Binding::Output(output_binding) = &input.binding {
+                    if self.node_by_id(output_binding.output_node_id).is_none() {
                         return Err(anyhow::Error::msg("Node input connected to a non-existent node"));
                     }
                 }
@@ -294,13 +305,13 @@ impl Node {
     }
 
     pub fn from_function(function: &Function) -> Node {
-        let inputs: Vec<Input> = function.inputs.iter().map(|input| {
+        let inputs: Vec<Input> = function.inputs.iter().map(|func_input| {
             Input {
-                name: input.name.clone(),
-                data_type: input.data_type.clone(),
+                name: func_input.name.clone(),
+                data_type: func_input.data_type.clone(),
                 is_required: true,
-                binding: None,
-                default_value: None,
+                binding: func_input.const_value.as_ref().map_or(Binding::None, |_| Binding::Const),
+                const_value: func_input.const_value.clone(),
             }
         }).collect();
 
@@ -329,19 +340,39 @@ impl Node {
 }
 
 impl Binding {
-    pub fn new(output_node_id: Uuid, output_index: u32) -> Binding {
-        Binding {
+    pub fn from_output_binding(output_node_id: Uuid, output_index: u32) -> Binding {
+        Binding::Output(OutputBinding {
             output_node_id,
             output_index,
-            ..Default::default()
+            behavior: BindingBehavior::default(),
+        })
+    }
+
+    pub fn as_output_binding(&self) -> Option<&OutputBinding> {
+        match self {
+            Binding::Output(output_binding) => Some(output_binding),
+            _ => None,
+        }
+    }
+    pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputBinding> {
+        match self {
+            Binding::Output(output_binding) => Some(output_binding),
+            _ => None,
         }
     }
 
-    pub fn output_node_id(&self) -> Uuid {
-        self.output_node_id
+    pub fn is_output_binding(&self) -> bool {
+        self.as_output_binding().is_some()
     }
-    pub fn output_index(&self) -> u32 {
-        self.output_index
+    pub fn is_const(&self) -> bool {
+        *self == Binding::Const
+    }
+
+    pub fn is_some(&self) -> bool {
+        match self {
+            Binding::None => false,
+            Binding::Const | Binding::Output(_) => true
+        }
     }
 }
 

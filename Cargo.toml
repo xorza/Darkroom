@@ -14,6 +14,7 @@ egui_node_graph = { path = "../egui_node_graph/egui_node_graph" }
 
 serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
+serde_json = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = "*"
 wgpu = "*"

@@ -29,8 +29,7 @@ pub struct RuntimeNode {
     pub has_outputs: bool,
 
     pub should_execute: bool,
-    pub execution_index: u32,
-    pub run_time: f64,
+    pub execution_index: Option<u32>,
 }
 
 #[derive(Default, Clone)]
@@ -86,31 +85,34 @@ impl Runtime {
             i += 1;
             let i = i - 1;
 
-            let node_input_binding = &inputs_bindings[i];
-            if !node_ids.insert(node_input_binding.output_node_id) {
+            let input_binding = &inputs_bindings[i];
+            if !node_ids.insert(input_binding.output_node_id) {
                 continue;
             }
 
             let mut has_missing_inputs = false;
             let node = graph
-                .node_by_id(node_input_binding.output_node_id)
+                .node_by_id(input_binding.output_node_id)
                 .ok_or(anyhow!("Node not found"))?;
             for (input_index, input) in node.inputs.iter().enumerate() {
-                if input.binding.is_some() {
-                    let binding = input.binding.as_ref().unwrap();
-                    assert_ne!(binding.output_node_id(), node.id());
+                match &input.binding {
+                    Binding::None => {
+                        has_missing_inputs |= input.is_required;
+                    }
+                    Binding::Const => {}
+                    Binding::Output(output_binding) => {
+                        assert_ne!(output_binding.output_node_id, node.id());
 
-                    inputs_bindings.push(RuntimeInput {
-                        output_node_id: binding.output_node_id(),
-                        output_index: binding.output_index(),
-                        input_node_id: binding.output_node_id(),
-                        input_index: input_index as u32,
-                        has_missing_inputs: false,
-                        connection_behavior: binding.behavior,
-                        is_output: false,
-                    });
-                } else if input.default_value.is_some() {} else {
-                    has_missing_inputs |= input.is_required;
+                        inputs_bindings.push(RuntimeInput {
+                            output_node_id: output_binding.output_node_id,
+                            output_index: output_binding.output_index,
+                            input_node_id: node.id(),
+                            input_index: input_index as u32,
+                            has_missing_inputs: false,
+                            connection_behavior: output_binding.behavior,
+                            is_output: false,
+                        });
+                    }
                 }
             }
 
@@ -158,8 +160,7 @@ impl Runtime {
                 outputs: r_outputs,
                 has_outputs,
                 should_execute: false,
-                execution_index: 0,
-                run_time: 0.0,
+                execution_index: None,
                 is_output,
                 behavior: node.behavior,
                 name: node.name.clone(),
@@ -182,14 +183,20 @@ impl Runtime {
             }
             if behavior != FunctionBehavior::Active {
                 for input in node.inputs.iter() {
-                    let binding = input.binding.as_ref().unwrap();
-                    let output_r_node = r_nodes.node_by_id(binding.output_node_id());
+                    match &input.binding {
+                        Binding::None => { panic!("Missing input") }
+                        Binding::Const => {}
+                        Binding::Output(output_binding) => {
+                            let output_r_node = r_nodes
+                                .node_by_id(output_binding.output_node_id);
 
-                    has_missing_inputs |= output_r_node.has_missing_inputs;
+                            has_missing_inputs |= output_r_node.has_missing_inputs;
 
-                    if binding.behavior == BindingBehavior::Always
-                        && output_r_node.behavior == FunctionBehavior::Active {
-                        behavior = FunctionBehavior::Active;
+                            if output_binding.behavior == BindingBehavior::Always
+                                && output_r_node.behavior == FunctionBehavior::Active {
+                                behavior = FunctionBehavior::Active;
+                            }
+                        }
                     }
                 }
             }
@@ -217,14 +224,19 @@ impl Runtime {
             let r_node = r_nodes.node_by_id(node_id);
 
             if !r_node.has_outputs || r_node.behavior == FunctionBehavior::Active {
-                for (_, input) in node.inputs.iter().enumerate() {
-                    if let Some(binding) = input.binding.as_ref() {
-                        let r_output_node = r_nodes.node_by_id(binding.output_node_id());
+                for (_index, input) in node.inputs.iter().enumerate() {
+                    match &input.binding {
+                        Binding::None => { panic!("Missing input") }
+                        Binding::Const => {}
+                        Binding::Output(output_binding) => {
+                            let r_output_node = r_nodes
+                                .node_by_id(output_binding.output_node_id);
 
-                        assert!(!r_output_node.has_missing_inputs);
+                            assert!(!r_output_node.has_missing_inputs);
 
-                        if r_output_node.behavior == FunctionBehavior::Active {
-                            exec_order.push(binding.output_node_id());
+                            if r_output_node.behavior == FunctionBehavior::Active {
+                                exec_order.push(output_binding.output_node_id);
+                            }
                         }
                     }
                 }
@@ -245,20 +257,22 @@ impl Runtime {
             let node_id = order[i];
             let node = graph.node_by_id(node_id).unwrap();
 
-            for (_input_index, input) in node.inputs.iter().enumerate() {
-                if let Some(binding) = input.binding.as_ref() {
-                    assert_ne!(binding.output_node_id(), node.id());
+            for (_index, input) in node.inputs.iter().enumerate() {
+                match &input.binding {
+                    Binding::None => { panic!("Missing input") }
+                    Binding::Const => {}
+                    Binding::Output(output_binding) => {
+                        assert_ne!(output_binding.output_node_id, node.id());
 
-                    let output_r_node = r_nodes
-                        .node_by_id_mut(binding.output_node_id());
+                        let output_r_node = r_nodes
+                            .node_by_id_mut(output_binding.output_node_id);
 
-                    assert!(output_r_node.has_outputs);
+                        assert!(output_r_node.has_outputs);
 
-                    if output_r_node.should_execute {
-                        output_r_node.outputs[binding.output_index() as usize].connection_count += 1;
+                        if output_r_node.should_execute {
+                            output_r_node.outputs[output_binding.output_index as usize].connection_count += 1;
+                        }
                     }
-                } else  {
-                    assert!(input.default_value.is_some(), "No input value or binding for input {} of node {}.", input.name, node.name);
                 }
             }
 
@@ -269,8 +283,10 @@ impl Runtime {
 
             r_node.has_outputs = true;
             r_node.should_execute = true;
-            r_node.execution_index = execution_index;
+            r_node.execution_index = Some(execution_index);
         }
+
+        r_nodes.nodes.sort_by_key(|r_node| r_node.execution_index.unwrap_or(u32::MAX));
 
         Ok(r_nodes)
     }

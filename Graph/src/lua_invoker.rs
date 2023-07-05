@@ -3,13 +3,14 @@ use std::collections::HashMap;
 use std::mem::transmute;
 use std::rc::Rc;
 
-use mlua::{Error, Function, Lua, Table, Value, Variadic};
+use mlua::{Error, Function, Lua, Table, Variadic};
 use uuid::Uuid;
 
-use crate::{data, functions, invoke};
+use crate::{data, functions, invoker};
 use crate::data::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
-use crate::invoke::{InvokeArgs, Invoker};
+use crate::invoker::{InvokeArgs, Invoker};
+use crate::runtime::RuntimeInfo;
 
 #[derive(Default)]
 struct Cache {
@@ -28,7 +29,7 @@ struct FuncConnections {
     outputs: Vec<u32>,
 }
 
-pub struct LuaInvoker {
+pub(crate) struct LuaInvoker {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache>>,
     funcs: HashMap<Uuid, LuaFuncInfo>,
@@ -128,7 +129,7 @@ impl LuaInvoker {
                 default_value = None;
             }
 
-            function_info.inputs.push(functions::InputInfo { name, data_type, default_value });
+            function_info.inputs.push(functions::InputInfo { name, data_type, const_value: default_value });
         }
 
         let outputs: Table = table.get("outputs")?;
@@ -243,8 +244,8 @@ impl LuaInvoker {
                     name: input.name.clone(),
                     data_type: input.data_type,
                     is_required: true,
-                    binding: None,
-                    default_value: None,
+                    binding: Binding::None,
+                    const_value: None,
                 });
             }
             for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
@@ -268,9 +269,8 @@ impl LuaInvoker {
             for (input_index, output_id) in connection.inputs.iter().enumerate() {
                 let input = &mut node.inputs[input_index];
                 let output_addr = output_ids.get(output_id).unwrap();
-                let binding = Binding::new(output_addr.node_id, output_addr.index);
 
-                input.binding = Some(binding);
+                input.binding =  Binding::from_output_binding(output_addr.node_id, output_addr.index)
             }
 
             graph.add_node(node);
@@ -292,23 +292,8 @@ impl LuaInvoker {
     pub fn get_all_functions(&self) -> Vec<&functions::Function> {
         self.funcs.values().map(|f| &f.info).collect()
     }
-}
 
-
-impl Drop for LuaInvoker {
-    fn drop(&mut self) {
-        self.funcs.clear();
-
-        unsafe {
-            let lua = transmute::<&'static Lua, Box<Lua>>(self.lua);
-            drop(lua);
-        }
-    }
-}
-
-impl Invoker for LuaInvoker {
-    fn start(&self) {}
-    fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
+    pub(crate) fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
         self.lua.globals().set("context_id", context_id.to_string())?;
 
         let function_info = self.funcs
@@ -338,7 +323,24 @@ impl Invoker for LuaInvoker {
 
         Ok(())
     }
-    fn finish(&self) {}
+}
+
+
+impl Drop for LuaInvoker {
+    fn drop(&mut self) {
+        self.funcs.clear();
+
+        unsafe {
+            let lua = transmute::<&'static Lua, Box<Lua>>(self.lua);
+            drop(lua);
+        }
+    }
+}
+
+impl Invoker for LuaInvoker {
+    fn invoke(function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
+        todo!()
+    }
 }
 
 fn from_invoke_value<'lua>(value: &'lua data::Value, lua: &'lua Lua) -> anyhow::Result<mlua::Value<'lua>> {

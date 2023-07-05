@@ -39,7 +39,7 @@ nodes:
       - name: radius
         data_type: Float
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
           output_index: 0
           behavior: Once
@@ -56,14 +56,14 @@ nodes:
       - name: circumference
         data_type: Float
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 999c4d37-e0eb-4856-be3f-ad2090c84d8c
           output_index: 0
           behavior: Once
       - name: radius
         data_type: Float
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 5f110618-8faa-4629-8f5d-473c236de7d1
           output_index: 0
           behavior: Once
@@ -79,7 +79,7 @@ nodes:
       - name: message
         data_type: Float
         is_required: true
-        binding:
+        binding: !Output
           output_node_id: 81493aae-1d24-46f6-9364-c167620985ac
           output_index: 0
           behavior: Always

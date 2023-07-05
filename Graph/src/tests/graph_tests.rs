@@ -1,6 +1,43 @@
 use std::hint::black_box;
 
+use crate::data::{DataType, Value};
 use crate::graph::*;
+
+#[test]
+fn graph_to_yaml() -> anyhow::Result<()> {
+    let mut graph = Graph::default();
+    let mut node1 = Node::new();
+    node1.outputs.push(Output {
+        name: "output1".to_string(),
+        data_type: DataType::Int,
+    });
+    node1.inputs.push(Input {
+        name: "input1".to_string(),
+        data_type: DataType::Int,
+        is_required: true,
+        binding: Binding::Const,
+        const_value: Some(Value::Int(55)),
+    });
+    let mut node2 = Node::new();
+    node2.inputs.push(Input {
+        name: "input2".to_string(),
+        data_type: DataType::Int,
+        is_required: true,
+        binding: Binding::Output(OutputBinding {
+            output_node_id: node1.id(),
+            output_index: 0,
+            behavior: BindingBehavior::Always,
+        }),
+        const_value: None,
+    });
+
+    graph.add_node(node1);
+    graph.add_node(node2);
+
+    let _yaml: String = graph.to_yaml()?;
+
+    Ok(())
+}
 
 #[test]
 fn graph_from_yaml() -> anyhow::Result<()> {
@@ -23,8 +60,8 @@ fn node_remove_test() -> anyhow::Result<()> {
     assert_eq!(graph.nodes().len(), 4);
 
     for input in graph.nodes().iter().flat_map(|node| node.inputs.iter()) {
-        if let Some(binding) = input.binding.as_ref() {
-            assert_ne!(binding.output_node_id(), node_id);
+        if let Some(binding) = input.binding.as_output_binding() {
+            assert_ne!(binding.output_node_id, node_id);
         }
     }
 
@@ -42,10 +79,5 @@ fn subgraph_from_yaml() -> anyhow::Result<()> {
     assert_eq!(circle.inputs.len(), 1);
     assert_eq!(circle.outputs.len(), 2);
 
-    Ok(())
-}
-
-#[test]
-fn test_graph_validation() -> anyhow::Result<()> {
     Ok(())
 }

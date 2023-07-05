@@ -10,6 +10,6 @@ pub mod common;
 pub mod runtime;
 pub mod graph;
 pub mod functions;
-pub mod invoke;
+pub mod invoker;
 pub mod lua_invoker;
 pub mod data;

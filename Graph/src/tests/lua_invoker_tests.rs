@@ -4,7 +4,7 @@ use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
 use crate::functions::Functions;
-use crate::invoke::{InvokeArgs, Invoker};
+use crate::invoker::{InvokeArgs, Invoker};
 use crate::lua_invoker::LuaInvoker;
 
 #[test]
@@ -95,12 +95,12 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     assert_eq!(mult_node.inputs.len(), 2);
     assert!(mult_node.inputs[0].binding.is_some());
 
-    let binding = mult_node.inputs[0].binding.as_ref().unwrap();
-    let bound_node = graph.node_by_id(binding.output_node_id()).unwrap();
+    let binding = mult_node.inputs[0].binding.as_output_binding().unwrap();
+    let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
     assert_eq!(bound_node.name, "sum");
 
-    let binding = mult_node.inputs[1].binding.as_ref().unwrap();
-    let bound_node = graph.node_by_id(binding.output_node_id()).unwrap();
+    let binding = mult_node.inputs[1].binding.as_output_binding().unwrap();
+    let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
     assert_eq!(bound_node.name, "val1");
 
     let output = invoker.get_output();
