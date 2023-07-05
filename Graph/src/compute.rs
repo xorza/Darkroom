@@ -5,10 +5,10 @@ use uuid::Uuid;
 
 use crate::data::{DataType, Value};
 use crate::graph::{Binding, Graph};
-use crate::runtime::RuntimeInfo;
+use crate::preprocess::PreprocessInfo;
 
 #[derive(Clone, Default, Hash, PartialEq, Eq)]
-struct OutputAddress {
+pub struct OutputAddress {
     node_id: Uuid,
     output_index: u32,
 }
@@ -20,14 +20,31 @@ pub(crate) struct ArgSet {
     args: Vec<Option<Value>>,
 }
 
+pub type ArgCache = HashMap<OutputAddress, Option<Value>>;
 
-pub trait Invoker {
-    fn run(&self, graph: &Graph, runtime: &RuntimeInfo) -> anyhow::Result<()> {
-        let mut arg_cache: HashMap<OutputAddress, Value> = HashMap::new();
+pub struct NodeInvokeInfo {
+    node_id: Uuid,
+    runtime: f64,
+}
+
+#[derive(Default)]
+pub struct ComputeInfo {
+    arg_cache: ArgCache,
+    node_invoke_infos: Vec<NodeInvokeInfo>,
+}
+
+pub trait Compute {
+    fn run(&self,
+           graph: &Graph,
+           preprocess_info: &PreprocessInfo,
+           prev_compute_info: &ComputeInfo)
+           -> anyhow::Result<ComputeInfo>
+    {
+        let mut compute_info = ComputeInfo::default();
         let mut inputs: ArgSet = ArgSet::default();
         let mut outputs: ArgSet = ArgSet::default();
 
-        for r_node in runtime.nodes.iter()
+        for r_node in preprocess_info.nodes.iter()
             .filter(|node| node.should_execute) {
             let _execution_index = r_node.execution_index.unwrap();
             assert!(r_node.execution_index.is_some());
@@ -39,38 +56,56 @@ pub trait Invoker {
             node.inputs.iter()
                 .map(|input| {
                     match &input.binding {
-                        Binding::None => None,
-                        Binding::Const => input.const_value.clone(),
+                        Binding::None =>
+                            None,
+
+                        Binding::Const =>
+                            input.const_value.clone(),
+
                         Binding::Output(output_binding) => {
                             let output_address = OutputAddress {
                                 node_id: output_binding.output_node_id,
                                 output_index: output_binding.output_index,
                             };
 
-                            arg_cache.get(&output_address).cloned()
+                            compute_info.arg_cache
+                                .get(&output_address)
+                                .or_else(|| prev_compute_info.arg_cache.get(&output_address))
+                                .unwrap_or_else(|| {
+                                    panic!("Output {:?} not found for node {:?}, id: {:?}", output_address.output_index, node.name, node.id())
+                                })
+                                .clone()
                         }
                     }
                 })
                 .enumerate()
                 .for_each(|(index, value)| inputs[index] = value);
 
+            let start = std::time::Instant::now();
             self.invoke(node.function_id, node.id(), inputs.as_slice(), outputs.as_mut_slice())?;
+            let elapsed = start.elapsed();
+
+            compute_info.node_invoke_infos.push(NodeInvokeInfo {
+                node_id: node.id(),
+                runtime: elapsed.as_secs_f64(),
+            });
 
             outputs.iter()
                 .enumerate()
-                .filter(|(_, value)| value.is_some())
                 .for_each(|(index, value)| {
-                    let insert_result = arg_cache.insert(
-                        OutputAddress {
-                            node_id: node.id(),
-                            output_index: index as u32,
-                        },
-                        value.clone().unwrap());
+                    let insert_result = compute_info.arg_cache
+                        .insert(
+                            OutputAddress {
+                                node_id: node.id(),
+                                output_index: index as u32,
+                            },
+                            value.clone(),
+                        );
                     assert!(insert_result.is_none());
                 });
         }
 
-        Ok(())
+        Ok(compute_info)
     }
 
     fn invoke(&self,
@@ -108,13 +143,13 @@ impl LambdaInvoker {
     }
 }
 
-impl Invoker for LambdaInvoker {
+impl Compute for LambdaInvoker {
     fn invoke(&self,
               function_id: Uuid,
               context_id: Uuid,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
-        -> anyhow::Result<()>
+              -> anyhow::Result<()>
     {
         let invokable = self.lambdas.get(&function_id).unwrap();
         (invokable.lambda)(context_id, inputs, outputs);

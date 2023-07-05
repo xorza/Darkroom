@@ -8,19 +8,19 @@ use crate::common::is_debug;
 use crate::graph::*;
 
 #[derive(Default)]
-pub struct Runtime {}
+pub struct Preprocess {}
 
 #[derive(Default, Clone)]
-pub struct RuntimeOutput {
+pub struct PreprocessOutput {
     pub connection_count: u32,
 }
 
 #[derive(Clone)]
-pub struct RuntimeNode {
+pub struct PreprocessNode {
     node_id: Uuid,
 
     pub name: String,
-    pub outputs: Vec<RuntimeOutput>,
+    pub outputs: Vec<PreprocessOutput>,
 
     pub is_output: bool,
 
@@ -33,7 +33,7 @@ pub struct RuntimeNode {
 }
 
 #[derive(Default, Clone)]
-struct RuntimeInput {
+struct PreprocessInput {
     output_node_id: Uuid,
     output_index: u32,
     input_node_id: Uuid,
@@ -44,29 +44,29 @@ struct RuntimeInput {
 }
 
 #[derive(Default)]
-pub struct RuntimeInfo {
-    pub nodes: Vec<RuntimeNode>,
+pub struct PreprocessInfo {
+    pub nodes: Vec<PreprocessNode>,
 }
 
-impl Runtime {
-    pub fn run(&mut self, graph: &Graph, previous_run: &RuntimeInfo) -> anyhow::Result<RuntimeInfo> {
+impl Preprocess {
+    pub fn run(&self, graph: &Graph, prev_run: &PreprocessInfo) -> anyhow::Result<PreprocessInfo> {
         assert!(graph.validate().is_ok());
 
-        let r_inputs = self.collect_all_inputs(graph)?;
-        let runtime_info = self.gather_inputs_to_runtime(graph, r_inputs, previous_run);
-        let runtime_info = self.mark_active_and_missing_inputs(graph, runtime_info);
-        let exec_order = self.create_exec_order(graph, &runtime_info);
-        let runtime_info = self.execute(graph, runtime_info, exec_order)?;
+        let pp_inputs = self.collect_all_inputs(graph)?;
+        let preprocess_info = self.gathepp_inputs_to_runtime(graph, pp_inputs, prev_run);
+        let preprocess_info = self.mark_active_and_missing_inputs(graph, preprocess_info);
+        let exec_order = self.create_exec_order(graph, &preprocess_info);
+        let preprocess_info = self.execute(graph, preprocess_info, exec_order)?;
 
-        Ok(runtime_info)
+        Ok(preprocess_info)
     }
 
-    fn collect_all_inputs(&self, graph: &Graph) -> anyhow::Result<Vec<RuntimeInput>> {
-        let mut inputs_bindings
-            = graph.nodes().iter()
+    fn collect_all_inputs(&self, graph: &Graph) -> anyhow::Result<Vec<PreprocessInput>> {
+        let mut input_bindings = graph.nodes()
+            .iter()
             .filter(|node| node.is_output)
             .map(|node| {
-                RuntimeInput {
+                PreprocessInput {
                     output_node_id: node.id(),
                     output_index: 0,
                     input_node_id: Uuid::nil(),
@@ -76,16 +76,16 @@ impl Runtime {
                     is_output: true,
                 }
             })
-            .collect::<Vec<RuntimeInput>>();
+            .collect::<Vec<PreprocessInput>>();
 
         let mut node_ids: HashSet<Uuid> = HashSet::new();
 
         let mut i: usize = 0;
-        while i < inputs_bindings.len() {
+        while i < input_bindings.len() {
             i += 1;
             let i = i - 1;
 
-            let input_binding = &inputs_bindings[i];
+            let input_binding = &input_bindings[i];
             if !node_ids.insert(input_binding.output_node_id) {
                 continue;
             }
@@ -103,7 +103,7 @@ impl Runtime {
                     Binding::Output(output_binding) => {
                         assert_ne!(output_binding.output_node_id, node.id());
 
-                        inputs_bindings.push(RuntimeInput {
+                        input_bindings.push(PreprocessInput {
                             output_node_id: output_binding.output_node_id,
                             output_index: output_binding.output_index,
                             input_node_id: node.id(),
@@ -116,48 +116,48 @@ impl Runtime {
                 }
             }
 
-            inputs_bindings[i].has_missing_inputs = has_missing_inputs;
+            input_bindings[i].has_missing_inputs = has_missing_inputs;
         }
 
-        Ok(inputs_bindings)
+        Ok(input_bindings)
     }
-    fn gather_inputs_to_runtime(
+    fn gathepp_inputs_to_runtime(
         &self,
         graph: &Graph,
-        all_r_inputs: Vec<RuntimeInput>,
-        previous_run: &RuntimeInfo)
-        -> RuntimeInfo
+        all_pp_inputs: Vec<PreprocessInput>,
+        prev_run: &PreprocessInfo)
+        -> PreprocessInfo
     {
-        let mut r_nodes = RuntimeInfo::default();
+        let mut pp_nodes = PreprocessInfo::default();
         let mut node_ids: HashSet<Uuid> = HashSet::new();
 
-        for r_input in all_r_inputs.iter().rev() {
-            let node_id = r_input.output_node_id;
+        for pp_input in all_pp_inputs.iter().rev() {
+            let node_id = pp_input.output_node_id;
             if !node_ids.insert(node_id) {
                 continue;
             }
 
             let node = graph.node_by_id(node_id).unwrap();
 
-            let r_inputs = all_r_inputs.iter()
+            let pp_inputs = all_pp_inputs.iter()
                 .filter(|node| node.output_node_id == node_id)
-                .collect::<Vec<&RuntimeInput>>();
+                .collect::<Vec<&PreprocessInput>>();
 
-            let has_missing_inputs = r_inputs.iter()
+            let has_missing_inputs = pp_inputs.iter()
                 .any(|node| node.has_missing_inputs);
 
-            let r_outputs: Vec<RuntimeOutput> = vec![RuntimeOutput::default(); node.outputs.len()];
+            let pp_outputs: Vec<PreprocessOutput> = vec![PreprocessOutput::default(); node.outputs.len()];
 
-            let has_outputs = previous_run.nodes.iter()
+            let has_outputs = prev_run.nodes.iter()
                 .any(|node| node.node_id == node_id && node.has_outputs);
 
-            let is_output = r_inputs.iter()
-                .any(|r_input| r_input.is_output);
+            let is_output = pp_inputs.iter()
+                .any(|pp_input| pp_input.is_output);
 
-            r_nodes.nodes.push(RuntimeNode {
+            pp_nodes.nodes.push(PreprocessNode {
                 node_id,
                 has_missing_inputs,
-                outputs: r_outputs,
+                outputs: pp_outputs,
                 has_outputs,
                 should_execute: false,
                 execution_index: None,
@@ -167,14 +167,14 @@ impl Runtime {
             });
         }
 
-        r_nodes
+        pp_nodes
     }
-    fn mark_active_and_missing_inputs(&self, graph: &Graph, mut r_nodes: RuntimeInfo) -> RuntimeInfo {
-        for i in 0..r_nodes.nodes.len() {
-            let node_id = r_nodes.nodes[i].node_id;
-            let has_arguments = r_nodes.nodes[i].has_outputs;
-            let mut has_missing_inputs = r_nodes.nodes[i].has_missing_inputs;
-            let mut behavior = r_nodes.nodes[i].behavior;
+    fn mark_active_and_missing_inputs(&self, graph: &Graph, mut pp_nodes: PreprocessInfo) -> PreprocessInfo {
+        for i in 0..pp_nodes.nodes.len() {
+            let node_id = pp_nodes.nodes[i].node_id;
+            let has_arguments = pp_nodes.nodes[i].has_outputs;
+            let mut has_missing_inputs = pp_nodes.nodes[i].has_missing_inputs;
+            let mut behavior = pp_nodes.nodes[i].behavior;
 
             let node = graph.node_by_id(node_id).unwrap();
 
@@ -187,7 +187,7 @@ impl Runtime {
                         Binding::None => { panic!("Missing input") }
                         Binding::Const => {}
                         Binding::Output(output_binding) => {
-                            let output_r_node = r_nodes
+                            let output_r_node = pp_nodes
                                 .node_by_id(output_binding.output_node_id);
 
                             has_missing_inputs |= output_r_node.has_missing_inputs;
@@ -201,14 +201,14 @@ impl Runtime {
                 }
             }
 
-            r_nodes.nodes[i].behavior = behavior;
-            r_nodes.nodes[i].has_missing_inputs = has_missing_inputs;
+            pp_nodes.nodes[i].behavior = behavior;
+            pp_nodes.nodes[i].has_missing_inputs = has_missing_inputs;
         }
 
-        r_nodes
+        pp_nodes
     }
-    fn create_exec_order(&self, graph: &Graph, r_nodes: &RuntimeInfo) -> Vec<Uuid> {
-        let mut exec_order = r_nodes.nodes.iter()
+    fn create_exec_order(&self, graph: &Graph, pp_nodes: &PreprocessInfo) -> Vec<Uuid> {
+        let mut exec_order = pp_nodes.nodes.iter()
             .rev()
             .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
             .map(|r_node| r_node.node_id)
@@ -221,7 +221,7 @@ impl Runtime {
 
             let node_id = exec_order[i];
             let node = graph.node_by_id(node_id).unwrap();
-            let r_node = r_nodes.node_by_id(node_id);
+            let r_node = pp_nodes.node_by_id(node_id);
 
             if !r_node.has_outputs || r_node.behavior == FunctionBehavior::Active {
                 for (_index, input) in node.inputs.iter().enumerate() {
@@ -229,7 +229,7 @@ impl Runtime {
                         Binding::None => { panic!("Missing input") }
                         Binding::Const => {}
                         Binding::Output(output_binding) => {
-                            let r_output_node = r_nodes
+                            let r_output_node = pp_nodes
                                 .node_by_id(output_binding.output_node_id);
 
                             assert!(!r_output_node.has_missing_inputs);
@@ -247,11 +247,11 @@ impl Runtime {
         exec_order
     }
     fn execute(
-        &mut self,
+        &self,
         graph: &Graph,
-        mut r_nodes: RuntimeInfo,
+        mut pp_nodes: PreprocessInfo,
         order: Vec<Uuid>,
-    ) -> anyhow::Result<RuntimeInfo>
+    ) -> anyhow::Result<PreprocessInfo>
     {
         for (execution_index, i) in (0_u32..).zip(0..order.len()) {
             let node_id = order[i];
@@ -264,7 +264,7 @@ impl Runtime {
                     Binding::Output(output_binding) => {
                         assert_ne!(output_binding.output_node_id, node.id());
 
-                        let output_r_node = r_nodes
+                        let output_r_node = pp_nodes
                             .node_by_id_mut(output_binding.output_node_id);
 
                         assert!(output_r_node.has_outputs);
@@ -276,7 +276,7 @@ impl Runtime {
                 }
             }
 
-            let r_node = r_nodes.nodes
+            let r_node = pp_nodes.nodes
                 .iter_mut()
                 .find(|rnode| rnode.node_id == node_id)
                 .unwrap();
@@ -286,29 +286,29 @@ impl Runtime {
             r_node.execution_index = Some(execution_index);
         }
 
-        r_nodes.nodes.sort_by_key(|r_node| r_node.execution_index.unwrap_or(u32::MAX));
+        pp_nodes.nodes.sort_by_key(|r_node| r_node.execution_index.unwrap_or(u32::MAX));
 
-        Ok(r_nodes)
+        Ok(pp_nodes)
     }
 }
 
-impl RuntimeNode {
+impl PreprocessNode {
     pub fn node_id(&self) -> Uuid {
         self.node_id
     }
 }
 
-impl RuntimeInfo {
-    pub fn node_by_name(&self, name: &str) -> Option<&RuntimeNode> {
+impl PreprocessInfo {
+    pub fn node_by_name(&self, name: &str) -> Option<&PreprocessNode> {
         self.nodes.iter().find(|node| node.name == name)
     }
 
-    pub fn node_by_id(&self, node_id: Uuid) -> &RuntimeNode {
+    pub fn node_by_id(&self, node_id: Uuid) -> &PreprocessNode {
         self.nodes.iter()
             .find(|node| node.node_id == node_id)
             .unwrap()
     }
-    pub fn node_by_id_mut(&mut self, node_id: Uuid) -> &mut RuntimeNode {
+    pub fn node_by_id_mut(&mut self, node_id: Uuid) -> &mut PreprocessNode {
         self.nodes.iter_mut()
             .find(|node| node.node_id == node_id)
             .unwrap()

@@ -3,8 +3,8 @@ use std::str::FromStr;
 use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
+use crate::compute::{ArgSet, Compute, InvokeArgs};
 use crate::functions::Functions;
-use crate::invoker::{ArgSet, InvokeArgs, Invoker};
 use crate::lua_invoker::LuaInvoker;
 
 #[test]

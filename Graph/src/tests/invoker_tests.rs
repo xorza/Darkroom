@@ -2,10 +2,10 @@ use std::str::FromStr;
 
 use uuid::Uuid;
 
+use crate::compute::{Compute, ComputeInfo, LambdaInvoker};
 use crate::data::Value;
 use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
-use crate::invoker::{Invoker, LambdaInvoker};
-use crate::runtime::{Runtime, RuntimeInfo};
+use crate::preprocess::{Preprocess, PreprocessInfo};
 
 static mut RESULT: i64 = 0;
 static mut A: i64 = 2;
@@ -20,7 +20,7 @@ fn setup() {
 }
 
 
-fn create_invoker<GetA, GetB, SetResult>(
+fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
 ) -> anyhow::Result<LambdaInvoker>
     where
@@ -28,47 +28,46 @@ fn create_invoker<GetA, GetB, SetResult>(
         GetA: Fn() -> i64 + 'static,
         GetB: Fn() -> i64 + 'static,
 {
-    let mut invoker = LambdaInvoker::new();
+    let mut compute = LambdaInvoker::new();
 
     // print func
-    invoker.add_lambda(Uuid::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, move |_, inputs, _| {
+    compute.add_lambda(Uuid::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, move |_, inputs, _| {
         result(inputs[0].as_ref().unwrap().as_int());
     });
     // val 1 func
-    invoker.add_lambda(Uuid::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?, move |_, _, outputs| {
+    compute.add_lambda(Uuid::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?, move |_, _, outputs| {
         outputs[0] = Value::from(get_a()).into();
     });
     // val 2 func
-    invoker.add_lambda(Uuid::from_str("a937baff-822d-48fd-9154-58751539b59b")?, move |_, _, outputs| {
+    compute.add_lambda(Uuid::from_str("a937baff-822d-48fd-9154-58751539b59b")?, move |_, _, outputs| {
         outputs[0] = Value::from(get_b()).into();
     });
     // sum func
-    invoker.add_lambda(Uuid::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?, |_, inputs, outputs| {
+    compute.add_lambda(Uuid::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?, |_, inputs, outputs| {
         let a: i64 = inputs[0].as_ref().unwrap().as_int();
         let b: i64 = inputs[1].as_ref().unwrap().as_int();
         outputs[0] = Value::from(a + b).into();
     });
     // mult func
-    invoker.add_lambda(Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?, |_, inputs, outputs| {
+    compute.add_lambda(Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?, |_, inputs, outputs| {
         let a: i64 = inputs[0].as_ref().unwrap().as_int();
         let b: i64 = inputs[1].as_ref().unwrap().as_int();
         outputs[0] = Value::from(a * b).into();
     });
 
-    Ok(invoker)
+    Ok(compute)
 }
 
 
 #[test]
 fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
-    let _invoker = create_invoker(
+    let compute = create_compute(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
         |result| unsafe { RESULT = result; },
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut compute = Runtime::default();
 
     {
         let sum_inputs = &mut graph
@@ -88,8 +87,9 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         mult_inputs[1].binding = Binding::None;
     }
 
-    let _runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
-    todo!("call invoker");
+    let preprocess = Preprocess::default();
+    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 360);
 
     drop(graph);
@@ -100,28 +100,28 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
 #[test]
 fn simple_compute_test() -> anyhow::Result<()> {
-    let invoker = create_invoker(
+    let compute = create_compute(
         || unsafe { A },
         || unsafe { B },
         |result| unsafe { RESULT = result; },
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut compute = Runtime::default();
+    let preprocess = Preprocess::default();
 
-    let runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
-    invoker.run(&graph, &runtime_info)?;
+    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 35);
 
-    let runtime_info = compute.run(&graph, &runtime_info)?;
-    invoker.run(&graph, &runtime_info)?;
+    let preprocess_info = preprocess.run(&graph, &preprocess_info)?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &compute_info)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let runtime_info = compute.run(&graph, &runtime_info)?;
-    invoker.run(&graph, &runtime_info)?;
-    assert_eq!(unsafe { RESULT }, 49);
+    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
+    assert_eq!(unsafe { RESULT }, 63);
 
     graph
         .node_by_name_mut("sum").unwrap()
@@ -129,9 +129,9 @@ fn simple_compute_test() -> anyhow::Result<()> {
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
-    let runtime_info =  compute.run(&graph, &runtime_info)?;
+    let preprocess_info = preprocess.run(&graph, &preprocess_info)?;
 
-    invoker.run(&graph, &runtime_info)?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &compute_info)?;
 
     assert_eq!(unsafe { RESULT }, 63);
 

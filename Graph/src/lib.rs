@@ -7,9 +7,9 @@ mod tests;
 #[cfg(feature = "opencl")]
 pub mod ocl_context;
 pub mod common;
-pub mod runtime;
+pub mod preprocess;
 pub mod graph;
 pub mod functions;
-pub mod invoker;
+pub mod compute;
 pub mod lua_invoker;
 pub mod data;

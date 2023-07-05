@@ -6,11 +6,11 @@ use std::rc::Rc;
 use mlua::{Error, Function, Lua, Table, Variadic};
 use uuid::Uuid;
 
-use crate::{data, functions, invoker};
+use crate::{compute, data, functions};
+use crate::compute::{Compute, InvokeArgs};
 use crate::data::DataType;
 use crate::graph::{Binding, Graph, Input, Node, Output};
-use crate::invoker::{InvokeArgs, Invoker};
-use crate::runtime::RuntimeInfo;
+use crate::preprocess::PreprocessInfo;
 
 #[derive(Default)]
 struct Cache {
@@ -306,7 +306,7 @@ impl Drop for LuaInvoker {
     }
 }
 
-impl Invoker for LuaInvoker {
+impl Compute for LuaInvoker {
     fn invoke(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
         self.lua.globals().set("context_id", context_id.to_string())?;
 

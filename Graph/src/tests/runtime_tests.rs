@@ -2,14 +2,14 @@ use std::str::FromStr;
 
 use uuid::Uuid;
 
+use crate::compute::{Compute, InvokeArgs, LambdaInvoker};
 use crate::data::Value;
 use crate::graph::*;
-use crate::invoker::{InvokeArgs, Invoker, LambdaInvoker};
-use crate::runtime::{Runtime, RuntimeInfo};
+use crate::preprocess::{Preprocess, PreprocessInfo};
 
 struct EmptyInvoker {}
 
-impl Invoker for EmptyInvoker {
+impl Compute for EmptyInvoker {
     fn invoke(&self,
               _function_id: Uuid,
               _context_id: Uuid,
@@ -24,9 +24,9 @@ impl Invoker for EmptyInvoker {
 #[test]
 fn simple_run() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let nodes = runtime.run(&graph, &RuntimeInfo::default())?;
+    let nodes = runtime.run(&graph, &PreprocessInfo::default())?;
     assert!(nodes.nodes.iter().all(|_node| _node.should_execute));
     assert!(nodes.nodes.iter().all(|_node| _node.has_outputs));
 
@@ -36,17 +36,17 @@ fn simple_run() -> anyhow::Result<()> {
 #[test]
 fn double_run() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
+    let preprocess_info = runtime.run(&graph, &PreprocessInfo::default())?;
 
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(runtime_info.nodes.iter().all(|node| node.has_outputs));
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(preprocess_info.nodes.iter().all(|node| node.has_outputs));
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -54,18 +54,18 @@ fn double_run() -> anyhow::Result<()> {
 #[test]
 fn node_behavior_active_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
+    let preprocess_info = runtime.run(&graph, &PreprocessInfo::default())?;
 
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(preprocess_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -73,22 +73,22 @@ fn node_behavior_active_test() -> anyhow::Result<()> {
 #[test]
 fn edge_behavior_once_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
+    let preprocess_info = runtime.run(&graph, &PreprocessInfo::default())?;
 
     graph.node_by_name_mut("mult").unwrap()
         .inputs.get_mut(1).unwrap()
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Once;
 
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(preprocess_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
     Ok(())
 }
@@ -96,24 +96,24 @@ fn edge_behavior_once_test() -> anyhow::Result<()> {
 #[test]
 fn edge_behavior_always_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
+    let preprocess_info = runtime.run(&graph, &PreprocessInfo::default())?;
 
     graph.node_by_name_mut("sum").unwrap()
         .inputs.get_mut(0).unwrap()
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
-    assert!(runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
-    assert_eq!(runtime_info.node_by_name("val1").unwrap().outputs[0].connection_count, 1);
-    assert_eq!(runtime_info.node_by_name("val2").unwrap().outputs[0].connection_count, 0);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(preprocess_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
+    assert_eq!(preprocess_info.node_by_name("val1").unwrap().outputs[0].connection_count, 1);
+    assert_eq!(preprocess_info.node_by_name("val2").unwrap().outputs[0].connection_count, 0);
 
     Ok(())
 }
@@ -121,49 +121,49 @@ fn edge_behavior_always_test() -> anyhow::Result<()> {
 #[test]
 fn multiple_runs_with_various_modifications() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let mut runtime = Runtime::default();
+    let runtime = Preprocess::default();
 
-    let runtime_info = runtime.run(&graph, &RuntimeInfo::default())?;
-    assert_eq!(runtime_info.node_by_name("sum").unwrap().outputs[0].connection_count, 1);
+    let preprocess_info = runtime.run(&graph, &PreprocessInfo::default())?;
+    assert_eq!(preprocess_info.node_by_name("sum").unwrap().outputs[0].connection_count, 1);
 
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
-    assert_eq!(runtime_info.node_by_name("sum").unwrap().outputs[0].connection_count, 0);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
+    assert_eq!(preprocess_info.node_by_name("sum").unwrap().outputs[0].connection_count, 0);
 
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
     graph.node_by_name_mut("mult").unwrap()
         .inputs.get_mut(1).unwrap()
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Once;
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(!runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(!runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(!preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(!preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
     graph.node_by_name_mut("sum").unwrap()
         .inputs.get_mut(1).unwrap()
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
-    let runtime_info = runtime.run(&graph, &runtime_info)?;
-    assert!(runtime_info.nodes.iter().all(|_node| _node.has_outputs));
-    assert!(runtime_info.node_by_name("val1").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("val2").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("sum").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("mult").unwrap().should_execute);
-    assert!(runtime_info.node_by_name("print").unwrap().should_execute);
+    let preprocess_info = runtime.run(&graph, &preprocess_info)?;
+    assert!(preprocess_info.nodes.iter().all(|_node| _node.has_outputs));
+    assert!(preprocess_info.node_by_name("val1").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("val2").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("sum").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("mult").unwrap().should_execute);
+    assert!(preprocess_info.node_by_name("print").unwrap().should_execute);
 
 
     Ok(())
