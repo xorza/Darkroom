@@ -330,7 +330,7 @@ impl NodeshopApp {
                         name: editor_input_name.clone(),
                         data_type: editor_input.typ,
                         is_required: true,
-                        binding: None,
+                        binding: Binding::None,
                         const_value: Some(editor_value.clone()),
                     });
 
@@ -372,10 +372,10 @@ impl NodeshopApp {
                 .get_mut(input_address.arg_index)
                 .unwrap();
 
-            input.binding = Some(Binding::from_output_binding(
+            input.binding = Binding::from_output_binding(
                 output_address.node_id,
                 output_address.arg_index as u32,
-            ));
+            );
         }
 
         let yaml = serde_yaml::to_string(&graph)?;
@@ -457,7 +457,7 @@ impl NodeshopApp {
 
         for node in graph.graph.nodes().iter() {
             for (index, input) in node.inputs.iter().enumerate() {
-                if let Some(binding) = &input.binding {
+                if let Some(binding) = input.binding.as_output_binding() {
                     let input_id = input_addresses.get(
                         &ArgAddress {
                             node_id: node.id(),
