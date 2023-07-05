@@ -4,8 +4,9 @@
 #[cfg(test)]
 mod tests;
 
-#[cfg(feature = "opencl")]
-pub mod ocl_context;
+#[macro_use]
+mod macros;
+
 pub mod common;
 pub mod preprocess;
 pub mod graph;
@@ -13,3 +14,4 @@ pub mod functions;
 pub mod compute;
 pub mod lua_invoker;
 pub mod data;
+

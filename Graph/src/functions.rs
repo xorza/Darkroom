@@ -18,8 +18,7 @@ pub struct InputInfo {
     pub const_value: Option<Value>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default,Hash, Serialize, Deserialize)]
-pub struct FunctionId(Uuid);
+id_type!(FunctionId);
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct Function {
@@ -94,22 +93,3 @@ impl Function {
         self.self_id
     }
 }
-
-impl FunctionId {
-    pub fn new() -> FunctionId {
-        FunctionId(Uuid::new_v4())
-    }
-    pub fn nil() -> FunctionId {
-        FunctionId(Uuid::nil())
-    }
-
-    pub fn is_nil(&self) -> bool {
-        self.0 == Uuid::nil()
-    }
-
-    pub fn from_str(id: &str) -> anyhow::Result<FunctionId> {
-        let uuid = Uuid::parse_str(id)?;
-        Ok(FunctionId(uuid))
-    }
-}
-

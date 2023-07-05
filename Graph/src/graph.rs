@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use crate::data::{DataType, Value};
 use crate::functions::{Function, FunctionId};
+use crate::macros;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FunctionBehavior {
@@ -11,8 +12,7 @@ pub enum FunctionBehavior {
     Passive,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default,Hash, Serialize, Deserialize)]
-pub struct NodeId(Uuid);
+id_type!(NodeId);
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
@@ -404,15 +404,3 @@ impl FunctionBehavior {
     }
 }
 
-impl NodeId {
-    pub fn new() -> NodeId {
-        NodeId(Uuid::new_v4())
-    }
-    pub fn nil() -> NodeId {
-        NodeId(Uuid::nil())
-    }
-
-    pub fn is_nil(&self) -> bool {
-        self.0 == Uuid::nil()
-    }
-}
