@@ -300,7 +300,7 @@ impl Drop for LuaInvoker {
     fn drop(&mut self) {
         self.funcs.clear();
 
-        let _: Box<Lua> = unsafe { Box::from_raw((self.lua as *const Lua) as *mut Lua) };
+        let _lua: Box<Lua> = unsafe { Box::from_raw((self.lua as *const Lua) as *mut Lua) };
     }
 }
 
