@@ -4,7 +4,7 @@ use mlua::{Function, Lua, Value, Variadic};
 use uuid::Uuid;
 
 use crate::functions::Functions;
-use crate::invoker::{InvokeArgs, Invoker};
+use crate::invoker::{ArgSet, InvokeArgs, Invoker};
 use crate::lua_invoker::LuaInvoker;
 
 #[test]
@@ -76,16 +76,17 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let _yaml = functions.to_yaml()?;
 
 
-    let inputs: InvokeArgs = InvokeArgs::from_vec(vec![3, 5]);
-    let mut outputs: InvokeArgs = InvokeArgs::from_vec(vec![0]);
+    let inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
+    let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
 
     // call 'mult' function
-    invoker.call(
+    invoker.invoke(
         Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
         Uuid::nil(),
-        &inputs,
-        &mut outputs)?;
-    let result: i64 = outputs[0].as_int();
+        inputs.as_slice(),
+        outputs.as_mut_slice(),
+    )?;
+    let result: i64 = outputs[0].as_ref().unwrap().as_int();
     assert_eq!(result, 15);
 
     let graph = invoker.map_graph()?;

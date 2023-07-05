@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::data::Value;
 use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
-use crate::invoker::LambdaInvoker;
+use crate::invoker::{Invoker, LambdaInvoker};
 use crate::runtime::{Runtime, RuntimeInfo};
 
 static mut RESULT: i64 = 0;
@@ -32,27 +32,27 @@ fn create_invoker<GetA, GetB, SetResult>(
 
     // print func
     invoker.add_lambda(Uuid::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, move |_, inputs, _| {
-        result(inputs[0].as_int());
+        result(inputs[0].as_ref().unwrap().as_int());
     });
     // val 1 func
     invoker.add_lambda(Uuid::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?, move |_, _, outputs| {
-        outputs[0] = Value::from(get_a());
+        outputs[0] = Value::from(get_a()).into();
     });
     // val 2 func
     invoker.add_lambda(Uuid::from_str("a937baff-822d-48fd-9154-58751539b59b")?, move |_, _, outputs| {
-        outputs[0] = Value::from(get_b());
+        outputs[0] = Value::from(get_b()).into();
     });
     // sum func
     invoker.add_lambda(Uuid::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?, |_, inputs, outputs| {
-        let a: i64 = inputs[0].as_int();
-        let b: i64 = inputs[1].as_int();
-        outputs[0] = Value::from(a + b);
+        let a: i64 = inputs[0].as_ref().unwrap().as_int();
+        let b: i64 = inputs[1].as_ref().unwrap().as_int();
+        outputs[0] = Value::from(a + b).into();
     });
     // mult func
     invoker.add_lambda(Uuid::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?, |_, inputs, outputs| {
-        let a: i64 = inputs[0].as_int();
-        let b: i64 = inputs[1].as_int();
-        outputs[0] = Value::from(a * b);
+        let a: i64 = inputs[0].as_ref().unwrap().as_int();
+        let b: i64 = inputs[1].as_ref().unwrap().as_int();
+        outputs[0] = Value::from(a * b).into();
     });
 
     Ok(invoker)
@@ -100,7 +100,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
 #[test]
 fn simple_compute_test() -> anyhow::Result<()> {
-    let _invoker = create_invoker(
+    let invoker = create_invoker(
         || unsafe { A },
         || unsafe { B },
         |result| unsafe { RESULT = result; },
@@ -110,14 +110,17 @@ fn simple_compute_test() -> anyhow::Result<()> {
     let mut compute = Runtime::default();
 
     let runtime_info = compute.run(&graph, &RuntimeInfo::default())?;
+    invoker.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     let runtime_info = compute.run(&graph, &runtime_info)?;
+    invoker.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     let runtime_info = compute.run(&graph, &runtime_info)?;
+    invoker.run(&graph, &runtime_info)?;
     assert_eq!(unsafe { RESULT }, 49);
 
     graph
@@ -126,8 +129,9 @@ fn simple_compute_test() -> anyhow::Result<()> {
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
-    let _runtime_info =  compute.run(&graph, &runtime_info)?;
-    todo!("call invoker");
+    let runtime_info =  compute.run(&graph, &runtime_info)?;
+
+    invoker.run(&graph, &runtime_info)?;
 
     assert_eq!(unsafe { RESULT }, 63);
 

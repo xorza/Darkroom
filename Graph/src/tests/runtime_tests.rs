@@ -10,8 +10,13 @@ use crate::runtime::{Runtime, RuntimeInfo};
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
-    fn invoke(function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
-        todo!()
+    fn invoke(&self,
+              _function_id: Uuid,
+              _context_id: Uuid,
+              _inputs: &InvokeArgs,
+              _outputs: &mut InvokeArgs)
+        -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

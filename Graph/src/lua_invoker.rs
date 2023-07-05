@@ -270,7 +270,7 @@ impl LuaInvoker {
                 let input = &mut node.inputs[input_index];
                 let output_addr = output_ids.get(output_id).unwrap();
 
-                input.binding =  Binding::from_output_binding(output_addr.node_id, output_addr.index)
+                input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.index)
             }
 
             graph.add_node(node);
@@ -292,37 +292,6 @@ impl LuaInvoker {
     pub fn get_all_functions(&self) -> Vec<&functions::Function> {
         self.funcs.values().map(|f| &f.info).collect()
     }
-
-    pub(crate) fn call(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
-        self.lua.globals().set("context_id", context_id.to_string())?;
-
-        let function_info = self.funcs
-            .get(&function_id)
-            .unwrap();
-
-        let mut input_args: Variadic<mlua::Value> = Variadic::new();
-        for (i, input) in function_info.info.inputs.iter().enumerate() {
-            assert_eq!(input.data_type, inputs[i].data_type());
-
-            let invoke_value = from_invoke_value(&inputs[i], self.lua)?;
-            input_args.push(invoke_value);
-        }
-
-        let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
-
-        for (i, output) in function_info.info.outputs.iter().enumerate() {
-            let output_arg: &mlua::Value = output_args
-                .get(i)
-                .unwrap();
-            outputs[i] = data::Value::from(output_arg);
-
-            assert_eq!(output.data_type, outputs[i].data_type());
-        }
-
-        self.lua.globals().set("context_id", mlua::Value::Nil)?;
-
-        Ok(())
-    }
 }
 
 
@@ -338,12 +307,44 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn invoke(function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
-        todo!()
+    fn invoke(&self, function_id: Uuid, context_id: Uuid, inputs: &InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
+        self.lua.globals().set("context_id", context_id.to_string())?;
+
+        let function_info = self.funcs
+            .get(&function_id)
+            .unwrap();
+
+        let mut input_args: Variadic<mlua::Value> = Variadic::new();
+        for (index, input_info) in function_info.info.inputs.iter().enumerate() {
+            let input = inputs.get(index)
+                .unwrap()
+                .as_ref()
+                .expect("input is required");
+            assert_eq!(input_info.data_type, input.data_type());
+
+            let invoke_value = to_lua_value(self.lua, &input)?;
+            input_args.push(invoke_value);
+        }
+
+        let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
+
+        for (index, output_info) in function_info.info.outputs.iter().enumerate() {
+            let output_arg: &mlua::Value = output_args
+                .get(index)
+                .unwrap();
+
+            let output = data::Value::from(output_arg);
+            assert_eq!(output_info.data_type, output.data_type());
+            outputs[index] = Some(output);
+        }
+
+        self.lua.globals().set("context_id", mlua::Value::Nil)?;
+
+        Ok(())
     }
 }
 
-fn from_invoke_value<'lua>(value: &'lua data::Value, lua: &'lua Lua) -> anyhow::Result<mlua::Value<'lua>> {
+fn to_lua_value<'lua>(lua: &'lua Lua, value: &data::Value) -> anyhow::Result<mlua::Value<'lua>> {
     match value {
         data::Value::Null => { Ok(mlua::Value::Nil) }
         data::Value::Float(v) => { Ok(mlua::Value::Number(*v as mlua::Number)) }
