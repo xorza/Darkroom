@@ -120,7 +120,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
-    let compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 63);
 
     graph
@@ -129,10 +129,8 @@ fn simple_compute_test() -> anyhow::Result<()> {
         .binding.as_output_binding_mut().unwrap()
         .behavior = BindingBehavior::Always;
 
-    let preprocess_info = preprocess.run(&graph, &preprocess_info)?;
-
-    let _compute_info = compute.run(&graph, &preprocess_info, &compute_info)?;
-
+    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 63);
 
     drop(graph);
