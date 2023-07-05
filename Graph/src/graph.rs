@@ -30,7 +30,7 @@ pub struct Node {
     pub outputs: Vec<Output>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subgraph_id: Option<Uuid>,
+    pub subgraph_id: Option<SubGraphId>,
 }
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -71,6 +71,8 @@ pub struct Input {
     pub const_value: Option<Value>,
 }
 
+id_type!(SubGraphId);
+
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct SubInputNodeConnection {
     pub subnode_id: NodeId,
@@ -95,7 +97,7 @@ pub struct SubOutput {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SubGraph {
-    self_id: Uuid,
+    self_id: SubGraphId,
 
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -165,8 +167,8 @@ impl Graph {
             .iter_mut()
             .find(|node| node.self_id == id)
     }
-    pub fn nodes_by_subgraph_id(&self, subgraph_id: Uuid) -> Vec<&Node> {
-        assert_ne!(subgraph_id, Uuid::nil());
+    pub fn nodes_by_subgraph_id(&self, subgraph_id: SubGraphId) -> Vec<&Node> {
+        assert!(!subgraph_id.is_nil());
 
         self.nodes
             .iter()
@@ -261,8 +263,8 @@ impl Graph {
             None => self.subgraphs.push(subgraph.clone()),
         }
     }
-    pub fn remove_subgraph_by_id(&mut self, id: Uuid) {
-        assert_ne!(id, Uuid::nil());
+    pub fn remove_subgraph_by_id(&mut self, id: SubGraphId) {
+        assert!(!id.is_nil());
 
         self.subgraphs
             .retain(|subgraph| subgraph.self_id != id);
@@ -279,14 +281,14 @@ impl Graph {
             });
     }
 
-    pub fn subgraph_by_id_mut(&mut self, id: Uuid) -> Option<&mut SubGraph> {
-        assert_ne!(id, Uuid::nil());
+    pub fn subgraph_by_id_mut(&mut self, id: SubGraphId) -> Option<&mut SubGraph> {
+        assert!(!id.is_nil());
         self.subgraphs
             .iter_mut()
             .find(|subgraph| subgraph.self_id == id)
     }
-    pub fn subgraph_by_id(&self, id: Uuid) -> Option<&SubGraph> {
-        assert_ne!(id, Uuid::nil());
+    pub fn subgraph_by_id(&self, id: SubGraphId) -> Option<&SubGraph> {
+        assert!(!id.is_nil());
         self.subgraphs
             .iter()
             .find(|subgraph| subgraph.self_id == id)
@@ -382,7 +384,7 @@ impl Binding {
 impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
-            self_id: Uuid::new_v4(),
+            self_id: SubGraphId::new(),
 
             name: "".to_string(),
             inputs: vec![],
@@ -390,7 +392,7 @@ impl SubGraph {
         }
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SubGraphId {
         self.self_id
     }
 }
@@ -403,4 +405,3 @@ impl FunctionBehavior {
         };
     }
 }
-
