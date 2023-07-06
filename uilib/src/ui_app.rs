@@ -25,7 +25,7 @@ impl App for UiApp {
         let mut result = Self {
             window_size: UVec2::new(0, 0),
             renderer,
-            view: Rc::new(Canvas::new()),
+            view: Rc::new(Canvas::default()),
         };
         result.resize(device, queue, window_size);
 

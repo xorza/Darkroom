@@ -37,10 +37,12 @@ impl WgpuContext {
         assert!(adapter.features().contains(wgpu::Features::PUSH_CONSTANTS));
 
         let _limits = adapter.limits();
-        let mut limits = wgpu::Limits::default();
-        limits.max_push_constant_size = 256;
-        limits.max_texture_dimension_1d = 16384;
-        limits.max_texture_dimension_2d = 16384;
+        let limits = wgpu::Limits {
+            max_push_constant_size : 256,
+            max_texture_dimension_1d : 16384,
+            max_texture_dimension_2d : 16384,
+            ..Default::default()
+        };
 
         let device_descriptor = wgpu::DeviceDescriptor {
             label: None,

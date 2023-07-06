@@ -15,8 +15,8 @@ pub trait ContentView: View {
     fn add_child(&mut self, child: Rc<dyn View>) {
         self.children().push(child);
     }
-    fn remove_child(&mut self, child: Rc<dyn View>) {
-        self.children().retain(|c| Rc::ptr_eq(c, &child));
+    fn remove_child(&mut self, _child: Rc<dyn View>) {
+        panic!("Not implemented")
     }
 }
 

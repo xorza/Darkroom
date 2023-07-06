@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::view::*;
 
+#[derive(Default)]
 pub struct Canvas {
     children: Vec<Rc<dyn View>>,
 }
@@ -16,9 +17,5 @@ impl ContentView for Canvas {
 }
 
 impl Canvas {
-    pub fn new() -> Self {
-        Self {
-            children: Vec::new(),
-        }
-    }
+
 }

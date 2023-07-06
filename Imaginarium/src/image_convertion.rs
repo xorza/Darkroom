@@ -174,6 +174,9 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
     Ok(())
 }
 
+type ConvertFn<From, To> = fn(&[From], &mut [To], fn(From) -> To, fn(From, From, From) -> From);
+
+
 fn convert_pixels<From, To>(
     from: &Image,
     to: &mut Image,
@@ -196,7 +199,8 @@ fn convert_pixels<From, To>(
     let to_pixel_size = to.channel_count.byte_count(to.channel_size) as usize;
     let from_pixel_size = from.channel_count.byte_count(from.channel_size) as usize;
 
-    let convert_pixel: fn(&[From], &mut [To], fn(From) -> To, fn(From, From, From) -> From) =
+
+    let convert_pixel: ConvertFn<From, To> =
         match (to.channel_count, from.channel_count) {
             (ChannelCount::Gray, ChannelCount::Gray) =>
                 |from_pixel, to_pixel, convert_fn, _| {

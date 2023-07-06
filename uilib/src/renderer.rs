@@ -314,7 +314,7 @@ impl WgpuRenderer {
     }
 
 
-    pub fn go(&self, render: &RenderInfo, draw_list: &Vec<Draw>) {
+    pub fn go(&self, render: &RenderInfo, draw_list: &[Draw]) {
         let mut vertex_uniform: VertexUniform = VertexUniform::zeroed();
         let mut fragment_uniform: FragmentUniform = FragmentUniform::zeroed();
 

@@ -13,6 +13,7 @@ pub enum FunctionBehavior {
 
 id_type!(NodeId);
 
+#[allow(clippy::new_without_default)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: NodeId,
@@ -94,7 +95,7 @@ pub struct SubOutput {
     pub subnode_output_index: u32,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct SubGraph {
     self_id: SubGraphId,
 
@@ -297,7 +298,7 @@ impl Graph {
 impl Node {
     pub fn new() -> Node {
         Node {
-            self_id: NodeId::new(),
+            self_id: NodeId::unique(),
             function_id: FunctionId::nil(),
             name: "".to_string(),
             behavior: FunctionBehavior::Active,
@@ -327,7 +328,7 @@ impl Node {
         }).collect();
 
         Node {
-            self_id: NodeId::new(),
+            self_id: NodeId::unique(),
             function_id: function.id(),
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
@@ -383,7 +384,7 @@ impl Binding {
 impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
-            self_id: SubGraphId::new(),
+            self_id: SubGraphId::unique(),
 
             name: "".to_string(),
             inputs: vec![],
