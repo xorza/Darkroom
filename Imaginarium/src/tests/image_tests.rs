@@ -4,25 +4,25 @@ use crate::image::Image;
 #[test]
 fn it_works() {
     let tiff = Image::read_file("../test_resources/rgb-sample-32bit.tiff").unwrap();
-    assert_eq!(tiff.desc.width, 256);
-    assert_eq!(tiff.desc.height, 1);
-    assert_eq!(tiff.desc.stride, 3072);
-    assert_eq!(tiff.desc.color_format.channel_size, ChannelSize::_32bit);
-    assert_eq!(tiff.desc.color_format.channel_count, ChannelCount::Rgb);
+    assert_eq!(tiff.desc.width(), 256);
+    assert_eq!(tiff.desc.height(), 1);
+    assert_eq!(tiff.desc.stride(), 3072);
+    assert_eq!(tiff.desc.color_format().channel_size, ChannelSize::_32bit);
+    assert_eq!(tiff.desc.color_format().channel_count, ChannelCount::Rgb);
 
     let png = Image::read_file("../test_resources/rgba-sample-8bit.png").unwrap();
-    assert_eq!(png.desc.width, 864);
-    assert_eq!(png.desc.height, 409);
-    assert_eq!(png.desc.stride, 3456);
-    assert_eq!(png.desc.color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(png.desc.color_format.channel_count, ChannelCount::Rgba);
+    assert_eq!(png.desc.width(), 864);
+    assert_eq!(png.desc.height(), 409);
+    assert_eq!(png.desc.stride(), 3456);
+    assert_eq!(png.desc.color_format().channel_size, ChannelSize::_8bit);
+    assert_eq!(png.desc.color_format().channel_count, ChannelCount::Rgba);
 
     let png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
-    assert_eq!(png.desc.width, 331);
-    assert_eq!(png.desc.height, 126);
-    assert_eq!(png.desc.stride, 993);
-    assert_eq!(png.desc.color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(png.desc.color_format.channel_count, ChannelCount::Rgb);
+    assert_eq!(png.desc.width(), 331);
+    assert_eq!(png.desc.height(), 126);
+    assert_eq!(png.desc.stride(), 993);
+    assert_eq!(png.desc.color_format().channel_size, ChannelSize::_8bit);
+    assert_eq!(png.desc.color_format().channel_count, ChannelCount::Rgb);
 }
 
 

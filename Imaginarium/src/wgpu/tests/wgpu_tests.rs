@@ -24,8 +24,8 @@ fn it_works() {
 
     let shader = Shader::new(device, include_str!("shader.wgsl"));
     let texture_size = [
-        TextureSize([image_desc.width as f32, image_desc.height as f32]),
-        TextureSize([image_desc.width as f32, image_desc.height as f32]),
+        TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
+        TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
     ];
 
     let mut encoder = device
@@ -41,11 +41,7 @@ fn it_works() {
     );
     queue.submit(Some(encoder.finish()));
 
-    let mut img3 = Image::new_empty(
-        image_desc.width,
-        image_desc.height,
-        image_desc.color_format,
-    ).unwrap();
+    let mut img3 = Image::new_empty(image_desc).unwrap();
 
     dst_tex.read(device, queue, &mut img3).unwrap();
 

@@ -308,8 +308,8 @@ pub(crate) struct Texture {
 impl Texture {
     pub fn new(device: &wgpu::Device, image_desc: &ImageDesc) -> Self {
         let extent = wgpu::Extent3d {
-            width: image_desc.width,
-            height: image_desc.height,
+            width: image_desc.width(),
+            height: image_desc.height(),
             depth_or_array_layers: 1,
         };
 
@@ -325,7 +325,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::from(image_desc.color_format),
+            format: wgpu::TextureFormat::from(image_desc.color_format()),
             usage,
             view_formats: &[],
         });
@@ -350,8 +350,8 @@ impl Texture {
             &image.bytes,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(self.image_desc.stride),
-                rows_per_image: Some(self.image_desc.height),
+                bytes_per_row: Some(self.image_desc.stride()),
+                rows_per_image: Some(self.image_desc.height()),
             },
             self.extent,
         );
@@ -385,8 +385,8 @@ impl Texture {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(self.image_desc.stride),
-                    rows_per_image: Some(self.image_desc.height),
+                    bytes_per_row: Some(self.image_desc.stride()),
+                    rows_per_image: Some(self.image_desc.height()),
                 },
             },
             self.extent,

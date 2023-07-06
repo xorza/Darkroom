@@ -34,10 +34,10 @@ fn align_stride(n: u32) -> u32 {
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct ImageDesc {
-    pub width: u32,
-    pub height: u32,
-    pub stride: u32,
-    pub color_format: ColorFormat,
+    width: u32,
+    height: u32,
+    stride: u32,
+    color_format: ColorFormat,
 }
 
 #[derive(Clone)]
@@ -47,36 +47,22 @@ pub struct Image {
 }
 
 impl Image {
-    pub fn new_empty(
-        width: u32,
-        height: u32,
-        color_format: ColorFormat, )
-        -> anyhow::Result<Image>
-    {
-        color_format.validate()?;
+    pub fn new_empty(desc: ImageDesc) -> anyhow::Result<Image> {
+        desc.color_format().validate()?;
 
-        let info = ImageDesc::new(width, height, color_format);
-        let bytes = vec![0; (info.stride * height) as usize];
+        let bytes = vec![0; (desc.stride * desc.height) as usize];
 
         Ok(Image {
-            desc: info,
+            desc,
             bytes,
         })
     }
 
-    pub fn new_with_data(
-        width: u32,
-        height: u32,
-        color_format: ColorFormat,
-        bytes: Vec<u8>)
-        -> anyhow::Result<Image>
-    {
-        color_format.validate()?;
-
-        let info = ImageDesc::new(width, height, color_format);
+    pub fn new_with_data(desc: ImageDesc, bytes: Vec<u8>) -> anyhow::Result<Image> {
+        desc.color_format().validate()?;
 
         Ok(Image {
-            desc: info,
+            desc,
             bytes,
         })
     }
@@ -208,19 +194,19 @@ impl Image {
     }
 
     fn save_jpg(&self, filename: &str) -> anyhow::Result<()> {
-        if self.desc.color_format.channel_type != ChannelType::UInt {
-            return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.desc.color_format.channel_type));
+        if self.desc.color_format().channel_type != ChannelType::UInt {
+            return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.desc.color_format().channel_type));
         }
 
-        let color_format = match self.desc.color_format.channel_size {
-            ChannelSize::_8bit => match self.desc.color_format.channel_count {
+        let color_format = match self.desc.color_format().channel_size {
+            ChannelSize::_8bit => match self.desc.color_format().channel_count {
                 ChannelCount::Gray => image_lib::ColorType::L8,
                 ChannelCount::Rgb => image_lib::ColorType::Rgb8,
 
-                _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.desc.color_format.channel_count)),
+                _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.desc.color_format().channel_count)),
             },
 
-            _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.desc.color_format.channel_size)),
+            _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.desc.color_format().channel_size)),
         };
 
         image_lib::save_buffer_with_format(
@@ -235,25 +221,25 @@ impl Image {
         Ok(())
     }
     fn save_png(&self, filename: &str) -> anyhow::Result<()> {
-        if self.desc.color_format.channel_type != ChannelType::UInt {
-            return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.desc.color_format.channel_type));
+        if self.desc.color_format().channel_type != ChannelType::UInt {
+            return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.desc.color_format().channel_type));
         }
 
-        let color_format = match self.desc.color_format.channel_size {
-            ChannelSize::_8bit => match self.desc.color_format.channel_count {
+        let color_format = match self.desc.color_format().channel_size {
+            ChannelSize::_8bit => match self.desc.color_format().channel_count {
                 ChannelCount::Gray => image_lib::ColorType::L8,
                 ChannelCount::GrayAlpha => image_lib::ColorType::La8,
                 ChannelCount::Rgb => image_lib::ColorType::Rgb8,
                 ChannelCount::Rgba => image_lib::ColorType::Rgba8,
             },
-            ChannelSize::_16bit => match self.desc.color_format.channel_count {
+            ChannelSize::_16bit => match self.desc.color_format().channel_count {
                 ChannelCount::Gray => image_lib::ColorType::L16,
                 ChannelCount::GrayAlpha => image_lib::ColorType::La16,
                 ChannelCount::Rgb => image_lib::ColorType::Rgb16,
                 ChannelCount::Rgba => image_lib::ColorType::Rgba16,
             },
 
-            _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.desc.color_format.channel_size)),
+            _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.desc.color_format().channel_size)),
         };
 
         image_lib::save_buffer_with_format(
@@ -274,7 +260,7 @@ impl Image {
 
     pub fn convert(
         &self,
-        color_format: ColorFormat, )
+        color_format: ColorFormat)
         -> anyhow::Result<Image>
     {
         color_format.validate()?;
@@ -283,11 +269,13 @@ impl Image {
             return Err(anyhow::anyhow!("Image is already in the requested format"));
         }
 
-        let mut result = Image::new_empty(
+        let desc = ImageDesc::new(
             self.desc.width,
             self.desc.height,
             color_format,
-        )?;
+        );
+
+        let mut result = Image::new_empty(desc)?;
 
         convert_image(self, &mut result)?;
 
@@ -295,7 +283,7 @@ impl Image {
     }
 
     pub fn bytes_per_pixel(&self) -> u32 {
-        self.desc.color_format.byte_count()
+        self.desc.color_format().byte_count()
     }
 }
 
@@ -312,7 +300,20 @@ impl ImageDesc {
             color_format,
         }
     }
-    pub(crate) fn size_in_bytes(&self) -> u32 {
+    pub fn size_in_bytes(&self) -> u32 {
         self.height * self.stride
     }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn stride(&self) -> u32 {
+        self.stride
+    }
+    pub fn color_format(&self) -> ColorFormat {
+        self.color_format
+    }
+
 }

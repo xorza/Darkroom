@@ -177,7 +177,7 @@ impl ColorType for RGBAI64 {
 
 
 pub(crate) fn save_tiff(image: &Image, filename: &str) -> anyhow::Result<()> {
-    match (image.desc.color_format.channel_count, image.desc.color_format.channel_size, image.desc.color_format.channel_type) {
+    match (image.desc.color_format().channel_count, image.desc.color_format().channel_size, image.desc.color_format().channel_type) {
         // @formatter:off
         (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => save_tiff_internal::<GrayI8          >(image,filename)?,
         (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType::  Int) => save_tiff_internal::<GrayI16         >(image,filename)?,
@@ -236,9 +236,9 @@ pub(crate) fn save_tiff(image: &Image, filename: &str) -> anyhow::Result<()> {
 
         // @formatter:on
         (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}",
-            image.desc.color_format.channel_count,
-            image.desc.color_format.channel_size,
-            image.desc.color_format.channel_type
+            image.desc.color_format().channel_count,
+            image.desc.color_format().channel_size,
+            image.desc.color_format().channel_type
         )),
     };
 
@@ -254,7 +254,7 @@ fn save_tiff_internal<ColorType>(image: &Image, filename: &str) -> anyhow::Resul
 
     let mut file = File::create(filename)?;
     let mut tiff = TiffEncoder::new(&mut file)?;
-    let img = tiff.new_image::<ColorType>(image.desc.width, image.desc.height)?;
+    let img = tiff.new_image::<ColorType>(image.desc.width(), image.desc.height())?;
 
     img.write_data(buf).unwrap();
 
