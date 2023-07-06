@@ -4,6 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
+use crate::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
 
 pub(crate) struct WgpuContext {
@@ -75,31 +76,34 @@ impl WgpuContext {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         shader: &Shader,
-        tex1_view: &wgpu::TextureView,
-        tex2_view: &wgpu::TextureView,
-        target_tex_view: &wgpu::TextureView,
+        input_textures: &[&Texture],
+        target_tex: &Texture,
         push_constant: &T,
     )
     where T: Pod
     {
+        assert_eq!(input_textures.len() as u32, shader.input_texture_count);
+        assert_eq!(shader.push_constant_size, std::mem::size_of::<T>() as u32);
+
         let device = &self.device;
+
+        let mut bind_entries: Vec<wgpu::BindGroupEntry> = Vec::new();
+        bind_entries.push(wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Sampler(&self.default_sampler),
+        });
+        input_textures.iter()
+            .enumerate()
+            .for_each(|(index, tex)| {
+                bind_entries.push(wgpu::BindGroupEntry {
+                    binding: index as u32 + 1,
+                    resource: wgpu::BindingResource::TextureView(&tex.view),
+                });
+            });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &shader.bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Sampler(&self.default_sampler),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(tex1_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(tex2_view),
-                }
-            ],
+            entries: bind_entries.as_slice(),
             label: None,
         });
 
@@ -108,7 +112,7 @@ impl WgpuContext {
                 &wgpu::RenderPassDescriptor {
                     color_attachments: &[
                         Some(wgpu::RenderPassColorAttachment {
-                            view: target_tex_view,
+                            view: &target_tex.view,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
@@ -122,7 +126,9 @@ impl WgpuContext {
 
             render_pass.push_debug_group("Prepare data for draw.");
 
-            render_pass.set_pipeline(&shader.pipeline);
+            let pipeline = shader
+                .get_pipeline(&target_tex.image_desc.color_format());
+            render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_push_constants(
                 wgpu::ShaderStages::VERTEX,
@@ -205,7 +211,6 @@ pub(crate) struct Shader {
     pub vertex_layout: Vec<wgpu::VertexFormat>,
 }
 
-
 impl Shader {
     pub fn new(
         device: &wgpu::Device,
@@ -213,7 +218,8 @@ impl Shader {
         input_texture_count: u32,
         push_constant_size: u32,
         vertex_layout: &[wgpu::VertexFormat],
-    ) -> Self
+    )
+        -> Self
     {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -309,6 +315,10 @@ impl Shader {
             push_constant_size,
             vertex_layout: vertex_layout.to_vec(),
         }
+    }
+
+    pub fn get_pipeline(&self, _color_format: &ColorFormat) -> &wgpu::RenderPipeline {
+        &self.pipeline
     }
 }
 

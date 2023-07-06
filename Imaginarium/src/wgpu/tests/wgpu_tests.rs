@@ -46,9 +46,8 @@ fn it_works() {
     context.draw_one(
         &mut encoder,
         &shader,
-        &tex1.view,
-        &tex2.view,
-        &dst_tex.view,
+        &[&tex1, &tex2],
+        &dst_tex,
         &texture_transforms,
     );
     queue.submit(Some(encoder.finish()));
