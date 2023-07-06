@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::str::FromStr;
 
 use mlua::{Error, Function, Lua, Table, Variadic};
 

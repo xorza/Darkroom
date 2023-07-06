@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use crate::compute::{Compute, ComputeInfo, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;

@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::{ArgSet, Compute, InvokeContext};

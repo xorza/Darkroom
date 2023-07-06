@@ -16,7 +16,11 @@ macro_rules! id_type {
             pub fn is_nil(&self) -> bool {
                 self.0 == Uuid::nil()
             }
-            pub fn from_str(id: &str) -> anyhow::Result<$name> {
+        }
+        impl std::str::FromStr for $name {
+            type Err = anyhow::Error;
+
+            fn from_str(id: &str) -> Result<$name, Self::Err> {
                 let uuid = Uuid::parse_str(id)?;
                 Ok($name(uuid))
             }
