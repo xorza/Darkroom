@@ -11,7 +11,7 @@ impl Compute for EmptyInvoker {
               _ctx: &mut InvokeContext,
               _inputs: &InvokeArgs,
               _outputs: &mut InvokeArgs)
-              -> anyhow::Result<()> {
+        -> anyhow::Result<()> {
         Ok(())
     }
 }

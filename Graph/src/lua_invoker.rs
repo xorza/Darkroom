@@ -308,7 +308,7 @@ impl Compute for LuaInvoker {
               _ctx: &mut InvokeContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
-              -> anyhow::Result<()>
+        -> anyhow::Result<()>
     {
         // self.lua.globals().set("context_id", context_id.to_string())?;
 

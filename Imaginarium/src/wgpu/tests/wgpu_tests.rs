@@ -29,7 +29,7 @@ fn it_works() {
     texture_transforms[1]
         .aspect(1.0)
         .translate(0.5, 0.5)
-        .rotate(0.5)
+        .rotate(-1.0)
         .translate(-0.5, -0.5);
 
     let shader = Shader::new(

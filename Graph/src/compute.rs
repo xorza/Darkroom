@@ -48,7 +48,7 @@ pub trait Compute {
            graph: &Graph,
            preprocess_info: &PreprocessInfo,
            prev_compute_info: &ComputeInfo)
-           -> anyhow::Result<ComputeInfo>
+        -> anyhow::Result<ComputeInfo>
     {
         let mut compute_info = ComputeInfo::default();
         let mut inputs: ArgSet = ArgSet::default();
@@ -131,7 +131,7 @@ pub trait Compute {
               ctx: &mut InvokeContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
-              -> anyhow::Result<()>;
+        -> anyhow::Result<()>;
 }
 
 pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
@@ -147,7 +147,7 @@ pub struct LambdaCompute {
 
 impl LambdaCompute {
     pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
-        where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
+    where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
@@ -162,7 +162,7 @@ impl Compute for LambdaCompute {
               ctx: &mut InvokeContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
-              -> anyhow::Result<()>
+        -> anyhow::Result<()>
     {
         let invokable = self.lambdas.get(&function_id).unwrap();
         (invokable.lambda)(ctx, inputs, outputs);
@@ -173,8 +173,8 @@ impl Compute for LambdaCompute {
 
 impl ArgSet {
     pub fn from_vec<T, V>(args: Vec<T>) -> Self
-        where T: Into<Option<V>>,
-              V: Into<Value>
+    where T: Into<Option<V>>,
+          V: Into<Value>
     {
         Self {
             args: args.into_iter().map(|v| v.into().map(|v| v.into())).collect(),
@@ -220,7 +220,7 @@ impl InvokeContext {
     }
 
     pub fn is_some<T>(&self) -> bool
-        where T: Any + Default
+    where T: Any + Default
     {
         match &self.boxed {
             None => false,
@@ -229,27 +229,27 @@ impl InvokeContext {
     }
 
     pub fn get<T>(&self) -> Option<&T>
-        where T: Any + Default
+    where T: Any + Default
     {
         self.boxed.as_ref()
             .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
-        where T: Any + Default
+    where T: Any + Default
     {
         self.boxed.as_mut()
             .and_then(|boxed| boxed.downcast_mut::<T>())
     }
 
     pub fn set<T>(&mut self, value: T)
-        where T: Any + Default
+    where T: Any + Default
     {
         self.boxed = Some(Box::new(value));
     }
 
     pub fn get_or_default<T>(&mut self) -> &mut T
-        where T: Any + Default
+    where T: Any + Default
     {
         let is_some = self.is_some::<T>();
 

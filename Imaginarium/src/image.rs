@@ -315,5 +315,4 @@ impl ImageDesc {
     pub fn color_format(&self) -> ColorFormat {
         self.color_format
     }
-
 }

@@ -184,8 +184,8 @@ fn convert_pixels<From, To>(
     convert_fn: fn(From) -> To,
     avg_fn: fn(From, From, From) -> From,
 )
-    where From: Copy + Pod,
-          To: Copy + Pod + Bounded,
+where From: Copy + Pod,
+      To: Copy + Pod + Bounded,
 {
     assert_eq!(from.desc.width(), to.desc.width());
     assert_eq!(from.desc.height(), to.desc.height());

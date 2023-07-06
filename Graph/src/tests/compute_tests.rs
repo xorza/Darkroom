@@ -21,10 +21,10 @@ fn setup() {
 fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
 ) -> anyhow::Result<LambdaCompute>
-    where
-        SetResult: Fn(i64) + 'static,
-        GetA: Fn() -> i64 + 'static,
-        GetB: Fn() -> i64 + 'static,
+where
+    SetResult: Fn(i64) + 'static,
+    GetA: Fn() -> i64 + 'static,
+    GetB: Fn() -> i64 + 'static,
 {
     setup();
 

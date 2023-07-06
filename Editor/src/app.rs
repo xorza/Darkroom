@@ -173,8 +173,8 @@ impl eng::NodeDataTrait for EditorNode {
         _graph: &EditorGraph,
         _user_state: &mut Self::UserState,
     ) -> Vec<eng::NodeResponse<MyResponse, EditorNode>>
-        where
-            MyResponse: eng::UserResponseTrait,
+    where
+        MyResponse: eng::UserResponseTrait,
     {
         let mut button: egui::Button;
         if self.is_output {

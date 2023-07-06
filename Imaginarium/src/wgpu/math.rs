@@ -31,7 +31,7 @@ impl TextureTransform {
 
         self
     }
-    pub fn scale(&mut self, x: f32, y: f32)  -> &mut Self{
+    pub fn scale(&mut self, x: f32, y: f32) -> &mut Self {
         self.r0[0] *= x;
         self.r1[1] *= y;
 
