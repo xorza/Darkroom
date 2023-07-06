@@ -144,10 +144,8 @@ fn it_works() {
     let img3 = Image::new_with_data(
         img2.width,
         img2.height,
-        img2.channel_count,
-        img2.channel_size,
-        img2.channel_type,
+        img2.color_format,
         result,
-    );
+    ).unwrap();
     img3.save_file("../test_output/compute.png").unwrap();
 }

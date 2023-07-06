@@ -22,7 +22,7 @@ bytemuck = { version = "*", features = ["derive"] }
 pollster = "*"
 tiff = "*"
 png = "*"
-image = "*"
+image_lib = {version="*", package = "image"}
 num-traits = "*"
 winit = "*"
 glam = "*"

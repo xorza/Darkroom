@@ -6,7 +6,8 @@ use tiff::encoder::{colortype, TiffEncoder, TiffValue};
 use tiff::encoder::colortype::*;
 use tiff::tags::{PhotometricInterpretation, SampleFormat};
 
-use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
+use crate::color_format::*;
+use crate::image::Image;
 
 pub struct GrayAlphaI8;
 impl ColorType for GrayAlphaI8 {
@@ -145,7 +146,7 @@ impl ColorType for RGBAI64 {
 
 
 pub(crate) fn save_tiff(image: &Image, filename: &str) -> anyhow::Result<()> {
-    match (image.channel_count, image.channel_size, image.channel_type) {
+    match (image.color_format.channel_count, image.color_format.channel_size, image.color_format.channel_type) {
         // @formatter:off
         (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => save_tiff_internal::<GrayI8          >(image,filename)?,
         (ChannelCount::     Gray, ChannelSize::_16bit, ChannelType::  Int) => save_tiff_internal::<GrayI16         >(image,filename)?,
@@ -203,7 +204,7 @@ pub(crate) fn save_tiff(image: &Image, filename: &str) -> anyhow::Result<()> {
         (ChannelCount::     Rgba, ChannelSize::_64bit, ChannelType::Float) => save_tiff_internal::<RGBA64Float     >(image,filename)?,
 
         // @formatter:on
-        (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", image.channel_count, image.channel_size, image.channel_type)),
+        (_, _, _) => return Err(anyhow::anyhow!("Unsupported TIFF format: {:?} {:?} {:?}", image.color_format.channel_count, image.color_format.channel_size, image.color_format.channel_type)),
     };
 
 

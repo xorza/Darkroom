@@ -1,48 +1,19 @@
 use std::fs::File;
 use std::path::Path;
 
-use image::ImageFormat;
+use image_lib::ImageFormat;
 use tiff::decoder::DecodingResult;
 
+use crate::color_format::*;
 use crate::image_convertion::convert_image;
 use crate::tiff_extentions::save_tiff;
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
-#[repr(u32)]
-pub enum ChannelCount {
-    Gray = 1,
-    GrayAlpha = 2,
-    Rgb = 3,
-    #[default]
-    Rgba = 4,
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
-#[repr(u32)]
-pub enum ChannelSize {
-    #[default]
-    _8bit = 1,
-    _16bit = 2,
-    _32bit = 4,
-    _64bit = 8,
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Default)]
-pub enum ChannelType {
-    #[default]
-    UInt,
-    Float,
-    Int,
-}
-
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Image {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
-    pub channel_count: ChannelCount,
-    pub channel_size: ChannelSize,
-    pub channel_type: ChannelType,
+    pub color_format: ColorFormat,
     pub bytes: Vec<u8>,
 }
 
@@ -75,45 +46,41 @@ impl Image {
     pub fn new_empty(
         width: u32,
         height: u32,
-        channel_count: ChannelCount,
-        channel_size: ChannelSize,
-        channel_type: ChannelType)
-        -> Image
+        color_format: ColorFormat, )
+        -> anyhow::Result<Image>
     {
-        let stride = align_stride(width * channel_count as u32 * channel_size as u32);
+        color_format.validate()?;
+
+        let stride = align_stride(width * color_format.channel_count as u32 * color_format.channel_size as u32);
         let bytes = vec![0; (stride * height) as usize];
 
-        Image {
+        Ok(Image {
             width,
             height,
             stride,
-            channel_count,
-            channel_size,
-            channel_type,
+            color_format,
             bytes,
-        }
+        })
     }
 
     pub fn new_with_data(
         width: u32,
         height: u32,
-        channel_count: ChannelCount,
-        channel_size: ChannelSize,
-        channel_type: ChannelType,
+        color_format: ColorFormat,
         bytes: Vec<u8>)
-        -> Image
+        -> anyhow::Result<Image>
     {
-        let stride = align_stride(width * channel_count as u32 * channel_size as u32);
+        color_format.validate()?;
 
-        Image {
+        let stride = align_stride(width * color_format.channel_count as u32 * color_format.channel_size as u32);
+
+        Ok(Image {
             width,
             height,
             stride,
-            channel_count,
-            channel_size,
-            channel_type,
+            color_format,
             bytes,
-        }
+        })
     }
 
     pub fn read_file(filename: &str) -> anyhow::Result<Image> {
@@ -132,21 +99,21 @@ impl Image {
 
     fn load_png_jpeg(filename: &str) -> anyhow::Result<Image> {
         let img =
-            image::open(filename)
+            image_lib::open(filename)
                 .expect("Failed to open image");
 
         let (channel_count, channel_size, channel_type) = match img.color() {
             // @formatter:off
-            image::ColorType::L8      => (ChannelCount::Gray,      ChannelSize:: _8bit, ChannelType::UInt  ),
-            image::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::UInt  ),
-            image::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::UInt  ),
-            image::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt  ),
-            image::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize:: _8bit, ChannelType::UInt  ),
-            image::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::UInt  ),
-            image::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize:: _8bit, ChannelType::UInt  ),
-            image::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::UInt  ),
-            image::ColorType::Rgb32F  => (ChannelCount::Rgb,       ChannelSize::_32bit, ChannelType::Float ),
-            image::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
+            image_lib::ColorType::L8      => (ChannelCount::Gray,      ChannelSize:: _8bit, ChannelType::UInt  ),
+            image_lib::ColorType::L16     => (ChannelCount::Gray,      ChannelSize::_16bit, ChannelType::UInt  ),
+            image_lib::ColorType::La8     => (ChannelCount::GrayAlpha, ChannelSize:: _8bit, ChannelType::UInt  ),
+            image_lib::ColorType::La16    => (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt  ),
+            image_lib::ColorType::Rgb8    => (ChannelCount::Rgb,       ChannelSize:: _8bit, ChannelType::UInt  ),
+            image_lib::ColorType::Rgb16   => (ChannelCount::Rgb,       ChannelSize::_16bit, ChannelType::UInt  ),
+            image_lib::ColorType::Rgba8   => (ChannelCount::Rgba,      ChannelSize:: _8bit, ChannelType::UInt  ),
+            image_lib::ColorType::Rgba16  => (ChannelCount::Rgba,      ChannelSize::_16bit, ChannelType::UInt  ),
+            image_lib::ColorType::Rgb32F  => (ChannelCount::Rgb,       ChannelSize::_32bit, ChannelType::Float ),
+            image_lib::ColorType::Rgba32F => (ChannelCount::Rgba,      ChannelSize::_32bit, ChannelType::Float ),
             _ =>  panic!("Unsupported color type: {:?}", img.color()),
             // @formatter:on
         };
@@ -157,9 +124,7 @@ impl Image {
             width: img.width(),
             height: img.height(),
             stride: bytes.len() as u32 / img.height(),
-            channel_count,
-            channel_size,
-            channel_type,
+            color_format: ColorFormat::from((channel_count, channel_size, channel_type)),
             bytes,
         };
 
@@ -213,13 +178,14 @@ impl Image {
 
         let (w, h) = decoder.dimensions()?;
 
+        let channel_size = ChannelSize::from_bit_count(channel_bits as u32);
+        let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
+
         let image = Image {
             width: w,
             height: h,
             stride: bytes.len() as u32 / h,
-            channel_count,
-            channel_size: ChannelSize::from_bit_count(channel_bits as u32),
-            channel_type,
+            color_format,
             bytes,
         };
 
@@ -242,60 +208,60 @@ impl Image {
     }
 
     fn save_jpg(&self, filename: &str) -> anyhow::Result<()> {
-        if self.channel_type != ChannelType::UInt {
-            return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.channel_type));
+        if self.color_format.channel_type != ChannelType::UInt {
+            return Err(anyhow::anyhow!("Unsupported JPEG channel type: {:?}", self.color_format.channel_type));
         }
 
-        let color_type = match self.channel_size {
-            ChannelSize::_8bit => match self.channel_count {
-                ChannelCount::Gray => image::ColorType::L8,
-                ChannelCount::Rgb => image::ColorType::Rgb8,
+        let color_format = match self.color_format.channel_size {
+            ChannelSize::_8bit => match self.color_format.channel_count {
+                ChannelCount::Gray => image_lib::ColorType::L8,
+                ChannelCount::Rgb => image_lib::ColorType::Rgb8,
 
-                _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.channel_count)),
+                _ => return Err(anyhow::anyhow!("Unsupported JPEG color format: {:?}", self.color_format.channel_count)),
             },
 
-            _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.channel_size)),
+            _ => return Err(anyhow::anyhow!("Unsupported JPEG channel size: {:?}", self.color_format.channel_size)),
         };
 
-        image::save_buffer_with_format(
+        image_lib::save_buffer_with_format(
             filename,
             &self.bytes,
             self.width,
             self.height,
-            color_type,
+            color_format,
             ImageFormat::Jpeg,
         )?;
 
         Ok(())
     }
     fn save_png(&self, filename: &str) -> anyhow::Result<()> {
-        if self.channel_type != ChannelType::UInt {
-            return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.channel_type));
+        if self.color_format.channel_type != ChannelType::UInt {
+            return Err(anyhow::anyhow!("Unsupported PNG channel type: {:?}", self.color_format.channel_type));
         }
 
-        let color_type = match self.channel_size {
-            ChannelSize::_8bit => match self.channel_count {
-                ChannelCount::Gray => image::ColorType::L8,
-                ChannelCount::GrayAlpha => image::ColorType::La8,
-                ChannelCount::Rgb => image::ColorType::Rgb8,
-                ChannelCount::Rgba => image::ColorType::Rgba8,
+        let color_format = match self.color_format.channel_size {
+            ChannelSize::_8bit => match self.color_format.channel_count {
+                ChannelCount::Gray => image_lib::ColorType::L8,
+                ChannelCount::GrayAlpha => image_lib::ColorType::La8,
+                ChannelCount::Rgb => image_lib::ColorType::Rgb8,
+                ChannelCount::Rgba => image_lib::ColorType::Rgba8,
             },
-            ChannelSize::_16bit => match self.channel_count {
-                ChannelCount::Gray => image::ColorType::L16,
-                ChannelCount::GrayAlpha => image::ColorType::La16,
-                ChannelCount::Rgb => image::ColorType::Rgb16,
-                ChannelCount::Rgba => image::ColorType::Rgba16,
+            ChannelSize::_16bit => match self.color_format.channel_count {
+                ChannelCount::Gray => image_lib::ColorType::L16,
+                ChannelCount::GrayAlpha => image_lib::ColorType::La16,
+                ChannelCount::Rgb => image_lib::ColorType::Rgb16,
+                ChannelCount::Rgba => image_lib::ColorType::Rgba16,
             },
 
-            _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.channel_size)),
+            _ => return Err(anyhow::anyhow!("Unsupported PNG channel size: {:?}", self.color_format.channel_size)),
         };
 
-        image::save_buffer_with_format(
+        image_lib::save_buffer_with_format(
             filename,
             &self.bytes,
             self.width,
             self.height,
-            color_type,
+            color_format,
             ImageFormat::Png,
         )?;
 
@@ -308,31 +274,20 @@ impl Image {
 
     pub fn convert(
         &self,
-        channel_count: ChannelCount,
-        channel_size: ChannelSize,
-        channel_type: ChannelType)
+        color_format: ColorFormat, )
         -> anyhow::Result<Image>
     {
-        if channel_type == ChannelType::Float {
-            match channel_size {
-                ChannelSize::_8bit | ChannelSize::_16bit =>
-                    return Err(anyhow::anyhow!("Unsupported channel size for float: {:?}", channel_size)),
-                _ => {}
-            }
-        }
-        if self.channel_count == channel_count &&
-            self.channel_size == channel_size &&
-            self.channel_type == channel_type {
+        color_format.validate()?;
+
+        if self.color_format == color_format {
             return Err(anyhow::anyhow!("Image is already in the requested format"));
         }
 
         let mut result = Image::new_empty(
             self.width,
             self.height,
-            channel_count,
-            channel_size,
-            channel_type,
-        );
+            color_format,
+        )?;
 
         convert_image(self, &mut result)?;
 
@@ -340,34 +295,6 @@ impl Image {
     }
 
     pub fn bytes_per_pixel(&self) -> u32 {
-        self.channel_count.byte_count(self.channel_size)
+        self.color_format.byte_count()
     }
 }
-
-impl ChannelSize {
-    pub fn byte_count(&self) -> u32 {
-        *self as u32
-    }
-    fn from_bit_count(bit_count: u32) -> ChannelSize {
-        match bit_count {
-            // @formatter:off
-            8  => ChannelSize::_8bit ,
-            16 => ChannelSize::_16bit,
-            32 => ChannelSize::_32bit,
-            62 => ChannelSize::_64bit,
-            _  => panic!("Invalid channel size: {:?}", bit_count),
-            // @formatter:on
-        }
-    }
-}
-
-impl ChannelCount {
-    pub fn channel_count(&self) -> u32 {
-        *self as u32
-    }
-    pub fn byte_count(&self, channel_size: ChannelSize) -> u32 {
-        self.channel_count() * channel_size.byte_count()
-    }
-}
-
-

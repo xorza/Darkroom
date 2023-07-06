@@ -293,3 +293,33 @@ impl Shader {
         }
     }
 }
+
+pub(crate) struct Texture {
+    pub(crate) texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+    pub(crate) full_extent: wgpu::Extent3d,
+}
+
+impl Texture {
+    pub fn new(device: &wgpu::Device, size: wgpu::Extent3d) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Self {
+            texture,
+            view,
+            full_extent: size,
+        }
+    }
+}
+
