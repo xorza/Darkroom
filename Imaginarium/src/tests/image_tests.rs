@@ -30,7 +30,7 @@ fn it_works() {
 fn save_rgb_png() {
     let png = Image::read_file("../test_resources/rgb-sample-8bit.png").unwrap();
 
-    png.save_file("../test_output/save_rgb_png.png").unwrap();
+    png.save_file("../test_output/save_rgb.png").unwrap();
 }
 
 #[test]
