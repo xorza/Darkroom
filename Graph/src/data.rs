@@ -14,9 +14,9 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn can_assign(from: &DataType, to: &DataType) -> bool {
-        assert_ne!(from, &DataType::Null);
-        assert_ne!(to, &DataType::Null);
+    pub fn can_assign(from: DataType, to: DataType) -> bool {
+        assert_ne!(from, DataType::Null);
+        assert_ne!(to, DataType::Null);
 
         from == to
     }
@@ -115,39 +115,82 @@ impl From<i64> for Value {
         Value::Int(value)
     }
 }
-
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
         Value::Int(value as i64)
     }
 }
-
 impl From<f32> for Value {
     fn from(value: f32) -> Self {
         Value::Float(value as f64)
     }
 }
-
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Value::Float(value)
     }
 }
-
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::String(value.to_string())
     }
 }
-
 impl From<String> for Value {
     fn from(value: String) -> Self {
         Value::String(value)
     }
 }
-
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value)
+    }
+}
+
+impl Into<i64> for Value {
+    fn into(self) -> i64 {
+        match self {
+            Value::Int(value) => { value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl Into<i32> for Value {
+    fn into(self) -> i32 {
+        match self {
+            Value::Int(value) => { value as i32 }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl Into<f32> for Value {
+    fn into(self) -> f32 {
+        match self {
+            Value::Float(value) => { value as f32 }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl Into<f64> for Value {
+    fn into(self) -> f64 {
+        match self {
+            Value::Float(value) => { value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl Into<String> for Value {
+    fn into(self) -> String {
+        match self {
+            Value::String(value) => { value }
+            _ => { panic!("Value is not a string") }
+        }
+    }
+}
+impl Into<bool> for Value {
+    fn into(self) -> bool {
+        match self {
+            Value::Bool(value) => { value }
+            _ => { panic!("Value is not a bool") }
+        }
     }
 }
