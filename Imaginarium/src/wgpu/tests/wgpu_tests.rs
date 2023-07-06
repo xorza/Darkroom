@@ -27,10 +27,10 @@ fn it_works() {
         TextureTransform::default()
     ];
     texture_transforms[1]
-        .aspect(1.0)
-        .translate(0.5, 0.5)
+        .aspect(1, 1)
+        .center()
         .rotate(-1.0)
-        .translate(-0.5, -0.5);
+        .uncenter();
 
     let shader = Shader::new(
         device,

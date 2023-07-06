@@ -26,8 +26,8 @@ impl Default for TextureTransform {
 }
 
 impl TextureTransform {
-    pub fn aspect(&mut self, aspect: f32) -> &mut Self {
-        self.r0[0] = aspect;
+    pub fn aspect(&mut self, width: u32, height: u32) -> &mut Self {
+        self.r0[0] *= width as f32 / height as f32;
 
         self
     }
@@ -60,6 +60,12 @@ impl TextureTransform {
         self.r2[2] += self.r0[2] * x + self.r1[2] * y;
 
         self
+    }
+    pub fn center(&mut self) -> &mut Self {
+        self.translate(0.5, 0.5)
+    }
+    pub fn uncenter(&mut self) -> &mut Self {
+        self.translate(-0.5, -0.5)
     }
 }
 
