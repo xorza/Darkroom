@@ -141,6 +141,7 @@ impl eng::WidgetValueTrait for EditorValue {
         _user_state: &mut MyState,
         _node_data: &EditorNode,
     ) -> Vec<Self::Response> {
+        #[allow(clippy::single_match)]
         match &mut self.0 {
             Value::Int(value) => {
                 ui.horizontal(|ui| {
@@ -249,6 +250,7 @@ impl eframe::App for NodeshopApp {
             })
             .inner;
         for node_response in graph_response.node_responses {
+            #[allow(clippy::single_match)]
             match node_response {
                 eng::NodeResponse::User(user_event) => {
                     match user_event {

@@ -13,7 +13,6 @@ pub enum FunctionBehavior {
 
 id_type!(NodeId);
 
-#[allow(clippy::new_without_default)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Node {
     self_id: NodeId,
@@ -296,6 +295,7 @@ impl Graph {
 }
 
 impl Node {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Node {
         Node {
             self_id: NodeId::unique(),
