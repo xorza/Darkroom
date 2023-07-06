@@ -32,10 +32,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build graph
-        run: cargo build --manifest-path=Graph/Cargo.toml --verbose
+        run: cargo build --manifest-path=./Cargo.toml --verbose
 
       - name: Run graph tests
-        run: cargo test --manifest-path=Graph/Cargo.toml --verbose
-
-#      - name: Build editor
-#        run: cmake -S ./Editor -B ./Editor/build && cmake --build ./Editor/build
+        run: cargo test --manifest-path=./Cargo.toml --verbose
