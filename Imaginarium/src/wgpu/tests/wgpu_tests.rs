@@ -1,5 +1,5 @@
 use crate::image::Image;
-use crate::wgpu::wgpu_context::{BindLayoutEntry, Shader, Texture, TextureSize, WgpuContext};
+use crate::wgpu::wgpu_context::{BindLayoutEntry, Shader, Texture, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -22,8 +22,8 @@ fn it_works() {
     let dst_tex = Texture::new(device, &image_desc);
 
     let texture_size = [
-        TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
-        TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
+        [image_desc.width() as f32, image_desc.height() as f32],
+        [image_desc.width() as f32, image_desc.height() as f32],
     ];
 
     let shader = Shader::new(
@@ -35,9 +35,9 @@ fn it_works() {
     );
 
 
-    let mut encoder = device
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
+    let mut encoder = device.create_command_encoder(
+        &wgpu::CommandEncoderDescriptor { label: None }
+    );
     context.draw_one(
         &mut encoder,
         &shader,

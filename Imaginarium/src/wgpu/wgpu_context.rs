@@ -158,10 +158,6 @@ impl Vert2D {
     }
 }
 
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-pub(crate) struct TextureSize(pub [f32; 2]);
-
 pub(crate) struct VertexBuffer {
     pub(crate) buffer: wgpu::Buffer,
     pub(crate) vert_count: u32,
