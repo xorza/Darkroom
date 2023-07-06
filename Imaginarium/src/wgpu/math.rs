@@ -62,3 +62,20 @@ impl TextureTransform {
         self
     }
 }
+
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub(crate) struct Vert2D(pub [f32; 2], pub [f32; 2]);
+
+impl Vert2D {
+    pub fn rect_one() -> [Vert2D; 4] {
+        [
+            // @formatter:off
+            Vert2D([-1.0, -1.0], [0.0, 0.0]),
+            Vert2D([ 1.0, -1.0], [1.0, 0.0]),
+            Vert2D([-1.0,  1.0], [0.0, 1.0]),
+            Vert2D([ 1.0,  1.0], [1.0, 1.0]),
+            // @formatter:on
+        ]
+    }
+}

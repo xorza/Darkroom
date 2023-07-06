@@ -1,11 +1,12 @@
 use std::ops::RangeBounds;
 
-use bytemuck::{Pod, Zeroable};
+use bytemuck::{Pod};
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
+use crate::wgpu::math::Vert2D;
 
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
@@ -142,27 +143,11 @@ impl WgpuContext {
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
 
-
             drop(render_pass);
         }
     }
 }
 
-
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-pub(crate) struct Vert2D(pub [f32; 2], pub [f32; 2]);
-
-impl Vert2D {
-    pub fn rect_one() -> [Vert2D; 4] {
-        [
-            Vert2D([-1.0, -1.0], [0.0, 0.0]),
-            Vert2D([1.0, -1.0], [1.0, 0.0]),
-            Vert2D([-1.0, 1.0], [0.0, 1.0]),
-            Vert2D([1.0, 1.0], [1.0, 1.0]),
-        ]
-    }
-}
 
 pub(crate) struct VertexBuffer {
     pub(crate) buffer: wgpu::Buffer,

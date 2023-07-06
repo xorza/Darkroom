@@ -17,9 +17,10 @@ fn vs_main(
 ) -> VertexOutput {
     var result: VertexOutput;
     result.position = vec4<f32>(position, 0.0, 1.0);
+    var tex_coord = vec3<f32>(tex_coord, 1.0);
 
-    result.tex1_coord = (pc.tex1_transform * vec3<f32>(tex_coord, 1.0)).xy;
-    result.tex2_coord = (pc.tex2_transform * vec3<f32>(tex_coord, 1.0)).xy;
+    result.tex1_coord = (pc.tex1_transform * tex_coord).xy;
+    result.tex2_coord = (pc.tex2_transform * tex_coord).xy;
 
     return result;
 }
