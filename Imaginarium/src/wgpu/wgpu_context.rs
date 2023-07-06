@@ -122,11 +122,13 @@ impl WgpuContext {
                 bytemuck::bytes_of(push_constant),
             );
 
+            render_pass.pop_debug_group();
+
             render_pass.insert_debug_marker("Draw.");
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
 
-            render_pass.pop_debug_group();
+            drop(render_pass);
         }
     }
 }
