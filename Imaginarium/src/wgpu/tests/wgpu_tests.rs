@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use wgpu::util::DeviceExt;
 
 use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
-use crate::wgpu_context::{Shader, TextureSize, Vert2D, WgpuContext};
+use crate::wgpu::wgpu_context::{Shader, TextureSize, Vert2D, WgpuContext};
 
 #[test]
 fn it_works() {
