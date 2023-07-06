@@ -197,20 +197,22 @@ impl VertexBuffer {
 }
 
 pub(crate) struct Shader {
-    pub(crate) module: wgpu::ShaderModule,
-    pub(crate) bind_group_layout: wgpu::BindGroupLayout,
-    pub(crate) pipeline: wgpu::RenderPipeline,
+    pub module: wgpu::ShaderModule,
+    pub bind_group_layout: wgpu::BindGroupLayout,
+    pub pipeline: wgpu::RenderPipeline,
+    pub input_texture_count: u32,
+    pub output_texture_count: u32,
+    pub push_constant_size: u32,
+    pub vertex_layout: Vec<wgpu::VertexFormat>,
 }
 
-pub(crate) enum BindLayoutEntry {
-    Texture,
-}
 
 impl Shader {
     pub fn new(
         device: &wgpu::Device,
         shader: &str,
-        bind_layout_entries: &[BindLayoutEntry],
+        input_texture_count: u32,
+        output_texture_count: u32,
         push_constant_size: u32,
         vertex_layout: &[wgpu::VertexFormat],
     ) -> Self
@@ -221,23 +223,17 @@ impl Shader {
         });
 
         let wgpu_bind_group_layout_entries =
-            bind_layout_entries
-                .iter()
-                .enumerate()
-                .map(|(index, entry)| {
-                    match entry {
-                        BindLayoutEntry::Texture => {
-                            wgpu::BindGroupLayoutEntry {
-                                binding: index as u32,
-                                visibility: wgpu::ShaderStages::FRAGMENT,
-                                ty: wgpu::BindingType::Texture {
-                                    multisampled: false,
-                                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                                    view_dimension: wgpu::TextureViewDimension::D2,
-                                },
-                                count: None,
-                            }
-                        }
+            (0..input_texture_count as usize)
+                .map(|index| {
+                    wgpu::BindGroupLayoutEntry {
+                        binding: index as u32,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
                     }
                 })
                 .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
@@ -269,6 +265,17 @@ impl Shader {
             vertex_stride += entry.size();
         }
 
+        let wgpu_color_target_states =
+            (0..output_texture_count as usize)
+                .map(|_index| {
+                    Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8Unorm,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })
+                })
+                .collect::<Vec<Option<wgpu::ColorTargetState>>>();
+
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -283,11 +290,7 @@ impl Shader {
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
+                targets: wgpu_color_target_states.as_slice(),
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -303,6 +306,10 @@ impl Shader {
             module,
             bind_group_layout,
             pipeline,
+            input_texture_count,
+            output_texture_count,
+            push_constant_size,
+            vertex_layout: vertex_layout.to_vec(),
         }
     }
 }

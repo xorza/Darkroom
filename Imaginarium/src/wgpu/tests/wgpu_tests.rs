@@ -1,5 +1,5 @@
 use crate::image::Image;
-use crate::wgpu::wgpu_context::{BindLayoutEntry, Shader, Texture, WgpuContext};
+use crate::wgpu::wgpu_context::{Shader, Texture, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -29,7 +29,8 @@ fn it_works() {
     let shader = Shader::new(
         device,
         include_str!("shader.wgsl"),
-        &[BindLayoutEntry::Texture, BindLayoutEntry::Texture],
+        2,
+        1,
         std::mem::size_of_val(&texture_size) as u32,
         &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
     );
