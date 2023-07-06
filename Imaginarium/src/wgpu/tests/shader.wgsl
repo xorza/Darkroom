@@ -24,9 +24,12 @@ fn vs_main(
 
 @group(0)
 @binding(0)
-var tex_1: texture_2d<f32>;
+var the_sampler: sampler;
 @group(0)
 @binding(1)
+var tex_1: texture_2d<f32>;
+@group(0)
+@binding(2)
 var tex_2: texture_2d<f32>;
 
 @fragment

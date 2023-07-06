@@ -35,7 +35,6 @@ fn it_works() {
         &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
     );
 
-
     let mut encoder = device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor { label: None }
     );

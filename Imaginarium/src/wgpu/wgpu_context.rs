@@ -11,6 +11,7 @@ pub(crate) struct WgpuContext {
     pub queue: wgpu::Queue,
     pub limits: wgpu::Limits,
     pub rect_one_vb: VertexBuffer,
+    pub default_sampler: wgpu::Sampler,
 }
 
 fn aligned_size_of_uniform<U: Sized>() -> u64 {
@@ -59,11 +60,14 @@ impl WgpuContext {
 
         let rect_one_vb = VertexBuffer::from_slice(&device, &Vert2D::rect_one());
 
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+
         Ok(WgpuContext {
             device,
             queue,
             limits,
             rect_one_vb,
+            default_sampler,
         })
     }
 
@@ -76,7 +80,7 @@ impl WgpuContext {
         target_tex_view: &wgpu::TextureView,
         push_constant: &T,
     )
-        where T: Pod
+    where T: Pod
     {
         let device = &self.device;
 
@@ -85,10 +89,14 @@ impl WgpuContext {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(tex1_view),
+                    resource: wgpu::BindingResource::Sampler(&self.default_sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: wgpu::BindingResource::TextureView(tex1_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::TextureView(tex2_view),
                 }
             ],
@@ -222,11 +230,18 @@ impl Shader {
             source: wgpu::ShaderSource::Wgsl(shader.into()),
         });
 
-        let wgpu_bind_group_layout_entries =
+        let mut wgpu_bind_group_layout_entries: Vec<wgpu::BindGroupLayoutEntry> = Vec::new();
+        wgpu_bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+        wgpu_bind_group_layout_entries.extend(
             (0..input_texture_count as usize)
                 .map(|index| {
                     wgpu::BindGroupLayoutEntry {
-                        binding: index as u32,
+                        binding: index as u32 + 1,
                         visibility: wgpu::ShaderStages::FRAGMENT,
                         ty: wgpu::BindingType::Texture {
                             multisampled: false,
@@ -236,7 +251,7 @@ impl Shader {
                         count: None,
                     }
                 })
-                .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
+        );
 
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
