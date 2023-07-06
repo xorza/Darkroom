@@ -209,7 +209,6 @@ pub(crate) struct Shader {
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub pipeline: wgpu::RenderPipeline,
     pub input_texture_count: u32,
-    pub output_texture_count: u32,
     pub push_constant_size: u32,
     pub vertex_layout: Vec<wgpu::VertexFormat>,
 }
@@ -220,7 +219,6 @@ impl Shader {
         device: &wgpu::Device,
         shader: &str,
         input_texture_count: u32,
-        output_texture_count: u32,
         push_constant_size: u32,
         vertex_layout: &[wgpu::VertexFormat],
     ) -> Self
@@ -280,16 +278,6 @@ impl Shader {
             vertex_stride += entry.size();
         }
 
-        let wgpu_color_target_states =
-            (0..output_texture_count as usize)
-                .map(|_index| {
-                    Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8Unorm,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })
-                })
-                .collect::<Vec<Option<wgpu::ColorTargetState>>>();
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: Some(&pipeline_layout),
@@ -305,7 +293,11 @@ impl Shader {
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: "fs_main",
-                targets: wgpu_color_target_states.as_slice(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -322,7 +314,6 @@ impl Shader {
             bind_group_layout,
             pipeline,
             input_texture_count,
-            output_texture_count,
             push_constant_size,
             vertex_layout: vertex_layout.to_vec(),
         }

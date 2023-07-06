@@ -34,7 +34,9 @@ var tex_2: texture_2d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-    let color1 = textureLoad(tex_1, vec2<i32>(vertex.tex1_coord), 0);
-    let color2 = textureLoad(tex_2, vec2<i32>(vertex.tex2_coord), 0);
+//    let color1 = textureLoad(tex_1, vec2<i32>(vertex.tex1_coord), 0);
+//    let color2 = textureLoad(tex_2, vec2<i32>(vertex.tex2_coord), 0);
+    let color1 = textureSample(tex_1, the_sampler, vertex.tex1_coord);
+    let color2 = textureSample(tex_2, the_sampler, vertex.tex2_coord);
     return vec4<f32>(color1 * color2);
 }

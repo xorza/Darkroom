@@ -21,16 +21,12 @@ fn it_works() {
 
     let dst_tex = Texture::new(device, &image_desc);
 
-    let texture_size = [
-        [image_desc.width() as f32, image_desc.height() as f32],
-        [image_desc.width() as f32, image_desc.height() as f32],
-    ];
+    let texture_size = [[1.0f32, 1.0f32], [1.0f32, 1.0f32]];
 
     let shader = Shader::new(
         device,
         include_str!("shader.wgsl"),
         2,
-        1,
         std::mem::size_of_val(&texture_size) as u32,
         &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
     );
