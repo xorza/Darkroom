@@ -26,6 +26,8 @@ fn create_compute<GetA, GetB, SetResult>(
         GetA: Fn() -> i64 + 'static,
         GetB: Fn() -> i64 + 'static,
 {
+    setup();
+
     let mut compute = LambdaCompute::default();
 
     // print func
@@ -58,6 +60,8 @@ fn create_compute<GetA, GetB, SetResult>(
 
 #[test]
 fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
+    setup();
+
     let compute = create_compute(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
@@ -96,6 +100,8 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
 #[test]
 fn simple_compute_test() -> anyhow::Result<()> {
+    setup();
+
     let compute = create_compute(
         || unsafe { A },
         || unsafe { B },
