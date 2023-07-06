@@ -1,0 +1,3 @@
+[submodule "egui_node_graph"]
+	path = egui_node_graph
+	url = git@github.com:xorza/egui_node_graph.git
