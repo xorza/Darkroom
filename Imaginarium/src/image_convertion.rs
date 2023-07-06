@@ -7,10 +7,10 @@ use crate::color_format::*;
 use crate::image::Image;
 
 pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> {
-    match (from.info.color_format.channel_size, to.info.color_format.channel_size) {
+    match (from.desc.color_format.channel_size, to.desc.color_format.channel_size) {
         // @formatter:off
         (ChannelSize:: _8bit, ChannelSize:: _8bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i8 >(from, to,  i8_to_i8 , avg_i8 ),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u8 >(from, to,  i8_to_u8 , avg_i8 ),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i8 >(from, to,  u8_to_i8 , avg_u8 ),
@@ -18,7 +18,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize:: _8bit, ChannelSize::_16bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i16>(from, to,  i8_to_i16, avg_i8 ),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u16>(from, to,  i8_to_u16, avg_i8 ),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u8 , i16>(from, to,  u8_to_i16, avg_u8 ),
@@ -26,7 +26,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize:: _8bit, ChannelSize::_32bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i32>(from, to,  i8_to_i32, avg_i8 ),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u32>(from, to,  i8_to_u32, avg_i8 ),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i8 , f32>(from, to,  i8_to_f32, avg_i8 ),
@@ -36,7 +36,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize:: _8bit, ChannelSize::_64bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i8 , i64>(from, to,  i8_to_i64, avg_i8 ),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i8 , u64>(from, to,  i8_to_u64, avg_i8 ),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i8 , f64>(from, to,  i8_to_f64, avg_i8 ),
@@ -46,7 +46,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_16bit, ChannelSize:: _8bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i8 >(from, to, i16_to_i8 , avg_i16),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u8 >(from, to, i16_to_u8 , avg_i16),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i8 >(from, to, u16_to_i8 , avg_u16),
@@ -54,7 +54,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_16bit, ChannelSize::_16bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i16>(from, to, i16_to_i16, avg_i16),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u16>(from, to, i16_to_u16, avg_i16),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u16, i16>(from, to, u16_to_i16, avg_u16),
@@ -62,7 +62,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_16bit, ChannelSize::_32bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i32>(from, to, i16_to_i32, avg_i16),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u32>(from, to, i16_to_u32, avg_i16),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i16, f32>(from, to, i16_to_f32, avg_i16),
@@ -72,7 +72,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_16bit, ChannelSize::_64bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i16, i64>(from, to, i16_to_i64, avg_i16),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i16, u64>(from, to, i16_to_u64, avg_i16),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i16, f64>(from, to, i16_to_f64, avg_i16),
@@ -82,7 +82,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_32bit, ChannelSize:: _8bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i8 >(from, to, i32_to_i8 , avg_i32),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u8 >(from, to, i32_to_u8 , avg_i32),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i8 >(from, to, u32_to_i8 , avg_u32),
@@ -92,7 +92,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_32bit, ChannelSize::_16bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i16>(from, to, i32_to_i16, avg_i32),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u16>(from, to, i32_to_u16, avg_i32),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u32, i16>(from, to, u32_to_i16, avg_u32),
@@ -102,7 +102,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_32bit, ChannelSize::_32bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i32>(from, to, i32_to_i32, avg_i32),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u32>(from, to, i32_to_u32, avg_i32),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i32, f32>(from, to, i32_to_f32, avg_i32),
@@ -114,7 +114,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (ChannelType::Float, ChannelType::Float) => convert_pixels::<f32, f32>(from, to, f32_to_f32, avg_f32),
             }
         (ChannelSize::_32bit, ChannelSize::_64bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i32, i64>(from, to, i32_to_i64, avg_i32),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i32, u64>(from, to, i32_to_u64, avg_i32),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i32, f64>(from, to, i32_to_f64, avg_i32),
@@ -126,7 +126,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (ChannelType::Float, ChannelType::Float) => convert_pixels::<f32, f64>(from, to, f32_to_f64, avg_f32),
             }
         (ChannelSize::_64bit, ChannelSize::_8bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i8 >(from, to, i64_to_i8 , avg_i64),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u8 >(from, to, i64_to_u8 , avg_i64),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i8 >(from, to, u64_to_i8 , avg_u64),
@@ -136,7 +136,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_64bit, ChannelSize::_16bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i16>(from, to, i64_to_i16, avg_i64),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u16>(from, to, i64_to_u16, avg_i64),
                 (ChannelType:: UInt, ChannelType::  Int) => convert_pixels::<u64, i16>(from, to, u64_to_i16, avg_u64),
@@ -146,7 +146,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (_, _) => return Err(anyhow::anyhow!("Invalid channel type")),
             }
         (ChannelSize::_64bit, ChannelSize::_32bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i32>(from, to, i64_to_i32, avg_i64),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u32>(from, to, i64_to_u32, avg_i64),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i64, f32>(from, to, i64_to_f32, avg_i64),
@@ -158,7 +158,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> anyhow::Result<()> 
                 (ChannelType::Float, ChannelType::Float) => convert_pixels::<f64, f32>(from, to, f64_to_f32, avg_f64),
             }
         (ChannelSize::_64bit, ChannelSize::_64bit) =>
-            match (from.info.color_format.channel_type, to.info.color_format.channel_type) {
+            match (from.desc.color_format.channel_type, to.desc.color_format.channel_type) {
                 (ChannelType::  Int, ChannelType::  Int) => convert_pixels::<i64, i64>(from, to, i64_to_i64, avg_i64),
                 (ChannelType::  Int, ChannelType:: UInt) => convert_pixels::<i64, u64>(from, to, i64_to_u64, avg_i64),
                 (ChannelType::  Int, ChannelType::Float) => convert_pixels::<i64, f64>(from, to, i64_to_f64, avg_i64),
@@ -187,22 +187,22 @@ fn convert_pixels<From, To>(
     where From: Copy + Pod,
           To: Copy + Pod + Bounded,
 {
-    assert_eq!(from.info.width, to.info.width);
-    assert_eq!(from.info.height, to.info.height);
-    assert_eq!(from.info.color_format.channel_size.byte_count(), size_of::<From>() as u32);
-    assert_eq!(to.info.color_format.channel_size.byte_count(), size_of::<To>() as u32);
+    assert_eq!(from.desc.width, to.desc.width);
+    assert_eq!(from.desc.height, to.desc.height);
+    assert_eq!(from.desc.color_format.channel_size.byte_count(), size_of::<From>() as u32);
+    assert_eq!(to.desc.color_format.channel_size.byte_count(), size_of::<To>() as u32);
 
-    if from.info.color_format.channel_count == to.info.color_format.channel_count
-        && from.info.color_format.channel_size == to.info.color_format.channel_size {
+    if from.desc.color_format.channel_count == to.desc.color_format.channel_count
+        && from.desc.color_format.channel_size == to.desc.color_format.channel_size {
         return;
     }
 
-    let to_pixel_size = to.info.color_format.byte_count();
-    let from_pixel_size = from.info.color_format.byte_count();
+    let to_pixel_size = to.desc.color_format.byte_count();
+    let from_pixel_size = from.desc.color_format.byte_count();
 
 
     let convert_pixel: ConvertFn<From, To> =
-        match (to.info.color_format.channel_count, from.info.color_format.channel_count) {
+        match (to.desc.color_format.channel_count, from.desc.color_format.channel_count) {
             (ChannelCount::Gray, ChannelCount::Gray) =>
                 |from_pixel, to_pixel, convert_fn, _| {
                     to_pixel[0] = convert_fn(from_pixel[0]);
@@ -297,14 +297,14 @@ fn convert_pixels<From, To>(
         };
 
 
-    for i in 0..from.info.height {
-        for j in 0..from.info.width {
-            let from_offset = i * from.info.stride + j * from_pixel_size;
+    for i in 0..from.desc.height {
+        for j in 0..from.desc.width {
+            let from_offset = i * from.desc.stride + j * from_pixel_size;
             let from_pixel: &[From] = bytemuck::cast_slice(
                 &from.bytes[from_offset as usize..(from_offset + from_pixel_size) as usize]
             );
 
-            let to_offset = i * to.info.stride + j * to_pixel_size;
+            let to_offset = i * to.desc.stride + j * to_pixel_size;
             let to_pixel: &mut [To] = bytemuck::cast_slice_mut(
                 &mut to.bytes[to_offset as usize..(to_offset + to_pixel_size) as usize]
             );

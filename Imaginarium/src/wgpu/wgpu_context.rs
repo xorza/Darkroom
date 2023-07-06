@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
-use crate::image::ImageInfo;
+use crate::image::{Image, ImageDesc};
 
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
@@ -297,16 +297,17 @@ impl Shader {
 }
 
 pub(crate) struct Texture {
+    pub image_desc: ImageDesc,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub extent: wgpu::Extent3d,
 }
 
 impl Texture {
-    pub fn new(device: &wgpu::Device, image_info: &ImageInfo) -> Self {
+    pub fn new(device: &wgpu::Device, image_desc: &ImageDesc) -> Self {
         let extent = wgpu::Extent3d {
-            width: image_info.width,
-            height: image_info.height,
+            width: image_desc.width,
+            height: image_desc.height,
             depth_or_array_layers: 1,
         };
 
@@ -322,7 +323,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::from(image_info.color_format),
+            format: wgpu::TextureFormat::from(image_desc.color_format),
             usage,
             view_formats: &[],
         });
@@ -330,10 +331,83 @@ impl Texture {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
 
         Self {
+            image_desc: image_desc.clone(),
             texture,
             view,
             extent,
         }
+    }
+
+    pub fn write(&self, queue: &wgpu::Queue, image: &Image) -> anyhow::Result<()> {
+        if self.image_desc != image.desc {
+            return Err(anyhow::anyhow!("image info mismatch"));
+        }
+
+        queue.write_texture(
+            self.texture.as_image_copy(),
+            &image.bytes,
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(self.image_desc.stride),
+                rows_per_image: Some(self.image_desc.height),
+            },
+            self.extent,
+        );
+
+        Ok(())
+    }
+
+    pub fn read(&self, device: &wgpu::Device, queue: &wgpu::Queue, image: &mut Image) -> anyhow::Result<()> {
+        if self.image_desc != image.desc {
+            return Err(anyhow::anyhow!("image info mismatch"));
+        }
+
+        let mut encoder = device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            size: self.image_desc.size_in_bytes() as wgpu::BufferAddress,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+            label: Some("Read buffer"),
+        });
+
+        encoder.copy_texture_to_buffer(
+            wgpu::ImageCopyTexture {
+                texture: &self.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: Default::default(),
+            },
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(self.image_desc.stride),
+                    rows_per_image: Some(self.image_desc.height),
+                },
+            },
+            self.extent,
+        );
+
+        queue.submit(Some(encoder.finish()));
+
+
+        let slice = buffer.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |result| {
+            result.unwrap();
+        });
+        device.poll(wgpu::Maintain::Wait);
+
+        {
+            let data = slice.get_mapped_range();
+            image.bytes = data.to_vec();
+            drop(data);
+        }
+
+        buffer.unmap();
+
+        Ok(())
     }
 }
 

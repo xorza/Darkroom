@@ -29,7 +29,7 @@ pub enum ChannelType {
     Int,
 }
 
-#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Hash, Default, PartialEq, Eq)]
 pub struct ColorFormat {
     pub channel_count: ChannelCount,
     pub channel_size: ChannelSize,
