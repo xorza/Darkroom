@@ -34,13 +34,16 @@ pub struct NodeInvokeInfo {
 pub struct ComputeInfo {
     arg_cache: ArgCache,
     node_invoke_infos: Vec<NodeInvokeInfo>,
-    context_cache: HashMap<NodeId, RefCell<DynamicContext>>,
+    context_cache: HashMap<NodeId, RefCell<InvokeContext>>,
 }
 
-pub type DynamicContext = Box<dyn Any>;
+#[derive(Default)]
+pub struct InvokeContext {
+    boxed: Option<Box<dyn Any>>,
+}
 
 pub trait Invokable {
-    fn call(&self, ctx: &mut DynamicContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
+    fn call(&self, ctx: &mut InvokeContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
 }
 
 pub trait Compute {
@@ -94,9 +97,9 @@ pub trait Compute {
             let mut ctx = prev_compute_info.context_cache
                 .get(&node.id())
                 .and_then(|ctx|
-                    Some(ctx.replace(Box::new(())))
+                    Some(ctx.replace(InvokeContext::default()))
                 )
-                .unwrap_or_else(|| Box::new(()));
+                .unwrap_or_else(|| InvokeContext::default());
 
             let start = std::time::Instant::now();
             self.invoke(node.function_id, &mut ctx, inputs.as_slice(), outputs.as_mut_slice())?;
@@ -131,13 +134,13 @@ pub trait Compute {
 
     fn invoke(&self,
               function_id: FunctionId,
-              ctx: &mut DynamicContext,
+              ctx: &mut InvokeContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>;
 }
 
-pub type Lambda = dyn Fn(&mut DynamicContext, &InvokeArgs, &mut InvokeArgs) + 'static;
+pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
     lambda: Box<Lambda>,
@@ -155,7 +158,7 @@ impl LambdaCompute {
     }
 
     pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
-        where F: Fn(&mut DynamicContext, &InvokeArgs, &mut InvokeArgs) + 'static
+        where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
@@ -167,7 +170,7 @@ impl LambdaCompute {
 impl Compute for LambdaCompute {
     fn invoke(&self,
               function_id: FunctionId,
-              ctx: &mut DynamicContext,
+              ctx: &mut InvokeContext,
               inputs: &InvokeArgs,
               outputs: &mut InvokeArgs)
               -> anyhow::Result<()>
@@ -217,5 +220,25 @@ impl Index<usize> for ArgSet {
 impl IndexMut<usize> for ArgSet {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.args[index]
+    }
+}
+
+impl InvokeContext {
+    pub fn is_some(&self) -> bool {
+        self.boxed.is_some()
+    }
+
+    pub fn set<T: Any>(&mut self, value: T) {
+        self.boxed = Some(Box::new(value));
+    }
+
+    pub fn get<T: Any>(&self) -> Option<&T> {
+        self.boxed.as_ref()
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+    }
+
+    pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
+        self.boxed.as_mut()
+            .and_then(|boxed| boxed.downcast_mut::<T>())
     }
 }

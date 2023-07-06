@@ -137,3 +137,18 @@ fn simple_compute_test() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test]
+fn box_test() -> anyhow::Result<()>{
+    fn box_test_(ctx:&mut Option<Box<dyn Any>>){
+        let context: Option<Box<dyn Any>> = Some(Box::new(17u32));
+        *ctx = context;
+    }
+    
+    let mut context: Option<Box<dyn Any>> = None;
+    box_test_(&mut context);
+
+    let _context  = context.unwrap().downcast::<u32>().unwrap();
+
+    Ok(())
+}
+

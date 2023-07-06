@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use uuid::Uuid;
 
-use crate::compute::{Compute, DynamicContext, InvokeArgs, LambdaCompute};
+use crate::compute::{Compute, InvokeArgs, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::*;
@@ -14,7 +14,7 @@ struct EmptyInvoker {}
 impl Compute for EmptyInvoker {
     fn invoke(&self,
               _function_id: FunctionId,
-              _ctx: &mut DynamicContext,
+              _ctx: &mut InvokeContext,
               _inputs: &InvokeArgs,
               _outputs: &mut InvokeArgs)
               -> anyhow::Result<()> {
