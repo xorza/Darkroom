@@ -447,10 +447,12 @@ impl NodeshopApp {
             self.state.node_order.push(node_id);
 
             if let Some((x, y)) = graph.positions
-                .get(&node.id()) { self.state.node_positions.insert(
-                        node_id,
-                        egui::Pos2 { x: *x, y: *y },
-                    ); }
+                .get(&node.id()) {
+                self.state.node_positions.insert(
+                    node_id,
+                    egui::Pos2 { x: *x, y: *y },
+                );
+            }
         }
 
         for node in graph.graph.nodes().iter() {

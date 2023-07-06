@@ -115,31 +115,37 @@ impl From<i64> for Value {
         Value::Int(value)
     }
 }
+
 impl From<i32> for Value {
     fn from(value: i32) -> Self {
         Value::Int(value as i64)
     }
 }
+
 impl From<f32> for Value {
     fn from(value: f32) -> Self {
         Value::Float(value as f64)
     }
 }
+
 impl From<f64> for Value {
     fn from(value: f64) -> Self {
         Value::Float(value)
     }
 }
+
 impl From<&str> for Value {
     fn from(value: &str) -> Self {
         Value::String(value.to_string())
     }
 }
+
 impl From<String> for Value {
     fn from(value: String) -> Self {
         Value::String(value)
     }
 }
+
 impl From<bool> for Value {
     fn from(value: bool) -> Self {
         Value::Bool(value)
@@ -154,6 +160,7 @@ impl From<Value> for i64 {
         }
     }
 }
+
 impl From<Value> for f64 {
     fn from(value: Value) -> Self {
         match value {
@@ -162,6 +169,7 @@ impl From<Value> for f64 {
         }
     }
 }
+
 impl From<Value> for i32 {
     fn from(value: Value) -> Self {
         match value {
@@ -170,6 +178,7 @@ impl From<Value> for i32 {
         }
     }
 }
+
 impl From<Value> for f32 {
     fn from(value: Value) -> Self {
         match value {
@@ -178,6 +187,7 @@ impl From<Value> for f32 {
         }
     }
 }
+
 impl From<Value> for bool {
     fn from(value: Value) -> Self {
         match value {
@@ -186,6 +196,7 @@ impl From<Value> for bool {
         }
     }
 }
+
 impl From<Value> for String {
     fn from(value: Value) -> Self {
         match value {

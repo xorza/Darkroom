@@ -425,8 +425,6 @@ impl WgpuRenderer {
     }
 
     fn create_id_texture(device: &Device, window_size: UVec2) -> Texture {
-        
-
         device.create_texture(&TextureDescriptor {
             label: Some("Id Texture"),
             size: Extent3d {

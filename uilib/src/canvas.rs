@@ -16,6 +16,4 @@ impl ContentView for Canvas {
     }
 }
 
-impl Canvas {
-
-}
+impl Canvas {}

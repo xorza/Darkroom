@@ -63,6 +63,7 @@ impl From<glam::UVec2> for UVec2 {
         }
     }
 }
+
 impl From<UVec2> for glam::UVec2 {
     fn from(v: UVec2) -> Self {
         Self {

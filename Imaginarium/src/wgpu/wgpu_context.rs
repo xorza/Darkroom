@@ -4,6 +4,8 @@ use bytemuck::{Pod, Zeroable};
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
+use crate::image::ImageInfo;
+
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
@@ -38,9 +40,9 @@ impl WgpuContext {
 
         let _limits = adapter.limits();
         let limits = wgpu::Limits {
-            max_push_constant_size : 256,
-            max_texture_dimension_1d : 16384,
-            max_texture_dimension_2d : 16384,
+            max_push_constant_size: 256,
+            max_texture_dimension_1d: 16384,
+            max_texture_dimension_2d: 16384,
             ..Default::default()
         };
 
@@ -295,21 +297,33 @@ impl Shader {
 }
 
 pub(crate) struct Texture {
-    pub(crate) texture: wgpu::Texture,
-    pub(crate) view: wgpu::TextureView,
-    pub(crate) full_extent: wgpu::Extent3d,
+    pub texture: wgpu::Texture,
+    pub view: wgpu::TextureView,
+    pub extent: wgpu::Extent3d,
 }
 
 impl Texture {
-    pub fn new(device: &wgpu::Device, size: wgpu::Extent3d) -> Self {
+    pub fn new(device: &wgpu::Device, image_info: &ImageInfo) -> Self {
+        let extent = wgpu::Extent3d {
+            width: image_info.width,
+            height: image_info.height,
+            depth_or_array_layers: 1,
+        };
+
+        let usage =
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC;
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
-            size,
+            size: extent,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            format: wgpu::TextureFormat::from(image_info.color_format),
+            usage,
             view_formats: &[],
         });
 
@@ -318,7 +332,7 @@ impl Texture {
         Self {
             texture,
             view,
-            full_extent: size,
+            extent,
         }
     }
 }

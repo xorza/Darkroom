@@ -1,4 +1,6 @@
-#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone, Default)]
+use strum_macros::Display;
+
+#[derive(Debug, Hash, PartialEq, Eq, Copy, Clone, Default, Display)]
 #[repr(u32)]
 pub enum ChannelCount {
     Gray = 1,
@@ -27,11 +29,21 @@ pub enum ChannelType {
     Int,
 }
 
-#[derive(Clone, Hash, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, Default, PartialEq, Eq)]
 pub struct ColorFormat {
     pub channel_count: ChannelCount,
     pub channel_size: ChannelSize,
     pub channel_type: ChannelType,
+}
+
+
+impl ChannelCount {
+    pub fn channel_count(&self) -> u32 {
+        *self as u32
+    }
+    pub fn byte_count(&self, channel_size: ChannelSize) -> u32 {
+        self.channel_count() * channel_size.byte_count()
+    }
 }
 
 impl ChannelSize {
@@ -48,15 +60,6 @@ impl ChannelSize {
             _  => panic!("Invalid channel size: {:?}", bit_count),
             // @formatter:on
         }
-    }
-}
-
-impl ChannelCount {
-    pub fn channel_count(&self) -> u32 {
-        *self as u32
-    }
-    pub fn byte_count(&self, channel_size: ChannelSize) -> u32 {
-        self.channel_count() * channel_size.byte_count()
     }
 }
 
@@ -139,7 +142,7 @@ impl ColorFormat {
         channel_size: ChannelSize::_64bit,
         channel_type: ChannelType::Float,
     };
-    
+
     //gray alpha
     pub const GRAY_ALPHA_U8: ColorFormat = ColorFormat {
         channel_count: ChannelCount::GrayAlpha,
@@ -191,7 +194,7 @@ impl ColorFormat {
         channel_size: ChannelSize::_64bit,
         channel_type: ChannelType::Float,
     };
-    
+
     // rgb
     pub const RGB_U8: ColorFormat = ColorFormat {
         channel_count: ChannelCount::Rgb,
@@ -295,4 +298,10 @@ impl ColorFormat {
         channel_size: ChannelSize::_64bit,
         channel_type: ChannelType::Float,
     };
+}
+
+impl ToString for ColorFormat {
+    fn to_string(&self) -> String {
+        format!("{:?}_{:?}{:?}", self.channel_count, self.channel_type, self.channel_size)
+    }
 }

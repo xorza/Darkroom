@@ -1,5 +1,5 @@
 use crate::image::Image;
-use crate::wgpu::wgpu_context::{Shader, TextureSize, WgpuContext};
+use crate::wgpu::wgpu_context::{Shader, Texture, TextureSize, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -11,36 +11,38 @@ fn it_works() {
     let queue = &context.queue;
 
 
-    let src_tex1_extent = wgpu::Extent3d {
-        width: img1.width,
-        height: img1.height,
-        depth_or_array_layers: 1,
-    };
-    let src_tex1 = device.create_texture(&wgpu::TextureDescriptor {
-        size: src_tex1_extent,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8Unorm,
-        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-        view_formats: &[],
-        label: Some("tex 1"),
-    });
-    let src_tex1_view = src_tex1.create_view(&wgpu::TextureViewDescriptor::default());
+    let tex1 = Texture::new(device, &img1.info);
+
+    // let src_tex1_extent = wgpu::Extent3d {
+    //     width: img1.info.width,
+    //     height: img1.info.height,
+    //     depth_or_array_layers: 1,
+    // };
+    // let src_tex1 = device.create_texture(&wgpu::TextureDescriptor {
+    //     size: src_tex1_extent,
+    //     mip_level_count: 1,
+    //     sample_count: 1,
+    //     dimension: wgpu::TextureDimension::D2,
+    //     format: wgpu::TextureFormat::Rgba8Unorm,
+    //     usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+    //     view_formats: &[],
+    //     label: Some("tex 1"),
+    // });
+    // let src_tex1_view = src_tex1.create_view(&wgpu::TextureViewDescriptor::default());
     queue.write_texture(
-        src_tex1.as_image_copy(),
+        tex1.texture.as_image_copy(),
         &img1.bytes,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(img1.stride),
+            bytes_per_row: Some(img1.info.stride),
             rows_per_image: None,
         },
-        src_tex1_extent,
+        tex1.extent,
     );
 
     let src_tex2_extent = wgpu::Extent3d {
-        width: img2.width,
-        height: img2.height,
+        width: img2.info.width,
+        height: img2.info.height,
         depth_or_array_layers: 1,
     };
     let src_tex2 = device.create_texture(&wgpu::TextureDescriptor {
@@ -59,7 +61,7 @@ fn it_works() {
         &img2.bytes,
         wgpu::ImageDataLayout {
             offset: 0,
-            bytes_per_row: Some(img2.stride),
+            bytes_per_row: Some(img2.info.stride),
             rows_per_image: None,
         },
         src_tex2_extent,
@@ -67,8 +69,8 @@ fn it_works() {
 
 
     let dst_tex_extent = wgpu::Extent3d {
-        width: img2.width,
-        height: img2.height,
+        width: img2.info.width,
+        height: img2.info.height,
         depth_or_array_layers: 1,
     };
     let dst_tex = device.create_texture(&wgpu::TextureDescriptor {
@@ -86,8 +88,8 @@ fn it_works() {
 
     let shader = Shader::new(device, include_str!("shader.wgsl"));
     let texture_size = [
-        TextureSize([img1.width as f32, img1.height as f32]),
-        TextureSize([img2.width as f32, img2.height as f32]),
+        TextureSize([img1.info.width as f32, img1.info.height as f32]),
+        TextureSize([img2.info.width as f32, img2.info.height as f32]),
     ];
 
 
@@ -97,7 +99,7 @@ fn it_works() {
     context.draw_one(
         &mut encoder,
         &shader,
-        &src_tex1_view,
+        &tex1.view,
         &src_tex2_view,
         &dst_tex_view,
         &texture_size,
@@ -121,8 +123,8 @@ fn it_works() {
             buffer: &buffer,
             layout: wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(img2.width * img2.bytes_per_pixel()),
-                rows_per_image: Some(img2.height),
+                bytes_per_row: Some(img2.info.width * img2.bytes_per_pixel()),
+                rows_per_image: Some(img2.info.height),
             },
         },
         dst_tex_extent,
@@ -142,9 +144,9 @@ fn it_works() {
 
 
     let img3 = Image::new_with_data(
-        img2.width,
-        img2.height,
-        img2.color_format,
+        img2.info.width,
+        img2.info.height,
+        img2.info.color_format,
         result,
     ).unwrap();
     img3.save_file("../test_output/compute.png").unwrap();
