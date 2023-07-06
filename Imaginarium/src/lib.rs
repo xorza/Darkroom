@@ -4,6 +4,7 @@
 #[cfg(test)]
 mod tests;
 
+#[cfg(feature = "wgpu")]
 pub mod wgpu_context;
 pub mod image;
 mod image_convertion;

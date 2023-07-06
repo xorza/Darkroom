@@ -7,7 +7,6 @@ use bytemuck::{Pod, PodCastError};
 use image::{EncodableLayout, ImageFormat};
 use num_traits::{Bounded, NumCast, ToPrimitive};
 use tiff::decoder::DecodingResult;
-use wgpu::Color;
 
 use crate::image_convertion::convert_image;
 use crate::tiff_extentions::save_tiff;
