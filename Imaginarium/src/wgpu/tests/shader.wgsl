@@ -5,8 +5,8 @@ struct VertexOutput {
 };
 
 struct PushConstants {
-    tex1_size: vec2<f32>,
-    tex2_size: vec2<f32>,
+    tex1_transform: mat3x3<f32>,
+    tex2_transform: mat3x3<f32>,
 };
 var<push_constant> pc: PushConstants;
 
@@ -16,9 +16,11 @@ fn vs_main(
     @location(1) tex_coord: vec2<f32>
 ) -> VertexOutput {
     var result: VertexOutput;
-    result.position = vec4<f32>(position * 2.0 - 1.0, 0.0, 1.0);
-    result.tex1_coord = tex_coord * pc.tex1_size;
-    result.tex2_coord = tex_coord * pc.tex2_size;
+    result.position = vec4<f32>(position, 0.0, 1.0);
+
+    result.tex1_coord = (pc.tex1_transform * vec3<f32>(tex_coord, 1.0)).xy;
+    result.tex2_coord = (pc.tex2_transform * vec3<f32>(tex_coord, 1.0)).xy;
+
     return result;
 }
 
@@ -34,8 +36,6 @@ var tex_2: texture_2d<f32>;
 
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
-//    let color1 = textureLoad(tex_1, vec2<i32>(vertex.tex1_coord), 0);
-//    let color2 = textureLoad(tex_2, vec2<i32>(vertex.tex2_coord), 0);
     let color1 = textureSample(tex_1, the_sampler, vertex.tex1_coord);
     let color2 = textureSample(tex_2, the_sampler, vertex.tex2_coord);
     return vec4<f32>(color1 * color2);

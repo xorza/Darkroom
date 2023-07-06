@@ -1,4 +1,5 @@
 use crate::image::Image;
+use crate::wgpu::math::TextureTransform;
 use crate::wgpu::wgpu_context::{Shader, Texture, WgpuContext};
 
 #[test]
@@ -21,18 +22,26 @@ fn it_works() {
 
     let dst_tex = Texture::new(device, &image_desc);
 
-    let texture_size = [[1.0f32, 1.0f32], [1.0f32, 1.0f32]];
+    let mut texture_transforms = [
+        TextureTransform::default(),
+        TextureTransform::default()
+    ];
+    texture_transforms[1]
+        .aspect(1.0)
+        .translate(0.5, 0.5)
+        .rotate(0.5)
+        .translate(-0.5, -0.5);
 
     let shader = Shader::new(
         device,
         include_str!("shader.wgsl"),
         2,
-        std::mem::size_of_val(&texture_size) as u32,
+        std::mem::size_of_val(&texture_transforms) as u32,
         &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
     );
 
     let mut encoder = device.create_command_encoder(
-        &wgpu::CommandEncoderDescriptor { label: None }
+        &wgpu::CommandEncoderDescriptor::default()
     );
     context.draw_one(
         &mut encoder,
@@ -40,13 +49,11 @@ fn it_works() {
         &tex1.view,
         &tex2.view,
         &dst_tex.view,
-        &texture_size,
+        &texture_transforms,
     );
     queue.submit(Some(encoder.finish()));
 
     let mut img3 = Image::new_empty(image_desc).unwrap();
-
     dst_tex.read(device, queue, &mut img3).unwrap();
-
     img3.save_file("../test_output/compute.png").unwrap();
 }

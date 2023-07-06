@@ -148,19 +148,11 @@ impl WgpuContext {
 pub(crate) struct Vert2D(pub [f32; 2], pub [f32; 2]);
 
 impl Vert2D {
-    pub fn rect(width: f32, height: f32, tex_width: f32, tex_height: f32) -> [Vert2D; 4] {
-        [
-            Vert2D([0.0, 0.0], [0.0, 0.0]),
-            Vert2D([width, 0.0], [tex_width, 0.0]),
-            Vert2D([0.0, height], [0.0, tex_height]),
-            Vert2D([width, height], [tex_width, tex_height]),
-        ]
-    }
     pub fn rect_one() -> [Vert2D; 4] {
         [
-            Vert2D([0.0, 0.0], [0.0, 0.0]),
-            Vert2D([1.0, 0.0], [1.0, 0.0]),
-            Vert2D([0.0, 1.0], [0.0, 1.0]),
+            Vert2D([-1.0, -1.0], [0.0, 0.0]),
+            Vert2D([1.0, -1.0], [1.0, 0.0]),
+            Vert2D([-1.0, 1.0], [0.0, 1.0]),
             Vert2D([1.0, 1.0], [1.0, 1.0]),
         ]
     }
