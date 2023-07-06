@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use uuid::Uuid;
 
-use crate::compute::{Compute, ComputeInfo, LambdaCompute};
+use crate::compute::{Compute, ComputeInfo, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
@@ -138,16 +138,21 @@ fn simple_compute_test() -> anyhow::Result<()> {
 }
 
 #[test]
-fn box_test() -> anyhow::Result<()>{
-    fn box_test_(ctx:&mut Option<Box<dyn Any>>){
-        let context: Option<Box<dyn Any>> = Some(Box::new(17u32));
-        *ctx = context;
+fn invoke_context_test() -> anyhow::Result<()> {
+    fn box_test_(ctx: &mut InvokeContext) {
+        let n = *ctx.get_or_default::<u32>();
+        assert_eq!(n, 0);
+        let n = ctx.get_or_default::<i32>();
+        assert_eq!(*n, 0);
+        *n = 13;
     }
-    
-    let mut context: Option<Box<dyn Any>> = None;
-    box_test_(&mut context);
 
-    let _context  = context.unwrap().downcast::<u32>().unwrap();
+    let mut ctx = InvokeContext::default();
+    box_test_(&mut ctx);
+    let n = ctx.get_or_default::<i32>();
+    assert_eq!(*n, 13);
+    let n = *ctx.get_or_default::<u32>();
+    assert_eq!(n, 0);
 
     Ok(())
 }

@@ -37,7 +37,6 @@ pub struct ComputeInfo {
     context_cache: HashMap<NodeId, RefCell<InvokeContext>>,
 }
 
-#[derive(Default)]
 pub struct InvokeContext {
     boxed: Option<Box<dyn Any>>,
 }
@@ -224,21 +223,44 @@ impl IndexMut<usize> for ArgSet {
 }
 
 impl InvokeContext {
-    pub fn is_some(&self) -> bool {
-        self.boxed.is_some()
+    pub(crate) fn default() -> InvokeContext {
+        InvokeContext {
+            boxed: None,
+        }
     }
 
-    pub fn set<T: Any>(&mut self, value: T) {
-        self.boxed = Some(Box::new(value));
+    pub fn is_some<T>(&self) -> bool
+        where T: Any + Default
+    {
+        match &self.boxed {
+            None => false,
+            Some(v) => v.is::<T>(),
+        }
     }
 
-    pub fn get<T: Any>(&self) -> Option<&T> {
+    pub fn get<T>(&self) -> Option<&T>
+        where T: Any + Default
+    {
         self.boxed.as_ref()
             .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
-    pub fn get_mut<T: Any>(&mut self) -> Option<&mut T> {
-        self.boxed.as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
+    pub fn get_or_default<T>(&mut self) -> &mut T
+        where T: Any + Default
+    {
+        let is_some = self.is_some::<T>();
+
+        if is_some {
+            self.boxed
+                .as_mut()
+                .unwrap()
+                .downcast_mut::<T>()
+                .unwrap()
+        } else {
+            self.boxed
+                .insert(Box::new(T::default()))
+                .downcast_mut::<T>()
+                .unwrap()
+        }
     }
 }
