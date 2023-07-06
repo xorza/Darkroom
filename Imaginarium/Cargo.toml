@@ -7,9 +7,9 @@ edition = "2021"
 default = ["wgpu"]
 
 [dependencies]
-tiff =  { workspace = true }
-png =  { workspace = true }
-image =  { workspace = true }
+tiff = { workspace = true }
+png = { workspace = true }
+image = { workspace = true }
 anyhow = { workspace = true }
 wgpu = { workspace = true, optional = true }
 pollster = { workspace = true }

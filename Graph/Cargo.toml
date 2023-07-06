@@ -10,4 +10,4 @@ serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
-mlua ={ workspace = true }
+mlua = { workspace = true }

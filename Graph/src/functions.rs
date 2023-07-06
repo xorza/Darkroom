@@ -38,7 +38,7 @@ pub struct Functions {
 }
 
 impl Functions {
-    pub fn new(funcs: &Vec<&Function>) -> Functions {
+    pub fn new(funcs: &[&Function]) -> Functions {
         let functions = funcs.iter()
             .cloned()
             .cloned()

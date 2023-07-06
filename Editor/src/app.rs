@@ -1,14 +1,13 @@
 use std::{borrow::Cow, collections::HashMap};
 
-use eframe::egui::{self, DragValue, TextStyle, Widget};
+use eframe::egui::{self, DragValue, Widget};
 use egui_file::{DialogType, FileDialog};
-use egui_node_graph as eng;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
+use egui_node_graph as eng;
 use graph_lib::data::{DataType, Value};
 use graph_lib::functions::{Function, FunctionId};
-use graph_lib::graph::{Binding, FunctionBehavior, Input, NodeId, Output};
+use graph_lib::graph::{Binding, Input, NodeId, Output};
 
 #[derive(Clone, Debug, Default)]
 pub struct EditorNode {
@@ -363,7 +362,7 @@ impl NodeshopApp {
 
         for (editor_input_id, editor_output_id) in editor_graph.connections.iter() {
             let input_address = input_addresses.get(&editor_input_id).unwrap();
-            let output_address = output_addresses.get(&editor_output_id).unwrap();
+            let output_address = output_addresses.get(editor_output_id).unwrap();
 
             let input = graph.graph
                 .node_by_id_mut(input_address.node_id)
@@ -445,14 +444,11 @@ impl NodeshopApp {
             let node_id = editor_graph.add_node(node.name.clone(), node_data, node_add);
             self.state.node_order.push(node_id);
 
-            graph.positions
-                .get(&node.id())
-                .map(|(x, y)| {
-                    self.state.node_positions.insert(
+            if let Some((x, y)) = graph.positions
+                .get(&node.id()) { self.state.node_positions.insert(
                         node_id,
                         egui::Pos2 { x: *x, y: *y },
-                    );
-                });
+                    ); }
         }
 
         for node in graph.graph.nodes().iter() {

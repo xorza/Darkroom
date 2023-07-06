@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::f32::consts;
 use std::mem;
 
 use bytemuck::{Pod, Zeroable};
@@ -8,8 +7,7 @@ use wgpu::*;
 use wgpu::util::DeviceExt;
 
 use crate::app_base::RenderInfo;
-use crate::math::{FVec4, UVec2, UVec4};
-use crate::view::View;
+use crate::math::{FVec4, UVec2};
 
 fn vertex(pos: [f32; 3], tc: [f32; 2]) -> Vertex {
     Vertex {
@@ -372,7 +370,7 @@ impl WgpuRenderer {
                                 * Mat4::from_scale(Vec3::new(size.x as f32, size.y as f32, 1.0))
                         ).to_cols_array();
 
-                        fragment_uniform.color = color.clone();
+                        fragment_uniform.color = *color;
                     }
                 }
 
@@ -427,7 +425,9 @@ impl WgpuRenderer {
     }
 
     fn create_id_texture(device: &Device, window_size: UVec2) -> Texture {
-        let id_texture = device.create_texture(&TextureDescriptor {
+        
+
+        device.create_texture(&TextureDescriptor {
             label: Some("Id Texture"),
             size: Extent3d {
                 width: window_size.x,
@@ -440,8 +440,6 @@ impl WgpuRenderer {
             format: TextureFormat::R32Uint,
             usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST | TextureUsages::COPY_SRC,
             view_formats: &[],
-        });
-
-        id_texture
+        })
     }
 }

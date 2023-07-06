@@ -1,11 +1,7 @@
 use std::fs::File;
-use std::io::Cursor;
-use std::mem::{align_of, size_of};
 use std::path::Path;
 
-use bytemuck::{Pod, PodCastError};
-use image::{EncodableLayout, ImageFormat};
-use num_traits::{Bounded, NumCast, ToPrimitive};
+use image::ImageFormat;
 use tiff::decoder::DecodingResult;
 
 use crate::image_convertion::convert_image;

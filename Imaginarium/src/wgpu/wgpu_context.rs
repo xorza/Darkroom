@@ -1,5 +1,4 @@
-use std::marker::PhantomData;
-use std::ops::{Range, RangeBounds};
+use std::ops::RangeBounds;
 
 use bytemuck::{Pod, Zeroable};
 use pollster::FutureExt;
@@ -178,7 +177,7 @@ impl VertexBuffer {
     }
     pub fn from_slice<V: Pod>(device: &wgpu::Device, data: &[V]) -> Self {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            contents: bytemuck::cast_slice(&data),
+            contents: bytemuck::cast_slice(data),
             usage: wgpu::BufferUsages::VERTEX,
             label: None,
         });

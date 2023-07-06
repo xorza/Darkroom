@@ -12,6 +12,6 @@ serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 graph_lib = { workspace = true }
-egui_node_graph ={ workspace = true }
+egui_node_graph = { workspace = true }
 egui_file = { workspace = true }
-eframe ={ workspace = true }
+eframe = { workspace = true }

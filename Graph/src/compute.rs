@@ -3,9 +3,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
-use uuid::Uuid;
-
-use crate::data::{DataType, Value};
+use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, NodeId};
 use crate::preprocess::PreprocessInfo;
@@ -94,11 +92,8 @@ pub trait Compute {
                 .for_each(|(index, value)| inputs[index] = value);
 
             let mut ctx = prev_compute_info.context_cache
-                .get(&node.id())
-                .and_then(|ctx|
-                    Some(ctx.replace(InvokeContext::default()))
-                )
-                .unwrap_or_else(|| InvokeContext::default());
+                .get(&node.id()).map(|ctx| ctx.replace(InvokeContext::default()))
+                .unwrap_or_else(InvokeContext::default);
 
             let start = std::time::Instant::now();
             self.invoke(node.function_id, &mut ctx, inputs.as_slice(), outputs.as_mut_slice())?;
@@ -145,17 +140,12 @@ pub struct LambdaInvokable {
     lambda: Box<Lambda>,
 }
 
+#[derive(Default)]
 pub struct LambdaCompute {
     lambdas: HashMap<FunctionId, LambdaInvokable>,
 }
 
 impl LambdaCompute {
-    pub fn new() -> LambdaCompute {
-        LambdaCompute {
-            lambdas: HashMap::new(),
-        }
-    }
-
     pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
         where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
@@ -271,7 +261,7 @@ impl InvokeContext {
                 .unwrap()
         } else {
             self.boxed
-                .insert(Box::new(T::default()))
+                .insert(Box::<T>::default())
                 .downcast_mut::<T>()
                 .unwrap()
         }

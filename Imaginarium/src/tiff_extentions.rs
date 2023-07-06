@@ -144,7 +144,7 @@ impl ColorType for RGBAI64 {
 }
 
 
-pub(crate) fn save_tiff(image:&Image, filename: &str) -> anyhow::Result<()> {
+pub(crate) fn save_tiff(image: &Image, filename: &str) -> anyhow::Result<()> {
     match (image.channel_count, image.channel_size, image.channel_type) {
         // @formatter:off
         (ChannelCount::     Gray, ChannelSize:: _8bit, ChannelType::  Int) => save_tiff_internal::<GrayI8          >(image,filename)?,
@@ -210,7 +210,7 @@ pub(crate) fn save_tiff(image:&Image, filename: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn save_tiff_internal<ColorType>(image:&Image, filename: &str) -> anyhow::Result<()>
+fn save_tiff_internal<ColorType>(image: &Image, filename: &str) -> anyhow::Result<()>
     where ColorType: colortype::ColorType,
           [ColorType::Inner]: TiffValue,
 {

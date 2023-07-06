@@ -1,5 +1,5 @@
 #![allow(dead_code)]
-#![allow(unused_imports)]
+// #![allow(unused_imports)]
 
 
 // use uilib::app_base::run;
@@ -10,8 +10,6 @@
 //     run::<UiApp>("UI App");
 // }
 
-
-use serde::Serialize;
 
 use crate::app::NodeshopApp;
 

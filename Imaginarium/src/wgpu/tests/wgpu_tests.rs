@@ -1,9 +1,5 @@
-use std::borrow::Cow;
-
-use wgpu::util::DeviceExt;
-
-use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
-use crate::wgpu::wgpu_context::{Shader, TextureSize, Vert2D, WgpuContext};
+use crate::image::Image;
+use crate::wgpu::wgpu_context::{Shader, TextureSize, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -86,7 +82,6 @@ fn it_works() {
         label: Some("target texture"),
     });
     let dst_tex_view = dst_tex.create_view(&wgpu::TextureViewDescriptor::default());
-
 
 
     let shader = Shader::new(device, include_str!("shader.wgsl"));

@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use bytemuck::Pod;
-use num_traits::{Bounded, NumCast, ToPrimitive};
+use num_traits::Bounded;
 
 use crate::image::{ChannelCount, ChannelSize, ChannelType, Image};
 
@@ -545,25 +545,25 @@ fn convert_pixels<From, To>(
 #[inline] pub(crate) fn f32_to_u32(value: f32) -> u32 { (value as f64 * u32::MAX as f64) as u32 }
 #[inline] pub(crate) fn f32_to_u64(value: f32) -> u64 { (value as f64 * u64::MAX as f64) as u64 }
 
-#[inline] pub(crate) fn f64_to_u8 (value: f64) ->  u8 { (value as f64 *  u8::MAX as f64) as  u8 }
-#[inline] pub(crate) fn f64_to_u16(value: f64) -> u16 { (value as f64 * u16::MAX as f64) as u16 }
-#[inline] pub(crate) fn f64_to_u32(value: f64) -> u32 { (value as f64 * u32::MAX as f64) as u32 }
-#[inline] pub(crate) fn f64_to_u64(value: f64) -> u64 { (value as f64 * u64::MAX as f64) as u64 }
+#[inline] pub(crate) fn f64_to_u8 (value: f64) ->  u8 { (value *  u8::MAX as f64) as  u8 }
+#[inline] pub(crate) fn f64_to_u16(value: f64) -> u16 { (value * u16::MAX as f64) as u16 }
+#[inline] pub(crate) fn f64_to_u32(value: f64) -> u32 { (value * u32::MAX as f64) as u32 }
+#[inline] pub(crate) fn f64_to_u64(value: f64) -> u64 { (value * u64::MAX as f64) as u64 }
 
 #[inline] pub(crate) fn f32_to_i8 (value: f32) ->  i8 { (value as f64 *  i8::MAX as f64) as  i8 }
 #[inline] pub(crate) fn f32_to_i16(value: f32) -> i16 { (value as f64 * i16::MAX as f64) as i16 }
 #[inline] pub(crate) fn f32_to_i32(value: f32) -> i32 { (value as f64 * i32::MAX as f64) as i32 }
 #[inline] pub(crate) fn f32_to_i64(value: f32) -> i64 { (value as f64 * i64::MAX as f64) as i64 }
 
-#[inline] pub(crate) fn f64_to_i8 (value: f64) ->  i8 { (value as f64 *  i8::MAX as f64) as  i8 }
-#[inline] pub(crate) fn f64_to_i16(value: f64) -> i16 { (value as f64 * i16::MAX as f64) as i16 }
-#[inline] pub(crate) fn f64_to_i32(value: f64) -> i32 { (value as f64 * i32::MAX as f64) as i32 }
-#[inline] pub(crate) fn f64_to_i64(value: f64) -> i64 { (value as f64 * i64::MAX as f64) as i64 }
+#[inline] pub(crate) fn f64_to_i8 (value: f64) ->  i8 { (value *  i8::MAX as f64) as  i8 }
+#[inline] pub(crate) fn f64_to_i16(value: f64) -> i16 { (value * i16::MAX as f64) as i16 }
+#[inline] pub(crate) fn f64_to_i32(value: f64) -> i32 { (value * i32::MAX as f64) as i32 }
+#[inline] pub(crate) fn f64_to_i64(value: f64) -> i64 { (value * i64::MAX as f64) as i64 }
 
 #[inline] pub(crate) fn f32_to_f64(value: f32) -> f64 { value as f64 }
-#[inline] pub(crate) fn f32_to_f32(value: f32) -> f32 { value as f32 }
+#[inline] pub(crate) fn f32_to_f32(value: f32) -> f32 { value }
 #[inline] pub(crate) fn f64_to_f32(value: f64) -> f32 { value as f32 }
-#[inline] pub(crate) fn f64_to_f64(value: f64) -> f64 { value as f64 }
+#[inline] pub(crate) fn f64_to_f64(value: f64) -> f64 { value }
 
 
 #[inline] pub(crate) fn avg_u8 (v0:  u8, v1:  u8, v2:  u8) ->  u8 { ((v0 as  u16 + v1 as  u16 + v2 as  u16) / 3) as  u8 }
@@ -577,6 +577,6 @@ fn convert_pixels<From, To>(
 #[inline] pub(crate) fn avg_i64(v0: i64, v1: i64, v2: i64) -> i64 { ((v0 as i128 + v1 as i128 + v2 as i128) / 3) as i64 }
 
 #[inline] pub(crate) fn avg_f32(v0: f32, v1: f32, v2: f32) -> f32 { ((v0 as f64 + v1 as f64 + v2 as f64) / 3.0) as f32 }
-#[inline] pub(crate) fn avg_f64(v0: f64, v1: f64, v2: f64) -> f64 { ((v0 as f64 + v1 as f64 + v2 as f64) / 3.0) as f64 }
+#[inline] pub(crate) fn avg_f64(v0: f64, v1: f64, v2: f64) -> f64 { (v0 + v1 + v2) / 3.0 }
 
 // @formatter:on

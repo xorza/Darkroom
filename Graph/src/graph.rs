@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use crate::data::{DataType, Value};
 use crate::functions::{Function, FunctionId};
-use crate::macros;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FunctionBehavior {
@@ -313,7 +312,7 @@ impl Node {
         let inputs: Vec<Input> = function.inputs.iter().map(|func_input| {
             Input {
                 name: func_input.name.clone(),
-                data_type: func_input.data_type.clone(),
+                data_type: func_input.data_type,
                 is_required: true,
                 binding: func_input.const_value.as_ref().map_or(Binding::None, |_| Binding::Const),
                 const_value: func_input.const_value.clone(),
@@ -323,7 +322,7 @@ impl Node {
         let outputs: Vec<Output> = function.outputs.iter().map(|output| {
             Output {
                 name: output.name.clone(),
-                data_type: output.data_type.clone(),
+                data_type: output.data_type,
             }
         }).collect();
 

@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use crate::math::FVec4;
 use crate::renderer::Renderer;
 
 pub trait Draw {

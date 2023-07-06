@@ -146,51 +146,51 @@ impl From<bool> for Value {
     }
 }
 
-impl Into<i64> for Value {
-    fn into(self) -> i64 {
-        match self {
+impl From<Value> for i64 {
+    fn from(value: Value) -> Self {
+        match value {
             Value::Int(value) => { value }
             _ => { panic!("Value is not an int") }
         }
     }
 }
-impl Into<i32> for Value {
-    fn into(self) -> i32 {
-        match self {
-            Value::Int(value) => { value as i32 }
-            _ => { panic!("Value is not an int") }
-        }
-    }
-}
-impl Into<f32> for Value {
-    fn into(self) -> f32 {
-        match self {
-            Value::Float(value) => { value as f32 }
-            _ => { panic!("Value is not a float") }
-        }
-    }
-}
-impl Into<f64> for Value {
-    fn into(self) -> f64 {
-        match self {
+impl From<Value> for f64 {
+    fn from(value: Value) -> Self {
+        match value {
             Value::Float(value) => { value }
             _ => { panic!("Value is not a float") }
         }
     }
 }
-impl Into<String> for Value {
-    fn into(self) -> String {
-        match self {
-            Value::String(value) => { value }
-            _ => { panic!("Value is not a string") }
+impl From<Value> for i32 {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Int(value) => { value as i32 }
+            _ => { panic!("Value is not an int") }
         }
     }
 }
-impl Into<bool> for Value {
-    fn into(self) -> bool {
-        match self {
+impl From<Value> for f32 {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::Float(value) => { value as f32 }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl From<Value> for bool {
+    fn from(value: Value) -> Self {
+        match value {
             Value::Bool(value) => { value }
             _ => { panic!("Value is not a bool") }
+        }
+    }
+}
+impl From<Value> for String {
+    fn from(value: Value) -> Self {
+        match value {
+            Value::String(value) => { value }
+            _ => { panic!("Value is not a string") }
         }
     }
 }

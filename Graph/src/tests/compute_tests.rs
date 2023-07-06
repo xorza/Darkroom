@@ -1,8 +1,3 @@
-use std::any::Any;
-use std::str::FromStr;
-
-use uuid::Uuid;
-
 use crate::compute::{Compute, ComputeInfo, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
@@ -29,7 +24,7 @@ fn create_compute<GetA, GetB, SetResult>(
         GetA: Fn() -> i64 + 'static,
         GetB: Fn() -> i64 + 'static,
 {
-    let mut compute = LambdaCompute::new();
+    let mut compute = LambdaCompute::default();
 
     // print func
     compute.add_lambda(FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?, move |_, inputs, _| {

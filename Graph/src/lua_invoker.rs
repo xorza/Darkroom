@@ -1,17 +1,14 @@
-use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use mlua::{Error, Function, Lua, Table, Variadic};
-use uuid::Uuid;
 
-use crate::{compute, data, functions};
+use crate::{data, functions};
 use crate::compute::{Compute, InvokeArgs, InvokeContext};
 use crate::data::DataType;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
-use crate::preprocess::PreprocessInfo;
 
 #[derive(Default)]
 struct Cache {
@@ -326,7 +323,7 @@ impl Compute for LuaInvoker {
                 .expect("input is required");
             assert_eq!(input_info.data_type, input.data_type());
 
-            let invoke_value = to_lua_value(self.lua, &input)?;
+            let invoke_value = to_lua_value(self.lua, input)?;
             input_args.push(invoke_value);
         }
 
