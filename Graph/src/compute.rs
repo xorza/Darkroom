@@ -245,6 +245,19 @@ impl InvokeContext {
             .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
+    pub fn get_mut<T>(&mut self) -> Option<&mut T>
+        where T: Any + Default
+    {
+        self.boxed.as_mut()
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+    }
+
+    pub fn set<T>(&mut self, value: T)
+        where T: Any + Default
+    {
+        self.boxed = Some(Box::new(value));
+    }
+
     pub fn get_or_default<T>(&mut self) -> &mut T
         where T: Any + Default
     {
