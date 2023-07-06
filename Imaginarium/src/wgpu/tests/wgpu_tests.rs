@@ -1,5 +1,5 @@
 use crate::image::Image;
-use crate::wgpu::wgpu_context::{Shader, Texture, TextureSize, WgpuContext};
+use crate::wgpu::wgpu_context::{BindLayoutEntry, Shader, Texture, TextureSize, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -19,14 +19,21 @@ fn it_works() {
     tex2.write(queue, &img).unwrap();
     drop(img);
 
-
     let dst_tex = Texture::new(device, &image_desc);
 
-    let shader = Shader::new(device, include_str!("shader.wgsl"));
     let texture_size = [
         TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
         TextureSize([image_desc.width() as f32, image_desc.height() as f32]),
     ];
+
+    let shader = Shader::new(
+        device,
+        include_str!("shader.wgsl"),
+        &[BindLayoutEntry::Texture, BindLayoutEntry::Texture],
+        std::mem::size_of_val(&texture_size) as u32,
+        &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
+    );
+
 
     let mut encoder = device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });

@@ -84,11 +84,11 @@ impl WgpuContext {
             layout: &shader.bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 1,
+                    binding: 0,
                     resource: wgpu::BindingResource::TextureView(tex1_view),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 2,
+                    binding: 1,
                     resource: wgpu::BindingResource::TextureView(tex2_view),
                 }
             ],
@@ -127,6 +127,7 @@ impl WgpuContext {
             render_pass.insert_debug_marker("Draw.");
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
+
 
             drop(render_pass);
         }
@@ -205,37 +206,49 @@ pub(crate) struct Shader {
     pub(crate) pipeline: wgpu::RenderPipeline,
 }
 
+pub(crate) enum BindLayoutEntry {
+    Texture,
+}
+
 impl Shader {
-    pub fn new(device: &wgpu::Device, shader: &str) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        shader: &str,
+        bind_layout_entries: &[BindLayoutEntry],
+        push_constant_size: u32,
+        vertex_layout: &[wgpu::VertexFormat],
+    ) -> Self
+    {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(shader.into()),
         });
 
+        let wgpu_bind_group_layout_entries =
+            bind_layout_entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| {
+                    match entry {
+                        BindLayoutEntry::Texture => {
+                            wgpu::BindGroupLayoutEntry {
+                                binding: index as u32,
+                                visibility: wgpu::ShaderStages::FRAGMENT,
+                                ty: wgpu::BindingType::Texture {
+                                    multisampled: false,
+                                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                                    view_dimension: wgpu::TextureViewDimension::D2,
+                                },
+                                count: None,
+                            }
+                        }
+                    }
+                })
+                .collect::<Vec<wgpu::BindGroupLayoutEntry>>();
+
         let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    },
-                ],
+                entries: &wgpu_bind_group_layout_entries,
                 label: None,
             });
 
@@ -244,10 +257,21 @@ impl Shader {
                 bind_group_layouts: &[&bind_group_layout],
                 push_constant_ranges: &[wgpu::PushConstantRange {
                     stages: wgpu::ShaderStages::VERTEX,
-                    range: 0..4 * 2 + 4 * 2,
+                    range: 0..push_constant_size,
                 }],
                 label: None,
             });
+
+        let mut vertex_stride: u64 = 0;
+        let mut vertex_attributes: Vec<wgpu::VertexAttribute> = Vec::new();
+        for (index, entry) in vertex_layout.iter().enumerate() {
+            vertex_attributes.push(wgpu::VertexAttribute {
+                offset: vertex_stride,
+                format: *entry,
+                shader_location: index as u32,
+            });
+            vertex_stride += entry.size();
+        }
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             layout: Some(&pipeline_layout),
@@ -255,20 +279,9 @@ impl Shader {
                 module: &module,
                 entry_point: "vs_main",
                 buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 4 * 2 + 4 * 2,
+                    array_stride: vertex_stride,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            format: wgpu::VertexFormat::Float32x2,
-                            shader_location: 0,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 4 * 2,
-                            format: wgpu::VertexFormat::Float32x2,
-                            shader_location: 1,
-                        },
-                    ],
+                    attributes: vertex_attributes.as_slice(),
                 }],
             },
             fragment: Some(wgpu::FragmentState {
