@@ -1,5 +1,3 @@
-use std::cell::RefCell;
-
 use crate::image::Image;
 use crate::wgpu::math::TextureTransform;
 use crate::wgpu::wgpu_context::{Action, WgpuContext};
@@ -72,7 +70,7 @@ fn it_works2() {
         .uncenter();
 
     let img1 = Image::read_file("../test_resources/rainbow256x256.png").unwrap();
-    let img2 = Image::read_file("../test_resources/squares256x256.png").unwrap();
+    let mut img2 = Image::read_file("../test_resources/squares256x256.png").unwrap();
     let mut img3 = Image::new_empty(img1.desc.clone()).unwrap();
 
     let tex1 = context.create_texture(img1.desc.clone());
@@ -87,26 +85,27 @@ fn it_works2() {
 
     context.perform(&[
         Action::ImgToTex {
-            images: &[&img1, &img2],
-            textures: &[&tex1, &tex2],
-        },
+            images: vec![&img1, &img2],
+            textures: vec![&tex1, &tex2],
+        }
+    ]);
+
+    context.perform(&[
         Action::RunShader {
             shader: &shader,
-            input_textures: &[&tex1, &tex2],
+            input_textures: vec![&tex1, &tex2],
             output_texture: &tex3,
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
         Action::RunShader {
             shader: &shader,
-            input_textures: &[&tex3, &tex2],
+            input_textures: vec![&tex3, &tex2],
             output_texture: &tex1,
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
-        Action::TexToImg {
-            textures: &[&tex1],
-            images: &[RefCell::new(&mut img3)],
-        },
+        Action::tex_to_img(&[&tex3, &tex1], &mut [&mut img2, &mut img3])
     ]);
 
-    img3.save_file("../test_output/compute2.png").unwrap();
+    img2.save_file("../test_output/compute2.png").unwrap();
+    img3.save_file("../test_output/compute3.png").unwrap();
 }

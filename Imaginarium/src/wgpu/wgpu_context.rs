@@ -22,20 +22,19 @@ fn aligned_size_of_uniform<U: Sized>() -> u64 {
 pub(crate) enum Action<'a> {
     RunShader {
         shader: &'a Shader,
-        input_textures: &'a [&'a Texture],
+        input_textures: Vec<&'a Texture>,
         output_texture: &'a Texture,
         push_constants: &'a [u8],
     },
     ImgToTex {
-        images: &'a [&'a Image],
-        textures: &'a [&'a Texture],
+        images: Vec<&'a Image>,
+        textures: Vec<&'a Texture>,
     },
     TexToImg {
-        textures: &'a [&'a Texture],
-        images: &'a [RefCell<&'a mut Image>],
+        textures: Vec<&'a Texture>,
+        images: Vec<RefCell<&'a mut Image>>,
     },
 }
-
 
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
@@ -554,3 +553,14 @@ impl Texture {
     }
 }
 
+impl<'a> Action<'a> {
+    pub fn tex_to_img(tex: &'a [&'a Texture], img: &'a mut [&'a mut Image]) -> Action<'a> {
+        Action::TexToImg {
+            textures: tex.to_vec(),
+            images: img.iter_mut().map(|x| {
+                let x: RefCell<&'a mut Image> = RefCell::new(*x);
+                x
+            }).collect::<Vec<RefCell<&'a mut Image>>>(),
+        }
+    }
+}
