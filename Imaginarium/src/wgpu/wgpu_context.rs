@@ -3,6 +3,7 @@ use std::ops::RangeBounds;
 
 use bytemuck::Pod;
 use pollster::FutureExt;
+use wgpu::CommandEncoder;
 use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
@@ -19,27 +20,22 @@ fn aligned_size_of_uniform<U: Sized>() -> u64 {
 
 
 pub(crate) enum Action<'a> {
-    RunShader(RunShaderAction<'a>),
-    ImgToTex(ImgToTexAction<'a>),
-    TexToImg(TexToImgAction<'a>),
+    RunShader {
+        shader: &'a Shader,
+        input_textures: &'a [&'a Texture],
+        output_texture: &'a Texture,
+        push_constants: &'a [u8],
+    },
+    ImgToTex {
+        images: &'a [&'a Image],
+        textures: &'a [&'a Texture],
+    },
+    TexToImg {
+        textures: &'a [&'a Texture],
+        images: &'a [RefCell<&'a mut Image>],
+    },
 }
 
-pub(crate) struct RunShaderAction<'a> {
-    pub shader: &'a Shader,
-    pub input_textures: &'a [&'a Texture],
-    pub output_texture: &'a Texture,
-    pub push_constants: &'a [u8],
-}
-
-pub(crate) struct ImgToTexAction<'a> {
-    pub images: &'a [&'a Image],
-    pub textures: &'a [&'a Texture],
-}
-
-pub(crate) struct TexToImgAction<'a> {
-    pub textures: &'a [&'a Texture],
-    pub images: &'a [RefCell<&'a mut Image>],
-}
 
 pub(crate) struct WgpuContext {
     pub device: wgpu::Device,
@@ -99,26 +95,35 @@ impl WgpuContext {
     }
 
     pub fn perform(&self, actions: &[Action]) {
+        let mut encoder: Option<CommandEncoder> = None;
 
 
-        for action in actions {
+        for action in actions.iter() {
             match action {
-                Action::RunShader(action) => {
-                    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                Action::RunShader {
+                    shader,
+                    input_textures,
+                    output_texture,
+                    push_constants,
+                } => {
+                    let encoder = encoder.get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                         label: None,
-                    });
+                    }));
+
                     self.run_shader(
-                        &mut encoder,
-                        action.shader,
-                        action.input_textures,
-                        action.output_texture,
-                        action.push_constants,
+                        encoder,
+                        shader,
+                        input_textures,
+                        output_texture,
+                        push_constants,
                     );
-                    self.queue.submit(Some(encoder.finish()));
                 }
-                Action::ImgToTex(action) => {
+                Action::ImgToTex {
+                    images,
+                    textures,
+                } => {
                     for (image, texture) in
-                    action.images.iter().zip(action.textures) {
+                    images.iter().zip(textures.iter()) {
                         if image.desc != texture.desc {
                             panic!("Image and texture must have the same dimensions");
                         }
@@ -136,9 +141,12 @@ impl WgpuContext {
                         );
                     }
                 }
-                Action::TexToImg(action) => {
+                Action::TexToImg {
+                    textures,
+                    images,
+                } => {
                     for (image, texture) in
-                    action.images.iter().zip(action.textures) {
+                    images.iter().zip(textures.iter()) {
                         let mut image = image.borrow_mut();
 
                         if image.desc != texture.desc {
@@ -153,8 +161,12 @@ impl WgpuContext {
                             label: Some("Read buffer"),
                         });
 
-                        let mut encoder = self.device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                        let mut encoder = encoder
+                            .take()
+                            .unwrap_or_else(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                                label: None,
+                            }));
+
                         encoder.copy_texture_to_buffer(
                             wgpu::ImageCopyTexture {
                                 texture: &texture.texture,
@@ -192,8 +204,9 @@ impl WgpuContext {
             }
         }
 
-        // self.queue.submit(Some(encoder.finish()));
-        // self.device.poll(wgpu::Maintain::Wait);
+        if let Some(encoder) = encoder {
+            self.queue.submit(Some(encoder.finish()));
+        }
     }
 
     pub(crate) fn create_shader(
@@ -402,7 +415,6 @@ impl WgpuContext {
             render_pass.insert_debug_marker("Draw.");
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
-
         }
     }
 }

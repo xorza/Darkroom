@@ -1,7 +1,8 @@
 use std::cell::RefCell;
+
 use crate::image::Image;
 use crate::wgpu::math::TextureTransform;
-use crate::wgpu::wgpu_context::{Action, ImgToTexAction, RunShaderAction, TexToImgAction, WgpuContext};
+use crate::wgpu::wgpu_context::{Action, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -85,20 +86,20 @@ fn it_works2() {
     );
 
     context.perform(&[
-        Action::ImgToTex(ImgToTexAction {
+        Action::ImgToTex {
             images: &[&img1, &img2],
             textures: &[&tex1, &tex2],
-        }),
-        Action::RunShader(RunShaderAction {
+        },
+        Action::RunShader {
             shader: &shader,
             input_textures: &[&tex1, &tex2],
             output_texture: &output_texture,
             push_constants: bytemuck::bytes_of(&texture_transforms),
-        }),
-        Action::TexToImg(TexToImgAction {
+        },
+        Action::TexToImg {
             textures: &[&output_texture],
             images: &[RefCell::new(&mut img3)],
-        }),
+        },
     ]);
 
     img3.save_file("../test_output/compute2.png").unwrap();
