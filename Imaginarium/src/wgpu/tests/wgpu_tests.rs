@@ -77,7 +77,7 @@ fn it_works2() {
 
     let tex1 = context.create_texture(img1.desc.clone());
     let tex2 = context.create_texture(img2.desc.clone());
-    let output_texture = context.create_texture(img1.desc.clone());
+    let tex3 = context.create_texture(img1.desc.clone());
 
     let shader = context.create_shader(
         include_str!("shader.wgsl"),
@@ -93,11 +93,17 @@ fn it_works2() {
         Action::RunShader {
             shader: &shader,
             input_textures: &[&tex1, &tex2],
-            output_texture: &output_texture,
+            output_texture: &tex3,
+            push_constants: bytemuck::bytes_of(&texture_transforms),
+        },
+        Action::RunShader {
+            shader: &shader,
+            input_textures: &[&tex3, &tex2],
+            output_texture: &tex1,
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
         Action::TexToImg {
-            textures: &[&output_texture],
+            textures: &[&tex1],
             images: &[RefCell::new(&mut img3)],
         },
     ]);
