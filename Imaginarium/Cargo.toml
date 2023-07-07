@@ -17,3 +17,7 @@ bytemuck = { workspace = true }
 num-traits = { workspace = true }
 strum_macros = { workspace = true }
 glam = { workspace = true }
+common = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+

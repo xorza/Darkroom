@@ -1,7 +1,8 @@
+use std::ops::Mul;
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+#[derive( Copy, Clone, Debug, Pod, Zeroable)]
 pub(crate) struct TextureTransform {
     r0: [f32; 3],
     pad0: f32,
@@ -67,7 +68,50 @@ impl TextureTransform {
     pub fn uncenter(&mut self) -> &mut Self {
         self.translate(-0.5, -0.5)
     }
+
+    pub fn size_in_bytes(&self) -> usize {
+        std::mem::size_of::<Self>()
+    }
 }
+
+impl<'a, 'b> Mul<&'b TextureTransform> for &'a TextureTransform {
+    type Output = TextureTransform;
+
+    fn mul(self, rhs: &'b TextureTransform) -> Self::Output {
+        TextureTransform {
+            r0: [
+                self.r0[0] * rhs.r0[0] + self.r0[1] * rhs.r1[0] + self.r0[2] * rhs.r2[0],
+                self.r0[0] * rhs.r0[1] + self.r0[1] * rhs.r1[1] + self.r0[2] * rhs.r2[1],
+                self.r0[0] * rhs.r0[2] + self.r0[1] * rhs.r1[2] + self.r0[2] * rhs.r2[2],
+            ],
+            r1: [
+                self.r1[0] * rhs.r0[0] + self.r1[1] * rhs.r1[0] + self.r1[2] * rhs.r2[0],
+                self.r1[0] * rhs.r0[1] + self.r1[1] * rhs.r1[1] + self.r1[2] * rhs.r2[1],
+                self.r1[0] * rhs.r0[2] + self.r1[1] * rhs.r1[2] + self.r1[2] * rhs.r2[2],
+            ],
+            r2: [
+                self.r2[0] * rhs.r0[0] + self.r2[1] * rhs.r1[0] + self.r2[2] * rhs.r2[0],
+                self.r2[0] * rhs.r0[1] + self.r2[1] * rhs.r1[1] + self.r2[2] * rhs.r2[1],
+                self.r2[0] * rhs.r0[2] + self.r2[1] * rhs.r1[2] + self.r2[2] * rhs.r2[2],
+            ],
+            pad0: 0.0,
+            pad1: 0.0,
+            pad2: 0.0,
+        }
+    }
+}
+
+impl PartialEq for TextureTransform {
+    fn eq(&self, other: &Self) -> bool {
+        self.r0 == other.r0
+            && self.r1 == other.r1
+            && self.r2 == other.r2
+        // Pads are not compared, as they hold no meaningful information
+    }
+}
+
+impl Eq for TextureTransform {}
+
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]

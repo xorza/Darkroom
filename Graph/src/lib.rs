@@ -4,8 +4,6 @@
 #[cfg(test)]
 mod tests;
 
-#[macro_use]
-mod macros;
 
 pub mod common;
 pub mod preprocess;

@@ -1,3 +1,4 @@
+#[macro_export]
 macro_rules! id_type {
     ($name:ident) => {
         #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
@@ -20,6 +21,11 @@ macro_rules! id_type {
             fn from_str(id: &str) -> Result<$name, Self::Err> {
                 let uuid = Uuid::parse_str(id)?;
                 Ok($name(uuid))
+            }
+        }
+        impl ToString for $name {
+            fn to_string(&self) -> String {
+                self.0.to_string()
             }
         }
         impl Default for $name {

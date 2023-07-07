@@ -3,13 +3,15 @@ members = [
     "Editor",
     "Graph",
     "uilib",
-    "Imaginarium"
+    "Imaginarium",
+    "Common",
 ]
 
 resolver = "2"
 
 [workspace.dependencies]
 graph_lib = { path = "./Graph", package = "graph" }
+common = { path = "./Common", package = "common" }
 egui_node_graph = { path = "./egui_node_graph/egui_node_graph" }
 
 serde = { version = "*", features = ["derive"] }

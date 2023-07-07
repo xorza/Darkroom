@@ -4,3 +4,5 @@ pub mod wgpu_context;
 mod tests;
 pub mod utils;
 pub mod math;
+pub mod image_texture;
+

@@ -1,6 +1,7 @@
+use std::cell::RefCell;
 use std::ops::RangeBounds;
 
-use bytemuck::{Pod};
+use bytemuck::Pod;
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
@@ -8,20 +9,44 @@ use crate::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
 use crate::wgpu::math::Vert2D;
 
-pub(crate) struct WgpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-    pub limits: wgpu::Limits,
-    pub rect_one_vb: VertexBuffer,
-    pub default_sampler: wgpu::Sampler,
-}
-
 fn aligned_size_of_uniform<U: Sized>() -> u64 {
     let uniform_size = std::mem::size_of::<U>();
     let uniform_align = 256;
     let uniform_padded_size = (uniform_size + uniform_align - 1) / uniform_align * uniform_align;
 
     uniform_padded_size as u64
+}
+
+
+pub(crate) enum Action<'a> {
+    RunShader(RunShaderAction<'a>),
+    ImgToTex(ImgToTexAction<'a>),
+    TexToImg(TexToImgAction<'a>),
+}
+
+pub(crate) struct RunShaderAction<'a> {
+    pub shader: &'a Shader,
+    pub input_textures: &'a [&'a Texture],
+    pub output_texture: &'a Texture,
+    pub push_constants: &'a [u8],
+}
+
+pub(crate) struct ImgToTexAction<'a> {
+    pub images: &'a [&'a Image],
+    pub textures: &'a [&'a Texture],
+}
+
+pub(crate) struct TexToImgAction<'a> {
+    pub textures: &'a [&'a Texture],
+    pub images: &'a [RefCell<&'a mut Image>],
+}
+
+pub(crate) struct WgpuContext {
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub limits: wgpu::Limits,
+    pub rect_one_vb: VertexBuffer,
+    pub default_sampler: wgpu::Sampler,
 }
 
 impl WgpuContext {
@@ -73,18 +98,253 @@ impl WgpuContext {
         })
     }
 
-    pub fn draw_one<T>(
+    pub fn perform(&self, actions: &[Action]) {
+
+
+        for action in actions {
+            match action {
+                Action::RunShader(action) => {
+                    let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: None,
+                    });
+                    self.run_shader(
+                        &mut encoder,
+                        action.shader,
+                        action.input_textures,
+                        action.output_texture,
+                        action.push_constants,
+                    );
+                    self.queue.submit(Some(encoder.finish()));
+                }
+                Action::ImgToTex(action) => {
+                    for (image, texture) in
+                    action.images.iter().zip(action.textures) {
+                        if image.desc != texture.desc {
+                            panic!("Image and texture must have the same dimensions");
+                        }
+                        let desc = &image.desc;
+
+                        self.queue.write_texture(
+                            texture.texture.as_image_copy(),
+                            &image.bytes,
+                            wgpu::ImageDataLayout {
+                                offset: 0,
+                                bytes_per_row: Some(desc.stride()),
+                                rows_per_image: Some(desc.height()),
+                            },
+                            texture.extent,
+                        );
+                    }
+                }
+                Action::TexToImg(action) => {
+                    for (image, texture) in
+                    action.images.iter().zip(action.textures) {
+                        let mut image = image.borrow_mut();
+
+                        if image.desc != texture.desc {
+                            panic!("Image and texture must have the same dimensions");
+                        }
+                        let desc = &image.desc;
+
+                        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+                            size: desc.size_in_bytes() as wgpu::BufferAddress,
+                            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                            label: Some("Read buffer"),
+                        });
+
+                        let mut encoder = self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                        encoder.copy_texture_to_buffer(
+                            wgpu::ImageCopyTexture {
+                                texture: &texture.texture,
+                                mip_level: 0,
+                                origin: wgpu::Origin3d::ZERO,
+                                aspect: Default::default(),
+                            },
+                            wgpu::ImageCopyBuffer {
+                                buffer: &buffer,
+                                layout: wgpu::ImageDataLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(desc.stride()),
+                                    rows_per_image: Some(desc.height()),
+                                },
+                            },
+                            texture.extent,
+                        );
+                        self.queue.submit(Some(encoder.finish()));
+
+                        let slice = buffer.slice(..);
+                        slice.map_async(wgpu::MapMode::Read, |result| {
+                            result.unwrap();
+                        });
+                        self.device.poll(wgpu::Maintain::Wait);
+
+                        {
+                            let data = slice.get_mapped_range();
+                            image.bytes = data.to_vec();
+                            drop(data);
+                        }
+
+                        buffer.unmap();
+                    }
+                }
+            }
+        }
+
+        // self.queue.submit(Some(encoder.finish()));
+        // self.device.poll(wgpu::Maintain::Wait);
+    }
+
+    pub(crate) fn create_shader(
+        &self,
+        shader: &str,
+        input_texture_count: u32,
+        push_constant_size: u32,
+    ) -> Shader {
+        let device = &self.device;
+
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(shader.into()),
+        });
+
+        let mut wgpu_bind_group_layout_entries: Vec<wgpu::BindGroupLayoutEntry> = Vec::new();
+        wgpu_bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+            count: None,
+        });
+        wgpu_bind_group_layout_entries.extend(
+            (0..input_texture_count as usize)
+                .map(|index| {
+                    wgpu::BindGroupLayoutEntry {
+                        binding: index as u32 + 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                        },
+                        count: None,
+                    }
+                })
+        );
+
+        let bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &wgpu_bind_group_layout_entries,
+                label: None,
+            });
+
+        let pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[&bind_group_layout],
+                push_constant_ranges: &[wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::VERTEX,
+                    range: 0..push_constant_size,
+                }],
+                label: None,
+            });
+
+        let vertex_layout =
+            vec![wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2];
+        let mut vertex_stride: u64 = 0;
+        let mut vertex_attributes: Vec<wgpu::VertexAttribute> = Vec::new();
+        for (index, entry) in vertex_layout.iter().enumerate() {
+            vertex_attributes.push(wgpu::VertexAttribute {
+                offset: vertex_stride,
+                format: *entry,
+                shader_location: index as u32,
+            });
+            vertex_stride += entry.size();
+        }
+
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: "vs_main",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: vertex_stride,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: vertex_attributes.as_slice(),
+                }],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8Unorm,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                ..Default::default()
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+            label: None,
+        });
+
+        Shader {
+            module,
+            bind_group_layout,
+            pipeline,
+            input_texture_count,
+            push_constant_size,
+            vertex_layout,
+        }
+    }
+
+    pub(crate) fn create_texture(&self, image_desc: ImageDesc) -> Texture {
+        let extent = wgpu::Extent3d {
+            width: image_desc.width(),
+            height: image_desc.height(),
+            depth_or_array_layers: 1,
+        };
+
+        let usage =
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC;
+
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: extent,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::from(image_desc.color_format()),
+            usage,
+            view_formats: &[],
+        });
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        Texture {
+            desc: image_desc,
+            texture,
+            view,
+            extent,
+        }
+    }
+
+    pub(crate) fn run_shader(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         shader: &Shader,
         input_textures: &[&Texture],
-        target_tex: &Texture,
-        push_constant: &T,
-    )
-    where T: Pod
-    {
+        output_texture: &Texture,
+        push_constant: &[u8],
+    ) {
         assert_eq!(input_textures.len() as u32, shader.input_texture_count);
-        assert_eq!(shader.push_constant_size, std::mem::size_of::<T>() as u32);
+        assert_eq!(shader.push_constant_size, push_constant.len() as u32);
 
         let device = &self.device;
 
@@ -113,7 +373,7 @@ impl WgpuContext {
                 &wgpu::RenderPassDescriptor {
                     color_attachments: &[
                         Some(wgpu::RenderPassColorAttachment {
-                            view: &target_tex.view,
+                            view: &output_texture.view,
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
@@ -128,13 +388,13 @@ impl WgpuContext {
             render_pass.push_debug_group("Prepare data for draw.");
 
             let pipeline = shader
-                .get_pipeline(&target_tex.image_desc.color_format());
+                .get_pipeline(&output_texture.desc.color_format());
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
             render_pass.set_push_constants(
                 wgpu::ShaderStages::VERTEX,
                 0,
-                bytemuck::bytes_of(push_constant),
+                push_constant,
             );
 
             render_pass.pop_debug_group();
@@ -143,7 +403,6 @@ impl WgpuContext {
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
 
-            drop(render_pass);
         }
     }
 }
@@ -197,160 +456,21 @@ pub(crate) struct Shader {
 }
 
 impl Shader {
-    pub fn new(
-        device: &wgpu::Device,
-        shader: &str,
-        input_texture_count: u32,
-        push_constant_size: u32,
-        vertex_layout: &[wgpu::VertexFormat],
-    )
-        -> Self
-    {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: None,
-            source: wgpu::ShaderSource::Wgsl(shader.into()),
-        });
-
-        let mut wgpu_bind_group_layout_entries: Vec<wgpu::BindGroupLayoutEntry> = Vec::new();
-        wgpu_bind_group_layout_entries.push(wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-            count: None,
-        });
-        wgpu_bind_group_layout_entries.extend(
-            (0..input_texture_count as usize)
-                .map(|index| {
-                    wgpu::BindGroupLayoutEntry {
-                        binding: index as u32 + 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    }
-                })
-        );
-
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &wgpu_bind_group_layout_entries,
-                label: None,
-            });
-
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[wgpu::PushConstantRange {
-                    stages: wgpu::ShaderStages::VERTEX,
-                    range: 0..push_constant_size,
-                }],
-                label: None,
-            });
-
-        let mut vertex_stride: u64 = 0;
-        let mut vertex_attributes: Vec<wgpu::VertexAttribute> = Vec::new();
-        for (index, entry) in vertex_layout.iter().enumerate() {
-            vertex_attributes.push(wgpu::VertexAttribute {
-                offset: vertex_stride,
-                format: *entry,
-                shader_location: index as u32,
-            });
-            vertex_stride += entry.size();
-        }
-
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: vertex_stride,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: vertex_attributes.as_slice(),
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba8Unorm,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            label: None,
-        });
-
-        Self {
-            module,
-            bind_group_layout,
-            pipeline,
-            input_texture_count,
-            push_constant_size,
-            vertex_layout: vertex_layout.to_vec(),
-        }
-    }
-
     pub fn get_pipeline(&self, _color_format: &ColorFormat) -> &wgpu::RenderPipeline {
         &self.pipeline
     }
 }
 
 pub(crate) struct Texture {
-    pub image_desc: ImageDesc,
+    pub desc: ImageDesc,
     pub texture: wgpu::Texture,
     pub view: wgpu::TextureView,
     pub extent: wgpu::Extent3d,
 }
 
 impl Texture {
-    pub fn new(device: &wgpu::Device, image_desc: &ImageDesc) -> Self {
-        let extent = wgpu::Extent3d {
-            width: image_desc.width(),
-            height: image_desc.height(),
-            depth_or_array_layers: 1,
-        };
-
-        let usage =
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC;
-
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::from(image_desc.color_format()),
-            usage,
-            view_formats: &[],
-        });
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-
-        Self {
-            image_desc: image_desc.clone(),
-            texture,
-            view,
-            extent,
-        }
-    }
-
     pub fn write(&self, queue: &wgpu::Queue, image: &Image) -> anyhow::Result<()> {
-        if self.image_desc != image.desc {
+        if self.desc != image.desc {
             return Err(anyhow::anyhow!("image info mismatch"));
         }
 
@@ -359,8 +479,8 @@ impl Texture {
             &image.bytes,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(self.image_desc.stride()),
-                rows_per_image: Some(self.image_desc.height()),
+                bytes_per_row: Some(self.desc.stride()),
+                rows_per_image: Some(self.desc.height()),
             },
             self.extent,
         );
@@ -369,7 +489,7 @@ impl Texture {
     }
 
     pub fn read(&self, device: &wgpu::Device, queue: &wgpu::Queue, image: &mut Image) -> anyhow::Result<()> {
-        if self.image_desc != image.desc {
+        if self.desc != image.desc {
             return Err(anyhow::anyhow!("image info mismatch"));
         }
 
@@ -377,7 +497,7 @@ impl Texture {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
 
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            size: self.image_desc.size_in_bytes() as wgpu::BufferAddress,
+            size: self.desc.size_in_bytes() as wgpu::BufferAddress,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
             label: Some("Read buffer"),
@@ -394,8 +514,8 @@ impl Texture {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(self.image_desc.stride()),
-                    rows_per_image: Some(self.image_desc.height()),
+                    bytes_per_row: Some(self.desc.stride()),
+                    rows_per_image: Some(self.desc.height()),
                 },
             },
             self.extent,

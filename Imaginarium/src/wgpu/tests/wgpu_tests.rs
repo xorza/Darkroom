@@ -1,6 +1,7 @@
+use std::cell::RefCell;
 use crate::image::Image;
 use crate::wgpu::math::TextureTransform;
-use crate::wgpu::wgpu_context::{Shader, Texture, WgpuContext};
+use crate::wgpu::wgpu_context::{Action, ImgToTexAction, RunShaderAction, TexToImgAction, WgpuContext};
 
 #[test]
 fn it_works() {
@@ -11,16 +12,16 @@ fn it_works() {
 
     let img = Image::read_file("../test_resources/rainbow256x256.png").unwrap();
     let image_desc = img.desc.clone();
-    let tex1 = Texture::new(device, &image_desc);
-    tex1.write(queue, &img).unwrap();
+    let input_tex1 = context.create_texture(image_desc.clone());
+    input_tex1.write(queue, &img).unwrap();
     drop(img);
 
     let img = Image::read_file("../test_resources/squares256x256.png").unwrap();
-    let tex2 = Texture::new(device, &image_desc);
-    tex2.write(queue, &img).unwrap();
+    let input_tex2 = context.create_texture(image_desc.clone());
+    input_tex2.write(queue, &img).unwrap();
     drop(img);
 
-    let dst_tex = Texture::new(device, &image_desc);
+    let output_tex = context.create_texture(image_desc.clone());
 
     let mut texture_transforms = [
         TextureTransform::default(),
@@ -32,27 +33,73 @@ fn it_works() {
         .rotate(-1.0)
         .uncenter();
 
-    let shader = Shader::new(
-        device,
+    let shader = context.create_shader(
         include_str!("shader.wgsl"),
         2,
-        std::mem::size_of_val(&texture_transforms) as u32,
-        &[wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2],
+        std::mem::size_of::<[TextureTransform; 2]>() as u32,
     );
 
     let mut encoder = device.create_command_encoder(
         &wgpu::CommandEncoderDescriptor::default()
     );
-    context.draw_one(
+    context.run_shader(
         &mut encoder,
         &shader,
-        &[&tex1, &tex2],
-        &dst_tex,
-        &texture_transforms,
+        &[&input_tex1, &input_tex2],
+        &output_tex,
+        bytemuck::bytes_of(&texture_transforms),
     );
     queue.submit(Some(encoder.finish()));
 
     let mut img3 = Image::new_empty(image_desc).unwrap();
-    dst_tex.read(device, queue, &mut img3).unwrap();
+    output_tex.read(device, queue, &mut img3).unwrap();
     img3.save_file("../test_output/compute.png").unwrap();
+}
+
+#[test]
+fn it_works2() {
+    let context = WgpuContext::new().unwrap();
+
+    let mut texture_transforms = [
+        TextureTransform::default(),
+        TextureTransform::default()
+    ];
+    texture_transforms[1]
+        .aspect(1, 1)
+        .center()
+        .rotate(-1.0)
+        .uncenter();
+
+    let img1 = Image::read_file("../test_resources/rainbow256x256.png").unwrap();
+    let img2 = Image::read_file("../test_resources/squares256x256.png").unwrap();
+    let mut img3 = Image::new_empty(img1.desc.clone()).unwrap();
+
+    let tex1 = context.create_texture(img1.desc.clone());
+    let tex2 = context.create_texture(img2.desc.clone());
+    let output_texture = context.create_texture(img1.desc.clone());
+
+    let shader = context.create_shader(
+        include_str!("shader.wgsl"),
+        2,
+        std::mem::size_of_val(&texture_transforms) as u32,
+    );
+
+    context.perform(&[
+        Action::ImgToTex(ImgToTexAction {
+            images: &[&img1, &img2],
+            textures: &[&tex1, &tex2],
+        }),
+        Action::RunShader(RunShaderAction {
+            shader: &shader,
+            input_textures: &[&tex1, &tex2],
+            output_texture: &output_texture,
+            push_constants: bytemuck::bytes_of(&texture_transforms),
+        }),
+        Action::TexToImg(TexToImgAction {
+            textures: &[&output_texture],
+            images: &[RefCell::new(&mut img3)],
+        }),
+    ]);
+
+    img3.save_file("../test_output/compute2.png").unwrap();
 }
