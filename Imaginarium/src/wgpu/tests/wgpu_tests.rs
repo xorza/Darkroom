@@ -105,6 +105,7 @@ fn it_works2() {
         },
         Action::tex_to_img(&[&tex3, &tex1], &mut [&mut img2, &mut img3])
     ]);
+    context.sync();
 
     img2.save_file("../test_output/compute2.png").unwrap();
     img3.save_file("../test_output/compute3.png").unwrap();

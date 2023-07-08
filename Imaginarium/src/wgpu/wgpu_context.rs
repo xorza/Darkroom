@@ -42,6 +42,7 @@ pub(crate) struct WgpuContext {
     pub limits: wgpu::Limits,
     pub rect_one_vb: VertexBuffer,
     pub default_sampler: wgpu::Sampler,
+    encoder: RefCell<Option<CommandEncoder>>,
 }
 
 impl WgpuContext {
@@ -90,13 +91,11 @@ impl WgpuContext {
             limits,
             rect_one_vb,
             default_sampler,
+            encoder: RefCell::new(None),
         })
     }
 
     pub fn perform(&self, actions: &[Action]) {
-        let mut encoder: Option<CommandEncoder> = None;
-
-
         for action in actions.iter() {
             match action {
                 Action::RunShader {
@@ -105,9 +104,11 @@ impl WgpuContext {
                     output_texture,
                     push_constants,
                 } => {
-                    let encoder = encoder.get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: None,
-                    }));
+                    let mut encoder_temp = self.encoder.borrow_mut();
+                    let encoder = encoder_temp
+                        .get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: None,
+                        }));
 
                     self.run_shader(
                         encoder,
@@ -160,7 +161,8 @@ impl WgpuContext {
                             label: Some("Read buffer"),
                         });
 
-                        let mut encoder = encoder
+                        let mut encoder = self.encoder
+                            .borrow_mut()
                             .take()
                             .unwrap_or_else(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                                 label: None,
@@ -202,10 +204,13 @@ impl WgpuContext {
                 }
             }
         }
+    }
 
-        if let Some(encoder) = encoder {
+    pub fn sync(&self) {
+        if let Some(encoder) = self.encoder.replace(None) {
             self.queue.submit(Some(encoder.finish()));
         }
+        self.device.poll(wgpu::Maintain::Wait);
     }
 
     pub(crate) fn create_shader(
@@ -414,6 +419,14 @@ impl WgpuContext {
             render_pass.insert_debug_marker("Draw.");
             render_pass.set_vertex_buffer(0, self.rect_one_vb.slice(..));
             render_pass.draw(0..self.rect_one_vb.vert_count, 0..1);
+        }
+    }
+}
+
+impl Drop for WgpuContext {
+    fn drop(&mut self) {
+        if self.encoder.borrow().is_some() {
+            panic!("WgpuContext dropped before encoder was submitted. Try calling WgpuContext::sync().");
         }
     }
 }
