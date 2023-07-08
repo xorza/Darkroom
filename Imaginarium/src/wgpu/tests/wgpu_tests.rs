@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use crate::image::Image;
 use crate::wgpu::math::TextureTransform;
 use crate::wgpu::wgpu_context::{Action, WgpuContext};
@@ -84,10 +86,7 @@ fn it_works2() {
     );
 
     context.perform(&[
-        Action::ImgToTex {
-            images: vec![&img1, &img2],
-            textures: vec![&tex1, &tex2],
-        }
+        Action::ImgToTex(vec![(&img1, &tex1), (&img2, &tex2)])
     ]);
 
     context.perform(&[
@@ -103,7 +102,10 @@ fn it_works2() {
             output_texture: &tex1,
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
-        Action::tex_to_img(&[&tex3, &tex1], &mut [&mut img2, &mut img3])
+        Action::TexToImg(vec![
+            (&tex1, RefCell::new(&mut img3)),
+            (&tex3, RefCell::new(&mut img2)),
+        ]),
     ]);
     context.sync();
 

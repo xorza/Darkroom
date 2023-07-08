@@ -26,14 +26,11 @@ pub(crate) enum Action<'a> {
         output_texture: &'a Texture,
         push_constants: &'a [u8],
     },
-    ImgToTex {
-        images: Vec<&'a Image>,
-        textures: Vec<&'a Texture>,
-    },
-    TexToImg {
-        textures: Vec<&'a Texture>,
-        images: Vec<RefCell<&'a mut Image>>,
-    },
+    ImgToTex(Vec<(&'a Image, &'a Texture)>),
+    TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>)
+    // textures: Vec<&'a Texture>,
+    // images: Vec<RefCell<&'a mut Image>>,
+    ,
 }
 
 pub(crate) struct WgpuContext {
@@ -118,12 +115,8 @@ impl WgpuContext {
                         push_constants,
                     );
                 }
-                Action::ImgToTex {
-                    images,
-                    textures,
-                } => {
-                    for (image, texture) in
-                    images.iter().zip(textures.iter()) {
+                Action::ImgToTex(img_tex) => {
+                    for (image, texture) in img_tex.iter() {
                         if image.desc != texture.desc {
                             panic!("Image and texture must have the same dimensions");
                         }
@@ -141,12 +134,8 @@ impl WgpuContext {
                         );
                     }
                 }
-                Action::TexToImg {
-                    textures,
-                    images,
-                } => {
-                    for (image, texture) in
-                    images.iter().zip(textures.iter()) {
+                Action::TexToImg(tex_img) => {
+                    for (texture, image) in tex_img.iter() {
                         let mut image = image.borrow_mut();
 
                         if image.desc != texture.desc {
@@ -563,17 +552,5 @@ impl Texture {
         buffer.unmap();
 
         Ok(())
-    }
-}
-
-impl<'a> Action<'a> {
-    pub fn tex_to_img(tex: &'a [&'a Texture], img: &'a mut [&'a mut Image]) -> Action<'a> {
-        Action::TexToImg {
-            textures: tex.to_vec(),
-            images: img.iter_mut().map(|x| {
-                let x: RefCell<&'a mut Image> = RefCell::new(*x);
-                x
-            }).collect::<Vec<RefCell<&'a mut Image>>>(),
-        }
     }
 }
