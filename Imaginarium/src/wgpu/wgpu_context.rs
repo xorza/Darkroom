@@ -34,14 +34,13 @@ pub(crate) enum Action<'a> {
 }
 
 pub(crate) struct WgpuContext {
-    pub device: wgpu::Device,
-    pub queue: wgpu::Queue,
-
+    device: wgpu::Device,
+    queue: wgpu::Queue,
     limits: wgpu::Limits,
     rect_one_vb: VertexBuffer,
     default_sampler: wgpu::Sampler,
     encoder: RefCell<Option<wgpu::CommandEncoder>>,
-    common_vertex_shader: Shader,
+    common_vertex_shader_module: wgpu::ShaderModule,
 }
 
 impl WgpuContext {
@@ -89,12 +88,10 @@ impl WgpuContext {
             ..Default::default()
         });
 
-        let common_vertex_shader = Shader::new(
-            &device,
-            include_str!("common_vert.wgsl"),
-            2,
-            2 * std::mem::size_of::<Transform2D>() as u32,
-        );
+        let common_vertex_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: None,
+            source: wgpu::ShaderSource::Wgsl(include_str!("common_vert.wgsl").into()),
+        });
 
         Ok(WgpuContext {
             device,
@@ -103,7 +100,7 @@ impl WgpuContext {
             rect_one_vb,
             default_sampler,
             encoder: RefCell::new(None),
-            common_vertex_shader,
+            common_vertex_shader_module: common_vertex_shader,
         })
     }
 
@@ -334,7 +331,7 @@ impl WgpuContext {
         });
         let pipeline = shader.get_pipeline(
             device,
-            &self.common_vertex_shader.module,
+            &self.common_vertex_shader_module,
             shader_entry_name,
             &output_texture.desc.color_format(),
         );
