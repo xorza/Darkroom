@@ -27,7 +27,7 @@ pub(crate) enum Action<'a> {
         shader_entry_name: &'a str,
         input_textures: Vec<&'a TextureWithTransform>,
         output_texture: &'a Texture,
-        push_constants: &'a [u8],
+        fragment_push_constant: &'a [u8],
     },
     ImgToTex(Vec<(&'a Image, &'a Texture)>),
     TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>),
@@ -117,7 +117,7 @@ impl WgpuContext {
                     shader_entry_name,
                     input_textures,
                     output_texture,
-                    push_constants,
+                    fragment_push_constant,
                 } => {
                     let mut encoder_temp = self.encoder.borrow_mut();
                     let encoder = encoder_temp
@@ -125,12 +125,12 @@ impl WgpuContext {
                             label: None,
                         }));
 
-                    let mut transforms_bytes = input_textures.iter()
+                    let mut push_constant = input_textures.iter()
                         .flat_map(|t| {
                             bytemuck::bytes_of(&t.transform).to_vec()
                         })
                         .collect::<Vec<u8>>();
-                    transforms_bytes.extend_from_slice(push_constants);
+                    push_constant.extend_from_slice(fragment_push_constant);
 
                     self.run_shader(
                         encoder,
@@ -138,7 +138,7 @@ impl WgpuContext {
                         shader_entry_name,
                         input_textures,
                         output_texture,
-                        transforms_bytes.as_slice(),
+                        push_constant.as_slice(),
                     );
                 }
 

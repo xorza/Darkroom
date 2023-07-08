@@ -47,14 +47,14 @@ fn it_works2() {
             shader_entry_name: "fs_main",
             input_textures: vec![&tex1, &tex2],
             output_texture: &tex3.texture,
-            push_constants: &[],
+            fragment_push_constant: &[],
         },
         Action::RunShader {
             shader: &shader,
             shader_entry_name: "fs_main",
             input_textures: vec![&tex3, &tex2],
             output_texture: &tex1.texture,
-            push_constants: &[],
+            fragment_push_constant: &[],
         },
         Action::TexToImg(vec![
             (&tex1.texture, RefCell::new(&mut img2)),
