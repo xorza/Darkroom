@@ -27,10 +27,7 @@ pub(crate) enum Action<'a> {
         push_constants: &'a [u8],
     },
     ImgToTex(Vec<(&'a Image, &'a Texture)>),
-    TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>)
-    // textures: Vec<&'a Texture>,
-    // images: Vec<RefCell<&'a mut Image>>,
-    ,
+    TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>),
 }
 
 pub(crate) struct WgpuContext {
@@ -69,7 +66,7 @@ impl WgpuContext {
 
         let device_descriptor = wgpu::DeviceDescriptor {
             label: None,
-            features: wgpu::Features::PUSH_CONSTANTS,
+            features: wgpu::Features::PUSH_CONSTANTS | wgpu::Features::ADDRESS_MODE_CLAMP_TO_BORDER,
             limits: limits.clone(),
         };
 
@@ -80,7 +77,12 @@ impl WgpuContext {
 
         let rect_one_vb = VertexBuffer::from_slice(&device, &Vert2D::rect_one());
 
-        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor::default());
+        let default_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToBorder,
+            address_mode_v: wgpu::AddressMode::ClampToBorder,
+            border_color: Some(wgpu::SamplerBorderColor::TransparentBlack),
+            ..Default::default()
+        });
 
         Ok(WgpuContext {
             device,
