@@ -3,7 +3,7 @@ use std::ops::RangeBounds;
 
 use bytemuck::Pod;
 use pollster::FutureExt;
-use wgpu::CommandEncoder;
+use wgpu::{BufferSlice, CommandEncoder};
 use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
@@ -37,6 +37,11 @@ pub(crate) struct WgpuContext {
     pub rect_one_vb: VertexBuffer,
     pub default_sampler: wgpu::Sampler,
     encoder: RefCell<Option<CommandEncoder>>,
+}
+
+struct BufferImage {
+    buffer: wgpu::Buffer,
+    image_index: (usize, usize),
 }
 
 impl WgpuContext {
@@ -95,7 +100,9 @@ impl WgpuContext {
     }
 
     pub fn perform(&self, actions: &[Action]) {
-        for action in actions.iter() {
+        let mut buffer_images: Option<Vec<BufferImage>> = None;
+
+        for (action_index, action) in actions.iter().enumerate() {
             match action {
                 Action::RunShader {
                     shader,
@@ -117,6 +124,7 @@ impl WgpuContext {
                         push_constants,
                     );
                 }
+
                 Action::ImgToTex(img_tex) => {
                     for (image, texture) in img_tex.iter() {
                         if image.desc != texture.desc {
@@ -136,9 +144,16 @@ impl WgpuContext {
                         );
                     }
                 }
+
                 Action::TexToImg(tex_img) => {
-                    for (texture, image) in tex_img.iter() {
-                        let mut image = image.borrow_mut();
+                    let mut encoder_temp = self.encoder.borrow_mut();
+                    let encoder = encoder_temp
+                        .get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: None,
+                        }));
+
+                    for (index_in_action, (texture, image)) in tex_img.iter().enumerate() {
+                        let image = image.borrow();
 
                         if image.desc != texture.desc {
                             panic!("Image and texture must have the same dimensions");
@@ -149,15 +164,8 @@ impl WgpuContext {
                             size: desc.size_in_bytes() as wgpu::BufferAddress,
                             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
                             mapped_at_creation: false,
-                            label: Some("Read buffer"),
+                            label: None,
                         });
-
-                        let mut encoder = self.encoder
-                            .borrow_mut()
-                            .take()
-                            .unwrap_or_else(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: None,
-                            }));
 
                         encoder.copy_texture_to_buffer(
                             wgpu::ImageCopyTexture {
@@ -176,22 +184,46 @@ impl WgpuContext {
                             },
                             texture.extent,
                         );
-                        self.queue.submit(Some(encoder.finish()));
 
-                        let slice = buffer.slice(..);
-                        slice.map_async(wgpu::MapMode::Read, |result| {
-                            result.unwrap();
-                        });
-                        self.device.poll(wgpu::Maintain::Wait);
-
-                        {
-                            let data = slice.get_mapped_range();
-                            image.bytes = data.to_vec();
-                            drop(data);
-                        }
-
-                        buffer.unmap();
+                        buffer_images
+                            .get_or_insert_with(Vec::new)
+                            .push(BufferImage {
+                                buffer,
+                                image_index: (action_index, index_in_action),
+                            });
                     }
+                }
+            }
+        }
+
+        if let Some(buffer_images) = buffer_images {
+            self.sync();
+
+            let slices = buffer_images
+                .iter()
+                .map(|buf_img| {
+                    let slice = buf_img.buffer.slice(..);
+                    slice.map_async(wgpu::MapMode::Read, |result| {
+                        result.unwrap();
+                    });
+                    slice
+                })
+                .collect::<Vec<BufferSlice>>();
+
+            self.device.poll(wgpu::Maintain::Wait);
+
+            for (slice_index, buf_img) in buffer_images.iter().enumerate() {
+                let (action_index, index_in_action) = buf_img.image_index;
+                if let Action::TexToImg(tex_to_img) = &actions[action_index] {
+                    let mut image = tex_to_img[index_in_action].1.borrow_mut();
+
+                    let data = slices[slice_index].get_mapped_range();
+                    image.bytes = data.to_vec();
+                    drop(data);
+
+                    buf_img.buffer.unmap();
+                } else {
+                    panic!("Expected TexToImg action.");
                 }
             }
         }
