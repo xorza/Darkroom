@@ -1,5 +1,7 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::RangeBounds;
+use std::rc::Rc;
 
 use bytemuck::Pod;
 use pollster::FutureExt;
@@ -21,6 +23,7 @@ fn aligned_size_of_uniform<U: Sized>() -> u64 {
 pub(crate) enum Action<'a> {
     RunShader {
         shader: &'a Shader,
+        shader_entry_name: &'a str,
         input_textures: Vec<&'a Texture>,
         output_texture: &'a Texture,
         push_constants: &'a [u8],
@@ -110,6 +113,7 @@ impl WgpuContext {
             match action {
                 Action::RunShader {
                     shader,
+                    shader_entry_name,
                     input_textures,
                     output_texture,
                     push_constants,
@@ -123,6 +127,7 @@ impl WgpuContext {
                     self.run_shader(
                         encoder,
                         shader,
+                        shader_entry_name,
                         input_textures,
                         output_texture,
                         push_constants,
@@ -287,6 +292,7 @@ impl WgpuContext {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         shader: &Shader,
+        shader_entry_name: &str,
         input_textures: &[&Texture],
         output_texture: &Texture,
         push_constant: &[u8],
@@ -318,6 +324,7 @@ impl WgpuContext {
         let pipeline = shader.get_pipeline(
             device,
             &self.common_vertex_shader.module,
+            shader_entry_name,
             &output_texture.desc.color_format(),
         );
 
@@ -408,12 +415,12 @@ pub(crate) struct Shader {
     pub module: wgpu::ShaderModule,
     pub bind_group_layout: wgpu::BindGroupLayout,
     pub pipeline_layout: wgpu::PipelineLayout,
-    // pub pipeline: wgpu::RenderPipeline,
     pub input_texture_count: u32,
     pub push_constant_size: u32,
     pub vertex_layout: Vec<wgpu::VertexFormat>,
     vertex_stride: u64,
     vertex_attributes: Vec<wgpu::VertexAttribute>,
+    pipeline_cache: RefCell<HashMap<(String, ColorFormat), Rc<wgpu::RenderPipeline>>>,
 }
 
 impl Shader {
@@ -490,47 +497,52 @@ impl Shader {
             vertex_layout,
             vertex_stride,
             vertex_attributes,
+            pipeline_cache: RefCell::default(),
         }
     }
 
-    pub fn get_pipeline(
+    fn get_pipeline(
         &self,
         device: &wgpu::Device,
         vertex_shader: &wgpu::ShaderModule,
+        shader_entry_name: &str,
         color_format: &ColorFormat,
-    ) -> wgpu::RenderPipeline {
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            layout: Some(&self.pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: vertex_shader,
-                entry_point: "vs_main",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: self.vertex_stride,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: self.vertex_attributes.as_slice(),
-                }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.module,
-                entry_point: "fs_main",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::from(color_format),
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleStrip,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview: None,
-            label: None,
-        });
-
-        println!("Suboptimal. Should cache created pipelines.");
-        pipeline
+    ) -> Rc<wgpu::RenderPipeline> {
+        self.pipeline_cache
+            .borrow_mut()
+            .entry((shader_entry_name.to_string(), *color_format))
+            .or_insert_with(|| Rc::from(
+                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    layout: Some(&self.pipeline_layout),
+                    vertex: wgpu::VertexState {
+                        module: vertex_shader,
+                        entry_point: "vs_main",
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: self.vertex_stride,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: self.vertex_attributes.as_slice(),
+                        }],
+                    },
+                    fragment: Some(wgpu::FragmentState {
+                        module: &self.module,
+                        entry_point: "fs_main",
+                        targets: &[Some(wgpu::ColorTargetState {
+                            format: wgpu::TextureFormat::from(color_format),
+                            blend: None,
+                            write_mask: wgpu::ColorWrites::ALL,
+                        })],
+                    }),
+                    primitive: wgpu::PrimitiveState {
+                        topology: wgpu::PrimitiveTopology::TriangleStrip,
+                        ..Default::default()
+                    },
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    multiview: None,
+                    label: None,
+                })
+            ))
+            .clone()
     }
 }
 

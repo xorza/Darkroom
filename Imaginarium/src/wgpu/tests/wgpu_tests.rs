@@ -46,6 +46,7 @@ fn it_works() {
     context.run_shader(
         &mut encoder,
         &shader,
+        "fs_main",
         &[&input_tex1, &input_tex2],
         &output_tex,
         bytemuck::bytes_of(&texture_transforms),
@@ -92,12 +93,14 @@ fn it_works2() {
     context.perform(&[
         Action::RunShader {
             shader: &shader,
+            shader_entry_name: "fs_main",
             input_textures: vec![&tex1, &tex2],
             output_texture: &tex3,
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
         Action::RunShader {
             shader: &shader,
+            shader_entry_name: "fs_main",
             input_textures: vec![&tex3, &tex2],
             output_texture: &tex1,
             push_constants: bytemuck::bytes_of(&texture_transforms),
