@@ -542,7 +542,7 @@ impl Shader {
                     },
                     fragment: Some(wgpu::FragmentState {
                         module: &self.module,
-                        entry_point: "fs_main",
+                        entry_point: shader_entry_name,
                         targets: &[Some(wgpu::ColorTargetState {
                             format: wgpu::TextureFormat::from(color_format),
                             blend: None,
@@ -570,79 +570,7 @@ pub(crate) struct Texture {
     pub extent: wgpu::Extent3d,
 }
 
-impl Texture {
-    pub fn write(&self, queue: &wgpu::Queue, image: &Image) -> anyhow::Result<()> {
-        if self.desc != image.desc {
-            return Err(anyhow::anyhow!("image info mismatch"));
-        }
-
-        queue.write_texture(
-            self.texture.as_image_copy(),
-            &image.bytes,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(self.desc.stride()),
-                rows_per_image: Some(self.desc.height()),
-            },
-            self.extent,
-        );
-
-        Ok(())
-    }
-
-    pub fn read(&self, device: &wgpu::Device, queue: &wgpu::Queue, image: &mut Image) -> anyhow::Result<()> {
-        if self.desc != image.desc {
-            return Err(anyhow::anyhow!("image info mismatch"));
-        }
-
-        let mut encoder = device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            size: self.desc.size_in_bytes() as wgpu::BufferAddress,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-            label: Some("Read buffer"),
-        });
-
-        encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: Default::default(),
-            },
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.desc.stride()),
-                    rows_per_image: Some(self.desc.height()),
-                },
-            },
-            self.extent,
-        );
-
-        queue.submit(Some(encoder.finish()));
-
-
-        let slice = buffer.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |result| {
-            result.unwrap();
-        });
-        device.poll(wgpu::Maintain::Wait);
-
-        {
-            let data = slice.get_mapped_range();
-            image.bytes = data.to_vec();
-            drop(data);
-        }
-
-        buffer.unmap();
-
-        Ok(())
-    }
-}
+impl Texture {}
 
 struct BufferImage {
     buffer: wgpu::Buffer,

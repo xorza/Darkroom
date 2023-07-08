@@ -15,7 +15,7 @@ var tex_1: texture_2d<f32>;
 var tex_2: texture_2d<f32>;
 
 @fragment
-fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_mult_blend(vertex: VertexOutput) -> @location(0) vec4<f32> {
     let color1 = textureSample(tex_1, the_sampler, vertex.tex1_coord);
     let color2 = textureSample(tex_2, the_sampler, vertex.tex2_coord);
 
