@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::rc::Rc;
+use std::thread;
 
 use bytemuck::Pod;
 use pollster::FutureExt;
@@ -9,7 +10,7 @@ use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
-use crate::wgpu::math::{TextureTransform, Vert2D};
+use crate::wgpu::math::{Transform2D, Vert2D};
 
 fn aligned_size_of_uniform<U: Sized>() -> u64 {
     let uniform_size = std::mem::size_of::<U>();
@@ -24,7 +25,7 @@ pub(crate) enum Action<'a> {
     RunShader {
         shader: &'a Shader,
         shader_entry_name: &'a str,
-        input_textures: Vec<&'a Texture>,
+        input_textures: Vec<&'a TextureWithTransform>,
         output_texture: &'a Texture,
         push_constants: &'a [u8],
     },
@@ -92,7 +93,7 @@ impl WgpuContext {
             &device,
             include_str!("common_vert.wgsl"),
             2,
-            2 * std::mem::size_of::<TextureTransform>() as u32,
+            2 * std::mem::size_of::<Transform2D>() as u32,
         );
 
         Ok(WgpuContext {
@@ -124,13 +125,20 @@ impl WgpuContext {
                             label: None,
                         }));
 
+                    let mut transforms_bytes = input_textures.iter()
+                        .flat_map(|t| {
+                            bytemuck::bytes_of(&t.transform).to_vec()
+                        })
+                        .collect::<Vec<u8>>();
+                    transforms_bytes.extend_from_slice(push_constants);
+
                     self.run_shader(
                         encoder,
                         shader,
                         shader_entry_name,
                         input_textures,
                         output_texture,
-                        push_constants,
+                        transforms_bytes.as_slice(),
                     );
                 }
 
@@ -288,17 +296,20 @@ impl WgpuContext {
         }
     }
 
-    pub(crate) fn run_shader(
+    fn run_shader(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         shader: &Shader,
         shader_entry_name: &str,
-        input_textures: &[&Texture],
+        input_textures: &[&TextureWithTransform],
         output_texture: &Texture,
         push_constant: &[u8],
     ) {
         assert_eq!(input_textures.len() as u32, shader.input_texture_count);
-        assert_eq!(shader.push_constant_size, push_constant.len() as u32);
+        assert_eq!(
+            shader.fragment_push_constant_size + shader.vertex_push_constant_size,
+            push_constant.len() as u32
+        );
 
         let device = &self.device;
 
@@ -312,7 +323,7 @@ impl WgpuContext {
             .for_each(|(index, tex)| {
                 bind_entries.push(wgpu::BindGroupEntry {
                     binding: index as u32 + 1,
-                    resource: wgpu::BindingResource::TextureView(&tex.view),
+                    resource: wgpu::BindingResource::TextureView(&tex.texture.view),
                 });
             });
 
@@ -366,7 +377,7 @@ impl WgpuContext {
 
 impl Drop for WgpuContext {
     fn drop(&mut self) {
-        if self.encoder.borrow().is_some() {
+        if self.encoder.borrow().is_some() && !thread::panicking() {
             panic!("WgpuContext dropped before encoder was submitted. Try calling WgpuContext::sync().");
         }
     }
@@ -412,12 +423,13 @@ impl VertexBuffer {
 }
 
 pub(crate) struct Shader {
-    pub module: wgpu::ShaderModule,
-    pub bind_group_layout: wgpu::BindGroupLayout,
-    pub pipeline_layout: wgpu::PipelineLayout,
-    pub input_texture_count: u32,
-    pub push_constant_size: u32,
-    pub vertex_layout: Vec<wgpu::VertexFormat>,
+    pub(crate) module: wgpu::ShaderModule,
+    bind_group_layout: wgpu::BindGroupLayout,
+    pipeline_layout: wgpu::PipelineLayout,
+    input_texture_count: u32,
+    vertex_push_constant_size: u32,
+    fragment_push_constant_size: u32,
+    vertex_layout: Vec<wgpu::VertexFormat>,
     vertex_stride: u64,
     vertex_attributes: Vec<wgpu::VertexAttribute>,
     pipeline_cache: RefCell<HashMap<(String, ColorFormat), Rc<wgpu::RenderPipeline>>>,
@@ -428,7 +440,7 @@ impl Shader {
         device: &wgpu::Device,
         shader: &str,
         input_texture_count: u32,
-        push_constant_size: u32,
+        fragment_push_constant_size: u32,
     ) -> Shader {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
@@ -464,13 +476,20 @@ impl Shader {
                 label: None,
             });
 
+        let vertex_push_constant_size = input_texture_count * std::mem::size_of::<Transform2D>() as u32;
+
         let pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[wgpu::PushConstantRange {
-                    stages: wgpu::ShaderStages::VERTEX,
-                    range: 0..push_constant_size,
-                }],
+                push_constant_ranges: &[
+                    wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::VERTEX,
+                        range: 0..vertex_push_constant_size,
+                    },
+                    wgpu::PushConstantRange {
+                        stages: wgpu::ShaderStages::FRAGMENT,
+                        range: vertex_push_constant_size..fragment_push_constant_size + vertex_push_constant_size,
+                    }],
                 label: None,
             });
 
@@ -493,7 +512,8 @@ impl Shader {
             bind_group_layout,
             pipeline_layout,
             input_texture_count,
-            push_constant_size,
+            vertex_push_constant_size,
+            fragment_push_constant_size,
             vertex_layout,
             vertex_stride,
             vertex_attributes,
@@ -630,4 +650,24 @@ impl Texture {
 struct BufferImage {
     buffer: wgpu::Buffer,
     image_index: (usize, usize), // action index, index of (tex, img) inside action vec
+}
+
+pub(crate) struct TextureWithTransform {
+    pub(crate) texture: Texture,
+    pub(crate) transform: Transform2D,
+}
+
+impl TextureWithTransform {
+    pub(crate) fn from_texture(texture: Texture) -> Self {
+        Self {
+            texture,
+            transform: Transform2D::default(),
+        }
+    }
+    pub(crate) fn new(texture: Texture, transform: Transform2D) -> Self {
+        Self {
+            texture,
+            transform,
+        }
+    }
 }

@@ -1,9 +1,10 @@
 use std::ops::Mul;
+
 use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
-#[derive( Copy, Clone, Debug, Pod, Zeroable)]
-pub(crate) struct TextureTransform {
+#[derive(Copy, Clone, Debug, Pod, Zeroable)]
+pub(crate) struct Transform2D {
     r0: [f32; 3],
     pad0: f32,
     r1: [f32; 3],
@@ -12,7 +13,7 @@ pub(crate) struct TextureTransform {
     pad2: f32,
 }
 
-impl Default for TextureTransform {
+impl Default for Transform2D {
     fn default() -> Self {
         Self {
             r0: [1.0, 0.0, 0.0],
@@ -26,7 +27,7 @@ impl Default for TextureTransform {
     }
 }
 
-impl TextureTransform {
+impl Transform2D {
     pub fn aspect(&mut self, width: u32, height: u32) -> &mut Self {
         self.r0[0] *= width as f32 / height as f32;
 
@@ -74,11 +75,11 @@ impl TextureTransform {
     }
 }
 
-impl<'a, 'b> Mul<&'b TextureTransform> for &'a TextureTransform {
-    type Output = TextureTransform;
+impl<'a, 'b> Mul<&'b Transform2D> for &'a Transform2D {
+    type Output = Transform2D;
 
-    fn mul(self, rhs: &'b TextureTransform) -> Self::Output {
-        TextureTransform {
+    fn mul(self, rhs: &'b Transform2D) -> Self::Output {
+        Transform2D {
             r0: [
                 self.r0[0] * rhs.r0[0] + self.r0[1] * rhs.r1[0] + self.r0[2] * rhs.r2[0],
                 self.r0[0] * rhs.r0[1] + self.r0[1] * rhs.r1[1] + self.r0[2] * rhs.r2[1],
@@ -101,7 +102,7 @@ impl<'a, 'b> Mul<&'b TextureTransform> for &'a TextureTransform {
     }
 }
 
-impl PartialEq for TextureTransform {
+impl PartialEq for Transform2D {
     fn eq(&self, other: &Self) -> bool {
         self.r0 == other.r0
             && self.r1 == other.r1
@@ -110,7 +111,7 @@ impl PartialEq for TextureTransform {
     }
 }
 
-impl Eq for TextureTransform {}
+impl Eq for Transform2D {}
 
 
 #[repr(C)]
