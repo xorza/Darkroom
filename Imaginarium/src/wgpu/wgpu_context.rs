@@ -3,7 +3,6 @@ use std::ops::RangeBounds;
 
 use bytemuck::Pod;
 use pollster::FutureExt;
-use wgpu::{BufferSlice, CommandEncoder};
 use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
@@ -36,7 +35,7 @@ pub(crate) struct WgpuContext {
     pub limits: wgpu::Limits,
     pub rect_one_vb: VertexBuffer,
     pub default_sampler: wgpu::Sampler,
-    encoder: RefCell<Option<CommandEncoder>>,
+    encoder: RefCell<Option<wgpu::CommandEncoder>>,
 }
 
 struct BufferImage {
@@ -208,7 +207,7 @@ impl WgpuContext {
                     });
                     slice
                 })
-                .collect::<Vec<BufferSlice>>();
+                .collect::<Vec<wgpu::BufferSlice>>();
 
             self.device.poll(wgpu::Maintain::Wait);
 
