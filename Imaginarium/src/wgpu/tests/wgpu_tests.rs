@@ -35,7 +35,7 @@ fn it_works() {
         .uncenter();
 
     let shader = context.create_shader(
-        include_str!("shader.wgsl"),
+        include_str!("blend_frag.wgsl"),
         2,
         std::mem::size_of::<[TextureTransform; 2]>() as u32,
     );
@@ -80,7 +80,7 @@ fn it_works2() {
     let tex3 = context.create_texture(img1.desc.clone());
 
     let shader = context.create_shader(
-        include_str!("shader.wgsl"),
+        include_str!("blend_frag.wgsl"),
         2,
         std::mem::size_of_val(&texture_transforms) as u32,
     );
