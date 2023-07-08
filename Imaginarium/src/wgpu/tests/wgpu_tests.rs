@@ -103,8 +103,8 @@ fn it_works2() {
             push_constants: bytemuck::bytes_of(&texture_transforms),
         },
         Action::TexToImg(vec![
-            (&tex1, RefCell::new(&mut img3)),
-            (&tex3, RefCell::new(&mut img2)),
+            (&tex1, RefCell::new(&mut img2)),
+            (&tex3, RefCell::new(&mut img3)),
         ]),
     ]);
     context.sync();

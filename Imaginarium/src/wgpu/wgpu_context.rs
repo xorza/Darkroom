@@ -198,8 +198,8 @@ impl WgpuContext {
     pub fn sync(&self) {
         if let Some(encoder) = self.encoder.replace(None) {
             self.queue.submit(Some(encoder.finish()));
+            self.device.poll(wgpu::Maintain::Wait);
         }
-        self.device.poll(wgpu::Maintain::Wait);
     }
 
     pub(crate) fn create_shader(
