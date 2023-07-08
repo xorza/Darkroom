@@ -14,8 +14,8 @@ use crate::wgpu::math::{Transform2D, Vert2D};
 
 fn aligned_size_of_uniform<U: Sized>() -> u64 {
     let uniform_size = std::mem::size_of::<U>();
-    let uniform_align = 256;
-    let uniform_padded_size = (uniform_size + uniform_align - 1) / uniform_align * uniform_align;
+    const UNIFORM_ALIGN: usize = 256;
+    let uniform_padded_size = (uniform_size + UNIFORM_ALIGN - 1) / UNIFORM_ALIGN * UNIFORM_ALIGN;
 
     uniform_padded_size as u64
 }
