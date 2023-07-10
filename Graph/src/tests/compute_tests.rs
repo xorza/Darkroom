@@ -3,8 +3,8 @@ use std::str::FromStr;
 use crate::compute::{Compute, ComputeInfo, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
-use crate::graph::{Binding, BindingBehavior, FunctionBehavior, Graph};
-use crate::preprocess::{Preprocess, PreprocessInfo};
+use crate::graph::{Binding, FunctionBehavior, Graph};
+use crate::preprocess::Preprocess;
 
 static mut RESULT: i64 = 0;
 static mut A: i64 = 2;
@@ -89,7 +89,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
     }
 
     let preprocess = Preprocess::default();
-    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let preprocess_info = preprocess.run(&graph);
     let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 360);
 
@@ -111,29 +111,20 @@ fn simple_compute_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let preprocess = Preprocess::default();
 
-    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let preprocess_info = preprocess.run(&graph);
     let compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 35);
 
-    let preprocess_info = preprocess.run(&graph, &preprocess_info)?;
+    let preprocess_info = preprocess.run(&graph);
     let _compute_info = compute.run(&graph, &preprocess_info, &compute_info)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
+    let preprocess_info = preprocess.run(&graph);
     let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
     assert_eq!(unsafe { RESULT }, 63);
 
-    graph
-        .node_by_name_mut("sum").unwrap()
-        .inputs.get_mut(0).unwrap()
-        .binding.as_output_binding_mut().unwrap()
-        .behavior = BindingBehavior::Always;
-
-    let preprocess_info = preprocess.run(&graph, &PreprocessInfo::default())?;
-    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
-    assert_eq!(unsafe { RESULT }, 63);
 
     drop(graph);
 

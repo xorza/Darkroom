@@ -54,11 +54,7 @@ pub trait Compute {
         let mut inputs: ArgSet = ArgSet::default();
         let mut outputs: ArgSet = ArgSet::default();
 
-        for r_node in preprocess_info.nodes.iter()
-            .filter(|node| node.should_execute) {
-            let _execution_index = r_node.execution_index.unwrap();
-            assert!(r_node.execution_index.is_some());
-
+        for r_node in preprocess_info.nodes.iter() {
             let node = graph.node_by_id(r_node.node_id()).unwrap();
             inputs.resize_and_fill(node.inputs.len());
             outputs.resize_and_fill(node.outputs.len());

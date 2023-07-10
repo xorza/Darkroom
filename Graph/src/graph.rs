@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
 use common::id_type;
 
 use crate::data::{DataType, Value};
@@ -39,18 +40,10 @@ pub struct Output {
     pub data_type: DataType,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
-pub enum BindingBehavior {
-    #[default]
-    Always,
-    Once,
-}
-
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputBinding {
     pub output_node_id: NodeId,
     pub output_index: u32,
-    pub behavior: BindingBehavior,
 }
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -350,7 +343,6 @@ impl Binding {
         Binding::Output(OutputBinding {
             output_node_id,
             output_index,
-            behavior: BindingBehavior::default(),
         })
     }
 

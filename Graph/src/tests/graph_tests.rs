@@ -26,7 +26,6 @@ fn graph_to_yaml() -> anyhow::Result<()> {
         binding: Binding::Output(OutputBinding {
             output_node_id: node1.id(),
             output_index: 0,
-            behavior: BindingBehavior::Always,
         }),
         const_value: None,
     });
