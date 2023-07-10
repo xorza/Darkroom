@@ -11,8 +11,8 @@ pub(crate) type InvokeArgs = [Option<Value>];
 
 #[derive(Default, Debug)]
 pub(crate) struct ArgSet {
-    args: Vec<Option<Value>>,
-    binding_count: Vec<u32>,
+    pub(crate) args: Vec<Option<Value>>,
+    pub(crate) binding_count: Vec<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -22,8 +22,8 @@ pub struct InvokeContext {
 
 #[derive(Default, Debug)]
 pub struct ComputeCache {
-    output_args: HashMap<NodeId, ArgSet>,
-    contexts: HashMap<NodeId, InvokeContext>,
+    pub(crate) output_args: HashMap<NodeId, ArgSet>,
+    pub(crate) contexts: HashMap<NodeId, InvokeContext>,
 }
 
 pub struct NodeInvokeInfo {
@@ -98,27 +98,27 @@ pub trait Compute {
                     outputs.binding_count[index] = output.binding_count;
                 });
 
-            {
+            let elapsed = {
                 let ctx = compute_cache.contexts
                     .get_mut(&node.id())
                     .unwrap_or(&mut empty_context);
 
                 let start = std::time::Instant::now();
                 self.invoke(node.function_id, ctx, inputs.as_slice(), outputs.as_mut_slice())?;
-                let elapsed = start.elapsed();
 
-                compute_info.node_invoke_infos.push(NodeInvokeInfo {
-                    node_id: node.id(),
-                    runtime: elapsed.as_secs_f64(),
-                });
-            }
+                start.elapsed()
+            };
+
+            inputs.resize_and_fill(0);
+
+            compute_info.node_invoke_infos.push(NodeInvokeInfo {
+                node_id: node.id(),
+                runtime: elapsed.as_secs_f64(),
+            });
 
             if !empty_context.is_none() {
                 compute_cache.contexts.insert(node.id(), std::mem::take(&mut empty_context));
             }
-
-
-            inputs.resize_and_fill(0);
         }
 
         Ok(compute_info)

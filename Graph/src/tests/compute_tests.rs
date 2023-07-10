@@ -127,6 +127,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
     let preprocess_info = preprocess.run(&graph);
     let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
     assert_eq!(unsafe { RESULT }, 63);
+    assert!(compute_cache.output_args.iter().all(|(_, args)| args.binding_count.iter().all(|&c| c == 0)));
 
     Ok(())
 }
