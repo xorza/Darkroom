@@ -12,6 +12,7 @@ resolver = "2"
 [workspace.dependencies]
 graph_lib = { path = "./Graph", package = "graph" }
 common = { path = "./Common", package = "common" }
+uilib = { path = "./uilib", package = "uilib" }
 egui_node_graph = { path = "./egui_node_graph/egui_node_graph" }
 
 serde = { version = "*", features = ["derive"] }

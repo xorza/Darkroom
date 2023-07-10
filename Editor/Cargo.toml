@@ -1,12 +1,14 @@
 [package]
-name = "nodeshop"
+name = "editor"
 version = "0.1.0"
 edition = "2021"
+
 
 [features]
 default = []
 
 [dependencies]
+uilib = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }

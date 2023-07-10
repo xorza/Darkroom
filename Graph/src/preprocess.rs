@@ -1,22 +1,34 @@
 use std::collections::HashSet;
 
 use anyhow::anyhow;
+use serde::{Deserialize, Serialize};
 
+use crate::data::Value;
 use crate::graph::*;
 
 #[derive(Default)]
 pub struct Preprocess {}
 
-#[derive(Default, Clone)]
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub enum PreprocessInput {
+    #[default]
+    None,
+    Constant(Value),
+    Binding { output_node_id: NodeId, output_index: u32 },
+}
+
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct PreprocessOutput {
     pub connection_count: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct PreprocessNode {
     node_id: NodeId,
 
     pub name: String,
+
+    pub inputs: Vec<PreprocessInput>,
     pub outputs: Vec<PreprocessOutput>,
 
     pub is_output: bool,
@@ -30,7 +42,7 @@ pub struct PreprocessNode {
 }
 
 #[derive(Default, Clone)]
-struct PreprocessInput {
+struct Edge {
     output_node_id: NodeId,
     output_index: u32,
     input_node_id: NodeId,
@@ -40,7 +52,7 @@ struct PreprocessInput {
     is_output: bool,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize, Deserialize)]
 pub struct PreprocessInfo {
     pub nodes: Vec<PreprocessNode>,
 }
@@ -49,21 +61,21 @@ impl Preprocess {
     pub fn run(&self, graph: &Graph, prev_run: &PreprocessInfo) -> anyhow::Result<PreprocessInfo> {
         assert!(graph.validate().is_ok());
 
-        let pp_inputs = self.collect_all_inputs(graph)?;
-        let preprocess_info = self.gathepp_inputs_to_runtime(graph, pp_inputs, prev_run);
-        let preprocess_info = self.mark_active_and_missing_inputs(graph, preprocess_info);
+        let edges = self.collect_all_inputs(graph)?;
+        let preprocess_info = self.gather_edges(graph, edges, prev_run);
+        let preprocess_info = self.process_input_values(graph, preprocess_info);
         let exec_order = self.create_exec_order(graph, &preprocess_info);
         let preprocess_info = self.execute(graph, preprocess_info, exec_order)?;
 
         Ok(preprocess_info)
     }
 
-    fn collect_all_inputs(&self, graph: &Graph) -> anyhow::Result<Vec<PreprocessInput>> {
-        let mut input_bindings = graph.nodes()
+    fn collect_all_inputs(&self, graph: &Graph) -> anyhow::Result<Vec<Edge>> {
+        let mut all_edges = graph.nodes()
             .iter()
             .filter(|node| node.is_output)
             .map(|node| {
-                PreprocessInput {
+                Edge {
                     output_node_id: node.id(),
                     output_index: 0,
                     input_node_id: NodeId::nil(),
@@ -73,16 +85,16 @@ impl Preprocess {
                     is_output: true,
                 }
             })
-            .collect::<Vec<PreprocessInput>>();
+            .collect::<Vec<Edge>>();
 
         let mut node_ids: HashSet<NodeId> = HashSet::new();
 
         let mut i: usize = 0;
-        while i < input_bindings.len() {
+        while i < all_edges.len() {
             i += 1;
             let i = i - 1;
 
-            let input_binding = &input_bindings[i];
+            let input_binding = &all_edges[i];
             if !node_ids.insert(input_binding.output_node_id) {
                 continue;
             }
@@ -100,7 +112,7 @@ impl Preprocess {
                     Binding::Output(output_binding) => {
                         assert_ne!(output_binding.output_node_id, node.id());
 
-                        input_bindings.push(PreprocessInput {
+                        all_edges.push(Edge {
                             output_node_id: output_binding.output_node_id,
                             output_index: output_binding.output_index,
                             input_node_id: node.id(),
@@ -113,45 +125,48 @@ impl Preprocess {
                 }
             }
 
-            input_bindings[i].has_missing_inputs = has_missing_inputs;
+            all_edges[i].has_missing_inputs = has_missing_inputs;
         }
 
-        Ok(input_bindings)
+        all_edges.reverse();
+
+        Ok(all_edges)
     }
-    fn gathepp_inputs_to_runtime(
+    fn gather_edges(
         &self,
         graph: &Graph,
-        all_pp_inputs: Vec<PreprocessInput>,
+        all_edges: Vec<Edge>,
         prev_run: &PreprocessInfo)
         -> PreprocessInfo
     {
         let mut pp_nodes = PreprocessInfo::default();
         let mut node_ids: HashSet<NodeId> = HashSet::new();
 
-        for pp_input in all_pp_inputs.iter().rev() {
-            let node_id = pp_input.output_node_id;
+        for edge in all_edges.iter() {
+            let node_id = edge.output_node_id;
             if !node_ids.insert(node_id) {
                 continue;
             }
 
             let node = graph.node_by_id(node_id).unwrap();
 
-            let pp_inputs = all_pp_inputs.iter()
-                .filter(|node| node.output_node_id == node_id)
-                .collect::<Vec<&PreprocessInput>>();
+            let node_output_edges = all_edges.iter()
+                .filter(|&edge| edge.output_node_id == node_id)
+                .collect::<Vec<&Edge>>();
 
-            let has_missing_inputs = pp_inputs.iter()
-                .any(|pp_input| pp_input.has_missing_inputs);
+            let has_missing_inputs = node_output_edges.iter()
+                .any(|edge| edge.has_missing_inputs);
 
             let has_outputs = prev_run.nodes.iter()
                 .any(|pp_node| pp_node.node_id == node_id && pp_node.has_outputs);
 
-            let is_output = pp_inputs.iter()
-                .any(|pp_input| pp_input.is_output);
+            let is_output = node_output_edges.iter()
+                .any(|&edge| edge.is_output);
 
             pp_nodes.nodes.push(PreprocessNode {
                 node_id,
                 has_missing_inputs,
+                inputs: vec![PreprocessInput::default(); node.inputs.len()],
                 outputs: vec![PreprocessOutput::default(); node.outputs.len()],
                 has_outputs,
                 should_execute: false,
@@ -164,7 +179,7 @@ impl Preprocess {
 
         pp_nodes
     }
-    fn mark_active_and_missing_inputs(&self, graph: &Graph, mut pp_nodes: PreprocessInfo) -> PreprocessInfo {
+    fn process_input_values(&self, graph: &Graph, mut pp_nodes: PreprocessInfo) -> PreprocessInfo {
         for i in 0..pp_nodes.nodes.len() {
             let node_id = pp_nodes.nodes[i].node_id;
             let has_arguments = pp_nodes.nodes[i].has_outputs;
@@ -205,7 +220,7 @@ impl Preprocess {
     fn create_exec_order(&self, graph: &Graph, pp_nodes: &PreprocessInfo) -> Vec<NodeId> {
         let mut exec_order = pp_nodes.nodes.iter()
             .rev()
-            .filter(|r_node| r_node.is_output && !r_node.has_missing_inputs)
+            .filter(|&r_node| r_node.is_output && !r_node.has_missing_inputs)
             .map(|r_node| r_node.node_id)
             .collect::<Vec<NodeId>>();
 
@@ -216,9 +231,9 @@ impl Preprocess {
 
             let node_id = exec_order[i];
             let node = graph.node_by_id(node_id).unwrap();
-            let r_node = pp_nodes.node_by_id(node_id);
+            let pp_node = pp_nodes.node_by_id(node_id);
 
-            if !r_node.has_outputs || r_node.behavior == FunctionBehavior::Active {
+            if !pp_node.has_outputs || pp_node.behavior == FunctionBehavior::Active {
                 for (_index, input) in node.inputs.iter().enumerate() {
                     match &input.binding {
                         Binding::None => { panic!("Missing input") }
@@ -248,7 +263,7 @@ impl Preprocess {
         order: Vec<NodeId>,
     ) -> anyhow::Result<PreprocessInfo>
     {
-        for (execution_index, i) in (0_u32..).zip(0..order.len()) {
+        for (i, execution_index) in (0..order.len()).zip(0_u32..) {
             let node_id = order[i];
             let node = graph.node_by_id(node_id).unwrap();
 
@@ -273,7 +288,7 @@ impl Preprocess {
 
             let r_node = pp_nodes.nodes
                 .iter_mut()
-                .find(|rnode| rnode.node_id == node_id)
+                .find(|r_node| r_node.node_id == node_id)
                 .unwrap();
 
             r_node.has_outputs = true;
@@ -295,17 +310,17 @@ impl PreprocessNode {
 
 impl PreprocessInfo {
     pub fn node_by_name(&self, name: &str) -> Option<&PreprocessNode> {
-        self.nodes.iter().find(|node| node.name == name)
+        self.nodes.iter().find(|&pp_node| pp_node.name == name)
     }
 
     pub fn node_by_id(&self, node_id: NodeId) -> &PreprocessNode {
         self.nodes.iter()
-            .find(|node| node.node_id == node_id)
+            .find(|&pp_node| pp_node.node_id == node_id)
             .unwrap()
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> &mut PreprocessNode {
         self.nodes.iter_mut()
-            .find(|node| node.node_id == node_id)
+            .find(|pp_node| pp_node.node_id == node_id)
             .unwrap()
     }
 }

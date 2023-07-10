@@ -26,6 +26,8 @@ fn simple_run() -> anyhow::Result<()> {
     assert!(nodes.nodes.iter().all(|_node| _node.should_execute));
     assert!(nodes.nodes.iter().all(|_node| _node.has_outputs));
 
+    let _yaml = serde_yaml::to_string(&nodes)?;
+
     Ok(())
 }
 
