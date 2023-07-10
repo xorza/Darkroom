@@ -1,27 +1,30 @@
 use std::any::Any;
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use crate::data::Value;
 use crate::functions::FunctionId;
-use crate::graph::{Binding, Graph, NodeId};
+use crate::graph::{Binding, FunctionBehavior, Graph, NodeId};
 use crate::preprocess::PreprocessInfo;
-
-#[derive(Clone, Default, Hash, PartialEq, Eq)]
-pub struct OutputAddress {
-    node_id: NodeId,
-    output_index: u32,
-}
 
 pub(crate) type InvokeArgs = [Option<Value>];
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct ArgSet {
     args: Vec<Option<Value>>,
+    binding_count: Vec<u32>,
 }
 
-pub type ArgCache = HashMap<OutputAddress, Option<Value>>;
+#[derive(Debug, Default)]
+pub struct InvokeContext {
+    boxed: Option<Box<dyn Any>>,
+}
+
+#[derive(Default, Debug)]
+pub struct ComputeCache {
+    output_args: HashMap<NodeId, ArgSet>,
+    contexts: HashMap<NodeId, InvokeContext>,
+}
 
 pub struct NodeInvokeInfo {
     node_id: NodeId,
@@ -30,13 +33,7 @@ pub struct NodeInvokeInfo {
 
 #[derive(Default)]
 pub struct ComputeInfo {
-    arg_cache: ArgCache,
     node_invoke_infos: Vec<NodeInvokeInfo>,
-    context_cache: HashMap<NodeId, RefCell<InvokeContext>>,
-}
-
-pub struct InvokeContext {
-    boxed: Option<Box<dyn Any>>,
 }
 
 pub trait Invokable {
@@ -47,18 +44,18 @@ pub trait Compute {
     fn run(&self,
            graph: &Graph,
            preprocess_info: &PreprocessInfo,
-           prev_compute_info: &ComputeInfo)
+           compute_cache: &mut ComputeCache, )
         -> anyhow::Result<ComputeInfo>
     {
         let mut compute_info = ComputeInfo::default();
         let mut inputs: ArgSet = ArgSet::default();
-        let mut outputs: ArgSet = ArgSet::default();
 
-        for r_node in preprocess_info.nodes.iter() {
-            let node = graph.node_by_id(r_node.node_id()).unwrap();
+        let mut empty_context = InvokeContext::default();
+
+        for pp_node in preprocess_info.nodes.iter() {
+            let node = graph.node_by_id(pp_node.node_id()).unwrap();
+
             inputs.resize_and_fill(node.inputs.len());
-            outputs.resize_and_fill(node.outputs.len());
-
             node.inputs.iter()
                 .map(|input| {
                     match &input.binding {
@@ -69,54 +66,59 @@ pub trait Compute {
                             input.const_value.clone(),
 
                         Binding::Output(output_binding) => {
-                            let output_address = OutputAddress {
-                                node_id: output_binding.output_node_id,
-                                output_index: output_binding.output_index,
-                            };
+                            let args = compute_cache.output_args
+                                .get_mut(&output_binding.output_node_id)
+                                .unwrap();
 
-                            compute_info.arg_cache
-                                .get(&output_address)
-                                .or_else(|| prev_compute_info.arg_cache.get(&output_address))
-                                .unwrap_or_else(|| {
-                                    panic!("Output {:?} not found for node {:?}, id: {:?}", output_address.output_index, node.name, node.id())
-                                })
-                                .clone()
+                            let binding_count = &mut args.binding_count[output_binding.output_index as usize];
+                            *binding_count -= 1;
+
+                            if *binding_count == 0 && pp_node.behavior == FunctionBehavior::Active {
+                                args[output_binding.output_index as usize]
+                                    .take()
+                            } else {
+                                args[output_binding.output_index as usize]
+                                    .clone()
+                            }
                         }
                     }
                 })
                 .enumerate()
-                .for_each(|(index, value)| inputs[index] = value);
-
-            let mut ctx = prev_compute_info.context_cache
-                .get(&node.id()).map(|ctx| ctx.replace(InvokeContext::default()))
-                .unwrap_or_else(InvokeContext::default);
-
-            let start = std::time::Instant::now();
-            self.invoke(node.function_id, &mut ctx, inputs.as_slice(), outputs.as_mut_slice())?;
-            let elapsed = start.elapsed();
-
-            let insert_result
-                = compute_info.context_cache.insert(node.id(), RefCell::new(ctx));
-            assert!(insert_result.is_none());
-
-            compute_info.node_invoke_infos.push(NodeInvokeInfo {
-                node_id: node.id(),
-                runtime: elapsed.as_secs_f64(),
-            });
-
-            outputs.iter()
-                .enumerate()
                 .for_each(|(index, value)| {
-                    let insert_result = compute_info.arg_cache
-                        .insert(
-                            OutputAddress {
-                                node_id: node.id(),
-                                output_index: index as u32,
-                            },
-                            value.clone(),
-                        );
-                    assert!(insert_result.is_none());
+                    inputs[index] = value
                 });
+
+            let outputs = compute_cache.output_args
+                .entry(node.id())
+                .or_insert_with(|| ArgSet::with_size(node.outputs.len() as u32));
+            pp_node.outputs
+                .iter()
+                .enumerate()
+                .for_each(|(index, output)| {
+                    outputs.binding_count[index] = output.binding_count;
+                });
+
+            {
+                let ctx = compute_cache.contexts
+                    .get_mut(&node.id())
+                    .unwrap_or(&mut empty_context);
+
+                let start = std::time::Instant::now();
+                self.invoke(node.function_id, ctx, inputs.as_slice(), outputs.as_mut_slice())?;
+                let elapsed = start.elapsed();
+
+                compute_info.node_invoke_infos.push(NodeInvokeInfo {
+                    node_id: node.id(),
+                    runtime: elapsed.as_secs_f64(),
+                });
+            }
+
+            if !empty_context.is_none() {
+                compute_cache.contexts.insert(node.id(), std::mem::take(&mut empty_context));
+            }
+
+
+            inputs.resize_and_fill(0);
         }
 
         Ok(compute_info)
@@ -168,12 +170,21 @@ impl Compute for LambdaCompute {
 }
 
 impl ArgSet {
+    pub fn with_size(size: u32) -> Self {
+        Self {
+            args: vec![None; size as usize],
+            binding_count: vec![0; size as usize],
+        }
+    }
     pub fn from_vec<T, V>(args: Vec<T>) -> Self
     where T: Into<Option<V>>,
           V: Into<Value>
     {
+        let count = args.len();
+        let args = args.into_iter().map(|v| v.into().map(|v| v.into())).collect();
         Self {
-            args: args.into_iter().map(|v| v.into().map(|v| v.into())).collect(),
+            args,
+            binding_count: vec![0; count],
         }
     }
     pub fn as_slice(&self) -> &[Option<Value>] {
@@ -185,6 +196,8 @@ impl ArgSet {
     pub fn resize_and_fill(&mut self, size: usize) {
         self.args.resize(size, None);
         self.args.fill(None);
+        self.binding_count.resize(size, 0);
+        self.binding_count.fill(0);
     }
     pub fn iter(&self) -> impl Iterator<Item=&Option<Value>> {
         self.args.iter()
@@ -213,6 +226,10 @@ impl InvokeContext {
         InvokeContext {
             boxed: None,
         }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.boxed.is_none()
     }
 
     pub fn is_some<T>(&self) -> bool

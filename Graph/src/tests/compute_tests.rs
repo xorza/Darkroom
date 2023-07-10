@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::compute::{Compute, ComputeInfo, InvokeContext, LambdaCompute};
+use crate::compute::{Compute, ComputeCache, InvokeContext, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, FunctionBehavior, Graph};
@@ -90,7 +90,9 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 
     let preprocess = Preprocess::default();
     let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
+    let mut compute_cache = ComputeCache::default();
+
+    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
     assert_eq!(unsafe { RESULT }, 360);
 
     drop(graph);
@@ -110,23 +112,21 @@ fn simple_compute_test() -> anyhow::Result<()> {
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let preprocess = Preprocess::default();
+    let mut compute_cache = ComputeCache::default();
 
     let preprocess_info = preprocess.run(&graph);
-    let compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &compute_info)?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
     assert_eq!(unsafe { RESULT }, 35);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
     let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &ComputeInfo::default())?;
+    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
     assert_eq!(unsafe { RESULT }, 63);
-
-
-    drop(graph);
 
     Ok(())
 }

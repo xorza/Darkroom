@@ -2,20 +2,13 @@ use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::Value;
 use crate::graph::*;
 
 #[derive(Default)]
 pub struct Preprocess {}
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub enum PreprocessInput {
-    #[default]
-    Missing,
-    None,
-    Constant(Value),
-    Binding { output_node_id: NodeId, output_index: u32 },
-}
+pub struct PreprocessInput {}
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PreprocessOutput {
@@ -159,19 +152,6 @@ impl Preprocess {
                     behavior: node.behavior,
                     name: node.name.clone(),
                 });
-
-                if let Some(output_index) = edge.output_index {
-                    pp_nodes
-                        .last_mut()
-                        .unwrap()
-                        .outputs[output_index as usize].binding_count = 1;
-                }
-            } else if let Some(output_index) = edge.output_index {
-                pp_nodes
-                    .iter_mut()
-                    .find(|pp_node| pp_node.node_id == node_id)
-                    .unwrap()
-                    .outputs[output_index as usize].binding_count += 1;
             }
         }
 
@@ -189,26 +169,13 @@ impl Preprocess {
                 let processed_nodes = &mut pp_nodes[0..i];
 
                 for (index, input) in node.inputs.iter().enumerate() {
-                    let pp_input = &mut pp_node.inputs[index];
+                    let _pp_input = &mut pp_node.inputs[index];
 
                     match &input.binding {
                         Binding::None => {
-                            if input.is_required {
-                                *pp_input = PreprocessInput::Missing;
-                            } else {
-                                *pp_input = PreprocessInput::None;
-                            }
+                            pp_node.has_missing_inputs |= input.is_required;
                         }
-                        Binding::Const => {
-                            if pp_node.behavior == FunctionBehavior::Active {
-                                *pp_input = PreprocessInput::Constant(
-                                    input.const_value
-                                        .as_ref()
-                                        .expect("Expected const_value for const binding")
-                                        .clone()
-                                );
-                            }
-                        }
+                        Binding::Const => {}
                         Binding::Output(output_binding) => {
                             let output_pp_node = processed_nodes
                                 .iter_mut()
@@ -225,11 +192,6 @@ impl Preprocess {
                             if output_pp_node.has_missing_inputs {
                                 pp_node.has_missing_inputs = true;
                             }
-
-                            *pp_input = PreprocessInput::Binding {
-                                output_node_id: output_binding.output_node_id,
-                                output_index: output_binding.output_index,
-                            };
                         }
                     }
                 }
