@@ -121,6 +121,12 @@ pub trait Compute {
             }
         }
 
+        assert!(
+            compute_cache.output_args.iter().all(|(_, args)| {
+                args.binding_count.iter().all(|&binding_count| binding_count == 0)
+            })
+        );
+
         Ok(compute_info)
     }
 
