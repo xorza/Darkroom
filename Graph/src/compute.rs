@@ -15,6 +15,18 @@ pub trait Invokable {
     fn call(&self, ctx: &mut InvokeContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);
 }
 
+pub trait Invoker {
+    fn all_functions(&self) -> Vec<FunctionId>;
+
+    fn invoke(
+        &self,
+        function_id: FunctionId,
+        ctx: &mut InvokeContext,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()>;
+}
+
 pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
@@ -22,12 +34,29 @@ pub struct LambdaInvokable {
 }
 
 #[derive(Default)]
-pub struct LambdaCompute {
+pub struct LambdaInvoker {
+    all_functions: Vec<FunctionId>,
     lambdas: HashMap<FunctionId, LambdaInvokable>,
 }
 
-pub trait Compute {
-    fn run(
+#[derive(Default)]
+pub struct Compute {
+    invokers: Vec<Box<dyn Invoker>>,
+    functions: HashMap<FunctionId, usize>,
+}
+
+impl Compute {
+    pub fn add_invoker(&mut self, invoker: Box<dyn Invoker>) {
+        invoker
+            .all_functions()
+            .iter()
+            .for_each(|function_id| {
+                self.functions.insert(*function_id, self.invokers.len());
+            });
+
+        self.invokers.push(invoker);
+    }
+    pub fn run(
         &self,
         graph: &Graph,
         runtime_graph: &mut RuntimeGraph,
@@ -92,12 +121,18 @@ pub trait Compute {
                 let ctx = &mut r_node.invoke_context;
 
                 let start = std::time::Instant::now();
-                self.invoke(
-                    node.function_id,
-                    ctx,
-                    inputs.0.as_slice(),
-                    outputs.as_mut_slice(),
-                )?;
+                let &invoker_index =
+                    self.functions
+                        .get(&node.function_id).unwrap();
+                self.invokers
+                    .get(invoker_index)
+                    .unwrap()
+                    .invoke(
+                        node.function_id,
+                        ctx,
+                        inputs.as_slice(),
+                        outputs.as_mut_slice(),
+                    )?;
 
                 start.elapsed().as_secs_f64()
             };
@@ -113,17 +148,9 @@ pub trait Compute {
 
         Ok(())
     }
-
-    fn invoke(
-        &self,
-        function_id: FunctionId,
-        ctx: &mut InvokeContext,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()>;
 }
 
-impl LambdaCompute {
+impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
     where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
@@ -131,10 +158,15 @@ impl LambdaCompute {
             lambda: Box::new(lambda),
         };
         self.lambdas.insert(function_id, invokable);
+        self.all_functions.push(function_id);
     }
 }
 
-impl Compute for LambdaCompute {
+impl Invoker for LambdaInvoker {
+    fn all_functions(&self) -> Vec<FunctionId> {
+        self.all_functions.clone()
+    }
+
     fn invoke(&self,
               function_id: FunctionId,
               ctx: &mut InvokeContext,

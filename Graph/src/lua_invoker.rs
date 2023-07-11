@@ -6,7 +6,7 @@ use std::str::FromStr;
 use mlua::{Error, Function, Lua, Table, Variadic};
 
 use crate::{data, functions};
-use crate::compute::{Compute, InvokeArgs};
+use crate::compute::{InvokeArgs, Invoker};
 use crate::data::DataType;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
@@ -303,7 +303,11 @@ impl Drop for LuaInvoker {
     }
 }
 
-impl Compute for LuaInvoker {
+impl Invoker for LuaInvoker {
+    fn all_functions(&self) -> Vec<FunctionId> {
+        self.funcs.keys().cloned().collect::<Vec<FunctionId>>()
+    }
+
     fn invoke(&self,
               function_id: FunctionId,
               _ctx: &mut InvokeContext,

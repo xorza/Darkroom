@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::compute::{Compute, LambdaCompute};
+use crate::compute::{Compute, LambdaInvoker};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, FunctionBehavior, Graph};
@@ -21,7 +21,7 @@ fn setup() {
 
 fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
-) -> anyhow::Result<LambdaCompute>
+) -> anyhow::Result<Compute>
 where
     SetResult: Fn(i64) + 'static,
     GetA: Fn() -> i64 + 'static,
@@ -29,28 +29,28 @@ where
 {
     setup();
 
-    let mut compute = LambdaCompute::default();
+    let mut invoker = LambdaInvoker::default();
 
     // print func
-    compute.add_lambda(
+    invoker.add_lambda(
         FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
         move |_, inputs, _| {
             result(inputs[0].as_ref().unwrap().as_int());
         });
     // val 1 func
-    compute.add_lambda(
+    invoker.add_lambda(
         FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
         move |_, _, outputs| {
             outputs[0] = Value::from(get_a()).into();
         });
     // val 2 func
-    compute.add_lambda(
+    invoker.add_lambda(
         FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
         move |_, _, outputs| {
             outputs[0] = Value::from(get_b()).into();
         });
     // sum func
-    compute.add_lambda(
+    invoker.add_lambda(
         FunctionId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
@@ -59,7 +59,7 @@ where
             ctx.set(a + b);
         });
     // mult func
-    compute.add_lambda(
+    invoker.add_lambda(
         FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
@@ -67,6 +67,9 @@ where
             outputs[0] = Value::from(a * b).into();
             ctx.set(a * b);
         });
+
+    let mut compute = Compute::default();
+    compute.add_invoker(Box::new(invoker));
 
     Ok(compute)
 }

@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use mlua::{Function, Lua, Value, Variadic};
 
-use crate::compute::{ArgSet, Compute};
+use crate::compute::{ArgSet, Invoker};
 use crate::functions::{FunctionId, Functions};
 use crate::lua_invoker::LuaInvoker;
 use crate::runtime_graph::InvokeContext;
