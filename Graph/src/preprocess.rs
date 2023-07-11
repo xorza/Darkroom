@@ -7,9 +7,6 @@ use crate::graph::*;
 #[derive(Default)]
 pub struct Preprocess {}
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct PreprocessInput {}
-
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PreprocessOutput {
     pub binding_count: u32,
@@ -21,7 +18,6 @@ pub struct PreprocessNode {
 
     pub name: String,
 
-    pub inputs: Vec<PreprocessInput>,
     pub outputs: Vec<PreprocessOutput>,
     pub is_output: bool,
 
@@ -52,7 +48,7 @@ impl Preprocess {
         assert!(graph.validate().is_ok());
 
         let edges = self.gather_edges(graph, cached_nodes);
-        let p_nodes = self.gather_nodes(graph, edges);
+        let p_nodes = self.gather_nodes(graph, edges, cached_nodes);
         let p_nodes = self.process_behavior_and_inputs(graph, p_nodes);
 
         PreprocessInfo {
@@ -115,7 +111,8 @@ impl Preprocess {
     fn gather_nodes(
         &self,
         graph: &Graph,
-        all_edges: Vec<Edge>)
+        all_edges: Vec<Edge>,
+        caches_nodes: &HashSet<NodeId>)
         -> Vec<PreprocessNode>
     {
         let mut p_nodes: Vec<PreprocessNode> = Vec::new();
@@ -134,13 +131,19 @@ impl Preprocess {
                 let is_output = node_output_edges.iter()
                     .any(|&edge| edge.is_output);
 
+                let behavior =
+                    if caches_nodes.contains(&node_id) {
+                        FunctionBehavior::Passive
+                    } else {
+                        node.behavior
+                    };
+
                 p_nodes.push(PreprocessNode {
                     node_id,
-                    inputs: vec![PreprocessInput::default(); node.inputs.len()],
                     outputs: vec![PreprocessOutput::default(); node.outputs.len()],
                     is_output,
                     has_missing_inputs: false,
-                    behavior: node.behavior,
+                    behavior,
                     name: node.name.clone(),
                 });
                 if let Some(output_index) = edge.output_index {
@@ -168,9 +171,7 @@ impl Preprocess {
             {
                 let processed_nodes = &mut p_nodes[0..i];
 
-                for (index, input) in node.inputs.iter().enumerate() {
-                    let _p_input = &mut p_node.inputs[index];
-
+                for (_index, input) in node.inputs.iter().enumerate() {
                     match &input.binding {
                         Binding::None => {
                             p_node.has_missing_inputs |= input.is_required;
