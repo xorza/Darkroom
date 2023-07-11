@@ -135,7 +135,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(unsafe { RESULT }, 63);
 

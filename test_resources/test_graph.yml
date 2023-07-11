@@ -45,7 +45,7 @@ nodes:
     name: sum
     behavior: Passive
     is_output: false
-    should_cache_outputs: false
+    should_cache_outputs: true
     inputs:
       - name: A
         data_type: Int

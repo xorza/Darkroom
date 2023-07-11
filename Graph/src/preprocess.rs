@@ -50,7 +50,6 @@ impl Preprocess {
             node.inputs.iter()
                 .for_each(|input| {
                     if let Binding::Output(output_binding) = &input.binding {
-                        println!("{}", output_binding.output_node_id);
                         active_node_ids.push(output_binding.output_node_id);
                     }
                 });
@@ -93,6 +92,7 @@ impl Preprocess {
                 r_node.behavior = node.behavior;
                 r_node.has_missing_inputs = false;
                 r_node.output_binding_count.fill(0);
+                r_node.should_execute = false;
 
                 r_node
             })
@@ -160,12 +160,14 @@ impl Preprocess {
 
             if r_node.is_output {
                 r_node.should_execute = true;
-            }
-            if r_node.behavior == FunctionBehavior::Active {
+            } else if r_node.output_values.is_none() {
                 r_node.should_execute = true;
-            }
-            if r_node.output_values.is_none() {
+            } else if r_node.should_cache_outputs {
+                r_node.should_execute = false;
+            } else if r_node.behavior == FunctionBehavior::Active {
                 r_node.should_execute = true;
+            } else {
+                r_node.should_execute = false;
             }
 
             if r_node.should_execute {
