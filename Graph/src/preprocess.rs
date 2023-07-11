@@ -45,7 +45,7 @@ impl Preprocess {
         self.run1(graph, &HashSet::new())
     }
     pub fn run1(&self, graph: &Graph, cached_nodes: &HashSet<NodeId>) -> PreprocessInfo {
-        assert!(graph.validate().is_ok());
+        debug_assert!(graph.validate().is_ok());
 
         let edges = self.gather_edges(graph, cached_nodes);
         let p_nodes = self.gather_nodes(graph, edges, cached_nodes);

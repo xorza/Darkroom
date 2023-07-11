@@ -33,7 +33,7 @@ pub struct NodeInvokeInfo {
 
 #[derive(Default)]
 pub struct ComputeInfo {
-    node_invoke_infos: Vec<NodeInvokeInfo>,
+    node_invoke_info: Vec<NodeInvokeInfo>,
 }
 
 pub trait Invokable {
@@ -112,7 +112,7 @@ pub trait Compute {
 
             inputs.resize_and_fill(0);
 
-            compute_info.node_invoke_infos.push(NodeInvokeInfo {
+            compute_info.node_invoke_info.push(NodeInvokeInfo {
                 node_id: node.id(),
                 runtime: elapsed.as_secs_f64(),
             });
