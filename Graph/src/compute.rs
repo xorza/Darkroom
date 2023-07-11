@@ -52,9 +52,9 @@ pub trait Compute {
 
         let mut empty_context = InvokeContext::default();
 
-        for pp_node in preprocess_info.nodes.iter()
-            .filter(|pp_node| !pp_node.has_missing_inputs) {
-            let node = graph.node_by_id(pp_node.node_id()).unwrap();
+        for p_node in preprocess_info.nodes.iter()
+            .filter(|p_node| !p_node.has_missing_inputs) {
+            let node = graph.node_by_id(p_node.node_id()).unwrap();
 
             inputs.resize_and_fill(node.inputs.len());
             node.inputs.iter()
@@ -74,7 +74,7 @@ pub trait Compute {
                             let binding_count = &mut args.binding_count[output_binding.output_index as usize];
                             *binding_count -= 1;
 
-                            if *binding_count == 0 && pp_node.behavior == FunctionBehavior::Active {
+                            if *binding_count == 0 && p_node.behavior == FunctionBehavior::Active {
                                 args[output_binding.output_index as usize]
                                     .take()
                             } else {
@@ -92,7 +92,7 @@ pub trait Compute {
             let outputs = compute_cache.output_args
                 .entry(node.id())
                 .or_insert_with(|| ArgSet::with_size(node.outputs.len() as u32));
-            pp_node.outputs
+            p_node.outputs
                 .iter()
                 .enumerate()
                 .for_each(|(index, output)| {

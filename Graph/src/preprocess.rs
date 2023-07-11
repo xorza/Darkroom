@@ -52,11 +52,11 @@ impl Preprocess {
         assert!(graph.validate().is_ok());
 
         let edges = self.gather_edges(graph, cached_nodes);
-        let pp_nodes = self.gather_nodes(graph, edges);
-        let pp_nodes = self.process_behavior_and_inputs(graph, pp_nodes);
+        let p_nodes = self.gather_nodes(graph, edges);
+        let p_nodes = self.process_behavior_and_inputs(graph, p_nodes);
 
         PreprocessInfo {
-            nodes: pp_nodes,
+            nodes: p_nodes,
         }
     }
 
@@ -118,7 +118,7 @@ impl Preprocess {
         all_edges: Vec<Edge>)
         -> Vec<PreprocessNode>
     {
-        let mut pp_nodes: Vec<PreprocessNode> = Vec::new();
+        let mut p_nodes: Vec<PreprocessNode> = Vec::new();
         let mut node_ids: HashSet<NodeId> = HashSet::new();
 
         for edge in all_edges.iter() {
@@ -134,7 +134,7 @@ impl Preprocess {
                 let is_output = node_output_edges.iter()
                     .any(|&edge| edge.is_output);
 
-                pp_nodes.push(PreprocessNode {
+                p_nodes.push(PreprocessNode {
                     node_id,
                     inputs: vec![PreprocessInput::default(); node.inputs.len()],
                     outputs: vec![PreprocessOutput::default(); node.outputs.len()],
@@ -144,58 +144,58 @@ impl Preprocess {
                     name: node.name.clone(),
                 });
                 if let Some(output_index) = edge.output_index {
-                    pp_nodes.last_mut().unwrap()
+                    p_nodes.last_mut().unwrap()
                         .outputs[output_index as usize].binding_count += 1;
                 }
             } else if let Some(output_index) = edge.output_index {
-                pp_nodes.iter_mut()
-                    .find(|pp_node| pp_node.node_id == node_id)
+                p_nodes.iter_mut()
+                    .find(|p_node| p_node.node_id == node_id)
                     .unwrap()
                     .outputs[output_index as usize].binding_count += 1;
             }
         }
 
-        pp_nodes.reverse();
+        p_nodes.reverse();
 
-        pp_nodes
+        p_nodes
     }
 
-    fn process_behavior_and_inputs(&self, graph: &Graph, mut pp_nodes: Vec<PreprocessNode>) -> Vec<PreprocessNode> {
-        for i in 0..pp_nodes.len() {
-            let mut pp_node = std::mem::take(&mut pp_nodes[i]);
-            let node = graph.node_by_id(pp_node.node_id).unwrap();
+    fn process_behavior_and_inputs(&self, graph: &Graph, mut p_nodes: Vec<PreprocessNode>) -> Vec<PreprocessNode> {
+        for i in 0..p_nodes.len() {
+            let mut p_node = std::mem::take(&mut p_nodes[i]);
+            let node = graph.node_by_id(p_node.node_id).unwrap();
 
             {
-                let processed_nodes = &mut pp_nodes[0..i];
+                let processed_nodes = &mut p_nodes[0..i];
 
                 for (index, input) in node.inputs.iter().enumerate() {
-                    let _pp_input = &mut pp_node.inputs[index];
+                    let _p_input = &mut p_node.inputs[index];
 
                     match &input.binding {
                         Binding::None => {
-                            pp_node.has_missing_inputs |= input.is_required;
+                            p_node.has_missing_inputs |= input.is_required;
                         }
                         Binding::Const => {}
                         Binding::Output(output_binding) => {
-                            let output_pp_node = processed_nodes
+                            let output_p_node = processed_nodes
                                 .iter()
-                                .find(|pp_node| pp_node.node_id == output_binding.output_node_id)
+                                .find(|p_node| p_node.node_id == output_binding.output_node_id)
                                 .expect("Node not found among already processed ones");
 
-                            if output_pp_node.behavior == FunctionBehavior::Active {
-                                pp_node.behavior = FunctionBehavior::Active;
+                            if output_p_node.behavior == FunctionBehavior::Active {
+                                p_node.behavior = FunctionBehavior::Active;
                             }
 
-                            pp_node.has_missing_inputs |= output_pp_node.has_missing_inputs;
+                            p_node.has_missing_inputs |= output_p_node.has_missing_inputs;
                         }
                     }
                 }
             }
 
-            pp_nodes[i] = pp_node;
+            p_nodes[i] = p_node;
         }
 
-        pp_nodes
+        p_nodes
     }
 }
 
@@ -207,17 +207,17 @@ impl PreprocessNode {
 
 impl PreprocessInfo {
     pub fn node_by_name(&self, name: &str) -> Option<&PreprocessNode> {
-        self.nodes.iter().find(|&pp_node| pp_node.name == name)
+        self.nodes.iter().find(|&p_node| p_node.name == name)
     }
 
     pub fn node_by_id(&self, node_id: NodeId) -> &PreprocessNode {
         self.nodes.iter()
-            .find(|&pp_node| pp_node.node_id == node_id)
+            .find(|&p_node| p_node.node_id == node_id)
             .unwrap()
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> &mut PreprocessNode {
         self.nodes.iter_mut()
-            .find(|pp_node| pp_node.node_id == node_id)
+            .find(|p_node| p_node.node_id == node_id)
             .unwrap()
     }
 }
