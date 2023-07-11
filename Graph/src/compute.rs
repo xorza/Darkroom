@@ -131,7 +131,7 @@ impl Compute {
                 start.elapsed().as_secs_f64()
             };
 
-            inputs.resize_and_fill(0);
+            inputs.fill();
         }
 
         debug_assert!(
@@ -194,6 +194,10 @@ impl ArgSet {
     }
     pub(crate) fn resize_and_fill(&mut self, size: usize) {
         self.0.resize(size, None);
+        self.fill();
+    }
+    pub(crate) fn fill(&mut self) {
+        self.0.fill(None);
     }
     pub(crate) fn as_slice(&self) -> &[Option<Value>] {
         self.0.as_slice()
