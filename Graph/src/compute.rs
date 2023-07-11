@@ -52,7 +52,8 @@ pub trait Compute {
 
         let mut empty_context = InvokeContext::default();
 
-        for pp_node in preprocess_info.nodes.iter() {
+        for pp_node in preprocess_info.nodes.iter()
+            .filter(|pp_node| !pp_node.has_missing_inputs) {
             let node = graph.node_by_id(pp_node.node_id()).unwrap();
 
             inputs.resize_and_fill(node.inputs.len());
@@ -121,7 +122,7 @@ pub trait Compute {
             }
         }
 
-        assert!(
+        debug_assert!(
             compute_cache.output_args.iter().all(|(_, args)| {
                 args.binding_count.iter().all(|&binding_count| binding_count == 0)
             })

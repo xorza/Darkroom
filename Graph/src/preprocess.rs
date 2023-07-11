@@ -46,9 +46,9 @@ pub struct PreprocessInfo {
 
 impl Preprocess {
     pub fn run(&self, graph: &Graph) -> PreprocessInfo {
-        self.run1(graph, &Vec::new())
+        self.run1(graph, &HashSet::new())
     }
-    pub fn run1(&self, graph: &Graph, cached_nodes: &Vec<NodeId>) -> PreprocessInfo {
+    pub fn run1(&self, graph: &Graph, cached_nodes: &HashSet<NodeId>) -> PreprocessInfo {
         assert!(graph.validate().is_ok());
 
         let edges = self.gather_edges(graph, cached_nodes);
@@ -60,7 +60,7 @@ impl Preprocess {
         }
     }
 
-    fn gather_edges(&self, graph: &Graph, caches_nodes: &[NodeId]) -> Vec<Edge> {
+    fn gather_edges(&self, graph: &Graph, caches_nodes: &HashSet<NodeId>) -> Vec<Edge> {
         let mut all_edges = graph.nodes()
             .iter()
             .filter(|node| node.is_output)
@@ -91,32 +91,23 @@ impl Preprocess {
                 continue;
             }
 
-            let mut has_missing_inputs = false;
             let node = graph
                 .node_by_id(edge.output_node_id)
                 .expect("Node not found");
             for (input_index, input) in node.inputs.iter().enumerate() {
-                match &input.binding {
-                    Binding::None => {
-                        has_missing_inputs |= input.is_required;
-                    }
-                    Binding::Const => {}
-                    Binding::Output(output_binding) => {
-                        assert_ne!(output_binding.output_node_id, node.id());
+                if let Binding::Output(output_binding) = &input.binding {
+                    assert_ne!(output_binding.output_node_id, node.id());
 
-                        all_edges.push(Edge {
-                            output_node_id: output_binding.output_node_id,
-                            output_index: Some(output_binding.output_index),
-                            input_node_id: node.id(),
-                            input_index: input_index as u32,
-                            has_missing_inputs: false,
-                            is_output: false,
-                        });
-                    }
+                    all_edges.push(Edge {
+                        output_node_id: output_binding.output_node_id,
+                        output_index: Some(output_binding.output_index),
+                        input_node_id: node.id(),
+                        input_index: input_index as u32,
+                        has_missing_inputs: false,
+                        is_output: false,
+                    });
                 }
             }
-
-            all_edges[i].has_missing_inputs = has_missing_inputs;
         }
 
         all_edges
@@ -152,6 +143,15 @@ impl Preprocess {
                     behavior: node.behavior,
                     name: node.name.clone(),
                 });
+                if let Some(output_index) = edge.output_index {
+                    pp_nodes.last_mut().unwrap()
+                        .outputs[output_index as usize].binding_count += 1;
+                }
+            } else if let Some(output_index) = edge.output_index {
+                pp_nodes.iter_mut()
+                    .find(|pp_node| pp_node.node_id == node_id)
+                    .unwrap()
+                    .outputs[output_index as usize].binding_count += 1;
             }
         }
 
@@ -178,20 +178,15 @@ impl Preprocess {
                         Binding::Const => {}
                         Binding::Output(output_binding) => {
                             let output_pp_node = processed_nodes
-                                .iter_mut()
-                                .find(|r_node| r_node.node_id == output_binding.output_node_id)
+                                .iter()
+                                .find(|pp_node| pp_node.node_id == output_binding.output_node_id)
                                 .expect("Node not found among already processed ones");
-
-                            let pp_output = &mut output_pp_node.outputs[output_binding.output_index as usize];
-                            pp_output.binding_count += 1;
 
                             if output_pp_node.behavior == FunctionBehavior::Active {
                                 pp_node.behavior = FunctionBehavior::Active;
                             }
 
-                            if output_pp_node.has_missing_inputs {
-                                pp_node.has_missing_inputs = true;
-                            }
+                            pp_node.has_missing_inputs |= output_pp_node.has_missing_inputs;
                         }
                     }
                 }
