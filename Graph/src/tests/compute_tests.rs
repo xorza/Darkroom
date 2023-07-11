@@ -1,9 +1,10 @@
 use std::str::FromStr;
 
-use crate::compute::{Compute, LambdaInvoker};
+use crate::compute::Compute;
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, FunctionBehavior, Graph};
+use crate::invoke::LambdaInvoker;
 use crate::preprocess::Preprocess;
 use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 

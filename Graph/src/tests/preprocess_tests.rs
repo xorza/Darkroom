@@ -1,6 +1,6 @@
-use crate::compute::{InvokeArgs, Invoker};
 use crate::functions::FunctionId;
 use crate::graph::*;
+use crate::invoke::{InvokeArgs, Invoker};
 use crate::preprocess::Preprocess;
 use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 
