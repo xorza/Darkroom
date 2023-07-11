@@ -6,10 +6,11 @@ use std::str::FromStr;
 use mlua::{Error, Function, Lua, Table, Variadic};
 
 use crate::{data, functions};
-use crate::compute::{Compute, InvokeArgs, InvokeContext};
+use crate::compute::{Compute, InvokeArgs};
 use crate::data::DataType;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
+use crate::runtime_graph::InvokeContext;
 
 #[derive(Default)]
 struct Cache {

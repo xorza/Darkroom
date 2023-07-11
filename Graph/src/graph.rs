@@ -5,6 +5,7 @@ use common::id_type;
 
 use crate::data::{DataType, Value};
 use crate::functions::{Function, FunctionId};
+use crate::subgraph::{SubGraph, SubGraphId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FunctionBehavior {
@@ -24,6 +25,7 @@ pub struct Node {
     pub name: String,
     pub behavior: FunctionBehavior,
     pub is_output: bool,
+    pub should_cache_outputs: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
@@ -64,40 +66,6 @@ pub struct Input {
     pub const_value: Option<Value>,
 }
 
-id_type!(SubGraphId);
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubInputNodeConnection {
-    pub subnode_id: NodeId,
-    pub subnode_input_index: u32,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubInput {
-    pub name: String,
-    pub data_type: DataType,
-    pub is_required: bool,
-    pub connections: Vec<SubInputNodeConnection>,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubOutput {
-    pub name: String,
-    pub data_type: DataType,
-    pub subnode_id: NodeId,
-    pub subnode_output_index: u32,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
-pub struct SubGraph {
-    self_id: SubGraphId,
-
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<SubInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<SubOutput>,
-}
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Graph {
@@ -108,11 +76,11 @@ pub struct Graph {
 
 
 impl Graph {
-    pub fn nodes(&self) -> &Vec<Node> {
-        &self.nodes
+    pub fn nodes(&self) -> &[Node] {
+        self.nodes.as_slice()
     }
-    pub fn nodes_mut(&mut self) -> Vec<&mut Node> {
-        self.nodes.iter_mut().collect()
+    pub fn nodes_mut(&mut self) -> &mut [Node] {
+        self.nodes.as_mut_slice()
     }
 
     pub fn add_node(&mut self, node: Node) {
@@ -216,7 +184,7 @@ impl Graph {
                 for connection in subinput.connections.iter() {
                     let node = self.node_by_id(connection.subnode_id)
                         .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent node"))?;
-                    if node.subgraph_id != Some(subgraph.self_id) {
+                    if node.subgraph_id != Some(subgraph.id()) {
                         return Err(anyhow::Error::msg("Subgraph input connected to an external node"));
                     }
                     let input = node.inputs.get(connection.subnode_input_index as usize)
@@ -231,7 +199,7 @@ impl Graph {
             for suboutput in subgraph.outputs.iter() {
                 let node = self.node_by_id(suboutput.subnode_id)
                     .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent node"))?;
-                if node.subgraph_id != Some(subgraph.self_id) {
+                if node.subgraph_id != Some(subgraph.id()) {
                     return Err(anyhow::Error::msg("Subgraph output connected to an external node"));
                 }
 
@@ -246,45 +214,12 @@ impl Graph {
         Ok(())
     }
 
-    pub fn subgraphs(&self) -> &Vec<SubGraph> {
+
+    pub(crate) fn subgraphs(&self) -> &Vec<SubGraph> {
         &self.subgraphs
     }
-
-    pub fn add_subgraph(&mut self, subgraph: &SubGraph) {
-        match self.subgraphs.iter().position(|sg| sg.self_id == subgraph.self_id) {
-            Some(index) => self.subgraphs[index] = subgraph.clone(),
-            None => self.subgraphs.push(subgraph.clone()),
-        }
-    }
-    pub fn remove_subgraph_by_id(&mut self, id: SubGraphId) {
-        assert!(!id.is_nil());
-
-        self.subgraphs
-            .retain(|subgraph| subgraph.self_id != id);
-
-        self.nodes
-            .iter()
-            .filter(|node| node.subgraph_id == Some(id))
-            .map(|node| node.self_id)
-            .collect::<Vec<NodeId>>()
-            .iter()
-            .cloned()
-            .for_each(|node_id| {
-                self.remove_node_by_id(node_id);
-            });
-    }
-
-    pub fn subgraph_by_id_mut(&mut self, id: SubGraphId) -> Option<&mut SubGraph> {
-        assert!(!id.is_nil());
-        self.subgraphs
-            .iter_mut()
-            .find(|subgraph| subgraph.self_id == id)
-    }
-    pub fn subgraph_by_id(&self, id: SubGraphId) -> Option<&SubGraph> {
-        assert!(!id.is_nil());
-        self.subgraphs
-            .iter()
-            .find(|subgraph| subgraph.self_id == id)
+    pub(crate) fn subgraphs_mut(&mut self) -> &mut Vec<SubGraph> {
+        &mut self.subgraphs
     }
 }
 
@@ -297,6 +232,7 @@ impl Node {
             name: "".to_string(),
             behavior: FunctionBehavior::Active,
             is_output: false,
+            should_cache_outputs: false,
             inputs: vec![],
             outputs: vec![],
             subgraph_id: None,
@@ -326,6 +262,7 @@ impl Node {
             function_id: function.id(),
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
+            should_cache_outputs: false,
             is_output: false,
             inputs,
             outputs,
@@ -371,22 +308,6 @@ impl Binding {
             Binding::None => false,
             Binding::Const | Binding::Output(_) => true
         }
-    }
-}
-
-impl SubGraph {
-    pub fn new() -> SubGraph {
-        SubGraph {
-            self_id: SubGraphId::unique(),
-
-            name: "".to_string(),
-            inputs: vec![],
-            outputs: vec![],
-        }
-    }
-
-    pub fn id(&self) -> SubGraphId {
-        self.self_id
     }
 }
 

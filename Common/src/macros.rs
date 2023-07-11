@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Debug, Hash, serde::Serialize, serde::Deserialize)]
         pub struct $name(uuid::Uuid);
 
         impl $name {
@@ -23,9 +23,14 @@ macro_rules! id_type {
                 Ok($name(uuid))
             }
         }
-        impl ToString for $name {
-            fn to_string(&self) -> String {
-                self.0.to_string()
+        // impl std::string::ToString for $name {
+        //     fn to_string(&self) -> String {
+        //         self.0.to_string()
+        //     }
+        // }
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0.to_string())
             }
         }
         impl Default for $name {

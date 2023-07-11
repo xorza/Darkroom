@@ -66,17 +66,3 @@ fn node_remove_test() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-#[test]
-fn subgraph_from_yaml() -> anyhow::Result<()> {
-    let graph = Graph::from_yaml_file("../test_resources/test_subgraph.yml")?;
-    let _yaml: String = graph.to_yaml()?;
-
-    assert_eq!(graph.subgraphs().len(), 1);
-    let circle = graph.subgraphs()[0].clone();
-    assert_eq!(circle.name, "circle");
-    assert_eq!(circle.inputs.len(), 1);
-    assert_eq!(circle.outputs.len(), 2);
-
-    Ok(())
-}

@@ -1,10 +1,11 @@
 use std::str::FromStr;
 
-use crate::compute::{Compute, ComputeCache, InvokeContext, LambdaCompute};
+use crate::compute::{Compute, LambdaCompute};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, FunctionBehavior, Graph};
 use crate::preprocess::Preprocess;
+use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 
 static mut RESULT: i64 = 0;
 static mut A: i64 = 2;
@@ -101,10 +102,9 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
     }
 
     let preprocess = Preprocess::default();
-    let preprocess_info = preprocess.run(&graph);
-    let mut compute_cache = ComputeCache::default();
+    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
 
-    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
+    compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(unsafe { RESULT }, 360);
 
     drop(graph);
@@ -124,21 +124,19 @@ fn simple_compute_test() -> anyhow::Result<()> {
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     let preprocess = Preprocess::default();
-    let mut compute_cache = ComputeCache::default();
 
-    let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
+    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(unsafe { RESULT }, 35);
 
-    let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
+    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(unsafe { RESULT }, 35);
-    assert_eq!(compute_cache.contexts.len(), 2);
 
     unsafe { B = 7; }
     graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let preprocess_info = preprocess.run(&graph);
-    let _compute_info = compute.run(&graph, &preprocess_info, &mut compute_cache)?;
+    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(unsafe { RESULT }, 63);
 
     Ok(())

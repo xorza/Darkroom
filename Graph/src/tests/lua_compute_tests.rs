@@ -2,9 +2,10 @@ use std::str::FromStr;
 
 use mlua::{Function, Lua, Value, Variadic};
 
-use crate::compute::{ArgSet, Compute, InvokeContext};
+use crate::compute::{ArgSet, Compute};
 use crate::functions::{FunctionId, Functions};
 use crate::lua_invoker::LuaInvoker;
+use crate::runtime_graph::InvokeContext;
 
 #[test]
 fn lua_works() {
@@ -75,8 +76,8 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let _yaml = functions.to_yaml()?;
 
 
-    let inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
-    let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
+    let inputs: ArgSet = ArgSet::from_vec(vec![Some(3), Some(5)]);
+    let mut outputs: ArgSet = ArgSet::from_vec(vec![Some(0)]);
 
     let mut ctx = InvokeContext::default();
     // call 'mult' function
