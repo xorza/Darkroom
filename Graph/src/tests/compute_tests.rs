@@ -69,10 +69,7 @@ where
             ctx.set(a * b);
         });
 
-    let mut compute = Compute::default();
-    compute.add_invoker(Box::new(invoker));
-
-    Ok(compute)
+    Ok(invoker.into())
 }
 
 #[test]

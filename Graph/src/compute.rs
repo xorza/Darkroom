@@ -14,19 +14,34 @@ pub(crate) struct ArgSet(Vec<Option<Value>>);
 #[derive(Default)]
 pub struct Compute {
     invokers: Vec<Box<dyn Invoker>>,
-    functions: HashMap<FunctionId, usize>,
+    functions: HashMap<FunctionId, u32>,
 }
 
 impl Compute {
+    pub fn from_invokers(mut invokers: Vec<Box<dyn Invoker>>) -> Self {
+        let mut compute = Compute::default();
+        invokers
+            .drain(..)
+            .for_each(|invoker| compute.add_invoker(invoker));
+        compute
+    }
     pub fn add_invoker(&mut self, invoker: Box<dyn Invoker>) {
         invoker
             .all_functions()
             .iter()
-            .for_each(|function_id| {
-                self.functions.insert(*function_id, self.invokers.len());
+            .for_each(|&function_id| {
+                self.functions
+                    .insert(
+                        function_id,
+                        self.invokers.len() as u32,
+                    );
             });
 
         self.invokers.push(invoker);
+    }
+    pub fn add_invoker_t<T>(&mut self, invoker: T)
+    where T: Invoker + 'static {
+        self.add_invoker(Box::new(invoker));
     }
     pub fn run(
         &self,
@@ -121,10 +136,25 @@ impl Compute {
                 .get(&function_id)
                 .unwrap();
         let invoker = self.invokers
-            .get(invoker_index)
+            .get(invoker_index as usize)
             .unwrap();
 
         invoker.as_ref()
+    }
+}
+
+impl<T: Invoker + 'static> From<T> for Compute {
+    fn from(invoker: T) -> Self {
+        let mut compute = Compute::default();
+        compute.add_invoker(Box::new(invoker));
+        compute
+    }
+}
+impl From<Box<dyn Invoker>> for Compute {
+    fn from(invoker: Box<dyn Invoker>) -> Self {
+        let mut compute = Compute::default();
+        compute.add_invoker(invoker);
+        compute
     }
 }
 

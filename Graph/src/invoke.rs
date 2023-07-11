@@ -22,6 +22,7 @@ pub trait Invoker {
     ) -> anyhow::Result<()>;
 }
 
+
 pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
@@ -33,7 +34,6 @@ pub struct LambdaInvoker {
     all_functions: Vec<FunctionId>,
     lambdas: HashMap<FunctionId, LambdaInvokable>,
 }
-
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
