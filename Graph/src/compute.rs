@@ -117,22 +117,24 @@ impl Compute {
                 r_node.output_values
                     .get_or_insert_with(|| vec![None; node.outputs.len()]);
 
+            let &invoker_index =
+                self.functions
+                    .get(&node.function_id)
+                    .unwrap();
+
             r_node.run_time = {
                 let ctx = &mut r_node.invoke_context;
+                let invoker = self.invokers
+                    .get(invoker_index)
+                    .unwrap();
 
                 let start = std::time::Instant::now();
-                let &invoker_index =
-                    self.functions
-                        .get(&node.function_id).unwrap();
-                self.invokers
-                    .get(invoker_index)
-                    .unwrap()
-                    .invoke(
-                        node.function_id,
-                        ctx,
-                        inputs.as_slice(),
-                        outputs.as_mut_slice(),
-                    )?;
+                invoker.invoke(
+                    node.function_id,
+                    ctx,
+                    inputs.as_slice(),
+                    outputs.as_mut_slice(),
+                )?;
 
                 start.elapsed().as_secs_f64()
             };
