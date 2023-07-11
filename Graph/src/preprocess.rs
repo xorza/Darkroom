@@ -1,29 +1,11 @@
 use std::collections::HashSet;
 
-use serde::{Deserialize, Serialize};
-
 use crate::graph::*;
+use crate::runtime_graph::{RuntimeGraph, RuntimeNode, RuntimeOutput};
 
 #[derive(Default)]
 pub struct Preprocess {}
 
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct PreprocessOutput {
-    pub binding_count: u32,
-}
-
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct PreprocessNode {
-    node_id: NodeId,
-
-    pub name: String,
-
-    pub outputs: Vec<PreprocessOutput>,
-    pub is_output: bool,
-
-    pub has_missing_inputs: bool,
-    pub behavior: FunctionBehavior,
-}
 
 #[derive(Default, Clone)]
 struct Edge {
@@ -35,24 +17,19 @@ struct Edge {
     is_output: bool,
 }
 
-#[derive(Default, Serialize, Deserialize)]
-pub struct PreprocessInfo {
-    pub nodes: Vec<PreprocessNode>,
-}
-
 impl Preprocess {
-    pub fn run(&self, graph: &Graph) -> PreprocessInfo {
+    pub fn run(&self, graph: &Graph) -> RuntimeGraph {
         self.run1(graph, &HashSet::new())
     }
-    pub fn run1(&self, graph: &Graph, cached_nodes: &HashSet<NodeId>) -> PreprocessInfo {
+    pub fn run1(&self, graph: &Graph, cached_nodes: &HashSet<NodeId>) -> RuntimeGraph {
         debug_assert!(graph.validate().is_ok());
 
         let edges = self.gather_edges(graph, cached_nodes);
-        let p_nodes = self.gather_nodes(graph, edges, cached_nodes);
-        let p_nodes = self.process_behavior_and_inputs(graph, p_nodes);
+        let r_nodes = self.gather_nodes(graph, edges, cached_nodes);
+        let r_nodes = self.process_behavior_and_inputs(graph, r_nodes);
 
-        PreprocessInfo {
-            nodes: p_nodes,
+        RuntimeGraph {
+            nodes: r_nodes,
         }
     }
 
@@ -113,9 +90,9 @@ impl Preprocess {
         graph: &Graph,
         all_edges: Vec<Edge>,
         caches_nodes: &HashSet<NodeId>)
-        -> Vec<PreprocessNode>
+        -> Vec<RuntimeNode>
     {
-        let mut p_nodes: Vec<PreprocessNode> = Vec::new();
+        let mut r_nodes: Vec<RuntimeNode> = Vec::new();
         let mut node_ids: HashSet<NodeId> = HashSet::new();
 
         for edge in all_edges.iter() {
@@ -138,38 +115,38 @@ impl Preprocess {
                         node.behavior
                     };
 
-                p_nodes.push(PreprocessNode {
+                r_nodes.push(RuntimeNode {
                     node_id,
-                    outputs: vec![PreprocessOutput::default(); node.outputs.len()],
+                    outputs: vec![RuntimeOutput::default(); node.outputs.len()],
                     is_output,
                     has_missing_inputs: false,
                     behavior,
                     name: node.name.clone(),
                 });
                 if let Some(output_index) = edge.output_index {
-                    p_nodes.last_mut().unwrap()
+                    r_nodes.last_mut().unwrap()
                         .outputs[output_index as usize].binding_count += 1;
                 }
             } else if let Some(output_index) = edge.output_index {
-                p_nodes.iter_mut()
+                r_nodes.iter_mut()
                     .find(|p_node| p_node.node_id == node_id)
                     .unwrap()
                     .outputs[output_index as usize].binding_count += 1;
             }
         }
 
-        p_nodes.reverse();
+        r_nodes.reverse();
 
-        p_nodes
+        r_nodes
     }
 
-    fn process_behavior_and_inputs(&self, graph: &Graph, mut p_nodes: Vec<PreprocessNode>) -> Vec<PreprocessNode> {
-        for i in 0..p_nodes.len() {
-            let mut p_node = std::mem::take(&mut p_nodes[i]);
+    fn process_behavior_and_inputs(&self, graph: &Graph, mut r_nodes: Vec<RuntimeNode>) -> Vec<RuntimeNode> {
+        for i in 0..r_nodes.len() {
+            let mut p_node = std::mem::take(&mut r_nodes[i]);
             let node = graph.node_by_id(p_node.node_id).unwrap();
 
             {
-                let processed_nodes = &mut p_nodes[0..i];
+                let processed_nodes = &mut r_nodes[0..i];
 
                 for (_index, input) in node.inputs.iter().enumerate() {
                     match &input.binding {
@@ -193,32 +170,9 @@ impl Preprocess {
                 }
             }
 
-            p_nodes[i] = p_node;
+            r_nodes[i] = p_node;
         }
 
-        p_nodes
-    }
-}
-
-impl PreprocessNode {
-    pub fn node_id(&self) -> NodeId {
-        self.node_id
-    }
-}
-
-impl PreprocessInfo {
-    pub fn node_by_name(&self, name: &str) -> Option<&PreprocessNode> {
-        self.nodes.iter().find(|&p_node| p_node.name == name)
-    }
-
-    pub fn node_by_id(&self, node_id: NodeId) -> &PreprocessNode {
-        self.nodes.iter()
-            .find(|&p_node| p_node.node_id == node_id)
-            .unwrap()
-    }
-    pub fn node_by_id_mut(&mut self, node_id: NodeId) -> &mut PreprocessNode {
-        self.nodes.iter_mut()
-            .find(|p_node| p_node.node_id == node_id)
-            .unwrap()
+        r_nodes
     }
 }

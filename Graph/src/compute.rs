@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 use crate::data::Value;
 use crate::functions::FunctionId;
 use crate::graph::{Binding, FunctionBehavior, Graph, NodeId};
-use crate::preprocess::PreprocessInfo;
+use crate::runtime_graph::RuntimeGraph;
 
 pub(crate) type InvokeArgs = [Option<Value>];
 
@@ -43,7 +43,7 @@ pub trait Invokable {
 pub trait Compute {
     fn run(&self,
            graph: &Graph,
-           preprocess_info: &PreprocessInfo,
+           preprocess_info: &RuntimeGraph,
            compute_cache: &mut ComputeCache, )
         -> anyhow::Result<ComputeInfo>
     {
