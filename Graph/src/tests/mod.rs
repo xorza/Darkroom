@@ -6,3 +6,5 @@ mod graph_tests;
 mod lua_compute_tests;
 #[cfg(test)]
 mod compute_tests;
+#[cfg(test)]
+mod playground;

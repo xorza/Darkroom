@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-    <configuration default="false" name="Run nodeshop" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-        <option name="command" value="run --package nodeshop --bin nodeshop"/>
+    <configuration default="false" name="Run editor" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+        <option name="command" value="run --package editor --bin editor"/>
         <option name="workingDirectory" value="file://$PROJECT_DIR$"/>
         <option name="emulateTerminal" value="false"/>
         <option name="channel" value="DEFAULT"/>

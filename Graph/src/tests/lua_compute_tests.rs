@@ -3,7 +3,7 @@ use std::str::FromStr;
 use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::ArgSet;
-use crate::functions::{FunctionId, Functions};
+use crate::functions::FunctionId;
 use crate::invoke::Invoker;
 use crate::lua_invoker::LuaInvoker;
 use crate::runtime_graph::InvokeContext;
@@ -72,10 +72,6 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
 
     let funcs = invoker.get_all_functions();
     assert_eq!(funcs.len(), 5);
-
-    let functions = Functions::new(&funcs);
-    let _yaml = functions.to_yaml()?;
-
 
     let inputs: ArgSet = ArgSet::from_vec(vec![Some(3), Some(5)]);
     let mut outputs: ArgSet = ArgSet::from_vec(vec![Some(0)]);

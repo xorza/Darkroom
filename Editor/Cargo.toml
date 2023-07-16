@@ -5,7 +5,8 @@ edition = "2021"
 
 
 [features]
-default = []
+wgpu = ["graph_lib/wgpu"]
+default = ["wgpu"]
 
 [dependencies]
 uilib = { workspace = true }

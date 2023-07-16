@@ -95,14 +95,14 @@ impl LuaInvoker {
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
-            let function_info = Self::function_from_table(&function_table)?;
-            let function: Function = self.lua.globals().get(function_info.name.as_str())?;
+            let function = Self::function_from_table(&function_table)?;
+            let lua_function: Function = self.lua.globals().get(function.name.as_str())?;
 
             self.funcs.insert(
-                function_info.id(),
+                function.self_id,
                 LuaFuncInfo {
-                    info: function_info,
-                    lua_func: function,
+                    info: function,
+                    lua_func: lua_function,
                 },
             );
         }
@@ -129,7 +129,13 @@ impl LuaInvoker {
                 default_value = None;
             }
 
-            function_info.inputs.push(functions::InputInfo { name, data_type, const_value: default_value });
+            function_info.inputs.push(functions::InputInfo {
+                name,
+                is_required: true,
+                data_type,
+                default_value,
+                variants: None,
+            });
         }
 
         let outputs: Table = table.get("outputs")?;
@@ -304,8 +310,8 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn all_functions(&self) -> Vec<FunctionId> {
-        self.funcs.keys().cloned().collect::<Vec<FunctionId>>()
+    fn all_functions(&self) -> Vec<functions::Function> {
+        todo!("all_functions")
     }
 
     fn invoke(&self,

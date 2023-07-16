@@ -244,9 +244,9 @@ impl Node {
             Input {
                 name: func_input.name.clone(),
                 data_type: func_input.data_type,
-                is_required: true,
-                binding: func_input.const_value.as_ref().map_or(Binding::None, |_| Binding::Const),
-                const_value: func_input.const_value.clone(),
+                is_required: func_input.is_required,
+                binding: func_input.default_value.as_ref().map_or(Binding::None, |_| Binding::Const),
+                const_value: func_input.default_value.clone(),
             }
         }).collect();
 
@@ -259,7 +259,7 @@ impl Node {
 
         Node {
             self_id: NodeId::unique(),
-            function_id: function.id(),
+            function_id: function.self_id,
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
             should_cache_outputs: false,

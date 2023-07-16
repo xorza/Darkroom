@@ -13,6 +13,7 @@ resolver = "2"
 graph_lib = { path = "./Graph", package = "graph" }
 common = { path = "./Common", package = "common" }
 uilib = { path = "./uilib", package = "uilib" }
+imaginarium = { path = "./Imaginarium", package = "imaginarium" }
 egui_node_graph = { path = "./egui_node_graph/egui_node_graph" }
 
 serde = { version = "*", features = ["derive"] }

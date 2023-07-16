@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::data::Value;
-use crate::functions::FunctionId;
+use crate::functions::{Function, FunctionId};
 use crate::runtime_graph::InvokeContext;
 
 pub type InvokeArgs = [Option<Value>];
@@ -11,7 +11,7 @@ pub trait Invokable {
 }
 
 pub trait Invoker {
-    fn all_functions(&self) -> Vec<FunctionId>;
+    fn all_functions(&self) -> Vec<Function>;
 
     fn invoke(
         &self,
@@ -22,46 +22,51 @@ pub trait Invoker {
     ) -> anyhow::Result<()>;
 }
 
-
-pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
-
-pub struct LambdaInvokable {
-    lambda: Box<Lambda>,
+pub struct UberInvoker {
+    invokers: Vec<Box<dyn Invoker>>,
+    function_id_to_invoker_index: HashMap<FunctionId, usize>,
 }
 
-#[derive(Default)]
-pub struct LambdaInvoker {
-    all_functions: Vec<FunctionId>,
-    lambdas: HashMap<FunctionId, LambdaInvokable>,
-}
+impl UberInvoker {
+    pub fn new(invokers: Vec<Box<dyn Invoker>>) -> Self {
+        let mut function_id_to_invoker_index = HashMap::new();
+        invokers
+            .iter()
+            .enumerate()
+            .for_each(|(index, invoker)| {
+                invoker
+                    .all_functions()
+                    .iter()
+                    .for_each(|function| {
+                        function_id_to_invoker_index.insert(function.self_id, index);
+                    });
+            });
 
-impl LambdaInvoker {
-    pub fn add_lambda<F>(&mut self, function_id: FunctionId, lambda: F)
-    where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
-    {
-        let invokable = LambdaInvokable {
-            lambda: Box::new(lambda),
-        };
-        self.lambdas.insert(function_id, invokable);
-        self.all_functions.push(function_id);
+        Self {
+            invokers,
+            function_id_to_invoker_index,
+        }
     }
 }
 
-impl Invoker for LambdaInvoker {
-    fn all_functions(&self) -> Vec<FunctionId> {
-        self.all_functions.clone()
+impl Invoker for UberInvoker {
+    fn all_functions(&self) -> Vec<Function> {
+        self.invokers.iter().flat_map(|invoker| invoker.all_functions()).collect()
     }
 
-    fn invoke(&self,
-              function_id: FunctionId,
-              ctx: &mut InvokeContext,
-              inputs: &InvokeArgs,
-              outputs: &mut InvokeArgs)
-        -> anyhow::Result<()>
+    fn invoke(
+        &self,
+        function_id: FunctionId,
+        ctx: &mut InvokeContext,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()>
     {
-        let invokable = self.lambdas.get(&function_id).unwrap();
-        (invokable.lambda)(ctx, inputs, outputs);
+        let invoker_index = self.function_id_to_invoker_index
+            .get(&function_id)
+            .ok_or_else(|| anyhow::anyhow!("No invoker found for function_id: {:?}", function_id))?;
 
-        Ok(())
+        let invoker = &self.invokers[*invoker_index];
+        invoker.invoke(function_id, ctx, inputs, outputs)
     }
 }

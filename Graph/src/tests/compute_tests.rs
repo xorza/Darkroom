@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
 use crate::compute::Compute;
-use crate::data::Value;
-use crate::functions::FunctionId;
+use crate::data::{DataType, Value};
+use crate::functions::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
-use crate::invoke::LambdaInvoker;
+use crate::lambda_invoker::LambdaInvoker;
 use crate::preprocess::Preprocess;
 use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 
@@ -34,34 +34,121 @@ where
 
     // print func
     invoker.add_lambda(
-        FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
+        Function {
+            self_id: FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
+            name: "print".to_string(),
+            behavior: FunctionBehavior::Active,
+            is_output: true,
+            inputs: vec![InputInfo {
+                name: "message".to_string(),
+                is_required: true,
+                data_type: DataType::Int,
+                default_value: None,
+                variants: None,
+            }],
+            outputs: vec![],
+        },
         move |_, inputs, _| {
             result(inputs[0].as_ref().unwrap().as_int());
         });
-    // val 1 func
     invoker.add_lambda(
-        FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
+        Function {
+            self_id: FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
+            name: "val 1".to_string(),
+            behavior: FunctionBehavior::Passive,
+            is_output: false,
+            inputs: vec![],
+            outputs: vec![
+                OutputInfo {
+                    name: "value".to_string(),
+                    data_type: DataType::Int,
+                }
+            ],
+        },
         move |_, _, outputs| {
             outputs[0] = Value::from(get_a()).into();
         });
-    // val 2 func
     invoker.add_lambda(
-        FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
+        Function {
+            self_id: FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
+            name: "val 2".to_string(),
+            behavior: FunctionBehavior::Passive,
+            is_output: false,
+            inputs: vec![],
+            outputs: vec![
+                OutputInfo {
+                    name: "value".to_string(),
+                    data_type: DataType::Int,
+                }
+            ],
+        },
         move |_, _, outputs| {
             outputs[0] = Value::from(get_b()).into();
         });
-    // sum func
     invoker.add_lambda(
-        FunctionId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
+        Function {
+            self_id: FunctionId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
+            name: "sum".to_string(),
+            behavior: FunctionBehavior::Active,
+            is_output: true,
+            inputs: vec![
+                InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: None,
+                },
+                InputInfo {
+                    name: "b".to_string(),
+                    is_required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: None,
+                },
+            ],
+            outputs: vec![
+                OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Int,
+                }
+            ],
+        },
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
             let b: i64 = inputs[1].as_ref().unwrap().as_int();
             outputs[0] = Value::from(a + b).into();
             ctx.set(a + b);
         });
-    // mult func
     invoker.add_lambda(
-        FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+        Function {
+            self_id: FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+            name: "mult".to_string(),
+            behavior: FunctionBehavior::Active,
+            is_output: true,
+            inputs: vec![
+                InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: None,
+                },
+                InputInfo {
+                    name: "b".to_string(),
+                    is_required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: None,
+                },
+            ],
+            outputs: vec![
+                OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Int,
+                }
+            ],
+        },
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
             let b: i64 = inputs[1].as_ref().unwrap().as_int();

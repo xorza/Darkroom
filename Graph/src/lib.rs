@@ -15,4 +15,7 @@ pub mod data;
 pub mod runtime_graph;
 pub mod subgraph;
 pub mod invoke;
+#[cfg(feature = "wgpu")]
+pub mod wgpu;
+pub mod lambda_invoker;
 

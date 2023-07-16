@@ -79,7 +79,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
 
     fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
         let function = user_state.function_templates
-            .function_by_id(self.0.id())
+            .function_by_id(self.0.self_id)
             .unwrap();
 
         function.name.clone().into()
@@ -118,7 +118,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
             graph.add_output_param(node_id, name.to_string(), DataType::Int);
         };
 
-        let function = user_state.function_templates.function_by_id(self.0.id()).unwrap();
+        let function = user_state.function_templates.function_by_id(self.0.self_id).unwrap();
         for input in function.inputs.iter() {
             input_scalar(graph, &input.name);
         }
@@ -197,18 +197,12 @@ impl eng::NodeDataTrait for EditorNode {
 }
 
 impl FunctionTemplates {
-    fn load(&mut self, funcs: &graph_lib::functions::Functions) {
-        let funcs = funcs
-            .functions()
-            .iter()
-            .map(|f| FunctionTemplate(f.clone()))
-            .collect();
-
-        self.templates = funcs;
+    fn load(&mut self) {
+        todo!("load functions");
     }
 
-    fn function_by_id(&self, id: FunctionId) -> Option<&graph_lib::functions::Function> {
-        self.templates.iter().find(|f| f.0.id() == id).map(|f| &f.0)
+    fn function_by_id(&self, id: FunctionId) -> Option<&Function> {
+        self.templates.iter().find(|f| f.0.self_id == id).map(|f| &f.0)
     }
 }
 
@@ -295,15 +289,6 @@ struct SerializedGraph {
 }
 
 impl NodeshopApp {
-    pub fn load_functions_from_yaml_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let mut funcs = graph_lib::functions::Functions::default();
-        funcs.load_yaml_file(path)?;
-        self.function_templates.load(&funcs);
-        self.user_state.function_templates = self.function_templates.clone();
-
-        Ok(())
-    }
-
     fn save_graph_to_yaml(&self, filename: &str) -> anyhow::Result<()> {
         let editor_graph = &self.state.graph;
 
@@ -315,7 +300,7 @@ impl NodeshopApp {
         for (editor_node_id, editor_node) in editor_graph.nodes.iter() {
             let mut node = graph_lib::graph::Node::new();
             node.name = editor_node.user_data.template.0.name.clone();
-            node.function_id = editor_node.user_data.template.0.id();
+            node.function_id = editor_node.user_data.template.0.self_id;
             node.is_output = editor_node.user_data.template.0.is_output;
             node.behavior = editor_node.user_data.template.0.behavior;
 

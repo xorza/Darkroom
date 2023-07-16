@@ -1,8 +1,6 @@
-use std::collections::HashMap;
 use std::ops::{Index, IndexMut};
 
 use crate::data::Value;
-use crate::functions::FunctionId;
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
 use crate::runtime_graph::RuntimeGraph;
@@ -11,38 +9,11 @@ use crate::runtime_graph::RuntimeGraph;
 pub(crate) struct ArgSet(Vec<Option<Value>>);
 
 
-#[derive(Default)]
 pub struct Compute {
-    invokers: Vec<Box<dyn Invoker>>,
-    functions: HashMap<FunctionId, u32>,
+    invoker: Box<dyn Invoker>,
 }
 
 impl Compute {
-    pub fn from_invokers(mut invokers: Vec<Box<dyn Invoker>>) -> Self {
-        let mut compute = Compute::default();
-        invokers
-            .drain(..)
-            .for_each(|invoker| compute.add_invoker(invoker));
-        compute
-    }
-    pub fn add_invoker(&mut self, invoker: Box<dyn Invoker>) {
-        invoker
-            .all_functions()
-            .iter()
-            .for_each(|&function_id| {
-                self.functions
-                    .insert(
-                        function_id,
-                        self.invokers.len() as u32,
-                    );
-            });
-
-        self.invokers.push(invoker);
-    }
-    pub fn add_invoker_t<T>(&mut self, invoker: T)
-    where T: Invoker + 'static {
-        self.add_invoker(Box::new(invoker));
-    }
     pub fn run(
         &self,
         graph: &Graph,
@@ -105,10 +76,8 @@ impl Compute {
                     .get_or_insert_with(|| vec![None; node.outputs.len()]);
 
             r_node.run_time = {
-                let invoker = self.get_invoker(node.function_id);
-
                 let start = std::time::Instant::now();
-                invoker.invoke(
+                self.invoker.invoke(
                     node.function_id,
                     &mut r_node.invoke_context,
                     inputs.as_slice(),
@@ -129,32 +98,20 @@ impl Compute {
 
         Ok(())
     }
-
-    fn get_invoker(&self, function_id: FunctionId) -> &dyn Invoker {
-        let &invoker_index =
-            self.functions
-                .get(&function_id)
-                .unwrap();
-        let invoker = self.invokers
-            .get(invoker_index as usize)
-            .unwrap();
-
-        invoker.as_ref()
-    }
 }
 
 impl<T: Invoker + 'static> From<T> for Compute {
     fn from(invoker: T) -> Self {
-        let mut compute = Compute::default();
-        compute.add_invoker(Box::new(invoker));
-        compute
+        Compute {
+            invoker: Box::new(invoker),
+        }
     }
 }
 impl From<Box<dyn Invoker>> for Compute {
     fn from(invoker: Box<dyn Invoker>) -> Self {
-        let mut compute = Compute::default();
-        compute.add_invoker(invoker);
-        compute
+        Compute {
+            invoker,
+        }
     }
 }
 

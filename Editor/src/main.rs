@@ -16,10 +16,7 @@ use crate::app::NodeshopApp;
 mod app;
 
 fn main() {
-    let mut app = Box::<NodeshopApp>::default();
-    app
-        .load_functions_from_yaml_file("./test_resources/test_functions.yml")
-        .expect("Failed to load functions from yaml file");
+    let app = Box::<NodeshopApp>::default();
 
     eframe::run_native(
         "Nodeshop",

@@ -4,11 +4,15 @@ version = "0.1.1"
 edition = "2021"
 description = "A graph library for Nodeshop"
 
+[features]
+wgpu = ["imaginarium/wgpu"]
+default = ["wgpu"]
 
 [dependencies]
+imaginarium = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 mlua = { workspace = true }
-common = {workspace = true}
+common = { workspace = true }

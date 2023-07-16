@@ -21,7 +21,7 @@ fn aligned_size_of_uniform<U: Sized>() -> u64 {
 }
 
 
-pub(crate) enum Action<'a> {
+pub enum Action<'a> {
     RunShader {
         shader: &'a Shader,
         shader_entry_name: &'a str,
@@ -33,7 +33,7 @@ pub(crate) enum Action<'a> {
     TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>),
 }
 
-pub(crate) struct WgpuContext {
+pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
     limits: wgpu::Limits,
@@ -419,7 +419,7 @@ impl VertexBuffer {
     }
 }
 
-pub(crate) struct Shader {
+pub struct Shader {
     pub(crate) module: wgpu::ShaderModule,
     bind_group_layout: wgpu::BindGroupLayout,
     pipeline_layout: wgpu::PipelineLayout,
@@ -563,11 +563,11 @@ impl Shader {
     }
 }
 
-pub(crate) struct Texture {
+pub struct Texture {
     pub desc: ImageDesc,
-    pub texture: wgpu::Texture,
-    pub view: wgpu::TextureView,
-    pub extent: wgpu::Extent3d,
+    pub(crate) texture: wgpu::Texture,
+    pub(crate) view: wgpu::TextureView,
+    pub(crate) extent: wgpu::Extent3d,
 }
 
 impl Texture {}
@@ -577,7 +577,7 @@ struct BufferImage {
     image_index: (usize, usize), // action index, index of (tex, img) inside action vec
 }
 
-pub(crate) struct TextureWithTransform {
+pub struct TextureWithTransform {
     pub(crate) texture: Texture,
     pub(crate) transform: Transform2D,
 }
