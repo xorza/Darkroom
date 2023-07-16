@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use crate::compute::Compute;
 use crate::data::{DataType, Value};
-use crate::functions::{Function, FunctionId, InputInfo, OutputInfo};
+use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
 use crate::lambda_invoker::LambdaInvoker;
 use crate::preprocess::Preprocess;

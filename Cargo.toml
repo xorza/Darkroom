@@ -35,3 +35,4 @@ mlua = { version = "*", features = ["lua54", "vendored"] }
 egui_file = "*"
 eframe = { version = "*", features = ["wgpu"] }
 strum_macros = "*"
+once_cell = "*"

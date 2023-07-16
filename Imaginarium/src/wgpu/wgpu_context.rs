@@ -20,7 +20,6 @@ fn aligned_size_of_uniform<U: Sized>() -> u64 {
     uniform_padded_size as u64
 }
 
-
 pub enum Action<'a> {
     RunShader {
         shader: &'a Shader,

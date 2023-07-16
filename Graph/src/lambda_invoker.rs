@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::functions::{Function, FunctionId};
+use crate::function::{Function, FunctionId};
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::runtime_graph::InvokeContext;
 

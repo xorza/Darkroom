@@ -1,4 +1,4 @@
-use crate::functions::{Function, FunctionId};
+use crate::function::{Function, FunctionId};
 use crate::graph::*;
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::preprocess::Preprocess;

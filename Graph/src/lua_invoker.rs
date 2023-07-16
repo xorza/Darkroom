@@ -5,9 +5,9 @@ use std::str::FromStr;
 
 use mlua::{Error, Function, Lua, Table, Variadic};
 
-use crate::{data, functions};
+use crate::{data, function};
 use crate::data::DataType;
-use crate::functions::FunctionId;
+use crate::function::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::runtime_graph::InvokeContext;
@@ -18,7 +18,7 @@ struct Cache {
 }
 
 struct LuaFuncInfo {
-    info: functions::Function,
+    info: function::Function,
     lua_func: Function<'static>,
 }
 
@@ -109,10 +109,10 @@ impl LuaInvoker {
 
         Ok(())
     }
-    fn function_from_table(table: &Table) -> anyhow::Result<functions::Function> {
+    fn function_from_table(table: &Table) -> anyhow::Result<function::Function> {
         let id_str: String = table.get("id")?;
 
-        let mut function_info = functions::Function::new(FunctionId::from_str(&id_str)?);
+        let mut function_info = function::Function::new(FunctionId::from_str(&id_str)?);
         function_info.name = table.get("name")?;
         function_info.inputs = Vec::new();
         function_info.outputs = Vec::new();
@@ -129,7 +129,7 @@ impl LuaInvoker {
                 default_value = None;
             }
 
-            function_info.inputs.push(functions::InputInfo {
+            function_info.inputs.push(function::InputInfo {
                 name,
                 is_required: true,
                 data_type,
@@ -145,7 +145,7 @@ impl LuaInvoker {
             let data_type_name: String = output.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            function_info.outputs.push(functions::OutputInfo { name, data_type });
+            function_info.outputs.push(function::OutputInfo { name, data_type });
         }
 
         Ok(function_info)
@@ -248,7 +248,7 @@ impl LuaInvoker {
                 let input = function.inputs.get(i).unwrap();
                 node.inputs.push(Input {
                     name: input.name.clone(),
-                    data_type: input.data_type,
+                    data_type: input.data_type.clone(),
                     is_required: true,
                     binding: Binding::None,
                     const_value: None,
@@ -258,7 +258,7 @@ impl LuaInvoker {
                 let output = function.outputs.get(i).unwrap();
                 node.outputs.push(Output {
                     name: output.name.clone(),
-                    data_type: output.data_type,
+                    data_type: output.data_type.clone(),
                 });
 
                 assert!(!node.id().is_nil());
@@ -295,7 +295,7 @@ impl LuaInvoker {
         result
     }
 
-    pub fn get_all_functions(&self) -> Vec<&functions::Function> {
+    pub fn get_all_functions(&self) -> Vec<&function::Function> {
         self.funcs.values().map(|f| &f.info).collect()
     }
 }
@@ -310,7 +310,7 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn all_functions(&self) -> Vec<functions::Function> {
+    fn all_functions(&self) -> Vec<function::Function> {
         todo!("all_functions")
     }
 

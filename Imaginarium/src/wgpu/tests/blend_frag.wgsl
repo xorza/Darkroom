@@ -1,6 +1,7 @@
 struct VertexOutput {
-    @location(0) tex1_coord: vec2<f32>,
-    @location(1) tex2_coord: vec2<f32>,
+    @location(0) tex0_coord: vec2<f32>,
+    @location(1) tex1_coord: vec2<f32>,
+    @location(2) tex2_coord: vec2<f32>,
     @builtin(position) position: vec4<f32>,
 };
 

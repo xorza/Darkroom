@@ -4,7 +4,7 @@ use uuid::Uuid;
 use common::id_type;
 
 use crate::data::{DataType, Value};
-use crate::functions::{Function, FunctionId};
+use crate::function::{Function, FunctionId};
 use crate::subgraph::{SubGraph, SubGraphId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -190,7 +190,7 @@ impl Graph {
                     let input = node.inputs.get(connection.subnode_input_index as usize)
                         .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent input"))?;
 
-                    if !DataType::can_assign(subinput.data_type, input.data_type) {
+                    if !DataType::can_assign(&subinput.data_type, &input.data_type) {
                         return Err(anyhow::Error::msg("Subgraph input connected to a node input with an incompatible data type"));
                     }
                 }
@@ -205,7 +205,7 @@ impl Graph {
 
                 let output = node.outputs.get(suboutput.subnode_output_index as usize)
                     .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent output"))?;
-                if !DataType::can_assign(suboutput.data_type, output.data_type) {
+                if !DataType::can_assign(&suboutput.data_type, &output.data_type) {
                     return Err(anyhow::Error::msg("Subgraph output connected to a node output with an incompatible data type"));
                 }
             }
@@ -243,7 +243,7 @@ impl Node {
         let inputs: Vec<Input> = function.inputs.iter().map(|func_input| {
             Input {
                 name: func_input.name.clone(),
-                data_type: func_input.data_type,
+                data_type: func_input.data_type.clone(),
                 is_required: func_input.is_required,
                 binding: func_input.default_value.as_ref().map_or(Binding::None, |_| Binding::Const),
                 const_value: func_input.default_value.clone(),
@@ -253,7 +253,7 @@ impl Node {
         let outputs: Vec<Output> = function.outputs.iter().map(|output| {
             Output {
                 name: output.name.clone(),
-                data_type: output.data_type,
+                data_type: output.data_type.clone(),
             }
         }).collect();
 

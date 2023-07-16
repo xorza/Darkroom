@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::data::Value;
-use crate::functions::{Function, FunctionId};
+use crate::function::{Function, FunctionId};
 use crate::runtime_graph::InvokeContext;
 
 pub type InvokeArgs = [Option<Value>];

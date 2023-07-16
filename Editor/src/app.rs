@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use egui_node_graph as eng;
 use graph_lib::data::{DataType, Value};
-use graph_lib::functions::{Function, FunctionId};
+use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::{Binding, Input, NodeId, Output};
 
 #[derive(Clone, Debug, Default)]
@@ -314,7 +314,7 @@ impl NodeshopApp {
 
                     node.inputs.push(Input {
                         name: editor_input_name.clone(),
-                        data_type: editor_input.typ,
+                        data_type: editor_input.typ.clone(),
                         is_required: true,
                         binding: Binding::None,
                         const_value: Some(editor_value.clone()),
@@ -332,7 +332,7 @@ impl NodeshopApp {
 
                     node.outputs.push(Output {
                         name: editor_output_name.clone(),
-                        data_type: editor_output.typ,
+                        data_type: editor_output.typ.clone(),
                     });
 
                     output_addresses.insert(*editor_output_id, ArgAddress {
@@ -395,12 +395,12 @@ impl NodeshopApp {
                 |editor_graph: &mut EditorGraph, editor_node_id: eng::NodeId| {
                     for (index, input) in node.inputs.iter().enumerate() {
                         let default_value = input.const_value.clone()
-                            .unwrap_or(Value::from(input.data_type));
+                            .unwrap_or(Value::from(input.data_type.clone()));
 
                         let input_id = editor_graph.add_input_param(
                             editor_node_id,
                             input.name.clone(),
-                            input.data_type,
+                            input.data_type.clone(),
                             EditorValue(default_value),
                             eng::InputParamKind::ConnectionOrConstant,
                             true);
@@ -417,7 +417,7 @@ impl NodeshopApp {
                         let output_id = editor_graph.add_output_param(
                             editor_node_id,
                             output.name.clone(),
-                            output.data_type);
+                            output.data_type.clone());
 
                         output_addresses.insert(
                             ArgAddress {

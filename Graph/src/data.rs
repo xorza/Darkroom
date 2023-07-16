@@ -2,8 +2,12 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+use common::id_type;
+
+id_type!(TypeId);
+
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Eq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
     Null,
@@ -11,12 +15,16 @@ pub enum DataType {
     Int,
     Bool,
     String,
+    Custom {
+        type_id: TypeId,
+        type_name: String,
+    },
 }
 
 impl DataType {
-    pub fn can_assign(from: DataType, to: DataType) -> bool {
-        assert_ne!(from, DataType::Null);
-        assert_ne!(to, DataType::Null);
+    pub fn can_assign(from: &DataType, to: &DataType) -> bool {
+        assert_ne!(*from, DataType::Null);
+        assert_ne!(*to, DataType::Null);
 
         from == to
     }
@@ -48,6 +56,22 @@ impl FromStr for DataType {
         }
     }
 }
+
+impl PartialEq for DataType {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (DataType::Null, DataType::Null) => true,
+            (DataType::Float, DataType::Float) => true,
+            (DataType::Int, DataType::Int) => true,
+            (DataType::Bool, DataType::Bool) => true,
+            (DataType::String, DataType::String) => true,
+            (DataType::Custom { type_id: id1, .. }, DataType::Custom { type_id: id2, .. }) => id1 == id2,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for DataType {}
 
 
 #[repr(C)]

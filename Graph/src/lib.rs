@@ -8,7 +8,7 @@ mod tests;
 pub mod common;
 pub mod preprocess;
 pub mod graph;
-pub mod functions;
+pub mod function;
 pub mod compute;
 pub mod lua_invoker;
 pub mod data;
