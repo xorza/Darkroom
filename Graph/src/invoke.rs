@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::data::Value;
+use crate::data::DynamicValue;
 use crate::function::{Function, FunctionId};
 use crate::runtime_graph::InvokeContext;
 
-pub type InvokeArgs = [Option<Value>];
+pub type InvokeArgs = [Option<DynamicValue>];
 
 pub trait Invokable {
     fn call(&self, ctx: &mut InvokeContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);

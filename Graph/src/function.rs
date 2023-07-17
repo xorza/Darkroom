@@ -17,9 +17,9 @@ pub struct InputInfo {
     pub is_required: bool,
     pub data_type: DataType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<Value>,
+    pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "skip_serializing_if_none_or_empty")]
-    pub variants: Option<Vec<Value>>,
+    pub variants: Option<Vec<StaticValue>>,
 }
 
 id_type!(FunctionId);
@@ -47,7 +47,7 @@ impl Function {
 }
 
 
-fn skip_serializing_if_none_or_empty(opt: &Option<Vec<Value>>) -> bool {
+fn skip_serializing_if_none_or_empty(opt: &Option<Vec<StaticValue>>) -> bool {
     opt.as_ref().map_or(true, |v| v.is_empty())
 }
 

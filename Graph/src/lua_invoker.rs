@@ -7,6 +7,7 @@ use mlua::{Error, Function, Lua, Table, Variadic};
 
 use crate::{data, function};
 use crate::data::DataType;
+use crate::data::DynamicValue;
 use crate::function::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
 use crate::invoke::{InvokeArgs, Invoker};
@@ -124,7 +125,7 @@ impl LuaInvoker {
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
 
-            let mut default_value: Option<data::Value> = None;
+            let mut default_value: Option<data::StaticValue> = None;
             if input.len()? > 2 {
                 default_value = None;
             }
@@ -300,7 +301,6 @@ impl LuaInvoker {
     }
 }
 
-
 impl Drop for LuaInvoker {
     fn drop(&mut self) {
         self.funcs.clear();
@@ -346,7 +346,7 @@ impl Invoker for LuaInvoker {
                 .get(index)
                 .unwrap();
 
-            let output = data::Value::from(output_arg);
+            let output = data::DynamicValue::from(output_arg);
             assert_eq!(output_info.data_type, output.data_type());
             outputs[index] = Some(output);
         }
@@ -357,23 +357,24 @@ impl Invoker for LuaInvoker {
     }
 }
 
-fn to_lua_value<'lua>(lua: &'lua Lua, value: &data::Value) -> anyhow::Result<mlua::Value<'lua>> {
+fn to_lua_value<'lua>(lua: &'lua Lua, value: &data::DynamicValue) -> anyhow::Result<mlua::Value<'lua>> {
     match value {
-        data::Value::Null => { Ok(mlua::Value::Nil) }
-        data::Value::Float(v) => { Ok(mlua::Value::Number(*v as mlua::Number)) }
-        data::Value::Int(v) => { Ok(mlua::Value::Integer(*v as mlua::Integer)) }
-        data::Value::Bool(v) => { Ok(mlua::Value::Boolean(*v)) }
-        data::Value::String(v) => {
+        data::DynamicValue::Null => { Ok(mlua::Value::Nil) }
+        data::DynamicValue::Float(v) => { Ok(mlua::Value::Number(*v as mlua::Number)) }
+        data::DynamicValue::Int(v) => { Ok(mlua::Value::Integer(*v as mlua::Integer)) }
+        data::DynamicValue::Bool(v) => { Ok(mlua::Value::Boolean(*v)) }
+        data::DynamicValue::String(v) => {
             let lua_string = lua.create_string(v)?;
             Ok(mlua::Value::String(lua_string))
         }
+        _ => panic!("not supported")
     }
 }
 
-impl From<&mlua::Value<'_>> for data::Value {
+impl From<&mlua::Value<'_>> for DynamicValue {
     fn from(value: &mlua::Value) -> Self {
         match value {
-            mlua::Value::Nil => { data::Value::Null }
+            mlua::Value::Nil => { DynamicValue::Null }
             mlua::Value::Boolean(v) => { (*v).into() }
             mlua::Value::Integer(v) => { (*v).into() }
             mlua::Value::Number(v) => { (*v).into() }

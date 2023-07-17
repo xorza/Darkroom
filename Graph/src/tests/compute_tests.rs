@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use crate::compute::Compute;
-use crate::data::{DataType, Value};
+use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
 use crate::lambda_invoker::LambdaInvoker;
@@ -67,7 +67,7 @@ where
             ],
         },
         move |_, _, outputs| {
-            outputs[0] = Value::from(get_a() as f64).into();
+            outputs[0] = DynamicValue::from(get_a() as f64).into();
         });
     // val 2
     invoker.add_lambda(
@@ -85,7 +85,7 @@ where
             ],
         },
         move |_, _, outputs| {
-            outputs[0] = Value::from(get_b()).into();
+            outputs[0] = DynamicValue::from(get_b()).into();
         });
     // sum
     invoker.add_lambda(
@@ -120,7 +120,7 @@ where
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
             let b: i64 = inputs[1].as_ref().unwrap().as_int();
-            outputs[0] = Value::from(a + b).into();
+            outputs[0] = DynamicValue::from(a + b).into();
             ctx.set(a + b);
         });
     // mult
@@ -156,7 +156,7 @@ where
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
             let b: i64 = inputs[1].as_ref().unwrap().as_int();
-            outputs[0] = Value::from(a * b).into();
+            outputs[0] = DynamicValue::from(a * b).into();
             ctx.set(a * b);
         });
 
@@ -179,9 +179,9 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         let sum_inputs = &mut graph
             .node_by_name_mut("sum").unwrap()
             .inputs;
-        sum_inputs[0].const_value = Some(Value::from(29));
+        sum_inputs[0].const_value = Some(StaticValue::from(29));
         sum_inputs[0].binding = Binding::Const;
-        sum_inputs[1].const_value = Some(Value::from(11));
+        sum_inputs[1].const_value = Some(StaticValue::from(11));
         sum_inputs[1].binding = Binding::Const;
     }
 
@@ -189,7 +189,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         let mult_inputs = &mut graph
             .node_by_name_mut("mult").unwrap()
             .inputs;
-        mult_inputs[1].const_value = Some(Value::from(9));
+        mult_inputs[1].const_value = Some(StaticValue::from(9));
         mult_inputs[1].binding = Binding::Const;
     }
 

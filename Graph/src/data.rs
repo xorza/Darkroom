@@ -1,3 +1,4 @@
+use std::any::Any;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -25,12 +26,351 @@ pub enum DataType {
     },
 }
 
+#[repr(C)]
+#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
+pub enum StaticValue {
+    #[default]
+    Null,
+    Float(f64),
+    Int(i64),
+    Bool(bool),
+    String(String),
+}
+
+#[repr(C)]
+#[derive(Default, Debug)]
+pub enum DynamicValue {
+    #[default]
+    Null,
+    Float(f64),
+    Int(i64),
+    Bool(bool),
+    String(String),
+    // Array(Vec<DynamicValue>),
+    Custom {
+        data_type: DataType,
+        data: Box<dyn Any>,
+    },
+}
+
+
+impl StaticValue {
+    pub fn data_type(&self) -> DataType {
+        match self {
+            StaticValue::Null => DataType::Null,
+            StaticValue::Float(_) => DataType::Float,
+            StaticValue::Int(_) => DataType::Int,
+            StaticValue::Bool(_) => DataType::Bool,
+            StaticValue::String(_) => DataType::String,
+        }
+    }
+
+    pub fn as_float(&self) -> f64 {
+        match self {
+            StaticValue::Float(value) => { *value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+    pub fn as_int(&self) -> i64 {
+        match self {
+            StaticValue::Int(value) => { *value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            StaticValue::Bool(value) => { *value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+    pub fn as_string(&self) -> &str {
+        match self {
+            StaticValue::String(value) => { value }
+            _ => { panic!("Value is not a string") }
+        }
+    }
+}
+
+impl DynamicValue {
+    pub fn data_type(&self) -> DataType {
+        match self {
+            DynamicValue::Null => DataType::Null,
+            DynamicValue::Float(_) => DataType::Float,
+            DynamicValue::Int(_) => DataType::Int,
+            DynamicValue::Bool(_) => DataType::Bool,
+            DynamicValue::String(_) => DataType::String,
+            // DynamicValue::Array(_) => DataType::Array,
+            DynamicValue::Custom { data_type, .. } => data_type.clone(),
+        }
+    }
+
+    pub fn as_float(&self) -> f64 {
+        match self {
+            DynamicValue::Float(value) => { *value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+    pub fn as_int(&self) -> i64 {
+        match self {
+            DynamicValue::Int(value) => { *value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+    pub fn as_bool(&self) -> bool {
+        match self {
+            DynamicValue::Bool(value) => { *value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+    pub fn as_string(&self) -> &str {
+        match self {
+            DynamicValue::String(value) => { value }
+            _ => { panic!("Value is not a string") }
+        }
+    }
+    pub fn as_custom(&self) -> &Box<dyn Any> {
+        match self {
+            DynamicValue::Custom { data, .. } => { data }
+            _ => { panic!("Value is not a custom type") }
+        }
+    }
+}
+
+impl Clone for DynamicValue {
+    fn clone(&self) -> Self {
+        let mut result = DynamicValue::Null;
+        result.clone_from(self);
+        result
+    }
+
+    fn clone_from(&mut self, source: &Self) {
+        match source {
+            DynamicValue::Null => { *self = DynamicValue::Null; }
+            DynamicValue::Float(value) => { *self = DynamicValue::Float(*value); }
+            DynamicValue::Int(value) => { *self = DynamicValue::Int(*value); }
+            DynamicValue::Bool(value) => { *self = DynamicValue::Bool(*value); }
+            DynamicValue::String(value) => { *self = DynamicValue::String(value.clone()); }
+            // DynamicValue::Array(value) => { *self = DynamicValue::Array(value.clone()); }
+            DynamicValue::Custom { data_type, data: _data } => {
+                *self = DynamicValue::Custom {
+                    data_type: data_type.clone(),
+                    // data: *data.clone(),
+                    data: Box::new(()),
+                };
+                unimplemented!("Clone custom type")
+            }
+        }
+    }
+}
+
+impl From<StaticValue> for DynamicValue {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Null => DynamicValue::Null,
+            StaticValue::Float(value) => DynamicValue::Float(value),
+            StaticValue::Int(value) => DynamicValue::Int(value),
+            StaticValue::Bool(value) => DynamicValue::Bool(value),
+            StaticValue::String(value) => DynamicValue::String(value),
+        }
+    }
+}
+impl From<&StaticValue> for DynamicValue {
+    fn from(value: &StaticValue) -> Self {
+        match value {
+            StaticValue::Null => DynamicValue::Null,
+            StaticValue::Float(value) => DynamicValue::Float(*value),
+            StaticValue::Int(value) => DynamicValue::Int(*value),
+            StaticValue::Bool(value) => DynamicValue::Bool(*value),
+            StaticValue::String(value) => DynamicValue::String(value.clone()),
+        }
+    }
+}
+impl From<DataType> for StaticValue {
+    fn from(data_type: DataType) -> Self {
+        match data_type {
+            DataType::Float => StaticValue::Float(0.0),
+            DataType::Int => StaticValue::Int(0),
+            DataType::Bool => StaticValue::Bool(false),
+            DataType::String => StaticValue::String("".to_string()),
+            _ => panic!("No value for {:?}", data_type),
+        }
+    }
+}
+impl From<DataType> for DynamicValue {
+    fn from(data_type: DataType) -> Self {
+        match data_type {
+            DataType::Float => DynamicValue::Float(0.0),
+            DataType::Int => DynamicValue::Int(0),
+            DataType::Bool => DynamicValue::Bool(false),
+            DataType::String => DynamicValue::String("".to_string()),
+            _ => panic!("No value for {:?}", data_type),
+        }
+    }
+}
+
+impl From<i64> for StaticValue {
+    fn from(value: i64) -> Self {
+        StaticValue::Int(value)
+    }
+}
+impl From<i32> for StaticValue {
+    fn from(value: i32) -> Self {
+        StaticValue::Int(value as i64)
+    }
+}
+impl From<f32> for StaticValue {
+    fn from(value: f32) -> Self {
+        StaticValue::Float(value as f64)
+    }
+}
+impl From<f64> for StaticValue {
+    fn from(value: f64) -> Self {
+        StaticValue::Float(value)
+    }
+}
+impl From<&str> for StaticValue {
+    fn from(value: &str) -> Self {
+        StaticValue::String(value.to_string())
+    }
+}
+impl From<String> for StaticValue {
+    fn from(value: String) -> Self {
+        StaticValue::String(value)
+    }
+}
+impl From<bool> for StaticValue {
+    fn from(value: bool) -> Self {
+        StaticValue::Bool(value)
+    }
+}
+impl From<StaticValue> for i64 {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Int(value) => { value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl From<StaticValue> for f64 {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Float(value) => { value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl From<StaticValue> for i32 {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Int(value) => { value as i32 }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl From<StaticValue> for f32 {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Float(value) => { value as f32 }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl From<StaticValue> for bool {
+    fn from(value: StaticValue) -> Self {
+        match value {
+            StaticValue::Bool(value) => { value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+}
+
+impl From<i64> for DynamicValue {
+    fn from(value: i64) -> Self {
+        DynamicValue::Int(value)
+    }
+}
+impl From<i32> for DynamicValue {
+    fn from(value: i32) -> Self {
+        DynamicValue::Int(value as i64)
+    }
+}
+impl From<f32> for DynamicValue {
+    fn from(value: f32) -> Self {
+        DynamicValue::Float(value as f64)
+    }
+}
+impl From<f64> for DynamicValue {
+    fn from(value: f64) -> Self {
+        DynamicValue::Float(value)
+    }
+}
+impl From<&str> for DynamicValue {
+    fn from(value: &str) -> Self {
+        DynamicValue::String(value.to_string())
+    }
+}
+impl From<String> for DynamicValue {
+    fn from(value: String) -> Self {
+        DynamicValue::String(value)
+    }
+}
+impl From<bool> for DynamicValue {
+    fn from(value: bool) -> Self {
+        DynamicValue::Bool(value)
+    }
+}
+impl From<DynamicValue> for i64 {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::Int(value) => { value }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl From<DynamicValue> for f64 {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::Float(value) => { value }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl From<DynamicValue> for i32 {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::Int(value) => { value as i32 }
+            _ => { panic!("Value is not an int") }
+        }
+    }
+}
+impl From<DynamicValue> for f32 {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::Float(value) => { value as f32 }
+            _ => { panic!("Value is not a float") }
+        }
+    }
+}
+impl From<DynamicValue> for bool {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::Bool(value) => { value }
+            _ => { panic!("Value is not a bool") }
+        }
+    }
+}
+impl From<DynamicValue> for String {
+    fn from(value: DynamicValue) -> Self {
+        match value {
+            DynamicValue::String(value) => { value }
+            _ => { panic!("Value is not a string") }
+        }
+    }
+}
+
 impl DataType {
     pub fn is_custom(&self) -> bool {
-        match self {
-            DataType::Custom { .. } => true,
-            _ => false,
-        }
+        matches!(self, DataType::Custom { .. })
     }
 }
 
@@ -45,7 +385,6 @@ impl ToString for DataType {
         }
     }
 }
-
 impl FromStr for DataType {
     type Err = ();
 
@@ -60,7 +399,6 @@ impl FromStr for DataType {
         }
     }
 }
-
 impl PartialEq for DataType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -74,162 +412,5 @@ impl PartialEq for DataType {
         }
     }
 }
-
 impl Eq for DataType {}
 
-
-#[repr(C)]
-#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
-pub enum Value {
-    #[default]
-    Null,
-    Float(f64),
-    Int(i64),
-    Bool(bool),
-    String(String),
-}
-
-impl Value {
-    pub fn data_type(&self) -> DataType {
-        match self {
-            Value::Null => DataType::Null,
-            Value::Float(_) => DataType::Float,
-            Value::Int(_) => DataType::Int,
-            Value::Bool(_) => DataType::Bool,
-            Value::String(_) => DataType::String,
-        }
-    }
-
-    pub fn as_float(&self) -> f64 {
-        match self {
-            Value::Float(value) => { *value }
-            _ => { panic!("Value is not a float") }
-        }
-    }
-    pub fn as_int(&self) -> i64 {
-        match self {
-            Value::Int(value) => { *value }
-            _ => { panic!("Value is not an int") }
-        }
-    }
-    pub fn as_bool(&self) -> bool {
-        match self {
-            Value::Bool(value) => { *value }
-            _ => { panic!("Value is not a bool") }
-        }
-    }
-    pub fn as_string(&self) -> &str {
-        match self {
-            Value::String(value) => { value }
-            _ => { panic!("Value is not a string") }
-        }
-    }
-}
-
-impl From<DataType> for Value {
-    fn from(data_type: DataType) -> Self {
-        match data_type {
-            DataType::Float => Value::Float(0.0),
-            DataType::Int => Value::Int(0),
-            DataType::Bool => Value::Bool(false),
-            DataType::String => Value::String("".to_string()),
-            _ => panic!("No value for {:?}", data_type),
-        }
-    }
-}
-
-impl From<i64> for Value {
-    fn from(value: i64) -> Self {
-        Value::Int(value)
-    }
-}
-
-impl From<i32> for Value {
-    fn from(value: i32) -> Self {
-        Value::Int(value as i64)
-    }
-}
-
-impl From<f32> for Value {
-    fn from(value: f32) -> Self {
-        Value::Float(value as f64)
-    }
-}
-
-impl From<f64> for Value {
-    fn from(value: f64) -> Self {
-        Value::Float(value)
-    }
-}
-
-impl From<&str> for Value {
-    fn from(value: &str) -> Self {
-        Value::String(value.to_string())
-    }
-}
-
-impl From<String> for Value {
-    fn from(value: String) -> Self {
-        Value::String(value)
-    }
-}
-
-impl From<bool> for Value {
-    fn from(value: bool) -> Self {
-        Value::Bool(value)
-    }
-}
-
-impl From<Value> for i64 {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Int(value) => { value }
-            _ => { panic!("Value is not an int") }
-        }
-    }
-}
-
-impl From<Value> for f64 {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Float(value) => { value }
-            _ => { panic!("Value is not a float") }
-        }
-    }
-}
-
-impl From<Value> for i32 {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Int(value) => { value as i32 }
-            _ => { panic!("Value is not an int") }
-        }
-    }
-}
-
-impl From<Value> for f32 {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Float(value) => { value as f32 }
-            _ => { panic!("Value is not a float") }
-        }
-    }
-}
-
-impl From<Value> for bool {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::Bool(value) => { value }
-            _ => { panic!("Value is not a bool") }
-        }
-    }
-}
-
-impl From<Value> for String {
-    fn from(value: Value) -> Self {
-        match value {
-            Value::String(value) => { value }
-            _ => { panic!("Value is not a string") }
-        }
-    }
-}

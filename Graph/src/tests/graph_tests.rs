@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use crate::data::{DataType, Value};
+use crate::data::{DataType, StaticValue};
 use crate::graph::*;
 
 #[test]
@@ -16,7 +16,7 @@ fn graph_to_yaml() -> anyhow::Result<()> {
         data_type: DataType::Int,
         is_required: true,
         binding: Binding::Const,
-        const_value: Some(Value::Int(55)),
+        const_value: Some(StaticValue::Int(55)),
     });
     let mut node2 = Node::new();
     node2.inputs.push(Input {

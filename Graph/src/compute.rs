@@ -1,12 +1,12 @@
 use std::ops::{Index, IndexMut};
 
-use crate::data::{DataType, Value};
+use crate::data::{DataType, DynamicValue};
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
 use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Default)]
-pub(crate) struct ArgSet(Vec<Option<Value>>);
+pub(crate) struct ArgSet(Vec<Option<DynamicValue>>);
 
 
 pub struct Compute {
@@ -45,7 +45,9 @@ impl Compute {
                 .map(|input| {
                     let value = match &input.binding {
                         Binding::None => None,
-                        Binding::Const => input.const_value.clone(),
+                        Binding::Const => input.const_value
+                            .as_ref()
+                            .map(DynamicValue::from),
 
                         Binding::Output(output_binding) => {
                             let output_r_node = runtime_graph
@@ -58,10 +60,9 @@ impl Compute {
                                     .as_mut().unwrap();
                             let value =
                                 output_values
-                                    .get_mut(output_binding.output_index as usize).unwrap()
-                                    .clone();
+                                    .get_mut(output_binding.output_index as usize).unwrap();
 
-                            value
+                            value.clone()
                         }
                     };
                     let data_type = &input.data_type;
@@ -70,11 +71,11 @@ impl Compute {
                 })
                 .enumerate()
                 .for_each(|(index, (data_type, value))| {
-                    if let Some(value) = value {
-                        inputs[index] = Some(self.convert_type(value, data_type));
-                    } else {
-                        inputs[index] = None;
-                    }
+                    inputs[index] = value
+                        .as_ref()
+                        .map(|value| {
+                            self.convert_type(value, data_type)
+                        });
                 });
 
             let r_node = &mut runtime_graph.nodes[index];
@@ -106,10 +107,10 @@ impl Compute {
         Ok(())
     }
 
-    fn convert_type(&self, src_value: Value, dst_data_type: &DataType) -> Value {
+    fn convert_type(&self, src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
         let src_data_type = &src_value.data_type();
         if *src_data_type == *dst_data_type {
-            return src_value;
+            return src_value.clone();
         }
 
         if src_data_type.is_custom() || dst_data_type.is_custom() {
@@ -117,14 +118,17 @@ impl Compute {
         }
 
         match (src_data_type, dst_data_type) {
-            (DataType::Bool, DataType::Int) => Value::Int(src_value.as_bool() as i64),
-            (DataType::Bool, DataType::Float) => Value::Float(src_value.as_bool() as i64 as f64),
+            (DataType::Bool, DataType::Int) => DynamicValue::Int(src_value.as_bool() as i64),
+            (DataType::Bool, DataType::Float) => DynamicValue::Float(src_value.as_bool() as i64 as f64),
+            (DataType::Bool, DataType::String) => DynamicValue::String(src_value.as_bool().to_string()),
 
-            (DataType::Int, DataType::Bool) => Value::Bool(src_value.as_int() != 0),
-            (DataType::Int, DataType::Float) => Value::Float(src_value.as_int() as f64),
+            (DataType::Int, DataType::Bool) => DynamicValue::Bool(src_value.as_int() != 0),
+            (DataType::Int, DataType::Float) => DynamicValue::Float(src_value.as_int() as f64),
+            (DataType::Int, DataType::String) => DynamicValue::String(src_value.as_int().to_string()),
 
-            (DataType::Float, DataType::Bool) => Value::Bool(src_value.as_float().abs() > common::EPSILON),
-            (DataType::Float, DataType::Int) => Value::Int(src_value.as_float() as i64),
+            (DataType::Float, DataType::Bool) => DynamicValue::Bool(src_value.as_float().abs() > common::EPSILON),
+            (DataType::Float, DataType::Int) => DynamicValue::Int(src_value.as_float() as i64),
+            (DataType::Float, DataType::String) => DynamicValue::String(src_value.as_float().to_string()),
 
             (src, dst) => {
                 panic!("Unsupported conversion from {:?} to {:?}", src, dst);
@@ -151,7 +155,7 @@ impl From<Box<dyn Invoker>> for Compute {
 
 impl ArgSet {
     pub(crate) fn from_vec<T>(vec: Vec<Option<T>>) -> Self
-    where T: Into<Value> {
+    where T: Into<DynamicValue> {
         ArgSet(vec.into_iter().map(|v| v.map(|v| v.into())).collect())
     }
     pub(crate) fn resize_and_fill(&mut self, size: usize) {
@@ -161,15 +165,15 @@ impl ArgSet {
     pub(crate) fn fill(&mut self) {
         self.0.fill(None);
     }
-    pub(crate) fn as_slice(&self) -> &[Option<Value>] {
+    pub(crate) fn as_slice(&self) -> &[Option<DynamicValue>] {
         self.0.as_slice()
     }
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [Option<Value>] {
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [Option<DynamicValue>] {
         self.0.as_mut_slice()
     }
 }
 impl Index<usize> for ArgSet {
-    type Output = Option<Value>;
+    type Output = Option<DynamicValue>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]

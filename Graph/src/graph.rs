@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use common::id_type;
 
-use crate::data::{DataType, Value};
+use crate::data::{DataType, StaticValue};
 use crate::function::{Function, FunctionId};
 use crate::subgraph::{SubGraph, SubGraphId};
 
@@ -63,7 +63,7 @@ pub struct Input {
     pub is_required: bool,
     pub binding: Binding,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub const_value: Option<Value>,
+    pub const_value: Option<StaticValue>,
 }
 
 

@@ -5,7 +5,7 @@ use egui_file::{DialogType, FileDialog};
 use serde::{Deserialize, Serialize};
 
 use egui_node_graph as eng;
-use graph_lib::data::{DataType, Value};
+use graph_lib::data::{DataType, StaticValue};
 use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::{Binding, Input, NodeId, Output};
 
@@ -19,7 +19,7 @@ pub struct EditorNode {
 struct FunctionTemplate(Function);
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct EditorValue(Value);
+pub struct EditorValue(StaticValue);
 
 enum NodeCategory {}
 
@@ -108,7 +108,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
                 node_id,
                 name.to_string(),
                 DataType::Int,
-                EditorValue(Value::Int(0)),
+                EditorValue(StaticValue::Int(0)),
                 eng::InputParamKind::ConnectionOrConstant,
                 true,
             );
@@ -143,7 +143,7 @@ impl eng::WidgetValueTrait for EditorValue {
     ) -> Vec<Self::Response> {
         #[allow(clippy::single_match)]
         match &mut self.0 {
-            Value::Int(value) => {
+            StaticValue::Int(value) => {
                 ui.horizontal(|ui| {
                     ui.label(param_name);
                     ui.add(DragValue::new(value));
@@ -395,7 +395,7 @@ impl NodeshopApp {
                 |editor_graph: &mut EditorGraph, editor_node_id: eng::NodeId| {
                     for (index, input) in node.inputs.iter().enumerate() {
                         let default_value = input.const_value.clone()
-                            .unwrap_or(Value::from(input.data_type.clone()));
+                            .unwrap_or(StaticValue::from(input.data_type.clone()));
 
                         let input_id = editor_graph.add_input_param(
                             editor_node_id,
