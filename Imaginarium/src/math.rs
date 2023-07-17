@@ -4,7 +4,7 @@ use bytemuck::{Pod, Zeroable};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
-pub(crate) struct Transform2D {
+pub struct Transform2D {
     r0: [f32; 3],
     pad0: f32,
     r1: [f32; 3],

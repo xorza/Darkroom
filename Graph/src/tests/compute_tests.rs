@@ -32,7 +32,7 @@ where
 
     let mut invoker = LambdaInvoker::default();
 
-    // print func
+    // print
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
@@ -51,6 +51,7 @@ where
         move |_, inputs, _| {
             result(inputs[0].as_ref().unwrap().as_int());
         });
+    // val 1
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
@@ -66,8 +67,9 @@ where
             ],
         },
         move |_, _, outputs| {
-            outputs[0] = Value::from(get_a()).into();
+            outputs[0] = Value::from(get_a() as f64).into();
         });
+    // val 2
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
@@ -85,6 +87,7 @@ where
         move |_, _, outputs| {
             outputs[0] = Value::from(get_b()).into();
         });
+    // sum
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
@@ -120,6 +123,7 @@ where
             outputs[0] = Value::from(a + b).into();
             ctx.set(a + b);
         });
+    // mult
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,

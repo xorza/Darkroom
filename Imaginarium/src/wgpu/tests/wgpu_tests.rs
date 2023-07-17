@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 
 use crate::image::Image;
-use crate::wgpu::math::Transform2D;
+use crate::math::Transform2D;
 use crate::wgpu::wgpu_context::{Action, TextureWithTransform, WgpuContext};
 
 #[test]

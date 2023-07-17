@@ -9,3 +9,4 @@ mod tiff_extentions;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 pub mod color_format;
+pub mod math;

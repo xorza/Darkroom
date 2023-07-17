@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use crate::data::Value;
+use crate::data::{DataType, Value};
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
 use crate::runtime_graph::RuntimeGraph;
@@ -43,7 +43,7 @@ impl Compute {
             node.inputs
                 .iter()
                 .map(|input| {
-                    match &input.binding {
+                    let value = match &input.binding {
                         Binding::None => None,
                         Binding::Const => input.const_value.clone(),
 
@@ -63,11 +63,18 @@ impl Compute {
 
                             value
                         }
-                    }
+                    };
+                    let data_type = &input.data_type;
+
+                    (data_type, value)
                 })
                 .enumerate()
-                .for_each(|(index, value)| {
-                    inputs[index] = value
+                .for_each(|(index, (data_type, value))| {
+                    if let Some(value) = value {
+                        inputs[index] = Some(self.convert_type(value, data_type));
+                    } else {
+                        inputs[index] = None;
+                    }
                 });
 
             let r_node = &mut runtime_graph.nodes[index];
@@ -97,6 +104,32 @@ impl Compute {
         );
 
         Ok(())
+    }
+
+    fn convert_type(&self, src_value: Value, dst_data_type: &DataType) -> Value {
+        let src_data_type = &src_value.data_type();
+        if *src_data_type == *dst_data_type {
+            return src_value;
+        }
+
+        if src_data_type.is_custom() || dst_data_type.is_custom() {
+            panic!("Custom types are not supported yet");
+        }
+
+        match (src_data_type, dst_data_type) {
+            (DataType::Bool, DataType::Int) => Value::Int(src_value.as_bool() as i64),
+            (DataType::Bool, DataType::Float) => Value::Float(src_value.as_bool() as i64 as f64),
+
+            (DataType::Int, DataType::Bool) => Value::Bool(src_value.as_int() != 0),
+            (DataType::Int, DataType::Float) => Value::Float(src_value.as_int() as f64),
+
+            (DataType::Float, DataType::Bool) => Value::Bool(src_value.as_float().abs() > common::EPSILON),
+            (DataType::Float, DataType::Int) => Value::Int(src_value.as_float() as i64),
+
+            (src, dst) => {
+                panic!("Unsupported conversion from {:?} to {:?}", src, dst);
+            }
+        }
     }
 }
 

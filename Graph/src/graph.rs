@@ -187,12 +187,12 @@ impl Graph {
                     if node.subgraph_id != Some(subgraph.id()) {
                         return Err(anyhow::Error::msg("Subgraph input connected to an external node"));
                     }
-                    let input = node.inputs.get(connection.subnode_input_index as usize)
-                        .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent input"))?;
 
-                    if !DataType::can_assign(&subinput.data_type, &input.data_type) {
-                        return Err(anyhow::Error::msg("Subgraph input connected to a node input with an incompatible data type"));
-                    }
+                    // let input = node.inputs.get(connection.subnode_input_index as usize)
+                    //     .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent input"))?;
+                    // if !DataType::can_assign(&subinput.data_type, &input.data_type) {
+                    //     return Err(anyhow::Error::msg("Subgraph input connected to a node input with an incompatible data type"));
+                    // }
                 }
             }
 
@@ -203,11 +203,11 @@ impl Graph {
                     return Err(anyhow::Error::msg("Subgraph output connected to an external node"));
                 }
 
-                let output = node.outputs.get(suboutput.subnode_output_index as usize)
-                    .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent output"))?;
-                if !DataType::can_assign(&suboutput.data_type, &output.data_type) {
-                    return Err(anyhow::Error::msg("Subgraph output connected to a node output with an incompatible data type"));
-                }
+                // let output = node.outputs.get(suboutput.subnode_output_index as usize)
+                //     .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent output"))?;
+                // if !DataType::can_assign(&suboutput.data_type, &output.data_type) {
+                //     return Err(anyhow::Error::msg("Subgraph output connected to a node output with an incompatible data type"));
+                // }
             }
         }
 

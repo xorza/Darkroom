@@ -1,57 +1,60 @@
-use std::str::FromStr;
-
-use once_cell::sync::Lazy;
+use std::collections::HashMap;
 
 use imaginarium::wgpu::wgpu_context::WgpuContext;
 
-use crate::data::{DataType, TypeId};
 use crate::function::{Function, FunctionId};
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::runtime_graph::InvokeContext;
 
-pub static IMAGE_DATA_TYPE: Lazy<DataType> = Lazy::new(||
-    DataType::Custom {
-        type_id: TypeId::from_str("9b21b096-caa3-4443-ad43-bf425fcc975e").unwrap(),
-        type_name: "Image".to_string(),
-    }
-);
-
-struct WgpuFunc {
-    shader: imaginarium::wgpu::wgpu_context::Shader,
-    function: Function,
+pub trait WgpuInvokable {
+    fn new(wgpu_context: &WgpuContext) -> Self where Self: Sized;
+    fn descriptor(&self) -> Function;
+    fn invoke(
+        &self,
+        wgpu_context: &WgpuContext,
+        invoke_context: &mut InvokeContext,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()>;
 }
+
 
 pub(crate) struct WgpuInvoker {
     context: WgpuContext,
+    funcs: HashMap<FunctionId, Box<dyn WgpuInvokable>>,
 }
 
 impl WgpuInvoker {
-    pub fn new() -> anyhow::Result<Self> {
-        let context = WgpuContext::new()?;
-
-        Ok(Self {
-            context,
-        })
+    pub fn add_function<T>(&mut self)
+    where T: WgpuInvokable + 'static
+    {
+        let wgpu_func = T::new(&self.context);
+        let boxed_wgpu_func = Box::new(wgpu_func);
+        let func_id = boxed_wgpu_func.descriptor().self_id;
+        self.funcs.insert(func_id, boxed_wgpu_func);
     }
 }
 
 impl Invoker for WgpuInvoker {
     fn all_functions(&self) -> Vec<Function> {
-        todo!()
+        self.funcs
+            .values()
+            .map(|f| f.descriptor())
+            .collect()
     }
 
     fn invoke(
         &self,
-        _function_id: FunctionId,
-        _ctx: &mut InvokeContext,
-        _inputs: &InvokeArgs,
-        _outputs: &mut InvokeArgs,
+        function_id: FunctionId,
+        ctx: &mut InvokeContext,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>
     {
+        let invokable = self.funcs.get(&function_id).unwrap();
+        invokable.invoke(&self.context, ctx, inputs, outputs)?;
+
         Ok(())
     }
 }
-
-impl WgpuFunc {}
-
 

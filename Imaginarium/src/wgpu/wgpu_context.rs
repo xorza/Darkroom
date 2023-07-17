@@ -10,7 +10,7 @@ use wgpu::util::DeviceExt;
 
 use crate::color_format::ColorFormat;
 use crate::image::{Image, ImageDesc};
-use crate::wgpu::math::{Transform2D, Vert2D};
+use crate::math::{Transform2D, Vert2D};
 
 fn aligned_size_of_uniform<U: Sized>() -> u64 {
     let uniform_size = std::mem::size_of::<U>();
@@ -249,7 +249,7 @@ impl WgpuContext {
         }
     }
 
-    pub(crate) fn create_shader(
+    pub fn create_shader(
         &self,
         shader: &str,
         input_texture_count: u32,

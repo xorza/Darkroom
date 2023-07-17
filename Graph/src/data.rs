@@ -15,6 +15,10 @@ pub enum DataType {
     Int,
     Bool,
     String,
+    Array {
+        element_type: Box<DataType>,
+        length: u64,
+    },
     Custom {
         type_id: TypeId,
         type_name: String,
@@ -22,11 +26,11 @@ pub enum DataType {
 }
 
 impl DataType {
-    pub fn can_assign(from: &DataType, to: &DataType) -> bool {
-        assert_ne!(*from, DataType::Null);
-        assert_ne!(*to, DataType::Null);
-
-        from == to
+    pub fn is_custom(&self) -> bool {
+        match self {
+            DataType::Custom { .. } => true,
+            _ => false,
+        }
     }
 }
 
