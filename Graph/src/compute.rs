@@ -8,10 +8,10 @@ use crate::runtime_graph::RuntimeGraph;
 #[derive(Default)]
 pub(crate) struct ArgSet(Vec<Option<DynamicValue>>);
 
-
 pub struct Compute {
     invoker: Box<dyn Invoker>,
 }
+
 
 impl Compute {
     pub fn run(
@@ -107,14 +107,18 @@ impl Compute {
         Ok(())
     }
 
-    fn convert_type(&self, src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
-        let src_data_type = &src_value.data_type();
+    fn convert_type(&self,
+                    src_value: &DynamicValue,
+                    dst_data_type: &DataType)
+        -> DynamicValue
+    {
+        let src_data_type = src_value.data_type();
         if *src_data_type == *dst_data_type {
             return src_value.clone();
         }
 
         if src_data_type.is_custom() || dst_data_type.is_custom() {
-            panic!("Custom types are not supported yet");
+            return self.invoker.convert_value(src_value, dst_data_type);
         }
 
         match (src_data_type, dst_data_type) {

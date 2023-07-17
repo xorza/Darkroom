@@ -1,4 +1,4 @@
-use crate::function::{Function, FunctionId};
+use crate::function::FunctionId;
 use crate::graph::*;
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::preprocess::Preprocess;
@@ -7,10 +7,6 @@ use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
-    fn all_functions(&self) -> Vec<Function> {
-        vec![]
-    }
-
     fn invoke(&self,
               _function_id: FunctionId,
               _ctx: &mut InvokeContext,

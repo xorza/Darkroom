@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
@@ -18,10 +19,12 @@ pub enum DataType {
     String,
     Array {
         element_type: Box<DataType>,
+        // length is not included in the hash or equality check
         length: u64,
     },
     Custom {
         type_id: TypeId,
+        // type_name is not included in the hash or equality check
         type_name: String,
     },
 }
@@ -55,13 +58,13 @@ pub enum DynamicValue {
 
 
 impl StaticValue {
-    pub fn data_type(&self) -> DataType {
+    pub fn data_type(&self) -> &DataType {
         match self {
-            StaticValue::Null => DataType::Null,
-            StaticValue::Float(_) => DataType::Float,
-            StaticValue::Int(_) => DataType::Int,
-            StaticValue::Bool(_) => DataType::Bool,
-            StaticValue::String(_) => DataType::String,
+            StaticValue::Null => &DataType::Null,
+            StaticValue::Float(_) => &DataType::Float,
+            StaticValue::Int(_) => &DataType::Int,
+            StaticValue::Bool(_) => &DataType::Bool,
+            StaticValue::String(_) => &DataType::String,
         }
     }
 
@@ -92,15 +95,15 @@ impl StaticValue {
 }
 
 impl DynamicValue {
-    pub fn data_type(&self) -> DataType {
+    pub fn data_type(&self) -> &DataType {
         match self {
-            DynamicValue::Null => DataType::Null,
-            DynamicValue::Float(_) => DataType::Float,
-            DynamicValue::Int(_) => DataType::Int,
-            DynamicValue::Bool(_) => DataType::Bool,
-            DynamicValue::String(_) => DataType::String,
+            DynamicValue::Null => &DataType::Null,
+            DynamicValue::Float(_) => &DataType::Float,
+            DynamicValue::Int(_) => &DataType::Int,
+            DynamicValue::Bool(_) => &DataType::Bool,
+            DynamicValue::String(_) => &DataType::String,
             // DynamicValue::Array(_) => DataType::Array,
-            DynamicValue::Custom { data_type, .. } => data_type.clone(),
+            DynamicValue::Custom { data_type, .. } => data_type,
         }
     }
 
@@ -407,10 +410,40 @@ impl PartialEq for DataType {
             (DataType::Int, DataType::Int) => true,
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
-            (DataType::Custom { type_id: id1, .. }, DataType::Custom { type_id: id2, .. }) => id1 == id2,
+
+            (DataType::Custom { type_id: id1, .. },
+                DataType::Custom { type_id: id2, .. }) =>
+                id1 == id2,
+
+            (DataType::Array { element_type: element_type_a, .. },
+                DataType::Array { element_type: element_type_b, .. }) =>
+                element_type_a == element_type_b,
+
             _ => false,
         }
     }
 }
 impl Eq for DataType {}
+impl Hash for DataType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            DataType::Null => 0.hash(state),
+            DataType::Float => 1.hash(state),
+            DataType::Int => 2.hash(state),
+            DataType::Bool => 3.hash(state),
+            DataType::String => 4.hash(state),
 
+            DataType::Array { element_type, .. } => {
+                5.hash(state);
+                element_type.hash(state);
+                // length is not included in the hash
+            }
+
+            DataType::Custom { type_id, .. } => {
+                6.hash(state);
+                type_id.hash(state);
+                // type_name is not included in the hash
+            }
+        }
+    }
+}

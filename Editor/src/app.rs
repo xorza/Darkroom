@@ -310,7 +310,7 @@ impl NodeshopApp {
                         .get(*editor_input_id).unwrap();
                     let editor_value = &editor_input.value.0;
 
-                    assert_eq!(editor_input.typ, editor_value.data_type());
+                    assert_eq!(editor_input.typ, *editor_value.data_type());
 
                     node.inputs.push(Input {
                         name: editor_input_name.clone(),

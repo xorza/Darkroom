@@ -310,10 +310,6 @@ impl Drop for LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn all_functions(&self) -> Vec<function::Function> {
-        todo!("all_functions")
-    }
-
     fn invoke(&self,
               function_id: FunctionId,
               _ctx: &mut InvokeContext,
@@ -333,7 +329,7 @@ impl Invoker for LuaInvoker {
                 .unwrap()
                 .as_ref()
                 .expect("input is required");
-            assert_eq!(input_info.data_type, input.data_type());
+            assert_eq!(input_info.data_type, *input.data_type());
 
             let invoke_value = to_lua_value(self.lua, input)?;
             input_args.push(invoke_value);
@@ -347,7 +343,7 @@ impl Invoker for LuaInvoker {
                 .unwrap();
 
             let output = data::DynamicValue::from(output_arg);
-            assert_eq!(output_info.data_type, output.data_type());
+            assert_eq!(output_info.data_type, *output.data_type());
             outputs[index] = Some(output);
         }
 
