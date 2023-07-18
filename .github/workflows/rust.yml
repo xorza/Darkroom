@@ -34,7 +34,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build graph
-        run: cargo build --manifest-path=./Cargo.toml --verbose
+        run: cargo build --manifest-path=./Cargo.toml --verbose --no-default-features --workspace
 
       - name: Run graph tests
         run: cargo test --manifest-path=./Cargo.toml --verbose --no-default-features --workspace --exclude egui_node_graph
