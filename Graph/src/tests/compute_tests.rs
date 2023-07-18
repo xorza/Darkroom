@@ -300,6 +300,7 @@ fn cached_value() -> anyhow::Result<()> {
     let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
     compute.run(&graph, &mut runtime_graph)?;
 
+    //assert that both nodes were called
     assert_eq!(test_values.borrow().a, 3);
     assert_eq!(test_values.borrow().b, 6);
     assert_eq!(test_values.borrow().result, 35);
@@ -307,7 +308,9 @@ fn cached_value() -> anyhow::Result<()> {
     let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
     compute.run(&graph, &mut runtime_graph)?;
 
+    //assert that node a was called again
     assert_eq!(test_values.borrow().a, 4);
+    //but node b was cached
     assert_eq!(test_values.borrow().b, 6);
     assert_eq!(test_values.borrow().result, 40);
 
