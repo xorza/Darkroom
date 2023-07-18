@@ -9,6 +9,8 @@ wgpu = ["graph_lib/wgpu"]
 default = ["wgpu"]
 
 [dependencies]
+common = { workspace = true }
+
 uilib = { workspace = true }
 serde = { workspace = true }
 serde_yaml = { workspace = true }

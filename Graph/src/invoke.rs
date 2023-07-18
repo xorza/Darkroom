@@ -43,12 +43,12 @@ pub trait Invoker {
     }
 }
 
+#[derive(Default)]
 pub struct UberInvoker {
     invokers: Vec<Box<dyn Invoker>>,
     function_id_to_invoker_index: HashMap<FunctionId, usize>,
     data_type_to_invoker_index: HashMap<TypeConverterDesc, usize>,
 }
-
 
 impl UberInvoker {
     pub fn new(invokers: Vec<Box<dyn Invoker>>) -> Self {
@@ -83,6 +83,14 @@ impl UberInvoker {
             function_id_to_invoker_index,
             data_type_to_invoker_index,
         }
+    }
+
+    pub fn function_by_id(&self, func_if: FunctionId) -> Function {
+        self.all_functions()
+            .iter()
+            .find(|f| f.self_id == func_if)
+            .unwrap()
+            .clone()
     }
 }
 

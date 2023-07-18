@@ -1,4 +1,5 @@
 use std::{borrow::Cow, collections::HashMap};
+use std::default::Default;
 
 use eframe::egui::{self, DragValue, Widget};
 use egui_file::{DialogType, FileDialog};
@@ -6,8 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use egui_node_graph as eng;
 use graph_lib::data::{DataType, StaticValue};
+use graph_lib::elements::basic_invoker::BasicInvoker;
 use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::{Binding, Input, NodeId, Output};
+use graph_lib::invoke::{Invoker, UberInvoker};
 
 #[derive(Clone, Debug, Default)]
 pub struct EditorNode {
@@ -38,10 +41,9 @@ struct FunctionTemplates {
 
 #[derive(Default)]
 pub struct MyState {
-    function_templates: FunctionTemplates,
+    invoker: UberInvoker,
 }
 
-#[derive(Default)]
 pub struct NodeshopApp {
     state: EditorState,
     user_state: MyState,
@@ -77,12 +79,8 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
     type UserState = MyState;
     type CategoryType = NodeCategory;
 
-    fn node_finder_label(&self, user_state: &mut Self::UserState) -> Cow<'_, str> {
-        let function = user_state.function_templates
-            .function_by_id(self.0.self_id)
-            .unwrap();
-
-        function.name.clone().into()
+    fn node_finder_label(&self, _user_state: &mut Self::UserState) -> Cow<'_, str> {
+        self.0.name.as_str().into()
     }
 
     fn node_finder_categories(&self, _user_state: &mut Self::UserState) -> Vec<Self::CategoryType> {
@@ -118,13 +116,15 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
             graph.add_output_param(node_id, name.to_string(), DataType::Int);
         };
 
-        let function = user_state.function_templates.function_by_id(self.0.self_id).unwrap();
-        for input in function.inputs.iter() {
-            input_scalar(graph, &input.name);
-        }
-        for output in function.outputs.iter() {
-            output_scalar(graph, &output.name);
-        }
+        let function = user_state.invoker.function_by_id(self.0.self_id);
+
+        function.inputs
+            .iter()
+            .filter(|&input| input.variants.is_none())
+            .for_each(|input| input_scalar(graph, &input.name));
+        function.outputs
+            .iter()
+            .for_each(|output| output_scalar(graph, &output.name));
     }
 }
 
@@ -197,12 +197,18 @@ impl eng::NodeDataTrait for EditorNode {
 }
 
 impl FunctionTemplates {
-    fn load(&mut self) {
-        todo!("load functions");
-    }
-
     fn function_by_id(&self, id: FunctionId) -> Option<&Function> {
         self.templates.iter().find(|f| f.0.self_id == id).map(|f| &f.0)
+    }
+}
+
+impl From<Vec<Function>> for FunctionTemplates {
+    fn from(functions: Vec<Function>) -> Self {
+        let templates = functions.iter()
+            .map(|f| FunctionTemplate(f.clone()))
+            .collect();
+
+        Self { templates }
     }
 }
 
@@ -365,6 +371,17 @@ impl NodeshopApp {
         }
 
         let yaml = serde_yaml::to_string(&graph)?;
+
+        let filename = common::get_file_extension(filename)
+            .ok()
+            .map(|ext| {
+                if ext == "yaml" {
+                    filename.to_string()
+                } else {
+                    format!("{}.yaml", filename)
+                }
+            })
+            .unwrap_or_else(|| format!("{}.yaml", filename));
         std::fs::write(filename, yaml)?;
 
         Ok(())
@@ -382,9 +399,8 @@ impl NodeshopApp {
         let mut output_addresses = HashMap::<ArgAddress, eng::OutputId>::new();
 
         for (_index, node) in graph.graph.nodes().iter().enumerate() {
-            let function = self.user_state.function_templates
-                .function_by_id(node.function_id)
-                .unwrap();
+            let function = self.user_state.invoker
+                .function_by_id(node.function_id);
 
             let node_data = EditorNode {
                 template: FunctionTemplate(function.clone()),
@@ -461,5 +477,27 @@ impl NodeshopApp {
         }
 
         Ok(())
+    }
+}
+
+impl Default for NodeshopApp {
+    fn default() -> Self {
+        let invoker = UberInvoker::new(
+            vec![
+                Box::new(BasicInvoker::default()),
+            ]
+        );
+        let function_templates = FunctionTemplates::from(
+            invoker.all_functions()
+        );
+
+        NodeshopApp {
+            state: EditorState::default(),
+            function_templates,
+            user_state: MyState {
+                invoker,
+            },
+            file_dialog: None,
+        }
     }
 }

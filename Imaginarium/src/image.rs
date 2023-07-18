@@ -1,5 +1,4 @@
 use std::fs::File;
-use std::path::Path;
 
 use image_lib::ImageFormat;
 use tiff::decoder::DecodingResult;
@@ -7,15 +6,6 @@ use tiff::decoder::DecodingResult;
 use crate::color_format::*;
 use crate::image_convertion::convert_image;
 use crate::tiff_extentions::save_tiff;
-
-fn get_file_extension(filename: &str) -> anyhow::Result<&str> {
-    let extension = Path::new(filename)
-        .extension()
-        .and_then(|os_str| os_str.to_str())
-        .ok_or(anyhow::anyhow!("Failed to get file extension"))?;
-
-    Ok(extension)
-}
 
 fn align_stride(n: u32) -> u32 {
     // align to 4
@@ -68,7 +58,7 @@ impl Image {
     }
 
     pub fn read_file(filename: &str) -> anyhow::Result<Image> {
-        let extension = get_file_extension(filename)?;
+        let extension = common::get_file_extension(filename)?;
 
         let image =
             match extension {
@@ -180,7 +170,7 @@ impl Image {
 
 
     pub fn save_file(&self, filename: &str) -> anyhow::Result<()> {
-        let extension = get_file_extension(filename)?;
+        let extension = common::get_file_extension(filename)?;
 
         match extension {
             "png" => self.save_png(filename)?,

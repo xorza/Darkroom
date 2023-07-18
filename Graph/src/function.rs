@@ -11,6 +11,7 @@ pub struct OutputInfo {
     pub data_type: DataType,
 }
 
+
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct InputInfo {
     pub name: String,
@@ -19,7 +20,7 @@ pub struct InputInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "skip_serializing_if_none_or_empty")]
-    pub variants: Option<Vec<StaticValue>>,
+    pub variants: Option<Vec<(StaticValue, String)>>,
 }
 
 id_type!(FunctionId);
@@ -47,7 +48,7 @@ impl Function {
 }
 
 
-fn skip_serializing_if_none_or_empty(opt: &Option<Vec<StaticValue>>) -> bool {
+fn skip_serializing_if_none_or_empty(opt: &Option<Vec<(StaticValue, String)>>) -> bool {
     opt.as_ref().map_or(true, |v| v.is_empty())
 }
 

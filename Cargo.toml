@@ -34,5 +34,6 @@ glyph_brush = "*"
 mlua = { version = "*", features = ["lua54", "vendored"] }
 egui_file = "*"
 eframe = { version = "*", features = ["wgpu"] }
+strum = "*"
 strum_macros = "*"
 once_cell = "*"
