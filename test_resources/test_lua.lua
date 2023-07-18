@@ -4,10 +4,10 @@ end
 function mult(a, b)
     return a * b
 end
-function val1()
+function get_a()
     return 4
 end
-function val2()
+function get_b()
     return 9
 end
 function print_func(message)
@@ -17,7 +17,7 @@ end
 functions = {
     {
         id = "a937baff-822d-48fd-9154-58751539b59b",
-        name = "val2",
+        name = "get_b",
         inputs = { },
         outputs = {
             { "result", "int" }
@@ -25,7 +25,7 @@ functions = {
     },
     {
         id = "d4d27137-5a14-437a-8bb5-b2f7be0941a2",
-        name = "val1",
+        name = "get_a",
         inputs = { },
         outputs = {
             { "result", "int" }
@@ -62,9 +62,9 @@ functions = {
 }
 
 function graph()
-    local a = val2()
-    local b = val1()
-    local c_sum_a_b = sum(a, b)
-    local d_mult_b_c = mult(b, c_sum_a_b)
-    print_func(d_mult_b_c)
+    local a = get_a() --4
+    local b = get_b() --9
+    local c_sum_a_b = sum(a, b) --13
+    local d_mult_b_c = mult(b, c_sum_a_b) --117
+    print_func(d_mult_b_c) --117
 end

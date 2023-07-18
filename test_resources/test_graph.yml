@@ -24,7 +24,7 @@ nodes:
         data_type: Int
   - self_id: 5f110618-8faa-4629-8f5d-473c236de7d1
     function_id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
-    name: val1
+    name: get_a
     behavior: Active
     is_output: false
     should_cache_outputs: false
@@ -33,7 +33,7 @@ nodes:
         data_type: Int
   - self_id: 6fc6b533-c375-451c-ba3a-a14ea217cb30
     function_id: a937baff-822d-48fd-9154-58751539b59b
-    name: val2
+    name: get_b
     behavior: Passive
     is_output: false
     should_cache_outputs: false

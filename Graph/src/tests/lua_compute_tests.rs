@@ -100,10 +100,10 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
 
     let binding = mult_node.inputs[1].binding.as_output_binding().unwrap();
     let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
-    assert_eq!(bound_node.name, "val1");
+    assert_eq!(bound_node.name, "get_b");
 
     let output = invoker.get_output();
-    assert_eq!(output, "52");
+    assert_eq!(output, "117");
 
     Ok(())
 }

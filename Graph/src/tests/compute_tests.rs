@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::str::FromStr;
 
 use crate::compute::Compute;
@@ -8,17 +10,12 @@ use crate::lambda_invoker::LambdaInvoker;
 use crate::preprocess::Preprocess;
 use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 
-static mut RESULT: i64 = 0;
-static mut A: i64 = 2;
-static mut B: i64 = 5;
-
-fn setup() {
-    unsafe {
-        RESULT = 0;
-        A = 2;
-        B = 5;
-    }
+struct TestValues {
+    a: i64,
+    b: i64,
+    result: i64,
 }
+
 
 fn create_compute<GetA, GetB, SetResult>(
     get_a: GetA, get_b: GetB, result: SetResult,
@@ -28,8 +25,6 @@ where
     GetA: Fn() -> i64 + 'static,
     GetB: Fn() -> i64 + 'static,
 {
-    setup();
-
     let mut invoker = LambdaInvoker::default();
 
     // print
@@ -55,7 +50,7 @@ where
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
-            name: "val 1".to_string(),
+            name: "get_a".to_string(),
             behavior: FunctionBehavior::Passive,
             is_output: false,
             inputs: vec![],
@@ -73,7 +68,7 @@ where
     invoker.add_lambda(
         Function {
             self_id: FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
-            name: "val 2".to_string(),
+            name: "get_b".to_string(),
             behavior: FunctionBehavior::Passive,
             is_output: false,
             inputs: vec![],
@@ -163,14 +158,77 @@ where
     Ok(invoker.into())
 }
 
+
+#[test]
+fn invoke_context_test() -> anyhow::Result<()> {
+    fn box_test_(ctx: &mut InvokeContext) {
+        let n = *ctx.get_or_default::<u32>();
+        assert_eq!(n, 0);
+        let n = ctx.get_or_default::<i32>();
+        assert_eq!(*n, 0);
+        *n = 13;
+    }
+
+    let mut ctx = InvokeContext::default();
+    box_test_(&mut ctx);
+    let n = ctx.get_or_default::<i32>();
+    assert_eq!(*n, 13);
+    let n = *ctx.get_or_default::<u32>();
+    assert_eq!(n, 0);
+
+    Ok(())
+}
+
+#[test]
+fn simple_compute_test() -> anyhow::Result<()> {
+    let test_values = Rc::new(RefCell::new(TestValues {
+        a: 2,
+        b: 5,
+        result: 0,
+    }));
+
+    let test_values_a = test_values.clone();
+    let test_values_b = test_values.clone();
+    let test_values_result = test_values.clone();
+    let compute = create_compute(
+        move || test_values_a.borrow().a,
+        move || test_values_b.borrow().b,
+        move |result| test_values_result.borrow_mut().result = result,
+    )?;
+
+    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+    let preprocess = Preprocess::default();
+
+    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    compute.run(&graph, &mut runtime_graph)?;
+    assert_eq!(test_values.borrow().result, 35);
+
+    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    compute.run(&graph, &mut runtime_graph)?;
+    assert_eq!(test_values.borrow().result, 35);
+
+    test_values.borrow_mut().b = 7;
+    graph.node_by_name_mut("get_b").unwrap().behavior = FunctionBehavior::Active;
+    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    compute.run(&graph, &mut runtime_graph)?;
+    assert_eq!(test_values.borrow().result, 63);
+
+    Ok(())
+}
+
 #[test]
 fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
-    setup();
+    let test_values = Rc::new(RefCell::new(TestValues {
+        a: 2,
+        b: 5,
+        result: 0,
+    }));
 
+    let test_values_result = test_values.clone();
     let compute = create_compute(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
-        |result| unsafe { RESULT = result; },
+        move |result| test_values_result.borrow_mut().result = result,
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
@@ -197,7 +255,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
     let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
 
     compute.run(&graph, &mut runtime_graph)?;
-    assert_eq!(unsafe { RESULT }, 360);
+    assert_eq!(test_values.borrow().result, 360);
 
     drop(graph);
 
@@ -205,51 +263,55 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
 }
 
 #[test]
-fn simple_compute_test() -> anyhow::Result<()> {
-    setup();
+fn cached_value() -> anyhow::Result<()> {
+    let test_values = Rc::new(RefCell::new(TestValues {
+        a: 2,
+        b: 5,
+        result: 0,
+    }));
 
+    let test_values_a = test_values.clone();
+    let test_values_b = test_values.clone();
+    let test_values_result = test_values.clone();
     let compute = create_compute(
-        || unsafe { A },
-        || unsafe { B },
-        |result| unsafe { RESULT = result; },
+        move || {
+            let a1 = test_values_a.borrow().a;
+            test_values_a.borrow_mut().a += 1;
+
+            a1
+        },
+        move || {
+            let b1 = test_values_b.borrow().b;
+            test_values_b.borrow_mut().b += 1;
+            if b1 == 6 {
+                panic!("Unexpected call to get_b");
+            }
+
+            b1
+        },
+        move |result| test_values_result.borrow_mut().result = result,
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+    graph.node_by_name_mut("sum").unwrap()
+        .should_cache_outputs = false;
     let preprocess = Preprocess::default();
 
     let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
     compute.run(&graph, &mut runtime_graph)?;
-    assert_eq!(unsafe { RESULT }, 35);
+
+    assert_eq!(test_values.borrow().a, 3);
+    assert_eq!(test_values.borrow().b, 6);
+    assert_eq!(test_values.borrow().result, 35);
 
     let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
     compute.run(&graph, &mut runtime_graph)?;
-    assert_eq!(unsafe { RESULT }, 35);
 
-    unsafe { B = 7; }
-    graph.node_by_name_mut("val2").unwrap().behavior = FunctionBehavior::Active;
-    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
-    compute.run(&graph, &mut runtime_graph)?;
-    assert_eq!(unsafe { RESULT }, 63);
+    assert_eq!(test_values.borrow().a, 4);
+    assert_eq!(test_values.borrow().b, 6);
+    assert_eq!(test_values.borrow().result, 40);
 
-    Ok(())
-}
-
-#[test]
-fn invoke_context_test() -> anyhow::Result<()> {
-    fn box_test_(ctx: &mut InvokeContext) {
-        let n = *ctx.get_or_default::<u32>();
-        assert_eq!(n, 0);
-        let n = ctx.get_or_default::<i32>();
-        assert_eq!(*n, 0);
-        *n = 13;
-    }
-
-    let mut ctx = InvokeContext::default();
-    box_test_(&mut ctx);
-    let n = ctx.get_or_default::<i32>();
-    assert_eq!(*n, 13);
-    let n = *ctx.get_or_default::<u32>();
-    assert_eq!(n, 0);
+    drop(graph);
 
     Ok(())
 }

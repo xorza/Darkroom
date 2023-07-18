@@ -98,11 +98,14 @@ impl Compute {
             inputs.fill();
         }
 
-        debug_assert!(
-            runtime_graph.nodes
-                .iter()
-                .all(|r_node| r_node.total_binding_count == 0)
-        );
+        for r_node in runtime_graph.nodes.iter_mut() {
+            if !r_node.should_cache_outputs {
+                r_node.output_values = None;
+            }
+
+            assert_eq!(r_node.total_binding_count, 0);
+        }
+
 
         Ok(())
     }

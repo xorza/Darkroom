@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::mem::take;
 
 use crate::graph::*;
-use crate::runtime_graph::{RuntimeGraph, RuntimeNode};
+use crate::runtime_graph::{InvokeContext, RuntimeGraph, RuntimeNode};
 
 #[derive(Default)]
 pub struct Preprocess {}
@@ -65,34 +65,39 @@ impl Preprocess {
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
 
-                let mut r_node =
-                    previous_runtime
-                        .node_by_id_mut(node_id)
-                        .map(take)
-                        .unwrap_or_else(|| {
-                            RuntimeNode {
-                                node_id,
-                                name: node.name.clone(),
-                                is_output: node.is_output,
-                                has_missing_inputs: false,
-                                behavior: node.behavior,
-                                should_execute: false,
-                                should_cache_outputs: node.should_cache_outputs,
-                                run_time: 0.0,
-                                invoke_context: Default::default(),
-                                output_values: None,
-                                output_binding_count: vec![0; node.outputs.len()],
-                                total_binding_count: 0,
-                            }
-                        });
-                assert_eq!(r_node.output_binding_count.len(), node.outputs.len());
-                assert_eq!(r_node.total_binding_count, 0);
-                debug_assert_eq!(r_node.name, node.name);
+                let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
-                r_node.behavior = node.behavior;
-                r_node.has_missing_inputs = false;
-                r_node.output_binding_count.fill(0);
-                r_node.should_execute = false;
+                let (invoke_context, output_values) =
+                    if let Some(prev_r_node) = prev_r_node {
+                        assert_eq!(prev_r_node.output_binding_count.len(), node.outputs.len());
+                        debug_assert_eq!(prev_r_node.name, node.name);
+
+                        (
+                            take(&mut prev_r_node.invoke_context),
+                            prev_r_node.output_values.take()
+                        )
+                    } else {
+                        (
+                            InvokeContext::default(),
+                            None
+                        )
+                    };
+
+
+                let r_node = RuntimeNode {
+                    node_id,
+                    name: node.name.clone(),
+                    is_output: node.is_output,
+                    has_missing_inputs: false,
+                    behavior: node.behavior,
+                    should_execute: false,
+                    should_cache_outputs: node.should_cache_outputs,
+                    run_time: 0.0,
+                    invoke_context,
+                    output_values,
+                    output_binding_count: vec![0; node.outputs.len()],
+                    total_binding_count: 0,
+                };
 
                 r_node
             })
@@ -102,6 +107,7 @@ impl Preprocess {
     }
 
     // in forward pass, mark active nodes and nodes with missing inputs
+    // if node is passive, mark it for caching outputs
     fn forward_pass(&self,
                     graph: &Graph,
                     r_nodes: &mut Vec<RuntimeNode>,
@@ -128,6 +134,9 @@ impl Preprocess {
                 }
             }
 
+            if r_node.behavior == FunctionBehavior::Passive {
+                r_node.should_cache_outputs = true;
+            }
             r_nodes[index] = r_node;
         }
     }
