@@ -84,6 +84,7 @@ impl Compute {
             let outputs =
                 r_node.output_values
                     .get_or_insert_with(|| vec![None; node.outputs.len()]);
+            assert_eq!(outputs.len(), node.outputs.len());
 
             r_node.run_time = {
                 let start = std::time::Instant::now();
