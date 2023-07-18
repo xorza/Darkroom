@@ -1,2 +1,2 @@
 mod wgpu_invoker;
-mod texture;
+mod image_texture;

@@ -2,12 +2,9 @@ use std::collections::HashMap;
 
 use imaginarium::wgpu::wgpu_context::WgpuContext;
 
-use crate::data::{DataType, DynamicValue};
-use crate::elements::image::IMAGE_DATA_TYPE;
 use crate::function::{Function, FunctionId};
-use crate::invoke::{InvokeArgs, Invoker, TypeConverterDesc};
+use crate::invoke::{InvokeArgs, Invoker};
 use crate::runtime_graph::InvokeContext;
-use crate::wgpu::texture::TEXTURE_DATA_TYPE;
 
 pub trait WgpuInvokable {
     fn new(wgpu_context: &WgpuContext) -> Self where Self: Sized;
@@ -46,19 +43,6 @@ impl Invoker for WgpuInvoker {
             .collect()
     }
 
-    fn all_converters(&self) -> Vec<TypeConverterDesc> {
-        vec![
-            TypeConverterDesc {
-                src: IMAGE_DATA_TYPE.clone(),
-                dst: TEXTURE_DATA_TYPE.clone(),
-            },
-            TypeConverterDesc {
-                src: TEXTURE_DATA_TYPE.clone(),
-                dst: IMAGE_DATA_TYPE.clone(),
-            },
-        ]
-    }
-
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -73,8 +57,5 @@ impl Invoker for WgpuInvoker {
         Ok(())
     }
 
-    fn convert_value(&self, _src_value: &DynamicValue, _dst_data_type: &DataType) -> DynamicValue {
-        unimplemented!("TODO: Implement Invoker::convert_value in {}", std::any::type_name::<Self>());
-    }
 }
 

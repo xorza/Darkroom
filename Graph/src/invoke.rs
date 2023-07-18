@@ -25,8 +25,6 @@ pub trait Invokable {
 
 pub trait Invoker {
     fn all_functions(&self) -> Vec<Function> { vec![] }
-    fn all_converters(&self) -> Vec<TypeConverterDesc> { vec![] }
-
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -35,6 +33,8 @@ pub trait Invoker {
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>;
 
+    // for now decided there will be no type conversion
+    fn all_converters(&self) -> Vec<TypeConverterDesc> { vec![] }
     fn convert_value(&self,
                      _src_value: &DynamicValue,
                      _dst_data_type: &DataType)
@@ -90,10 +90,6 @@ impl Invoker for UberInvoker {
     fn all_functions(&self) -> Vec<Function> {
         self.invokers.iter().flat_map(|invoker| invoker.all_functions()).collect()
     }
-    fn all_converters(&self) -> Vec<TypeConverterDesc> {
-        self.invokers.iter().flat_map(|invoker| invoker.all_converters()).collect()
-    }
-
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -108,6 +104,10 @@ impl Invoker for UberInvoker {
 
         let invoker = &self.invokers[invoker_index];
         invoker.invoke(function_id, ctx, inputs, outputs)
+    }
+
+    fn all_converters(&self) -> Vec<TypeConverterDesc> {
+        self.invokers.iter().flat_map(|invoker| invoker.all_converters()).collect()
     }
 
     fn convert_value(&self, src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
