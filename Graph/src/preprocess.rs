@@ -91,7 +91,7 @@ impl Preprocess {
                     has_missing_inputs: false,
                     behavior: node.behavior,
                     should_execute: false,
-                    should_cache_outputs: node.should_cache_outputs,
+                    should_cache_outputs: node.cache_outputs,
                     run_time: 0.0,
                     invoke_context,
                     output_values,

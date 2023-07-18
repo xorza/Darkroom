@@ -18,3 +18,13 @@ pub fn is_debug() -> bool {
     cfg!(debug_assertions)
 }
 
+pub trait Apply<T> {
+    fn apply(&mut self, f: fn(&mut T));
+}
+impl<T> Apply<T> for Option<T> {
+    fn apply(&mut self, f: fn(&mut T)) {
+        if let Some(v) = self.as_mut() {
+            f(v);
+        }
+    }
+}

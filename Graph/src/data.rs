@@ -210,6 +210,28 @@ impl From<DataType> for DynamicValue {
         }
     }
 }
+impl From<&DataType> for StaticValue {
+    fn from(data_type: &DataType) -> Self {
+        match data_type {
+            DataType::Float => StaticValue::Float(0.0),
+            DataType::Int => StaticValue::Int(0),
+            DataType::Bool => StaticValue::Bool(false),
+            DataType::String => StaticValue::String("".to_string()),
+            _ => panic!("No value for {:?}", data_type),
+        }
+    }
+}
+impl From<&DataType> for DynamicValue {
+    fn from(data_type: &DataType) -> Self {
+        match data_type {
+            DataType::Float => DynamicValue::Float(0.0),
+            DataType::Int => DynamicValue::Int(0),
+            DataType::Bool => DynamicValue::Bool(false),
+            DataType::String => DynamicValue::String("".to_string()),
+            _ => panic!("No value for {:?}", data_type),
+        }
+    }
+}
 
 impl From<i64> for StaticValue {
     fn from(value: i64) -> Self {

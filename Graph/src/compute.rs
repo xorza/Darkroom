@@ -1,5 +1,7 @@
 use std::ops::{Index, IndexMut};
 
+use common::Apply;
+
 use crate::data::{DataType, DynamicValue};
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
@@ -100,7 +102,7 @@ impl Compute {
 
         for r_node in runtime_graph.nodes.iter_mut() {
             if !r_node.should_cache_outputs {
-                r_node.output_values = None;
+                r_node.output_values.apply(|values| values.fill(None));
             }
 
             assert_eq!(r_node.total_binding_count, 0);

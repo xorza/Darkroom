@@ -294,7 +294,7 @@ fn cached_value() -> anyhow::Result<()> {
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap()
-        .should_cache_outputs = false;
+        .cache_outputs = false;
     let preprocess = Preprocess::default();
 
     let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());

@@ -93,7 +93,7 @@ impl Default for BasicInvoker {
         invoker.add_lambda(
             Function {
                 self_id: FunctionId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
-                name: "math two argument operation".to_string(),
+                name: "2 arg math".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 inputs: vec![
@@ -139,6 +139,39 @@ impl Default for BasicInvoker {
                 op.invoke(&inputs[0..1], ctx)
                     .map(|result| outputs[0] = Some(result))
                     .expect("failed to invoke math two argument operation");
+            });
+
+        // to string
+        invoker.add_lambda(
+            Function {
+                self_id: FunctionId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
+                name: "float to string".to_string(),
+                behavior: FunctionBehavior::Passive,
+                is_output: false,
+                inputs: vec![
+                    InputInfo {
+                        name: "value".to_string(),
+                        is_required: true,
+                        data_type: DataType::Float,
+                        default_value: None,
+                        variants: None,
+                    },
+                ],
+                outputs: vec![
+                    OutputInfo {
+                        name: "result".to_string(),
+                        data_type: DataType::String,
+                    }
+                ],
+            },
+            |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
+
+                let value: f64 = inputs[0].as_ref().unwrap().as_float();
+                let result = format!("{}", value);
+
+                outputs[0] = Some(DynamicValue::String(result));
             });
 
         Self {

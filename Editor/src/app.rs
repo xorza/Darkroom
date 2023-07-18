@@ -1,7 +1,7 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 use std::default::Default;
 
-use eframe::egui::{self, DragValue, Widget};
+use eframe::egui::{self, Checkbox, DragValue, TextEdit, Widget};
 use egui_file::{DialogType, FileDialog};
 use serde::{Deserialize, Serialize};
 
@@ -9,13 +9,23 @@ use egui_node_graph as eng;
 use graph_lib::data::{DataType, StaticValue};
 use graph_lib::elements::basic_invoker::BasicInvoker;
 use graph_lib::function::{Function, FunctionId};
-use graph_lib::graph::{Binding, Input, NodeId, Output};
+use graph_lib::graph::{Binding, Graph, Node, NodeId, OutputBinding};
 use graph_lib::invoke::{Invoker, UberInvoker};
 
-#[derive(Clone, Debug, Default)]
+type Positions = Vec<(NodeId, (f32, f32))>;
+
+#[derive(Debug, Eq, PartialEq, Hash, Clone)]
+struct ArgAddress {
+    node_id: NodeId,
+    arg_index: u32,
+}
+
+#[derive(Clone)]
 pub struct EditorNode {
-    template: FunctionTemplate,
+    node_id: NodeId,
+    function_id: FunctionId,
     is_output: bool,
+    cache_outputs: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -26,9 +36,16 @@ pub struct EditorValue(StaticValue);
 
 enum NodeCategory {}
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum MyResponse {
     ToggleNodeOutput(eng::NodeId),
+    ToggleNodeCacheOutputs(eng::NodeId),
+    SetInputValue {
+        node_id: eng::NodeId,
+        input_index: u32,
+        value: StaticValue,
+    },
+
 }
 
 type EditorGraph = eng::Graph<EditorNode, DataType, EditorValue>;
@@ -42,6 +59,9 @@ struct FunctionTemplates {
 #[derive(Default)]
 pub struct MyState {
     invoker: UberInvoker,
+    graph: Graph,
+    input_mapping: Vec<(eng::InputId, ArgAddress)>,
+    output_mapping: Vec<(eng::OutputId, ArgAddress)>,
 }
 
 pub struct NodeshopApp {
@@ -62,7 +82,10 @@ impl eng::CategoryTrait for NodeCategory {
 impl eng::DataTypeTrait<MyState> for DataType {
     fn data_type_color(&self, _user_state: &mut MyState) -> egui::Color32 {
         match self {
-            DataType::Int => egui::Color32::from_rgb(38, 109, 211),
+            DataType::Int
+            | DataType::Float => egui::Color32::from_rgb(38, 109, 211),
+            DataType::Bool => egui::Color32::from_rgb(211, 38, 109),
+            DataType::String => egui::Color32::from_rgb(109, 211, 38),
             _ => egui::Color32::from_rgb(0, 0, 0),
         }
     }
@@ -70,6 +93,43 @@ impl eng::DataTypeTrait<MyState> for DataType {
     fn name(&self) -> Cow<'static, str> {
         self.to_string().into()
     }
+}
+
+fn build_node_from_func(
+    editor_graph: &mut EditorGraph,
+    function: &Function,
+    eng_node_id: eng::NodeId,
+) {
+    function.inputs
+        .iter()
+        .filter(|input| input.variants.is_none())
+        .for_each(|input| {
+            let shown_inline = input.variants.is_none();
+            let param_kind = if input.data_type.is_custom() {
+                eng::InputParamKind::ConnectionOnly
+            } else {
+                eng::InputParamKind::ConnectionOrConstant
+            };
+
+            let _input_id = editor_graph.add_input_param(
+                eng_node_id,
+                input.name.to_string(),
+                input.data_type.clone(),
+                EditorValue(StaticValue::from(&input.data_type)),
+                param_kind,
+                shown_inline,
+            );
+        });
+
+    function.outputs
+        .iter()
+        .for_each(|output| {
+            let _output_id = editor_graph.add_output_param(
+                eng_node_id,
+                output.name.to_string(),
+                output.data_type.clone(),
+            );
+        });
 }
 
 impl eng::NodeTemplateTrait for FunctionTemplate {
@@ -92,39 +152,26 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
-        EditorNode { template: self.clone(), is_output: self.0.is_output }
+        EditorNode {
+            function_id: self.0.self_id,
+            node_id: NodeId::nil(),
+            is_output: self.0.is_output,
+            cache_outputs: false,
+        }
     }
 
     fn build_node(
         &self,
         graph: &mut EditorGraph,
-        user_state: &mut Self::UserState,
+        _user_state: &mut Self::UserState,
         node_id: eng::NodeId,
     ) {
-        let input_scalar = |graph: &mut EditorGraph, name: &str| {
-            graph.add_input_param(
-                node_id,
-                name.to_string(),
-                DataType::Int,
-                EditorValue(StaticValue::Int(0)),
-                eng::InputParamKind::ConnectionOrConstant,
-                true,
-            );
-        };
-
-        let output_scalar = |graph: &mut EditorGraph, name: &str| {
-            graph.add_output_param(node_id, name.to_string(), DataType::Int);
-        };
-
-        let function = user_state.invoker.function_by_id(self.0.self_id);
-
-        function.inputs
-            .iter()
-            .filter(|&input| input.variants.is_none())
-            .for_each(|input| input_scalar(graph, &input.name));
-        function.outputs
-            .iter()
-            .for_each(|output| output_scalar(graph, &output.name));
+        let function = &self.0;
+        build_node_from_func(
+            graph,
+            function,
+            node_id,
+        );
     }
 }
 
@@ -135,26 +182,58 @@ impl eng::WidgetValueTrait for EditorValue {
 
     fn value_widget(
         &mut self,
+        param_index: usize,
         param_name: &str,
-        _node_id: eng::NodeId,
+        node_id: eng::NodeId,
         ui: &mut egui::Ui,
         _user_state: &mut MyState,
         _node_data: &EditorNode,
     ) -> Vec<Self::Response> {
         #[allow(clippy::single_match)]
-        match &mut self.0 {
+            let mut editor_value = self.0.clone();
+
+        match &mut editor_value {
             StaticValue::Int(value) => {
                 ui.horizontal(|ui| {
                     ui.label(param_name);
                     ui.add(DragValue::new(value));
                 });
             }
+            StaticValue::Float(value) => {
+                ui.horizontal(|ui| {
+                    ui.label(param_name);
+                    ui.add(DragValue::new(value));
+                });
+            }
+            StaticValue::String(value) => {
+                ui.horizontal(|ui| {
+                    ui.label(param_name);
+                    ui.add(TextEdit::singleline(value));
+                });
+            }
+            StaticValue::Bool(value) => {
+                ui.horizontal(|ui| {
+                    ui.label(param_name);
+                    ui.add(Checkbox::new(value, ""));
+                });
+            }
 
             _ => {}
         }
 
-        // This allows you to return your responses from the inline widgets.
-        Vec::new()
+        if editor_value != self.0 {
+            self.0 = editor_value.clone();
+
+            vec![
+                MyResponse::SetInputValue {
+                    node_id,
+                    input_index: param_index as u32,
+                    value: editor_value,
+                }
+            ]
+        } else {
+            vec![]
+        }
     }
 }
 
@@ -171,28 +250,102 @@ impl eng::NodeDataTrait for EditorNode {
         ui: &mut egui::Ui,
         node_id: eng::NodeId,
         _graph: &EditorGraph,
-        _user_state: &mut Self::UserState,
+        user_state: &mut Self::UserState,
     ) -> Vec<eng::NodeResponse<MyResponse, EditorNode>>
     where
         MyResponse: eng::UserResponseTrait,
     {
-        let mut button: egui::Button;
-        if self.is_output {
-            button =
-                egui::Button::new(
-                    egui::RichText::new("Output")
-                        .color(egui::Color32::BLACK))
-                    .fill(egui::Color32::GOLD);
-        } else {
-            button = egui::Button::new(egui::RichText::new("Output"));
-        }
-        button = button.min_size(egui::Vec2::new(70.0, 0.0));
+        let mut responses = vec![];
+        let function = user_state.invoker.function_by_id(self.function_id);
+        let node = user_state.graph.node_by_id(self.node_id).unwrap();
 
-        if button.ui(ui).clicked() {
-            vec![eng::NodeResponse::User(MyResponse::ToggleNodeOutput(node_id))]
-        } else {
-            vec![]
+        {
+            let is_output_button =
+                if self.is_output {
+                    egui::Button::new(
+                        egui::RichText::new("Active")
+                            .color(egui::Color32::BLACK)
+                    )
+                        .fill(egui::Color32::GOLD)
+                    // .sense(egui::Sense::hover())
+                } else {
+                    egui::Button::new(egui::RichText::new("Active"))
+                }
+                    .min_size(egui::Vec2::new(70.0, 0.0));
+            if is_output_button.ui(ui).clicked() {
+                responses.push(eng::NodeResponse::User(MyResponse::ToggleNodeOutput(node_id)));
+            }
         }
+
+        if !self.is_output {
+            let cache_outputs_button =
+                if self.cache_outputs {
+                    egui::Button::new(
+                        egui::RichText::new("Once")
+                            .color(egui::Color32::BLACK)
+                    )
+                        .fill(egui::Color32::GOLD)
+                } else {
+                    egui::Button::new(egui::RichText::new("Once"))
+                }
+                    .min_size(egui::Vec2::new(70.0, 0.0));
+            if cache_outputs_button.ui(ui).clicked() {
+                responses.push(eng::NodeResponse::User(MyResponse::ToggleNodeCacheOutputs(node_id)));
+            }
+        }
+
+        {
+            for (index, input) in
+            function.inputs.iter().enumerate()
+                .filter(|&(_index, input)| input.variants.is_some())
+            {
+                let variants: &Vec<(StaticValue, String)> = input.variants
+                    .as_ref()
+                    .unwrap();
+
+                let mut current_value = node
+                    .inputs[index]
+                    .const_value
+                    .as_ref()
+                    .unwrap_or_else(|| {
+                        &variants
+                            .first()
+                            .expect("No variants")
+                            .0
+                    })
+                    .clone();
+
+                let current_value_label = variants
+                    .iter()
+                    .find(|(value, _)| *value == current_value)
+                    .map(|(_, name)| name)
+                    .expect("No variant with current value");
+
+                egui::ComboBox::from_label(input.name.clone())
+                    .selected_text(current_value_label)
+                    .show_ui(ui, |ui| {
+                        for (value, name) in variants {
+                            ui.selectable_value(
+                                &mut current_value,
+                                value.clone(),
+                                name,
+                            );
+                        }
+                    });
+
+                if Some(&current_value) != node.inputs[index].const_value.as_ref() {
+                    responses.push(eng::NodeResponse::User(
+                        MyResponse::SetInputValue {
+                            node_id,
+                            input_index: index as u32,
+                            value: current_value,
+                        }
+                    ));
+                }
+            }
+        }
+
+        responses
     }
 }
 
@@ -254,13 +407,126 @@ impl eframe::App for NodeshopApp {
             match node_response {
                 eng::NodeResponse::User(user_event) => {
                     match user_event {
-                        MyResponse::ToggleNodeOutput(node) => {
-                            let node = &mut self.state.graph.nodes[node].user_data;
+                        MyResponse::ToggleNodeOutput(node_id) => {
+                            let eng_node = &mut self.state.graph.nodes[node_id].user_data;
+                            let node = self.user_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
                             node.is_output = !node.is_output;
+                            eng_node.is_output = node.is_output;
+                            if node.is_output {
+                                node.cache_outputs = false;
+                                eng_node.cache_outputs = false;
+                            }
+                        }
+                        MyResponse::ToggleNodeCacheOutputs(node_id) => {
+                            let eng_node = &mut self.state.graph.nodes[node_id].user_data;
+                            let node = self.user_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
+                            node.cache_outputs = !node.cache_outputs;
+                            eng_node.cache_outputs = node.cache_outputs;
+                        }
+                        MyResponse::SetInputValue { node_id, input_index, value } => {
+                            let eng_node = &mut self.state.graph.nodes[node_id].user_data;
+                            let node = self.user_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
+                            node.inputs[input_index as usize].const_value = Some(value);
                         }
                     }
                 }
-                _ => {}
+
+                eng::NodeResponse::ConnectEventStarted(_node_id, _parameter_id) => {}
+                eng::NodeResponse::ConnectEventEnded { input: input_id, output: output_id } => {
+                    let input_address = self.user_state.input_mapping
+                        .iter()
+                        .find_map(|(id, address)| {
+                            if *id == input_id {
+                                Some(address)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+
+                    let output_address = self.user_state.output_mapping
+                        .iter()
+                        .find_map(|(id, address)| {
+                            if *id == output_id {
+                                Some(address)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+
+                    let input_node = self.user_state.graph
+                        .node_by_id_mut(input_address.node_id)
+                        .unwrap();
+
+                    input_node.inputs[input_address.arg_index as usize].binding =
+                        Binding::Output(OutputBinding {
+                            output_node_id: output_address.node_id,
+                            output_index: output_address.arg_index as u32,
+                        });
+                }
+                eng::NodeResponse::CreatedNode(node_id) => {
+                    let eng_node = &mut self.state.graph.nodes[node_id];
+                    let function = self.user_state.invoker.function_by_id(eng_node.user_data.function_id);
+                    let node = Node::from_function(&function);
+                    eng_node.user_data.node_id = node.id();
+
+                    eng_node.inputs
+                        .iter()
+                        .enumerate()
+                        .for_each(|(index, (_name, input_id))| {
+                            self.user_state.input_mapping.push((*input_id, ArgAddress {
+                                node_id: node.id(),
+                                arg_index: index as u32,
+                            }));
+                        });
+                    eng_node.outputs
+                        .iter()
+                        .enumerate()
+                        .for_each(|(index, (_name, output_id))| {
+                            self.user_state.output_mapping.push((*output_id, ArgAddress {
+                                node_id: node.id(),
+                                arg_index: index as u32,
+                            }));
+                        });
+
+                    self.user_state.graph.add_node(node);
+                }
+                eng::NodeResponse::SelectNode(node_id) => {
+                    let eng_node = &mut self.state.graph.nodes[node_id];
+                    let node = self.user_state.graph.node_by_id_mut(eng_node.user_data.node_id).unwrap();
+                    assert_eq!(node.inputs.len(), eng_node.inputs.len());
+                    assert_eq!(node.outputs.len(), eng_node.outputs.len());
+                }
+                eng::NodeResponse::DeleteNodeUi(_node_id) => {}
+                eng::NodeResponse::DeleteNodeFull { node_id: _node_id, node } => {
+                    self.user_state.graph.remove_node_by_id(node.user_data.node_id);
+                }
+                eng::NodeResponse::DisconnectEvent { input: input_id, output: _output_id } => {
+                    let input_address = self.user_state.input_mapping
+                        .iter()
+                        .find_map(|(id, address)| {
+                            if *id == input_id {
+                                Some(address)
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap();
+
+                    let input_node = self.user_state.graph
+                        .node_by_id_mut(input_address.node_id)
+                        .unwrap();
+
+                    let input = &mut input_node.inputs[input_address.arg_index as usize];
+                    if input.const_value.is_some() {
+                        input.binding = Binding::Const;
+                    } else {
+                        input.binding = Binding::None;
+                    }
+                }
+                eng::NodeResponse::RaiseNode(_node_id) => {}
+                eng::NodeResponse::MoveNode { node: _node_id, drag_delta: _delta } => {}
             }
         }
 
@@ -282,199 +548,154 @@ impl eframe::App for NodeshopApp {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash, Clone)]
-struct ArgAddress {
-    node_id: NodeId,
-    arg_index: usize,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct SerializedGraph {
-    graph: graph_lib::graph::Graph,
-    positions: HashMap<NodeId, (f32, f32)>,
-}
-
 impl NodeshopApp {
     fn save_graph_to_yaml(&self, filename: &str) -> anyhow::Result<()> {
-        let editor_graph = &self.state.graph;
-
-        let mut graph = SerializedGraph::default();
-
-        let mut input_addresses = HashMap::<eng::InputId, ArgAddress>::new();
-        let mut output_addresses = HashMap::<eng::OutputId, ArgAddress>::new();
-
-        for (editor_node_id, editor_node) in editor_graph.nodes.iter() {
-            let mut node = graph_lib::graph::Node::new();
-            node.name = editor_node.user_data.template.0.name.clone();
-            node.function_id = editor_node.user_data.template.0.self_id;
-            node.is_output = editor_node.user_data.template.0.is_output;
-            node.behavior = editor_node.user_data.template.0.behavior;
-
-            editor_node.inputs.iter()
-                .for_each(|(editor_input_name, editor_input_id)| {
-                    let editor_input = editor_graph.inputs
-                        .get(*editor_input_id).unwrap();
-                    let editor_value = &editor_input.value.0;
-
-                    assert_eq!(editor_input.typ, *editor_value.data_type());
-
-                    node.inputs.push(Input {
-                        name: editor_input_name.clone(),
-                        data_type: editor_input.typ.clone(),
-                        is_required: true,
-                        binding: Binding::None,
-                        const_value: Some(editor_value.clone()),
-                    });
-
-                    input_addresses.insert(*editor_input_id, ArgAddress {
-                        node_id: node.id(),
-                        arg_index: node.inputs.len() - 1,
-                    });
-                });
-
-            editor_node.outputs.iter()
-                .for_each(|(editor_output_name, editor_output_id)| {
-                    let editor_output = editor_graph.outputs.get(*editor_output_id).unwrap();
-
-                    node.outputs.push(Output {
-                        name: editor_output_name.clone(),
-                        data_type: editor_output.typ.clone(),
-                    });
-
-                    output_addresses.insert(*editor_output_id, ArgAddress {
-                        node_id: node.id(),
-                        arg_index: node.outputs.len() - 1,
-                    });
-                });
-
-            let position = self.state.node_positions.get(editor_node_id).unwrap();
-            graph.positions.insert(node.id(), (position.x, position.y));
-
-            graph.graph.add_node(node);
-        }
-
-        for (editor_input_id, editor_output_id) in editor_graph.connections.iter() {
-            let input_address = input_addresses.get(&editor_input_id).unwrap();
-            let output_address = output_addresses.get(editor_output_id).unwrap();
-
-            let input = graph.graph
-                .node_by_id_mut(input_address.node_id)
-                .unwrap()
-                .inputs
-                .get_mut(input_address.arg_index)
-                .unwrap();
-
-            input.binding = Binding::from_output_binding(
-                output_address.node_id,
-                output_address.arg_index as u32,
-            );
-        }
-
-        let yaml = serde_yaml::to_string(&graph)?;
-
         let filename = common::get_file_extension(filename)
             .ok()
-            .map(|ext| {
+            .and_then(|ext| {
                 if ext == "yaml" {
-                    filename.to_string()
+                    Some(filename.to_string())
                 } else {
-                    format!("{}.yaml", filename)
+                    None
                 }
             })
             .unwrap_or_else(|| format!("{}.yaml", filename));
-        std::fs::write(filename, yaml)?;
+
+        let positions: Positions = self.state.graph.nodes
+            .iter()
+            .map(|(editor_node_id, editor_node)| {
+                let position = self.state.node_positions.get(editor_node_id).unwrap();
+                (editor_node.user_data.node_id, (position.x, position.y))
+            })
+            .collect();
+
+        let graph = &self.user_state.graph;
+
+        let file = std::fs::File::create(filename)?;
+        let mut writer = serde_yaml::Serializer::new(file);
+        graph.serialize(&mut writer)?;
+        positions.serialize(&mut writer)?;
 
         Ok(())
     }
 
     fn load_graph_from_yaml(&mut self, filename: &str) -> anyhow::Result<()> {
-        let yaml = std::fs::read_to_string(filename)?;
-        let graph: SerializedGraph = serde_yaml::from_str(&yaml)?;
+        let file = std::fs::File::open(filename)?;
+        let mut deserializer = serde_yaml::Deserializer::from_reader(file);
 
         self.state = EditorState::default();
-        let editor_graph = &mut self.state.graph;
+        self.user_state.graph = Graph::deserialize(deserializer.next().unwrap())?;
+        let positions = Positions::deserialize(deserializer.next().unwrap())?;
 
+        drop(deserializer);
 
-        let mut input_addresses = HashMap::<ArgAddress, eng::InputId>::new();
-        let mut output_addresses = HashMap::<ArgAddress, eng::OutputId>::new();
-
-        for (_index, node) in graph.graph.nodes().iter().enumerate() {
-            let function = self.user_state.invoker
-                .function_by_id(node.function_id);
-
-            let node_data = EditorNode {
-                template: FunctionTemplate(function.clone()),
+        for node in self.user_state.graph.nodes() {
+            let function = self.user_state.invoker.function_by_id(node.function_id);
+            let editor_node = EditorNode {
+                node_id: node.id(),
+                function_id: node.function_id,
                 is_output: node.is_output,
+                cache_outputs: node.cache_outputs,
             };
 
-            let node_add =
-                |editor_graph: &mut EditorGraph, editor_node_id: eng::NodeId| {
-                    for (index, input) in node.inputs.iter().enumerate() {
-                        let default_value = input.const_value.clone()
-                            .unwrap_or(StaticValue::from(input.data_type.clone()));
+            let eng_node_id = self.state.graph.add_node(
+                node.name.clone(),
+                editor_node,
+                |_, _| {},
+            );
+            self.state.node_order.push(eng_node_id);
 
-                        let input_id = editor_graph.add_input_param(
-                            editor_node_id,
-                            input.name.clone(),
-                            input.data_type.clone(),
-                            EditorValue(default_value),
-                            eng::InputParamKind::ConnectionOrConstant,
-                            true);
+            build_node_from_func(
+                &mut self.state.graph,
+                &function,
+                eng_node_id,
+            );
 
-                        input_addresses.insert(
-                            ArgAddress {
-                                node_id: node.id(),
-                                arg_index: index,
-                            },
-                            input_id);
-                    }
-
-                    for (index, output) in node.outputs.iter().enumerate() {
-                        let output_id = editor_graph.add_output_param(
-                            editor_node_id,
-                            output.name.clone(),
-                            output.data_type.clone());
-
-                        output_addresses.insert(
-                            ArgAddress {
-                                node_id: node.id(),
-                                arg_index: index,
-                            },
-                            output_id);
-                    }
-                };
-
-            let node_id = editor_graph.add_node(node.name.clone(), node_data, node_add);
-            self.state.node_order.push(node_id);
-
-            if let Some((x, y)) = graph.positions
-                .get(&node.id()) {
-                self.state.node_positions.insert(
-                    node_id,
-                    egui::Pos2 { x: *x, y: *y },
-                );
-            }
-        }
-
-        for node in graph.graph.nodes().iter() {
-            for (index, input) in node.inputs.iter().enumerate() {
-                if let Some(binding) = input.binding.as_output_binding() {
-                    let input_id = input_addresses.get(
-                        &ArgAddress {
+            let eng_node = &self.state.graph.nodes[eng_node_id];
+            eng_node.inputs
+                .iter()
+                .enumerate()
+                .for_each(|(index, (_name, input_id))| {
+                    self.user_state.input_mapping.push((
+                        *input_id,
+                        ArgAddress {
                             node_id: node.id(),
-                            arg_index: index,
-                        }).unwrap();
+                            arg_index: index as u32,
+                        },
+                    ));
+                });
+            eng_node.outputs
+                .iter()
+                .enumerate()
+                .for_each(|(index, (_name, output_id))| {
+                    self.user_state.output_mapping.push((
+                        *output_id,
+                        ArgAddress {
+                            node_id: node.id(),
+                            arg_index: index as u32,
+                        },
+                    ));
+                });
 
-                    let output_id = output_addresses.get(
-                        &ArgAddress {
-                            node_id: binding.output_node_id,
-                            arg_index: binding.output_index as usize,
-                        }).unwrap();
+            // set default values
+            node.inputs
+                .iter()
+                .zip(eng_node.inputs.iter())
+                .for_each(|(input, (_name, eng_input_id))| {
+                    if let Some(const_value) = &input.const_value {
+                        self.state.graph.inputs[*eng_input_id].value.0 = const_value.clone();
+                    }
+                });
 
-                    editor_graph.add_connection(*output_id, *input_id);
-                }
-            }
+            positions
+                .iter()
+                .find(|(id, _)| *id == node.id())
+                .map(|(_, (x, y))| {
+                    self.state.node_positions.insert(eng_node_id, egui::Pos2 { x: *x, y: *y });
+                });
         }
+
+        // Connect inputs to outputs
+        self.user_state.graph.nodes()
+            .iter()
+            .flat_map(|node|
+                node.inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(index, input)|
+                        (node.id(), index, &input.binding)
+                    )
+            )
+            .filter(|(_node_id, _index, binding)|
+                binding.is_output_binding()
+            )
+            .for_each(|(node_id, index, binding)| {
+                let input_address = ArgAddress {
+                    node_id,
+                    arg_index: index as u32,
+                };
+                let output_address = binding
+                    .as_output_binding()
+                    .map(|output_binding| {
+                        ArgAddress {
+                            node_id: output_binding.output_node_id,
+                            arg_index: output_binding.output_index,
+                        }
+                    }).unwrap();
+
+                let input_id = self.user_state.input_mapping
+                    .iter()
+                    .find(|(_, address)| *address == input_address)
+                    .map(|(input_id, _)| *input_id)
+                    .unwrap();
+                let output_id = self.user_state.output_mapping
+                    .iter()
+                    .find(|(_, address)| *address == output_address)
+                    .map(|(output_id, _)| *output_id)
+                    .unwrap();
+
+                self.state.graph.add_connection(output_id, input_id);
+            });
 
         Ok(())
     }
@@ -496,8 +717,10 @@ impl Default for NodeshopApp {
             function_templates,
             user_state: MyState {
                 invoker,
+                ..Default::default()
             },
             file_dialog: None,
         }
     }
 }
+

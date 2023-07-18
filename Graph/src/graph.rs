@@ -25,7 +25,7 @@ pub struct Node {
     pub name: String,
     pub behavior: FunctionBehavior,
     pub is_output: bool,
-    pub should_cache_outputs: bool,
+    pub cache_outputs: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
@@ -232,7 +232,7 @@ impl Node {
             name: "".to_string(),
             behavior: FunctionBehavior::Active,
             is_output: false,
-            should_cache_outputs: false,
+            cache_outputs: false,
             inputs: vec![],
             outputs: vec![],
             subgraph_id: None,
@@ -262,7 +262,7 @@ impl Node {
             function_id: function.self_id,
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
-            should_cache_outputs: false,
+            cache_outputs: false,
             is_output: false,
             inputs,
             outputs,

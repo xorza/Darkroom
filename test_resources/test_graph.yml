@@ -4,7 +4,7 @@ nodes:
     name: mult
     behavior: Passive
     is_output: false
-    should_cache_outputs: false
+    cache_outputs: false
     inputs:
       - name: A
         data_type: Int
@@ -27,7 +27,7 @@ nodes:
     name: get_a
     behavior: Active
     is_output: false
-    should_cache_outputs: false
+    cache_outputs: false
     outputs:
       - name: Int32 Value
         data_type: Int
@@ -36,7 +36,7 @@ nodes:
     name: get_b
     behavior: Passive
     is_output: false
-    should_cache_outputs: false
+    cache_outputs: false
     outputs:
       - name: Int32 Value
         data_type: Int
@@ -45,7 +45,7 @@ nodes:
     name: sum
     behavior: Passive
     is_output: false
-    should_cache_outputs: true
+    cache_outputs: true
     inputs:
       - name: A
         data_type: Int
@@ -69,7 +69,7 @@ nodes:
     name: print
     behavior: Passive
     is_output: true
-    should_cache_outputs: false
+    cache_outputs: false
     inputs:
       - name: message
         data_type: Int
