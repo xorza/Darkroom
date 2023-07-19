@@ -35,6 +35,21 @@ fn simple_run() -> anyhow::Result<()> {
 }
 
 #[test]
+fn empty_run() {
+    let graph = Graph::from_yaml_file("../test_resources/test_graph.yml").unwrap();
+    let mut runtime_graph = RuntimeGraph::from(&graph);
+    runtime_graph.next(&graph);
+
+    assert_eq!(runtime_graph.nodes.len(), 5);
+    assert_eq!(runtime_graph.node_by_name("get_b").unwrap().total_binding_count, 2);
+
+    runtime_graph.next(&graph);
+
+    assert_eq!(runtime_graph.nodes.len(), 5);
+    assert_eq!(runtime_graph.node_by_name("get_b").unwrap().total_binding_count, 2);
+}
+
+#[test]
 fn missing_input() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap()

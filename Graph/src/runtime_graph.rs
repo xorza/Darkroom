@@ -255,7 +255,7 @@ impl RuntimeGraph {
     // if node is passive, mark it for caching outputs
     fn forward_pass(
         graph: &Graph,
-        r_nodes: &mut Vec<RuntimeNode>,
+        r_nodes: &mut [RuntimeNode],
     ) {
         for index in 0..r_nodes.len() {
             let mut r_node = take(&mut r_nodes[index]);
@@ -288,7 +288,7 @@ impl RuntimeGraph {
     // in backward pass, mark active nodes without cached outputs for execution
     fn backward_pass(
         graph: &Graph,
-        r_nodes: &mut Vec<RuntimeNode>,
+        r_nodes: &mut [RuntimeNode],
     ) {
         r_nodes.iter_mut()
             .for_each(|r_node| {
