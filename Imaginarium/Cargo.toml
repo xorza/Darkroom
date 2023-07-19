@@ -5,6 +5,7 @@ edition = "2021"
 
 [features]
 default = ["wgpu"]
+wgpu = ["dep:wgpu"]
 
 [dependencies]
 tiff = { workspace = true }

@@ -34,7 +34,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build graph
-        run: cargo build --manifest-path=./Cargo.toml --verbose --no-default-features --workspace
+        run: cargo build --verbose --no-default-features --workspace --all
 
+      - name: Run imaginarium tests
+        run: cargo test --verbose --no-default-features -p imaginarium
       - name: Run graph tests
-        run: cargo test --manifest-path=./Cargo.toml --verbose --no-default-features --workspace --exclude egui_node_graph
+        run: cargo test --verbose --no-default-features -p graph
+      - name: Run common tests
+        run: cargo test --verbose --no-default-features -p common
+      - name: Run editor tests
+        run: cargo test --verbose --no-default-features -p editor
