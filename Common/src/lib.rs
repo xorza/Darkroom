@@ -19,10 +19,16 @@ pub fn is_debug() -> bool {
 }
 
 pub trait Apply<T> {
-    fn apply(&mut self, f: fn(&mut T));
+    fn apply(&self, f: fn(&T));
+    fn apply_mut(&mut self, f: fn(&mut T));
 }
 impl<T> Apply<T> for Option<T> {
-    fn apply(&mut self, f: fn(&mut T)) {
+    fn apply(&self, f: fn(&T)) {
+        if let Some(v) = self.as_ref() {
+            f(v);
+        }
+    }
+    fn apply_mut(&mut self, f: fn(&mut T)) {
         if let Some(v) = self.as_mut() {
             f(v);
         }

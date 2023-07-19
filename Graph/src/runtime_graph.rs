@@ -72,15 +72,6 @@ impl RuntimeGraph {
         graph: &Graph,
     ) {
         Self::backward_pass(graph, &mut self.nodes);
-        // self.nodes
-        //     .iter_mut()
-        //     .for_each(|r_node| {
-        //         for i in 0..r_node.output_binding_count.len() {
-        //             r_node.current_output_binding_count[i] = r_node.output_binding_count[i];
-        //         }
-        //         r_node.current_total_binding_count = r_node.total_binding_count;
-        //         r_node.should_invoke = Self::is_active(r_node) && !r_node.has_missing_inputs;
-        //     });
     }
 }
 

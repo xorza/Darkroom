@@ -67,7 +67,19 @@ pub(crate) fn load(
 
     for node in graph_state.graph.nodes() {
         let function = invoker.function_by_id(node.function_id);
-        let combobox_inputs = combobox_inputs_from_function(&function);
+        let mut combobox_inputs = combobox_inputs_from_function(&function);
+
+        combobox_inputs
+            .iter_mut()
+            .for_each(|combo_input| {
+                let value = node
+                    .inputs[combo_input.input_index as usize]
+                    .const_value
+                    .as_ref();
+                if let Some(value) = value {
+                    combo_input.current_value = value.clone();
+                }
+            });
 
         let editor_node = EditorNode {
             node_id: node.id(),

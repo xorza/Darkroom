@@ -136,7 +136,7 @@ impl Default for BasicInvoker {
                     .as_int()
                     .into();
 
-                op.invoke(&inputs[0..1], ctx)
+                op.invoke(&inputs[0..2], ctx)
                     .map(|result| outputs[0] = Some(result))
                     .expect("failed to invoke math two argument operation");
             });

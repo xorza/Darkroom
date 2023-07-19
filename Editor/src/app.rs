@@ -27,7 +27,7 @@ pub(crate) struct GraphState {
     pub(crate) output_mapping: Vec<(eng::OutputId, ArgAddress)>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct AppState {
     invoker: UberInvoker,
     graph_state: GraphState,
@@ -58,6 +58,10 @@ impl eframe::App for NodeshopApp {
                         let mut dialog = FileDialog::save_file(None);
                         dialog.open();
                         self.file_dialog = Some(dialog);
+                    }
+
+                    if ui.button("Run").clicked() {
+                        self.user_state.worker.run_once(self.user_state.graph_state.graph.clone());
                     }
                 });
             });
@@ -97,7 +101,15 @@ impl eframe::App for NodeshopApp {
                         AppResponse::SetInputValue { node_id, input_index, value } => {
                             let eng_node = &mut self.state.graph.nodes[node_id].user_data;
                             let node = self.user_state.graph_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
+
+                            eng_node.combobox_inputs
+                                .iter_mut()
+                                .find(|combobox_input| combobox_input.input_index == input_index)
+                                .map(|combobox_input| {
+                                    combobox_input.current_value = value.clone();
+                                });
                             node.inputs[input_index as usize].const_value = Some(value);
+                            node.inputs[input_index as usize].binding = Binding::Const;
                         }
                     }
                 }
@@ -236,7 +248,8 @@ impl Default for NodeshopApp {
             function_templates,
             user_state: AppState {
                 invoker,
-                ..Default::default()
+                graph_state: GraphState::default(),
+                worker: Worker::new(),
             },
             file_dialog: None,
         }

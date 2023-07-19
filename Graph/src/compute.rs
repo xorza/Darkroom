@@ -105,12 +105,11 @@ impl Compute {
 
         for r_node in runtime_graph.nodes.iter_mut() {
             if !r_node.should_cache_outputs {
-                r_node.output_values.apply(|values| values.fill(None));
+                r_node.output_values.apply_mut(|values| values.fill(None));
             }
 
             assert_eq!(r_node.total_binding_count, 0);
         }
-
 
         Ok(())
     }

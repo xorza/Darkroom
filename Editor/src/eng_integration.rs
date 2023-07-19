@@ -64,9 +64,9 @@ impl eng::WidgetValueTrait for EditorValue {
         _user_state: &mut AppState,
         _node_data: &EditorNode,
     ) -> Vec<Self::Response> {
-        #[allow(clippy::single_match)]
-            let mut editor_value = self.0.clone();
+        let mut editor_value = self.0.clone();
 
+        #[allow(clippy::single_match)]
         match &mut editor_value {
             StaticValue::Int(value) => {
                 ui.horizontal(|ui| {
@@ -138,7 +138,6 @@ impl eng::NodeDataTrait for EditorNode {
                             .color(egui::Color32::BLACK)
                     )
                         .fill(egui::Color32::GOLD)
-                    // .sense(egui::Sense::hover())
                 } else {
                     egui::Button::new(egui::RichText::new("Active"))
                 }
