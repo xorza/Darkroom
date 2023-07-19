@@ -4,6 +4,11 @@
 use crate::app::NodeshopApp;
 
 mod app;
+mod worker;
+mod function_templates;
+mod common;
+mod eng_integration;
+mod serialization;
 
 fn main() {
     let app = Box::<NodeshopApp>::default();

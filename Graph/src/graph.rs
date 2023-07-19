@@ -16,7 +16,7 @@ pub enum FunctionBehavior {
 
 id_type!(NodeId);
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
     self_id: NodeId,
 
@@ -36,19 +36,19 @@ pub struct Node {
     pub subgraph_id: Option<SubGraphId>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Output {
     pub name: String,
     pub data_type: DataType,
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct OutputBinding {
     pub output_node_id: NodeId,
     pub output_index: u32,
 }
 
-#[derive(Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Binding {
     #[default]
     None,
@@ -56,7 +56,7 @@ pub enum Binding {
     Output(OutputBinding),
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Input {
     pub name: String,
     pub data_type: DataType,
@@ -67,7 +67,7 @@ pub struct Input {
 }
 
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

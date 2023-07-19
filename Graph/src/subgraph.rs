@@ -7,13 +7,13 @@ use crate::graph::{Graph, NodeId};
 
 id_type!(SubGraphId);
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct SubInputNodeConnection {
     pub subnode_id: NodeId,
     pub subnode_input_index: u32,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct SubInput {
     pub name: String,
     pub data_type: DataType,
@@ -21,7 +21,7 @@ pub struct SubInput {
     pub connections: Vec<SubInputNodeConnection>,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct SubOutput {
     pub name: String,
     pub data_type: DataType,
@@ -29,7 +29,7 @@ pub struct SubOutput {
     pub subnode_output_index: u32,
 }
 
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct SubGraph {
     self_id: SubGraphId,
 

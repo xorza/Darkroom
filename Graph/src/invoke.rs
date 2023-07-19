@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
 
 use crate::data::{DataType, DynamicValue};
@@ -25,6 +26,13 @@ pub trait Invokable {
 
 pub trait Invoker {
     fn all_functions(&self) -> Vec<Function> { vec![] }
+    fn function_by_id(&self, func_if: FunctionId) -> Function {
+        self.all_functions()
+            .iter()
+            .find(|f| f.self_id == func_if)
+            .unwrap()
+            .clone()
+    }
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -34,7 +42,9 @@ pub trait Invoker {
     ) -> anyhow::Result<()>;
 
     // for now decided there will be no type conversion
-    fn all_converters(&self) -> Vec<TypeConverterDesc> { vec![] }
+    fn all_converters(&self) -> Vec<TypeConverterDesc> {
+        vec![]
+    }
     fn convert_value(&self,
                      _src_value: &DynamicValue,
                      _dst_data_type: &DataType)
@@ -48,10 +58,16 @@ pub struct UberInvoker {
     invokers: Vec<Box<dyn Invoker>>,
     function_id_to_invoker_index: HashMap<FunctionId, usize>,
     data_type_to_invoker_index: HashMap<TypeConverterDesc, usize>,
+    all_functions: Vec<Function>,
 }
 
 impl UberInvoker {
     pub fn new(invokers: Vec<Box<dyn Invoker>>) -> Self {
+        let all_functions = invokers
+            .iter()
+            .flat_map(|invoker| invoker.all_functions())
+            .collect();
+
         let mut function_id_to_invoker_index = HashMap::new();
         invokers
             .iter()
@@ -82,11 +98,12 @@ impl UberInvoker {
             invokers,
             function_id_to_invoker_index,
             data_type_to_invoker_index,
+            all_functions,
         }
     }
 
     pub fn function_by_id(&self, func_if: FunctionId) -> Function {
-        self.all_functions()
+        self.all_functions
             .iter()
             .find(|f| f.self_id == func_if)
             .unwrap()
@@ -96,7 +113,7 @@ impl UberInvoker {
 
 impl Invoker for UberInvoker {
     fn all_functions(&self) -> Vec<Function> {
-        self.invokers.iter().flat_map(|invoker| invoker.all_functions()).collect()
+        self.all_functions.clone()
     }
     fn invoke(
         &self,
@@ -177,6 +194,16 @@ impl<'a> Borrow<dyn TypeConverterKey + 'a> for (&'a DataType, &'a DataType) {
     }
 }
 
+impl Debug for UberInvoker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UberInvoker")
+            .field("invokers", &self.invokers.len())
+            .field("function_id_to_invoker_index", &self.function_id_to_invoker_index)
+            .field("data_type_to_invoker_index", &self.data_type_to_invoker_index)
+            .field("all_functions", &self.all_functions)
+            .finish()
+    }
+}
 
 #[cfg(test)]
 mod tests {
