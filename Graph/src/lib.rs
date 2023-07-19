@@ -6,7 +6,6 @@ mod tests;
 
 
 pub mod common;
-pub mod preprocess;
 pub mod graph;
 pub mod function;
 pub mod compute;

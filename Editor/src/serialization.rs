@@ -12,8 +12,8 @@ type Positions = Vec<(NodeId, (f32, f32))>;
 
 
 pub(crate) fn save(
+    graph_state: &GraphState,
     editor_state: &EditorState,
-    graph: &Graph,
     filename: &str,
 ) -> anyhow::Result<()>
 {
@@ -38,7 +38,7 @@ pub(crate) fn save(
 
     let file = std::fs::File::create(filename)?;
     let mut writer = serde_yaml::Serializer::new(file);
-    graph.serialize(&mut writer)?;
+    graph_state.graph.serialize(&mut writer)?;
     positions.serialize(&mut writer)?;
 
     Ok(())

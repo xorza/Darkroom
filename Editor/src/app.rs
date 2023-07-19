@@ -11,6 +11,7 @@ use graph_lib::invoke::{Invoker, UberInvoker};
 use crate::eng_integration::{AppResponse, EditorState};
 use crate::function_templates::FunctionTemplates;
 use crate::serialization;
+use crate::worker::Worker;
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub(crate) struct ArgAddress {
@@ -30,6 +31,7 @@ pub(crate) struct GraphState {
 pub struct AppState {
     invoker: UberInvoker,
     graph_state: GraphState,
+    worker: Worker,
 }
 
 pub struct NodeshopApp {
@@ -218,22 +220,6 @@ impl eframe::App for NodeshopApp {
     }
 }
 
-impl NodeshopApp {
-    fn save_yaml(&self, filename: &str) -> anyhow::Result<()> {
-        serialization::save(&self.state, &self.user_state.graph_state.graph, filename)
-    }
-
-    fn load_yaml(&mut self, filename: &str) -> anyhow::Result<()> {
-        let (graph_state, editor_state) =
-            serialization::load(&self.user_state.invoker, filename)?;
-
-        self.user_state.graph_state = graph_state;
-        self.state = editor_state;
-
-        Ok(())
-    }
-}
-
 impl Default for NodeshopApp {
     fn default() -> Self {
         let invoker = UberInvoker::new(
@@ -254,5 +240,26 @@ impl Default for NodeshopApp {
             },
             file_dialog: None,
         }
+    }
+}
+
+impl NodeshopApp {
+    fn save_yaml(&self, filename: &str) -> anyhow::Result<()> {
+        serialization::save(
+            &self.user_state.graph_state,
+            &self.state,
+            filename,
+        )
+    }
+    fn load_yaml(&mut self, filename: &str) -> anyhow::Result<()> {
+        let (
+            graph_state,
+            editor_state
+        ) = serialization::load(&self.user_state.invoker, filename)?;
+
+        self.user_state.graph_state = graph_state;
+        self.state = editor_state;
+
+        Ok(())
     }
 }

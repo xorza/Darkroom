@@ -7,7 +7,6 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
 use crate::lambda_invoker::LambdaInvoker;
-use crate::preprocess::Preprocess;
 use crate::runtime_graph::{InvokeContext, RuntimeGraph};
 
 struct TestValues {
@@ -197,19 +196,18 @@ fn simple_compute_test() -> anyhow::Result<()> {
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    let preprocess = Preprocess::default();
 
-    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    let mut runtime_graph = RuntimeGraph::from(&graph);
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 35);
 
-    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    // runtime_graph.update(&graph);
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 35);
 
     test_values.borrow_mut().b = 7;
     graph.node_by_name_mut("get_b").unwrap().behavior = FunctionBehavior::Active;
-    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    let mut runtime_graph = RuntimeGraph::from(&graph);
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 63);
 
@@ -217,7 +215,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
 }
 
 #[test]
-fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
+fn default_input_value() -> anyhow::Result<()> {
     let test_values = Rc::new(RefCell::new(TestValues {
         a: 2,
         b: 5,
@@ -251,8 +249,7 @@ fn simple_compute_test_default_input_value() -> anyhow::Result<()> {
         mult_inputs[1].binding = Binding::Const;
     }
 
-    let preprocess = Preprocess::default();
-    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    let mut runtime_graph = RuntimeGraph::from(&graph);
 
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 360);
@@ -295,9 +292,8 @@ fn cached_value() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap()
         .cache_outputs = false;
-    let preprocess = Preprocess::default();
 
-    let mut runtime_graph = preprocess.run(&graph, &mut RuntimeGraph::default());
+    let mut runtime_graph = RuntimeGraph::from(&graph);
     compute.run(&graph, &mut runtime_graph)?;
 
     //assert that both nodes were called
@@ -305,7 +301,7 @@ fn cached_value() -> anyhow::Result<()> {
     assert_eq!(test_values.borrow().b, 6);
     assert_eq!(test_values.borrow().result, 35);
 
-    let mut runtime_graph = preprocess.run(&graph, &mut runtime_graph);
+    // runtime_graph.update(&graph);
     compute.run(&graph, &mut runtime_graph)?;
 
     //assert that node a was called again

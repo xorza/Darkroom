@@ -22,6 +22,8 @@ impl Compute {
         runtime_graph: &mut RuntimeGraph,
     ) -> anyhow::Result<()>
     {
+        runtime_graph.next(graph);
+
         let mut inputs: ArgSet = ArgSet::default();
 
         let active_node_indexes =
@@ -29,7 +31,7 @@ impl Compute {
                 .iter_mut()
                 .enumerate()
                 .filter_map(|(index, r_node)| {
-                    if !r_node.has_missing_inputs && r_node.should_execute {
+                    if r_node.should_invoke {
                         Some(index)
                     } else {
                         None
@@ -55,7 +57,7 @@ impl Compute {
                             let output_r_node = runtime_graph
                                 .node_by_id_mut(output_binding.output_node_id).unwrap();
 
-                            output_r_node.decrement_binding_count(output_binding.output_index);
+                            output_r_node.decrement_current_binding_count(output_binding.output_index);
 
                             let output_values =
                                 output_r_node.output_values
