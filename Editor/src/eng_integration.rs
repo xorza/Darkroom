@@ -8,15 +8,25 @@ use graph_lib::data::{DataType, StaticValue};
 use graph_lib::function::FunctionId;
 use graph_lib::graph::NodeId;
 
-use crate::app::{AppState, MyResponse};
+use crate::app::AppState;
 use crate::function_templates::FunctionTemplate;
 
-#[derive(Clone)]
+#[derive(Debug)]
+pub(crate) struct ComboboxInput {
+    pub(crate) input_index: u32,
+    pub(crate) name: String,
+    pub(crate) current_value: StaticValue,
+    pub(crate) variants: Vec<(StaticValue, String)>,
+}
+
+#[derive(Debug)]
 pub struct EditorNode {
     pub(crate) node_id: NodeId,
     pub(crate) function_id: FunctionId,
     pub(crate) is_output: bool,
     pub(crate) cache_outputs: bool,
+
+    pub(crate) combobox_inputs: Vec<ComboboxInput>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -25,9 +35,23 @@ pub struct EditorValue(pub(crate) StaticValue);
 pub(crate) type EditorGraph = eng::Graph<EditorNode, DataType, EditorValue>;
 pub(crate) type EditorState = eng::GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, AppState>;
 
+#[derive(Clone, Debug)]
+pub enum AppResponse {
+    ToggleNodeOutput(eng::NodeId),
+    ToggleNodeCacheOutputs(eng::NodeId),
+    SetInputValue {
+        node_id: eng::NodeId,
+        input_index: u32,
+        value: StaticValue,
+    },
+
+}
+
+
+impl eng::UserResponseTrait for AppResponse {}
 
 impl eng::WidgetValueTrait for EditorValue {
-    type Response = MyResponse;
+    type Response = AppResponse;
     type UserState = AppState;
     type NodeData = EditorNode;
 
@@ -76,7 +100,7 @@ impl eng::WidgetValueTrait for EditorValue {
             self.0 = editor_value.clone();
 
             vec![
-                MyResponse::SetInputValue {
+                AppResponse::SetInputValue {
                     node_id,
                     input_index: param_index as u32,
                     value: editor_value,
@@ -89,7 +113,7 @@ impl eng::WidgetValueTrait for EditorValue {
 }
 
 impl eng::NodeDataTrait for EditorNode {
-    type Response = MyResponse;
+    type Response = AppResponse;
     type UserState = AppState;
     type DataType = DataType;
     type ValueType = EditorValue;
@@ -100,9 +124,9 @@ impl eng::NodeDataTrait for EditorNode {
         node_id: eng::NodeId,
         _graph: &EditorGraph,
         _user_state: &mut Self::UserState,
-    ) -> Vec<eng::NodeResponse<MyResponse, EditorNode>>
+    ) -> Vec<eng::NodeResponse<AppResponse, EditorNode>>
     where
-        MyResponse: eng::UserResponseTrait,
+        AppResponse: eng::UserResponseTrait,
     {
         let mut responses = vec![];
 
@@ -120,7 +144,7 @@ impl eng::NodeDataTrait for EditorNode {
                 }
                     .min_size(egui::Vec2::new(70.0, 0.0));
             if is_output_button.ui(ui).clicked() {
-                responses.push(eng::NodeResponse::User(MyResponse::ToggleNodeOutput(node_id)));
+                responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeOutput(node_id)));
             }
         }
 
@@ -137,62 +161,43 @@ impl eng::NodeDataTrait for EditorNode {
                 }
                     .min_size(egui::Vec2::new(70.0, 0.0));
             if cache_outputs_button.ui(ui).clicked() {
-                responses.push(eng::NodeResponse::User(MyResponse::ToggleNodeCacheOutputs(node_id)));
+                responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeCacheOutputs(node_id)));
             }
         }
 
         {
-            // let function = user_state.invoker.function_by_id(self.function_id);
-            // let node = user_state.graph.node_by_id(self.node_id).unwrap();
-            //
-            // for (index, input) in
-            // function.inputs.iter().enumerate()
-            //     .filter(|&(_index, input)| input.variants.is_some())
-            // {
-            //     let variants: &Vec<(StaticValue, String)> = input.variants
-            //         .as_ref()
-            //         .unwrap();
-            //
-            //     let mut current_value = node
-            //         .inputs[index]
-            //         .const_value
-            //         .as_ref()
-            //         .unwrap_or_else(|| {
-            //             &variants
-            //                 .first()
-            //                 .expect("No variants")
-            //                 .0
-            //         })
-            //         .clone();
-            //
-            //     let current_value_label = variants
-            //         .iter()
-            //         .find(|(value, _)| *value == current_value)
-            //         .map(|(_, name)| name)
-            //         .expect("No variant with current value");
-            //
-            //     egui::ComboBox::from_label(input.name.clone())
-            //         .selected_text(current_value_label)
-            //         .show_ui(ui, |ui| {
-            //             for (value, name) in variants {
-            //                 ui.selectable_value(
-            //                     &mut current_value,
-            //                     value.clone(),
-            //                     name,
-            //                 );
-            //             }
-            //         });
-            //
-            //     if Some(&current_value) != node.inputs[index].const_value.as_ref() {
-            //         responses.push(eng::NodeResponse::User(
-            //             MyResponse::SetInputValue {
-            //                 node_id,
-            //                 input_index: index as u32,
-            //                 value: current_value,
-            //             }
-            //         ));
-            //     }
-            // }
+            for combo_input in self.combobox_inputs.iter() {
+                let variants: &Vec<(StaticValue, String)> = &combo_input.variants;
+                let mut current_value = combo_input.current_value.clone();
+
+                let current_value_label = variants
+                    .iter()
+                    .find(|(value, _)| *value == current_value)
+                    .map(|(_, name)| name)
+                    .expect("No variant with current value");
+
+                egui::ComboBox::from_label(combo_input.name.clone())
+                    .selected_text(current_value_label)
+                    .show_ui(ui, |ui| {
+                        for (value, name) in variants {
+                            ui.selectable_value(
+                                &mut current_value,
+                                value.clone(),
+                                name,
+                            );
+                        }
+                    });
+
+                if current_value != combo_input.current_value {
+                    responses.push(eng::NodeResponse::User(
+                        AppResponse::SetInputValue {
+                            node_id,
+                            input_index: combo_input.input_index,
+                            value: current_value,
+                        }
+                    ));
+                }
+            }
         }
 
         responses

@@ -5,7 +5,7 @@ use graph_lib::graph::{Graph, NodeId};
 use graph_lib::invoke::Invoker;
 
 use crate::app::{ArgAddress, GraphState};
-use crate::common::build_node_from_func;
+use crate::common::{build_node_from_func, combobox_inputs_from_function};
 use crate::eng_integration::{EditorNode, EditorState};
 
 type Positions = Vec<(NodeId, (f32, f32))>;
@@ -67,11 +67,14 @@ pub(crate) fn load(
 
     for node in graph_state.graph.nodes() {
         let function = invoker.function_by_id(node.function_id);
+        let combobox_inputs = combobox_inputs_from_function(&function);
+
         let editor_node = EditorNode {
             node_id: node.id(),
             function_id: node.function_id,
             is_output: node.is_output,
             cache_outputs: node.cache_outputs,
+            combobox_inputs,
         };
 
         let eng_node_id = editor_state.graph.add_node(
@@ -113,7 +116,7 @@ pub(crate) fn load(
                 ));
             });
 
-        // set default values
+        // Set default values
         node.inputs
             .iter()
             .zip(eng_node.inputs.iter())

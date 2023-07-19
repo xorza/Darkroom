@@ -4,12 +4,11 @@ use eframe::egui::{self};
 use egui_file::{DialogType, FileDialog};
 
 use egui_node_graph as eng;
-use graph_lib::data::StaticValue;
 use graph_lib::elements::basic_invoker::BasicInvoker;
 use graph_lib::graph::{Binding, Graph, Node, NodeId, OutputBinding};
 use graph_lib::invoke::{Invoker, UberInvoker};
 
-use crate::eng_integration::EditorState;
+use crate::eng_integration::{AppResponse, EditorState};
 use crate::function_templates::FunctionTemplates;
 use crate::serialization;
 
@@ -19,17 +18,6 @@ pub(crate) struct ArgAddress {
     pub(crate) arg_index: u32,
 }
 
-#[derive(Clone, Debug)]
-pub enum MyResponse {
-    ToggleNodeOutput(eng::NodeId),
-    ToggleNodeCacheOutputs(eng::NodeId),
-    SetInputValue {
-        node_id: eng::NodeId,
-        input_index: u32,
-        value: StaticValue,
-    },
-
-}
 
 #[derive(Default, Debug)]
 pub(crate) struct GraphState {
@@ -52,8 +40,6 @@ pub struct NodeshopApp {
     file_dialog: Option<FileDialog>,
 }
 
-
-impl eng::UserResponseTrait for MyResponse {}
 
 impl eframe::App for NodeshopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -90,7 +76,7 @@ impl eframe::App for NodeshopApp {
             match node_response {
                 eng::NodeResponse::User(user_event) => {
                     match user_event {
-                        MyResponse::ToggleNodeOutput(node_id) => {
+                        AppResponse::ToggleNodeOutput(node_id) => {
                             let eng_node = &mut self.state.graph.nodes[node_id].user_data;
                             let node = self.user_state.graph_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
                             node.is_output = !node.is_output;
@@ -100,13 +86,13 @@ impl eframe::App for NodeshopApp {
                                 eng_node.cache_outputs = false;
                             }
                         }
-                        MyResponse::ToggleNodeCacheOutputs(node_id) => {
+                        AppResponse::ToggleNodeCacheOutputs(node_id) => {
                             let eng_node = &mut self.state.graph.nodes[node_id].user_data;
                             let node = self.user_state.graph_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
                             node.cache_outputs = !node.cache_outputs;
                             eng_node.cache_outputs = node.cache_outputs;
                         }
-                        MyResponse::SetInputValue { node_id, input_index, value } => {
+                        AppResponse::SetInputValue { node_id, input_index, value } => {
                             let eng_node = &mut self.state.graph.nodes[node_id].user_data;
                             let node = self.user_state.graph_state.graph.node_by_id_mut(eng_node.node_id).unwrap();
                             node.inputs[input_index as usize].const_value = Some(value);

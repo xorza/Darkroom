@@ -2,7 +2,7 @@ use egui_node_graph as eng;
 use graph_lib::data::StaticValue;
 use graph_lib::function::Function;
 
-use crate::eng_integration::{EditorGraph, EditorValue};
+use crate::eng_integration::{ComboboxInput, EditorGraph, EditorValue};
 
 pub(crate) fn build_node_from_func(
     editor_graph: &mut EditorGraph,
@@ -39,5 +39,39 @@ pub(crate) fn build_node_from_func(
                 output.data_type.clone(),
             );
         });
+}
+
+pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<ComboboxInput> {
+    let combobox_inputs = function.inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, input)| {
+            if let Some(variants) = input.variants.as_ref() {
+                let variants = variants
+                    .iter()
+                    .map(|variant| (variant.0.clone(), variant.1.clone()))
+                    .collect::<Vec<(StaticValue, String)>>();
+                let current_value = input.default_value.as_ref()
+                    .unwrap_or_else(|| {
+                        &variants
+                            .first()
+                            .expect("No variants")
+                            .0
+                    })
+                    .clone();
+
+                Some(ComboboxInput {
+                    input_index: index as u32,
+                    name: input.name.clone(),
+                    current_value,
+                    variants,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<ComboboxInput>>();
+
+    combobox_inputs
 }
 

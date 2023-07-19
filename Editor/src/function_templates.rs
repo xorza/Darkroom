@@ -6,7 +6,7 @@ use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
 
 use crate::app::AppState;
-use crate::common::build_node_from_func;
+use crate::common::{build_node_from_func, combobox_inputs_from_function};
 use crate::eng_integration::{EditorGraph, EditorNode, EditorValue};
 
 pub(crate) enum NodeCategory {}
@@ -64,11 +64,14 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
     }
 
     fn user_data(&self, _user_state: &mut Self::UserState) -> Self::NodeData {
+        let combobox_inputs = combobox_inputs_from_function(&self.0);
+
         EditorNode {
             function_id: self.0.self_id,
             node_id: NodeId::nil(),
             is_output: self.0.is_output,
             cache_outputs: false,
+            combobox_inputs,
         }
     }
 
