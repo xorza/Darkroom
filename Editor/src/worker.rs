@@ -87,16 +87,16 @@ impl Worker {
                 worker_message = Some(rx.recv().unwrap());
             }
 
-            match worker_message.take().as_ref().unwrap() {
+            match worker_message.take().unwrap() {
                 WorkerMessage::Stop => break,
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = RuntimeGraph::from(graph);
-                    compute.run(graph, &mut runtime_graph)
+                    let mut runtime_graph = RuntimeGraph::from(&graph);
+                    compute.run(&graph, &mut runtime_graph)
                         .expect("Failed to run graph");
-
-                    egui_ctx.request_repaint();
                 }
             }
+
+            egui_ctx.request_repaint();
         }
     }
 
