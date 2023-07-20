@@ -1,8 +1,8 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
+use graph_lib::function::Function;
 use graph_lib::graph::{Graph, NodeId};
-use graph_lib::invoke::Invoker;
 
 use crate::app::{ArgAddress, GraphState};
 use crate::common::{build_node_from_func, combobox_inputs_from_function};
@@ -45,7 +45,7 @@ pub(crate) fn save(
 }
 
 pub(crate) fn load(
-    invoker: &dyn Invoker,
+    functions: &Vec<Function>,
     filename: &str,
 ) -> anyhow::Result<(GraphState, EditorState)>
 {
@@ -66,8 +66,12 @@ pub(crate) fn load(
     drop(deserializer);
 
     for node in graph_state.graph.nodes() {
-        let function = invoker.function_by_id(node.function_id);
-        let mut combobox_inputs = combobox_inputs_from_function(&function);
+        let function = functions
+            .iter()
+            .find(|function| function.self_id == node.function_id)
+            .unwrap();
+
+        let mut combobox_inputs = combobox_inputs_from_function(function);
 
         combobox_inputs
             .iter_mut()
@@ -98,7 +102,7 @@ pub(crate) fn load(
 
         build_node_from_func(
             &mut editor_state.graph,
-            &function,
+            function,
             eng_node_id,
         );
 

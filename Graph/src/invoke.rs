@@ -26,13 +26,7 @@ pub trait Invokable {
 
 pub trait Invoker {
     fn all_functions(&self) -> Vec<Function> { vec![] }
-    fn function_by_id(&self, func_if: FunctionId) -> Function {
-        self.all_functions()
-            .iter()
-            .find(|f| f.self_id == func_if)
-            .unwrap()
-            .clone()
-    }
+
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -58,16 +52,10 @@ pub struct UberInvoker {
     invokers: Vec<Box<dyn Invoker>>,
     function_id_to_invoker_index: HashMap<FunctionId, usize>,
     data_type_to_invoker_index: HashMap<TypeConverterDesc, usize>,
-    all_functions: Vec<Function>,
 }
 
 impl UberInvoker {
     pub fn new(invokers: Vec<Box<dyn Invoker>>) -> Self {
-        let all_functions = invokers
-            .iter()
-            .flat_map(|invoker| invoker.all_functions())
-            .collect();
-
         let mut function_id_to_invoker_index = HashMap::new();
         invokers
             .iter()
@@ -98,22 +86,16 @@ impl UberInvoker {
             invokers,
             function_id_to_invoker_index,
             data_type_to_invoker_index,
-            all_functions,
         }
-    }
-
-    pub fn function_by_id(&self, func_if: FunctionId) -> Function {
-        self.all_functions
-            .iter()
-            .find(|f| f.self_id == func_if)
-            .unwrap()
-            .clone()
     }
 }
 
 impl Invoker for UberInvoker {
     fn all_functions(&self) -> Vec<Function> {
-        self.all_functions.clone()
+        self.invokers
+            .iter()
+            .flat_map(|invoker| invoker.all_functions())
+            .collect()
     }
     fn invoke(
         &self,
@@ -200,7 +182,6 @@ impl Debug for UberInvoker {
             .field("invokers", &self.invokers.len())
             .field("function_id_to_invoker_index", &self.function_id_to_invoker_index)
             .field("data_type_to_invoker_index", &self.data_type_to_invoker_index)
-            .field("all_functions", &self.all_functions)
             .finish()
     }
 }

@@ -56,6 +56,5 @@ impl Invoker for WgpuInvoker {
 
         Ok(())
     }
-
 }
 

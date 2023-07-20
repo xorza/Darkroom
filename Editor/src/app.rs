@@ -1,13 +1,15 @@
 use std::default::Default;
+use std::sync::{Arc, Mutex};
 
+use eframe::CreationContext;
 use eframe::egui::{self};
 use egui_file::{DialogType, FileDialog};
 
 use common::ApplyMut;
 use egui_node_graph as eng;
-use graph_lib::elements::basic_invoker::BasicInvoker;
+use graph_lib::elements::basic_invoker::Logger;
+use graph_lib::function::Function;
 use graph_lib::graph::{Binding, Graph, Node, NodeId, OutputBinding};
-use graph_lib::invoke::{Invoker, UberInvoker};
 
 use crate::eng_integration::{AppResponse, EditorState};
 use crate::function_templates::FunctionTemplates;
@@ -30,9 +32,11 @@ pub(crate) struct GraphState {
 
 #[derive(Debug)]
 pub struct AppState {
-    invoker: UberInvoker,
+    functions: Vec<Function>,
     graph_state: GraphState,
     worker: Worker,
+    egui_ctx: egui::Context,
+    logger: Logger,
 }
 
 pub struct NodeshopApp {
@@ -48,22 +52,40 @@ impl eframe::App for NodeshopApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Open").clicked() {
-                        let mut dialog = FileDialog::open_file(None);
-                        dialog.open();
-                        self.file_dialog = Some(dialog);
-                    }
+                ui.vertical(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_height(110.0);
+                        ui.label("Log:");
+                        ui.vertical(|ui| {
+                            let mut logger = self.user_state.logger.lock().unwrap();
+                            if logger.len() > 5 {
+                                let remaining = logger.len() - 5;
+                                logger.drain(..remaining);
+                            }
 
-                    if ui.button("Save").clicked() {
-                        let mut dialog = FileDialog::save_file(None);
-                        dialog.open();
-                        self.file_dialog = Some(dialog);
-                    }
+                            for log in logger.iter() {
+                                ui.label(log);
+                            }
+                        });
+                    });
 
-                    if ui.button("Run").clicked() {
-                        self.user_state.worker.run_once(self.user_state.graph_state.graph.clone());
-                    }
+                    ui.horizontal(|ui| {
+                        if ui.button("Open").clicked() {
+                            let mut dialog = FileDialog::open_file(None);
+                            dialog.open();
+                            self.file_dialog = Some(dialog);
+                        }
+
+                        if ui.button("Save").clicked() {
+                            let mut dialog = FileDialog::save_file(None);
+                            dialog.open();
+                            self.file_dialog = Some(dialog);
+                        }
+
+                        if ui.button("Run").clicked() {
+                            self.user_state.worker.run_once(self.user_state.graph_state.graph.clone());
+                        }
+                    });
                 });
             });
 
@@ -151,9 +173,11 @@ impl eframe::App for NodeshopApp {
                 }
                 eng::NodeResponse::CreatedNode(node_id) => {
                     let eng_node = &mut self.state.graph.nodes[node_id];
-                    let function = self.user_state.invoker
-                        .function_by_id(eng_node.user_data.function_id);
-                    let node = Node::from_function(&function);
+                    let function = self.user_state.functions
+                        .iter()
+                        .find(|function| function.self_id == eng_node.user_data.function_id)
+                        .unwrap();
+                    let node = Node::from_function(function);
                     eng_node.user_data.node_id = node.id();
 
                     eng_node.inputs
@@ -233,31 +257,31 @@ impl eframe::App for NodeshopApp {
     }
 }
 
-impl Default for NodeshopApp {
-    fn default() -> Self {
-        let invoker = UberInvoker::new(
-            vec![
-                Box::new(BasicInvoker::default()),
-            ]
-        );
+
+impl NodeshopApp {
+    pub(crate) fn new(cc: &CreationContext) -> Self {
+        let logger: Logger = Arc::new(Mutex::new(Vec::new()));
+        let worker = Worker::new(cc.egui_ctx.clone(), logger.clone());
+
+        let functions = worker.all_functions();
         let function_templates = FunctionTemplates::from(
-            invoker.all_functions()
+            functions.clone()
         );
 
         NodeshopApp {
             state: EditorState::default(),
             function_templates,
             user_state: AppState {
-                invoker,
+                functions: functions.clone(),
                 graph_state: GraphState::default(),
-                worker: Worker::new(),
+                worker,
+                egui_ctx: cc.egui_ctx.clone(),
+                logger,
             },
             file_dialog: None,
         }
     }
-}
 
-impl NodeshopApp {
     fn save_yaml(&self, filename: &str) -> anyhow::Result<()> {
         serialization::save(
             &self.user_state.graph_state,
@@ -269,7 +293,7 @@ impl NodeshopApp {
         let (
             graph_state,
             editor_state
-        ) = serialization::load(&self.user_state.invoker, filename)?;
+        ) = serialization::load(&self.user_state.functions, filename)?;
 
         self.user_state.graph_state = graph_state;
         self.state = editor_state;

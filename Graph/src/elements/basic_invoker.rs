@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
@@ -10,10 +11,11 @@ use crate::invoke::{InvokeArgs, Invoker};
 use crate::lambda_invoker::LambdaInvoker;
 use crate::runtime_graph::InvokeContext;
 
+pub type Logger = Arc<Mutex<Vec<String>>>;
+
 pub struct BasicInvoker {
     lambda_invoker: LambdaInvoker,
 }
-
 
 #[repr(u32)]
 #[derive(Debug, Display, EnumIter, Copy, Clone)]
@@ -62,8 +64,8 @@ impl From<i64> for MathTwoArgOp {
     }
 }
 
-impl Default for BasicInvoker {
-    fn default() -> Self {
+impl BasicInvoker {
+    pub fn new(logger: Logger) -> Self {
         let mut invoker = LambdaInvoker::default();
 
         //print
@@ -84,9 +86,10 @@ impl Default for BasicInvoker {
                 ],
                 outputs: vec![],
             },
-            |_, inputs, _| {
+            move |_, inputs, _| {
                 let value: &str = inputs[0].as_ref().unwrap().as_string();
-                println!("{}", value);
+                logger.lock().unwrap().push(value.to_string());
+                println!("BasicInvoker::print {}", value);
             });
 
         // math two argument operation

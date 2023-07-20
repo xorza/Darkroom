@@ -11,13 +11,13 @@ mod eng_integration;
 mod serialization;
 
 fn main() {
-    let app = Box::<NodeshopApp>::default();
 
     eframe::run_native(
         "Nodeshop",
         eframe::NativeOptions::default(),
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
+            let app = Box::new(NodeshopApp::new(cc));
 
             app
         }),
