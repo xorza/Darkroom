@@ -129,6 +129,7 @@ impl eng::NodeDataTrait for EditorNode {
         AppResponse: eng::UserResponseTrait,
     {
         let mut responses = vec![];
+        ui.set_width(130.0);
 
         ui.horizontal(|ui| {
             {
