@@ -130,39 +130,41 @@ impl eng::NodeDataTrait for EditorNode {
     {
         let mut responses = vec![];
 
-        {
-            let is_output_button =
-                if self.is_output {
-                    egui::Button::new(
-                        egui::RichText::new("Active")
-                            .color(egui::Color32::BLACK)
-                    )
-                        .fill(egui::Color32::GOLD)
-                } else {
-                    egui::Button::new(egui::RichText::new("Active"))
+        ui.horizontal(|ui| {
+            {
+                let is_output_button =
+                    if self.is_output {
+                        egui::Button::new(
+                            egui::RichText::new("Active")
+                                .color(egui::Color32::BLACK)
+                        )
+                            .fill(egui::Color32::GOLD)
+                    } else {
+                        egui::Button::new(egui::RichText::new("Active"))
+                    }
+                        .min_size(egui::Vec2::new(50.0, 0.0));
+                if is_output_button.ui(ui).clicked() {
+                    responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeOutput(node_id)));
                 }
-                    .min_size(egui::Vec2::new(70.0, 0.0));
-            if is_output_button.ui(ui).clicked() {
-                responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeOutput(node_id)));
             }
-        }
 
-        if !self.is_output {
-            let cache_outputs_button =
-                if self.cache_outputs {
-                    egui::Button::new(
-                        egui::RichText::new("Once")
-                            .color(egui::Color32::BLACK)
-                    )
-                        .fill(egui::Color32::GOLD)
-                } else {
-                    egui::Button::new(egui::RichText::new("Once"))
+            if !self.is_output {
+                let cache_outputs_button =
+                    if self.cache_outputs {
+                        egui::Button::new(
+                            egui::RichText::new("Once")
+                                .color(egui::Color32::BLACK)
+                        )
+                            .fill(egui::Color32::GOLD)
+                    } else {
+                        egui::Button::new(egui::RichText::new("Once"))
+                    }
+                        .min_size(egui::Vec2::new(50.0, 0.0));
+                if cache_outputs_button.ui(ui).clicked() {
+                    responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeCacheOutputs(node_id)));
                 }
-                    .min_size(egui::Vec2::new(70.0, 0.0));
-            if cache_outputs_button.ui(ui).clicked() {
-                responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeCacheOutputs(node_id)));
             }
-        }
+        });
 
         {
             for combo_input in self.combobox_inputs.iter() {
@@ -177,6 +179,7 @@ impl eng::NodeDataTrait for EditorNode {
 
                 egui::ComboBox::from_label(combo_input.name.clone())
                     .selected_text(current_value_label)
+                    .width(100.0)
                     .show_ui(ui, |ui| {
                         for (value, name) in variants {
                             ui.selectable_value(
@@ -185,7 +188,8 @@ impl eng::NodeDataTrait for EditorNode {
                                 name,
                             );
                         }
-                    });
+                    })
+                ;
 
                 if current_value != combo_input.current_value {
                     responses.push(eng::NodeResponse::User(

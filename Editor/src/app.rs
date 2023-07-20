@@ -3,6 +3,7 @@ use std::default::Default;
 use eframe::egui::{self};
 use egui_file::{DialogType, FileDialog};
 
+use common::ApplyMut;
 use egui_node_graph as eng;
 use graph_lib::elements::basic_invoker::BasicInvoker;
 use graph_lib::graph::{Binding, Graph, Node, NodeId, OutputBinding};
@@ -105,7 +106,7 @@ impl eframe::App for NodeshopApp {
                             eng_node.combobox_inputs
                                 .iter_mut()
                                 .find(|combobox_input| combobox_input.input_index == input_index)
-                                .map(|combobox_input| {
+                                .apply_mut(|combobox_input| {
                                     combobox_input.current_value = value.clone();
                                 });
                             node.inputs[input_index as usize].const_value = Some(value);
