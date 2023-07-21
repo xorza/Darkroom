@@ -1,6 +1,9 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use rand::Rng;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 
@@ -53,11 +56,13 @@ impl MathTwoArgOp {
         }
     }
 }
+
 impl From<MathTwoArgOp> for StaticValue {
     fn from(op: MathTwoArgOp) -> Self {
         StaticValue::Int(op as i64)
     }
 }
+
 impl From<i64> for MathTwoArgOp {
     fn from(op: i64) -> Self {
         MathTwoArgOp::iter().find(|op_| *op_ as i64 == op).unwrap()
@@ -175,6 +180,50 @@ impl BasicInvoker {
                 let result = format!("{}", value);
 
                 outputs[0] = Some(DynamicValue::String(result));
+            });
+
+        // random
+        let rng = Rc::new(RefCell::new(rand::thread_rng()));
+
+        invoker.add_lambda(
+            Function {
+                self_id: FunctionId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
+                name: "random".to_string(),
+                behavior: FunctionBehavior::Passive,
+                is_output: false,
+                inputs: vec![
+                    InputInfo {
+                        name: "min".to_string(),
+                        is_required: true,
+                        data_type: DataType::Float,
+                        default_value: Some(StaticValue::Float(0.0)),
+                        variants: None,
+                    },
+                    InputInfo {
+                        name: "max".to_string(),
+                        is_required: true,
+                        data_type: DataType::Float,
+                        default_value: Some(StaticValue::Float(1.0)),
+                        variants: None,
+                    },
+                ],
+                outputs: vec![
+                    OutputInfo {
+                        name: "result".to_string(),
+                        data_type: DataType::Float,
+                    }
+                ],
+            },
+            move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
+
+                let min: f64 = inputs[0].as_ref().unwrap().as_float();
+                let max: f64 = inputs[1].as_ref().unwrap().as_float();
+                let random = rng.borrow_mut().gen::<f64>();
+                let result = min + (max - min) * random;
+
+                outputs[0] = Some(DynamicValue::Float(result));
             });
 
         Self {

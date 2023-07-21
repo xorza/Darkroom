@@ -37,3 +37,4 @@ eframe = { version = "*", features = ["wgpu"] }
 strum = "*"
 strum_macros = "*"
 once_cell = "*"
+rand = "*"

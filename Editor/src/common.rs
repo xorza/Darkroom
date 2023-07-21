@@ -20,11 +20,20 @@ pub(crate) fn build_node_from_func(
                 eng::InputParamKind::ConnectionOrConstant
             };
 
+            let value = input.default_value
+                .as_ref()
+                .map(|value| {
+                    value.clone()
+                })
+                .unwrap_or_else(|| {
+                    StaticValue::from(&input.data_type)
+                });
+
             let _input_id = editor_graph.add_input_param(
                 eng_node_id,
                 input.name.to_string(),
                 input.data_type.clone(),
-                EditorValue(StaticValue::from(&input.data_type)),
+                EditorValue(value),
                 param_kind,
                 shown_inline,
             );
