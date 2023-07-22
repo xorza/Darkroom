@@ -33,6 +33,7 @@ where
             name: "print".to_string(),
             behavior: FunctionBehavior::Active,
             is_output: true,
+            category: "Debug".to_string(),
             inputs: vec![InputInfo {
                 name: "message".to_string(),
                 is_required: true,
@@ -52,6 +53,7 @@ where
             name: "get_a".to_string(),
             behavior: FunctionBehavior::Passive,
             is_output: false,
+            category: "Debug".to_string(),
             inputs: vec![],
             outputs: vec![
                 OutputInfo {
@@ -70,6 +72,7 @@ where
             name: "get_b".to_string(),
             behavior: FunctionBehavior::Passive,
             is_output: false,
+            category: "Debug".to_string(),
             inputs: vec![],
             outputs: vec![
                 OutputInfo {
@@ -88,6 +91,7 @@ where
             name: "sum".to_string(),
             behavior: FunctionBehavior::Active,
             is_output: true,
+            category: "Debug".to_string(),
             inputs: vec![
                 InputInfo {
                     name: "a".to_string(),
@@ -122,8 +126,9 @@ where
         Function {
             self_id: FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
             name: "mult".to_string(),
-            behavior: FunctionBehavior::Active,
+            behavior: FunctionBehavior::Passive,
             is_output: true,
+            category: "Debug".to_string(),
             inputs: vec![
                 InputInfo {
                     name: "a".to_string(),

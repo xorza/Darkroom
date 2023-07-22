@@ -21,7 +21,7 @@ impl LambdaInvoker {
     where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
         if self.lambdas.contains_key(&function.self_id) {
-            panic!("Function with id {} already exists", function.self_id);
+            panic!("Function {}:{} with the same id already exists.", function.self_id, function.name);
         }
 
         let invokable = LambdaInvokable {

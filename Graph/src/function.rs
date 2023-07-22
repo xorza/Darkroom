@@ -29,6 +29,7 @@ id_type!(FunctionId);
 pub struct Function {
     pub self_id: FunctionId,
     pub name: String,
+    pub category: String,
     pub behavior: FunctionBehavior,
     pub is_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

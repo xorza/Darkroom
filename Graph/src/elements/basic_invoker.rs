@@ -82,6 +82,7 @@ impl BasicInvoker {
                 name: "print".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: true,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "value".to_string(),
@@ -105,6 +106,7 @@ impl BasicInvoker {
                 name: "2 arg math".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -156,6 +158,7 @@ impl BasicInvoker {
                 name: "float to string".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "value".to_string(),
@@ -190,6 +193,7 @@ impl BasicInvoker {
                 name: "random".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "min".to_string(),
@@ -229,8 +233,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
                 name: "add".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -269,8 +274,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
                 name: "subtract".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -309,8 +315,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
                 name: "multiply".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -349,8 +356,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
                 name: "divide".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -395,8 +403,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
                 name: "power".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -435,8 +444,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
                 name: "sqrt".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -467,8 +477,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
                 name: "sin".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -499,8 +510,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
                 name: "cos".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -531,8 +543,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
                 name: "tan".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "a".to_string(),
@@ -563,8 +576,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
                 name: "asin".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "sin".to_string(),
@@ -595,8 +609,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
                 name: "acos".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "cos".to_string(),
@@ -627,8 +642,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
                 name: "atan".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "tan".to_string(),
@@ -659,8 +675,9 @@ impl BasicInvoker {
             Function {
                 self_id: FunctionId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
                 name: "log".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FunctionBehavior::Passive,
                 is_output: false,
+                category: "math".to_string(),
                 inputs: vec![
                     InputInfo {
                         name: "value".to_string(),

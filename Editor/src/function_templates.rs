@@ -9,7 +9,7 @@ use crate::app::AppState;
 use crate::common::{build_node_from_func, combobox_inputs_from_function};
 use crate::eng_integration::{EditorGraph, EditorNode, EditorValue};
 
-pub(crate) enum NodeCategory {}
+pub(crate) struct NodeCategory(String);
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct FunctionTemplate(Function);
@@ -56,7 +56,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
     }
 
     fn node_finder_categories(&self, _user_state: &mut Self::UserState) -> Vec<Self::CategoryType> {
-        vec![]
+        vec![NodeCategory(self.0.category.clone())]
     }
 
     fn node_graph_label(&self, user_state: &mut Self::UserState) -> String {
@@ -92,7 +92,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
 
 impl eng::CategoryTrait for NodeCategory {
     fn name(&self) -> String {
-        "test_category".to_string()
+        self.0.clone()
     }
 }
 
