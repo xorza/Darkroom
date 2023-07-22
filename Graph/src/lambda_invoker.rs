@@ -20,6 +20,10 @@ impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Function, lambda: F)
     where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
     {
+        if self.lambdas.contains_key(&function.self_id) {
+            panic!("Function with id {} already exists", function.self_id);
+        }
+
         let invokable = LambdaInvokable {
             lambda: Box::new(lambda),
         };
