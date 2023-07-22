@@ -98,7 +98,7 @@ impl InvokeContext {
     }
 
     pub fn is_some<T>(&self) -> bool
-    where T: Any + Default
+    where T: Any
     {
         match &self.boxed {
             None => false,
@@ -107,21 +107,21 @@ impl InvokeContext {
     }
 
     pub fn get<T>(&self) -> Option<&T>
-    where T: Any + Default
+    where T: Any
     {
         self.boxed.as_ref()
             .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
-    where T: Any + Default
+    where T: Any
     {
         self.boxed.as_mut()
             .and_then(|boxed| boxed.downcast_mut::<T>())
     }
 
     pub fn set<T>(&mut self, value: T)
-    where T: Any + Default
+    where T: Any
     {
         self.boxed = Some(Box::new(value));
     }

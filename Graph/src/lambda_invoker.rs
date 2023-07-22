@@ -4,7 +4,7 @@ use crate::function::{Function, FunctionId};
 use crate::invoke::{InvokeArgs, Invoker};
 use crate::runtime_graph::InvokeContext;
 
-pub type Lambda = dyn Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static;
+pub type Lambda = dyn Fn(&mut InvokeContext, &mut InvokeArgs, &mut InvokeArgs) + 'static;
 
 pub struct LambdaInvokable {
     lambda: Box<Lambda>,
@@ -18,7 +18,7 @@ pub struct LambdaInvoker {
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Function, lambda: F)
-    where F: Fn(&mut InvokeContext, &InvokeArgs, &mut InvokeArgs) + 'static
+    where F: Fn(&mut InvokeContext, &mut InvokeArgs, &mut InvokeArgs) + 'static
     {
         if self.lambdas.contains_key(&function.self_id) {
             panic!("Function {}:{} with the same id already exists.", function.self_id, function.name);

@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::Instant;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
@@ -41,11 +42,24 @@ impl Default for TimersInvoker {
                     "x times per second".to_string(),
                 ],
             },
-            move |_ctx, inputs, outputs| {
+            move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();
-                let delta = 1.0 / frequency;
+
+                let delta =
+                    if ctx.is_none() {
+                        1.0 / frequency
+                    } else {
+                        let delta = ctx
+                            .get::<Instant>()
+                            .unwrap()
+                            .elapsed()
+                            .as_secs_f64();
+                        ctx.set(Instant::now());
+
+                        delta
+                    };
+
                 outputs[0] = DynamicValue::Float(delta);
-                // ctx.set_timer(delta);
             },
         );
 
