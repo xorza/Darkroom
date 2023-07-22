@@ -47,7 +47,7 @@ impl Invoker for WgpuInvoker {
         &self,
         function_id: FunctionId,
         ctx: &mut InvokeContext,
-        inputs: &InvokeArgs,
+        inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>
     {

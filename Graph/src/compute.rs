@@ -95,7 +95,7 @@ impl Compute {
                 self.invoker.invoke(
                     node.function_id,
                     &mut r_node.invoke_context,
-                    inputs.as_slice(),
+                    inputs.as_mut_slice(),
                     outputs.as_mut_slice(),
                 )?;
 

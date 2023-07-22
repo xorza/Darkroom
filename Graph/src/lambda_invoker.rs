@@ -41,7 +41,7 @@ impl Invoker for LambdaInvoker {
     fn invoke(&self,
               function_id: FunctionId,
               ctx: &mut InvokeContext,
-              inputs: &InvokeArgs,
+              inputs: &mut InvokeArgs,
               outputs: &mut InvokeArgs)
         -> anyhow::Result<()>
     {

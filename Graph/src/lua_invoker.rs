@@ -313,7 +313,7 @@ impl Invoker for LuaInvoker {
     fn invoke(&self,
               function_id: FunctionId,
               _ctx: &mut InvokeContext,
-              inputs: &InvokeArgs,
+              inputs: &mut InvokeArgs,
               outputs: &mut InvokeArgs)
         -> anyhow::Result<()>
     {

@@ -73,7 +73,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let funcs = invoker.get_all_functions();
     assert_eq!(funcs.len(), 5);
 
-    let inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
+    let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
     let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
 
     let mut ctx = InvokeContext::default();
@@ -81,7 +81,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     invoker.invoke(
         FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
         &mut ctx,
-        inputs.as_slice(),
+        inputs.as_mut_slice(),
         outputs.as_mut_slice(),
     )?;
     let result: i64 = outputs[0].as_int();

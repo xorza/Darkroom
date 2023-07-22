@@ -31,7 +31,7 @@ pub trait Invoker {
         &self,
         function_id: FunctionId,
         ctx: &mut InvokeContext,
-        inputs: &InvokeArgs,
+        inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>;
 
@@ -101,7 +101,7 @@ impl Invoker for UberInvoker {
         &self,
         function_id: FunctionId,
         ctx: &mut InvokeContext,
-        inputs: &InvokeArgs,
+        inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>
     {

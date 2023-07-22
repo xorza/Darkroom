@@ -9,7 +9,7 @@ impl Invoker for EmptyInvoker {
     fn invoke(&self,
               _function_id: FunctionId,
               _ctx: &mut InvokeContext,
-              _inputs: &InvokeArgs,
+              _inputs: &mut InvokeArgs,
               _outputs: &mut InvokeArgs)
         -> anyhow::Result<()> {
         Ok(())
