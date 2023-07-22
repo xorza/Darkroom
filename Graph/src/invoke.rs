@@ -18,7 +18,7 @@ pub struct TypeConverterDesc {
     pub dst: DataType,
 }
 
-pub type InvokeArgs = [Option<DynamicValue>];
+pub type InvokeArgs = [DynamicValue];
 
 pub trait Invokable {
     fn call(&self, ctx: &mut InvokeContext, inputs: &InvokeArgs, outputs: &mut InvokeArgs);

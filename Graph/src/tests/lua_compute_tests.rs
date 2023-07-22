@@ -73,8 +73,8 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let funcs = invoker.get_all_functions();
     assert_eq!(funcs.len(), 5);
 
-    let inputs: ArgSet = ArgSet::from_vec(vec![Some(3), Some(5)]);
-    let mut outputs: ArgSet = ArgSet::from_vec(vec![Some(0)]);
+    let inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
+    let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
 
     let mut ctx = InvokeContext::default();
     // call 'mult' function
@@ -84,7 +84,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
         inputs.as_slice(),
         outputs.as_mut_slice(),
     )?;
-    let result: i64 = outputs[0].as_ref().unwrap().as_int();
+    let result: i64 = outputs[0].as_int();
     assert_eq!(result, 15);
 
     let graph = invoker.map_graph()?;

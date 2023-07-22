@@ -45,7 +45,7 @@ where
             events: vec![],
         },
         move |_, inputs, _| {
-            result(inputs[0].as_ref().unwrap().as_int());
+            result(inputs[0].as_int());
         });
     // val 1
     invoker.add_lambda(
@@ -120,8 +120,8 @@ where
             events: vec![],
         },
         |ctx, inputs, outputs| {
-            let a: i64 = inputs[0].as_ref().unwrap().as_int();
-            let b: i64 = inputs[1].as_ref().unwrap().as_int();
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
             outputs[0] = DynamicValue::from(a + b).into();
             ctx.set(a + b);
         });
@@ -158,8 +158,8 @@ where
             events: vec![],
         },
         |ctx, inputs, outputs| {
-            let a: i64 = inputs[0].as_ref().unwrap().as_int();
-            let b: i64 = inputs[1].as_ref().unwrap().as_int();
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
             outputs[0] = DynamicValue::from(a * b).into();
             ctx.set(a * b);
         });
@@ -211,7 +211,6 @@ fn simple_compute_test() -> anyhow::Result<()> {
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 35);
 
-    // runtime_graph.update(&graph);
     compute.run(&graph, &mut runtime_graph)?;
     assert_eq!(test_values.borrow().result, 35);
 

@@ -27,7 +27,7 @@ pub struct RuntimeNode {
     #[serde(skip)]
     pub(crate) invoke_context: InvokeContext,
     #[serde(skip)]
-    pub(crate) output_values: Option<Vec<Option<DynamicValue>>>,
+    pub(crate) output_values: Option<Vec<DynamicValue>>,
 
     pub(crate) output_binding_count: Vec<u32>,
     pub(crate) total_binding_count: u32,

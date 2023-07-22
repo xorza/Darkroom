@@ -8,7 +8,7 @@ use crate::invoke::Invoker;
 use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Default)]
-pub(crate) struct ArgSet(Vec<Option<DynamicValue>>);
+pub(crate) struct ArgSet(Vec<DynamicValue>);
 
 pub struct Compute {
     invoker: Box<dyn Invoker>,
@@ -48,10 +48,15 @@ impl Compute {
                 .iter()
                 .map(|input| {
                     let value = match &input.binding {
-                        Binding::None => None,
-                        Binding::Const => input.const_value
-                            .as_ref()
-                            .map(DynamicValue::from),
+                        Binding::None => DynamicValue::None,
+                        Binding::Const => {
+                            let value: DynamicValue = input.const_value
+                                .as_ref()
+                                .expect("Const value is not set")
+                                .into();
+
+                            value
+                        }
 
                         Binding::Output(output_binding) => {
                             let output_r_node = runtime_graph
@@ -75,17 +80,14 @@ impl Compute {
                 })
                 .enumerate()
                 .for_each(|(index, (data_type, value))| {
-                    inputs[index] = value
-                        .as_ref()
-                        .map(|value| {
-                            self.convert_type(value, data_type)
-                        });
+                    inputs[index] = self.convert_type(&value, data_type);
                 });
 
             let r_node = &mut runtime_graph.nodes[index];
             let outputs =
                 r_node.output_values
-                    .get_or_insert_with(|| vec![None; node.outputs.len()]);
+                    .get_or_insert_with(|| vec![DynamicValue::None; node.outputs.len()]);
+
             assert_eq!(outputs.len(), node.outputs.len());
 
             r_node.run_time = {
@@ -107,7 +109,7 @@ impl Compute {
             if !r_node.should_cache_outputs {
                 r_node.output_values
                     .as_mut()
-                    .apply_mut(|values| values.fill(None));
+                    .apply_mut(|values| values.fill(DynamicValue::None));
             }
 
             assert_eq!(r_node.total_binding_count, 0);
@@ -167,26 +169,26 @@ impl From<Box<dyn Invoker>> for Compute {
 
 
 impl ArgSet {
-    pub(crate) fn from_vec<T>(vec: Vec<Option<T>>) -> Self
+    pub(crate) fn from_vec<T>(vec: Vec<T>) -> Self
     where T: Into<DynamicValue> {
-        ArgSet(vec.into_iter().map(|v| v.map(|v| v.into())).collect())
+        ArgSet(vec.into_iter().map(|v| v.into()).collect())
     }
     pub(crate) fn resize_and_fill(&mut self, size: usize) {
-        self.0.resize(size, None);
+        self.0.resize(size, DynamicValue::None);
         self.fill();
     }
     pub(crate) fn fill(&mut self) {
-        self.0.fill(None);
+        self.0.fill(DynamicValue::None);
     }
-    pub(crate) fn as_slice(&self) -> &[Option<DynamicValue>] {
+    pub(crate) fn as_slice(&self) -> &[DynamicValue] {
         self.0.as_slice()
     }
-    pub(crate) fn as_mut_slice(&mut self) -> &mut [Option<DynamicValue>] {
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [DynamicValue] {
         self.0.as_mut_slice()
     }
 }
 impl Index<usize> for ArgSet {
-    type Output = Option<DynamicValue>;
+    type Output = DynamicValue;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]

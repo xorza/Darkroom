@@ -44,6 +44,7 @@ pub enum StaticValue {
 #[derive(Default, Debug)]
 pub enum DynamicValue {
     #[default]
+    None,
     Null,
     Float(f64),
     Int(i64),
@@ -104,6 +105,7 @@ impl DynamicValue {
             DynamicValue::String(_) => &DataType::String,
             // DynamicValue::Array(_) => DataType::Array,
             DynamicValue::Custom { data_type, .. } => data_type,
+            DynamicValue::None => panic!("Value is None"),
         }
     }
 
@@ -137,6 +139,10 @@ impl DynamicValue {
             _ => { panic!("Value is not a custom type") }
         }
     }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, DynamicValue::None)
+    }
 }
 
 impl Clone for DynamicValue {
@@ -162,6 +168,7 @@ impl Clone for DynamicValue {
                 };
                 unimplemented!("Clone custom type")
             }
+            DynamicValue::None => { *self = DynamicValue::None; }
         }
     }
 }

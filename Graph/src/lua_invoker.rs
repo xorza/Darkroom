@@ -325,10 +325,7 @@ impl Invoker for LuaInvoker {
 
         let mut input_args: Variadic<mlua::Value> = Variadic::new();
         for (index, input_info) in function_info.info.inputs.iter().enumerate() {
-            let input = inputs.get(index)
-                .unwrap()
-                .as_ref()
-                .expect("input is required");
+            let input = &inputs[index];
             assert_eq!(input_info.data_type, *input.data_type());
 
             let invoke_value = to_lua_value(self.lua, input)?;
@@ -344,7 +341,7 @@ impl Invoker for LuaInvoker {
 
             let output = data::DynamicValue::from(output_arg);
             assert_eq!(output_info.data_type, *output.data_type());
-            outputs[index] = Some(output);
+            outputs[index] = output;
         }
 
         self.lua.globals().set("context_id", mlua::Value::Nil)?;
