@@ -93,6 +93,7 @@ impl BasicInvoker {
                     },
                 ],
                 outputs: vec![],
+                events: vec![],
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_ref().unwrap().as_string();
@@ -136,6 +137,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     }
                 ],
+                events: vec![],
             },
             move |ctx, inputs, outputs| {
                 assert_eq!(inputs.len(), 3);
@@ -174,6 +176,7 @@ impl BasicInvoker {
                         data_type: DataType::String,
                     }
                 ],
+                events: vec![],
             },
             |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -216,6 +219,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     }
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -258,6 +262,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     }
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -299,6 +304,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     }
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -340,6 +346,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     }
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -385,6 +392,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -428,6 +436,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -462,6 +471,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -495,6 +505,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -528,6 +539,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -561,6 +573,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -594,6 +607,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -627,6 +641,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -660,6 +675,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -700,6 +716,7 @@ impl BasicInvoker {
                         data_type: DataType::Float,
                     },
                 ],
+                events: vec![],
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);

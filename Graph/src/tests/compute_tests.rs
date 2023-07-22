@@ -42,6 +42,7 @@ where
                 variants: None,
             }],
             outputs: vec![],
+            events: vec![],
         },
         move |_, inputs, _| {
             result(inputs[0].as_ref().unwrap().as_int());
@@ -61,6 +62,7 @@ where
                     data_type: DataType::Int,
                 }
             ],
+            events: vec![],
         },
         move |_, _, outputs| {
             outputs[0] = DynamicValue::from(get_a() as f64).into();
@@ -80,6 +82,7 @@ where
                     data_type: DataType::Int,
                 }
             ],
+            events: vec![],
         },
         move |_, _, outputs| {
             outputs[0] = DynamicValue::from(get_b()).into();
@@ -114,6 +117,7 @@ where
                     data_type: DataType::Int,
                 }
             ],
+            events: vec![],
         },
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();
@@ -151,6 +155,7 @@ where
                     data_type: DataType::Int,
                 }
             ],
+            events: vec![],
         },
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_ref().unwrap().as_int();

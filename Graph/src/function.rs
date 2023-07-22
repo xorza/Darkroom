@@ -36,6 +36,8 @@ pub struct Function {
     pub inputs: Vec<InputInfo>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outputs: Vec<OutputInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
 }
 
 

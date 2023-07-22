@@ -16,25 +16,7 @@ pub enum FunctionBehavior {
 
 id_type!(NodeId);
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Node {
-    self_id: NodeId,
 
-    pub function_id: FunctionId,
-
-    pub name: String,
-    pub behavior: FunctionBehavior,
-    pub is_output: bool,
-    pub cache_outputs: bool,
-
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<Input>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<Output>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subgraph_id: Option<SubGraphId>,
-}
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Output {
@@ -66,6 +48,33 @@ pub struct Input {
     pub const_value: Option<StaticValue>,
 }
 
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct Event {
+    pub name: String,
+    pub subscribers: Vec<NodeId>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Node {
+    self_id: NodeId,
+
+    pub function_id: FunctionId,
+
+    pub name: String,
+    pub behavior: FunctionBehavior,
+    pub is_output: bool,
+    pub cache_outputs: bool,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<Input>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<Output>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<Event>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subgraph_id: Option<SubGraphId>,
+}
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
@@ -235,6 +244,7 @@ impl Node {
             cache_outputs: false,
             inputs: vec![],
             outputs: vec![],
+            events: vec![],
             subgraph_id: None,
         }
     }
@@ -257,6 +267,13 @@ impl Node {
             }
         }).collect();
 
+        let events: Vec<Event> = function.events.iter().map(|event| {
+            Event {
+                name: event.clone(),
+                subscribers: vec![],
+            }
+        }).collect();
+
         Node {
             self_id: NodeId::unique(),
             function_id: function.self_id,
@@ -266,6 +283,7 @@ impl Node {
             is_output: false,
             inputs,
             outputs,
+            events,
             subgraph_id: None,
         }
     }
