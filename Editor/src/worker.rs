@@ -7,11 +7,12 @@ use eframe::egui;
 
 use graph_lib::compute::Compute;
 use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
-use graph_lib::elements::timers_invoker::TimersInvoker;
 use graph_lib::function::Function;
 use graph_lib::graph::Graph;
 use graph_lib::invoke::{Invoker, UberInvoker};
 use graph_lib::runtime_graph::RuntimeGraph;
+
+use crate::timers_invoker::TimersInvoker;
 
 enum WorkerMessage {
     Stop,

@@ -1,12 +1,12 @@
 use std::str::FromStr;
 use std::time::Instant;
 
-use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
-use crate::graph::FunctionBehavior;
-use crate::invoke::{InvokeArgs, Invoker};
-use crate::lambda_invoker::LambdaInvoker;
-use crate::runtime_graph::InvokeContext;
+use graph_lib::data::{DataType, DynamicValue, StaticValue};
+use graph_lib::function::{Function, FunctionId, InputInfo, OutputInfo};
+use graph_lib::graph::FunctionBehavior;
+use graph_lib::invoke::{InvokeArgs, Invoker};
+use graph_lib::lambda_invoker::LambdaInvoker;
+use graph_lib::runtime_graph::InvokeContext;
 
 pub struct TimersInvoker {
     lambda_invoker: LambdaInvoker,
