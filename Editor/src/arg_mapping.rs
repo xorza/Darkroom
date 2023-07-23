@@ -7,7 +7,7 @@ pub(crate) struct ArgAddress {
     pub(crate) index: u32,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct ArgMapping {
     // @formatter:off
     triggers: Vec<( eng::InputId,     NodeId)>,
@@ -17,12 +17,21 @@ pub(crate) struct ArgMapping {
     // @formatter:on
 }
 
+pub(crate) enum FindByInputIdResult {
+    Input(ArgAddress),
+    Trigger(NodeId),
+}
+pub(crate) enum FindByOutputIdResult {
+    Output(ArgAddress),
+    Event(ArgAddress),
+}
+
 impl ArgMapping {
-    pub(crate) fn find_input_id(&self, node_id: NodeId, index: u32) -> eng::InputId {
+    pub(crate) fn find_input_id(&self, node_id: &NodeId, index: u32) -> eng::InputId {
         self.inputs
             .iter()
             .find_map(|(input_id, aa)|
-                if aa.node_id == node_id && aa.index == index {
+                if aa.node_id == *node_id && aa.index == index {
                     Some(*input_id)
                 } else {
                     None
@@ -30,11 +39,11 @@ impl ArgMapping {
             )
             .unwrap()
     }
-    pub(crate) fn find_output_id(&self, node_id: NodeId, index: u32) -> eng::OutputId {
+    pub(crate) fn find_output_id(&self, node_id: &NodeId, index: u32) -> eng::OutputId {
         self.outputs
             .iter()
             .find_map(|(output_id, aa)|
-                if aa.node_id == node_id && aa.index == index {
+                if aa.node_id == *node_id && aa.index == index {
                     Some(*output_id)
                 } else {
                     None
@@ -42,11 +51,11 @@ impl ArgMapping {
             )
             .unwrap()
     }
-    pub(crate) fn find_trigger_id(&self, node_id: NodeId) -> eng::InputId {
+    pub(crate) fn find_trigger_id(&self, node_id: &NodeId) -> eng::InputId {
         self.triggers
             .iter()
             .find_map(|(input_id, trigger_node_id)|
-                if *trigger_node_id == node_id {
+                if *trigger_node_id == *node_id {
                     Some(*input_id)
                 } else {
                     None
@@ -54,11 +63,11 @@ impl ArgMapping {
             )
             .unwrap()
     }
-    pub(crate) fn find_event_id(&self, node_id: NodeId, index: u32) -> eng::OutputId {
+    pub(crate) fn find_event_id(&self, node_id: &NodeId, index: u32) -> eng::OutputId {
         self.events
             .iter()
             .find_map(|(output_id, aa)|
-                if aa.node_id == node_id && aa.index == index {
+                if aa.node_id == *node_id && aa.index == index {
                     Some(*output_id)
                 } else {
                     None
@@ -115,6 +124,66 @@ impl ArgMapping {
             )
             .unwrap()
     }
+
+    pub(crate) fn find_by_input_id(&self, input_id: eng::InputId) -> FindByInputIdResult {
+        let result = self.inputs
+            .iter()
+            .find_map(|(aa_input_id, aa)|
+                if *aa_input_id == input_id {
+                    Some(FindByInputIdResult::Input(aa.clone()))
+                } else {
+                    None
+                }
+            );
+        if let Some(result) = result {
+            return result;
+        }
+
+        let result = self.triggers
+            .iter()
+            .find_map(|(aa_input_id, node_id)|
+                if *aa_input_id == input_id {
+                    Some(FindByInputIdResult::Trigger(*node_id))
+                } else {
+                    None
+                }
+            );
+        if let Some(result) = result {
+            return result;
+        } else {
+            panic!("Input not found")
+        }
+    }
+    pub(crate) fn find_by_output_id(&self, output_id: eng::OutputId) -> FindByOutputIdResult {
+        let result = self.outputs
+            .iter()
+            .find_map(|(aa_output_id, aa)|
+                if *aa_output_id == output_id {
+                    Some(FindByOutputIdResult::Output(aa.clone()))
+                } else {
+                    None
+                }
+            );
+        if let Some(result) = result {
+            return result;
+        }
+
+        let result = self.events
+            .iter()
+            .find_map(|(aa_output_id, aa)|
+                if *aa_output_id == output_id {
+                    Some(FindByOutputIdResult::Event(aa.clone()))
+                } else {
+                    None
+                }
+            );
+        if let Some(result) = result {
+            return result;
+        } else {
+            panic!("Input not found")
+        }
+    }
+
 
     pub(crate) fn add_input(&mut self, eng_input_id: eng::InputId, node_id: NodeId, index: u32) {
         self.inputs.push((eng_input_id, ArgAddress {

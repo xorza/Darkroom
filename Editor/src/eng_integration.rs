@@ -10,6 +10,7 @@ use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
 
 use crate::app::AppState;
+use crate::arg_mapping::ArgMapping;
 use crate::function_templates::FunctionTemplate;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -365,6 +366,43 @@ pub(crate) fn build_node_from_func(
     editor_node.inputs = inputs;
     editor_node.events = events;
     editor_node.outputs = outputs;
+}
+
+pub(crate) fn register_node(editor_node: &EditorNode, arg_mapping: &mut ArgMapping) {
+    arg_mapping.add_trigger(
+        editor_node.trigger_id,
+        editor_node.node_id,
+    );
+    editor_node.inputs
+        .iter()
+        .enumerate()
+        .for_each(|(index, input_id)| {
+            arg_mapping.add_input(
+                *input_id,
+                editor_node.node_id,
+                index as u32,
+            );
+        });
+    editor_node.events
+        .iter()
+        .enumerate()
+        .for_each(|(index, event_id)| {
+            arg_mapping.add_event(
+                *event_id,
+                editor_node.node_id,
+                index as u32,
+            );
+        });
+    editor_node.outputs
+        .iter()
+        .enumerate()
+        .for_each(|(index, output_id)| {
+            arg_mapping.add_output(
+                *output_id,
+                editor_node.node_id,
+                index as u32,
+            );
+        });
 }
 
 pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<ComboboxInput> {

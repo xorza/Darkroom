@@ -5,7 +5,7 @@ use graph_lib::function::Function;
 use graph_lib::graph::{Graph, NodeId};
 
 use crate::app::GraphState;
-use crate::eng_integration::{build_node_from_func, combobox_inputs_from_function, EditorNode, EditorState};
+use crate::eng_integration::{build_node_from_func, combobox_inputs_from_function, EditorNode, EditorState, register_node};
 
 type Positions = Vec<(NodeId, (f32, f32))>;
 
@@ -108,33 +108,14 @@ pub(crate) fn load(
             eng_node_id,
         );
 
-        let editor_node = &editor_state.graph.nodes[eng_node_id];
-
-        editor_node.user_data.inputs
-            .iter()
-            .enumerate()
-            .for_each(|(index, input_id)| {
-                graph_state.arg_mapping.add_input(
-                    *input_id,
-                    node.id(),
-                    index as u32,
-                );
-            });
-        editor_node.user_data.outputs
-            .iter()
-            .enumerate()
-            .for_each(|(index, output_id)| {
-                graph_state.arg_mapping.add_output(
-                    *output_id,
-                    node.id(),
-                    index as u32,
-                );
-            });
+        let arg_mapping = &mut graph_state.arg_mapping;
+        let editor_node = &editor_state.graph.nodes[eng_node_id].user_data;
+        register_node(editor_node, arg_mapping);
 
         // Set default values
         node.inputs
             .iter()
-            .zip(editor_node.user_data.inputs.iter())
+            .zip(editor_node.inputs.iter())
             .for_each(|(input, eng_input_id)| {
                 if let Some(const_value) = &input.const_value {
                     editor_state.graph.inputs[*eng_input_id].value.0 = const_value.clone();
@@ -166,19 +147,44 @@ pub(crate) fn load(
         .for_each(|(node_id, index, binding)| {
             let index = index as u32;
 
-            let input_id = graph_state.arg_mapping.find_input_id(node_id, index);
+            let input_id = graph_state.arg_mapping.find_input_id(&node_id, index);
 
             let output_id = binding
                 .as_output_binding()
                 .map(|output_binding| {
                     graph_state.arg_mapping.find_output_id(
-                        output_binding.output_node_id,
+                        &output_binding.output_node_id,
                         output_binding.output_index,
                     )
                 })
                 .unwrap();
 
             editor_state.graph.add_connection(output_id, input_id);
+        });
+
+    // Connect events to triggers
+    graph_state.graph.nodes()
+        .iter()
+        .flat_map(|node| {
+            let event_node_id = node.id();
+            node.events
+                .iter()
+                .enumerate()
+                .flat_map(move |(event_index, event)|
+                    event.subscribers
+                        .iter()
+                        .map(move |subscriber_node_id|
+                            (event_node_id, event_index, subscriber_node_id)
+                        )
+                )
+        })
+        .for_each(|(event_node_id, event_index, subscriber_node_id)| {
+            let event_id = graph_state.arg_mapping
+                .find_event_id(&event_node_id, event_index as u32);
+            let trigger_id = graph_state.arg_mapping
+                .find_trigger_id(subscriber_node_id);
+
+            editor_state.graph.add_connection(event_id, trigger_id);
         });
 
     Ok((graph_state, editor_state))

@@ -11,8 +11,8 @@ use graph_lib::elements::basic_invoker::Logger;
 use graph_lib::function::Function;
 use graph_lib::graph::{Binding, Graph, Node, OutputBinding};
 
-use crate::arg_mapping::ArgMapping;
-use crate::eng_integration::{AppResponse, EditorState};
+use crate::arg_mapping::{ArgMapping, FindByInputIdResult, FindByOutputIdResult};
+use crate::eng_integration::{AppResponse, EditorState, register_node};
 use crate::function_templates::FunctionTemplates;
 use crate::serialization;
 use crate::worker::Worker;
@@ -132,21 +132,34 @@ impl eframe::App for NodeshopApp {
 
                 eng::NodeResponse::ConnectEventStarted(_node_id, _parameter_id) => {}
                 eng::NodeResponse::ConnectEventEnded { input: input_id, output: output_id } => {
-                    let input_address = self.user_state.graph_state.arg_mapping
-                        .find_input_address(input_id);
+                    let input_search = self.user_state.graph_state.arg_mapping
+                        .find_by_input_id(input_id);
 
-                    let output_address = self.user_state.graph_state.arg_mapping
-                        .find_output_address(output_id);
+                    let output_search = self.user_state.graph_state.arg_mapping
+                        .find_by_output_id(output_id);
 
-                    let input_node = self.user_state.graph_state.graph
-                        .node_by_id_mut(input_address.node_id)
-                        .unwrap();
+                    match (input_search, output_search) {
+                        (FindByInputIdResult::Input(input_arg_address),
+                            FindByOutputIdResult::Output(output_arg_address)) => {
+                            let input_node = self.user_state.graph_state.graph
+                                .node_by_id_mut(input_arg_address.node_id)
+                                .unwrap();
 
-                    input_node.inputs[input_address.index as usize].binding =
-                        Binding::Output(OutputBinding {
-                            output_node_id: output_address.node_id,
-                            output_index: output_address.index as u32,
-                        });
+                            input_node.inputs[input_arg_address.index as usize].binding =
+                                Binding::Output(OutputBinding {
+                                    output_node_id: output_arg_address.node_id,
+                                    output_index: output_arg_address.index,
+                                });
+                        }
+                        (FindByInputIdResult::Trigger(node_id),
+                            FindByOutputIdResult::Event(event_address)) => {
+                            let event_node = self.user_state.graph_state.graph
+                                .node_by_id_mut(event_address.node_id)
+                                .unwrap();
+                            event_node.events[event_address.index as usize].subscribers.push(node_id);
+                        }
+                        _ => panic!("Invalid connection")
+                    }
                 }
                 eng::NodeResponse::CreatedNode(node_id) => {
                     let eng_node = &mut self.state.graph.nodes[node_id];
@@ -159,42 +172,7 @@ impl eframe::App for NodeshopApp {
 
                     let arg_mapping = &mut self.user_state.graph_state.arg_mapping;
                     let editor_node = &mut eng_node.user_data;
-
-                    arg_mapping.add_trigger(
-                        editor_node.trigger_id,
-                        node.id(),
-                    );
-                    editor_node.inputs
-                        .iter()
-                        .enumerate()
-                        .for_each(|(index, input_id)| {
-                            arg_mapping.add_input(
-                                *input_id,
-                                node.id(),
-                                index as u32,
-                            );
-                        });
-                    editor_node.events
-                        .iter()
-                        .enumerate()
-                        .for_each(|(index, event_id)| {
-                            arg_mapping.add_event(
-                                *event_id,
-                                node.id(),
-                                index as u32,
-                            );
-                        });
-                    editor_node.outputs
-                        .iter()
-                        .enumerate()
-                        .for_each(|(index, output_id)| {
-                            arg_mapping.add_output(
-                                *output_id,
-                                node.id(),
-                                index as u32,
-                            );
-                        });
-
+                    register_node(editor_node, arg_mapping);
 
                     self.user_state.graph_state.graph.add_node(node);
                 }
