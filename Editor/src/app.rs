@@ -134,7 +134,6 @@ impl eframe::App for NodeshopApp {
                 eng::NodeResponse::ConnectEventEnded { input: input_id, output: output_id } => {
                     let input_search = self.user_state.graph_state.arg_mapping
                         .find_by_input_id(input_id);
-
                     let output_search = self.user_state.graph_state.arg_mapping
                         .find_by_output_id(output_id);
 
@@ -186,19 +185,34 @@ impl eframe::App for NodeshopApp {
                 eng::NodeResponse::DeleteNodeFull { node_id: _node_id, node } => {
                     self.user_state.graph_state.graph.remove_node_by_id(node.user_data.node_id);
                 }
-                eng::NodeResponse::DisconnectEvent { input: input_id, output: _output_id } => {
-                    let input_address = self.user_state.graph_state.arg_mapping
-                        .find_input_address(input_id);
+                eng::NodeResponse::DisconnectEvent { input: input_id, output: output_id } => {
+                    let input_search = self.user_state.graph_state.arg_mapping
+                        .find_by_input_id(input_id);
+                    let output_search = self.user_state.graph_state.arg_mapping
+                        .find_by_output_id(output_id);
+                    match (input_search, output_search) {
+                        (FindByInputIdResult::Input(input_arg_address),
+                            FindByOutputIdResult::Output(_output_arg_address)) => {
+                            let input_node = self.user_state.graph_state.graph
+                                .node_by_id_mut(input_arg_address.node_id)
+                                .unwrap();
 
-                    let input_node = self.user_state.graph_state.graph
-                        .node_by_id_mut(input_address.node_id)
-                        .unwrap();
-
-                    let input = &mut input_node.inputs[input_address.index as usize];
-                    if input.const_value.is_some() {
-                        input.binding = Binding::Const;
-                    } else {
-                        input.binding = Binding::None;
+                            let input = &mut input_node.inputs[input_arg_address.index as usize];
+                            if input.const_value.is_some() {
+                                input.binding = Binding::Const;
+                            } else {
+                                input.binding = Binding::None;
+                            }
+                        }
+                        (FindByInputIdResult::Trigger(node_id),
+                            FindByOutputIdResult::Event(event_address)) => {
+                            let event_node = self.user_state.graph_state.graph
+                                .node_by_id_mut(event_address.node_id)
+                                .unwrap();
+                            let event = &mut event_node.events[event_address.index as usize];
+                            event.subscribers.retain(|subscriber| *subscriber != node_id);
+                        }
+                        _ => panic!("Invalid connection")
                     }
                 }
                 eng::NodeResponse::RaiseNode(_node_id) => {}
