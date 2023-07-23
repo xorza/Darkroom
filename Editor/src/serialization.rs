@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use graph_lib::function::Function;
 use graph_lib::graph::{Graph, NodeId};
 
-use crate::app::{ArgAddress, GraphState};
-use crate::common::{build_node_from_func, combobox_inputs_from_function};
-use crate::eng_integration::{EditorNode, EditorState};
+use crate::app::GraphState;
+use crate::eng_integration::{build_node_from_func, combobox_inputs_from_function, EditorNode, EditorState};
 
 type Positions = Vec<(NodeId, (f32, f32))>;
 
@@ -59,8 +58,7 @@ pub(crate) fn load(
 
     let mut graph_state = GraphState {
         graph,
-        input_mapping: vec![],
-        output_mapping: vec![],
+        arg_mapping: Default::default(),
     };
 
     drop(deserializer);
@@ -91,6 +89,10 @@ pub(crate) fn load(
             is_output: node.is_output,
             cache_outputs: node.cache_outputs,
             combobox_inputs,
+            trigger_id: Default::default(),
+            inputs: vec![],
+            events: vec![],
+            outputs: vec![],
         };
 
         let eng_node_id = editor_state.graph.add_node(
@@ -106,37 +108,34 @@ pub(crate) fn load(
             eng_node_id,
         );
 
-        let eng_node = &editor_state.graph.nodes[eng_node_id];
-        eng_node.inputs
+        let editor_node = &editor_state.graph.nodes[eng_node_id];
+
+        editor_node.user_data.inputs
             .iter()
             .enumerate()
-            .for_each(|(index, (_name, input_id))| {
-                graph_state.input_mapping.push((
+            .for_each(|(index, input_id)| {
+                graph_state.arg_mapping.add_input(
                     *input_id,
-                    ArgAddress {
-                        node_id: node.id(),
-                        arg_index: index as u32,
-                    },
-                ));
+                    node.id(),
+                    index as u32,
+                );
             });
-        eng_node.outputs
+        editor_node.user_data.outputs
             .iter()
             .enumerate()
-            .for_each(|(index, (_name, output_id))| {
-                graph_state.output_mapping.push((
+            .for_each(|(index, output_id)| {
+                graph_state.arg_mapping.add_output(
                     *output_id,
-                    ArgAddress {
-                        node_id: node.id(),
-                        arg_index: index as u32,
-                    },
-                ));
+                    node.id(),
+                    index as u32,
+                );
             });
 
         // Set default values
         node.inputs
             .iter()
-            .zip(eng_node.inputs.iter())
-            .for_each(|(input, (_name, eng_input_id))| {
+            .zip(editor_node.user_data.inputs.iter())
+            .for_each(|(input, eng_input_id)| {
                 if let Some(const_value) = &input.const_value {
                     editor_state.graph.inputs[*eng_input_id].value.0 = const_value.clone();
                 }
@@ -165,28 +164,18 @@ pub(crate) fn load(
             binding.is_output_binding()
         )
         .for_each(|(node_id, index, binding)| {
-            let input_address = ArgAddress {
-                node_id,
-                arg_index: index as u32,
-            };
-            let output_address = binding
+            let index = index as u32;
+
+            let input_id = graph_state.arg_mapping.find_input_id(node_id, index);
+
+            let output_id = binding
                 .as_output_binding()
                 .map(|output_binding| {
-                    ArgAddress {
-                        node_id: output_binding.output_node_id,
-                        arg_index: output_binding.output_index,
-                    }
-                }).unwrap();
-
-            let input_id = graph_state.input_mapping
-                .iter()
-                .find(|(_, address)| *address == input_address)
-                .map(|(input_id, _)| *input_id)
-                .unwrap();
-            let output_id = graph_state.output_mapping
-                .iter()
-                .find(|(_, address)| *address == output_address)
-                .map(|(output_id, _)| *output_id)
+                    graph_state.arg_mapping.find_output_id(
+                        output_binding.output_node_id,
+                        output_binding.output_index,
+                    )
+                })
                 .unwrap();
 
             editor_state.graph.add_connection(output_id, input_id);

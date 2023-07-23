@@ -4,12 +4,27 @@ use eframe::egui;
 use eframe::egui::{Checkbox, DragValue, TextEdit, Widget};
 
 use egui_node_graph as eng;
-use graph_lib::data::{DataType, StaticValue};
-use graph_lib::function::FunctionId;
+use egui_node_graph::{InputId, OutputId};
+use graph_lib::data::{DataType, StaticValue, TypeId};
+use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
 
 use crate::app::AppState;
 use crate::function_templates::FunctionTemplate;
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum EditorDataType {
+    Int,
+    Float,
+    Bool,
+    String,
+    Event,
+    Custom {
+        type_id: TypeId,
+        // type_name is not included in the hash or equality check
+        type_name: String,
+    },
+}
 
 #[derive(Debug)]
 pub(crate) struct ComboboxInput {
@@ -27,13 +42,18 @@ pub struct EditorNode {
     pub(crate) cache_outputs: bool,
 
     pub(crate) combobox_inputs: Vec<ComboboxInput>,
+
+    pub(crate) trigger_id: InputId,
+    pub(crate) inputs: Vec<InputId>,
+    pub(crate) events: Vec<OutputId>,
+    pub(crate) outputs: Vec<OutputId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct EditorValue(pub(crate) StaticValue);
 
-pub(crate) type EditorGraph = eng::Graph<EditorNode, DataType, EditorValue>;
-pub(crate) type EditorState = eng::GraphEditorState<EditorNode, DataType, EditorValue, FunctionTemplate, AppState>;
+pub(crate) type EditorGraph = eng::Graph<EditorNode, EditorDataType, EditorValue>;
+pub(crate) type EditorState = eng::GraphEditorState<EditorNode, EditorDataType, EditorValue, FunctionTemplate, AppState>;
 
 #[derive(Clone, Debug)]
 pub enum AppResponse {
@@ -93,7 +113,9 @@ impl eng::WidgetValueTrait for EditorValue {
                 });
             }
 
-            _ => {}
+            _ => {
+                ui.label(param_name);
+            }
         }
 
         if editor_value != self.0 {
@@ -115,7 +137,7 @@ impl eng::WidgetValueTrait for EditorValue {
 impl eng::NodeDataTrait for EditorNode {
     type Response = AppResponse;
     type UserState = AppState;
-    type DataType = DataType;
+    type DataType = EditorDataType;
     type ValueType = EditorValue;
 
     fn bottom_ui(
@@ -208,14 +230,15 @@ impl eng::NodeDataTrait for EditorNode {
     }
 }
 
-impl eng::DataTypeTrait<AppState> for DataType {
+impl eng::DataTypeTrait<AppState> for EditorDataType {
     fn data_type_color(&self, _user_state: &mut AppState) -> egui::Color32 {
         match self {
-            DataType::Int
-            | DataType::Float => egui::Color32::from_rgb(38, 109, 211),
-            DataType::Bool => egui::Color32::from_rgb(211, 38, 109),
-            DataType::String => egui::Color32::from_rgb(109, 211, 38),
-            _ => egui::Color32::from_rgb(0, 0, 0),
+            EditorDataType::Int
+            | EditorDataType::Float => egui::Color32::from_rgb(38, 109, 211),
+            EditorDataType::Bool => egui::Color32::from_rgb(211, 38, 109),
+            EditorDataType::String => egui::Color32::from_rgb(109, 211, 38),
+            EditorDataType::Event => egui::Color32::from_rgb(255, 109, 109),
+            _ => egui::Color32::from_rgb(255, 255, 255),
         }
     }
 
@@ -223,3 +246,158 @@ impl eng::DataTypeTrait<AppState> for DataType {
         self.to_string().into()
     }
 }
+
+impl EditorDataType {}
+
+impl From<DataType> for EditorDataType {
+    fn from(value: DataType) -> Self {
+        EditorDataType::from(&value)
+    }
+}
+
+impl From<&DataType> for EditorDataType {
+    fn from(value: &DataType) -> Self {
+        match value {
+            DataType::Int => EditorDataType::Int,
+            DataType::Float => EditorDataType::Float,
+            DataType::Bool => EditorDataType::Bool,
+            DataType::String => EditorDataType::String,
+            DataType::Custom { type_id, type_name } => EditorDataType::Custom {
+                type_id: *type_id,
+                type_name: type_name.clone(),
+            },
+
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl ToString for EditorDataType {
+    fn to_string(&self) -> String {
+        match self {
+            EditorDataType::Int => "Int".to_string(),
+            EditorDataType::Float => "Float".to_string(),
+            EditorDataType::Bool => "Bool".to_string(),
+            EditorDataType::String => "String".to_string(),
+            EditorDataType::Event => "Event".to_string(),
+            EditorDataType::Custom { type_name, .. } => type_name.clone(),
+        }
+    }
+}
+
+
+pub(crate) fn build_node_from_func(
+    editor_graph: &mut EditorGraph,
+    function: &Function,
+    eng_node_id: eng::NodeId,
+) {
+    let trigger_id = editor_graph.add_input_param(
+        eng_node_id,
+        "trigger".to_string(),
+        EditorDataType::Event,
+        EditorValue::default(),
+        eng::InputParamKind::ConnectionOnly,
+        true,
+    );
+
+    let inputs = function.inputs
+        .iter()
+        .filter(|input| input.variants.is_none())
+        .map(|input| {
+            let shown_inline = input.variants.is_none();
+            let param_kind = if input.data_type.is_custom() {
+                eng::InputParamKind::ConnectionOnly
+            } else {
+                eng::InputParamKind::ConnectionOrConstant
+            };
+
+            let value = input.default_value
+                .as_ref()
+                .map(|value| {
+                    value.clone()
+                })
+                .unwrap_or_else(|| {
+                    StaticValue::from(&input.data_type)
+                });
+
+            let input_id = editor_graph.add_input_param(
+                eng_node_id,
+                input.name.to_string(),
+                (&input.data_type).into(),
+                EditorValue(value),
+                param_kind,
+                shown_inline,
+            );
+
+            input_id
+        })
+        .collect::<Vec<InputId>>();
+
+    let events = function.events
+        .iter()
+        .map(|event| {
+            let event_id = editor_graph.add_output_param(
+                eng_node_id,
+                event.clone(),
+                EditorDataType::Event,
+            );
+
+            event_id
+        })
+        .collect::<Vec<OutputId>>();
+
+    let outputs = function.outputs
+        .iter()
+        .map(|output| {
+            let output_id = editor_graph.add_output_param(
+                eng_node_id,
+                output.name.to_string(),
+                (&output.data_type).into(),
+            );
+
+            output_id
+        })
+        .collect::<Vec<OutputId>>();
+
+
+    let editor_node = &mut editor_graph.nodes[eng_node_id].user_data;
+    editor_node.trigger_id = trigger_id;
+    editor_node.inputs = inputs;
+    editor_node.events = events;
+    editor_node.outputs = outputs;
+}
+
+pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<ComboboxInput> {
+    let combobox_inputs = function.inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(index, input)| {
+            if let Some(variants) = input.variants.as_ref() {
+                let variants = variants
+                    .iter()
+                    .map(|variant| (variant.0.clone(), variant.1.clone()))
+                    .collect::<Vec<(StaticValue, String)>>();
+                let current_value = input.default_value.as_ref()
+                    .unwrap_or_else(|| {
+                        &variants
+                            .first()
+                            .expect("No variants")
+                            .0
+                    })
+                    .clone();
+
+                Some(ComboboxInput {
+                    input_index: index as u32,
+                    name: input.name.clone(),
+                    current_value,
+                    variants,
+                })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<ComboboxInput>>();
+
+    combobox_inputs
+}
+

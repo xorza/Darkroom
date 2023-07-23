@@ -408,11 +408,12 @@ impl DataType {
 
 impl ToString for DataType {
     fn to_string(&self) -> String {
-        match self {
+        match &self {
             DataType::Float => "float".to_string(),
             DataType::Int => "int".to_string(),
             DataType::Bool => "bool".to_string(),
             DataType::String => "string".to_string(),
+            DataType::Custom { type_name, .. } => type_name.clone(),
             _ => panic!("No string representation for {:?}", self),
         }
     }

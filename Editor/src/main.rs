@@ -9,6 +9,7 @@ mod function_templates;
 mod common;
 mod eng_integration;
 mod serialization;
+mod arg_mapping;
 
 fn main() {
 

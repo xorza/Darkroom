@@ -7,6 +7,7 @@ use eframe::egui;
 
 use graph_lib::compute::Compute;
 use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
+use graph_lib::elements::timers_invoker::TimersInvoker;
 use graph_lib::function::Function;
 use graph_lib::graph::Graph;
 use graph_lib::invoke::{Invoker, UberInvoker};
@@ -43,6 +44,7 @@ impl Worker {
             thread::spawn(move || {
                 let invoker = UberInvoker::new(vec![
                     Box::new(BasicInvoker::new(logger)),
+                    Box::new(TimersInvoker::default()),
                 ]);
 
                 {

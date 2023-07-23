@@ -1,13 +1,11 @@
 use std::borrow::Cow;
 
 use egui_node_graph as eng;
-use graph_lib::data::DataType;
 use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
 
 use crate::app::AppState;
-use crate::common::{build_node_from_func, combobox_inputs_from_function};
-use crate::eng_integration::{EditorGraph, EditorNode, EditorValue};
+use crate::eng_integration::{build_node_from_func, combobox_inputs_from_function, EditorDataType, EditorGraph, EditorNode, EditorValue};
 
 pub(crate) struct NodeCategory(String);
 
@@ -46,7 +44,7 @@ impl eng::NodeTemplateIter for FunctionTemplates {
 
 impl eng::NodeTemplateTrait for FunctionTemplate {
     type NodeData = EditorNode;
-    type DataType = DataType;
+    type DataType = EditorDataType;
     type ValueType = EditorValue;
     type UserState = AppState;
     type CategoryType = NodeCategory;
@@ -72,6 +70,10 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
             is_output: self.0.is_output,
             cache_outputs: false,
             combobox_inputs,
+            trigger_id: Default::default(),
+            inputs: vec![],
+            events: vec![],
+            outputs: vec![],
         }
     }
 

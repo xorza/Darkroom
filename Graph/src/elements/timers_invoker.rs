@@ -4,7 +4,9 @@ use std::time::Instant;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
+use crate::invoke::{InvokeArgs, Invoker};
 use crate::lambda_invoker::LambdaInvoker;
+use crate::runtime_graph::InvokeContext;
 
 pub struct TimersInvoker {
     lambda_invoker: LambdaInvoker,
@@ -17,7 +19,7 @@ impl Default for TimersInvoker {
         invoker.add_lambda(
             Function {
                 self_id: FunctionId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
-                name: "always".to_string(),
+                name: "frame event".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: false,
                 category: "Timers".to_string(),
@@ -39,7 +41,7 @@ impl Default for TimersInvoker {
                 events: vec![
                     "always".to_string(),
                     "once".to_string(),
-                    "x times per second".to_string(),
+                    "fps".to_string(),
                 ],
             },
             move |ctx, inputs, outputs| {
@@ -66,5 +68,21 @@ impl Default for TimersInvoker {
         TimersInvoker {
             lambda_invoker: invoker,
         }
+    }
+}
+
+impl Invoker for TimersInvoker {
+    fn all_functions(&self) -> Vec<Function> {
+        self.lambda_invoker.all_functions()
+    }
+
+    fn invoke(
+        &self,
+        function_id: FunctionId,
+        ctx: &mut InvokeContext,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        self.lambda_invoker.invoke(function_id, ctx, inputs, outputs)
     }
 }
