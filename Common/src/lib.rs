@@ -5,6 +5,7 @@ use flexi_logger::{Duplicate, FileSpec, Logger};
 
 #[macro_use]
 pub mod macros;
+pub mod scoped_ref;
 
 pub const EPSILON: f64 = 1e-10;
 
