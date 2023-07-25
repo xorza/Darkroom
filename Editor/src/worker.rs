@@ -1,11 +1,12 @@
 use std::mem::swap;
 use std::sync::{Arc, Condvar, mpsc, Mutex};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread;
 
 use eframe::egui;
+use tokio::runtime::Runtime;
 
-use graph_lib::compute::Compute;
+use graph_lib::compute::{Compute, EventQueue};
 use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
 use graph_lib::function::Function;
 use graph_lib::graph::Graph;
@@ -15,15 +16,18 @@ use graph_lib::runtime_graph::RuntimeGraph;
 use crate::timers_invoker::TimersInvoker;
 
 enum WorkerMessage {
+    Exit,
     Stop,
+    Event,
     RunOnce(Graph),
+    RunLoop(Graph),
 }
 
 
 #[derive(Debug)]
 pub(crate) struct Worker {
     thread_handle: Option<thread::JoinHandle<()>>,
-    sender: mpsc::Sender<WorkerMessage>,
+    tx: Sender<WorkerMessage>,
     all_functions: Vec<Function>,
 }
 
@@ -40,6 +44,7 @@ impl Worker {
 
         let condvar_clone = condvar.clone();
         let all_functions_clone = all_functions.clone();
+        let tx_clone = tx.clone();
 
         let thread_handle =
             thread::spawn(move || {
@@ -58,7 +63,7 @@ impl Worker {
 
                 condvar_clone.notify_all();
 
-                Self::worker_loop(compute, rx, egui_ctx);
+                Self::worker_loop(compute, tx_clone, rx, egui_ctx);
             });
 
         let mut all_functions_mutex = condvar
@@ -74,28 +79,38 @@ impl Worker {
 
         Self {
             thread_handle: Some(thread_handle),
-            sender: tx,
+            tx,
             all_functions,
         }
     }
 
     fn worker_loop(
         compute: Compute,
+        tx: Sender<WorkerMessage>,
         rx: Receiver<WorkerMessage>,
         egui_ctx: egui::Context,
     ) {
-        let mut worker_message: Option<WorkerMessage> = None;
+        let mut message: Option<WorkerMessage> = None;
+
         loop {
-            if worker_message.is_none() {
-                worker_message = Some(rx.recv().unwrap());
+            if message.is_none() {
+                message = Some(rx.recv().unwrap());
             }
 
-            match worker_message.take().unwrap() {
-                WorkerMessage::Stop => break,
+            match message.take().unwrap() {
+                WorkerMessage::Exit => break,
+
+                WorkerMessage::Stop |
+                WorkerMessage::Event => panic!("Unexpected event message"),
+
                 WorkerMessage::RunOnce(graph) => {
                     let mut runtime_graph = RuntimeGraph::from(&graph);
                     compute.run(&graph, &mut runtime_graph)
                         .expect("Failed to run graph");
+                }
+
+                WorkerMessage::RunLoop(graph) => {
+                    message = Self::event_subloop(graph, &compute, tx.clone(), &rx);
                 }
             }
 
@@ -103,13 +118,53 @@ impl Worker {
         }
     }
 
+    fn event_subloop(
+        graph: Graph,
+        compute: &Compute,
+        tx: Sender<WorkerMessage>,
+        rx: &Receiver<WorkerMessage>,
+    ) -> Option<WorkerMessage> {
+        let mut result_message: Option<WorkerMessage> = None;
+
+        let mut runtime_graph = RuntimeGraph::from(&graph);
+
+        let runtime = Runtime::new().unwrap();
+        let mut event_queue: EventQueue = Arc::new(Mutex::new(Vec::new()));
+
+        compute.start_event_queue(
+            &graph,
+            &mut runtime_graph,
+            &mut event_queue,
+            &runtime,
+            move || tx.send(WorkerMessage::Event).unwrap(),
+        );
+
+        loop {
+            let msg = rx.recv().unwrap();
+            match msg {
+                WorkerMessage::Stop => break,
+                WorkerMessage::Event => {
+                    compute
+                        .run(&graph, &mut runtime_graph)
+                        .expect("Failed to run graph");
+                },
+                _ => result_message = Some(msg),
+            }
+        }
+
+        runtime.shutdown_background();
+
+        result_message
+    }
+
     pub(crate) fn run_once(
         &mut self,
         graph: Graph,
     ) {
-        let msg = WorkerMessage::RunOnce(graph);
+        // let msg = WorkerMessage::RunOnce(graph);
+        let msg = WorkerMessage::RunLoop(graph);
 
-        self.sender
+        self.tx
             .send(msg)
             .unwrap();
     }
@@ -121,7 +176,7 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.sender.send(WorkerMessage::Stop).unwrap();
+        self.tx.send(WorkerMessage::Exit).unwrap();
         if let Some(thread_handle) = self.thread_handle.take() {
             thread_handle.join().unwrap();
         }

@@ -1,4 +1,5 @@
 use std::ops::{Index, IndexMut};
+use std::sync::{Arc, Mutex};
 
 use common::ApplyMut;
 
@@ -10,12 +11,50 @@ use crate::runtime_graph::RuntimeGraph;
 #[derive(Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
+
+pub type EventQueue = Arc<Mutex<Vec<u32>>>;
+
 pub struct Compute {
     invoker: Box<dyn Invoker>,
 }
 
-
 impl Compute {
+    pub fn start_event_queue<F>(
+        &self,
+        _graph: &Graph,
+        _runtime_graph: &mut RuntimeGraph,
+        _event_queue: &mut EventQueue,
+        runtime: &tokio::runtime::Runtime,
+        on_event: F,
+    )
+    where F: Fn() + Send + 'static
+    {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(1);
+
+        let tx_clone1 = tx.clone();
+        let _handle1 = runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(160)).await;
+                tx_clone1.send("test 1".to_string()).await.unwrap();
+            }
+        });
+
+        let tx_clone2 = tx.clone();
+        let _handle2 = runtime.spawn(async move {
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
+                tx_clone2.send("test 2".to_string()).await.unwrap();
+            }
+        });
+
+        runtime.spawn(async move {
+            while let Some(event) = rx.recv().await {
+                on_event();
+                println!("event: {}", event);
+            }
+        });
+    }
+
     pub fn run(
         &self,
         graph: &Graph,

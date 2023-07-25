@@ -18,4 +18,5 @@ pub mod invoke;
 pub mod wgpu;
 pub mod lambda_invoker;
 pub mod elements;
+pub mod event;
 

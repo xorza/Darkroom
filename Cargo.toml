@@ -38,3 +38,4 @@ strum = "*"
 strum_macros = "*"
 once_cell = "*"
 rand = "*"
+tokio = { version = "*", features = ["full"] }
