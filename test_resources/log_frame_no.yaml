@@ -1,0 +1,54 @@
+nodes:
+  - self_id: e69c3f32-ac66-4447-a3f6-9e8528c5d830
+    function_id: 01897c92-d605-5f5a-7a21-627ed74824ff
+    name: frame event
+    behavior: Active
+    is_output: false
+    cache_outputs: false
+    inputs:
+      - name: frequency
+        data_type: Float
+        is_required: true
+        binding: Const
+        const_value: !Float 30.0
+    outputs:
+      - name: delta
+        data_type: Float
+      - name: frame no
+        data_type: Int
+    events:
+      - name: always
+        subscribers: [ ]
+      - name: once
+        subscribers: [ ]
+      - name: fps
+        subscribers: [ ]
+  - self_id: eb6590aa-229d-4874-abba-37c56f5b97fa
+    function_id: 01896a88-bf15-dead-4a15-5969da5a9e65
+    name: float to string
+    behavior: Active
+    is_output: false
+    cache_outputs: false
+    inputs:
+      - name: value
+        data_type: Float
+        is_required: true
+        binding: !Output
+          output_node_id: e69c3f32-ac66-4447-a3f6-9e8528c5d830
+          output_index: 1
+    outputs:
+      - name: result
+        data_type: String
+  - self_id: 8be72298-dece-4a5f-8a1d-d2dee1e791d3
+    function_id: 01896910-0790-ad1b-aa12-3f1437196789
+    name: print
+    behavior: Active
+    is_output: true
+    cache_outputs: false
+    inputs:
+      - name: value
+        data_type: String
+        is_required: true
+        binding: !Output
+          output_node_id: eb6590aa-229d-4874-abba-37c56f5b97fa
+          output_index: 0

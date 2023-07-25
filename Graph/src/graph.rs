@@ -280,7 +280,7 @@ impl Node {
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
             cache_outputs: false,
-            is_output: false,
+            is_output: function.is_output,
             inputs,
             outputs,
             events,

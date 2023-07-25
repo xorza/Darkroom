@@ -8,3 +8,5 @@ mod lua_compute_tests;
 mod compute_tests;
 #[cfg(test)]
 mod playground;
+#[cfg(test)]
+mod worker_tests;

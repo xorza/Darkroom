@@ -6,7 +6,8 @@ use egui_file::{DialogType, FileDialog};
 
 use common::ApplyMut;
 use egui_node_graph as eng;
-use graph_lib::elements::basic_invoker::Logger;
+use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
+use graph_lib::elements::timers_invoker::TimersInvoker;
 use graph_lib::function::Function;
 use graph_lib::graph::{Binding, Graph, Node, OutputBinding};
 use graph_lib::worker::Worker;
@@ -243,6 +244,12 @@ impl NodeshopApp {
         let egui_ctx = cc.egui_ctx.clone();
 
         let worker = Worker::new(
+            |logger| {
+                vec![
+                    Box::new(BasicInvoker::new(logger)),
+                    Box::<TimersInvoker>::default(),
+                ]
+            },
             move || egui_ctx.request_repaint(),
         );
 

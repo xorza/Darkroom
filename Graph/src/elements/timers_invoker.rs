@@ -12,6 +12,11 @@ pub struct TimersInvoker {
     lambda_invoker: LambdaInvoker,
 }
 
+struct FrameEventContext {
+    last_frame: Instant,
+    frame_no: i64,
+}
+
 impl Default for TimersInvoker {
     fn default() -> TimersInvoker {
         let mut invoker = LambdaInvoker::default();
@@ -36,7 +41,11 @@ impl Default for TimersInvoker {
                     OutputInfo {
                         name: "delta".to_string(),
                         data_type: DataType::Float,
-                    }
+                    },
+                    OutputInfo {
+                        name: "frame no".to_string(),
+                        data_type: DataType::Int,
+                    },
                 ],
                 events: vec![
                     "always".to_string(),
@@ -46,22 +55,29 @@ impl Default for TimersInvoker {
             },
             move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();
+                let now = Instant::now();
 
-                let delta =
-                    if ctx.is_none() {
-                        1.0 / frequency
+                let (delta, frame_no) = {
+                    if let Some(frame_event_ctx) = ctx.get_mut::<FrameEventContext>() {
+                        let delta = now.duration_since(frame_event_ctx.last_frame).as_secs_f64();
+                        let frame_no = frame_event_ctx.frame_no;
+
+                        frame_event_ctx.last_frame = now;
+                        frame_event_ctx.frame_no += 1;
+
+                        (delta, frame_no)
                     } else {
-                        let delta = ctx
-                            .get::<Instant>()
-                            .unwrap()
-                            .elapsed()
-                            .as_secs_f64();
-                        ctx.set(Instant::now());
+                        ctx.set(FrameEventContext {
+                            last_frame: now,
+                            frame_no: 2,
+                        });
 
-                        delta
-                    };
+                        (1.0 / frequency, 1)
+                    }
+                };
 
                 outputs[0] = DynamicValue::Float(delta);
+                outputs[1] = DynamicValue::Int(frame_no);
             },
         );
 

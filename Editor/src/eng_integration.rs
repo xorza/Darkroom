@@ -15,8 +15,7 @@ use crate::function_templates::FunctionTemplate;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub enum EditorDataType {
-    Int,
-    Float,
+    Number,
     Bool,
     String,
     Event,
@@ -234,8 +233,7 @@ impl eng::NodeDataTrait for EditorNode {
 impl eng::DataTypeTrait<AppState> for EditorDataType {
     fn data_type_color(&self, _user_state: &mut AppState) -> egui::Color32 {
         match self {
-            EditorDataType::Int
-            | EditorDataType::Float => egui::Color32::from_rgb(38, 109, 211),
+            | EditorDataType::Number => egui::Color32::from_rgb(38, 109, 211),
             EditorDataType::Bool => egui::Color32::from_rgb(211, 38, 109),
             EditorDataType::String => egui::Color32::from_rgb(109, 211, 38),
             EditorDataType::Event => egui::Color32::from_rgb(255, 109, 109),
@@ -259,8 +257,8 @@ impl From<DataType> for EditorDataType {
 impl From<&DataType> for EditorDataType {
     fn from(value: &DataType) -> Self {
         match value {
-            DataType::Int => EditorDataType::Int,
-            DataType::Float => EditorDataType::Float,
+            DataType::Int => EditorDataType::Number,
+            DataType::Float => EditorDataType::Number,
             DataType::Bool => EditorDataType::Bool,
             DataType::String => EditorDataType::String,
             DataType::Custom { type_id, type_name } => EditorDataType::Custom {
@@ -276,8 +274,7 @@ impl From<&DataType> for EditorDataType {
 impl ToString for EditorDataType {
     fn to_string(&self) -> String {
         match self {
-            EditorDataType::Int => "Int".to_string(),
-            EditorDataType::Float => "Float".to_string(),
+            EditorDataType::Number => "Number".to_string(),
             EditorDataType::Bool => "Bool".to_string(),
             EditorDataType::String => "String".to_string(),
             EditorDataType::Event => "Event".to_string(),
@@ -366,6 +363,7 @@ pub(crate) fn build_node_from_func(
     editor_node.inputs = inputs;
     editor_node.events = events;
     editor_node.outputs = outputs;
+    editor_node.is_output = function.is_output;
 }
 
 pub(crate) fn register_node(editor_node: &EditorNode, arg_mapping: &mut ArgMapping) {

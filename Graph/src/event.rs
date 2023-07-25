@@ -55,6 +55,7 @@ impl EventOwner {
         &mut self,
         runtime: &Runtime,
         event_index: u32,
+        mut frame_rx: tokio::sync::broadcast::Receiver<()>,
         new_future: F,
     )
     where F: Fn() -> Fut + Send + Copy + 'static,
@@ -68,23 +69,32 @@ impl EventOwner {
                 let future = (new_future)();
                 future.await;
 
-                let trigger = trigger
-                    .lock()
-                    .await;
-                if trigger.is_none() {
-                    println!("Event loop stopped for event {:?}", event_index);
-                    break;
-                }
-                let result = trigger
-                    .as_ref()
-                    .unwrap()
-                    .send(EventId {
-                        node_id,
-                        event_index,
-                    })
-                    .await;
+                let result = {
+                    let trigger = trigger
+                        .lock()
+                        .await;
+                    if trigger.is_none() {
+                        println!("Event loop stopped for event {:?}", event_index);
+                        break;
+                    }
+
+                    trigger
+                        .as_ref()
+                        .unwrap()
+                        .send(EventId {
+                            node_id,
+                            event_index,
+                        })
+                        .await
+                };
                 if result.is_err() {
                     println!("Failed to send event {:?}", event_index);
+                    break;
+                }
+
+                let result = frame_rx.recv().await;
+                if result.is_err() {
+                    println!("Failed to receive frame {:?}", event_index);
                     break;
                 }
             }
@@ -102,13 +112,15 @@ mod tests {
 
     #[test]
     fn test_event() {
-        let (tx, mut rx) = channel::<EventId>(5);
-        let mut event_owner = EventOwner::new(NodeId::unique(), tx);
+        let (event_tx, mut event_rx) = channel::<EventId>(5);
+        let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<()>(5);
+        let mut event_owner = EventOwner::new(NodeId::unique(), event_tx);
         let runtime = tokio::runtime::Runtime::new().unwrap();
 
         event_owner.start_event_loop(
             &runtime,
             0,
+            frame_tx.subscribe(),
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(4)).await;
             },
@@ -116,23 +128,25 @@ mod tests {
         event_owner.start_event_loop(
             &runtime,
             1,
+            frame_tx.subscribe(),
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
             },
         );
 
-
-        let event = rx
+        let event = event_rx
             .blocking_recv()
             .unwrap();
         assert_eq!(event.event_index, 0);
 
-        let event = rx
+        let event = event_rx
             .blocking_recv()
             .unwrap();
         assert_eq!(event.event_index, 1);
 
-        let event = rx
+        frame_tx.send(()).unwrap();
+
+        let event = event_rx
             .blocking_recv()
             .unwrap();
         assert_eq!(event.event_index, 0);
@@ -142,12 +156,13 @@ mod tests {
         event_owner.start_event_loop(
             &runtime,
             2,
+            frame_tx.subscribe(),
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
             },
         );
 
-        let event = rx
+        let event = event_rx
             .blocking_recv()
             .unwrap();
         assert_eq!(event.event_index, 2);
