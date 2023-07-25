@@ -3,6 +3,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use log::info;
 use rand::Rng;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
@@ -98,7 +99,7 @@ impl BasicInvoker {
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
                 logger.lock().unwrap().push(value.to_string());
-                println!("BasicInvoker::print {}", value);
+                info!("{:?}", value);
             });
         // math two argument operation
         invoker.add_lambda(

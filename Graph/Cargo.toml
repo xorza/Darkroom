@@ -21,4 +21,5 @@ strum = { workspace = true }
 strum_macros = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true }
-
+log = { workspace = true }
+flexi_logger = { workspace = true }

@@ -1,5 +1,7 @@
 use std::sync::mpsc;
 
+use common::setup_logging;
+
 use crate::elements::basic_invoker::BasicInvoker;
 use crate::elements::timers_invoker::TimersInvoker;
 use crate::graph::Graph;
@@ -7,6 +9,8 @@ use crate::worker::Worker;
 
 #[test]
 fn test_worker() {
+    setup_logging("debug");
+
     let (tx, rx) = mpsc::channel();
 
     let mut worker = Worker::new(

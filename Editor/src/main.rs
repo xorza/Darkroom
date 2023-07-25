@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 // #![allow(unused_imports)]
 
+use ::common::setup_logging;
+
 use crate::app::NodeshopApp;
 
 mod app;
@@ -11,6 +13,7 @@ mod serialization;
 mod arg_mapping;
 
 fn main() {
+    setup_logging("info");
 
     eframe::run_native(
         "Nodeshop",

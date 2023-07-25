@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
+use log::info;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
@@ -99,7 +100,7 @@ impl NodeEventManager {
                         .lock()
                         .await;
                     if trigger.is_none() {
-                        println!("Event loop stopped for event {:?}", event_index);
+                        info!("Event loop stopped for event {:?}", event_index);
                         break;
                     }
 
@@ -113,13 +114,13 @@ impl NodeEventManager {
                         .await
                 };
                 if result.is_err() {
-                    println!("Failed to send event {:?}", event_index);
+                    info!("Failed to send event {:?}", event_index);
                     break;
                 }
 
                 let result = frame_rx.recv().await;
                 if result.is_err() {
-                    println!("Failed to receive frame {:?}", event_index);
+                    info!("Failed to receive frame {:?}", event_index);
                     break;
                 }
             }

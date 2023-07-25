@@ -39,3 +39,5 @@ strum_macros = "*"
 once_cell = "*"
 rand = "*"
 tokio = { version = "*", features = ["full"] }
+log = "*"
+flexi_logger = "*"

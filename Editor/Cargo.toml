@@ -21,3 +21,5 @@ egui_node_graph = { workspace = true }
 egui_file = { workspace = true }
 eframe = { workspace = true }
 tokio = { workspace = true }
+log = { workspace = true }
+flexi_logger = { workspace = true }
