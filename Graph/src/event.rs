@@ -35,8 +35,10 @@ pub struct EventTrigger {
 
 
 impl NodeEventManager {
-    pub fn new(frame_tx: tokio::sync::broadcast::Sender<()>,
-               event_rx: tokio::sync::mpsc::Sender<EventId>) -> Self {
+    pub fn new(
+        frame_tx: tokio::sync::broadcast::Sender<()>,
+        event_rx: tokio::sync::mpsc::Sender<EventId>,
+    ) -> Self {
         Self {
             frame_tx,
             event_rx,
@@ -49,16 +51,20 @@ impl NodeEventManager {
             .remove(&node_id)
             .unwrap();
 
-        node_event.join_handles
-            .iter()
-            .for_each(JoinHandle::abort);
-        node_event.join_handles.clear();
+        Self::stop(&mut node_event);
+    }
 
+    fn stop(node_event: &mut NodeEvent) {
         {
             // revoke old trigger
             let mut trigger = node_event.trigger.blocking_lock();
             *trigger = None;
         }
+
+        node_event.join_handles
+            .iter()
+            .for_each(JoinHandle::abort);
+        node_event.join_handles.clear();
     }
 
     pub fn start_node_event_loop<F, Fut>(
@@ -119,6 +125,15 @@ impl NodeEventManager {
             }
         });
         node_event.join_handles.push(join_handle);
+    }
+}
+
+impl Drop for NodeEventManager {
+    fn drop(&mut self) {
+        self.node_events
+            .values_mut()
+            .for_each(Self::stop);
+        self.node_events.clear();
     }
 }
 
