@@ -1,68 +1,87 @@
+use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::graph::NodeId;
 
 #[derive(Debug)]
-pub struct EventOwner {
-    trigger: Arc<Mutex<Option<Sender<EventId>>>>,
+struct NodeEvent {
     node_id: NodeId,
-    rx: Sender<EventId>,
+    trigger: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<EventId>>>>,
     join_handles: Vec<JoinHandle<()>>,
 }
 
 #[derive(Debug)]
-pub struct EventId {
-    node_id: NodeId,
-    event_index: u32,
+pub struct NodeEventManager {
+    frame_tx: tokio::sync::broadcast::Sender<()>,
+    event_rx: tokio::sync::mpsc::Sender<EventId>,
+    node_events: HashMap<NodeId, NodeEvent>,
 }
+
+#[derive(Debug)]
+pub struct EventId {
+    pub node_id: NodeId,
+    pub event_index: u32,
+}
+
 #[derive(Debug)]
 pub struct EventTrigger {
-    trigger: Arc<Mutex<Option<Sender<EventId>>>>,
+    trigger: Arc<tokio::sync::Mutex<Option<tokio::sync::mpsc::Sender<EventId>>>>,
     node_id: NodeId,
 }
 
 
-impl EventOwner {
-    pub fn new(node_id: NodeId, rx: Sender<EventId>) -> Self {
+impl NodeEventManager {
+    pub fn new(frame_tx: tokio::sync::broadcast::Sender<()>,
+               event_rx: tokio::sync::mpsc::Sender<EventId>) -> Self {
         Self {
-            trigger: Arc::new(Mutex::new(Some(rx.clone()))),
-            node_id,
-            rx,
-            join_handles: Vec::new(),
+            frame_tx,
+            event_rx,
+            node_events: HashMap::new(),
         }
     }
 
-    pub fn stop_all_event_loops(&mut self) {
-        {
-            // revoke old trigger
-            let mut trigger = self.trigger.blocking_lock();
-            *trigger = None;
-        }
-        self.join_handles
+    pub fn stop_node_events(&mut self, node_id: NodeId) {
+        let mut node_event = self.node_events
+            .remove(&node_id)
+            .unwrap();
+
+        node_event.join_handles
             .iter()
             .for_each(JoinHandle::abort);
-        self.join_handles.clear();
-        self.trigger = Arc::new(Mutex::new(Some(self.rx.clone())));
+        node_event.join_handles.clear();
+
+        {
+            // revoke old trigger
+            let mut trigger = node_event.trigger.blocking_lock();
+            *trigger = None;
+        }
     }
 
-    pub fn start_event_loop<F, Fut>(
+    pub fn start_node_event_loop<F, Fut>(
         &mut self,
         runtime: &Runtime,
-        event_index: u32,
-        mut frame_rx: tokio::sync::broadcast::Receiver<()>,
+        event_id: EventId,
         new_future: F,
     )
     where F: Fn() -> Fut + Send + Copy + 'static,
           Fut: Future<Output=()> + Send,
     {
-        let trigger = self.trigger.clone();
-        let node_id = self.node_id;
+        let node_event = self.node_events
+            .entry(event_id.node_id)
+            .or_insert_with(|| NodeEvent {
+                node_id: event_id.node_id,
+                trigger: Arc::new(tokio::sync::Mutex::new(Some(self.event_rx.clone()))),
+                join_handles: Vec::new(),
+            });
+
+        let trigger = node_event.trigger.clone();
+        let node_id = event_id.node_id;
+        let event_index = event_id.event_index;
+        let mut frame_rx = self.frame_tx.subscribe();
 
         let join_handle = runtime.spawn(async move {
             loop {
@@ -99,36 +118,40 @@ impl EventOwner {
                 }
             }
         });
-        self.join_handles.push(join_handle);
+        node_event.join_handles.push(join_handle);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::mpsc::channel;
-
-    use crate::event::{EventId, EventOwner};
+    use crate::event::{EventId, NodeEventManager};
     use crate::graph::NodeId;
 
     #[test]
     fn test_event() {
-        let (event_tx, mut event_rx) = channel::<EventId>(5);
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<EventId>(5);
         let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<()>(5);
-        let mut event_owner = EventOwner::new(NodeId::unique(), event_tx);
-        let runtime = tokio::runtime::Runtime::new().unwrap();
 
-        event_owner.start_event_loop(
+        let mut event_owner = NodeEventManager::new(frame_tx.clone(), event_tx);
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let node_id = NodeId::unique();
+
+        event_owner.start_node_event_loop(
             &runtime,
-            0,
-            frame_tx.subscribe(),
+            EventId {
+                node_id,
+                event_index: 0,
+            },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(4)).await;
             },
         );
-        event_owner.start_event_loop(
+        event_owner.start_node_event_loop(
             &runtime,
-            1,
-            frame_tx.subscribe(),
+            EventId {
+                node_id,
+                event_index: 1,
+            },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
             },
@@ -151,12 +174,14 @@ mod tests {
             .unwrap();
         assert_eq!(event.event_index, 0);
 
-        event_owner.stop_all_event_loops();
+        event_owner.stop_node_events(node_id);
 
-        event_owner.start_event_loop(
+        event_owner.start_node_event_loop(
             &runtime,
-            2,
-            frame_tx.subscribe(),
+            EventId {
+                node_id,
+                event_index: 2,
+            },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
             },
