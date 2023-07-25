@@ -1,3 +1,4 @@
+
 #![allow(dead_code)]
 // #![allow(unused_imports)]
 
@@ -19,4 +20,5 @@ pub mod wgpu;
 pub mod lambda_invoker;
 pub mod elements;
 pub mod event;
+pub mod worker;
 

@@ -1,5 +1,4 @@
 use std::default::Default;
-use std::sync::{Arc, Mutex};
 
 use eframe::CreationContext;
 use eframe::egui::{self};
@@ -10,12 +9,12 @@ use egui_node_graph as eng;
 use graph_lib::elements::basic_invoker::Logger;
 use graph_lib::function::Function;
 use graph_lib::graph::{Binding, Graph, Node, OutputBinding};
+use graph_lib::worker::Worker;
 
 use crate::arg_mapping::{ArgMapping, FindByInputIdResult, FindByOutputIdResult};
 use crate::eng_integration::{AppResponse, EditorState, register_node};
 use crate::function_templates::FunctionTemplates;
 use crate::serialization;
-use crate::worker::Worker;
 
 #[derive(Default, Debug)]
 pub(crate) struct GraphState {
@@ -241,13 +240,17 @@ impl eframe::App for NodeshopApp {
 
 impl NodeshopApp {
     pub(crate) fn new(cc: &CreationContext) -> Self {
-        let logger: Logger = Arc::new(Mutex::new(Vec::new()));
-        let worker = Worker::new(cc.egui_ctx.clone(), logger.clone());
+        let egui_ctx = cc.egui_ctx.clone();
+
+        let worker = Worker::new(
+            move || egui_ctx.request_repaint(),
+        );
 
         let functions = worker.all_functions();
         let function_templates = FunctionTemplates::from(
             functions.clone()
         );
+        let logger = worker.logger.clone();
 
         NodeshopApp {
             state: EditorState::default(),

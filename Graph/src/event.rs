@@ -97,12 +97,12 @@ impl EventOwner {
 mod tests {
     use tokio::sync::mpsc::channel;
 
-    use crate::event::EventOwner;
+    use crate::event::{EventId, EventOwner};
     use crate::graph::NodeId;
 
     #[test]
     fn test_event() {
-        let (tx, mut rx) = channel(5);
+        let (tx, mut rx) = channel::<EventId>(5);
         let mut event_owner = EventOwner::new(NodeId::unique(), tx);
         let runtime = tokio::runtime::Runtime::new().unwrap();
 

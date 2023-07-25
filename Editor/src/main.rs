@@ -4,13 +4,11 @@
 use crate::app::NodeshopApp;
 
 mod app;
-mod worker;
 mod function_templates;
 mod common;
 mod eng_integration;
 mod serialization;
 mod arg_mapping;
-mod timers_invoker;
 
 fn main() {
 
