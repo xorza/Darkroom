@@ -21,4 +21,5 @@ pub mod lambda_invoker;
 pub mod elements;
 pub mod event;
 pub mod worker;
+pub mod context;
 
