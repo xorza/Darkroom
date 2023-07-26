@@ -149,6 +149,7 @@ mod tests {
         let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<()>(5);
 
         let mut event_owner = NodeEventManager::new(frame_tx.clone(), event_tx);
+
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let node_id = NodeId::unique();
 
