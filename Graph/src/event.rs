@@ -159,7 +159,7 @@ mod tests {
                 event_index: 0,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(4)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
             },
         );
         event_owner.start_node_event_loop(
@@ -169,7 +169,7 @@ mod tests {
                 event_index: 1,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(12)).await;
             },
         );
 
@@ -199,7 +199,7 @@ mod tests {
                 event_index: 2,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(8)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(18)).await;
             },
         );
 
