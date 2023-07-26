@@ -25,9 +25,16 @@ struct ContextManager {
     frame_started: bool,
 }
 
+pub trait IContextManager {
+    fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>>;
 
-impl ContextManager {
-    pub fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
+    fn begin_frame(&mut self);
+    fn end_frame(&mut self);
+}
+
+
+impl IContextManager for ContextManager {
+    fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
         if !self.frame_started {
             panic!("Frame not started");
         }
@@ -65,19 +72,8 @@ impl ContextManager {
             )
         )
     }
-    pub fn insert<T: Context + 'static>(&mut self, context: T) {
-        self.contexts
-            .insert(
-                TypeId::of::<T>(),
-                ContextEntry {
-                    context: Box::new(context),
-                    is_active_this_frame: false,
-                    ending: None,
-                },
-            );
-    }
 
-    pub fn begin_frame(&mut self) {
+    fn begin_frame(&mut self) {
         if is_debug() {
             assert!(
                 self.contexts
@@ -89,7 +85,7 @@ impl ContextManager {
         }
         self.frame_started = true;
     }
-    pub fn end_frame(&mut self) {
+    fn end_frame(&mut self) {
         if !self.frame_started {
             panic!("Frame not started");
         }
@@ -108,7 +104,23 @@ impl ContextManager {
             )
     }
 }
+impl ContextManager {
+    pub fn insert<T: Context + 'static>(&mut self, context: T) {
+        if self.frame_started {
+            panic!("Cannot insert context during frame");
+        }
 
+        self.contexts
+            .insert(
+                TypeId::of::<T>(),
+                ContextEntry {
+                    context: Box::new(context),
+                    is_active_this_frame: false,
+                    ending: None,
+                },
+            );
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use common::setup_logging;
+use common::log_setup::setup_logging;
 
 use crate::elements::basic_invoker::BasicInvoker;
 use crate::elements::timers_invoker::TimersInvoker;

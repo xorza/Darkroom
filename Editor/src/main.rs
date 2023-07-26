@@ -1,7 +1,8 @@
 #![allow(dead_code)]
 // #![allow(unused_imports)]
 
-use ::common::setup_logging;
+
+use ::common::log_setup::setup_logging;
 
 use crate::app::NodeshopApp;
 
