@@ -1,78 +1,108 @@
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 
-use common::scoped_ref::{ScopeRef, ScopeRefMut};
+use common::is_debug;
+use common::scoped_ref::ScopeRefMut;
 
 pub trait Context {
-    fn before(&self) {}
-    fn after(&self) {}
+    fn begin_frame(&mut self) {}
+    fn end_frame(&mut self) {}
 
-    fn before_mut(&mut self) { self.before(); }
-    fn after_mut(&mut self) { self.after(); }
+    fn begin_invoke(&mut self) {}
+    fn end_invoke(&mut self) {}
+}
+
+struct ContextEntry {
+    context: Box<dyn Any>,
+    is_active_this_frame: bool,
+    ending: Option<Box<dyn FnMut(&mut ContextEntry)>>,
 }
 
 #[derive(Default)]
 struct ContextManager {
-    contexts: HashMap<TypeId, Box<dyn Any>>,
+    contexts: HashMap<TypeId, ContextEntry>,
+    frame_started: bool,
 }
 
 
 impl ContextManager {
-    pub fn get<T: Context + 'static>(&self) -> Option<ScopeRef<T>> {
-        self.contexts
-            .get(&TypeId::of::<T>())
-            .and_then(
-                |any| any.downcast_ref::<T>()
-            )
-            .map(
-                |ctx| {
-                    ctx.before();
+    pub fn get_mut<T: Context + Sized + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
+        if !self.frame_started {
+            panic!("Frame not started");
+        }
 
-                    ScopeRef::new(
-                        ctx,
-                        |ctx| ctx.after(),
-                    )
-                }
-            )
-    }
-    pub fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
-        self.contexts
-            .get_mut(&TypeId::of::<T>())
-            .and_then(
-                |any| any.downcast_mut::<T>()
-            )
-            .map(
-                |ctx| {
-                    ctx.before_mut();
+        let type_id = TypeId::of::<T>();
+        let entry = self.contexts
+            .get_mut(&type_id);
+        if entry.is_none() {
+            return None;
+        }
 
-                    ScopeRefMut::new(
-                        ctx,
-                        |ctx| ctx.after_mut(),
-                    )
-                }
+        let entry = entry.unwrap();
+        let was_active_this_frame = entry.is_active_this_frame;
+        entry.is_active_this_frame = true;
+        let any = &mut *entry.context;
+        let ctx: &mut T = any.downcast_mut::<T>().unwrap();
+
+        if !was_active_this_frame {
+            let ending = move |entry: &mut ContextEntry| {
+                let ctx: &mut T = entry.context.downcast_mut::<T>().unwrap();
+                ctx.end_frame();
+            };
+
+            entry.ending = Some(Box::new(ending));
+            ctx.begin_frame();
+        }
+
+        ctx.begin_invoke();
+
+        Some(
+            ScopeRefMut::new(
+                ctx,
+                |ctx| ctx.end_invoke(),
             )
+        )
     }
-    pub fn insert<T: Context + 'static>(&mut self, context: T) -> Option<T> {
+    pub fn insert<T: Context + 'static>(&mut self, context: T) {
         self.contexts
             .insert(
                 TypeId::of::<T>(),
-                Box::new(context),
-            )
-            .and_then(
-                |any| any.downcast::<T>().ok()
-            )
-            .map(
-                |any| *any
-            )
+                ContextEntry {
+                    context: Box::new(context),
+                    is_active_this_frame: false,
+                    ending: None,
+                },
+            );
     }
-    pub fn remove<T: Context + 'static>(&mut self) -> Option<T> {
-        self.contexts
-            .remove(&TypeId::of::<T>())
-            .and_then(
-                |any| any.downcast::<T>().ok()
+
+    pub fn begin_frame(&mut self) {
+        if is_debug() {
+            assert!(
+                self.contexts
+                    .values()
+                    .all(
+                        |entry| !entry.is_active_this_frame
+                    )
             )
-            .map(
-                |any| *any
+        }
+        self.frame_started = true;
+    }
+    pub fn end_frame(&mut self) {
+        if !self.frame_started {
+            panic!("Frame not started");
+        }
+        self.frame_started = false;
+
+        self.contexts
+            .values_mut()
+            .filter(
+                |entry| entry.is_active_this_frame
+            )
+            .for_each(
+                |entry| {
+                    entry.ending.take().unwrap()(entry);
+                    entry.is_active_this_frame = false;
+                }
             )
     }
 }
@@ -87,11 +117,18 @@ mod tests {
     impl Context for i32 {}
     impl Context for f32 {}
     impl Context for String {
-        fn before_mut(&mut self) {
-            self.push_str(" before");
+        fn begin_frame(&mut self) {
+            self.push_str(" begin_frame");
         }
-        fn after_mut(&mut self) {
-            self.push_str(" after");
+        fn end_frame(&mut self) {
+            self.push_str(" end_frame");
+        }
+
+        fn begin_invoke(&mut self) {
+            self.push_str(" begin_invoke");
+        }
+        fn end_invoke(&mut self) {
+            self.push_str(" end_invoke");
         }
     }
 
@@ -101,17 +138,44 @@ mod tests {
 
         context_manager.insert(1);
         context_manager.insert("test".to_string());
-        let inserted1 = context_manager.insert(3.3f32);
-        let inserted2 = context_manager.insert(4.3f32);
+        context_manager.insert(3.3f32);
+        context_manager.insert(4.3f32);
 
-        assert_eq!(inserted1, None);
-        assert_eq!(inserted2, Some(3.3f32));
-        assert_eq!(*context_manager.get::<i32>().unwrap(), 1);
-        assert_eq!(*context_manager.get::<f32>().unwrap(), 4.3f32);
+        context_manager.begin_frame();
+        assert_eq!(*context_manager.get_mut::<i32>().unwrap(), 1);
+        assert_eq!(*context_manager.get_mut::<f32>().unwrap(), 4.3f32);
+        context_manager.end_frame();
 
-        let mut s = "test before".to_string();
+        context_manager.begin_frame();
+        let mut s = "test begin_frame begin_invoke".to_string();
         assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
-        let mut s = "test before after before".to_string();
-        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
+        context_manager.end_frame();
+
+        {
+            let internal_string = context_manager.contexts
+                .get_mut(&TypeId::of::<String>())
+                .unwrap()
+                .context
+                .downcast_mut::<String>()
+                .unwrap();
+            assert_eq!(internal_string.deref_mut(), "test begin_frame begin_invoke end_invoke end_frame");
+        }
+
+        context_manager.begin_frame();
+
+        {
+            let internal_string = context_manager.contexts
+                .get_mut(&TypeId::of::<String>())
+                .unwrap()
+                .context
+                .downcast_mut::<String>()
+                .unwrap();
+            assert_eq!(internal_string.deref_mut(), "test begin_frame begin_invoke end_invoke end_frame");
+        }
+
+        let mut target =
+            "test begin_frame begin_invoke end_invoke end_frame begin_frame begin_invoke".to_string();
+        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut target);
+        context_manager.end_frame();
     }
 }
