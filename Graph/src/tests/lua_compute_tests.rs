@@ -4,9 +4,8 @@ use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::ArgSet;
 use crate::function::FunctionId;
-use crate::invoke::Invoker;
+use crate::invoke_context::{InvokeCache, Invoker};
 use crate::lua_invoker::LuaInvoker;
-use crate::runtime_graph::InvokeContext;
 
 #[test]
 fn lua_works() {
@@ -76,11 +75,11 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
     let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
 
-    let mut ctx = InvokeContext::default();
+    let mut cache = InvokeCache::default();
     // call 'mult' function
     invoker.invoke(
         FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-        &mut ctx,
+        &mut cache,
         inputs.as_mut_slice(),
         outputs.as_mut_slice(),
     )?;

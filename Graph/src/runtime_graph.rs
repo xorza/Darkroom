@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::HashSet;
 use std::mem::take;
 
@@ -6,11 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
 use crate::graph::{Binding, FunctionBehavior, Graph, NodeId};
-
-#[derive(Debug, Default)]
-pub struct InvokeContext {
-    boxed: Option<Box<dyn Any>>,
-}
+use crate::invoke_context::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
@@ -25,7 +20,7 @@ pub struct RuntimeNode {
     pub run_time: f64,
 
     #[serde(skip)]
-    pub(crate) invoke_context: InvokeContext,
+    pub(crate) cache: InvokeCache,
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
@@ -86,65 +81,6 @@ impl From<&Graph> for RuntimeGraph {
     }
 }
 
-impl InvokeContext {
-    pub(crate) fn default() -> InvokeContext {
-        InvokeContext {
-            boxed: None,
-        }
-    }
-
-    pub fn is_none(&self) -> bool {
-        self.boxed.is_none()
-    }
-
-    pub fn is_some<T>(&self) -> bool
-    where T: Any
-    {
-        match &self.boxed {
-            None => false,
-            Some(v) => v.is::<T>(),
-        }
-    }
-
-    pub fn get<T>(&self) -> Option<&T>
-    where T: Any
-    {
-        self.boxed.as_ref()
-            .and_then(|boxed| boxed.downcast_ref::<T>())
-    }
-
-    pub fn get_mut<T>(&mut self) -> Option<&mut T>
-    where T: Any
-    {
-        self.boxed.as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
-    }
-
-    pub fn set<T>(&mut self, value: T)
-    where T: Any
-    {
-        self.boxed = Some(Box::new(value));
-    }
-
-    pub fn get_or_default<T>(&mut self) -> &mut T
-    where T: Any + Default
-    {
-        let is_some = self.is_some::<T>();
-
-        if is_some {
-            self.boxed
-                .as_mut()
-                .unwrap()
-                .downcast_mut::<T>()
-                .unwrap()
-        } else {
-            self.boxed
-                .insert(Box::<T>::default())
-                .downcast_mut::<T>()
-                .unwrap()
-        }
-    }
-}
 
 impl RuntimeGraph {
     fn run(graph: &Graph, previous_runtime: &mut RuntimeGraph) -> RuntimeGraph {
@@ -209,12 +145,12 @@ impl RuntimeGraph {
                         debug_assert_eq!(prev_r_node.name, node.name);
 
                         (
-                            take(&mut prev_r_node.invoke_context),
+                            take(&mut prev_r_node.cache),
                             prev_r_node.output_values.take()
                         )
                     } else {
                         (
-                            InvokeContext::default(),
+                            InvokeCache::default(),
                             None
                         )
                     };
@@ -228,7 +164,7 @@ impl RuntimeGraph {
                     should_cache_outputs: node.cache_outputs,
                     run_time: 0.0,
                     should_invoke: false,
-                    invoke_context,
+                    cache: invoke_context,
                     output_values,
 
                     output_binding_count: vec![0; node.outputs.len()],

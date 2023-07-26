@@ -6,8 +6,8 @@ use crate::compute::Compute;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
-use crate::lambda_invoker::LambdaInvoker;
-use crate::runtime_graph::{InvokeContext, RuntimeGraph};
+use crate::invoke_context::{EmptyInvoker, InvokeCache};
+use crate::runtime_graph::RuntimeGraph;
 
 struct TestValues {
     a: i64,
@@ -24,7 +24,7 @@ where
     GetA: Fn() -> i64 + 'static,
     GetB: Fn() -> i64 + 'static,
 {
-    let mut invoker = LambdaInvoker::default();
+    let mut invoker = EmptyInvoker::default();
 
     // print
     invoker.add_lambda(
@@ -170,19 +170,19 @@ where
 
 #[test]
 fn invoke_context_test() -> anyhow::Result<()> {
-    fn box_test_(ctx: &mut InvokeContext) {
-        let n = *ctx.get_or_default::<u32>();
+    fn box_test_(cache: &mut InvokeCache) {
+        let n = *cache.get_or_default::<u32>();
         assert_eq!(n, 0);
-        let n = ctx.get_or_default::<i32>();
+        let n = cache.get_or_default::<i32>();
         assert_eq!(*n, 0);
         *n = 13;
     }
 
-    let mut ctx = InvokeContext::default();
-    box_test_(&mut ctx);
-    let n = ctx.get_or_default::<i32>();
+    let mut cache = InvokeCache::default();
+    box_test_(&mut cache);
+    let n = cache.get_or_default::<i32>();
     assert_eq!(*n, 13);
-    let n = *ctx.get_or_default::<u32>();
+    let n = *cache.get_or_default::<u32>();
     assert_eq!(n, 0);
 
     Ok(())

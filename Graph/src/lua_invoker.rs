@@ -10,8 +10,7 @@ use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
-use crate::invoke::{InvokeArgs, Invoker};
-use crate::runtime_graph::InvokeContext;
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
 #[derive(Default)]
 struct Cache {
@@ -312,7 +311,7 @@ impl Drop for LuaInvoker {
 impl Invoker for LuaInvoker {
     fn invoke(&self,
               function_id: FunctionId,
-              _ctx: &mut InvokeContext,
+              _cache: &mut InvokeCache,
               inputs: &mut InvokeArgs,
               outputs: &mut InvokeArgs)
         -> anyhow::Result<()>

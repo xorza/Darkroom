@@ -10,7 +10,7 @@ use crate::elements::basic_invoker::Logger;
 use crate::event::EventId;
 use crate::function::Function;
 use crate::graph::Graph;
-use crate::invoke::{Invoker, UberInvoker};
+use crate::invoke_context::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Debug)]

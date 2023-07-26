@@ -1,14 +1,14 @@
 use crate::function::FunctionId;
 use crate::graph::*;
-use crate::invoke::{InvokeArgs, Invoker};
-use crate::runtime_graph::{InvokeContext, RuntimeGraph};
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
+use crate::runtime_graph::RuntimeGraph;
 
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
     fn invoke(&self,
               _function_id: FunctionId,
-              _ctx: &mut InvokeContext,
+              _cache: &mut InvokeCache,
               _inputs: &mut InvokeArgs,
               _outputs: &mut InvokeArgs)
         -> anyhow::Result<()> {

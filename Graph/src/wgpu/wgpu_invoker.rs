@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use imaginarium::wgpu::wgpu_context::WgpuContext;
 
 use crate::function::{Function, FunctionId};
-use crate::invoke::{InvokeArgs, Invoker};
-use crate::runtime_graph::InvokeContext;
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
 pub trait WgpuInvokable {
     fn new(wgpu_context: &WgpuContext) -> Self where Self: Sized;
@@ -12,7 +11,7 @@ pub trait WgpuInvokable {
     fn invoke(
         &self,
         wgpu_context: &WgpuContext,
-        invoke_context: &mut InvokeContext,
+        cache: &mut InvokeCache,
         inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>;
@@ -46,7 +45,7 @@ impl Invoker for WgpuInvoker {
     fn invoke(
         &self,
         function_id: FunctionId,
-        ctx: &mut InvokeContext,
+        ctx: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>

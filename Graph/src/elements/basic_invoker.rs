@@ -11,14 +11,12 @@ use strum_macros::{Display, EnumIter};
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
-use crate::invoke::{InvokeArgs, Invoker};
-use crate::lambda_invoker::LambdaInvoker;
-use crate::runtime_graph::InvokeContext;
+use crate::invoke_context::{EmptyInvoker, InvokeArgs, InvokeCache, Invoker};
 
 pub type Logger = Arc<Mutex<Vec<String>>>;
 
 pub struct BasicInvoker {
-    lambda_invoker: LambdaInvoker,
+    lambda_invoker: EmptyInvoker,
 }
 
 #[repr(u32)]
@@ -39,7 +37,7 @@ impl Math2ArgOp {
             .map(|op| (StaticValue::Int(op as i64), op.to_string()))
             .collect()
     }
-    fn invoke(&self, inputs: &InvokeArgs, _context: &InvokeContext) -> anyhow::Result<DynamicValue> {
+    fn invoke(&self, inputs: &InvokeArgs) -> anyhow::Result<DynamicValue> {
         assert_eq!(inputs.len(), 2);
 
         let a = inputs[0].as_float();
@@ -74,7 +72,7 @@ impl From<i64> for Math2ArgOp {
 
 impl BasicInvoker {
     pub fn new(logger: Logger) -> Self {
-        let mut invoker = LambdaInvoker::default();
+        let mut invoker = EmptyInvoker::default();
 
         //print
         invoker.add_lambda(
@@ -140,7 +138,7 @@ impl BasicInvoker {
                 ],
                 events: vec![],
             },
-            move |ctx, inputs, outputs| {
+            move |_cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
@@ -148,7 +146,7 @@ impl BasicInvoker {
                     .as_int()
                     .into();
 
-                op.invoke(&inputs[0..2], ctx)
+                op.invoke(&inputs[0..2])
                     .map(|result| outputs[0] = result)
                     .expect("failed to invoke math two argument operation");
             });
@@ -741,11 +739,11 @@ impl Invoker for BasicInvoker {
 
     fn invoke(&self,
               function_id: FunctionId,
-              ctx: &mut InvokeContext,
+              cache: &mut InvokeCache,
               inputs: &mut InvokeArgs,
               outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()>
     {
-        self.lambda_invoker.invoke(function_id, ctx, inputs, outputs)
+        self.lambda_invoker.invoke(function_id, cache, inputs, outputs)
     }
 }

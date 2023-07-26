@@ -4,7 +4,7 @@ use common::apply::ApplyMut;
 
 use crate::data::{DataType, DynamicValue};
 use crate::graph::{Binding, Graph};
-use crate::invoke::Invoker;
+use crate::invoke_context::Invoker;
 use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Default)]
@@ -94,7 +94,7 @@ impl Compute {
                 let start = std::time::Instant::now();
                 self.invoker.invoke(
                     node.function_id,
-                    &mut r_node.invoke_context,
+                    &mut r_node.cache,
                     inputs.as_mut_slice(),
                     outputs.as_mut_slice(),
                 )?;
@@ -129,7 +129,7 @@ impl Compute {
         }
 
         if src_data_type.is_custom() || dst_data_type.is_custom() {
-            return self.invoker.convert_value(src_value, dst_data_type);
+            panic!("Custom types are not supported yet");
         }
 
         match (src_data_type, dst_data_type) {
