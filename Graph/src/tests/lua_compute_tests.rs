@@ -3,9 +3,9 @@ use std::str::FromStr;
 use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::ArgSet;
+use crate::elements::lua_invoker::LuaInvoker;
 use crate::function::FunctionId;
 use crate::invoke_context::{InvokeCache, Invoker};
-use crate::lua_invoker::LuaInvoker;
 
 #[test]
 fn lua_works() {
