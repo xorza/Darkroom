@@ -3,6 +3,7 @@ use std::collections::HashMap;
 
 use common::is_debug;
 use common::scoped_ref::ScopeRefMut;
+use common::toggle::Toggle;
 
 pub trait Context {
     fn begin_frame(&mut self) {}
@@ -26,7 +27,7 @@ struct ContextManager {
 
 
 impl ContextManager {
-    pub fn get_mut<T: Context + Sized + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
+    pub fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
         if !self.frame_started {
             panic!("Frame not started");
         }
@@ -39,18 +40,19 @@ impl ContextManager {
         }
 
         let entry = entry.unwrap();
-        let was_active_this_frame = entry.is_active_this_frame;
-        entry.is_active_this_frame = true;
-        let any = &mut *entry.context;
-        let ctx: &mut T = any.downcast_mut::<T>().unwrap();
+        let was_active_this_frame = entry.is_active_this_frame.on();
+
+        let ctx: &mut T = entry.context.downcast_mut::<T>().unwrap();
 
         if !was_active_this_frame {
+            assert!(entry.ending.is_none());
+
             let ending = move |entry: &mut ContextEntry| {
                 let ctx: &mut T = entry.context.downcast_mut::<T>().unwrap();
                 ctx.end_frame();
             };
-
             entry.ending = Some(Box::new(ending));
+
             ctx.begin_frame();
         }
 
@@ -149,6 +151,8 @@ mod tests {
         context_manager.begin_frame();
         let mut s = "test begin_frame begin_invoke".to_string();
         assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
+        let mut s = "test begin_frame begin_invoke end_invoke begin_invoke".to_string();
+        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
         context_manager.end_frame();
 
         {
@@ -158,11 +162,13 @@ mod tests {
                 .context
                 .downcast_mut::<String>()
                 .unwrap();
-            assert_eq!(internal_string.deref_mut(), "test begin_frame begin_invoke end_invoke end_frame");
+            assert_eq!(
+                internal_string.deref_mut(),
+                "test begin_frame begin_invoke end_invoke begin_invoke end_invoke end_frame"
+            );
         }
 
         context_manager.begin_frame();
-
         {
             let internal_string = context_manager.contexts
                 .get_mut(&TypeId::of::<String>())
@@ -170,12 +176,22 @@ mod tests {
                 .context
                 .downcast_mut::<String>()
                 .unwrap();
-            assert_eq!(internal_string.deref_mut(), "test begin_frame begin_invoke end_invoke end_frame");
+            assert_eq!(
+                internal_string.deref_mut(),
+                "test begin_frame begin_invoke end_invoke begin_invoke end_invoke end_frame"
+            );
         }
-
-        let mut target =
-            "test begin_frame begin_invoke end_invoke end_frame begin_frame begin_invoke".to_string();
-        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut target);
+        {
+            let target =
+                "test begin_frame begin_invoke end_invoke begin_invoke end_invoke end_frame begin_frame begin_invoke";
+            let mut requested = context_manager
+                .get_mut::<String>()
+                .unwrap();
+            assert_eq!(
+                requested.deref_mut().deref_mut(),
+                target
+            );
+        }
         context_manager.end_frame();
     }
 }

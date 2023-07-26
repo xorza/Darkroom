@@ -1,6 +1,6 @@
 use std::ops::{Index, IndexMut};
 
-use common::ApplyMut;
+use common::apply::ApplyMut;
 
 use crate::data::{DataType, DynamicValue};
 use crate::graph::{Binding, Graph};
@@ -16,7 +16,6 @@ pub struct Compute {
 }
 
 impl Compute {
-
     pub fn run(
         &self,
         graph: &Graph,

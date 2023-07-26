@@ -4,7 +4,7 @@ use eframe::CreationContext;
 use eframe::egui::{self};
 use egui_file::{DialogType, FileDialog};
 
-use common::ApplyMut;
+use common::apply::ApplyMut;
 use egui_node_graph as eng;
 use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
 use graph_lib::elements::timers_invoker::TimersInvoker;
