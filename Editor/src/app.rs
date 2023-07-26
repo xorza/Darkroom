@@ -1,4 +1,5 @@
 use std::default::Default;
+use std::sync::{Arc, Mutex};
 
 use eframe::CreationContext;
 use eframe::egui::{self};
@@ -6,11 +7,11 @@ use egui_file::{DialogType, FileDialog};
 
 use common::apply::ApplyMut;
 use egui_node_graph as eng;
-use egui_node_graph::NodeResponse;
 use graph_lib::elements::basic_invoker::{BasicInvoker, Logger};
 use graph_lib::elements::timers_invoker::TimersInvoker;
 use graph_lib::function::Function;
 use graph_lib::graph::{Binding, Graph, Node, OutputBinding};
+use graph_lib::invoke_context::Invoker;
 use graph_lib::worker::Worker;
 
 use crate::arg_mapping::{ArgMapping, FindByInputIdResult, FindByOutputIdResult};
@@ -102,22 +103,20 @@ impl eframe::App for NodeshopApp {
     }
 }
 
-
 impl NodeshopApp {
     pub(crate) fn new(cc: &CreationContext) -> Self {
         let egui_ctx = cc.egui_ctx.clone();
+        let functions: Arc<Mutex<Vec<Function>>> = Arc::new(Mutex::new(Vec::new()));
 
+        let functions_clone = functions.clone();
         let worker = Worker::new(
-            |logger| {
-                vec![
-                    Box::new(BasicInvoker::new(logger)),
-                    Box::<TimersInvoker>::default(),
-                ]
+            move |logger| {
+                load_invokers(logger, functions_clone.lock().unwrap().as_mut())
             },
             move || egui_ctx.request_repaint(),
         );
 
-        let functions = worker.all_functions();
+        let functions = functions.lock().unwrap().clone();
         let function_templates = FunctionTemplates::from(
             functions.clone()
         );
@@ -127,7 +126,7 @@ impl NodeshopApp {
             state: EditorState::default(),
             function_templates,
             user_state: AppState {
-                functions: functions.clone(),
+                functions,
                 graph_state: GraphState::default(),
                 worker,
                 egui_ctx: cc.egui_ctx.clone(),
@@ -158,21 +157,26 @@ impl NodeshopApp {
 
     fn file_dialog(&mut self, ctx: &egui::Context) {
         let dialog =
-            if let Some(dialog) = &mut self.file_dialog {
-                if dialog.show(ctx).selected() {
+            self.file_dialog
+                .as_mut()
+                .and_then(|dialog| {
+                    if dialog.show(ctx).selected() {
+                        Some(dialog)
+                    } else {
+                        None
+                    }
+                })
+                .and_then(|dialog| {
                     dialog.path()
                         .and_then(|path| {
                             path
                                 .to_str()
                                 .map(|path| path.to_string())
                         })
-                        .map(|path| (path, dialog.dialog_type()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+                        .map(|path|
+                            (path, dialog.dialog_type())
+                        )
+                });
 
         if let Some((filename, dialog_type)) = dialog {
             self.file_dialog = None;
@@ -191,7 +195,6 @@ impl NodeshopApp {
             }
         }
     }
-
     fn user_response(&mut self, user_event: AppResponse) {
         match user_event {
             AppResponse::ToggleNodeOutput(node_id) => {
@@ -225,8 +228,7 @@ impl NodeshopApp {
             }
         }
     }
-
-    fn response(&mut self, node_response: NodeResponse<AppResponse, EditorNode>) {
+    fn response(&mut self, node_response: eng::NodeResponse<AppResponse, EditorNode>) {
         #[allow(clippy::single_match)]
         match node_response {
             eng::NodeResponse::User(user_event) => self.user_response(user_event),
@@ -320,4 +322,17 @@ impl NodeshopApp {
             eng::NodeResponse::MoveNode { node: _node_id, drag_delta: _delta } => {}
         }
     }
+}
+
+fn load_invokers(logger: Logger, out_funcs: &mut Vec<Function>) -> Vec<Box<dyn Invoker>> {
+    let basic_invoker = BasicInvoker::new(logger);
+    let timers_invoker = TimersInvoker::default();
+
+    out_funcs.extend(basic_invoker.all_functions());
+    out_funcs.extend(timers_invoker.all_functions());
+
+    vec![
+        Box::new(basic_invoker),
+        Box::new(timers_invoker),
+    ]
 }

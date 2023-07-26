@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
-use std::mem::swap;
-use std::sync::{Arc, Condvar};
+use std::sync::Arc;
 use std::thread;
 
 use tokio::runtime::Runtime;
@@ -8,7 +7,6 @@ use tokio::runtime::Runtime;
 use crate::compute::Compute;
 use crate::elements::basic_invoker::Logger;
 use crate::event::EventId;
-use crate::function::Function;
 use crate::graph::Graph;
 use crate::invoke_context::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
@@ -30,7 +28,6 @@ type EventQueue = Arc<tokio::sync::Mutex<Vec<EventId>>>;
 pub struct Worker {
     thread_handle: Option<thread::JoinHandle<()>>,
     tx: std::sync::mpsc::Sender<WorkerMessage>,
-    all_functions: Vec<Function>,
     pub logger: Logger,
 }
 
@@ -42,54 +39,32 @@ impl Worker {
     where Callback: Fn() + Send + 'static,
           InvokerCreator: FnOnce(Logger) -> Vec<Box<dyn Invoker>> + Send + 'static,
     {
-        let (tx, rx) =
+        let (worker_tx, worker_rx) =
             std::sync::mpsc::channel::<WorkerMessage>();
-
-        let on_all_function_ready_condvar = Arc::new(Condvar::new());
-        let all_functions: Arc<std::sync::Mutex<Vec<Function>>> =
-            Arc::new(std::sync::Mutex::new(Vec::new()));
-
-        let on_all_function_ready_condvar_clone = on_all_function_ready_condvar.clone();
-        let all_functions_clone = all_functions.clone();
-        let tx_clone = tx.clone();
-
         let logger = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+        let tx_clone = worker_tx.clone();
         let logger_clone = logger.clone();
+
+        let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
 
         let thread_handle =
             thread::spawn(move || {
                 let invokers = invoker_creator(logger_clone);
                 let invoker = UberInvoker::new(invokers);
-
-                {
-                    let mut all_functions_mutex = all_functions_clone.lock().unwrap();
-                    let all_functions = invoker.all_functions();
-                    *all_functions_mutex = all_functions;
-                }
-
                 let compute = Compute::from(invoker);
-
-                on_all_function_ready_condvar_clone.notify_all();
-
                 let compute_callback = Arc::new(compute_callback);
-                Self::worker_loop(compute, tx_clone, rx, compute_callback);
+
+                load_tx.send(()).unwrap();
+
+                Self::worker_loop(compute, tx_clone, worker_rx, compute_callback);
             });
 
-        let mut all_functions_mutex = on_all_function_ready_condvar
-            .wait_while(
-                all_functions.lock().unwrap(),
-                |functions| {
-                    functions.is_empty()
-                })
-            .unwrap();
-
-        let mut all_functions = vec![];
-        swap(&mut *all_functions_mutex, &mut all_functions);
+        load_rx.recv().unwrap();
 
         Self {
             thread_handle: Some(thread_handle),
-            tx,
-            all_functions,
+            tx: worker_tx,
             logger,
         }
     }
@@ -239,10 +214,6 @@ impl Worker {
         self.tx
             .send(msg)
             .unwrap();
-    }
-
-    pub fn all_functions(&self) -> &Vec<Function> {
-        &self.all_functions
     }
 }
 
