@@ -20,6 +20,6 @@ pub mod wgpu;
 pub mod elements;
 pub mod event;
 pub mod worker;
-pub mod context;
+pub mod context_manager;
 mod type_conversion;
 
