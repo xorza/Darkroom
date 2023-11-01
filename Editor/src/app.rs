@@ -34,7 +34,7 @@ pub struct AppState {
     logger: Logger,
 }
 
-pub struct NodeshopApp {
+pub struct ScenariumApp {
     state: EditorState,
     user_state: AppState,
     function_templates: FunctionTemplates,
@@ -43,7 +43,7 @@ pub struct NodeshopApp {
 }
 
 
-impl eframe::App for NodeshopApp {
+impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::bottom("test")
             .show(ctx, |ui| {
@@ -103,7 +103,7 @@ impl eframe::App for NodeshopApp {
     }
 }
 
-impl NodeshopApp {
+impl ScenariumApp {
     pub(crate) fn new(cc: &CreationContext) -> Self {
         let egui_ctx = cc.egui_ctx.clone();
         let functions: Arc<Mutex<Vec<Function>>> = Arc::new(Mutex::new(Vec::new()));
@@ -122,7 +122,7 @@ impl NodeshopApp {
         );
         let logger = worker.logger.clone();
 
-        NodeshopApp {
+        ScenariumApp {
             state: EditorState::default(),
             function_templates,
             user_state: AppState {

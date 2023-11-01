@@ -170,7 +170,7 @@ mod tests {
                 event_index: 1,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(12)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
             },
         );
 

@@ -4,7 +4,7 @@
 
 use ::common::log_setup::setup_logging;
 
-use crate::app::NodeshopApp;
+use crate::app::ScenariumApp;
 
 mod app;
 mod function_templates;
@@ -17,11 +17,11 @@ fn main() {
     setup_logging("info");
 
     eframe::run_native(
-        "Nodeshop",
+        "Scenarium",
         eframe::NativeOptions::default(),
         Box::new(|cc| {
             cc.egui_ctx.set_visuals(eframe::egui::Visuals::dark());
-            let app = Box::new(NodeshopApp::new(cc));
+            let app = Box::new(ScenariumApp::new(cc));
 
             app
         }),
