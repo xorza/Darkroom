@@ -7,7 +7,8 @@
         xmlns:viewModel="clr-namespace:ViewModel"
         d:DataContext="{d:DesignInstance Type=viewModel:DesignMainWindowViewModel}"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="MainWindow" Height="450" Width="800"
+        Background="#292929">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" MinHeight="50" />
@@ -33,7 +34,7 @@
                     <RowDefinition Height="Auto" MinHeight="50" />
                 </Grid.RowDefinitions>
 
-                <Border BorderBrush="Chocolate" BorderThickness="1">
+                <Border >
                     <ItemsControl ItemsSource="{Binding Nodes}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">

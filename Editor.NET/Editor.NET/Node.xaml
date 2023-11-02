@@ -3,49 +3,63 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:local="clr-namespace:Editor.NET"
              xmlns:viewModel="clr-namespace:ViewModel"
              d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}"
              mc:Ignorable="d"
              Width="Auto"
-             Height="Auto">
+             Height="Auto"
+             Background="{x:Null}"
+             >
     <UserControl.Resources>
-        
+        <ResourceDictionary>
+            <sys:Double x:Key="PinSize">8</sys:Double>
+            <Brush x:Key="EventPinColor">#DD423A</Brush>
+        </ResourceDictionary>
     </UserControl.Resources>
 
-    <Grid Margin="3" Background="{x:Null}">
-
-        <Border BorderBrush="Blue" Margin="0" BorderThickness="1"></Border>
-
-        <StackPanel Orientation="Vertical" Margin="1" Background="{x:Null}">
-            <Border Background="Beige">
+    <Border BorderBrush="#333" Margin="4" Padding="0" BorderThickness="1"
+            Background="#444" CornerRadius="1">
+        
+        <StackPanel Orientation="Vertical" Margin="0">
+            <Border Background="#555">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"></ColumnDefinition>
                         <ColumnDefinition Width="Auto"></ColumnDefinition>
                     </Grid.ColumnDefinitions>
 
-                    <Label Content="{Binding Name}"
-                           VerticalAlignment="Center"></Label>
+                    <Button Style="{StaticResource EmptyButton}"
+                            Width="{StaticResource PinSize}" Height="{StaticResource PinSize}"
+                            VerticalAlignment="Top" HorizontalAlignment="Left"
+                            Margin="-4">
+                        <Ellipse Fill="{StaticResource EventPinColor}" />
+                    </Button>
+
+                    <Label Grid.Column="0" Content="{Binding Name}"
+                           VerticalAlignment="Center" Margin="8 3" FontWeight="Bold">
+                    </Label>
                     <Button Grid.Column="1" Margin="2" Style="{StaticResource EmptyButton}"
                             VerticalAlignment="Center" HorizontalAlignment="Right"
-                            Width="15" Height="15">
-                        <Border BorderThickness="1" BorderBrush="Blue" Background="Transparent">
+                            Width="14" Height="14">
+                        <Border Background="Transparent"
+                                VerticalAlignment="Center" Margin="2">
                             <Grid>
-                                <Path Data="M 0,0 L 1,1" Stretch="Fill" Stroke="Black" StrokeThickness="2"
+                                <Path Data="M 0,0 L 1,1" Stretch="Fill" Stroke="#222" StrokeThickness="2"
                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                <Path Data="M 0,1 L 1,0" Stretch="Fill" Stroke="Black" StrokeThickness="2"
+                                <Path Data="M 0,1 L 1,0" Stretch="Fill" Stroke="#222" StrokeThickness="2"
                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Grid>
                         </Border>
                     </Button>
                 </Grid>
             </Border>
-            
-            <Grid Margin="-5 2" Width="Auto">
+
+            <Grid Margin="0 3">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"></ColumnDefinition>
-                    <ColumnDefinition Width="4"></ColumnDefinition>
+                    <ColumnDefinition Width="5"></ColumnDefinition>
                     <ColumnDefinition Width="*"></ColumnDefinition>
                 </Grid.ColumnDefinitions>
 
@@ -55,46 +69,71 @@
                     HorizontalContentAlignment="Left">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModel:Input}">
-                         
+
                             <StackPanel Orientation="Horizontal">
-                                <Button Style="{StaticResource EmptyButton}" Width="9" Height="9"
-                                        VerticalAlignment="Center">
-                                    <Ellipse Stroke="Black" StrokeThickness="1.5" Fill="Coral" />
+                                <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
+                                        Height="{StaticResource PinSize}"
+                                        VerticalAlignment="Center"
+                                        Margin="-4 0 0 0">
+                                    <Ellipse Fill="Coral" />
                                 </Button>
-                                <Label Margin="0" Padding="0"
-                                       VerticalAlignment="Center"
-                                       Content="{Binding Name}"></Label>
+                                <Label
+                                    VerticalAlignment="Center"
+                                    Content="{Binding Name}">
+                                </Label>
 
                             </StackPanel>
-                          
+
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <ItemsControl HorizontalContentAlignment="Right"
-                              HorizontalAlignment="Stretch"
-                              Grid.Column="2"
-                              ItemsSource="{Binding Outputs}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Output}">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
-                                <Button Style="{StaticResource EmptyButton}" Width="9" Height="9"
-                                        VerticalAlignment="Center">
-                                    <Ellipse Stroke="Black" StrokeThickness="1.5"
-                                             Fill="Chartreuse" />
-                                </Button>
-                            </StackPanel>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <StackPanel Orientation="Vertical" Grid.Column="2">
+                    <ItemsControl HorizontalContentAlignment="Right"
+                                  HorizontalAlignment="Stretch"
 
+                                  ItemsSource="{Binding Events}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModel:Event}">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
+                                    <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
+                                            Height="{StaticResource PinSize}"
+                                            VerticalAlignment="Center"
+                                            Margin="0 0 -4 0">
+                                        <Ellipse
+                                            Fill="{StaticResource EventPinColor}" />
+                                    </Button>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+
+                    <ItemsControl HorizontalContentAlignment="Right"
+                                  HorizontalAlignment="Stretch"
+
+                                  ItemsSource="{Binding Outputs}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModel:Output}">
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
+                                    <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
+                                            Height="{StaticResource PinSize}"
+                                            VerticalAlignment="Center"
+                                            Margin="0 0 -4 0">
+                                        <Ellipse
+                                            Fill="YellowGreen" />
+                                    </Button>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
             </Grid>
-            
-            <Expander Header="Preview">
-                
-            </Expander>
+
+
         </StackPanel>
 
-    </Grid>
+    </Border>
 </UserControl>

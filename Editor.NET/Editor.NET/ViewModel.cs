@@ -201,14 +201,12 @@ public class DesignNode : Node {
         Events.Add(new Event {
             Name = "Event 1",
         });
-        Events.Add(new Event {
-            Name = "Event 2",
-        });
     }
 }
 
 public class DesignMainWindowViewModel : MainWindowViewModel {
     public DesignMainWindowViewModel() {
+        Nodes.Add(new DesignNode());
         Nodes.Add(new DesignNode());
     }
 }
