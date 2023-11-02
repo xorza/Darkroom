@@ -175,12 +175,12 @@ impl eng::NodeDataTrait for EditorNode {
                 let cache_outputs_button =
                     if self.cache_outputs {
                         egui::Button::new(
-                            egui::RichText::new("Once")
+                            egui::RichText::new("Cache")
                                 .color(egui::Color32::BLACK)
                         )
                             .fill(egui::Color32::GOLD)
                     } else {
-                        egui::Button::new(egui::RichText::new("Once"))
+                        egui::Button::new(egui::RichText::new("Cache"))
                     }
                         .min_size(egui::Vec2::new(50.0, 0.0));
                 if cache_outputs_button.ui(ui).clicked() {
