@@ -17,7 +17,6 @@ pub enum FunctionBehavior {
 id_type!(NodeId);
 
 
-
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Output {
     pub name: String,

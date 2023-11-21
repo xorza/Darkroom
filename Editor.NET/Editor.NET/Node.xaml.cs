@@ -1,7 +1,9 @@
-﻿using System.ComponentModel;
+﻿using System;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using Editor.NET.ViewModel;
 
 namespace Editor.NET;
 
@@ -42,9 +44,25 @@ public partial class Node : UserControl {
         var currentPosition = e.GetPosition(this);
         var delta = currentPosition - _dragTitleMousePosition;
 
-        NodeDataContext.Position = new Point(
-            NodeDataContext.Position.X + delta.X,
-            NodeDataContext.Position.Y + delta.Y
+        NodeDataContext.CanvasPosition = new Point(
+            NodeDataContext.CanvasPosition.X + delta.X,
+            NodeDataContext.CanvasPosition.Y + delta.Y
         );
+    }
+
+    private void Input_OnLoaded(object sender, RoutedEventArgs e) {
+        var input = (FrameworkElement)sender!;
+        var position = input.TranslatePoint(new Point(input.ActualWidth / 2.0f, input.ActualHeight / 2.0f), this);
+        ((Input)input.DataContext).NodePosition = position;
+    }
+
+    private void Output_OnLoaded(object sender, RoutedEventArgs e) {
+        var output = (FrameworkElement)sender!;
+        var position = output.TranslatePoint(new Point(output.ActualWidth / 2.0f, output.ActualHeight / 2.0f), this);
+        ((Output)output.DataContext).NodePosition = position;
+    }
+
+    private void Node_OnLoaded(object sender, RoutedEventArgs e) {
+        NodeDataContext.UpdatePinPositions();
     }
 }

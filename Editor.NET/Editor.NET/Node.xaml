@@ -10,7 +10,9 @@
              mc:Ignorable="d"
              Width="Auto"
              Height="Auto"
-             Background="{x:Null}">
+             Background="{x:Null}"
+             
+             Loaded="Node_OnLoaded">
     <UserControl.Resources>
         <ResourceDictionary>
             <Brush x:Key="EventPinColor">#DD423A</Brush>
@@ -106,7 +108,10 @@
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PinButton}"
                                         Margin="-4 0 0 0"
-                                        Background="Coral" />
+                                        Background="Coral" 
+                                        DataContext="{Binding}"
+                                        Loaded="Input_OnLoaded"
+                                        />
                                 <Label
                                     VerticalAlignment="Center"
                                     Content="{Binding Name}">
@@ -124,13 +129,15 @@
 
                                   ItemsSource="{Binding Events}">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type viewModel:Event}">
+                            <DataTemplate DataType="{x:Type viewModel:Output}">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
                                     <Button Style="{StaticResource PinButton}"
                                             Margin="0 0 -4 0"
-                                            Background="{StaticResource EventPinColor}" />
+                                            Background="{StaticResource EventPinColor}"
+                                            Loaded="Output_OnLoaded"
+                                            />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -148,7 +155,9 @@
 
                                     <Button Style="{StaticResource PinButton}"
                                             Margin="0 0 -4 0"
-                                            Background="YellowGreen" />
+                                            Background="YellowGreen" 
+                                            Loaded="Output_OnLoaded"
+                                            />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

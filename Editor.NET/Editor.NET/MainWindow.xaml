@@ -13,7 +13,9 @@
         Title="MainWindow"
         Height="450"
         Width="800"
-        Background="#292929">
+        Background="#292929"
+        
+        Loaded="MainWindow_OnLoaded">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition
@@ -42,8 +44,13 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" MinHeight="50" />
                 </Grid.RowDefinitions>
-
+                
+                <Canvas
+                    Grid.Row="0"
+                    x:Name="ConnectionCanvas" />
+                
                 <ItemsControl
+                    Grid.Row="0"
                     ItemsSource="{Binding Nodes}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModel:Node}">
@@ -61,18 +68,17 @@
                         <Style TargetType="ContentPresenter">
                             <Setter
                                 Property="Canvas.Left"
-                                Value="{Binding Path=Position.X}" />
+                                Value="{Binding Path=CanvasPosition.X}" />
                             <Setter
                                 Property="Canvas.Top"
-                                Value="{Binding Path=Position.Y}" />
+                                Value="{Binding Path=CanvasPosition.Y}" />
                         </Style>
                     </ItemsControl.ItemContainerStyle>
                 </ItemsControl>
-                
+
             </Grid>
 
             <Border Grid.Column="1" Background="Brown"></Border>
         </Grid>
     </Grid>
 </Window>
-
