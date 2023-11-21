@@ -12,7 +12,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using ViewModel;
+using Editor.NET.ViewModel;
 
 namespace Editor.NET {
 public partial class MainWindow : Window {

@@ -5,54 +5,87 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:local="clr-namespace:Editor.NET"
-             xmlns:viewModel="clr-namespace:ViewModel"
+             xmlns:viewModel="clr-namespace:Editor.NET.ViewModel"
              d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}"
              mc:Ignorable="d"
              Width="Auto"
              Height="Auto"
-             Background="{x:Null}"
-             >
+             Background="{x:Null}">
     <UserControl.Resources>
         <ResourceDictionary>
-            <sys:Double x:Key="PinSize">8</sys:Double>
             <Brush x:Key="EventPinColor">#DD423A</Brush>
+            <sys:Double x:Key="PinSize">8</sys:Double>
+
+            <Style x:Key="PinButton"
+                   TargetType="Button"
+                   BasedOn="{StaticResource EmptyButton}">
+                <Setter Property="Width" Value="{StaticResource PinSize}" />
+                <Setter Property="Height" Value="{StaticResource PinSize}" />
+                <Setter Property="Background" Value="Chartreuse" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid>
+                                <Ellipse Fill="{TemplateBinding Background}" />
+                                <Ellipse
+                                    Fill="{StaticResource HighlightOverlayBrush}"
+                                    Visibility="{TemplateBinding IsMouseOver, Converter={StaticResource BoolToVis}}" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
     <Border BorderBrush="#333" Margin="4" Padding="0" BorderThickness="1"
             Background="#444" CornerRadius="1">
-        
+
         <StackPanel Orientation="Vertical" Margin="0">
-            <Border Background="#555">
+            <Border Background="#555"
+                    MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
+                    MouseLeftButtonUp="Title_OnMouseLeftButtonUp">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"></ColumnDefinition>
                         <ColumnDefinition Width="Auto"></ColumnDefinition>
                     </Grid.ColumnDefinitions>
 
-                    <Button Style="{StaticResource EmptyButton}"
-                            Width="{StaticResource PinSize}" Height="{StaticResource PinSize}"
-                            VerticalAlignment="Top" HorizontalAlignment="Left"
-                            Margin="-4">
-                        <Ellipse Fill="{StaticResource EventPinColor}" />
-                    </Button>
+                    <Button Style="{StaticResource PinButton}"
+                            VerticalAlignment="Top"
+                            HorizontalAlignment="Left"
+                            Margin="-4 -4 0 0"
+                            Background="{StaticResource EventPinColor}" />
 
                     <Label Grid.Column="0" Content="{Binding Name}"
                            VerticalAlignment="Center" Margin="8 3" FontWeight="Bold">
                     </Label>
-                    <Button Grid.Column="1" Margin="2" Style="{StaticResource EmptyButton}"
-                            VerticalAlignment="Center" HorizontalAlignment="Right"
-                            Width="14" Height="14">
-                        <Border Background="Transparent"
-                                VerticalAlignment="Center" Margin="2">
-                            <Grid>
+                    
+                    <Button Grid.Column="1"
+                            Margin="1"
+                            Padding="0"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right"
+                            Width="15"
+                            Height="15" 
+                            Background="Transparent"
+                            >
+                        <Grid>
+                            <Border Background="Transparent"
+                                    VerticalAlignment="Center" />
+
+                            <Grid Margin="2">
                                 <Path Data="M 0,0 L 1,1" Stretch="Fill" Stroke="#222" StrokeThickness="2"
                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                                 <Path Data="M 0,1 L 1,0" Stretch="Fill" Stroke="#222" StrokeThickness="2"
                                       HorizontalAlignment="Center" VerticalAlignment="Center" />
                             </Grid>
-                        </Border>
+
+                        </Grid>
                     </Button>
+                    
                 </Grid>
             </Border>
 
@@ -71,12 +104,9 @@
                         <DataTemplate DataType="{x:Type viewModel:Input}">
 
                             <StackPanel Orientation="Horizontal">
-                                <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
-                                        Height="{StaticResource PinSize}"
-                                        VerticalAlignment="Center"
-                                        Margin="-4 0 0 0">
-                                    <Ellipse Fill="Coral" />
-                                </Button>
+                                <Button Style="{StaticResource PinButton}"
+                                        Margin="-4 0 0 0"
+                                        Background="Coral" />
                                 <Label
                                     VerticalAlignment="Center"
                                     Content="{Binding Name}">
@@ -97,13 +127,10 @@
                             <DataTemplate DataType="{x:Type viewModel:Event}">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
-                                    <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
-                                            Height="{StaticResource PinSize}"
-                                            VerticalAlignment="Center"
-                                            Margin="0 0 -4 0">
-                                        <Ellipse
-                                            Fill="{StaticResource EventPinColor}" />
-                                    </Button>
+
+                                    <Button Style="{StaticResource PinButton}"
+                                            Margin="0 0 -4 0"
+                                            Background="{StaticResource EventPinColor}" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -118,13 +145,10 @@
                             <DataTemplate DataType="{x:Type viewModel:Output}">
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                     <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
-                                    <Button Style="{StaticResource EmptyButton}" Width="{StaticResource PinSize}"
-                                            Height="{StaticResource PinSize}"
-                                            VerticalAlignment="Center"
-                                            Margin="0 0 -4 0">
-                                        <Ellipse
-                                            Fill="YellowGreen" />
-                                    </Button>
+
+                                    <Button Style="{StaticResource PinButton}"
+                                            Margin="0 0 -4 0"
+                                            Background="YellowGreen" />
                                 </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>

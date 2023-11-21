@@ -3,9 +3,9 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices.JavaScript;
+using System.Windows;
 
-namespace ViewModel;
+namespace Editor.NET.ViewModel;
 
 public enum DataType {
     Number,
@@ -124,6 +124,8 @@ public class Node : INotifyPropertyChanged {
     private bool _isSelected = false;
     private bool _isOutput = false;
     private bool _isCached = false;
+    private Point _position;
+
 
     public String Name {
         get => _name;
@@ -161,9 +163,18 @@ public class Node : INotifyPropertyChanged {
         }
     }
 
-    public ObservableCollection<Input> Inputs { get; } = new ObservableCollection<Input>();
-    public ObservableCollection<Output> Outputs { get; } = new ObservableCollection<Output>();
-    public ObservableCollection<Event> Events { get; } = new ObservableCollection<Event>();
+    public Point Position {
+        get => _position;
+        set {
+            if (value.Equals(_position)) return;
+            _position = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public ObservableCollection<Input> Inputs { get; } = new();
+    public ObservableCollection<Output> Outputs { get; } = new();
+    public ObservableCollection<Event> Events { get; } = new();
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -206,7 +217,11 @@ public class DesignNode : Node {
 
 public class DesignMainWindowViewModel : MainWindowViewModel {
     public DesignMainWindowViewModel() {
-        Nodes.Add(new DesignNode());
-        Nodes.Add(new DesignNode());
+        Nodes.Add(new DesignNode() {
+            Position = new Point(30.0f, 50.0f),
+        });
+        Nodes.Add(new DesignNode() {
+            Position = new Point(100.0f, 150.0f),
+        });
     }
 }

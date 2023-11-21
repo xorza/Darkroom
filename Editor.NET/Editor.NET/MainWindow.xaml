@@ -3,23 +3,32 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+
         xmlns:local="clr-namespace:Editor.NET"
-        xmlns:viewModel="clr-namespace:ViewModel"
+        xmlns:viewModel="clr-namespace:Editor.NET.ViewModel"
+
         d:DataContext="{d:DesignInstance Type=viewModel:DesignMainWindowViewModel}"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800"
+
+        Title="MainWindow"
+        Height="450"
+        Width="800"
         Background="#292929">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" MinHeight="50" />
-            <RowDefinition Height="*" />
+            <RowDefinition
+                Height="Auto"
+                MinHeight="50" />
+            <RowDefinition
+                Height="*" />
         </Grid.RowDefinitions>
 
         <Grid>
-            <Button Content="click" VerticalAlignment="Top" HorizontalAlignment="Left"
-                    Padding="10 5" Margin="2"
-                    Click="AddDesignNodeButton_OnClick">
-            </Button>
+            <Button
+                Content="click"
+                VerticalAlignment="Top"
+                HorizontalAlignment="Left"
+                Click="AddDesignNodeButton_OnClick" />
         </Grid>
 
         <Grid Grid.Row="1">
@@ -34,22 +43,36 @@
                     <RowDefinition Height="Auto" MinHeight="50" />
                 </Grid.RowDefinitions>
 
-                <Border >
-                    <ItemsControl ItemsSource="{Binding Nodes}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type viewModel:Node}">
-                                <local:Node DataContext="{Binding}" Width="Auto"
-                                             Height="Auto"
-                                             VerticalAlignment="Top"
-                                             HorizontalAlignment="Left"></local:Node>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                    
-                </Border>
+                <ItemsControl
+                    ItemsSource="{Binding Nodes}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type viewModel:Node}">
+                            <local:Node
+                                NodeDataContext="{Binding}"
+                                Width="Auto" Height="Auto" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter
+                                Property="Canvas.Left"
+                                Value="{Binding Path=Position.X}" />
+                            <Setter
+                                Property="Canvas.Top"
+                                Value="{Binding Path=Position.Y}" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                </ItemsControl>
+                
             </Grid>
 
             <Border Grid.Column="1" Background="Brown"></Border>
         </Grid>
     </Grid>
 </Window>
+
