@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
     <configuration default="false" name="All Tests" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-        <option name="command" value="test --all-features --workspace --exclude &quot;egui_node_graph&quot;"/>
+        <option name="command" value="test --all-features --workspace"/>
         <option name="workingDirectory" value="file://$PROJECT_DIR$"/>
         <option name="emulateTerminal" value="false"/>
         <option name="channel" value="DEFAULT"/>
