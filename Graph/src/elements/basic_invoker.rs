@@ -11,12 +11,12 @@ use strum_macros::{Display, EnumIter};
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
-use crate::invoke_context::{EmptyInvoker, InvokeArgs, InvokeCache, Invoker};
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 pub type Logger = Arc<Mutex<Vec<String>>>;
 
 pub struct BasicInvoker {
-    lambda_invoker: EmptyInvoker,
+    lambda_invoker: LambdaInvoker,
 }
 
 #[repr(u32)]
@@ -72,7 +72,7 @@ impl From<i64> for Math2ArgOp {
 
 impl BasicInvoker {
     pub fn new(logger: Logger) -> Self {
-        let mut invoker = EmptyInvoker::default();
+        let mut invoker = LambdaInvoker::default();
 
         //print
         invoker.add_lambda(

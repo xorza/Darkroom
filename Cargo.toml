@@ -14,25 +14,26 @@ graph_lib = { path = "./Graph", package = "graph", features = ["wgpu"] }
 common = { path = "./Common", package = "common" }
 uilib = { path = "./uilib", package = "uilib" }
 imaginarium = { path = "./Imaginarium", package = "imaginarium", features = ["wgpu"] }
-egui_node_graph = { path = "./egui_node_graph/egui_node_graph" }
+
+egui_node_graph = { git = "ssh://git@github.com/xorza/egui_node_graph.git", branch = "main" }
 
 serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 serde_json = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = "*"
-wgpu = { version = "0.17.1" }
+wgpu = { version = "0.18.0" }
 bytemuck = { version = "*", features = ["derive"] }
 pollster = "*"
 tiff = "*"
 png = "*"
 image_lib = { version = "*", package = "image" }
 num-traits = "*"
-winit = "*"
+winit = "0.28.7"
 glam = "*"
 glyph_brush = "*"
 mlua = { version = "*", features = ["lua54", "vendored"] }
-egui_file = { version = "0.11.0" }
+egui_file = { version = "0.11.1" }
 eframe = { version = "0.23.0", features = ["wgpu"] }
 strum = "*"
 strum_macros = "*"

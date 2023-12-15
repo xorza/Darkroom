@@ -46,7 +46,9 @@ fn setup(title: &str) -> Setup {
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
+        flags: Default::default(),
         dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+        gles_minor_version: Default::default(),
     });
     let size = window.inner_size();
     let surface = unsafe {

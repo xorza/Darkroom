@@ -342,7 +342,7 @@ impl WgpuRenderer {
                             resolve_target: None,
                             ops: Operations {
                                 load: LoadOp::Clear(Color::RED),
-                                store: true,
+                                store: StoreOp::Store,
                             },
                         }),
                         Some(RenderPassColorAttachment {
@@ -350,11 +350,13 @@ impl WgpuRenderer {
                             resolve_target: None,
                             ops: Operations {
                                 load: LoadOp::Clear(Color::BLACK),
-                                store: true,
+                                store: StoreOp::Store,
                             },
                         }),
                     ],
                     depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
                 });
             render_pass.push_debug_group("Prepare data for draw.");
             render_pass.set_pipeline(&self.pipeline);

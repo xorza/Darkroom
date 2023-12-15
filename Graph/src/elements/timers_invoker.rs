@@ -4,10 +4,10 @@ use std::time::Instant;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
-use crate::invoke_context::{EmptyInvoker, InvokeArgs, InvokeCache, Invoker};
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 pub struct TimersInvoker {
-    lambda_invoker: EmptyInvoker,
+    lambda_invoker: LambdaInvoker,
 }
 
 struct FrameEventContext {
@@ -17,7 +17,7 @@ struct FrameEventContext {
 
 impl Default for TimersInvoker {
     fn default() -> TimersInvoker {
-        let mut invoker = EmptyInvoker::default();
+        let mut invoker = LambdaInvoker::default();
 
         invoker.add_lambda(
             Function {

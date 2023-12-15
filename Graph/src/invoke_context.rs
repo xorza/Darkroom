@@ -32,7 +32,7 @@ pub struct UberInvoker {
 }
 
 #[derive(Default)]
-pub struct EmptyInvoker {
+pub struct LambdaInvoker {
     all_functions: Vec<Function>,
     lambdas: HashMap<FunctionId, Box<Lambda>>,
 }
@@ -98,7 +98,7 @@ impl InvokeCache {
     }
 }
 
-impl EmptyInvoker {
+impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Function, lambda: F)
     where F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + 'static
     {
@@ -158,7 +158,7 @@ impl Invoker for UberInvoker {
     }
 }
 
-impl Invoker for EmptyInvoker {
+impl Invoker for LambdaInvoker {
     fn all_functions(&self) -> Vec<Function> {
         self.all_functions.clone()
     }

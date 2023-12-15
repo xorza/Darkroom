@@ -46,7 +46,9 @@ impl WgpuContext {
     pub fn new() -> anyhow::Result<WgpuContext> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
+            flags: Default::default(),
             dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+            gles_minor_version: Default::default(),
         });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
@@ -344,12 +346,14 @@ impl WgpuContext {
                             resolve_target: None,
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                                store: true,
+                                store: wgpu::StoreOp::Store,
                             },
                         }),
                     ],
                     depth_stencil_attachment: None,
+                    timestamp_writes: None,
                     label: None,
+                    occlusion_query_set: None,
                 });
 
             render_pass.push_debug_group("Prepare data for draw.");

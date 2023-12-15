@@ -6,7 +6,7 @@ use crate::compute::Compute;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
-use crate::invoke_context::{EmptyInvoker, InvokeCache};
+use crate::invoke_context::{InvokeCache, LambdaInvoker};
 use crate::runtime_graph::RuntimeGraph;
 
 struct TestValues {
@@ -24,7 +24,7 @@ where
     GetA: Fn() -> i64 + 'static,
     GetB: Fn() -> i64 + 'static,
 {
-    let mut invoker = EmptyInvoker::default();
+    let mut invoker = LambdaInvoker::default();
 
     // print
     invoker.add_lambda(
