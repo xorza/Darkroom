@@ -1,19 +1,19 @@
 [workspace]
 members = [
-    "Editor",
-    "Graph",
+    "editor",
+    "graph",
     "uilib",
-    "Imaginarium",
-    "Common",
+    "imaginarium",
+    "common",
 ]
 
 resolver = "2"
 
 [workspace.dependencies]
-graph_lib = { path = "./Graph", package = "graph", features = ["wgpu"] }
-common = { path = "./Common", package = "common" }
+graph_lib = { path = "./graph", package = "graph", features = ["wgpu"] }
+common = { path = "./common", package = "common" }
 uilib = { path = "./uilib", package = "uilib" }
-imaginarium = { path = "./Imaginarium", package = "imaginarium", features = ["wgpu"] }
+imaginarium = { path = "./imaginarium", package = "imaginarium", features = ["wgpu"] }
 
 egui_node_graph = { git = "ssh://git@github.com/xorza/egui_node_graph.git", branch = "main" }
 
