@@ -1,4 +1,6 @@
-use flexi_logger::{DeferredNow, Duplicate, FileSpec, Logger, style, TS_DASHES_BLANK_COLONS_DOT_BLANK};
+use flexi_logger::{
+    DeferredNow, Duplicate, FileSpec, Logger, style, TS_DASHES_BLANK_COLONS_DOT_BLANK,
+};
 use log::Record;
 
 pub fn detailed_format(
@@ -37,10 +39,7 @@ pub fn colored_detailed_format(
 pub fn setup_logging(base_level: &str) {
     let _ = Logger::try_with_str(base_level)
         .unwrap_or_else(|e| panic!("Logger initialization failed with {}", e))
-        .log_to_file(
-            FileSpec::default()
-                .directory("logs")
-        )
+        .log_to_file(FileSpec::default().directory("logs"))
         .duplicate_to_stderr(Duplicate::Warn)
         .duplicate_to_stdout(Duplicate::All)
         .format(detailed_format)

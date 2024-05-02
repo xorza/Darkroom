@@ -82,15 +82,13 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Active,
                 is_output: true,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "value".to_string(),
-                        is_required: true,
-                        data_type: DataType::String,
-                        default_value: None,
-                        variants: None,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "value".to_string(),
+                    is_required: true,
+                    data_type: DataType::String,
+                    default_value: None,
+                    variants: None,
+                }],
                 outputs: vec![],
                 events: vec![],
             },
@@ -98,7 +96,8 @@ impl BasicInvoker {
                 let value: &str = inputs[0].as_string();
                 logger.lock().unwrap().push(value.to_string());
                 info!("{:?}", value);
-            });
+            },
+        );
         // math two argument operation
         invoker.add_lambda(
             Function {
@@ -130,26 +129,23 @@ impl BasicInvoker {
                         variants: Some(Math2ArgOp::list_variants()),
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::Float,
-                    }
-                ],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let op: Math2ArgOp = inputs[2]
-                    .as_int()
-                    .into();
+                let op: Math2ArgOp = inputs[2].as_int().into();
 
                 op.invoke(&inputs[0..2])
                     .map(|result| outputs[0] = result)
                     .expect("failed to invoke math two argument operation");
-            });
+            },
+        );
         // to string
         invoker.add_lambda(
             Function {
@@ -158,21 +154,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "value".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: None,
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::String,
-                    }
-                ],
+                inputs: vec![InputInfo {
+                    name: "value".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: None,
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::String,
+                }],
                 events: vec![],
             },
             |_, inputs, outputs| {
@@ -183,7 +175,8 @@ impl BasicInvoker {
                 let result = format!("{}", value);
 
                 outputs[0] = DynamicValue::String(result);
-            });
+            },
+        );
 
         // random
         let rng = Rc::new(RefCell::new(rand::thread_rng()));
@@ -210,12 +203,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::Float,
-                    }
-                ],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -228,7 +219,8 @@ impl BasicInvoker {
                 let result = min + (max - min) * random;
 
                 outputs[0] = DynamicValue::Float(result);
-            });
+            },
+        );
         //add
         invoker.add_lambda(
             Function {
@@ -253,12 +245,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::Float,
-                    }
-                ],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -270,7 +260,8 @@ impl BasicInvoker {
                 let result = a + b;
 
                 outputs[0] = DynamicValue::Float(result);
-            });
+            },
+        );
         //subtract
         invoker.add_lambda(
             Function {
@@ -295,12 +286,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::Float,
-                    }
-                ],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -312,7 +301,8 @@ impl BasicInvoker {
                 let result = a - b;
 
                 outputs[0] = DynamicValue::Float(result);
-            });
+            },
+        );
         //multiply
         invoker.add_lambda(
             Function {
@@ -337,12 +327,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "result".to_string(),
-                        data_type: DataType::Float,
-                    }
-                ],
+                outputs: vec![OutputInfo {
+                    name: "result".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -354,7 +342,8 @@ impl BasicInvoker {
                 let result = a * b;
 
                 outputs[0] = DynamicValue::Float(result);
-            });
+            },
+        );
         //divide
         invoker.add_lambda(
             Function {
@@ -402,7 +391,8 @@ impl BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(divide);
                 outputs[1] = DynamicValue::Float(modulo);
-            });
+            },
+        );
         // power
         invoker.add_lambda(
             Function {
@@ -427,12 +417,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "power".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                outputs: vec![OutputInfo {
+                    name: "power".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -444,7 +432,8 @@ impl BasicInvoker {
                 let power = a.powf(b);
 
                 outputs[0] = DynamicValue::Float(power);
-            });
+            },
+        );
         // sqrt
         invoker.add_lambda(
             Function {
@@ -453,21 +442,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "a".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "sqrt".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "sqrt".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -478,7 +463,8 @@ impl BasicInvoker {
                 let sqrt = a.sqrt();
 
                 outputs[0] = DynamicValue::Float(sqrt);
-            });
+            },
+        );
         // sin
         invoker.add_lambda(
             Function {
@@ -487,21 +473,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "a".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "sin".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "sin".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -512,7 +494,8 @@ impl BasicInvoker {
                 let sin = a.sin();
 
                 outputs[0] = DynamicValue::Float(sin);
-            });
+            },
+        );
         // cos
         invoker.add_lambda(
             Function {
@@ -521,21 +504,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "a".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "cos".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "cos".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -546,7 +525,8 @@ impl BasicInvoker {
                 let cos = a.cos();
 
                 outputs[0] = DynamicValue::Float(cos);
-            });
+            },
+        );
         // tan
         invoker.add_lambda(
             Function {
@@ -555,21 +535,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "a".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "tan".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "a".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "tan".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -580,7 +556,8 @@ impl BasicInvoker {
                 let tan = a.tan();
 
                 outputs[0] = DynamicValue::Float(tan);
-            });
+            },
+        );
         // asin
         invoker.add_lambda(
             Function {
@@ -589,21 +566,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "sin".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "asin".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "sin".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "asin".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -614,7 +587,8 @@ impl BasicInvoker {
                 let asin = sin.asin();
 
                 outputs[0] = DynamicValue::Float(asin);
-            });
+            },
+        );
         // acos
         invoker.add_lambda(
             Function {
@@ -623,21 +597,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "cos".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "acos".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "cos".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(1.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "acos".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -648,7 +618,8 @@ impl BasicInvoker {
                 let acos = cos.acos();
 
                 outputs[0] = DynamicValue::Float(acos);
-            });
+            },
+        );
         // atan
         invoker.add_lambda(
             Function {
@@ -657,21 +628,17 @@ impl BasicInvoker {
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "tan".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
-                    },
-                ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "atan".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                inputs: vec![InputInfo {
+                    name: "tan".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(0.0)),
+                    variants: None,
+                }],
+                outputs: vec![OutputInfo {
+                    name: "atan".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -682,7 +649,8 @@ impl BasicInvoker {
                 let atan = tan.atan();
 
                 outputs[0] = DynamicValue::Float(atan);
-            });
+            },
+        );
         // log
         invoker.add_lambda(
             Function {
@@ -707,12 +675,10 @@ impl BasicInvoker {
                         variants: None,
                     },
                 ],
-                outputs: vec![
-                    OutputInfo {
-                        name: "log".to_string(),
-                        data_type: DataType::Float,
-                    },
-                ],
+                outputs: vec![OutputInfo {
+                    name: "log".to_string(),
+                    data_type: DataType::Float,
+                }],
                 events: vec![],
             },
             move |_, inputs, outputs| {
@@ -724,7 +690,8 @@ impl BasicInvoker {
                 let log = value.log(base);
 
                 outputs[0] = DynamicValue::Float(log);
-            });
+            },
+        );
 
         Self {
             lambda_invoker: invoker,
@@ -737,13 +704,14 @@ impl Invoker for BasicInvoker {
         self.lambda_invoker.all_functions()
     }
 
-    fn invoke(&self,
-              function_id: FunctionId,
-              cache: &mut InvokeCache,
-              inputs: &mut InvokeArgs,
-              outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()>
-    {
-        self.lambda_invoker.invoke(function_id, cache, inputs, outputs)
+    fn invoke(
+        &self,
+        function_id: FunctionId,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        self.lambda_invoker
+            .invoke(function_id, cache, inputs, outputs)
     }
 }

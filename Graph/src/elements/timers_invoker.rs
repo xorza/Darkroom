@@ -26,15 +26,13 @@ impl Default for TimersInvoker {
                 behavior: FunctionBehavior::Active,
                 is_output: false,
                 category: "Timers".to_string(),
-                inputs: vec![
-                    InputInfo {
-                        name: "frequency".to_string(),
-                        is_required: true,
-                        data_type: DataType::Float,
-                        default_value: Some(StaticValue::Float(30.0)),
-                        variants: None,
-                    }
-                ],
+                inputs: vec![InputInfo {
+                    name: "frequency".to_string(),
+                    is_required: true,
+                    data_type: DataType::Float,
+                    default_value: Some(StaticValue::Float(30.0)),
+                    variants: None,
+                }],
                 outputs: vec![
                     OutputInfo {
                         name: "delta".to_string(),
@@ -45,11 +43,7 @@ impl Default for TimersInvoker {
                         data_type: DataType::Int,
                     },
                 ],
-                events: vec![
-                    "always".to_string(),
-                    "once".to_string(),
-                    "fps".to_string(),
-                ],
+                events: vec!["always".to_string(), "once".to_string(), "fps".to_string()],
             },
             move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();
@@ -97,6 +91,7 @@ impl Invoker for TimersInvoker {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        self.lambda_invoker.invoke(function_id, cache, inputs, outputs)
+        self.lambda_invoker
+            .invoke(function_id, cache, inputs, outputs)
     }
 }

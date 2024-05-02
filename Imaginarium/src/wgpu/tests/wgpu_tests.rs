@@ -14,33 +14,18 @@ fn it_works2() {
     let img_desc = img1.desc.clone();
 
     let mut transform = Transform2D::default();
-    transform
-        .aspect(1, 1)
-        .center()
-        .rotate(-1.0)
-        .uncenter();
+    transform.aspect(1, 1).center().rotate(-1.0).uncenter();
 
-    let tex1 = TextureWithTransform::from_texture(
-        context.create_texture(img_desc.clone()),
-    );
-    let tex2 = TextureWithTransform::new(
-        context.create_texture(img_desc.clone()),
-        transform,
-    );
-    let tex3 = TextureWithTransform::from_texture(
-        context.create_texture(img1.desc.clone()),
-    );
+    let tex1 = TextureWithTransform::from_texture(context.create_texture(img_desc.clone()));
+    let tex2 = TextureWithTransform::new(context.create_texture(img_desc.clone()), transform);
+    let tex3 = TextureWithTransform::from_texture(context.create_texture(img1.desc.clone()));
 
+    let shader = context.create_shader(include_str!("blend_frag.wgsl"), 2, 0);
 
-    let shader = context.create_shader(
-        include_str!("blend_frag.wgsl"),
-        2,
-        0,
-    );
-
-    context.perform(&[
-        Action::ImgToTex(vec![(&img1, &tex1.texture), (&img2, &tex2.texture)])
-    ]);
+    context.perform(&[Action::ImgToTex(vec![
+        (&img1, &tex1.texture),
+        (&img2, &tex2.texture),
+    ])]);
 
     drop(img1);
     drop(img2);
@@ -67,12 +52,10 @@ fn it_works2() {
     let mut img3 = Image::new_empty(img_desc.clone()).unwrap();
     let mut img4 = Image::new_empty(img_desc.clone()).unwrap();
 
-    context.perform(&[
-        Action::TexToImg(vec![
-            (&tex1.texture, RefCell::new(&mut img3)),
-            (&tex3.texture, RefCell::new(&mut img4)),
-        ]),
-    ]);
+    context.perform(&[Action::TexToImg(vec![
+        (&tex1.texture, RefCell::new(&mut img3)),
+        (&tex3.texture, RefCell::new(&mut img4)),
+    ])]);
 
     context.sync();
 

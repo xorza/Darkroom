@@ -20,7 +20,9 @@ fn test_worker() {
                 Box::<TimersInvoker>::default(),
             ]
         },
-        move || { tx.send(()).unwrap(); },
+        move || {
+            tx.send(()).unwrap();
+        },
     );
 
     let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();

@@ -11,7 +11,6 @@ pub struct OutputInfo {
     pub data_type: DataType,
 }
 
-
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct InputInfo {
     pub name: String,
@@ -40,7 +39,6 @@ pub struct Function {
     pub events: Vec<String>,
 }
 
-
 impl Function {
     pub fn new(func_id: FunctionId) -> Function {
         Function {
@@ -50,8 +48,6 @@ impl Function {
     }
 }
 
-
 fn skip_serializing_if_none_or_empty(opt: &Option<Vec<(StaticValue, String)>>) -> bool {
     opt.as_ref().map_or(true, |v| v.is_empty())
 }
-

@@ -40,7 +40,6 @@ pub struct SubGraph {
     pub outputs: Vec<SubOutput>,
 }
 
-
 impl SubGraph {
     pub fn new() -> SubGraph {
         SubGraph {
@@ -61,7 +60,8 @@ impl Graph {
         match self
             .subgraphs_mut()
             .iter()
-            .position(|sg| sg.id() == subgraph.id()) {
+            .position(|sg| sg.id() == subgraph.id())
+        {
             Some(index) => self.subgraphs_mut()[index] = subgraph.clone(),
             None => self.subgraphs_mut().push(subgraph.clone()),
         }
@@ -69,8 +69,7 @@ impl Graph {
     pub fn remove_subgraph_by_id(&mut self, id: SubGraphId) {
         assert!(!id.is_nil());
 
-        self.subgraphs_mut()
-            .retain(|subgraph| subgraph.id() != id);
+        self.subgraphs_mut().retain(|subgraph| subgraph.id() != id);
 
         self.nodes()
             .iter()
@@ -92,8 +91,6 @@ impl Graph {
     }
     pub fn subgraph_by_id(&self, id: SubGraphId) -> Option<&SubGraph> {
         assert!(!id.is_nil());
-        self.subgraphs()
-            .iter()
-            .find(|subgraph| subgraph.id() == id)
+        self.subgraphs().iter().find(|subgraph| subgraph.id() == id)
     }
 }

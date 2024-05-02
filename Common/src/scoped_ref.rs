@@ -10,11 +10,9 @@ pub struct ScopeRefMut<'a, T: 'a> {
 }
 
 impl<'a, T> ScopeRef<'a, T> {
-    pub fn new<F>(
-        data: &'a T,
-        on_drop: F,
-    ) -> Self
-    where F: FnOnce(&T) + 'static
+    pub fn new<F>(data: &'a T, on_drop: F) -> Self
+    where
+        F: FnOnce(&T) + 'static,
     {
         Self {
             data,
@@ -31,19 +29,15 @@ impl<'a, T> Deref for ScopeRef<'a, T> {
 }
 impl<'a, T> Drop for ScopeRef<'a, T> {
     fn drop(&mut self) {
-        let on_drop = self.on_drop
-            .take()
-            .unwrap();
+        let on_drop = self.on_drop.take().unwrap();
         (on_drop)(self.data);
     }
 }
 
 impl<'a, T> ScopeRefMut<'a, T> {
-    pub fn new<F>(
-        data: &'a mut T,
-        on_drop: F,
-    ) -> Self
-    where F: FnOnce(&mut T) + 'static
+    pub fn new<F>(data: &'a mut T, on_drop: F) -> Self
+    where
+        F: FnOnce(&mut T) + 'static,
     {
         Self {
             data,
@@ -65,9 +59,7 @@ impl<'a, T> DerefMut for ScopeRefMut<'a, T> {
 }
 impl<'a, T> Drop for ScopeRefMut<'a, T> {
     fn drop(&mut self) {
-        let on_drop = self.on_drop
-            .take()
-            .unwrap();
+        let on_drop = self.on_drop.take().unwrap();
         (on_drop)(self.data);
     }
 }

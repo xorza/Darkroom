@@ -16,7 +16,6 @@ pub enum FunctionBehavior {
 
 id_type!(NodeId);
 
-
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Output {
     pub name: String,
@@ -82,7 +81,6 @@ pub struct Graph {
     subgraphs: Vec<SubGraph>,
 }
 
-
 impl Graph {
     pub fn nodes(&self) -> &[Node] {
         self.nodes.as_slice()
@@ -106,11 +104,15 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Output(output_binding) if output_binding.output_node_id == id => Some(input),
+                Binding::Output(output_binding) if output_binding.output_node_id == id => {
+                    Some(input)
+                }
                 _ => None,
             })
             .for_each(|input| {
-                input.binding = input.const_value.as_ref()
+                input.binding = input
+                    .const_value
+                    .as_ref()
                     .map_or(Binding::None, |_| Binding::Const);
             });
     }
@@ -125,16 +127,12 @@ impl Graph {
     pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
 
-        self.nodes
-            .iter()
-            .find(|node| node.self_id == id)
+        self.nodes.iter().find(|node| node.self_id == id)
     }
     pub fn node_by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
 
-        self.nodes
-            .iter_mut()
-            .find(|node| node.self_id == id)
+        self.nodes.iter_mut().find(|node| node.self_id == id)
     }
     pub fn nodes_by_subgraph_id(&self, subgraph_id: SubGraphId) -> Vec<&Node> {
         assert!(!subgraph_id.is_nil());
@@ -173,14 +171,17 @@ impl Graph {
 
             // validate node has a valid subgraph
             if let Some(subgraph_id) = node.subgraph_id {
-                self.subgraph_by_id(subgraph_id).ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
+                self.subgraph_by_id(subgraph_id)
+                    .ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
             }
 
             // validate node has valid bindings
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
                     if self.node_by_id(output_binding.output_node_id).is_none() {
-                        return Err(anyhow::Error::msg("Node input connected to a non-existent node"));
+                        return Err(anyhow::Error::msg(
+                            "Node input connected to a non-existent node",
+                        ));
                     }
                 }
             }
@@ -190,10 +191,15 @@ impl Graph {
             // validate all subgraph inputs are connected
             for subinput in subgraph.inputs.iter() {
                 for connection in subinput.connections.iter() {
-                    let node = self.node_by_id(connection.subnode_id)
-                        .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent node"))?;
+                    let node = self
+                        .node_by_id(connection.subnode_id)
+                        .ok_or(anyhow::Error::msg(
+                            "Subgraph input connected to a non-existent node",
+                        ))?;
                     if node.subgraph_id != Some(subgraph.id()) {
-                        return Err(anyhow::Error::msg("Subgraph input connected to an external node"));
+                        return Err(anyhow::Error::msg(
+                            "Subgraph input connected to an external node",
+                        ));
                     }
 
                     // let input = node.inputs.get(connection.subnode_input_index as usize)
@@ -205,10 +211,15 @@ impl Graph {
             }
 
             for suboutput in subgraph.outputs.iter() {
-                let node = self.node_by_id(suboutput.subnode_id)
-                    .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent node"))?;
+                let node = self
+                    .node_by_id(suboutput.subnode_id)
+                    .ok_or(anyhow::Error::msg(
+                        "Subgraph output connected to a non-existent node",
+                    ))?;
                 if node.subgraph_id != Some(subgraph.id()) {
-                    return Err(anyhow::Error::msg("Subgraph output connected to an external node"));
+                    return Err(anyhow::Error::msg(
+                        "Subgraph output connected to an external node",
+                    ));
                 }
 
                 // let output = node.outputs.get(suboutput.subnode_output_index as usize)
@@ -221,7 +232,6 @@ impl Graph {
 
         Ok(())
     }
-
 
     pub(crate) fn subgraphs(&self) -> &Vec<SubGraph> {
         &self.subgraphs
@@ -249,29 +259,38 @@ impl Node {
     }
 
     pub fn from_function(function: &Function) -> Node {
-        let inputs: Vec<Input> = function.inputs.iter().map(|func_input| {
-            Input {
+        let inputs: Vec<Input> = function
+            .inputs
+            .iter()
+            .map(|func_input| Input {
                 name: func_input.name.clone(),
                 data_type: func_input.data_type.clone(),
                 is_required: func_input.is_required,
-                binding: func_input.default_value.as_ref().map_or(Binding::None, |_| Binding::Const),
+                binding: func_input
+                    .default_value
+                    .as_ref()
+                    .map_or(Binding::None, |_| Binding::Const),
                 const_value: func_input.default_value.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let outputs: Vec<Output> = function.outputs.iter().map(|output| {
-            Output {
+        let outputs: Vec<Output> = function
+            .outputs
+            .iter()
+            .map(|output| Output {
                 name: output.name.clone(),
                 data_type: output.data_type.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
-        let events: Vec<Event> = function.events.iter().map(|event| {
-            Event {
+        let events: Vec<Event> = function
+            .events
+            .iter()
+            .map(|event| Event {
                 name: event.clone(),
                 subscribers: vec![],
-            }
-        }).collect();
+            })
+            .collect();
 
         Node {
             self_id: NodeId::unique(),
@@ -323,7 +342,7 @@ impl Binding {
     pub fn is_some(&self) -> bool {
         match self {
             Binding::None => false,
-            Binding::Const | Binding::Output(_) => true
+            Binding::Const | Binding::Output(_) => true,
         }
     }
 }

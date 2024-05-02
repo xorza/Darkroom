@@ -1,11 +1,15 @@
 use std::borrow::Cow;
 
 use egui_node_graph as eng;
+
 use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
 
 use crate::app::AppState;
-use crate::eng_integration::{build_node_from_func, combobox_inputs_from_function, EditorDataType, EditorGraph, EditorNode, EditorValue};
+use crate::eng_integration::{
+    build_node_from_func, combobox_inputs_from_function, EditorDataType, EditorGraph, EditorNode,
+    EditorValue,
+};
 
 pub(crate) struct NodeCategory(String);
 
@@ -17,16 +21,19 @@ pub(crate) struct FunctionTemplates {
     templates: Vec<FunctionTemplate>,
 }
 
-
 impl FunctionTemplates {
     fn function_by_id(&self, id: FunctionId) -> Option<&Function> {
-        self.templates.iter().find(|f| f.0.self_id == id).map(|f| &f.0)
+        self.templates
+            .iter()
+            .find(|f| f.0.self_id == id)
+            .map(|f| &f.0)
     }
 }
 
 impl From<Vec<Function>> for FunctionTemplates {
     fn from(functions: Vec<Function>) -> Self {
-        let templates = functions.iter()
+        let templates = functions
+            .iter()
             .map(|f| FunctionTemplate(f.clone()))
             .collect();
 
@@ -84,11 +91,7 @@ impl eng::NodeTemplateTrait for FunctionTemplate {
         node_id: eng::NodeId,
     ) {
         let function = &self.0;
-        build_node_from_func(
-            graph,
-            function,
-            node_id,
-        );
+        build_node_from_func(graph, function, node_id);
     }
 }
 
@@ -97,4 +100,3 @@ impl eng::CategoryTrait for NodeCategory {
         self.0.clone()
     }
 }
-

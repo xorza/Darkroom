@@ -47,7 +47,10 @@ impl WgpuContext {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             flags: Default::default(),
-            dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+            dx12_shader_compiler: wgpu::Dx12Compiler::Dxc {
+                dxil_path: None,
+                dxc_path: None,
+            },
             gles_minor_version: Default::default(),
         });
         let adapter = instance
@@ -118,15 +121,14 @@ impl WgpuContext {
                     fragment_push_constant,
                 } => {
                     let mut encoder_temp = self.encoder.borrow_mut();
-                    let encoder = encoder_temp
-                        .get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: None,
-                        }));
+                    let encoder = encoder_temp.get_or_insert_with(|| {
+                        self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
+                    });
 
-                    let mut push_constant = input_textures.iter()
-                        .flat_map(|t| {
-                            bytemuck::bytes_of(&t.transform).to_vec()
-                        })
+                    let mut push_constant = input_textures
+                        .iter()
+                        .flat_map(|t| bytemuck::bytes_of(&t.transform).to_vec())
                         .collect::<Vec<u8>>();
                     push_constant.extend_from_slice(fragment_push_constant);
 
@@ -162,10 +164,10 @@ impl WgpuContext {
 
                 Action::TexToImg(tex_img) => {
                     let mut encoder_temp = self.encoder.borrow_mut();
-                    let encoder = encoder_temp
-                        .get_or_insert_with(|| self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                            label: None,
-                        }));
+                    let encoder = encoder_temp.get_or_insert_with(|| {
+                        self.device
+                            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
+                    });
 
                     for (index_in_action, (texture, image)) in tex_img.iter().enumerate() {
                         let image = image.borrow();
@@ -257,7 +259,12 @@ impl WgpuContext {
         input_texture_count: u32,
         push_constant_size: u32,
     ) -> Shader {
-        Shader::new(&self.device, shader, input_texture_count, push_constant_size)
+        Shader::new(
+            &self.device,
+            shader,
+            input_texture_count,
+            push_constant_size,
+        )
     }
 
     pub(crate) fn create_texture(&self, image_desc: ImageDesc) -> Texture {
@@ -267,11 +274,10 @@ impl WgpuContext {
             depth_or_array_layers: 1,
         };
 
-        let usage =
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC;
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC;
 
         let texture = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -316,14 +322,12 @@ impl WgpuContext {
             binding: 0,
             resource: wgpu::BindingResource::Sampler(&self.default_sampler),
         });
-        input_textures.iter()
-            .enumerate()
-            .for_each(|(index, tex)| {
-                bind_entries.push(wgpu::BindGroupEntry {
-                    binding: index as u32 + 1,
-                    resource: wgpu::BindingResource::TextureView(&tex.texture.view),
-                });
+        input_textures.iter().enumerate().for_each(|(index, tex)| {
+            bind_entries.push(wgpu::BindGroupEntry {
+                binding: index as u32 + 1,
+                resource: wgpu::BindingResource::TextureView(&tex.texture.view),
             });
+        });
 
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &shader.bind_group_layout,
@@ -338,33 +342,26 @@ impl WgpuContext {
         );
 
         {
-            let mut render_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    color_attachments: &[
-                        Some(wgpu::RenderPassColorAttachment {
-                            view: &output_texture.view,
-                            resolve_target: None,
-                            ops: wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                                store: wgpu::StoreOp::Store,
-                            },
-                        }),
-                    ],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    label: None,
-                    occlusion_query_set: None,
-                });
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &output_texture.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                label: None,
+                occlusion_query_set: None,
+            });
 
             render_pass.push_debug_group("Prepare data for draw.");
 
             render_pass.set_pipeline(&pipeline);
             render_pass.set_bind_group(0, &bind_group, &[]);
-            render_pass.set_push_constants(
-                wgpu::ShaderStages::VERTEX,
-                0,
-                push_constant,
-            );
+            render_pass.set_push_constants(wgpu::ShaderStages::VERTEX, 0, push_constant);
 
             render_pass.pop_debug_group();
 
@@ -382,7 +379,6 @@ impl Drop for WgpuContext {
         }
     }
 }
-
 
 pub(crate) struct VertexBuffer {
     pub(crate) buffer: wgpu::Buffer,
@@ -454,47 +450,44 @@ impl Shader {
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
             count: None,
         });
-        wgpu_bind_group_layout_entries.extend(
-            (0..input_texture_count as usize)
-                .map(|index| {
-                    wgpu::BindGroupLayoutEntry {
-                        binding: index as u32 + 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            multisampled: false,
-                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                        },
-                        count: None,
-                    }
-                })
-        );
+        wgpu_bind_group_layout_entries.extend((0..input_texture_count as usize).map(|index| {
+            wgpu::BindGroupLayoutEntry {
+                binding: index as u32 + 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                },
+                count: None,
+            }
+        }));
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &wgpu_bind_group_layout_entries,
-                label: None,
-            });
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &wgpu_bind_group_layout_entries,
+            label: None,
+        });
 
-        let vertex_push_constant_size = input_texture_count * std::mem::size_of::<Transform2D>() as u32;
+        let vertex_push_constant_size =
+            input_texture_count * std::mem::size_of::<Transform2D>() as u32;
 
-        let pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                bind_group_layouts: &[&bind_group_layout],
-                push_constant_ranges: &[
-                    wgpu::PushConstantRange {
-                        stages: wgpu::ShaderStages::VERTEX,
-                        range: 0..vertex_push_constant_size,
-                    },
-                    wgpu::PushConstantRange {
-                        stages: wgpu::ShaderStages::FRAGMENT,
-                        range: vertex_push_constant_size..fragment_push_constant_size + vertex_push_constant_size,
-                    }],
-                label: None,
-            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[
+                wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::VERTEX,
+                    range: 0..vertex_push_constant_size,
+                },
+                wgpu::PushConstantRange {
+                    stages: wgpu::ShaderStages::FRAGMENT,
+                    range: vertex_push_constant_size
+                        ..fragment_push_constant_size + vertex_push_constant_size,
+                },
+            ],
+            label: None,
+        });
 
-        let vertex_layout =
-            vec![wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2];
+        let vertex_layout = vec![wgpu::VertexFormat::Float32x2, wgpu::VertexFormat::Float32x2];
         let mut vertex_stride: u64 = 0;
         let mut vertex_attributes: Vec<wgpu::VertexAttribute> = Vec::new();
         for (index, entry) in vertex_layout.iter().enumerate() {
@@ -505,7 +498,6 @@ impl Shader {
             });
             vertex_stride += entry.size();
         }
-
 
         Shader {
             module,
@@ -531,37 +523,39 @@ impl Shader {
         self.pipeline_cache
             .borrow_mut()
             .entry((shader_entry_name.to_string(), *color_format))
-            .or_insert_with(|| Rc::from(
-                device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    layout: Some(&self.pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: vertex_shader,
-                        entry_point: "vs_main",
-                        buffers: &[wgpu::VertexBufferLayout {
-                            array_stride: self.vertex_stride,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: self.vertex_attributes.as_slice(),
-                        }],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &self.module,
-                        entry_point: shader_entry_name,
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::from(color_format),
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
+            .or_insert_with(|| {
+                Rc::from(
+                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                        layout: Some(&self.pipeline_layout),
+                        vertex: wgpu::VertexState {
+                            module: vertex_shader,
+                            entry_point: "vs_main",
+                            buffers: &[wgpu::VertexBufferLayout {
+                                array_stride: self.vertex_stride,
+                                step_mode: wgpu::VertexStepMode::Vertex,
+                                attributes: self.vertex_attributes.as_slice(),
+                            }],
+                        },
+                        fragment: Some(wgpu::FragmentState {
+                            module: &self.module,
+                            entry_point: shader_entry_name,
+                            targets: &[Some(wgpu::ColorTargetState {
+                                format: wgpu::TextureFormat::from(color_format),
+                                blend: None,
+                                write_mask: wgpu::ColorWrites::ALL,
+                            })],
+                        }),
+                        primitive: wgpu::PrimitiveState {
+                            topology: wgpu::PrimitiveTopology::TriangleStrip,
+                            ..Default::default()
+                        },
+                        depth_stencil: None,
+                        multisample: wgpu::MultisampleState::default(),
+                        multiview: None,
+                        label: None,
                     }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleStrip,
-                        ..Default::default()
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
-                    label: None,
-                })
-            ))
+                )
+            })
             .clone()
     }
 }
@@ -593,9 +587,6 @@ impl TextureWithTransform {
         }
     }
     pub(crate) fn new(texture: Texture, transform: Transform2D) -> Self {
-        Self {
-            texture,
-            transform,
-        }
+        Self { texture, transform }
     }
 }

@@ -36,7 +36,6 @@ pub struct ColorFormat {
     pub channel_type: ChannelType,
 }
 
-
 impl ChannelCount {
     pub fn channel_count(&self) -> u32 {
         *self as u32
@@ -53,11 +52,11 @@ impl ChannelSize {
     pub(crate) fn from_bit_count(bit_count: u32) -> ChannelSize {
         match bit_count {
             // @formatter:off
-            8  => ChannelSize::_8bit ,
+            8 => ChannelSize::_8bit,
             16 => ChannelSize::_16bit,
             32 => ChannelSize::_32bit,
             62 => ChannelSize::_64bit,
-            _  => panic!("Invalid channel size: {:?}", bit_count),
+            _ => panic!("Invalid channel size: {:?}", bit_count),
             // @formatter:on
         }
     }
@@ -70,9 +69,13 @@ impl ColorFormat {
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.channel_type == ChannelType::Float {
             match self.channel_size {
-                ChannelSize::_8bit | ChannelSize::_16bit =>
-                    return Err(anyhow::anyhow!("Unsupported channel size for float: {:?}", self.channel_size)),
-                _ => {},
+                ChannelSize::_8bit | ChannelSize::_16bit => {
+                    return Err(anyhow::anyhow!(
+                        "Unsupported channel size for float: {:?}",
+                        self.channel_size
+                    ))
+                }
+                _ => {}
             }
         }
 
@@ -302,6 +305,9 @@ impl ColorFormat {
 
 impl ToString for ColorFormat {
     fn to_string(&self) -> String {
-        format!("{:?}_{:?}{:?}", self.channel_count, self.channel_type, self.channel_size)
+        format!(
+            "{:?}_{:?}{:?}",
+            self.channel_count, self.channel_type, self.channel_size
+        )
     }
 }

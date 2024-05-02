@@ -33,7 +33,6 @@ pub struct RuntimeGraph {
     pub nodes: Vec<RuntimeNode>,
 }
 
-
 impl RuntimeNode {
     pub fn node_id(&self) -> NodeId {
         self.node_id
@@ -54,33 +53,26 @@ impl RuntimeGraph {
     }
 
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
-        self.nodes.iter()
-            .find(|&p_node| p_node.node_id == node_id)
+        self.nodes.iter().find(|&p_node| p_node.node_id == node_id)
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
-        self.nodes.iter_mut()
+        self.nodes
+            .iter_mut()
             .find(|p_node| p_node.node_id == node_id)
     }
 
-    pub fn next(
-        &mut self,
-        graph: &Graph,
-    ) {
+    pub fn next(&mut self, graph: &Graph) {
         Self::backward_pass(graph, &mut self.nodes);
     }
 }
 
 impl From<&Graph> for RuntimeGraph {
     fn from(graph: &Graph) -> Self {
-        let runtime_graph = Self::run(
-            graph,
-            &mut RuntimeGraph::default(),
-        );
+        let runtime_graph = Self::run(graph, &mut RuntimeGraph::default());
 
         runtime_graph
     }
 }
-
 
 impl RuntimeGraph {
     fn run(graph: &Graph, previous_runtime: &mut RuntimeGraph) -> RuntimeGraph {
@@ -89,16 +81,10 @@ impl RuntimeGraph {
         let mut r_nodes = Self::gather_nodes(graph, previous_runtime);
         Self::forward_pass(graph, &mut r_nodes);
 
-        RuntimeGraph {
-            nodes: r_nodes,
-        }
+        RuntimeGraph { nodes: r_nodes }
     }
 
-    fn gather_nodes(
-        graph: &Graph,
-        previous_runtime: &mut RuntimeGraph,
-    ) -> Vec<RuntimeNode>
-    {
+    fn gather_nodes(graph: &Graph, previous_runtime: &mut RuntimeGraph) -> Vec<RuntimeNode> {
         let mut active_node_ids: Vec<NodeId> = graph
             .nodes()
             .iter()
@@ -119,12 +105,11 @@ impl RuntimeGraph {
             let node_id = active_node_ids[index];
             let node = graph.node_by_id(node_id).unwrap();
 
-            node.inputs.iter()
-                .for_each(|input| {
-                    if let Binding::Output(output_binding) = &input.binding {
-                        active_node_ids.push(output_binding.output_node_id);
-                    }
-                });
+            node.inputs.iter().for_each(|input| {
+                if let Binding::Output(output_binding) = &input.binding {
+                    active_node_ids.push(output_binding.output_node_id);
+                }
+            });
         }
 
         active_node_ids.reverse();
@@ -133,27 +118,24 @@ impl RuntimeGraph {
             active_node_ids.retain(|&x| set.insert(x));
         }
 
-        let r_nodes: Vec<RuntimeNode> = active_node_ids.iter()
+        let r_nodes: Vec<RuntimeNode> = active_node_ids
+            .iter()
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
 
                 let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
-                let (invoke_context, output_values) =
-                    if let Some(prev_r_node) = prev_r_node {
-                        assert_eq!(prev_r_node.output_binding_count.len(), node.outputs.len());
-                        debug_assert_eq!(prev_r_node.name, node.name);
+                let (invoke_context, output_values) = if let Some(prev_r_node) = prev_r_node {
+                    assert_eq!(prev_r_node.output_binding_count.len(), node.outputs.len());
+                    debug_assert_eq!(prev_r_node.name, node.name);
 
-                        (
-                            take(&mut prev_r_node.cache),
-                            prev_r_node.output_values.take()
-                        )
-                    } else {
-                        (
-                            InvokeCache::default(),
-                            None
-                        )
-                    };
+                    (
+                        take(&mut prev_r_node.cache),
+                        prev_r_node.output_values.take(),
+                    )
+                } else {
+                    (InvokeCache::default(), None)
+                };
 
                 let r_node = RuntimeNode {
                     node_id,
@@ -180,10 +162,7 @@ impl RuntimeGraph {
 
     // in forward pass, mark active nodes and nodes with missing inputs
     // if node is passive, mark it for caching outputs
-    fn forward_pass(
-        graph: &Graph,
-        r_nodes: &mut [RuntimeNode],
-    ) {
+    fn forward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
         for index in 0..r_nodes.len() {
             let mut r_node = take(&mut r_nodes[index]);
             let node = graph.node_by_id(r_node.node_id).unwrap();
@@ -195,7 +174,8 @@ impl RuntimeGraph {
                     }
                     Binding::Const => {}
                     Binding::Output(output_binding) => {
-                        let output_r_node = r_nodes[0..index].iter()
+                        let output_r_node = r_nodes[0..index]
+                            .iter()
                             .find(|&p_node| p_node.node_id == output_binding.output_node_id)
                             .expect("Node not found among already processed ones");
                         if output_r_node.behavior == FunctionBehavior::Active {
@@ -213,18 +193,15 @@ impl RuntimeGraph {
         }
     }
     // in backward pass, mark active nodes without cached outputs for execution
-    fn backward_pass(
-        graph: &Graph,
-        r_nodes: &mut [RuntimeNode],
-    ) {
-        r_nodes.iter_mut()
-            .for_each(|r_node| {
-                r_node.should_invoke = false;
-                r_node.output_binding_count.fill(0);
-                r_node.total_binding_count = 0;
-            });
+    fn backward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
+        r_nodes.iter_mut().for_each(|r_node| {
+            r_node.should_invoke = false;
+            r_node.output_binding_count.fill(0);
+            r_node.total_binding_count = 0;
+        });
 
-        let mut active_node_ids: Vec<NodeId> = r_nodes.iter()
+        let mut active_node_ids: Vec<NodeId> = r_nodes
+            .iter()
             .filter_map(|r_node| {
                 if r_node.is_output {
                     Some(r_node.node_id)
@@ -241,28 +218,27 @@ impl RuntimeGraph {
 
             let node_id = active_node_ids[index];
             let node = graph.node_by_id(node_id).unwrap();
-            let r_node =
-                r_nodes
-                    .iter_mut()
-                    .find(|r_node| r_node.node_id == node_id).unwrap();
+            let r_node = r_nodes
+                .iter_mut()
+                .find(|r_node| r_node.node_id == node_id)
+                .unwrap();
 
             let is_active = Self::is_active(r_node);
             r_node.should_invoke = is_active && !r_node.has_missing_inputs;
 
-            node.inputs.iter()
-                .for_each(|input| {
-                    if let Binding::Output(output_binding) = &input.binding {
-                        if is_active {
-                            active_node_ids.push(output_binding.output_node_id);
-                        }
-                        let output_r_node =
-                            r_nodes
-                                .iter_mut()
-                                .find(|r_node| r_node.node_id == output_binding.output_node_id).unwrap();
-                        output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
-                        output_r_node.total_binding_count += 1;
+            node.inputs.iter().for_each(|input| {
+                if let Binding::Output(output_binding) = &input.binding {
+                    if is_active {
+                        active_node_ids.push(output_binding.output_node_id);
                     }
-                });
+                    let output_r_node = r_nodes
+                        .iter_mut()
+                        .find(|r_node| r_node.node_id == output_binding.output_node_id)
+                        .unwrap();
+                    output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
+                    output_r_node.total_binding_count += 1;
+                }
+            });
         }
     }
 

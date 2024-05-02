@@ -14,7 +14,6 @@ impl From<wgpu::TextureFormat> for ColorFormat {
     }
 }
 
-
 impl From<&ColorFormat> for wgpu::TextureFormat {
     fn from(value: &ColorFormat) -> Self {
         match *value {
@@ -28,5 +27,3 @@ impl From<&ColorFormat> for wgpu::TextureFormat {
         }
     }
 }
-
-

@@ -15,9 +15,10 @@ struct TestValues {
     result: i64,
 }
 
-
 fn create_compute<GetA, GetB, SetResult>(
-    get_a: GetA, get_b: GetB, result: SetResult,
+    get_a: GetA,
+    get_b: GetB,
+    result: SetResult,
 ) -> anyhow::Result<Compute>
 where
     SetResult: Fn(i64) + 'static,
@@ -46,7 +47,8 @@ where
         },
         move |_, inputs, _| {
             result(inputs[0].as_int());
-        });
+        },
+    );
     // val 1
     invoker.add_lambda(
         Function {
@@ -56,17 +58,16 @@ where
             is_output: false,
             category: "Debug".to_string(),
             inputs: vec![],
-            outputs: vec![
-                OutputInfo {
-                    name: "value".to_string(),
-                    data_type: DataType::Int,
-                }
-            ],
+            outputs: vec![OutputInfo {
+                name: "value".to_string(),
+                data_type: DataType::Int,
+            }],
             events: vec![],
         },
         move |_, _, outputs| {
             outputs[0] = DynamicValue::from(get_a() as f64).into();
-        });
+        },
+    );
     // val 2
     invoker.add_lambda(
         Function {
@@ -76,17 +77,16 @@ where
             is_output: false,
             category: "Debug".to_string(),
             inputs: vec![],
-            outputs: vec![
-                OutputInfo {
-                    name: "value".to_string(),
-                    data_type: DataType::Int,
-                }
-            ],
+            outputs: vec![OutputInfo {
+                name: "value".to_string(),
+                data_type: DataType::Int,
+            }],
             events: vec![],
         },
         move |_, _, outputs| {
             outputs[0] = DynamicValue::from(get_b()).into();
-        });
+        },
+    );
     // sum
     invoker.add_lambda(
         Function {
@@ -111,12 +111,10 @@ where
                     variants: None,
                 },
             ],
-            outputs: vec![
-                OutputInfo {
-                    name: "result".to_string(),
-                    data_type: DataType::Int,
-                }
-            ],
+            outputs: vec![OutputInfo {
+                name: "result".to_string(),
+                data_type: DataType::Int,
+            }],
             events: vec![],
         },
         |ctx, inputs, outputs| {
@@ -124,7 +122,8 @@ where
             let b: i64 = inputs[1].as_int();
             outputs[0] = DynamicValue::from(a + b).into();
             ctx.set(a + b);
-        });
+        },
+    );
     // mult
     invoker.add_lambda(
         Function {
@@ -149,12 +148,10 @@ where
                     variants: None,
                 },
             ],
-            outputs: vec![
-                OutputInfo {
-                    name: "result".to_string(),
-                    data_type: DataType::Int,
-                }
-            ],
+            outputs: vec![OutputInfo {
+                name: "result".to_string(),
+                data_type: DataType::Int,
+            }],
             events: vec![],
         },
         |ctx, inputs, outputs| {
@@ -162,11 +159,11 @@ where
             let b: i64 = inputs[1].as_int();
             outputs[0] = DynamicValue::from(a * b).into();
             ctx.set(a * b);
-        });
+        },
+    );
 
     Ok(invoker.into())
 }
-
 
 #[test]
 fn invoke_context_test() -> anyhow::Result<()> {
@@ -241,9 +238,7 @@ fn default_input_value() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
     {
-        let sum_inputs = &mut graph
-            .node_by_name_mut("sum").unwrap()
-            .inputs;
+        let sum_inputs = &mut graph.node_by_name_mut("sum").unwrap().inputs;
         sum_inputs[0].const_value = Some(StaticValue::from(29));
         sum_inputs[0].binding = Binding::Const;
         sum_inputs[1].const_value = Some(StaticValue::from(11));
@@ -251,9 +246,7 @@ fn default_input_value() -> anyhow::Result<()> {
     }
 
     {
-        let mult_inputs = &mut graph
-            .node_by_name_mut("mult").unwrap()
-            .inputs;
+        let mult_inputs = &mut graph.node_by_name_mut("mult").unwrap().inputs;
         mult_inputs[1].const_value = Some(StaticValue::from(9));
         mult_inputs[1].binding = Binding::Const;
     }
@@ -299,8 +292,7 @@ fn cached_value() -> anyhow::Result<()> {
     )?;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-    graph.node_by_name_mut("sum").unwrap()
-        .cache_outputs = false;
+    graph.node_by_name_mut("sum").unwrap().cache_outputs = false;
 
     let mut runtime_graph = RuntimeGraph::from(&graph);
     compute.run(&graph, &mut runtime_graph)?;
@@ -323,4 +315,3 @@ fn cached_value() -> anyhow::Result<()> {
 
     Ok(())
 }
-

@@ -2,9 +2,9 @@ use std::borrow::Cow;
 
 use eframe::egui;
 use eframe::egui::{Checkbox, DragValue, TextEdit, Widget};
-
 use egui_node_graph as eng;
 use egui_node_graph::{InputId, OutputId};
+
 use graph_lib::data::{DataType, StaticValue, TypeId};
 use graph_lib::function::{Function, FunctionId};
 use graph_lib::graph::NodeId;
@@ -53,7 +53,8 @@ pub struct EditorNode {
 pub struct EditorValue(pub(crate) StaticValue);
 
 pub(crate) type EditorGraph = eng::Graph<EditorNode, EditorDataType, EditorValue>;
-pub(crate) type EditorState = eng::GraphEditorState<EditorNode, EditorDataType, EditorValue, FunctionTemplate, AppState>;
+pub(crate) type EditorState =
+eng::GraphEditorState<EditorNode, EditorDataType, EditorValue, FunctionTemplate, AppState>;
 
 #[derive(Clone, Debug)]
 pub enum AppResponse {
@@ -64,9 +65,7 @@ pub enum AppResponse {
         input_index: u32,
         value: StaticValue,
     },
-
 }
-
 
 impl eng::UserResponseTrait for AppResponse {}
 
@@ -121,13 +120,11 @@ impl eng::WidgetValueTrait for EditorValue {
         if editor_value != self.0 {
             self.0 = editor_value.clone();
 
-            vec![
-                AppResponse::SetInputValue {
-                    node_id,
-                    input_index: param_index as u32,
-                    value: editor_value,
-                }
-            ]
+            vec![AppResponse::SetInputValue {
+                node_id,
+                input_index: param_index as u32,
+                value: editor_value,
+            }]
         } else {
             vec![]
         }
@@ -155,36 +152,32 @@ impl eng::NodeDataTrait for EditorNode {
 
         ui.horizontal(|ui| {
             {
-                let is_output_button =
-                    if self.is_output {
-                        egui::Button::new(
-                            egui::RichText::new("Active")
-                                .color(egui::Color32::BLACK)
-                        )
-                            .fill(egui::Color32::GOLD)
-                    } else {
-                        egui::Button::new(egui::RichText::new("Active"))
-                    }
-                        .min_size(egui::Vec2::new(50.0, 0.0));
+                let is_output_button = if self.is_output {
+                    egui::Button::new(egui::RichText::new("Active").color(egui::Color32::BLACK))
+                        .fill(egui::Color32::GOLD)
+                } else {
+                    egui::Button::new(egui::RichText::new("Active"))
+                }
+                    .min_size(egui::Vec2::new(50.0, 0.0));
                 if is_output_button.ui(ui).clicked() {
-                    responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeOutput(node_id)));
+                    responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeOutput(
+                        node_id,
+                    )));
                 }
             }
 
             if !self.is_output {
-                let cache_outputs_button =
-                    if self.cache_outputs {
-                        egui::Button::new(
-                            egui::RichText::new("Cache")
-                                .color(egui::Color32::BLACK)
-                        )
-                            .fill(egui::Color32::GOLD)
-                    } else {
-                        egui::Button::new(egui::RichText::new("Cache"))
-                    }
-                        .min_size(egui::Vec2::new(50.0, 0.0));
+                let cache_outputs_button = if self.cache_outputs {
+                    egui::Button::new(egui::RichText::new("Cache").color(egui::Color32::BLACK))
+                        .fill(egui::Color32::GOLD)
+                } else {
+                    egui::Button::new(egui::RichText::new("Cache"))
+                }
+                    .min_size(egui::Vec2::new(50.0, 0.0));
                 if cache_outputs_button.ui(ui).clicked() {
-                    responses.push(eng::NodeResponse::User(AppResponse::ToggleNodeCacheOutputs(node_id)));
+                    responses.push(eng::NodeResponse::User(
+                        AppResponse::ToggleNodeCacheOutputs(node_id),
+                    ));
                 }
             }
         });
@@ -205,23 +198,16 @@ impl eng::NodeDataTrait for EditorNode {
                     .width(100.0)
                     .show_ui(ui, |ui| {
                         for (value, name) in variants {
-                            ui.selectable_value(
-                                &mut current_value,
-                                value.clone(),
-                                name,
-                            );
+                            ui.selectable_value(&mut current_value, value.clone(), name);
                         }
-                    })
-                ;
+                    });
 
                 if current_value != combo_input.current_value {
-                    responses.push(eng::NodeResponse::User(
-                        AppResponse::SetInputValue {
-                            node_id,
-                            input_index: combo_input.input_index,
-                            value: current_value,
-                        }
-                    ));
+                    responses.push(eng::NodeResponse::User(AppResponse::SetInputValue {
+                        node_id,
+                        input_index: combo_input.input_index,
+                        value: current_value,
+                    }));
                 }
             }
         }
@@ -233,7 +219,7 @@ impl eng::NodeDataTrait for EditorNode {
 impl eng::DataTypeTrait<AppState> for EditorDataType {
     fn data_type_color(&self, _user_state: &mut AppState) -> egui::Color32 {
         match self {
-            | EditorDataType::Number => egui::Color32::from_rgb(38, 109, 211),
+            EditorDataType::Number => egui::Color32::from_rgb(38, 109, 211),
             EditorDataType::Bool => egui::Color32::from_rgb(211, 38, 109),
             EditorDataType::String => egui::Color32::from_rgb(109, 211, 38),
             EditorDataType::Event => egui::Color32::from_rgb(255, 109, 109),
@@ -283,7 +269,6 @@ impl ToString for EditorDataType {
     }
 }
 
-
 pub(crate) fn build_node_from_func(
     editor_graph: &mut EditorGraph,
     function: &Function,
@@ -298,7 +283,8 @@ pub(crate) fn build_node_from_func(
         true,
     );
 
-    let inputs = function.inputs
+    let inputs = function
+        .inputs
         .iter()
         .filter(|input| input.variants.is_none())
         .map(|input| {
@@ -309,14 +295,11 @@ pub(crate) fn build_node_from_func(
                 eng::InputParamKind::ConnectionOrConstant
             };
 
-            let value = input.default_value
+            let value = input
+                .default_value
                 .as_ref()
-                .map(|value| {
-                    value.clone()
-                })
-                .unwrap_or_else(|| {
-                    StaticValue::from(&input.data_type)
-                });
+                .map(|value| value.clone())
+                .unwrap_or_else(|| StaticValue::from(&input.data_type));
 
             let input_id = editor_graph.add_input_param(
                 eng_node_id,
@@ -331,20 +314,19 @@ pub(crate) fn build_node_from_func(
         })
         .collect::<Vec<InputId>>();
 
-    let events = function.events
+    let events = function
+        .events
         .iter()
         .map(|event| {
-            let event_id = editor_graph.add_output_param(
-                eng_node_id,
-                event.clone(),
-                EditorDataType::Event,
-            );
+            let event_id =
+                editor_graph.add_output_param(eng_node_id, event.clone(), EditorDataType::Event);
 
             event_id
         })
         .collect::<Vec<OutputId>>();
 
-    let outputs = function.outputs
+    let outputs = function
+        .outputs
         .iter()
         .map(|output| {
             let output_id = editor_graph.add_output_param(
@@ -357,7 +339,6 @@ pub(crate) fn build_node_from_func(
         })
         .collect::<Vec<OutputId>>();
 
-
     let editor_node = &mut editor_graph.nodes[eng_node_id].user_data;
     editor_node.trigger_id = trigger_id;
     editor_node.inputs = inputs;
@@ -367,44 +348,33 @@ pub(crate) fn build_node_from_func(
 }
 
 pub(crate) fn register_node(editor_node: &EditorNode, arg_mapping: &mut ArgMapping) {
-    arg_mapping.add_trigger(
-        editor_node.trigger_id,
-        editor_node.node_id,
-    );
-    editor_node.inputs
+    arg_mapping.add_trigger(editor_node.trigger_id, editor_node.node_id);
+    editor_node
+        .inputs
         .iter()
         .enumerate()
         .for_each(|(index, input_id)| {
-            arg_mapping.add_input(
-                *input_id,
-                editor_node.node_id,
-                index as u32,
-            );
+            arg_mapping.add_input(*input_id, editor_node.node_id, index as u32);
         });
-    editor_node.events
+    editor_node
+        .events
         .iter()
         .enumerate()
         .for_each(|(index, event_id)| {
-            arg_mapping.add_event(
-                *event_id,
-                editor_node.node_id,
-                index as u32,
-            );
+            arg_mapping.add_event(*event_id, editor_node.node_id, index as u32);
         });
-    editor_node.outputs
+    editor_node
+        .outputs
         .iter()
         .enumerate()
         .for_each(|(index, output_id)| {
-            arg_mapping.add_output(
-                *output_id,
-                editor_node.node_id,
-                index as u32,
-            );
+            arg_mapping.add_output(*output_id, editor_node.node_id, index as u32);
         });
 }
 
 pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<ComboboxInput> {
-    let combobox_inputs = function.inputs
+    let combobox_inputs = function
+        .inputs
         .iter()
         .enumerate()
         .filter_map(|(index, input)| {
@@ -413,13 +383,10 @@ pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<Combobox
                     .iter()
                     .map(|variant| (variant.0.clone(), variant.1.clone()))
                     .collect::<Vec<(StaticValue, String)>>();
-                let current_value = input.default_value.as_ref()
-                    .unwrap_or_else(|| {
-                        &variants
-                            .first()
-                            .expect("No variants")
-                            .0
-                    })
+                let current_value = input
+                    .default_value
+                    .as_ref()
+                    .unwrap_or_else(|| &variants.first().expect("No variants").0)
                     .clone();
 
                 Some(ComboboxInput {
@@ -436,4 +403,3 @@ pub(crate) fn combobox_inputs_from_function(function: &Function) -> Vec<Combobox
 
     combobox_inputs
 }
-

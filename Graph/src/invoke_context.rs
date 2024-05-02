@@ -15,7 +15,9 @@ pub struct InvokeCache {
 }
 
 pub trait Invoker {
-    fn all_functions(&self) -> Vec<Function> { vec![] }
+    fn all_functions(&self) -> Vec<Function> {
+        vec![]
+    }
     fn invoke(
         &self,
         function_id: FunctionId,
@@ -37,12 +39,9 @@ pub struct LambdaInvoker {
     lambdas: HashMap<FunctionId, Box<Lambda>>,
 }
 
-
 impl InvokeCache {
     pub(crate) fn default() -> InvokeCache {
-        InvokeCache {
-            boxed: None,
-        }
+        InvokeCache { boxed: None }
     }
 
     pub fn is_none(&self) -> bool {
@@ -50,7 +49,8 @@ impl InvokeCache {
     }
 
     pub fn is_some<T>(&self) -> bool
-    where T: Any
+    where
+        T: Any,
     {
         match &self.boxed {
             None => false,
@@ -59,36 +59,38 @@ impl InvokeCache {
     }
 
     pub fn get<T>(&self) -> Option<&T>
-    where T: Any
+    where
+        T: Any,
     {
-        self.boxed.as_ref()
+        self.boxed
+            .as_ref()
             .and_then(|boxed| boxed.downcast_ref::<T>())
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
-    where T: Any
+    where
+        T: Any,
     {
-        self.boxed.as_mut()
+        self.boxed
+            .as_mut()
             .and_then(|boxed| boxed.downcast_mut::<T>())
     }
 
     pub fn set<T>(&mut self, value: T)
-    where T: Any
+    where
+        T: Any,
     {
         self.boxed = Some(Box::new(value));
     }
 
     pub fn get_or_default<T>(&mut self) -> &mut T
-    where T: Any + Default
+    where
+        T: Any + Default,
     {
         let is_some = self.is_some::<T>();
 
         if is_some {
-            self.boxed
-                .as_mut()
-                .unwrap()
-                .downcast_mut::<T>()
-                .unwrap()
+            self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
         } else {
             self.boxed
                 .insert(Box::<T>::default())
@@ -100,10 +102,14 @@ impl InvokeCache {
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Function, lambda: F)
-    where F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + 'static
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + 'static,
     {
         if self.lambdas.contains_key(&function.self_id) {
-            panic!("Function {}:{} with the same id already exists.", function.self_id, function.name);
+            panic!(
+                "Function {}:{} with the same id already exists.",
+                function.self_id, function.name
+            );
         }
 
         self.lambdas.insert(function.self_id, Box::new(lambda));
@@ -115,17 +121,11 @@ impl LambdaInvoker {
 impl UberInvoker {
     pub fn new(invokers: Vec<Box<dyn Invoker>>) -> Self {
         let mut function_id_to_invoker_index = HashMap::new();
-        invokers
-            .iter()
-            .enumerate()
-            .for_each(|(index, invoker)| {
-                invoker
-                    .all_functions()
-                    .iter()
-                    .for_each(|function| {
-                        function_id_to_invoker_index.insert(function.self_id, index);
-                    });
+        invokers.iter().enumerate().for_each(|(index, invoker)| {
+            invoker.all_functions().iter().for_each(|function| {
+                function_id_to_invoker_index.insert(function.self_id, index);
             });
+        });
 
         Self {
             invokers,
@@ -147,9 +147,9 @@ impl Invoker for UberInvoker {
         cache: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()>
-    {
-        let &invoker_index = self.function_id_to_invoker_index
+    ) -> anyhow::Result<()> {
+        let &invoker_index = self
+            .function_id_to_invoker_index
             .get(&function_id)
             .expect("Missing invoker for function_id");
 
@@ -162,13 +162,13 @@ impl Invoker for LambdaInvoker {
     fn all_functions(&self) -> Vec<Function> {
         self.all_functions.clone()
     }
-    fn invoke(&self,
-              function_id: FunctionId,
-              cache: &mut InvokeCache,
-              inputs: &mut InvokeArgs,
-              outputs: &mut InvokeArgs)
-        -> anyhow::Result<()>
-    {
+    fn invoke(
+        &self,
+        function_id: FunctionId,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
         let invokable = self.lambdas.get(&function_id).unwrap();
         (invokable)(cache, inputs, outputs);
 
@@ -180,8 +180,10 @@ impl Debug for UberInvoker {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UberInvoker")
             .field("invokers", &self.invokers.len())
-            .field("function_id_to_invoker_index", &self.function_id_to_invoker_index)
+            .field(
+                "function_id_to_invoker_index",
+                &self.function_id_to_invoker_index,
+            )
             .finish()
     }
 }
-

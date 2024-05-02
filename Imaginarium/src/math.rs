@@ -104,15 +104,12 @@ impl<'a, 'b> Mul<&'b Transform2D> for &'a Transform2D {
 
 impl PartialEq for Transform2D {
     fn eq(&self, other: &Self) -> bool {
-        self.r0 == other.r0
-            && self.r1 == other.r1
-            && self.r2 == other.r2
+        self.r0 == other.r0 && self.r1 == other.r1 && self.r2 == other.r2
         // Pads are not compared, as they hold no meaningful information
     }
 }
 
 impl Eq for Transform2D {}
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -123,9 +120,9 @@ impl Vert2D {
         [
             // @formatter:off
             Vert2D([-1.0, -1.0], [0.0, 0.0]),
-            Vert2D([ 1.0, -1.0], [1.0, 0.0]),
-            Vert2D([-1.0,  1.0], [0.0, 1.0]),
-            Vert2D([ 1.0,  1.0], [1.0, 1.0]),
+            Vert2D([1.0, -1.0], [1.0, 0.0]),
+            Vert2D([-1.0, 1.0], [0.0, 1.0]),
+            Vert2D([1.0, 1.0], [1.0, 1.0]),
             // @formatter:on
         ]
     }

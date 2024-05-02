@@ -34,7 +34,6 @@ pub struct EventTrigger {
     node_id: NodeId,
 }
 
-
 impl NodeEventManager {
     pub fn new(
         frame_tx: tokio::sync::broadcast::Sender<()>,
@@ -48,9 +47,7 @@ impl NodeEventManager {
     }
 
     pub fn stop_node_events(&mut self, node_id: NodeId) {
-        let mut node_event = self.node_events
-            .remove(&node_id)
-            .unwrap();
+        let mut node_event = self.node_events.remove(&node_id).unwrap();
 
         Self::stop(&mut node_event);
     }
@@ -62,9 +59,7 @@ impl NodeEventManager {
             *trigger = None;
         }
 
-        node_event.join_handles
-            .iter()
-            .for_each(JoinHandle::abort);
+        node_event.join_handles.iter().for_each(JoinHandle::abort);
         node_event.join_handles.clear();
     }
 
@@ -73,11 +68,12 @@ impl NodeEventManager {
         runtime: &Runtime,
         event_id: EventId,
         new_future: F,
-    )
-    where F: Fn() -> Fut + Send + Copy + 'static,
-          Fut: Future<Output=()> + Send,
+    ) where
+        F: Fn() -> Fut + Send + Copy + 'static,
+        Fut: Future<Output=()> + Send,
     {
-        let node_event = self.node_events
+        let node_event = self
+            .node_events
             .entry(event_id.node_id)
             .or_insert_with(|| NodeEvent {
                 node_id: event_id.node_id,
@@ -96,9 +92,7 @@ impl NodeEventManager {
                 future.await;
 
                 let result = {
-                    let trigger = trigger
-                        .lock()
-                        .await;
+                    let trigger = trigger.lock().await;
                     if trigger.is_none() {
                         info!("Event loop stopped for event {:?}", event_index);
                         break;
@@ -131,9 +125,7 @@ impl NodeEventManager {
 
 impl Drop for NodeEventManager {
     fn drop(&mut self) {
-        self.node_events
-            .values_mut()
-            .for_each(Self::stop);
+        self.node_events.values_mut().for_each(Self::stop);
         self.node_events.clear();
     }
 }
@@ -174,21 +166,15 @@ mod tests {
             },
         );
 
-        let event = event_rx
-            .blocking_recv()
-            .unwrap();
+        let event = event_rx.blocking_recv().unwrap();
         assert_eq!(event.event_index, 0);
 
-        let event = event_rx
-            .blocking_recv()
-            .unwrap();
+        let event = event_rx.blocking_recv().unwrap();
         assert_eq!(event.event_index, 1);
 
         frame_tx.send(()).unwrap();
 
-        let event = event_rx
-            .blocking_recv()
-            .unwrap();
+        let event = event_rx.blocking_recv().unwrap();
         assert_eq!(event.event_index, 0);
 
         event_owner.stop_node_events(node_id);
@@ -204,9 +190,7 @@ mod tests {
             },
         );
 
-        let event = event_rx
-            .blocking_recv()
-            .unwrap();
+        let event = event_rx.blocking_recv().unwrap();
         assert_eq!(event.event_index, 2);
     }
 }

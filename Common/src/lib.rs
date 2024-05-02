@@ -2,11 +2,10 @@ use std::path::Path;
 
 #[macro_use]
 pub mod macros;
-pub mod scoped_ref;
 pub mod apply;
-pub mod toggle;
 pub mod log_setup;
-
+pub mod scoped_ref;
+pub mod toggle;
 
 pub const EPSILON: f64 = 1e-10;
 

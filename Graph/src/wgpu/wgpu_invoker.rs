@@ -6,7 +6,9 @@ use crate::function::{Function, FunctionId};
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
 pub trait WgpuInvokable {
-    fn new(wgpu_context: &WgpuContext) -> Self where Self: Sized;
+    fn new(wgpu_context: &WgpuContext) -> Self
+    where
+        Self: Sized;
     fn descriptor(&self) -> Function;
     fn invoke(
         &self,
@@ -17,7 +19,6 @@ pub trait WgpuInvokable {
     ) -> anyhow::Result<()>;
 }
 
-
 pub(crate) struct WgpuInvoker {
     context: WgpuContext,
     funcs: HashMap<FunctionId, Box<dyn WgpuInvokable>>,
@@ -25,7 +26,8 @@ pub(crate) struct WgpuInvoker {
 
 impl WgpuInvoker {
     pub fn add_function<T>(&mut self)
-    where T: WgpuInvokable + 'static
+    where
+        T: WgpuInvokable + 'static,
     {
         let wgpu_func = T::new(&self.context);
         let boxed_wgpu_func = Box::new(wgpu_func);
@@ -36,10 +38,7 @@ impl WgpuInvoker {
 
 impl Invoker for WgpuInvoker {
     fn all_functions(&self) -> Vec<Function> {
-        self.funcs
-            .values()
-            .map(|f| f.descriptor())
-            .collect()
+        self.funcs.values().map(|f| f.descriptor()).collect()
     }
 
     fn invoke(
@@ -48,12 +47,10 @@ impl Invoker for WgpuInvoker {
         ctx: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()>
-    {
+    ) -> anyhow::Result<()> {
         let invokable = self.funcs.get(&function_id).unwrap();
         invokable.invoke(&self.context, ctx, inputs, outputs)?;
 
         Ok(())
     }
 }
-

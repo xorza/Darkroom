@@ -1,17 +1,16 @@
 #![allow(dead_code)]
 // #![allow(unused_imports)]
 
-
 use ::common::log_setup::setup_logging;
 
 use crate::app::ScenariumApp;
 
 mod app;
-mod function_templates;
+mod arg_mapping;
 mod common;
 mod eng_integration;
+mod function_templates;
 mod serialization;
-mod arg_mapping;
 
 fn main() {
     setup_logging("info");

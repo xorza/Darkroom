@@ -1,7 +1,18 @@
 #[macro_export]
 macro_rules! id_type {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Debug, Hash, serde::Serialize, serde::Deserialize)]
+        #[derive(
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            Ord,
+            PartialOrd,
+            Debug,
+            Hash,
+            serde::Serialize,
+            serde::Deserialize,
+        )]
         pub struct $name(uuid::Uuid);
 
         impl $name {
