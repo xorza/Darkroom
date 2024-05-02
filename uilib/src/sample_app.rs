@@ -95,7 +95,6 @@ fn create_matrix(aspect_ratio: f32, angle: f32) -> glam::Mat4 {
     projection * view
 }
 
-
 pub struct SampleApp {
     vertex_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
@@ -107,9 +106,11 @@ pub struct SampleApp {
 }
 
 impl App for SampleApp {
-    fn init(device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            surface_config: &wgpu::SurfaceConfiguration) -> Self {
+    fn init(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface_config: &wgpu::SurfaceConfiguration,
+    ) -> Self {
         let vertex_size = mem::size_of::<Vertex>();
         let (vertex_data, index_data) = create_vertices();
 
@@ -267,7 +268,7 @@ impl App for SampleApp {
             Event::WindowClose => EventResult::Exit,
             Event::RedrawFinished => EventResult::Redraw,
 
-            _ => EventResult::Continue
+            _ => EventResult::Continue,
         }
     }
 
@@ -277,7 +278,7 @@ impl App for SampleApp {
             device,
             queue,
             view,
-            time
+            time,
         }: RenderInfo,
     ) {
         let view_projection = create_matrix(
@@ -293,21 +294,20 @@ impl App for SampleApp {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut render_pass = encoder.begin_render_pass(
-                &wgpu::RenderPassDescriptor {
-                    label: None,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                });
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
             render_pass.push_debug_group("Prepare data for draw.");
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, &self.bind_group, &[]);

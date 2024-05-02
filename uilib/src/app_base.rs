@@ -17,9 +17,11 @@ pub struct RenderInfo<'a> {
 }
 
 pub trait App: 'static + Sized {
-    fn init(device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            surface_config: &wgpu::SurfaceConfiguration) -> Self;
+    fn init(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        surface_config: &wgpu::SurfaceConfiguration,
+    ) -> Self;
     fn update(&mut self, event: Event) -> EventResult;
     fn render(&self, render: RenderInfo);
     fn resize(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, window_size: UVec2);
@@ -38,22 +40,22 @@ struct Setup {
 
 fn setup(title: &str) -> Setup {
     let event_loop = EventLoop::new();
-    let window =
-        winit::window::WindowBuilder::new()
-            .with_title(title)
-            .build(&event_loop)
-            .expect("Failed to create window.");
+    let window = winit::window::WindowBuilder::new()
+        .with_title(title)
+        .build(&event_loop)
+        .expect("Failed to create window.");
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::PRIMARY,
         flags: Default::default(),
-        dx12_shader_compiler: wgpu::Dx12Compiler::Dxc { dxil_path: None, dxc_path: None },
+        dx12_shader_compiler: wgpu::Dx12Compiler::Dxc {
+            dxil_path: None,
+            dxc_path: None,
+        },
         gles_minor_version: Default::default(),
     });
     let size = window.inner_size();
-    let surface = unsafe {
-        instance.create_surface(&window).unwrap()
-    };
+    let surface = unsafe { instance.create_surface(&window).unwrap() };
 
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
@@ -159,11 +161,13 @@ fn start<E: App>(
                             .expect("Failed to acquire next surface texture.")
                     }
                 };
-                let surface_texture_view = surface_texture.texture.create_view(
-                    &wgpu::TextureViewDescriptor {
-                        format: Some(surface_view_format),
-                        ..wgpu::TextureViewDescriptor::default()
-                    });
+                let surface_texture_view =
+                    surface_texture
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor {
+                            format: Some(surface_view_format),
+                            ..wgpu::TextureViewDescriptor::default()
+                        });
 
                 assert!(!has_error_scope);
                 device.push_error_scope(wgpu::ErrorFilter::Validation);
@@ -190,7 +194,7 @@ fn start<E: App>(
         match result {
             EventResult::Continue => {}
             EventResult::Redraw => window.request_redraw(),
-            EventResult::Exit => *control_flow = ControlFlow::Exit
+            EventResult::Exit => *control_flow = ControlFlow::Exit,
         }
     });
 }

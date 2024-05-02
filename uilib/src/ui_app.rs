@@ -16,9 +16,7 @@ pub struct UiApp {
 }
 
 impl App for UiApp {
-    fn init(device: &Device,
-            queue: &Queue,
-            surface_config: &SurfaceConfiguration) -> Self {
+    fn init(device: &Device, queue: &Queue, surface_config: &SurfaceConfiguration) -> Self {
         let window_size = UVec2::new(surface_config.width, surface_config.height);
         let renderer = WgpuRenderer::new(device, queue, surface_config, window_size);
 
@@ -37,7 +35,7 @@ impl App for UiApp {
             Event::WindowClose => EventResult::Exit,
             Event::Resize(_size) => EventResult::Redraw,
 
-            _ => EventResult::Continue
+            _ => EventResult::Continue,
         }
     }
 

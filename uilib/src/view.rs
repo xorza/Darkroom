@@ -19,4 +19,3 @@ pub trait ContentView: View {
         panic!("Not implemented")
     }
 }
-

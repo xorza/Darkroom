@@ -16,7 +16,6 @@ impl UVec2 {
     }
 }
 
-
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
 pub struct UVec4 {
@@ -31,10 +30,14 @@ impl UVec4 {
         Self { x, y, z, w }
     }
     pub fn all(v: u32) -> Self {
-        Self { x: v, y: v, z: v, w: v }
+        Self {
+            x: v,
+            y: v,
+            z: v,
+            w: v,
+        }
     }
 }
-
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable, Default)]
@@ -50,25 +53,23 @@ impl FVec4 {
         Self { x, y, z, w }
     }
     pub fn all(v: f32) -> Self {
-        Self { x: v, y: v, z: v, w: v }
+        Self {
+            x: v,
+            y: v,
+            z: v,
+            w: v,
+        }
     }
 }
 
-
 impl From<glam::UVec2> for UVec2 {
     fn from(v: glam::UVec2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
+        Self { x: v.x, y: v.y }
     }
 }
 
 impl From<UVec2> for glam::UVec2 {
     fn from(v: UVec2) -> Self {
-        Self {
-            x: v.x,
-            y: v.y,
-        }
+        Self { x: v.x, y: v.y }
     }
 }

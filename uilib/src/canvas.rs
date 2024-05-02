@@ -9,7 +9,6 @@ pub struct Canvas {
 
 impl View for Canvas {}
 
-
 impl ContentView for Canvas {
     fn children(&mut self) -> &mut Vec<Rc<dyn View>> {
         &mut self.children
