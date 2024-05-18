@@ -112,4 +112,9 @@ partial class WindowResourceDictionary : ResourceDictionary {
     }
 
     #endregion
+
+    private void Window_Loaded(object sender, RoutedEventArgs e) {
+        var self = (Window)sender;
+        self.MaxHeight = SystemParameters.MaximizedPrimaryScreenHeight;
+    }
 }

@@ -25,9 +25,7 @@ public partial class MainWindow : Window {
         InitializeComponent();
 
         this.DataContext = _viewModel;
-        this.SizeChanged += (sender, args) => {
-            Debug.WriteLine("New window size: {0}x{1}", args.NewSize.Width, args.NewSize.Height);
-        };
+   
     }
 
 
