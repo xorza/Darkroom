@@ -31,13 +31,14 @@
                     Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid>
+            <Border BorderBrush="{x:Null}" BorderThickness="0">
                 <Button
+                    Margin="0"
                     Content="click"
                     VerticalAlignment="Top"
                     HorizontalAlignment="Left"
                     Click="AddDesignNodeButton_OnClick" />
-            </Grid>
+            </Border>
 
             <Border Grid.Row="1" BorderThickness="1"
                     BorderBrush="{StaticResource Blue}">
@@ -50,7 +51,7 @@
                     <ColumnDefinition Width="Auto" MinWidth="250" />
                 </Grid.ColumnDefinitions>
 
-                <Grid>
+                <Grid ClipToBounds="True">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="*" />
                         <RowDefinition Height="Auto" MinHeight="50" />

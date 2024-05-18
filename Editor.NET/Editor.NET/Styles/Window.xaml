@@ -14,6 +14,7 @@
                 <ControlTemplate TargetType="Button">
                     <Grid Width="{TemplateBinding Width}"
                           Height="{TemplateBinding Height}"
+
                           Background="Transparent">
                         <Ellipse Fill="{TemplateBinding Background}" />
                         <Ellipse Visibility="Collapsed"
@@ -22,6 +23,7 @@
                         <ContentPresenter Content="{TemplateBinding Content}"
                                           Width="{TemplateBinding Width}"
                                           Height="{TemplateBinding Height}"
+                                          Margin="{TemplateBinding Padding}"
                                           VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
                     </Grid>
@@ -42,153 +44,158 @@
     <Style x:Key="BorderRect" TargetType="Rectangle">
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Fill" Value="Transparent" />
-        <Setter Property="Tag" Value="{Binding RelativeSource={RelativeSource AncestorType=Window}}" />
         <EventSetter Event="MouseLeftButtonDown" Handler="borderRect_MouseLeftButtonDown" />
         <EventSetter Event="MouseLeftButtonUp" Handler="borderRect_MouseLeftButtonUp" />
         <EventSetter Event="MouseMove" Handler="borderRect_MouseMove" />
     </Style>
 
     <Style TargetType="Window" x:Key="DefaultWindow">
-        <Setter Property="MinWidth" Value="65" />
-        <Setter Property="MinHeight" Value="30" />
+        <Setter Property="MinWidth" Value="68" />
+        <Setter Property="MinHeight" Value="28" />
         <Setter Property="AllowsTransparency" Value="True" />
         <Setter Property="WindowStyle" Value="None" />
         <Setter Property="Background" Value="{StaticResource DarkGray}" />
         <Setter Property="BorderBrush" Value="{x:Null}" />
         <Setter Property="BorderThickness" Value="0" />
+
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="{x:Type Window}">
 
-                    <Border BorderThickness="2"
-                            BorderBrush="{StaticResource Blue}"
-                            Background="{TemplateBinding Background}"
-                            CornerRadius="5"
-                            Padding="0">
-                        <Grid>
+                    <Grid>
+                        <Border BorderThickness="2"
+                                CornerRadius="5"
+                                BorderBrush="{StaticResource Blue}"
+                                Background="{TemplateBinding Background}"
+                                Padding="0" />
 
+                        <Grid x:Name="InnerWindow" >
+
+                            <!-- header & content -->
                             <controls:ClippingBorder ClipToBounds="True"
                                                      Background="{x:Null}"
                                                      CornerRadius="4"
-                                                     BorderThickness="0">
-                                <ContentPresenter />
+                                                     BorderThickness="0" 
+                                                     Margin="1.8">
+                                <Grid>
+                                    <!-- dragging header -->
+                                    <Button Style="{StaticResource EmptyButton}"
+                                            Height="25"
+                                            Focusable="False"
+                                            VerticalAlignment="Top"
+                                            HorizontalAlignment="Stretch"
+                                            PreviewMouseLeftButtonDown="Header_MouseLeftButtonDown"
+                                            PreviewMouseDoubleClick="btnMax_Click">
+                                        <Border Background="Transparent" />
+                                    </Button>
+
+                                    <ContentPresenter />
+                                </Grid>
                             </controls:ClippingBorder>
 
-
+                            <!-- resize rectangles -->
                             <Grid x:Name="ResizeRects">
                                 <Rectangle x:Name="leftSizeGrip"
-                                           Width="7"
+                                           Width="5"
                                            HorizontalAlignment="Left"
                                            Cursor="SizeWE"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle x:Name="rightSizeGrip"
-                                           Width="7"
+                                           Width="5"
                                            HorizontalAlignment="Right"
                                            Cursor="SizeWE"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle x:Name="topSizeGrip"
-                                           Height="7"
+                                           Height="5"
                                            VerticalAlignment="Top"
                                            Cursor="SizeNS"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle x:Name="bottomSizeGrip"
-                                           Height="7"
+                                           Height="5"
                                            VerticalAlignment="Bottom"
                                            Cursor="SizeNS"
                                            Style="{StaticResource BorderRect}" />
                                 <!--  Corners  -->
                                 <Rectangle Name="topLeftSizeGrip"
-                                           Width="7"
-                                           Height="7"
+                                           Width="5"
+                                           Height="5"
                                            HorizontalAlignment="Left"
                                            VerticalAlignment="Top"
                                            Cursor="SizeNWSE"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle Name="bottomRightSizeGrip"
-                                           Width="7"
-                                           Height="7"
+                                           Width="5"
+                                           Height="5"
                                            HorizontalAlignment="Right"
                                            VerticalAlignment="Bottom"
                                            Cursor="SizeNWSE"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle Name="topRightSizeGrip"
-                                           Width="7"
-                                           Height="7"
+                                           Width="5"
+                                           Height="5"
                                            HorizontalAlignment="Right"
                                            VerticalAlignment="Top"
                                            Cursor="SizeNESW"
                                            Style="{StaticResource BorderRect}" />
                                 <Rectangle Name="bottomLeftSizeGrip"
-                                           Width="7"
-                                           Height="7"
+                                           Width="5"
+                                           Height="5"
                                            HorizontalAlignment="Left"
                                            VerticalAlignment="Bottom"
                                            Cursor="SizeNESW"
                                            Style="{StaticResource BorderRect}" />
                             </Grid>
 
-                            <controls:ClippingBorder ClipToBounds="True"
-                                                     Background="{x:Null}"
-                                                     CornerRadius="4"
-                                                     BorderThickness="0">
-                                <Border Margin="0"
-                                        Background="{StaticResource DarkGray}"
-                                        VerticalAlignment="Top" HorizontalAlignment="Right">
-                                    <Grid Margin="1" Width="60" Height="24">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
+                            <!-- min max close buttons -->
+                            <Border Padding="5"
+                                    Background="{StaticResource Blue}"
+                                    VerticalAlignment="Top" HorizontalAlignment="Right"
+                                    CornerRadius="0 4 0 4"
+                                    Margin="1.8">
+                                <StackPanel Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            HorizontalAlignment="Center">
 
-                                        <Button Style="{StaticResource RoundButton}"
-                                                Background="{StaticResource Green}"
-                                                Click="btnMin_Click"
-                                                Tag="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
-                                            <Path Width="10"
-                                                  Height="10"
-                                                  Margin="0 2 0 0"
-                                                  Style="{StaticResource CrossPath}"
-                                                  Data="M 0,0 L 1,0"
-                                                  Stroke="{StaticResource DarkGray}"
-                                                  HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                                        </Button>
-                                        <Button Grid.Column="1" Style="{StaticResource RoundButton}"
-                                                Background="{StaticResource Yellow}"
-                                                Click="btnMax_Click"
-                                                Tag="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
-                                            <Path Width="10"
-                                                  Height="10"
-                                                  Style="{StaticResource CrossPath}"
-                                                  Data="M 0,0 L 0,1 L 1,1 L 1,0 Z"
-                                                  Stroke="{StaticResource DarkGray}"
-                                                  HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                                        </Button>
-                                        <Button Grid.Column="2" Style="{StaticResource RoundButton}"
-                                                Background="{StaticResource Red}"
-                                                Click="btnClose_Click"
-                                                Tag="{Binding RelativeSource={RelativeSource AncestorType=Window}}">
-                                            <Path Width="10"
-                                                  Height="10"
-                                                  Style="{StaticResource CrossPath}"
-                                                  Stroke="{StaticResource DarkGray}"
-                                                  HorizontalAlignment="Center"
-                                                  VerticalAlignment="Center" />
-                                        </Button>
-                                    </Grid>
-                                </Border>
-                            </controls:ClippingBorder>
-
-
+                                    <Button Style="{StaticResource RoundButton}"
+                                            Background="{StaticResource Green}"
+                                            Click="btnMin_Click">
+                                        <Path Width="8"
+                                              Height="8"
+                                              Margin="0 2 0 0"
+                                              Style="{StaticResource CrossPath}"
+                                              Data="M 0,0 L 1,0"
+                                              Stroke="{StaticResource DarkGray}" />
+                                    </Button>
+                                    <Button Style="{StaticResource RoundButton}"
+                                            Background="{StaticResource Yellow}"
+                                            Click="btnMax_Click"
+                                            Margin="5 0 0 0">
+                                        <Path
+                                            Width="8"
+                                            Height="8"
+                                            Style="{StaticResource CrossPath}"
+                                            Data="M 0,0 L 0,1 L 1,1 L 1,0 Z"
+                                            Stroke="{StaticResource DarkGray}" />
+                                    </Button>
+                                    <Button Style="{StaticResource RoundButton}"
+                                            Background="{StaticResource Red}"
+                                            Click="btnClose_Click"
+                                            Margin="5 0 0 0">
+                                        <Path Width="8"
+                                              Height="8"
+                                              Style="{StaticResource CrossPath}"
+                                              Stroke="{StaticResource DarkGray}" />
+                                    </Button>
+                                </StackPanel>
+                            </Border>
                         </Grid>
-                    </Border>
 
+                    </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="WindowState" Value="Maximized">
                             <Trigger.Setters>
-                                <Setter TargetName="ResizeRects" Property="Visibility" Value="Collapsed"></Setter>
+                                <Setter TargetName="ResizeRects" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="InnerWindow" Property="Margin" Value="4" />
                             </Trigger.Setters>
                         </Trigger>
                     </ControlTemplate.Triggers>

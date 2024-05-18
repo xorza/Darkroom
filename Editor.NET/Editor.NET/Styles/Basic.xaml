@@ -31,16 +31,16 @@
         <Setter Property="Height" Value="Auto"></Setter>
         <Setter Property="MinWidth" Value="0"></Setter>
         <Setter Property="MinHeight" Value="0"></Setter>
-        <Setter Property="VerticalContentAlignment" Value="Center"></Setter>
-        <Setter Property="HorizontalContentAlignment" Value="Center"></Setter>
+        <!-- <Setter Property="VerticalContentAlignment" Value="Center"></Setter> -->
+        <!-- <Setter Property="HorizontalContentAlignment" Value="Center"></Setter> -->
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <ContentPresenter Content="{TemplateBinding Content}"
                                       Width="{TemplateBinding Width}"
                                       Height="{TemplateBinding Height}"
-                                      VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                      HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+                                      VerticalAlignment="{TemplateBinding VerticalAlignment}"
+                                      HorizontalAlignment="{TemplateBinding HorizontalAlignment}" />
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
@@ -100,7 +100,7 @@
 
     <Style TargetType="Path" x:Key="DefaultPath">
         <Setter Property="Stretch" Value="Fill" />
-        <Setter Property="StrokeThickness" Value="2" />
+        <Setter Property="StrokeThickness" Value="1.5" />
         <Setter Property="Stroke" Value="MediumVioletRed" />
     </Style>
 
