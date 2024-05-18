@@ -1,8 +1,6 @@
 [workspace]
 members = [
-    "Editor",
     "Graph",
-    "uilib",
     "Imaginarium",
     "Common",
 ]
@@ -12,28 +10,22 @@ resolver = "2"
 [workspace.dependencies]
 graph_lib = { path = "./Graph", package = "graph", features = ["wgpu"] }
 common = { path = "./Common", package = "common" }
-uilib = { path = "./uilib", package = "uilib" }
 imaginarium = { path = "./Imaginarium", package = "imaginarium", features = ["wgpu"] }
-egui_node_graph = { path = "./egui_node_graph/egui_node_graph" }
 
 serde = { version = "*", features = ["derive"] }
 serde_yaml = "*"
 serde_json = "*"
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = "*"
-wgpu = { version = "0.17.1" }
+wgpu = { version = "0.20.0" }
 bytemuck = { version = "*", features = ["derive"] }
 pollster = "*"
 tiff = "*"
 png = "*"
 image_lib = { version = "*", package = "image" }
 num-traits = "*"
-winit = "*"
 glam = "*"
-glyph_brush = "*"
 mlua = { version = "*", features = ["lua54", "vendored"] }
-egui_file = { version = "0.11.0" }
-eframe = { version = "0.23.0", features = ["wgpu"] }
 strum = "*"
 strum_macros = "*"
 once_cell = "*"

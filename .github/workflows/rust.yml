@@ -42,5 +42,3 @@ jobs:
         run: cargo test --verbose --no-default-features -p graph
       - name: Run common tests
         run: cargo test --verbose --no-default-features -p common
-      - name: Run editor tests
-        run: cargo test --verbose --no-default-features -p editor

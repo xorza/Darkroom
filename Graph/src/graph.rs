@@ -124,10 +124,10 @@ impl Graph {
 
     pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
-
         self.nodes
             .iter()
             .find(|node| node.self_id == id)
+
     }
     pub fn node_by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
