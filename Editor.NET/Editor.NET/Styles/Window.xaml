@@ -76,7 +76,7 @@
                                                      Background="{x:Null}"
                                                      CornerRadius="4"
                                                      BorderThickness="0" 
-                                                     Margin="1.8">
+                                                     Margin="1.75">
                                 <Grid>
                                     <!-- dragging header -->
                                     <Button Style="{StaticResource EmptyButton}"
@@ -151,7 +151,7 @@
                                     Background="{StaticResource Blue}"
                                     VerticalAlignment="Top" HorizontalAlignment="Right"
                                     CornerRadius="0 4 0 4"
-                                    Margin="1.8">
+                                    Margin="1.75">
                                 <StackPanel Orientation="Horizontal"
                                             VerticalAlignment="Center"
                                             HorizontalAlignment="Center">

@@ -36,6 +36,7 @@ partial class WindowResourceDictionary : ResourceDictionary {
             };
             wnd.WindowState = WindowState.Maximized;
         }
+        e.Handled = true;
     }
 
     private void btnMin_Click(object sender, RoutedEventArgs e) {
@@ -106,7 +107,8 @@ partial class WindowResourceDictionary : ResourceDictionary {
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender;
         var wnd = Window.GetWindow(header)!;
-        wnd.DragMove();
+         wnd.DragMove();
+         e.Handled = true;
     }
 
     #endregion
