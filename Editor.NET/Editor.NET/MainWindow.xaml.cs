@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -24,8 +25,10 @@ public partial class MainWindow : Window {
         InitializeComponent();
 
         this.DataContext = _viewModel;
+        this.SizeChanged += (sender, args) => {
+            Debug.WriteLine("New window size: {0}x{1}", args.NewSize.Width, args.NewSize.Height);
+        };
     }
-
 
 
     private void AddDesignNodeButton_OnClick(object sender, RoutedEventArgs e) {

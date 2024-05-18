@@ -67,12 +67,12 @@
                             Background="{TemplateBinding Background}"
                             CornerRadius="2">
                         <Grid>
-                            <Border
-                                BorderBrush="{x:Null}"
-                                BorderThickness="0"
-                                CornerRadius="2"
-                                Background="{StaticResource HighlightOverlayBrush}"
-                                Visibility="{TemplateBinding IsMouseOver, Converter={StaticResource BoolToVis}}" />
+                            <Border Visibility="Collapsed"
+                                    BorderBrush="{x:Null}"
+                                    BorderThickness="0"
+                                    CornerRadius="2"
+                                    Background="{StaticResource HighlightOverlayBrush}"
+                                    x:Name="HighlightOverlay" />
 
                             <ContentPresenter Content="{TemplateBinding Content}"
                                               Width="{TemplateBinding Width}"
@@ -82,12 +82,21 @@
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
                         </Grid>
                     </Border>
+
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="HighlightOverlay" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="HighlightOverlay" Property="Visibility" Value="Collapsed" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
-    
-    <Style TargetType="Button" BasedOn="{StaticResource DefaultButton}"/> 
+
+    <Style TargetType="Button" BasedOn="{StaticResource DefaultButton}" />
 
     <Style TargetType="Path" x:Key="DefaultPath">
         <Setter Property="Stretch" Value="Fill" />
@@ -99,8 +108,8 @@
     <Style TargetType="Path" x:Key="CrossPath" BasedOn="{StaticResource DefaultPath}">
         <Setter Property="Data" Value="M 0,0 L 1,1 M 0,1 L 1,0" />
     </Style>
-    
+
     <Style TargetType="Path" BasedOn="{StaticResource DefaultPath}" />
-    
+
 
 </ResourceDictionary>
