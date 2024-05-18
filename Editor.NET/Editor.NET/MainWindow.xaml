@@ -14,7 +14,7 @@
         Height="450"
         Width="800"
         Background="#292929"
-        
+
         Loaded="MainWindow_OnLoaded">
     <Grid>
         <Grid.RowDefinitions>
@@ -44,19 +44,40 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="Auto" MinHeight="50" />
                 </Grid.RowDefinitions>
-                
-                <Canvas
+
+                <!-- <Canvas -->
+                <!--     Grid.Row="0" -->
+                <!--     x:Name="ConnectionCanvas" /> -->
+                <ItemsControl
                     Grid.Row="0"
-                    x:Name="ConnectionCanvas" />
-                
+                    ItemsSource="{Binding Connections}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type viewModel:Connection}">
+                            <local:Connection
+                                InputPosition="{Binding Input.CanvasPosition}" 
+                                OutputPosition="{Binding Output.CanvasPosition}" 
+                                BorderBrush="{StaticResource Blue}"
+                                HoverBrush="{StaticResource HighlightOverlayBrush}"
+                                Thickness="2"
+                                Width="500"
+                                Height="500"
+                                />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+
                 <ItemsControl
                     Grid.Row="0"
                     ItemsSource="{Binding Nodes}">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate DataType="{x:Type viewModel:Node}">
                             <local:Node
-                                NodeDataContext="{Binding}"
-                                Width="Auto" Height="Auto" />
+                                NodeDataContext="{Binding}" />
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                     <ItemsControl.ItemsPanel>

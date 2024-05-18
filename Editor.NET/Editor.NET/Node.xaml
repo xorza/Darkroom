@@ -41,15 +41,16 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <Border BorderBrush="#333"
+    <Border BorderBrush="#444"
             Margin="4" Padding="0"
-            BorderThickness="1"
+            BorderThickness="2"
             Background="#222"
             CornerRadius="2">
 
         <StackPanel Orientation="Vertical" Margin="0">
-            <Border Background="#333"
-                    CornerRadius="2 2 0 0"
+            <Border Background="#444"
+                    Margin="-1 -1 -1 0"
+                    CornerRadius="1 1 0 0"
                     Padding="0"
                     MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
                     MouseLeftButtonUp="Title_OnMouseLeftButtonUp">

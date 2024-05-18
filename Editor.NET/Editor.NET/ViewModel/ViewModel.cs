@@ -380,7 +380,7 @@ public class DesignMainWindowViewModel : MainWindowViewModel {
             CanvasPosition = new Point(30.0f, 50.0f),
         });
         Nodes.Add(new DesignNode() {
-            CanvasPosition = new Point(100.0f, 150.0f),
+            CanvasPosition = new Point(220.0f, 130.0f),
         });
 
         Connections.Add(new Connection(

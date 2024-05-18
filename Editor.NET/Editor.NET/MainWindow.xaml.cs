@@ -24,29 +24,9 @@ public partial class MainWindow : Window {
         InitializeComponent();
 
         this.DataContext = _viewModel;
-
-        _viewModel.Connections.CollectionChanged += (sender, args) => { RedrawConnections(); };
-        RedrawConnections();
     }
 
-    private void RedrawConnections() {
-        ConnectionCanvas.Children.Clear();
 
-        foreach (var connection in _viewModel.Connections) {
-            var connectionView = new Connection {
-                Thickness = 2,
-            };
-
-            connectionView.SetBinding(Connection.OutputPositionDependencyProperty,
-                new Binding("Output.CanvasPosition") { Source = connection }
-            );
-            connectionView.SetBinding(Connection.InputPositionDependencyProperty,
-                new Binding("Input.CanvasPosition") { Source = connection }
-            );
-
-            ConnectionCanvas.Children.Add(connectionView);
-        }
-    }
 
     private void AddDesignNodeButton_OnClick(object sender, RoutedEventArgs e) {
         _viewModel.Nodes.Add(new DesignNode());

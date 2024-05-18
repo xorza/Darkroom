@@ -34,18 +34,7 @@ public class Connection : ClickControl {
         typeof(Connection),
         new PropertyMetadata(Brushes.Coral)
     );
-
-    public static readonly DependencyProperty BrushProperty = DependencyProperty.Register(
-        nameof(Brush), typeof(Brush),
-        typeof(Connection),
-        new PropertyMetadata(Brushes.SlateGray)
-    );
-
-    public Brush Brush {
-        get { return (Brush)GetValue(BrushProperty); }
-        set { SetValue(BrushProperty, value); }
-    }
-
+    
     public Connection() {
         LeftButtonClick += LeftButtonClickHandler;
         MouseDoubleClick += MouseButtonEventHandler;
@@ -89,13 +78,7 @@ public class Connection : ClickControl {
     protected override void OnRender(DrawingContext drawingContext) {
         base.OnRender(drawingContext);
 
-        Pen pen;
-        if (IsMouseOver) {
-            pen = new Pen(HoverBrush, Thickness * 1.5);
-        } else {
-            pen = new Pen(Brush, Thickness);
-        }
-
+    
         Point[] points = [
             new(InputPosition.X - 5, InputPosition.Y),
             new(InputPosition.X - 50, InputPosition.Y),
@@ -114,6 +97,9 @@ public class Connection : ClickControl {
         path.Figures.Add(pathFigure);
 
         drawingContext.DrawGeometry(null, new Pen(Brushes.Transparent, 5), path);
-        drawingContext.DrawGeometry(null, pen, path);
+        drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), path);
+        if (IsMouseOver) {
+            drawingContext.DrawGeometry(null, new Pen(HoverBrush, Thickness * 1.5), path);
+        }
     }
 }

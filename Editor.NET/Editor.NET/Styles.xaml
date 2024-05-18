@@ -8,6 +8,12 @@
     <Brush x:Key="Green">#53A957</Brush>
     <Brush x:Key="Blue">#34A0F6</Brush>
     <Brush x:Key="Red">#F53636</Brush>
+    
+    <Brush x:Key="LiteYellow">#FFDD80</Brush>
+    <Brush x:Key="LiteGreen">#80FF84</Brush>
+    <Brush x:Key="LiteBlue">#80C8FF</Brush>
+    <Brush x:Key="LiteRed">#FF8080</Brush>
+    
     <Brush x:Key="DarkWhite">#BBBCC1</Brush>
 
     <Style TargetType="Label">
