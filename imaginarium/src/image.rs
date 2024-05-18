@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use image_lib::ImageFormat;
+use image as image_lib;
 use tiff::decoder::DecodingResult;
 
 use crate::color_format::*;
@@ -228,7 +228,7 @@ impl Image {
             self.desc.width,
             self.desc.height,
             color_format,
-            ImageFormat::Jpeg,
+            image_lib::ImageFormat::Jpeg,
         )?;
 
         Ok(())
@@ -269,7 +269,7 @@ impl Image {
             self.desc.width,
             self.desc.height,
             color_format,
-            ImageFormat::Png,
+            image_lib::ImageFormat::Png,
         )?;
 
         Ok(())
