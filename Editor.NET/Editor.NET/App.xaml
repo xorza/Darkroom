@@ -4,6 +4,6 @@
              xmlns:local="clr-namespace:Editor.NET"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-         <ResourceDictionary Source="Styles.xaml"></ResourceDictionary>
+         <ResourceDictionary Source="Styles/Styles.xaml"></ResourceDictionary>
     </Application.Resources>
 </Application>

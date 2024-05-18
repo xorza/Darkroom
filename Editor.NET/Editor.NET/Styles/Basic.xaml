@@ -8,13 +8,15 @@
     <Brush x:Key="Green">#53A957</Brush>
     <Brush x:Key="Blue">#34A0F6</Brush>
     <Brush x:Key="Red">#F53636</Brush>
-    
+
     <Brush x:Key="LiteYellow">#FFDD80</Brush>
     <Brush x:Key="LiteGreen">#80FF84</Brush>
     <Brush x:Key="LiteBlue">#80C8FF</Brush>
     <Brush x:Key="LiteRed">#FF8080</Brush>
-    
+
     <Brush x:Key="DarkWhite">#BBBCC1</Brush>
+
+    <Brush x:Key="DarkGray">#222</Brush>
 
     <Style TargetType="Label">
         <Setter Property="Margin" Value="2"></Setter>
@@ -44,8 +46,8 @@
         </Setter>
     </Style>
 
-    <Style TargetType="Button">
-        <Setter Property="Margin" Value="1" />
+    <Style TargetType="Button" x:Key="DefaultButton">
+        <Setter Property="Margin" Value="2" />
         <Setter Property="Padding" Value="4 1" />
         <Setter Property="Width" Value="Auto" />
         <Setter Property="Height" Value="Auto" />
@@ -84,4 +86,21 @@
             </Setter.Value>
         </Setter>
     </Style>
+    
+    <Style TargetType="Button" BasedOn="{StaticResource DefaultButton}"/> 
+
+    <Style TargetType="Path" x:Key="DefaultPath">
+        <Setter Property="Stretch" Value="Fill" />
+        <Setter Property="StrokeThickness" Value="2" />
+        <Setter Property="Stroke" Value="MediumVioletRed" />
+    </Style>
+
+
+    <Style TargetType="Path" x:Key="CrossPath" BasedOn="{StaticResource DefaultPath}">
+        <Setter Property="Data" Value="M 0,0 L 1,1 M 0,1 L 1,0" />
+    </Style>
+    
+    <Style TargetType="Path" BasedOn="{StaticResource DefaultPath}" />
+    
+
 </ResourceDictionary>

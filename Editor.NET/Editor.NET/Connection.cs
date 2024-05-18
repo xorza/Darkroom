@@ -38,8 +38,6 @@ public class Connection : ClickControl {
     public Connection() {
         LeftButtonClick += LeftButtonClickHandler;
         MouseDoubleClick += MouseButtonEventHandler;
-
-        // Resources.Source = new Uri("/Styles.xaml", UriKind.Relative);
     }
 
     public static readonly DependencyProperty ThicknessProperty = DependencyProperty.Register(
