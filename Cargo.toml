@@ -1,35 +1,35 @@
 [workspace]
 members = [
-    "Graph",
-    "Imaginarium",
-    "Common",
+    "graph",
+    "imaginarium",
+    "common",
 ]
 
 resolver = "2"
 
 [workspace.dependencies]
-graph_lib = { path = "./Graph", package = "graph", features = ["wgpu"] }
-common = { path = "./Common", package = "common" }
-imaginarium = { path = "./Imaginarium", package = "imaginarium", features = ["wgpu"] }
+graph_lib = { path = "graph", package = "graph", features = ["wgpu"] }
+common = { path = "common", package = "common" }
+imaginarium = { path = "imaginarium", package = "imaginarium", features = ["wgpu"] }
 
-serde = { version = "*", features = ["derive"] }
-serde_yaml = "*"
-serde_json = "*"
-uuid = { version = "*", features = ["v4", "serde"] }
-anyhow = "*"
-wgpu = { version = "0.20.0" }
-bytemuck = { version = "*", features = ["derive"] }
-pollster = "*"
-tiff = "*"
-png = "*"
-image_lib = { version = "*", package = "image" }
-num-traits = "*"
-glam = "*"
-mlua = { version = "*", features = ["lua54", "vendored"] }
-strum = "*"
-strum_macros = "*"
-once_cell = "*"
-rand = "*"
-tokio = { version = "*", features = ["full"] }
-log = "*"
-flexi_logger = "*"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+serde_json = "1.0"
+uuid = { version = "1.8", features = ["v4", "serde"] }
+anyhow = "1.0"
+wgpu = { version = "0.20" }
+bytemuck = { version = "1.16", features = ["derive"] }
+pollster = "0.3"
+tiff = "0.9"
+png = "0.17"
+image_lib = { version = "0.25", package = "image" }
+num-traits = "0.2"
+glam = "0.27"
+mlua = { version = "0.9", features = ["lua54", "vendored"] }
+strum = "0.26"
+strum_macros = "0.26"
+once_cell = "1.19"
+rand = "0.8"
+tokio = { version = "1.37", features = ["full"] }
+log = "0.4"
+flexi_logger = "0.28"
