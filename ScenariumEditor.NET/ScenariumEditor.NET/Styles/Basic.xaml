@@ -7,16 +7,28 @@
     <Brush x:Key="Yellow">#E9BB35</Brush>
     <Brush x:Key="Green">#53A957</Brush>
     <Brush x:Key="Blue">#34A0F6</Brush>
-    <Brush x:Key="Red">#F53636</Brush>
+    <Brush x:Key="Red">#ED5353</Brush>
 
     <Brush x:Key="LiteYellow">#FFDD80</Brush>
     <Brush x:Key="LiteGreen">#80FF84</Brush>
     <Brush x:Key="LiteBlue">#80C8FF</Brush>
     <Brush x:Key="LiteRed">#FF8080</Brush>
+    
+    <Brush x:Key="DarkYellow">#996A34</Brush>
+    <Brush x:Key="DarkGreen">#376E37</Brush>
+    <Brush x:Key="DarkBlue">#2A68A9</Brush>
+    <Brush x:Key="DarkRed">#A32A2A</Brush>
 
-    <Brush x:Key="DarkWhite">#BBBCC1</Brush>
+    <Brush x:Key="DarkWhite">#BCBCBC</Brush>
+    <Brush x:Key="Gray">#333333</Brush>
 
-    <Brush x:Key="DarkGray">#222</Brush>
+    <Brush x:Key="DarkerGray">#222</Brush>
+    <Brush x:Key="DarkGray">#131313</Brush>
+    
+    <Style TargetType="Border" >
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
 
     <Style TargetType="Label">
         <Setter Property="Margin" Value="2"></Setter>

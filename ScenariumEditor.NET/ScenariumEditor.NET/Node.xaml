@@ -44,12 +44,12 @@
     <Border BorderBrush="#444"
             Margin="4" Padding="0"
             BorderThickness="2"
-            Background="{StaticResource DarkGray}"
+            Background="{StaticResource DarkerGray}"
             CornerRadius="2">
 
         <StackPanel Orientation="Vertical" Margin="0">
             <Border Background="#444"
-                    Margin="-1 -1 -1 0"
+                    Margin="0"
                     CornerRadius="1 1 0 0"
                     Padding="0"
                     MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
@@ -63,7 +63,7 @@
                     <Button Style="{StaticResource PinButton}"
                             VerticalAlignment="Top"
                             HorizontalAlignment="Left"
-                            Margin="-5 -5 0 0"
+                            Margin="-6 1 0 0"
                             Background="{StaticResource Red}" />
 
                     <Label Grid.Column="0" Content="{Binding Name}"
@@ -83,7 +83,7 @@
                                     VerticalAlignment="Center" />
 
                             <Path Style="{StaticResource CrossPath}"
-                                  Stroke="{StaticResource DarkGray}"
+                                  Stroke="{StaticResource DarkerGray}"
                                   HorizontalAlignment="Center"
                                   VerticalAlignment="Center" />
                         </Grid>
@@ -108,7 +108,7 @@
 
                             <StackPanel Orientation="Horizontal">
                                 <Button Style="{StaticResource PinButton}"
-                                        Margin="-5 0 0 0"
+                                        Margin="-6 0 0 0"
                                         Background="{StaticResource Yellow}"
                                         DataContext="{Binding}"
                                         Loaded="Input_OnLoaded" />
@@ -134,7 +134,7 @@
                                     <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
                                     <Button Style="{StaticResource PinButton}"
-                                            Margin="0 0 -5 0"
+                                            Margin="0 0 -6 0"
                                             Background="{StaticResource Red}"
                                             Loaded="Output_OnLoaded" />
                                 </StackPanel>
@@ -153,7 +153,7 @@
                                     <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
                                     <Button Style="{StaticResource PinButton}"
-                                            Margin="0 0 -5 0"
+                                            Margin="0 0 -6 0"
                                             Background="{StaticResource Green}"
                                             Loaded="Output_OnLoaded" />
                                 </StackPanel>

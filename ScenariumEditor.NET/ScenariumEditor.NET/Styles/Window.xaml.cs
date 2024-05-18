@@ -36,6 +36,7 @@ partial class WindowResourceDictionary : ResourceDictionary {
             };
             wnd.WindowState = WindowState.Maximized;
         }
+
         e.Handled = true;
     }
 
@@ -70,7 +71,7 @@ partial class WindowResourceDictionary : ResourceDictionary {
             double width = e.GetPosition(mainWindow).X;
             double height = e.GetPosition(mainWindow).Y;
             senderRect.CaptureMouse();
-            
+
             if (senderRect.Name.ToLower().Contains("right")) {
                 if (width > 0)
                     mainWindow.Width = width;
@@ -103,12 +104,12 @@ partial class WindowResourceDictionary : ResourceDictionary {
     #endregion
 
     #region dragging
-    
+
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender;
         var wnd = Window.GetWindow(header)!;
-         wnd.DragMove();
-         e.Handled = true;
+        wnd.DragMove();
+        e.Handled = true;
     }
 
     #endregion
