@@ -1,11 +1,11 @@
-﻿<Window x:Class="Editor.NET.MainWindow"
+﻿<Window x:Class="ScenariumEditor.NET.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 
-        xmlns:local="clr-namespace:Editor.NET"
-        xmlns:viewModel="clr-namespace:Editor.NET.ViewModel"
+        xmlns:local="clr-namespace:ScenariumEditor.NET"
+        xmlns:viewModel="clr-namespace:ScenariumEditor.NET.ViewModel"
 
         d:DataContext="{d:DesignInstance Type=viewModel:DesignMainWindowViewModel}"
         mc:Ignorable="d"

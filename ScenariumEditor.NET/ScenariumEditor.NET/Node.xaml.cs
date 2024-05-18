@@ -3,9 +3,9 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using Editor.NET.ViewModel;
+using ScenariumEditor.NET.ViewModel;
 
-namespace Editor.NET;
+namespace ScenariumEditor.NET;
 
 public partial class Node : UserControl {
     private Point _dragTitleMousePosition;

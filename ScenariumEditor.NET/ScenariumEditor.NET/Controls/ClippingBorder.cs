@@ -2,7 +2,7 @@
 using System.Windows.Controls;
 using System.Windows.Media;
 
-namespace Editor.NET.Controls;
+namespace ScenariumEditor.NET.Controls;
 
 public class ClippingBorder : Border {
     private readonly RectangleGeometry _clipRect = new RectangleGeometry();

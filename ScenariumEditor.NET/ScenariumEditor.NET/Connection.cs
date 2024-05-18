@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace Editor.NET;
+namespace ScenariumEditor.NET;
 
 public class ConnectionEventArgs : RoutedEventArgs {
     public ConnectionEventArgs(Connection connection) {
@@ -67,7 +67,7 @@ public class Connection : ClickControl {
         ((UIElement)d).InvalidateVisual();
     }
 
-    private void LeftButtonClickHandler(object? sender, MouseButtonEventArgs ea) {
+    private void LeftButtonClickHandler(object sender, MouseButtonEventArgs ea) {
     }
 
     private void MouseButtonEventHandler(object sender, MouseButtonEventArgs e) {

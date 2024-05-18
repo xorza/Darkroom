@@ -14,9 +14,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using Editor.NET.ViewModel;
+using ScenariumEditor.NET.ViewModel;
 
-namespace Editor.NET;
+namespace ScenariumEditor.NET;
 
 public partial class MainWindow : Window {
     private readonly MainWindowViewModel _viewModel = new DesignMainWindowViewModel();

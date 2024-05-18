@@ -1,6 +1,6 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Editor.NET", "Editor.NET\Editor.NET.csproj", "{346482BC-E92E-4E4C-BF00-F382DF4B54DA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScenariumEditor.NET", "ScenariumEditor.NET\ScenariumEditor.NET.csproj", "{346482BC-E92E-4E4C-BF00-F382DF4B54DA}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

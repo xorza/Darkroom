@@ -2,7 +2,7 @@
 using System.Windows.Controls;
 using System.Windows.Input;
 
-namespace Editor.NET;
+namespace ScenariumEditor.NET;
 
 public class ClickControl : Control {
     private bool _leftButtonDown;
@@ -14,21 +14,21 @@ public class ClickControl : Control {
         MouseLeftButtonUp += MouseLeftButtonUpHandler;
     }
 
-    public event MouseButtonEventHandler? LeftButtonClick;
+    public event MouseButtonEventHandler LeftButtonClick;
 
-    private void MouseEnterHandler(object? sender, RoutedEventArgs ea) {
+    private void MouseEnterHandler(object sender, RoutedEventArgs ea) {
         _leftButtonDown = false;
 
         InvalidateVisual();
     }
 
-    private void MouseLeftButtonDownHandler(object? sender, MouseButtonEventArgs ea) {
+    private void MouseLeftButtonDownHandler(object sender, MouseButtonEventArgs ea) {
         _leftButtonDown = true;
 
         InvalidateVisual();
     }
 
-    private void MouseLeftButtonUpHandler(object? sender, MouseButtonEventArgs ea) {
+    private void MouseLeftButtonUpHandler(object sender, MouseButtonEventArgs ea) {
         if (_leftButtonDown) {
             LeftButtonClick?.Invoke(sender, ea);
         }

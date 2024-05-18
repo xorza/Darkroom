@@ -5,7 +5,7 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
 
-namespace Editor.NET.ViewModel;
+namespace ScenariumEditor.NET.ViewModel;
 
 public enum DataType {
     Number,
@@ -13,7 +13,7 @@ public enum DataType {
 }
 
 public class MainWindowViewModel : INotifyPropertyChanged {
-    private Node? _selectoedNode;
+    private Node _selectedNode;
 
     public MainWindowViewModel() {
     }
@@ -22,22 +22,22 @@ public class MainWindowViewModel : INotifyPropertyChanged {
 
     public ObservableCollection<Connection> Connections { get; } = new();
 
-    public Node? SelectoedNode {
-        get => _selectoedNode;
+    public Node SelectoedNode {
+        get => _selectedNode;
         set {
-            if (Equals(value, _selectoedNode)) return;
-            _selectoedNode = value;
+            if (Equals(value, _selectedNode)) return;
+            _selectedNode = value;
             OnPropertyChanged();
         }
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);
@@ -122,13 +122,13 @@ public class Input : INotifyPropertyChanged {
         }
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);
@@ -210,13 +210,13 @@ public class Output : INotifyPropertyChanged {
         }
     }
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);
@@ -311,13 +311,13 @@ public class Node : INotifyPropertyChanged {
     public ObservableCollection<Output> Outputs { get; } = new();
     public ObservableCollection<Output> Events { get; } = new();
 
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);
@@ -326,13 +326,13 @@ public class Node : INotifyPropertyChanged {
 }
 
 public class Connection : INotifyPropertyChanged {
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);

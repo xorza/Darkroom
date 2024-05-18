@@ -4,7 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Shapes;
 
-namespace Editor.NET.Styles;
+namespace ScenariumEditor.NET.Styles;
 
 class NormalWindowPosition {
     public Point Position { get; set; }
