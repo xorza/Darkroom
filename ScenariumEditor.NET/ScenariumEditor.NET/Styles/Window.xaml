@@ -3,43 +3,9 @@
                     xmlns:controls="clr-namespace:ScenariumEditor.NET.Controls"
                     x:Class="ScenariumEditor.NET.Styles.WindowResourceDictionary">
     <ResourceDictionary.MergedDictionaries>
-        <ResourceDictionary Source="Basic.xaml"></ResourceDictionary>
+        <ResourceDictionary Source="Basic.xaml" />
+        <ResourceDictionary Source="Button.xaml" />
     </ResourceDictionary.MergedDictionaries>
-
-    <Style TargetType="Button" x:Key="RoundButton" BasedOn="{StaticResource EmptyButton}">
-        <Setter Property="Width" Value="15" />
-        <Setter Property="Height" Value="15" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="Button">
-                    <Grid Width="{TemplateBinding Width}"
-                          Height="{TemplateBinding Height}"
-
-                          Background="Transparent">
-                        <Ellipse Fill="{TemplateBinding Background}" />
-                        <Ellipse Visibility="Collapsed"
-                                 Fill="{StaticResource HighlightOverlayBrush}"
-                                 x:Name="HighlightOverlay" />
-                        <ContentPresenter Content="{TemplateBinding Content}"
-                                          Width="{TemplateBinding Width}"
-                                          Height="{TemplateBinding Height}"
-                                          Margin="{TemplateBinding Padding}"
-                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
-                                          HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
-                    </Grid>
-
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="HighlightOverlay" Property="Visibility" Value="Visible" />
-                        </Trigger>
-                        <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="HighlightOverlay" Property="Visibility" Value="Collapsed" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
 
     <Style x:Key="BorderRect" TargetType="Rectangle">
         <Setter Property="Focusable" Value="False" />
@@ -160,7 +126,9 @@
 
                                     <Button Style="{StaticResource RoundButton}"
                                             Background="{StaticResource Green}"
-                                            Click="btnMin_Click">
+                                            Click="btnMin_Click"
+                                            Width="15"
+                                            Height="15">
                                         <Path Width="8"
                                               Height="8"
                                               Margin="0 2 0 0"
@@ -171,7 +139,9 @@
                                     <Button Style="{StaticResource RoundButton}"
                                             Background="{StaticResource Yellow}"
                                             Click="btnMax_Click"
-                                            Margin="5 0 0 0">
+                                            Margin="5 0 0 0"
+                                            Width="15"
+                                            Height="15">
                                         <Path
                                             Width="8"
                                             Height="8"
@@ -182,7 +152,9 @@
                                     <Button Style="{StaticResource RoundButton}"
                                             Background="{StaticResource Red}"
                                             Click="btnClose_Click"
-                                            Margin="5 0 0 0">
+                                            Margin="5 0 0 0"
+                                            Width="15"
+                                            Height="15">
                                         <Path Width="8"
                                               Height="8"
                                               Style="{StaticResource CrossPath}"

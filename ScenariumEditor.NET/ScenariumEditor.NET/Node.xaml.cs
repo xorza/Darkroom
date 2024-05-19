@@ -18,8 +18,8 @@ public partial class Node : UserControl {
         NodeDataContext.UpdatePinPositions();
     }
 
-    // event for activating a Pin
     public event EventHandler<Pin> PinActivated = null;
+    public event EventHandler DeletePressed = null;
 
     public static readonly DependencyProperty NodeDataContextProperty = DependencyProperty.Register(
         nameof(NodeDataContext),
@@ -82,5 +82,9 @@ public partial class Node : UserControl {
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
         PinActivated?.Invoke(this, pin);
+    }
+
+    private void DeleteButton_OnClick(object sender, RoutedEventArgs e) {
+      DeletePressed?.Invoke(this, EventArgs.Empty);
     }
 }

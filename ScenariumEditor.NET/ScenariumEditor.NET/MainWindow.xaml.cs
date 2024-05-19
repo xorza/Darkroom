@@ -279,4 +279,10 @@ public partial class MainWindow : Window {
     }
 
     #endregion
+
+    private void Node_OnDeletePressed(object sender, EventArgs e) {
+        var nodeControl = (Node)sender;
+        var node =nodeControl.NodeDataContext;
+        _viewModel.Remove(node);
+    }
 }

@@ -50,6 +50,21 @@ public class MainWindowViewModel : INotifyPropertyChanged {
         }
     }
 
+    public void Remove(Node node) {
+        Nodes.Remove(node);
+        var connectionsToRemove = Connections
+            .Where(c => {
+                return node.Inputs.Contains(c.Input)
+                       || node.Outputs.Contains(c.Output)
+                       || node.Events.Contains(c.Output)
+                       || ReferenceEquals(c.Input, node.Trigger);
+            })
+            .ToList();
+        foreach (var connection in connectionsToRemove) {
+            Connections.Remove(connection);
+        }
+    }
+
 
     public event PropertyChangedEventHandler PropertyChanged;
 

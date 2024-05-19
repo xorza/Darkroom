@@ -68,7 +68,7 @@
                                                          Pin2Position="{Binding Output.CanvasPosition}"
                                                          BorderBrush="{StaticResource Blue}"
                                                          HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                         DeletedBrush="{StaticResource DarkRed}"
+                                                         DeletedBrush="{StaticResource Yellow}"
                                                          Loaded="ConnectionControl_OnLoaded"
                                                          Unloaded="ConnectionControl_OnUnloaded"/>
                             </DataTemplate>
@@ -129,7 +129,8 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">
                                 <local:Node NodeDataContext="{Binding}"
-                                            PinActivated="Node_OnPinActivated" />
+                                            PinActivated="Node_OnPinActivated" 
+                                            DeletePressed="Node_OnDeletePressed"/>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>

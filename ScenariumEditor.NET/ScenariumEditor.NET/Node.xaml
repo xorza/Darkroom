@@ -75,23 +75,14 @@
                            VerticalAlignment="Center" Margin="8 0" FontWeight="Bold">
                     </Label>
 
-                    <Button Grid.Column="1"
-                            Margin="5"
-                            Padding="2"
-                            VerticalAlignment="Center"
-                            HorizontalAlignment="Right"
-                            Width="15"
-                            Height="15"
-                            Background="Transparent">
-                        <Grid>
-                            <Border Background="Transparent"
-                                    VerticalAlignment="Center" />
-
-                            <Path Style="{StaticResource CrossPath}"
-                                  Stroke="{StaticResource DarkerGray}"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center" />
-                        </Grid>
+                    <Button Grid.Column="1" Style="{StaticResource RoundButton}"
+                            Background="{StaticResource Gray}"
+                            Margin="4"
+                            Click="DeleteButton_OnClick">
+                        <Path Width="8"
+                              Height="8"
+                              Style="{StaticResource CrossPath}"
+                              Stroke="{StaticResource DarkerGray}" />
                     </Button>
 
                 </Grid>
@@ -116,7 +107,7 @@
                                 <StackPanel Orientation="Horizontal">
                                     <Button Style="{StaticResource PinButton}"
                                             Margin="-6 0 0 0"
-                                            Background="{StaticResource Yellow}"
+                                            Background="{StaticResource Blue}"
                                             DataContext="{Binding}"
                                             Loaded="PinButton_OnLoaded"
                                             Click="PinButton_OnClick" />
@@ -163,7 +154,7 @@
 
                                         <Button Style="{StaticResource PinButton}"
                                                 Margin="0 0 -6 0"
-                                                Background="{StaticResource Green}"
+                                                Background="{StaticResource Blue}"
                                                 Loaded="PinButton_OnLoaded"
                                                 Click="PinButton_OnClick" />
                                     </StackPanel>
