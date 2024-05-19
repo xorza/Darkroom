@@ -68,4 +68,10 @@ public partial class MainWindow : Window {
     }
 
     #endregion
+
+    private void CanvasgBg_OnMouseWheel(object sender, MouseWheelEventArgs e) {
+        var canvas = (FrameworkElement)sender;
+        var delta = e.Delta;
+        this._viewModel.CanvasScale += delta / 2000.0;
+    }
 }

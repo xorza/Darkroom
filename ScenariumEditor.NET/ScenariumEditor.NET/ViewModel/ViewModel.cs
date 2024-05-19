@@ -14,27 +14,36 @@ public enum DataType {
 }
 
 public class MainWindowViewModel : INotifyPropertyChanged {
-  
     public MainWindowViewModel() {
     }
 
-    public double Pos { get; set; } =100.0;
 
     public ObservableCollection<Node> Nodes { get; } = new();
 
     public ObservableCollection<Connection> Connections { get; } = new();
-    
+
     private Point _canvasPosition;
 
     public Point CanvasPosition {
         get => _canvasPosition;
         set {
             if (Equals(value, _canvasPosition)) return;
-            // Debug.WriteLine("New position {0}", value);
             _canvasPosition = value;
             OnPropertyChanged();
         }
     }
+
+    private double _canvasScale = 1.0;
+
+    public double CanvasScale {
+        get => _canvasScale;
+        set {
+            if (Equals(value, _canvasScale)) return;
+            _canvasScale = value;
+            OnPropertyChanged();
+        }
+    }
+
 
     private Node _selectedNode;
 
@@ -84,15 +93,16 @@ public class Input : INotifyPropertyChanged {
         }
     }
 
-    
+
     private Point _nodeCanvasPosition;
+
     public Point NodeCanvasPosition {
         get => _nodeCanvasPosition;
         set {
             if (value.Equals(_nodeCanvasPosition)) return;
             _nodeCanvasPosition = value;
             OnPropertyChanged();
-            
+
             CanvasPosition = new Point(
                 _nodeCanvasPosition.X + _nodePosition.X,
                 _nodeCanvasPosition.Y + _nodePosition.Y
@@ -108,7 +118,7 @@ public class Input : INotifyPropertyChanged {
             if (value.Equals(_nodePosition)) return;
             _nodePosition = value;
             OnPropertyChanged();
-            
+
             CanvasPosition = new Point(
                 _nodeCanvasPosition.X + _nodePosition.X,
                 _nodeCanvasPosition.Y + _nodePosition.Y
@@ -182,7 +192,7 @@ public class Output : INotifyPropertyChanged {
             if (value.Equals(_nodePosition)) return;
             _nodePosition = value;
             OnPropertyChanged();
-            
+
             CanvasPosition = new Point(
                 _nodeCanvasPosition.X + _nodePosition.X,
                 _nodeCanvasPosition.Y + _nodePosition.Y
@@ -210,15 +220,16 @@ public class Output : INotifyPropertyChanged {
             OnPropertyChanged();
         }
     }
-    
+
     private Point _nodeCanvasPosition;
+
     public Point NodeCanvasPosition {
         get => _nodeCanvasPosition;
         set {
             if (value.Equals(_nodeCanvasPosition)) return;
             _nodeCanvasPosition = value;
             OnPropertyChanged();
-            
+
             CanvasPosition = new Point(
                 _nodeCanvasPosition.X + _nodePosition.X,
                 _nodeCanvasPosition.Y + _nodePosition.Y
@@ -298,7 +309,7 @@ public class Node : INotifyPropertyChanged {
 
     public void UpdatePinPositions() {
         var value = _canvasPosition;
-        
+
         _trigger.NodeCanvasPosition = value;
 
         foreach (var input in this.Inputs) {

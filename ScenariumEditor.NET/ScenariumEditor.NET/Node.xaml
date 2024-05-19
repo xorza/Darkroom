@@ -6,6 +6,7 @@
              xmlns:sys="clr-namespace:System;assembly=mscorlib"
              xmlns:local="clr-namespace:ScenariumEditor.NET"
              xmlns:viewModel="clr-namespace:ScenariumEditor.NET.ViewModel"
+             xmlns:controls="clr-namespace:ScenariumEditor.NET.Controls"
              d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}"
              mc:Ignorable="d"
              Width="Auto"
@@ -42,19 +43,19 @@
     </UserControl.Resources>
 
     <Border BorderBrush="#444"
-            Margin="4" Padding="0"
+            Background="#444"
+            Margin="4"
+            Padding="0"
             BorderThickness="2"
-            Background="{StaticResource DarkerGray}"
-            CornerRadius="2">
+            CornerRadius="{StaticResource CornerRadius}">
 
         <StackPanel Orientation="Vertical" Margin="0">
-            <Border Background="#444"
-                    Margin="0"
-                    CornerRadius="1 1 0 0"
-                    Padding="0"
-                    MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
-                    MouseLeftButtonUp="Title_OnMouseLeftButtonUp"
-                    MouseMove="Title_OnMouseMove">
+            <Border
+                Margin="0"
+                Padding="0"
+                MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
+                MouseLeftButtonUp="Title_OnMouseLeftButtonUp"
+                MouseMove="Title_OnMouseMove">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"></ColumnDefinition>
@@ -93,77 +94,79 @@
                 </Grid>
             </Border>
 
-            <Grid Margin="0 10">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"></ColumnDefinition>
-                    <ColumnDefinition Width="15"></ColumnDefinition>
-                    <ColumnDefinition Width="*"></ColumnDefinition>
-                </Grid.ColumnDefinitions>
+            <Border
+                Background="{StaticResource DarkerGray}" CornerRadius="{StaticResource CornerRadius}">
+                <Grid Margin="0 10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"></ColumnDefinition>
+                        <ColumnDefinition Width="15"></ColumnDefinition>
+                        <ColumnDefinition Width="*"></ColumnDefinition>
+                    </Grid.ColumnDefinitions>
 
-                <ItemsControl
-                    ItemsSource="{Binding Inputs}"
-                    HorizontalAlignment="Stretch"
-                    HorizontalContentAlignment="Left">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Input}">
-
-                            <StackPanel Orientation="Horizontal">
-                                <Button Style="{StaticResource PinButton}"
-                                        Margin="-6 0 0 0"
-                                        Background="{StaticResource Yellow}"
-                                        DataContext="{Binding}"
-                                        Loaded="Input_OnLoaded" />
-                                <Label
-                                    VerticalAlignment="Center"
-                                    Content="{Binding Name}">
-                                </Label>
-
-                            </StackPanel>
-
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-
-                <StackPanel Orientation="Vertical" Grid.Column="2">
-                    <ItemsControl HorizontalContentAlignment="Right"
-                                  HorizontalAlignment="Stretch"
-
-                                  ItemsSource="{Binding Events}">
+                    <ItemsControl
+                        ItemsSource="{Binding Inputs}"
+                        HorizontalAlignment="Stretch"
+                        HorizontalContentAlignment="Left">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type viewModel:Output}">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
+                            <DataTemplate DataType="{x:Type viewModel:Input}">
 
+                                <StackPanel Orientation="Horizontal">
                                     <Button Style="{StaticResource PinButton}"
-                                            Margin="0 0 -6 0"
-                                            Background="{StaticResource Red}"
-                                            Loaded="Output_OnLoaded" />
+                                            Margin="-6 0 0 0"
+                                            Background="{StaticResource Yellow}"
+                                            DataContext="{Binding}"
+                                            Loaded="Input_OnLoaded" />
+                                    <Label
+                                        VerticalAlignment="Center"
+                                        Content="{Binding Name}">
+                                    </Label>
+
                                 </StackPanel>
+
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
 
+                    <StackPanel Orientation="Vertical" Grid.Column="2">
+                        <ItemsControl HorizontalContentAlignment="Right"
+                                      HorizontalAlignment="Stretch"
 
-                    <ItemsControl HorizontalContentAlignment="Right"
-                                  HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding Events}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type viewModel:Output}">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
-                                  ItemsSource="{Binding Outputs}">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type viewModel:Output}">
-                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
+                                        <Button Style="{StaticResource PinButton}"
+                                                Margin="0 0 -6 0"
+                                                Background="{StaticResource Red}"
+                                                Loaded="Output_OnLoaded" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
 
-                                    <Button Style="{StaticResource PinButton}"
-                                            Margin="0 0 -6 0"
-                                            Background="{StaticResource Green}"
-                                            Loaded="Output_OnLoaded" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Grid>
 
+                        <ItemsControl HorizontalContentAlignment="Right"
+                                      HorizontalAlignment="Stretch"
+
+                                      ItemsSource="{Binding Outputs}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type viewModel:Output}">
+                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                        <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
+
+                                        <Button Style="{StaticResource PinButton}"
+                                                Margin="0 0 -6 0"
+                                                Background="{StaticResource Green}"
+                                                Loaded="Output_OnLoaded" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Grid>
+            </Border>
 
         </StackPanel>
 

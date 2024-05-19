@@ -1,5 +1,6 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:system="clr-namespace:System;assembly=System.Runtime">
 
     <BooleanToVisibilityConverter x:Key="BoolToVis" />
     <Brush x:Key="HighlightOverlayBrush">#6FFF</Brush>
@@ -24,6 +25,9 @@
 
     <Brush x:Key="DarkerGray">#222</Brush>
     <Brush x:Key="DarkGray">#131313</Brush>
+    
+    
+    <CornerRadius x:Key="CornerRadius">5</CornerRadius>
     
     <Style TargetType="Border" >
         <Setter Property="SnapsToDevicePixels" Value="True" />

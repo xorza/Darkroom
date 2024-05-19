@@ -21,7 +21,7 @@
 
         Loaded="MainWindow_OnLoaded">
     <Window.Resources>
-        <utils:BindingProxy x:Key="DataContextProxy" DataContext="{Binding}"  />
+        <utils:BindingProxy x:Key="DataContextProxy" DataContext="{Binding}" />
     </Window.Resources>
 
 
@@ -53,10 +53,11 @@
 
             <controls:ClippingBorder ClipToBounds="True"
                                      Background="{StaticResource DarkGray}"
-                                     CornerRadius="5"
+                                     CornerRadius="{StaticResource CornerRadius}"
                                      MouseDown="CanvasgBg_OnButtonDown"
                                      MouseUp="CanvasgBg_OnButtonUp"
-                                     MouseMove="CanvasgBg_OnMouseMove">
+                                     MouseMove="CanvasgBg_OnMouseMove"
+                                     MouseWheel="CanvasgBg_OnMouseWheel">
                 <Grid>
                     <ItemsControl Grid.Row="0"
                                   DataContext="{Binding}"
@@ -76,9 +77,15 @@
                             <ItemsPanelTemplate>
                                 <Canvas IsItemsHost="True">
                                     <Canvas.RenderTransform>
-                                        <TranslateTransform
-                                            X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
-                                            Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                        <TransformGroup>
+                                            <ScaleTransform
+                                                ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
+                                                ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
+
+                                            <TranslateTransform
+                                                X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
+                                                Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                       </TransformGroup>
                                     </Canvas.RenderTransform>
                                 </Canvas>
                             </ItemsPanelTemplate>
@@ -97,10 +104,15 @@
                             <ItemsPanelTemplate>
                                 <Canvas IsItemsHost="True">
                                     <Canvas.RenderTransform>
-                                        <TranslateTransform
-                                            
-                                            X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
-                                            Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                        <TransformGroup>
+                                            <ScaleTransform
+                                                ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
+                                                ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
+
+                                            <TranslateTransform
+                                                X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
+                                                Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                       </TransformGroup>
                                     </Canvas.RenderTransform>
                                 </Canvas>
                             </ItemsPanelTemplate>
