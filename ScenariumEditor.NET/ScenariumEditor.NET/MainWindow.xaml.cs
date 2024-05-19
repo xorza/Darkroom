@@ -106,6 +106,7 @@ public partial class MainWindow : Window {
                 if (_nearestPin != null) {
                     _viewModel.Connections.Add(new Connection(_activePin, _nearestPin));
                     CancelNewConnection();
+                    _canvasState = CanvasState.Idle;
                 }
 
                 return;
