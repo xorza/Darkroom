@@ -59,18 +59,17 @@
                                      MouseMove="CanvasgBg_OnMouseMove"
                                      MouseWheel="CanvasgBg_OnMouseWheel">
                 <Grid>
+                    <!-- connections -->
                     <ItemsControl Grid.Row="0"
                                   DataContext="{Binding}"
                                   ItemsSource="{Binding Connections}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Connection}">
-                                <local:Connection InputPosition="{Binding Input.CanvasPosition}"
+                                <local:ConnectionControl InputPosition="{Binding Input.CanvasPosition}"
                                                   OutputPosition="{Binding Output.CanvasPosition}"
                                                   BorderBrush="{StaticResource Blue}"
                                                   HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                  Thickness="2"
-                                                  Width="500"
-                                                  Height="500" />
+                                                  Thickness="2" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -85,19 +84,52 @@
                                             <TranslateTransform
                                                 X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
                                                 Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
-                                       </TransformGroup>
+                                        </TransformGroup>
                                     </Canvas.RenderTransform>
                                 </Canvas>
                             </ItemsPanelTemplate>
                         </ItemsControl.ItemsPanel>
                     </ItemsControl>
 
+                    <!-- new connection -->
+                    <Canvas x:Name="NewConnectionCanvas">
+                        <Canvas.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform
+                                    ScaleX="{Binding CanvasScale}"
+                                    ScaleY="{Binding CanvasScale}" />
+
+                                <TranslateTransform
+                                    X="{Binding CanvasPosition.X}"
+                                    Y="{Binding CanvasPosition.Y}" />
+                            </TransformGroup>
+                        </Canvas.RenderTransform>
+                        <Canvas.Style>
+                            <Style TargetType="Canvas">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding ActivePin}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Hidden" />
+                                    </DataTrigger>  
+                                </Style.Triggers>
+                            </Style>
+                        </Canvas.Style>
+
+                        <local:ConnectionControl InputPosition="{Binding ActivePin.CanvasPosition}"
+                                          OutputPosition="{Binding MouseCanvasPosition}"
+                                          BorderBrush="{StaticResource Red}"
+                                          HoverBrush="{StaticResource Red}"
+                                          Thickness="2" />
+                    </Canvas>
+
+
+                    <!-- nodes -->
                     <ItemsControl Grid.Row="0"
                                   ItemsSource="{Binding Nodes}"
                                   DataContext="{Binding}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">
-                                <local:Node NodeDataContext="{Binding}" />
+                                <local:Node NodeDataContext="{Binding}"
+                                            PinActivated="Node_OnPinActivated"/>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -112,7 +144,7 @@
                                             <TranslateTransform
                                                 X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
                                                 Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
-                                       </TransformGroup>
+                                        </TransformGroup>
                                     </Canvas.RenderTransform>
                                 </Canvas>
                             </ItemsPanelTemplate>

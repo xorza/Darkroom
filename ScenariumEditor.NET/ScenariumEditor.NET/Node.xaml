@@ -66,7 +66,10 @@
                             VerticalAlignment="Top"
                             HorizontalAlignment="Left"
                             Margin="-6 1 0 0"
-                            Background="{StaticResource Red}" />
+                            Background="{StaticResource Red}"
+                            DataContext="{Binding Trigger}"
+                            Loaded="PinButton_OnLoaded"
+                            Click="PinButton_OnClick" />
 
                     <Label Grid.Column="0" Content="{Binding Name}"
                            VerticalAlignment="Center" Margin="8 0" FontWeight="Bold">
@@ -108,14 +111,15 @@
                         HorizontalAlignment="Stretch"
                         HorizontalContentAlignment="Left">
                         <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="{x:Type viewModel:Input}">
+                            <DataTemplate DataType="{x:Type viewModel:Pin}">
 
                                 <StackPanel Orientation="Horizontal">
                                     <Button Style="{StaticResource PinButton}"
                                             Margin="-6 0 0 0"
                                             Background="{StaticResource Yellow}"
                                             DataContext="{Binding}"
-                                            Loaded="Input_OnLoaded" />
+                                            Loaded="PinButton_OnLoaded"
+                                            Click="PinButton_OnClick" />
                                     <Label
                                         VerticalAlignment="Center"
                                         Content="{Binding Name}">
@@ -133,14 +137,15 @@
 
                                       ItemsSource="{Binding Events}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type viewModel:Output}">
+                                <DataTemplate DataType="{x:Type viewModel:Pin}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
                                         <Button Style="{StaticResource PinButton}"
                                                 Margin="0 0 -6 0"
                                                 Background="{StaticResource Red}"
-                                                Loaded="Output_OnLoaded" />
+                                                Loaded="PinButton_OnLoaded"
+                                                Click="PinButton_OnClick" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -152,14 +157,15 @@
 
                                       ItemsSource="{Binding Outputs}">
                             <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type viewModel:Output}">
+                                <DataTemplate DataType="{x:Type viewModel:Pin}">
                                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                                         <Label Content="{Binding Name}" VerticalAlignment="Center"></Label>
 
                                         <Button Style="{StaticResource PinButton}"
                                                 Margin="0 0 -6 0"
                                                 Background="{StaticResource Green}"
-                                                Loaded="Output_OnLoaded" />
+                                                Loaded="PinButton_OnLoaded"
+                                                Click="PinButton_OnClick" />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

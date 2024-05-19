@@ -8,10 +8,12 @@ using ScenariumEditor.NET.ViewModel;
 namespace ScenariumEditor.NET;
 
 public partial class Node : UserControl {
-
     public Node() {
         InitializeComponent();
     }
+
+    // event for activating a Pin
+    public event EventHandler<Pin> PinActivated = null;
 
     public static readonly DependencyProperty NodeDataContextProperty = DependencyProperty.Register(
         nameof(NodeDataContext),
@@ -31,9 +33,10 @@ public partial class Node : UserControl {
     }
 
     #region dragging
-    private bool _isDragging=false;
+
+    private bool _isDragging = false;
     private Point _headerDragMousePosition;
-    
+
     private void Title_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender!;
         if (header.CaptureMouse()) {
@@ -49,29 +52,31 @@ public partial class Node : UserControl {
     }
 
     private void Title_OnMouseMove(object sender, MouseEventArgs e) {
-        if( !_isDragging ) return;
-        
+        if (!_isDragging) return;
+
         var header = (FrameworkElement)sender!;
         var currentPosition = e.GetPosition(header);
         var delta = currentPosition - _headerDragMousePosition;
 
         NodeDataContext.CanvasPosition += delta;
     }
+
     #endregion
 
-    private void Input_OnLoaded(object sender, RoutedEventArgs e) {
-        var input = (FrameworkElement)sender!;
-        var position = input.TranslatePoint(new Point(input.ActualWidth / 2.0f, input.ActualHeight / 2.0f), this);
-        ((Input)input.DataContext).NodePosition = position;
-    }
-
-    private void Output_OnLoaded(object sender, RoutedEventArgs e) {
-        var output = (FrameworkElement)sender!;
-        var position = output.TranslatePoint(new Point(output.ActualWidth / 2.0f, output.ActualHeight / 2.0f), this);
-        ((Output)output.DataContext).NodePosition = position;
+    private void PinButton_OnLoaded(object sender, RoutedEventArgs e) {
+        var element = (FrameworkElement)sender!;
+        var position = element.TranslatePoint(new Point(element.ActualWidth / 2.0f, element.ActualHeight / 2.0f), this);
+        var pin = (Pin)element.DataContext!;
+        pin.NodePosition = position;
     }
 
     private void Node_OnLoaded(object sender, RoutedEventArgs e) {
         NodeDataContext.UpdatePinPositions();
+    }
+
+    private void PinButton_OnClick(object sender, RoutedEventArgs e) {
+        var element = (FrameworkElement)sender;
+        var pin = (Pin)element.DataContext!;
+        PinActivated?.Invoke(this, pin);
     }
 }

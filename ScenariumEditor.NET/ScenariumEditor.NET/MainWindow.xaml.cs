@@ -22,7 +22,6 @@ public partial class MainWindow : Window {
     private readonly MainWindowViewModel _viewModel = new DesignMainWindowViewModel();
 
     public MainWindow() {
-        
         InitializeComponent();
 
         this.DataContext = _viewModel;
@@ -49,7 +48,7 @@ public partial class MainWindow : Window {
         var canvas = (FrameworkElement)sender;
         if (canvas.CaptureMouse()) {
             _isDragging = true;
-            _canvasDragMousePosition = e.GetPosition(canvas) -  this._viewModel.CanvasPosition;
+            _canvasDragMousePosition = e.GetPosition(canvas) - this._viewModel.CanvasPosition;
         }
     }
 
@@ -60,11 +59,14 @@ public partial class MainWindow : Window {
     }
 
     private void CanvasgBg_OnMouseMove(object sender, MouseEventArgs e) {
-        if (!_isDragging) return;
         var canvas = (FrameworkElement)sender;
-        var currentPosition = e.GetPosition(canvas);
-        var delta = currentPosition - _canvasDragMousePosition;
-        this._viewModel.CanvasPosition = delta;
+        var mousePosition = e.GetPosition(canvas);
+        _viewModel.MouseCanvasPosition = mousePosition;
+        
+        if (_isDragging) {
+            var delta = mousePosition - _canvasDragMousePosition;
+            this._viewModel.CanvasPosition = delta;
+        }
     }
 
     #endregion
@@ -73,5 +75,14 @@ public partial class MainWindow : Window {
         var canvas = (FrameworkElement)sender;
         var delta = e.Delta;
         this._viewModel.CanvasScale += delta / 2000.0;
+    }
+
+    private void Node_OnPinActivated(object sender, Pin e) {
+        if (_viewModel.ActivePin != null) {
+            _viewModel.Connections.Add(new Connection(_viewModel.ActivePin, e));
+            _viewModel.ActivePin = null;
+        } else {
+            _viewModel.ActivePin = e;
+        }
     }
 }

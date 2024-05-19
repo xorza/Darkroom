@@ -6,42 +6,42 @@ using System.Windows.Media;
 namespace ScenariumEditor.NET;
 
 public class ConnectionEventArgs : RoutedEventArgs {
-    public ConnectionEventArgs(Connection connection) {
-        Connection = connection;
+    public ConnectionEventArgs(ConnectionControl connectionControl) {
+        ConnectionControl = connectionControl;
     }
 
-    public Connection Connection { get; }
+    public ConnectionControl ConnectionControl { get; }
 }
 
-public class Connection : ClickControl {
+public class ConnectionControl : ClickControl {
     public static readonly DependencyProperty InputPositionDependencyProperty = DependencyProperty.Register(
         nameof(InputPosition),
         typeof(Point),
-        typeof(Connection),
+        typeof(ConnectionControl),
         new PropertyMetadata(Position_PropertyChangedCallback)
     );
 
     public static readonly DependencyProperty OutputPositionDependencyProperty = DependencyProperty.Register(
         nameof(OutputPosition),
         typeof(Point),
-        typeof(Connection),
+        typeof(ConnectionControl),
         new PropertyMetadata(Position_PropertyChangedCallback)
     );
 
     public static readonly DependencyProperty HoverBrushDependencyProperty = DependencyProperty.Register(
         nameof(HoverBrush),
         typeof(Brush),
-        typeof(Connection),
+        typeof(ConnectionControl),
         new PropertyMetadata(Brushes.Coral)
     );
     
-    public Connection() {
+    public ConnectionControl() {
         LeftButtonClick += LeftButtonClickHandler;
         MouseDoubleClick += MouseButtonEventHandler;
     }
 
     public static readonly DependencyProperty ThicknessProperty = DependencyProperty.Register(
-        nameof(Thickness), typeof(double), typeof(Connection), new PropertyMetadata(default(double)));
+        nameof(Thickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(default(double)));
 
     public double Thickness {
         get { return (double)GetValue(ThicknessProperty); }
