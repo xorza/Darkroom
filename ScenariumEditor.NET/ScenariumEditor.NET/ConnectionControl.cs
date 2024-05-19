@@ -18,38 +18,42 @@ public class ConnectionControl : ClickControl {
         nameof(Pin1Position),
         typeof(Point),
         typeof(ConnectionControl),
-        new PropertyMetadata(Position_PropertyChangedCallback)
+        new PropertyMetadata(OnPropertyChangedCallback_InvalidateVisual)
     );
 
     public static readonly DependencyProperty OutputPositionDependencyProperty = DependencyProperty.Register(
         nameof(Pin2Position),
         typeof(Point),
         typeof(ConnectionControl),
-        new PropertyMetadata(Position_PropertyChangedCallback)
+        new PropertyMetadata(OnPropertyChangedCallback_InvalidateVisual)
     );
 
     public static readonly DependencyProperty HoverBrushDependencyProperty = DependencyProperty.Register(
         nameof(HoverBrush),
         typeof(Brush),
         typeof(ConnectionControl),
-        new PropertyMetadata(Brushes.Coral)
+        new PropertyMetadata(Brushes.Coral, OnPropertyChangedCallback_InvalidateVisual)
     );
-    
+
     public ConnectionControl() {
         LeftButtonClick += LeftButtonClickHandler;
         MouseDoubleClick += MouseButtonEventHandler;
     }
 
     public static readonly DependencyProperty ThicknessProperty = DependencyProperty.Register(
-        nameof(Thickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(2.0));
+        nameof(Thickness), typeof(double), typeof(ConnectionControl),
+        new PropertyMetadata(2.0, OnPropertyChangedCallback_InvalidateVisual)
+    );
 
     public double Thickness {
         get { return (double)GetValue(ThicknessProperty); }
         set { SetValue(ThicknessProperty, value); }
     }
-    
+
     public static readonly DependencyProperty HoverThicknessProperty = DependencyProperty.Register(
-        nameof(HoverThickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(3.0));
+        nameof(HoverThickness), typeof(double), typeof(ConnectionControl),
+        new PropertyMetadata(3.0, OnPropertyChangedCallback_InvalidateVisual)
+    );
 
     public double HoverThickness {
         get { return (double)GetValue(HoverThicknessProperty); }
@@ -71,7 +75,30 @@ public class ConnectionControl : ClickControl {
         set => SetValue(HoverBrushDependencyProperty, value);
     }
 
-    private static void Position_PropertyChangedCallback(DependencyObject d, DependencyPropertyChangedEventArgs e) {
+    public static readonly DependencyProperty DeletedBrushProperty = DependencyProperty.Register(
+        nameof(DeletedBrush), typeof(Brush), typeof(ConnectionControl),
+        new PropertyMetadata(Brushes.IndianRed, OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public Brush DeletedBrush {
+        get { return (Brush)GetValue(DeletedBrushProperty); }
+        set { SetValue(DeletedBrushProperty, value); }
+    }
+
+    public static readonly DependencyProperty IsDeletedProperty = DependencyProperty.Register(
+        nameof(IsDeleted), typeof(bool), typeof(ConnectionControl),
+        new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public bool IsDeleted {
+        get { return (bool)GetValue(IsDeletedProperty); }
+        set { SetValue(IsDeletedProperty, value); }
+    }
+
+    public PathGeometry Geometry { get; } = new();
+
+    private static void OnPropertyChangedCallback_InvalidateVisual(DependencyObject d,
+        DependencyPropertyChangedEventArgs e) {
         ((UIElement)d).InvalidateVisual();
     }
 
@@ -83,7 +110,7 @@ public class ConnectionControl : ClickControl {
 
     protected override void OnRender(DrawingContext drawingContext) {
         base.OnRender(drawingContext);
-        
+
         Point[] points = [
             new(Pin1Position.X - 5, Pin1Position.Y),
             new(Pin1Position.X - 50, Pin1Position.Y),
@@ -91,20 +118,25 @@ public class ConnectionControl : ClickControl {
             new(Pin2Position.X + 5, Pin2Position.Y)
         ];
 
-        var pathFigure = new PathFigure {
-            StartPoint = points[0]
-        };
-        pathFigure.Segments.Add(
-            new BezierSegment(points[1], points[2], points[3], true));
-        pathFigure.IsClosed = false;
+        var pathFigure = new PathFigure(
+            points[0],
+            [new BezierSegment(points[1], points[2], points[3], true)],
+            false
+        );
 
-        PathGeometry path = new();
-        path.Figures.Add(pathFigure);
+        Geometry.Clear();
+        Geometry.Figures.Add(pathFigure);
 
-        drawingContext.DrawGeometry(null, new Pen(Brushes.Transparent, 5), path);
-        drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), path);
-        if (IsMouseOver) {
-            drawingContext.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), path);
+        // transparent line to make the connection easier to click
+        drawingContext.DrawGeometry(null, new Pen(Brushes.Transparent, 5), Geometry);
+
+
+        if (IsDeleted) {
+            drawingContext.DrawGeometry(null, new Pen(DeletedBrush, Thickness), Geometry);
+        } else if (IsMouseOver) {
+            drawingContext.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), Geometry);
+        } else {
+            drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), Geometry);
         }
     }
 }

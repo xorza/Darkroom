@@ -67,7 +67,10 @@
                                 <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
                                                          Pin2Position="{Binding Output.CanvasPosition}"
                                                          BorderBrush="{StaticResource Blue}"
-                                                         HoverBrush="{StaticResource HighlightOverlayBrush}" />
+                                                         HoverBrush="{StaticResource HighlightOverlayBrush}"
+                                                         DeletedBrush="{StaticResource DarkRed}"
+                                                         Loaded="ConnectionControl_OnLoaded"
+                                                         Unloaded="ConnectionControl_OnUnloaded"/>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -90,7 +93,7 @@
                     </ItemsControl>
 
                     <!-- new connection -->
-                    <Canvas x:Name="NewConnectionCanvas" Visibility="Hidden">
+                    <Canvas>
                         <Canvas.RenderTransform>
                             <TransformGroup>
                                 <ScaleTransform
@@ -104,11 +107,18 @@
                         </Canvas.RenderTransform>
 
                         <local:ConnectionControl x:Name="NewConnectionControl"
+                                                 Visibility="Collapsed"
                                                  Pin1Position="{Binding Input.CanvasPosition}"
                                                  Pin2Position="{Binding Output.CanvasPosition}"
-                                                 BorderBrush="{StaticResource Red}"
-                                                 HoverBrush="{StaticResource Red}" 
-                                                 HoverThickness="2"/>
+                                                 BorderBrush="{StaticResource Green}"
+                                                 HoverBrush="{StaticResource LiteGreen}"
+                                                 HoverThickness="2" />
+
+                        <Path x:Name="CuttingPath"
+                              Visibility="Collapsed" 
+                              StrokeThickness="3" 
+                              Stroke="{StaticResource Red}" />
+                        
                     </Canvas>
 
 
