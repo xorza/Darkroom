@@ -10,16 +10,15 @@ namespace ScenariumEditor.NET;
 public partial class Node : UserControl {
     public Node() {
         InitializeComponent();
-
-        this.MouseDown += (sender, args) => { args.Handled = true; };
     }
 
     private void Node_OnLoaded(object sender, RoutedEventArgs e) {
         NodeDataContext.UpdatePinPositions();
     }
 
-    public event EventHandler<Pin> PinActivated = null;
+    public event EventHandler<Pin> PinClick = null;
     public event EventHandler DeletePressed = null;
+    public event EventHandler Selected = null;
 
     public static readonly DependencyProperty NodeDataContextProperty = DependencyProperty.Register(
         nameof(NodeDataContext),
@@ -45,6 +44,7 @@ public partial class Node : UserControl {
 
     private void Header_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender!;
+        Selected?.Invoke(this, EventArgs.Empty);
         if (header.CaptureMouse()) {
             _headerDragMousePosition = e.GetPosition(header);
             _isDragging = true;
@@ -81,10 +81,15 @@ public partial class Node : UserControl {
     private void PinButton_OnClick(object sender, RoutedEventArgs e) {
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
-        PinActivated?.Invoke(this, pin);
+        PinClick?.Invoke(this, pin);
     }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e) {
       DeletePressed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void Node_OnMouseDown(object sender, MouseButtonEventArgs e) {
+        Selected?.Invoke(this, EventArgs.Empty);
+        e.Handled = true;
     }
 }

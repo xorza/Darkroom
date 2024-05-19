@@ -51,11 +51,10 @@
                 <ColumnDefinition Width="Auto" MinWidth="250" />
             </Grid.ColumnDefinitions>
 
-            <controls:ClippingBorder ClipToBounds="True"
+            <controls:ClippingBorder x:Name="GraphCanvasBg"
+                                     ClipToBounds="True"
                                      Background="{StaticResource DarkGray}"
                                      CornerRadius="{StaticResource CornerRadius}"
-                                     MouseDown="CanvasgBg_OnButtonDown"
-                                     MouseWheel="CanvasgBg_OnMouseWheel"
                                      Loaded="CanvasgBg_OnLoaded">
                 <Grid>
                     <!-- connections -->
@@ -70,7 +69,7 @@
                                                          HoverBrush="{StaticResource HighlightOverlayBrush}"
                                                          DeletedBrush="{StaticResource Yellow}"
                                                          Loaded="ConnectionControl_OnLoaded"
-                                                         Unloaded="ConnectionControl_OnUnloaded"/>
+                                                         Unloaded="ConnectionControl_OnUnloaded" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -115,10 +114,10 @@
                                                  HoverThickness="2" />
 
                         <Path x:Name="CuttingPath"
-                              Visibility="Collapsed" 
-                              StrokeThickness="3" 
+                              Visibility="Collapsed"
+                              StrokeThickness="3"
                               Stroke="{StaticResource Red}" />
-                        
+
                     </Canvas>
 
 
@@ -129,8 +128,9 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">
                                 <local:Node NodeDataContext="{Binding}"
-                                            PinActivated="Node_OnPinActivated" 
-                                            DeletePressed="Node_OnDeletePressed"/>
+                                            PinClick="Node_OnPinClick"
+                                            DeletePressed="Node_OnDeletePressed"
+                                            Selected="Node_OnSelected" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>

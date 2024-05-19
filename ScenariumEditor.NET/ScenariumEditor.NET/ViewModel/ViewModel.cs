@@ -45,7 +45,16 @@ public class MainWindowViewModel : INotifyPropertyChanged {
         get => _selectedNode;
         set {
             if (ReferenceEquals(value, _selectedNode)) return;
+            if (_selectedNode != null) {
+                _selectedNode.IsSelected = false;
+            }
+
             _selectedNode = value;
+            
+            if (_selectedNode != null) {
+                _selectedNode.IsSelected = true;
+            }
+
             OnPropertyChanged();
         }
     }
@@ -240,7 +249,7 @@ public class Node : INotifyPropertyChanged {
 
     public bool IsSelected {
         get => _isSelected;
-        set {
+        internal set {
             if (value == _isSelected) return;
             _isSelected = value;
             OnPropertyChanged();
@@ -349,6 +358,7 @@ public class Connection : INotifyPropertyChanged {
 public class DesignNode : Node {
     public DesignNode() {
         Name = "Node 1";
+        IsSelected = false;
         Inputs.Add(new Pin {
             Name = "Input 1",
             DataType = DataType.Number,

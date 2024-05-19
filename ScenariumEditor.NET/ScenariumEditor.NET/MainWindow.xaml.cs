@@ -36,56 +36,162 @@ public partial class MainWindow : Window {
     private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
     }
 
-
     private void CanvasgBg_OnLoaded(object sender, RoutedEventArgs e) {
-        var uiElement = (UIElement)sender;
-        uiElement.MouseMove += CanvasgBg_OnMouseMove_CanvasDragging;
-        uiElement.MouseUp += CanvasgBg_OnButtonUp;
+        var graphCanvas = (UIElement)sender;
 
-        uiElement.MouseMove += CanvasgBg_OnMouseMove_NewConnection;
-        uiElement.PreviewMouseRightButtonDown += CanvasgBg_OnPreviewMouseRightButtonDown_NewConnection;
-        uiElement.PreviewMouseLeftButtonDown += CanvasgBg_OnPreviewMouseLeftButtonDown_NewConnection;
-
-        uiElement.MouseLeftButtonDown += CanvasgBg_OnMouseLeftButtonDown_CuttingConnections;
-        uiElement.MouseMove += CanvasgBg_OnMouseMove_CuttingConnections;
-        uiElement.MouseLeftButtonUp += CanvasgBg_OnMouseLeftButtonUp_CuttingConnections;
-        uiElement.MouseRightButtonUp += CanvasgBg_OnMouseRightButtonUp_CuttingConnections;
+        graphCanvas.MouseDown += GraphCanvasBg_OnButtonDown;
+        graphCanvas.MouseUp += GraphCanvasBg_OnButtonUp;
+        graphCanvas.MouseMove += GraphCanvasBg_OnMouseMove;
+        graphCanvas.MouseWheel += CanvasgBg_OnMouseWheel;
+        
     }
 
-    #region canvas dragging
+    #region graph canvas events
 
-    private bool _isDragging = false;
-    private Vector _canvasDragMousePosition;
+    enum CanvasState {
+        Idle,
+        Dragging,
+        StartCuttingConnections,
+        CuttingConnections,
+        NewConnection
+    };
 
-    private void CanvasgBg_OnButtonDown(object sender, MouseButtonEventArgs e) {
-        if (e.MiddleButton != MouseButtonState.Pressed) {
-            return;
+    private CanvasState _canvasState = CanvasState.Idle;
+    private Point _currentMouseCanvasPosition;
+    private Point _canvasMousePositionWithOffset;
+
+    private void GraphCanvasBg_OnButtonDown(object sender, MouseButtonEventArgs e) {
+        _currentMouseCanvasPosition = e.GetPosition(GraphCanvasBg);
+        _canvasMousePositionWithOffset = _currentMouseCanvasPosition - _viewModel.CanvasPosition.ToVector();
+        e.Handled = true;
+
+        switch (_canvasState) {
+            case CanvasState.Idle:
+                // dragging canvas
+                if (e.ChangedButton == MouseButton.Middle) {
+                    if (StartCanvasDragging()) {
+                        _canvasState = CanvasState.Dragging;
+                    }
+
+                    return;
+                }
+
+                // cutting connections
+                if (e.ChangedButton == MouseButton.Left) {
+                    if (StartCuttingConnections()) {
+                        _canvasState = CanvasState.StartCuttingConnections;
+                    }
+
+                    return;
+                }
+
+                return;
+
+            case CanvasState.Dragging:
+                StopCanvasDragging();
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.StartCuttingConnections:
+                CancelCuttingConnections();
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.CuttingConnections:
+                CancelCuttingConnections();
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.NewConnection:
+                if (_nearestPin != null) {
+                    _viewModel.Connections.Add(new Connection(_activePin, _nearestPin));
+                    CancelNewConnection();
+                }
+
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException();
         }
+    }
 
-        var canvas = (FrameworkElement)sender;
-        if (canvas.CaptureMouse()) {
-            _isDragging = true;
-            _canvasDragMousePosition = e.GetPosition(canvas) - this._viewModel.CanvasPosition;
+    private void GraphCanvasBg_OnButtonUp(object sender, MouseButtonEventArgs e) {
+        _currentMouseCanvasPosition = e.GetPosition(GraphCanvasBg);
+        _canvasMousePositionWithOffset = _currentMouseCanvasPosition - _viewModel.CanvasPosition.ToVector();
+        e.Handled = true;
+
+        switch (_canvasState) {
+            case CanvasState.Idle:
+                break;
+
+            case CanvasState.Dragging:
+                StopCanvasDragging();
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.StartCuttingConnections:
+                CancelCuttingConnections();
+
+                // deselect node
+                if (e.ChangedButton == MouseButton.Left) {
+                    _viewModel.SelectedNode = null;
+                }
+
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.CuttingConnections:
+                if (e.ChangedButton == MouseButton.Left) {
+                    ApplyCuttingConnections();
+                } else {
+                    CancelCuttingConnections();
+                }
+                
+                _canvasState = CanvasState.Idle;
+                return;
+
+            case CanvasState.NewConnection:
+                CancelNewConnection();
+                _canvasState = CanvasState.Idle;
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException();
         }
     }
 
-    private void CanvasgBg_OnButtonUp(object sender, MouseButtonEventArgs e) {
-        var canvas = (FrameworkElement)sender;
-        canvas.ReleaseMouseCapture();
-        _isDragging = false;
-    }
+    private void GraphCanvasBg_OnMouseMove(object sender, MouseEventArgs e) {
+        _currentMouseCanvasPosition = e.GetPosition(GraphCanvasBg);
+        _canvasMousePositionWithOffset = _currentMouseCanvasPosition - _viewModel.CanvasPosition.ToVector();
+        e.Handled = true;
 
-    private void CanvasgBg_OnMouseMove_CanvasDragging(object sender, MouseEventArgs e) {
-        var canvas = (FrameworkElement)sender;
-        var mousePosition = e.GetPosition(canvas);
+        switch (_canvasState) {
+            case CanvasState.Idle:
+                break;
 
-        if (_isDragging) {
-            var delta = mousePosition - _canvasDragMousePosition;
-            this._viewModel.CanvasPosition = delta;
+            case CanvasState.Dragging:
+                this._viewModel.CanvasPosition = _currentMouseCanvasPosition - _canvasDragStartMousePosition;
+                return;
+
+            case CanvasState.StartCuttingConnections:
+                if (ContinueCuttingConnections()) {
+                    _canvasState = CanvasState.CuttingConnections;
+                }
+
+                return;
+
+            case CanvasState.CuttingConnections:
+                ContinueCuttingConnections();
+                return;
+
+            case CanvasState.NewConnection:
+                ContinueNewConnection();
+                return;
+
+            default:
+                throw new ArgumentOutOfRangeException();
         }
     }
-
-    #endregion
 
     private void CanvasgBg_OnMouseWheel(object sender, MouseWheelEventArgs e) {
         var canvas = (FrameworkElement)sender;
@@ -93,88 +199,99 @@ public partial class MainWindow : Window {
         this._viewModel.CanvasScale += delta / 2000.0;
     }
 
+    #endregion
+
+    #region canvas dragging
+
+    private Vector _canvasDragStartMousePosition;
+
+    private bool StartCanvasDragging() {
+        if (!GraphCanvasBg.CaptureMouse()) return false;
+
+        _canvasDragStartMousePosition = _currentMouseCanvasPosition - this._viewModel.CanvasPosition;
+        return true;
+    }
+
+    private void StopCanvasDragging() {
+        GraphCanvasBg.ReleaseMouseCapture();
+    }
+
+    #endregion
+
     #region new connection
 
     const double PinConnectionDistance = 80;
 
-    private Point _canvasMousePosition;
-    private bool _firstPinSelected = false;
     private Pin _activePin = null;
     private Pin _tempMousePin = null;
     private Pin _nearestPin = null;
 
-    private void Node_OnPinActivated(object sender, Pin e) {
-        if (!_firstPinSelected) {
-            _firstPinSelected = true;
+    private void Node_OnPinClick(object sender, Pin e) {
+        switch (_canvasState) {
+            case CanvasState.Dragging:
+            case CanvasState.StartCuttingConnections:
+            case CanvasState.CuttingConnections:
+            case CanvasState.Idle:
+                CancelCuttingConnections();
+                StopCanvasDragging();
+                
+                _activePin = e;
+                _tempMousePin = new Pin {
+                    DataType = e.DataType,
+                    PinType = e.PinType.GetOpposite(),
+                    CanvasPosition = _canvasMousePositionWithOffset
+                };
+                NewConnectionControl.Visibility = Visibility.Visible;
 
-            _activePin = e;
-            _tempMousePin = new Pin {
-                DataType = e.DataType,
-                PinType = e.PinType.GetOpposite(),
-                CanvasPosition = _canvasMousePosition
-            };
-            NewConnectionControl.Visibility = Visibility.Visible;
-
-            NewConnectionControl.DataContext = new Connection(_activePin, _tempMousePin);
-            // NewConnectionControl.CaptureMouse();
-        } else {
-            if (e.DataType == _activePin.DataType && e.PinType.GetOpposite() == _activePin.PinType) {
-                _viewModel.Connections.Add(new Connection(_activePin, e));
-                CancelNewConnection();
-            }
+                NewConnectionControl.DataContext = new Connection(_activePin, _tempMousePin);
+                // NewConnectionControl.CaptureMouse();
+                
+                _canvasState = CanvasState.NewConnection;
+                return;
+            
+            case CanvasState.NewConnection:
+                if (e.DataType == _activePin.DataType && e.PinType.GetOpposite() == _activePin.PinType) {
+                    _viewModel.Connections.Add(new Connection(_activePin, e));
+                    CancelNewConnection();
+                    _canvasState = CanvasState.Idle;
+                }
+                return;
+            
+            default:
+                throw new ArgumentOutOfRangeException();
         }
     }
 
-    private void CanvasgBg_OnMouseMove_NewConnection(object sender, MouseEventArgs e) {
-        var canvas = (FrameworkElement)sender;
-        _canvasMousePosition =
-            e.GetPosition(canvas) - new Vector(_viewModel.CanvasPosition.X, _viewModel.CanvasPosition.Y);
+    private void ContinueNewConnection() {
+        Debug.Assert(_tempMousePin != null);
 
-        if (_tempMousePin != null) {
-            _tempMousePin.CanvasPosition = _canvasMousePosition;
-            _nearestPin = _viewModel.Nodes
-                .SelectMany(
-                    node => node.Events
-                        .Concat(node.Inputs)
-                        .Concat(node.Outputs)
-                        .Concat([node.Trigger])
-                )
-                .Where(pin => pin.PinType == _tempMousePin.PinType && pin.DataType == _tempMousePin.DataType)
-                .Where(pin => (pin.CanvasPosition - _tempMousePin.CanvasPosition).LengthSquared < PinConnectionDistance)
-                .MinBy(pin => (pin.CanvasPosition - _tempMousePin.CanvasPosition).LengthSquared);
-            if (_nearestPin != null) {
-                _tempMousePin.CanvasPosition = _nearestPin.CanvasPosition;
-            }
+        _tempMousePin.CanvasPosition = _canvasMousePositionWithOffset;
+        _nearestPin = _viewModel.Nodes
+            .SelectMany(
+                node => node.Events
+                    .Concat(node.Inputs)
+                    .Concat(node.Outputs)
+                    .Concat([node.Trigger])
+            )
+            .Where(pin => pin.PinType == _tempMousePin.PinType && pin.DataType == _tempMousePin.DataType)
+            .Where(pin => (pin.CanvasPosition - _tempMousePin.CanvasPosition).LengthSquared < PinConnectionDistance)
+            .MinBy(pin => (pin.CanvasPosition - _tempMousePin.CanvasPosition).LengthSquared);
+        if (_nearestPin != null) {
+            _tempMousePin.CanvasPosition = _nearestPin.CanvasPosition;
         }
     }
 
     private void CancelNewConnection() {
-        _firstPinSelected = false;
         _tempMousePin = null;
         NewConnectionControl.Visibility = Visibility.Collapsed;
         NewConnectionControl.DataContext = null;
-    }
-
-    private void CanvasgBg_OnPreviewMouseLeftButtonDown_NewConnection(object sender, MouseButtonEventArgs e) {
-        if (_firstPinSelected && _nearestPin != null) {
-            _viewModel.Connections.Add(new Connection(_activePin, _nearestPin));
-            CancelNewConnection();
-            e.Handled = true;
-        }
-    }
-
-    private void CanvasgBg_OnPreviewMouseRightButtonDown_NewConnection(object sender, MouseButtonEventArgs e) {
-        if (_firstPinSelected) {
-            CancelNewConnection();
-            e.Handled = true;
-        }
     }
 
     #endregion
 
     #region cut connections
 
-    public static Point[] GetIntersectionPoints(Geometry g1, Geometry g2) {
+    private static Point[] GetIntersectionPoints(Geometry g1, Geometry g2) {
         Geometry og1 = g1.GetWidenedPathGeometry(new Pen(Brushes.Black, 1.0));
         Geometry og2 = g2.GetWidenedPathGeometry(new Pen(Brushes.Black, 1.0));
 
@@ -190,82 +307,69 @@ public partial class MainWindow : Window {
         return result;
     }
 
-    private bool _cuttingConnections = false;
-    private Point _previousMousePosition;
+    private Point _previousCanvasMousePosition;
     private PathGeometry _cuttingPathGeometry;
     private PathFigure _cuttingPathFigure;
 
     private readonly List<ConnectionControl> _connectionControls = new();
 
-    private void CanvasgBg_OnMouseLeftButtonDown_CuttingConnections(object sender, MouseButtonEventArgs e) {
-        var uiElement = (UIElement)sender;
-        if (uiElement.CaptureMouse()) {
-            _cuttingConnections = true;
-            _previousMousePosition = e.GetPosition(uiElement) - _viewModel.CanvasPosition.ToVector();
+    private bool StartCuttingConnections() {
+        if (!GraphCanvasBg.CaptureMouse())
+            return false;
 
-            _cuttingPathFigure = new PathFigure(
-                new Point(),
-                [new LineSegment(_previousMousePosition, false)],
-                false);
+        _previousCanvasMousePosition = _currentMouseCanvasPosition - _viewModel.CanvasPosition.ToVector();
 
-            CuttingPath.Data = _cuttingPathGeometry = new PathGeometry([_cuttingPathFigure]);
-            CuttingPath.Visibility = Visibility.Visible;
-            e.Handled = true;
-        }
+        _cuttingPathFigure = new PathFigure(
+            new Point(),
+            [new LineSegment(_previousCanvasMousePosition, false)],
+            false
+        );
+
+        CuttingPath.Data = _cuttingPathGeometry = new PathGeometry([_cuttingPathFigure]);
+        CuttingPath.Visibility = Visibility.Visible;
+        return true;
     }
 
-    private void CanvasgBg_OnMouseLeftButtonUp_CuttingConnections(object sender, MouseButtonEventArgs e) {
-        if (_cuttingConnections) {
-            var uiElement = (UIElement)sender;
-            _cuttingConnections = false;
-            uiElement.ReleaseMouseCapture();
+    private bool ContinueCuttingConnections() {
+        var delta = _canvasMousePositionWithOffset - _previousCanvasMousePosition;
+        if (delta.Length < 4) return false;
 
-            CuttingPath.Visibility = Visibility.Collapsed;
-            CuttingPath.Data = null;
-            _cuttingPathFigure = null;
+        _cuttingPathFigure.Segments.Add(
+            new LineSegment(_canvasMousePositionWithOffset, true)
+        );
+        _previousCanvasMousePosition = _canvasMousePositionWithOffset;
 
-            foreach (var connectionControl in _connectionControls.Where(ctrl => ctrl.IsDeleted)) {
-                var connection = (Connection)connectionControl.DataContext;
-                _viewModel.Connections.Remove(connection);
+        foreach (var connectionControl in _connectionControls) {
+            var points = GetIntersectionPoints(_cuttingPathGeometry, connectionControl.Geometry);
+            if (points.Any()) {
+                connectionControl.IsDeleted = true;
             }
         }
+
+        return true;
     }
 
-    private void CanvasgBg_OnMouseRightButtonUp_CuttingConnections(object sender, MouseButtonEventArgs e) {
-        if (_cuttingConnections) {
-            var uiElement = (UIElement)sender;
-            _cuttingConnections = false;
-            uiElement.ReleaseMouseCapture();
+    private void ApplyCuttingConnections() {
+        GraphCanvasBg.ReleaseMouseCapture();
 
-            CuttingPath.Visibility = Visibility.Collapsed;
-            CuttingPath.Data = null;
-            _cuttingPathFigure = null;
+        CuttingPath.Visibility = Visibility.Collapsed;
+        CuttingPath.Data = null;
+        _cuttingPathFigure = null;
 
-            _connectionControls.ForEach(ctrl => ctrl.IsDeleted = false);
+        foreach (var connectionControl in _connectionControls.Where(ctrl => ctrl.IsDeleted)) {
+            var connection = (Connection)connectionControl.DataContext;
+            _viewModel.Connections.Remove(connection);
         }
     }
 
+    private void CancelCuttingConnections() {
+        GraphCanvasBg.ReleaseMouseCapture();
 
-    private void CanvasgBg_OnMouseMove_CuttingConnections(object sender, MouseEventArgs e) {
-        if (_cuttingConnections) {
-            var uiElement = (UIElement)sender;
-            var mousePosition = e.GetPosition(uiElement) - _viewModel.CanvasPosition.ToVector();
-            var delta = mousePosition - _previousMousePosition;
-            if (delta.LengthSquared > 10) {
-                _cuttingPathFigure.Segments.Add(
-                    new LineSegment(mousePosition, true)
-                );
-                _previousMousePosition = mousePosition;
+        CuttingPath.Visibility = Visibility.Collapsed;
+        CuttingPath.Data = null;
+        _cuttingPathFigure = null;
 
-
-                foreach (var connectionControl in _connectionControls) {
-                    var points = GetIntersectionPoints(_cuttingPathGeometry, connectionControl.Geometry);
-                    if (points.Any()) {
-                        connectionControl.IsDeleted = true;
-                    }
-                }
-            }
-        }
+        _connectionControls.ForEach(ctrl => ctrl.IsDeleted = false);
     }
 
     private void ConnectionControl_OnLoaded(object sender, RoutedEventArgs e) {
@@ -282,7 +386,13 @@ public partial class MainWindow : Window {
 
     private void Node_OnDeletePressed(object sender, EventArgs e) {
         var nodeControl = (Node)sender;
-        var node =nodeControl.NodeDataContext;
+        var node = nodeControl.NodeDataContext;
         _viewModel.Remove(node);
+    }
+
+    private void Node_OnSelected(object sender, EventArgs e) {
+        var nodeControl = (Node)sender;
+        var node = nodeControl.NodeDataContext;
+        _viewModel.SelectedNode = node;
     }
 }

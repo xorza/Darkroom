@@ -13,7 +13,8 @@
              Height="Auto"
              Background="{x:Null}"
 
-             Loaded="Node_OnLoaded">
+             Loaded="Node_OnLoaded"
+             MouseDown="Node_OnMouseDown">
     <UserControl.Resources>
         <ResourceDictionary>
             <sys:Double x:Key="PinSize">10</sys:Double>
@@ -42,12 +43,21 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <Border BorderBrush="#444"
-            Background="#444"
+    <Border Background="#444"
             Margin="4"
             Padding="0"
             BorderThickness="2"
             CornerRadius="{StaticResource CornerRadius}">
+        <Border.Style>
+            <Style TargetType="Border">
+                <Setter Property="BorderBrush" Value="#444" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                        <Setter Property="BorderBrush" Value="OrangeRed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+        </Border.Style>
 
         <StackPanel Orientation="Vertical" Margin="0">
             <Border
@@ -58,8 +68,8 @@
                 MouseMove="Header_OnMouseMove">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"></ColumnDefinition>
-                        <ColumnDefinition Width="Auto"></ColumnDefinition>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
                     <Button Style="{StaticResource PinButton}"
@@ -77,12 +87,12 @@
 
                     <Button Grid.Column="1" Style="{StaticResource RoundButton}"
                             Background="{StaticResource Gray}"
-                            Margin="4"
+                            Margin="5"
                             Click="DeleteButton_OnClick">
                         <Path Width="8"
                               Height="8"
                               Style="{StaticResource CrossPath}"
-                              Stroke="{StaticResource DarkerGray}" />
+                              Stroke="{StaticResource DarkWhite}" />
                     </Button>
 
                 </Grid>
