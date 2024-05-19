@@ -22,10 +22,10 @@ public partial class MainWindow : Window {
     private readonly MainWindowViewModel _viewModel = new DesignMainWindowViewModel();
 
     public MainWindow() {
+        
         InitializeComponent();
 
         this.DataContext = _viewModel;
-   
     }
 
 
@@ -35,4 +35,37 @@ public partial class MainWindow : Window {
 
     private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
     }
+
+    #region canvas dragging
+
+    private bool _isDragging = false;
+    private Vector _canvasDragMousePosition;
+
+    private void CanvasgBg_OnButtonDown(object sender, MouseButtonEventArgs e) {
+        if (e.MiddleButton != MouseButtonState.Pressed) {
+            return;
+        }
+
+        var canvas = (FrameworkElement)sender;
+        if (canvas.CaptureMouse()) {
+            _isDragging = true;
+            _canvasDragMousePosition = e.GetPosition(canvas) -  this._viewModel.CanvasPosition;
+        }
+    }
+
+    private void CanvasgBg_OnButtonUp(object sender, MouseButtonEventArgs e) {
+        var canvas = (FrameworkElement)sender;
+        canvas.ReleaseMouseCapture();
+        _isDragging = false;
+    }
+
+    private void CanvasgBg_OnMouseMove(object sender, MouseEventArgs e) {
+        if (!_isDragging) return;
+        var canvas = (FrameworkElement)sender;
+        var currentPosition = e.GetPosition(canvas);
+        var delta = currentPosition - _canvasDragMousePosition;
+        this._viewModel.CanvasPosition = delta;
+    }
+
+    #endregion
 }

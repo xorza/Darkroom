@@ -8,7 +8,6 @@ using ScenariumEditor.NET.ViewModel;
 namespace ScenariumEditor.NET;
 
 public partial class Node : UserControl {
-    private Point _dragTitleMousePosition;
 
     public Node() {
         InitializeComponent();
@@ -33,11 +32,12 @@ public partial class Node : UserControl {
 
     #region dragging
     private bool _isDragging=false;
+    private Point _headerDragMousePosition;
     
     private void Title_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender!;
         if (header.CaptureMouse()) {
-            _dragTitleMousePosition = e.GetPosition(header);
+            _headerDragMousePosition = e.GetPosition(header);
             _isDragging = true;
         }
     }
@@ -53,12 +53,9 @@ public partial class Node : UserControl {
         
         var header = (FrameworkElement)sender!;
         var currentPosition = e.GetPosition(header);
-        var delta = currentPosition - _dragTitleMousePosition;
+        var delta = currentPosition - _headerDragMousePosition;
 
-        NodeDataContext.CanvasPosition = new Point(
-            NodeDataContext.CanvasPosition.X + delta.X,
-            NodeDataContext.CanvasPosition.Y + delta.Y
-        );
+        NodeDataContext.CanvasPosition += delta;
     }
     #endregion
 

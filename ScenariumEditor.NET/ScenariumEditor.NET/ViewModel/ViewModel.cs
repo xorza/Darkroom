@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Windows;
 
@@ -13,16 +14,31 @@ public enum DataType {
 }
 
 public class MainWindowViewModel : INotifyPropertyChanged {
-    private Node _selectedNode;
-
+  
     public MainWindowViewModel() {
     }
+
+    public double Pos { get; set; } =100.0;
 
     public ObservableCollection<Node> Nodes { get; } = new();
 
     public ObservableCollection<Connection> Connections { get; } = new();
+    
+    private Point _canvasPosition;
 
-    public Node SelectoedNode {
+    public Point CanvasPosition {
+        get => _canvasPosition;
+        set {
+            if (Equals(value, _canvasPosition)) return;
+            // Debug.WriteLine("New position {0}", value);
+            _canvasPosition = value;
+            OnPropertyChanged();
+        }
+    }
+
+    private Node _selectedNode;
+
+    public Node SelectedNode {
         get => _selectedNode;
         set {
             if (Equals(value, _selectedNode)) return;
@@ -33,11 +49,11 @@ public class MainWindowViewModel : INotifyPropertyChanged {
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
+    private void OnPropertyChanged([CallerMemberName] string propertyName = null) {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
         OnPropertyChanged(propertyName);
