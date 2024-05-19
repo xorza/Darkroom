@@ -31,17 +31,28 @@ public partial class Node : UserControl {
         set { SetValue(NodeDataContextProperty, value); }
     }
 
+    #region dragging
+    private bool _isDragging=false;
+    
     private void Title_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
-        this.MouseMove += Title_OnMouseMove;
-        _dragTitleMousePosition = e.GetPosition(this);
+        var header = (FrameworkElement)sender!;
+        if (header.CaptureMouse()) {
+            _dragTitleMousePosition = e.GetPosition(header);
+            _isDragging = true;
+        }
     }
 
     private void Title_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
-        this.MouseMove -= Title_OnMouseMove;
+        var header = (FrameworkElement)sender!;
+        _isDragging = false;
+        header.ReleaseMouseCapture();
     }
 
     private void Title_OnMouseMove(object sender, MouseEventArgs e) {
-        var currentPosition = e.GetPosition(this);
+        if( !_isDragging ) return;
+        
+        var header = (FrameworkElement)sender!;
+        var currentPosition = e.GetPosition(header);
         var delta = currentPosition - _dragTitleMousePosition;
 
         NodeDataContext.CanvasPosition = new Point(
@@ -49,6 +60,7 @@ public partial class Node : UserControl {
             NodeDataContext.CanvasPosition.Y + delta.Y
         );
     }
+    #endregion
 
     private void Input_OnLoaded(object sender, RoutedEventArgs e) {
         var input = (FrameworkElement)sender!;

@@ -6,6 +6,7 @@
 
         xmlns:local="clr-namespace:ScenariumEditor.NET"
         xmlns:viewModel="clr-namespace:ScenariumEditor.NET.ViewModel"
+        xmlns:controls="clr-namespace:ScenariumEditor.NET.Controls"
 
         d:DataContext="{d:DesignInstance Type=viewModel:DesignMainWindowViewModel}"
         mc:Ignorable="d"
@@ -36,7 +37,8 @@
                 Click="AddDesignNodeButton_OnClick" />
         </Grid>
 
-        <Rectangle Grid.Row="1" Fill="{StaticResource Gray}" />
+        <!-- <Rectangle Grid.Row="1" Fill="{StaticResource Gray}" /> -->
+
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
@@ -45,63 +47,67 @@
                 <ColumnDefinition Width="Auto" MinWidth="250" />
             </Grid.ColumnDefinitions>
 
-            <Grid ClipToBounds="True" Background="{StaticResource DarkGray}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" MinHeight="50" />
-                </Grid.RowDefinitions>
+            <controls:ClippingBorder ClipToBounds="True"
+                                     Background="{StaticResource DarkGray}"
+                                     CornerRadius="5">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" MinHeight="50" />
+                    </Grid.RowDefinitions>
 
-                <ItemsControl
-                    Grid.Row="0"
-                    ItemsSource="{Binding Connections}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Connection}">
-                            <local:Connection
-                                InputPosition="{Binding Input.CanvasPosition}"
-                                OutputPosition="{Binding Output.CanvasPosition}"
-                                BorderBrush="{StaticResource Blue}"
-                                HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                Thickness="2"
-                                Width="500"
-                                Height="500" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <Canvas />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                </ItemsControl>
+                    <ItemsControl
+                        Grid.Row="0"
+                        ItemsSource="{Binding Connections}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModel:Connection}">
+                                <local:Connection
+                                    InputPosition="{Binding Input.CanvasPosition}"
+                                    OutputPosition="{Binding Output.CanvasPosition}"
+                                    BorderBrush="{StaticResource Blue}"
+                                    HoverBrush="{StaticResource HighlightOverlayBrush}"
+                                    Thickness="2"
+                                    Width="500"
+                                    Height="500" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <Canvas />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
 
-                <ItemsControl
-                    Grid.Row="0"
-                    ItemsSource="{Binding Nodes}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Node}">
-                            <local:Node
-                                NodeDataContext="{Binding}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <Canvas />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter
-                                Property="Canvas.Left"
-                                Value="{Binding Path=CanvasPosition.X}" />
-                            <Setter
-                                Property="Canvas.Top"
-                                Value="{Binding Path=CanvasPosition.Y}" />
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
-                </ItemsControl>
+                    <ItemsControl
+                        Grid.Row="0"
+                        ItemsSource="{Binding Nodes}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type viewModel:Node}">
+                                <local:Node
+                                    NodeDataContext="{Binding}" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <Canvas />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter
+                                    Property="Canvas.Left"
+                                    Value="{Binding Path=CanvasPosition.X}" />
+                                <Setter
+                                    Property="Canvas.Top"
+                                    Value="{Binding Path=CanvasPosition.Y}" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                    </ItemsControl>
 
-            </Grid>
+                </Grid>
+            </controls:ClippingBorder>
 
-            <Rectangle Grid.Column="1" Fill="{StaticResource Gray}" />
+            <!-- <Rectangle Grid.Column="1" Fill="{StaticResource Gray}" /> -->
 
             <Border Grid.Column="2"></Border>
         </Grid>
