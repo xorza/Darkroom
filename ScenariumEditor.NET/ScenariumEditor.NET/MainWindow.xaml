@@ -55,9 +55,8 @@
                                      Background="{StaticResource DarkGray}"
                                      CornerRadius="{StaticResource CornerRadius}"
                                      MouseDown="CanvasgBg_OnButtonDown"
-                                     MouseUp="CanvasgBg_OnButtonUp"
-                                     MouseMove="CanvasgBg_OnMouseMove"
-                                     MouseWheel="CanvasgBg_OnMouseWheel">
+                                     MouseWheel="CanvasgBg_OnMouseWheel"
+                                     Loaded="CanvasgBg_OnLoaded">
                 <Grid>
                     <!-- connections -->
                     <ItemsControl Grid.Row="0"
@@ -65,11 +64,10 @@
                                   ItemsSource="{Binding Connections}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Connection}">
-                                <local:ConnectionControl InputPosition="{Binding Input.CanvasPosition}"
-                                                  OutputPosition="{Binding Output.CanvasPosition}"
-                                                  BorderBrush="{StaticResource Blue}"
-                                                  HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                  Thickness="2" />
+                                <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
+                                                         Pin2Position="{Binding Output.CanvasPosition}"
+                                                         BorderBrush="{StaticResource Blue}"
+                                                         HoverBrush="{StaticResource HighlightOverlayBrush}" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -92,7 +90,7 @@
                     </ItemsControl>
 
                     <!-- new connection -->
-                    <Canvas x:Name="NewConnectionCanvas">
+                    <Canvas x:Name="NewConnectionCanvas" Visibility="Hidden">
                         <Canvas.RenderTransform>
                             <TransformGroup>
                                 <ScaleTransform
@@ -104,21 +102,13 @@
                                     Y="{Binding CanvasPosition.Y}" />
                             </TransformGroup>
                         </Canvas.RenderTransform>
-                        <Canvas.Style>
-                            <Style TargetType="Canvas">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding ActivePin}" Value="{x:Null}">
-                                        <Setter Property="Visibility" Value="Hidden" />
-                                    </DataTrigger>  
-                                </Style.Triggers>
-                            </Style>
-                        </Canvas.Style>
 
-                        <local:ConnectionControl InputPosition="{Binding ActivePin.CanvasPosition}"
-                                          OutputPosition="{Binding MouseCanvasPosition}"
-                                          BorderBrush="{StaticResource Red}"
-                                          HoverBrush="{StaticResource Red}"
-                                          Thickness="2" />
+                        <local:ConnectionControl x:Name="NewConnectionControl"
+                                                 Pin1Position="{Binding Input.CanvasPosition}"
+                                                 Pin2Position="{Binding Output.CanvasPosition}"
+                                                 BorderBrush="{StaticResource Red}"
+                                                 HoverBrush="{StaticResource Red}" 
+                                                 HoverThickness="2"/>
                     </Canvas>
 
 
@@ -129,7 +119,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">
                                 <local:Node NodeDataContext="{Binding}"
-                                            PinActivated="Node_OnPinActivated"/>
+                                            PinActivated="Node_OnPinActivated" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>

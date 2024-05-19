@@ -39,17 +39,6 @@ public class MainWindowViewModel : INotifyPropertyChanged {
         }
     }
 
-    private Point _mouseCanvasPosition;
-
-    public Point MouseCanvasPosition {
-        get => _mouseCanvasPosition;
-        set {
-            if (Equals(value, _mouseCanvasPosition)) return;
-            _mouseCanvasPosition = value;
-            OnPropertyChanged();
-        }
-    }
-
     private Node _selectedNode;
 
     public Node SelectedNode {
@@ -61,16 +50,6 @@ public class MainWindowViewModel : INotifyPropertyChanged {
         }
     }
 
-    private Pin _activePin;
-
-    public Pin ActivePin {
-        get => _activePin;
-        set {
-            if (ReferenceEquals(value, _activePin)) return;
-            _activePin = value;
-            OnPropertyChanged();
-        }
-    }
 
     public event PropertyChangedEventHandler PropertyChanged;
 
@@ -96,6 +75,18 @@ public enum PinType {
     Output,
     Event,
     Trigger
+}
+
+static class PinTypeExtensions {
+    public static PinType GetOpposite(this PinType pinType) {
+        return pinType switch {
+            PinType.Input => PinType.Output,
+            PinType.Output => PinType.Input,
+            PinType.Event => PinType.Trigger,
+            PinType.Trigger => PinType.Event,
+            _ => throw new ArgumentOutOfRangeException(nameof(pinType), pinType, null)
+        };
+    }
 }
 
 public class Pin : INotifyPropertyChanged {
@@ -189,6 +180,24 @@ public class Pin : INotifyPropertyChanged {
         field = value;
         OnPropertyChanged(propertyName);
         return true;
+    }
+
+    public static (Pin, Pin) Sort(Pin pin1, Pin pin2) {
+        Debug.Assert(!ReferenceEquals(pin1, pin2));
+
+        switch ((pin1.PinType, pin2.PinType)) {
+            case (PinType.Input, PinType.Output):
+                return (pin1, pin2);
+            case (PinType.Output, PinType.Input):
+                return (pin2, pin1);
+            case (PinType.Event, PinType.Trigger):
+                return (pin2, pin1);
+            case (PinType.Trigger, PinType.Event):
+                return (pin1, pin2);
+            default:
+                Debug.Assert(false);
+                throw new InvalidOperationException("Invalid pin types");
+        }
     }
 }
 
@@ -316,28 +325,9 @@ public class Connection : INotifyPropertyChanged {
 
     public Connection(Pin pin1, Pin pin2) {
         Debug.Assert(!ReferenceEquals(pin1, pin2));
-
-        switch ((pin1.PinType, pin2.PinType)) {
-            case (PinType.Input, PinType.Output):
-                Output = pin2;
-                Input = pin1;
-                break;
-            case (PinType.Output, PinType.Input):
-                Output = pin1;
-                Input = pin2;
-                break;
-            case (PinType.Event, PinType.Trigger):
-                Output = pin1;
-                Input = pin2;
-                break;
-            case (PinType.Trigger, PinType.Event):
-                Input = pin1;
-                Output = pin2;
-                break;
-            default:
-                Debug.Assert(false);
-                break;
-        }
+        var (input, output) = Pin.Sort(pin1, pin2);
+        Input = input;
+        Output = output;
     }
 }
 

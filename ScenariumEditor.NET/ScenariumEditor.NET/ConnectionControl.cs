@@ -15,14 +15,14 @@ public class ConnectionEventArgs : RoutedEventArgs {
 
 public class ConnectionControl : ClickControl {
     public static readonly DependencyProperty InputPositionDependencyProperty = DependencyProperty.Register(
-        nameof(InputPosition),
+        nameof(Pin1Position),
         typeof(Point),
         typeof(ConnectionControl),
         new PropertyMetadata(Position_PropertyChangedCallback)
     );
 
     public static readonly DependencyProperty OutputPositionDependencyProperty = DependencyProperty.Register(
-        nameof(OutputPosition),
+        nameof(Pin2Position),
         typeof(Point),
         typeof(ConnectionControl),
         new PropertyMetadata(Position_PropertyChangedCallback)
@@ -41,19 +41,27 @@ public class ConnectionControl : ClickControl {
     }
 
     public static readonly DependencyProperty ThicknessProperty = DependencyProperty.Register(
-        nameof(Thickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(default(double)));
+        nameof(Thickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(2.0));
 
     public double Thickness {
         get { return (double)GetValue(ThicknessProperty); }
         set { SetValue(ThicknessProperty, value); }
     }
+    
+    public static readonly DependencyProperty HoverThicknessProperty = DependencyProperty.Register(
+        nameof(HoverThickness), typeof(double), typeof(ConnectionControl), new PropertyMetadata(3.0));
 
-    public Point InputPosition {
+    public double HoverThickness {
+        get { return (double)GetValue(HoverThicknessProperty); }
+        set { SetValue(HoverThicknessProperty, value); }
+    }
+
+    public Point Pin1Position {
         get => (Point)GetValue(InputPositionDependencyProperty);
         set => SetValue(InputPositionDependencyProperty, value);
     }
 
-    public Point OutputPosition {
+    public Point Pin2Position {
         get => (Point)GetValue(OutputPositionDependencyProperty);
         set => SetValue(OutputPositionDependencyProperty, value);
     }
@@ -75,13 +83,12 @@ public class ConnectionControl : ClickControl {
 
     protected override void OnRender(DrawingContext drawingContext) {
         base.OnRender(drawingContext);
-
-    
+        
         Point[] points = [
-            new(InputPosition.X - 5, InputPosition.Y),
-            new(InputPosition.X - 50, InputPosition.Y),
-            new(OutputPosition.X + 50, OutputPosition.Y),
-            new(OutputPosition.X + 5, OutputPosition.Y)
+            new(Pin1Position.X - 5, Pin1Position.Y),
+            new(Pin1Position.X - 50, Pin1Position.Y),
+            new(Pin2Position.X + 50, Pin2Position.Y),
+            new(Pin2Position.X + 5, Pin2Position.Y)
         ];
 
         var pathFigure = new PathFigure {
@@ -97,7 +104,7 @@ public class ConnectionControl : ClickControl {
         drawingContext.DrawGeometry(null, new Pen(Brushes.Transparent, 5), path);
         drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), path);
         if (IsMouseOver) {
-            drawingContext.DrawGeometry(null, new Pen(HoverBrush, Thickness * 1.5), path);
+            drawingContext.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), path);
         }
     }
 }
