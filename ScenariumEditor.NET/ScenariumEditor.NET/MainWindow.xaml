@@ -110,8 +110,8 @@
                                                  Visibility="Collapsed"
                                                  Pin1Position="{Binding Input.CanvasPosition}"
                                                  Pin2Position="{Binding Output.CanvasPosition}"
-                                                 BorderBrush="{StaticResource Green}"
-                                                 HoverBrush="{StaticResource LiteGreen}"
+                                                 BorderBrush="{StaticResource Blue}"
+                                                 HoverBrush="{StaticResource Blue}"
                                                  HoverThickness="2" />
 
                         <Path x:Name="CuttingPath"

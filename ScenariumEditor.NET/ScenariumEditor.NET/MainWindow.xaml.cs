@@ -14,6 +14,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using ScenariumEditor.NET.Utils;
 using ScenariumEditor.NET.ViewModel;
 
 namespace ScenariumEditor.NET;
@@ -117,8 +118,10 @@ public partial class MainWindow : Window {
             NewConnectionControl.DataContext = new Connection(_activePin, _tempMousePin);
             // NewConnectionControl.CaptureMouse();
         } else {
-            _viewModel.Connections.Add(new Connection(_activePin, e));
-            CancelNewConnection();
+            if (e.DataType == _activePin.DataType && e.PinType.GetOpposite() == _activePin.PinType) {
+                _viewModel.Connections.Add(new Connection(_activePin, e));
+                CancelNewConnection();
+            }
         }
     }
 
@@ -198,7 +201,7 @@ public partial class MainWindow : Window {
         var uiElement = (UIElement)sender;
         if (uiElement.CaptureMouse()) {
             _cuttingConnections = true;
-            _previousMousePosition = e.GetPosition(uiElement);
+            _previousMousePosition = e.GetPosition(uiElement) - _viewModel.CanvasPosition.ToVector();
 
             _cuttingPathFigure = new PathFigure(
                 new Point(),
@@ -207,6 +210,7 @@ public partial class MainWindow : Window {
 
             CuttingPath.Data = _cuttingPathGeometry = new PathGeometry([_cuttingPathFigure]);
             CuttingPath.Visibility = Visibility.Visible;
+            e.Handled = true;
         }
     }
 
@@ -215,18 +219,18 @@ public partial class MainWindow : Window {
             var uiElement = (UIElement)sender;
             _cuttingConnections = false;
             uiElement.ReleaseMouseCapture();
-            
+
             CuttingPath.Visibility = Visibility.Collapsed;
             CuttingPath.Data = null;
             _cuttingPathFigure = null;
 
-            foreach (var connectionControl in _connectionControls.Where(ctrl=> ctrl.IsDeleted)) {
+            foreach (var connectionControl in _connectionControls.Where(ctrl => ctrl.IsDeleted)) {
                 var connection = (Connection)connectionControl.DataContext;
                 _viewModel.Connections.Remove(connection);
             }
         }
     }
-    
+
     private void CanvasgBg_OnMouseRightButtonUp_CuttingConnections(object sender, MouseButtonEventArgs e) {
         if (_cuttingConnections) {
             var uiElement = (UIElement)sender;
@@ -236,8 +240,8 @@ public partial class MainWindow : Window {
             CuttingPath.Visibility = Visibility.Collapsed;
             CuttingPath.Data = null;
             _cuttingPathFigure = null;
-            
-            _connectionControls.ForEach(ctrl=> ctrl.IsDeleted = false);
+
+            _connectionControls.ForEach(ctrl => ctrl.IsDeleted = false);
         }
     }
 
@@ -245,16 +249,11 @@ public partial class MainWindow : Window {
     private void CanvasgBg_OnMouseMove_CuttingConnections(object sender, MouseEventArgs e) {
         if (_cuttingConnections) {
             var uiElement = (UIElement)sender;
-            var mousePosition = e.GetPosition(uiElement);
+            var mousePosition = e.GetPosition(uiElement) - _viewModel.CanvasPosition.ToVector();
             var delta = mousePosition - _previousMousePosition;
             if (delta.LengthSquared > 10) {
-                var controlPoint = new Point(
-                    (_previousMousePosition.X + mousePosition.X) / 2,
-                    (_previousMousePosition.Y + mousePosition.Y) / 2
-                );
-
                 _cuttingPathFigure.Segments.Add(
-                    new QuadraticBezierSegment(controlPoint, mousePosition, true)
+                    new LineSegment(mousePosition, true)
                 );
                 _previousMousePosition = mousePosition;
 

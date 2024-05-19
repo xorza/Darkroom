@@ -53,9 +53,9 @@
             <Border
                 Margin="0"
                 Padding="0"
-                MouseLeftButtonDown="Title_OnMouseLeftButtonDown"
-                MouseLeftButtonUp="Title_OnMouseLeftButtonUp"
-                MouseMove="Title_OnMouseMove">
+                MouseLeftButtonDown="Header_OnMouseLeftButtonDown"
+                MouseLeftButtonUp="Header_OnMouseLeftButtonUp"
+                MouseMove="Header_OnMouseMove">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"></ColumnDefinition>

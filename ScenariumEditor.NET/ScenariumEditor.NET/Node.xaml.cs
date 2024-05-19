@@ -10,6 +10,12 @@ namespace ScenariumEditor.NET;
 public partial class Node : UserControl {
     public Node() {
         InitializeComponent();
+
+        this.MouseDown += (sender, args) => { args.Handled = true; };
+    }
+
+    private void Node_OnLoaded(object sender, RoutedEventArgs e) {
+        NodeDataContext.UpdatePinPositions();
     }
 
     // event for activating a Pin
@@ -37,21 +43,22 @@ public partial class Node : UserControl {
     private bool _isDragging = false;
     private Point _headerDragMousePosition;
 
-    private void Title_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
+    private void Header_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender!;
         if (header.CaptureMouse()) {
             _headerDragMousePosition = e.GetPosition(header);
             _isDragging = true;
+            e.Handled = true;
         }
     }
 
-    private void Title_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
+    private void Header_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
         var header = (FrameworkElement)sender!;
         _isDragging = false;
         header.ReleaseMouseCapture();
     }
 
-    private void Title_OnMouseMove(object sender, MouseEventArgs e) {
+    private void Header_OnMouseMove(object sender, MouseEventArgs e) {
         if (!_isDragging) return;
 
         var header = (FrameworkElement)sender!;
@@ -70,9 +77,6 @@ public partial class Node : UserControl {
         pin.NodePosition = position;
     }
 
-    private void Node_OnLoaded(object sender, RoutedEventArgs e) {
-        NodeDataContext.UpdatePinPositions();
-    }
 
     private void PinButton_OnClick(object sender, RoutedEventArgs e) {
         var element = (FrameworkElement)sender;
