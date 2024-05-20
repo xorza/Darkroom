@@ -14,8 +14,9 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using ScenariumEditor.NET.Utils;
-using ScenariumEditor.NET.ViewModel;
+using GraphLib.Controls;
+using GraphLib.Utils;
+using GraphLib.ViewModel;
 
 namespace ScenariumEditor.NET;
 
@@ -386,13 +387,13 @@ public partial class MainWindow : Window {
     #endregion
 
     private void Node_OnDeletePressed(object sender, EventArgs e) {
-        var nodeControl = (Node)sender;
+        var nodeControl = (NodeControl)sender;
         var node = nodeControl.NodeDataContext;
         _viewModel.Remove(node);
     }
 
     private void Node_OnSelected(object sender, EventArgs e) {
-        var nodeControl = (Node)sender;
+        var nodeControl = (NodeControl)sender;
         var node = nodeControl.NodeDataContext;
         _viewModel.SelectedNode = node;
     }

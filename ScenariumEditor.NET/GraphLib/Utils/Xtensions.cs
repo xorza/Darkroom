@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace ScenariumEditor.NET.Utils;
+namespace GraphLib.Utils;
 
 public static class Xtensions {
     public static Vector ToVector(this Point point) {

@@ -3,12 +3,12 @@ using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using ScenariumEditor.NET.ViewModel;
+using GraphLib.ViewModel;
 
-namespace ScenariumEditor.NET;
+namespace GraphLib.Controls;
 
-public partial class Node : UserControl {
-    public Node() {
+public partial class NodeControl : UserControl {
+    public NodeControl() {
         InitializeComponent();
     }
 
@@ -23,13 +23,13 @@ public partial class Node : UserControl {
     public static readonly DependencyProperty NodeDataContextProperty = DependencyProperty.Register(
         nameof(NodeDataContext),
         typeof(ViewModel.Node),
-        typeof(Node),
+        typeof(NodeControl),
         new PropertyMetadata(default(ViewModel.Node), NodeDataContextPropertyChangedCallback)
     );
 
     private static void
         NodeDataContextPropertyChangedCallback(DependencyObject d, DependencyPropertyChangedEventArgs e) {
-        ((Node)d).DataContext = e.NewValue;
+        ((NodeControl)d).DataContext = e.NewValue;
     }
 
     public ViewModel.Node NodeDataContext {

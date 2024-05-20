@@ -3,7 +3,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 
-namespace ScenariumEditor.NET;
+namespace GraphLib.Controls;
 
 public class ConnectionEventArgs : RoutedEventArgs {
     public ConnectionEventArgs(ConnectionControl connectionControl) {

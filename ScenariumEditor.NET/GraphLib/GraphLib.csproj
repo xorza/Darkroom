@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0-windows</TargetFramework>
+        <LangVersion>latest</LangVersion>
+        <UseWPF>true</UseWPF>
+        <ImplicitUsings>enable</ImplicitUsings>    
+        <Nullable>disable</Nullable>     
+        <RootNamespace>GraphLib</RootNamespace>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <Page Update="Styles\Basic.xaml">
+        <Generator>MSBuild:Compile</Generator>
+      </Page>
+      <Page Update="Styles\Styles.xaml">
+        <Generator>MSBuild:Compile</Generator>
+      </Page>
+      <Page Update="Styles\Button.xaml">
+        <Generator>MSBuild:Compile</Generator>
+      </Page>
+      <Page Update="Controls\NodeControl.xaml">
+        <Generator>MSBuild:Compile</Generator>
+        <XamlRuntime>Wpf</XamlRuntime>
+        <SubType>Designer</SubType>
+      </Page>
+    </ItemGroup>
+
+</Project>

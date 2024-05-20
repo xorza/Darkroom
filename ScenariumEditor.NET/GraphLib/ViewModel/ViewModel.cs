@@ -6,7 +6,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Windows;
 
-namespace ScenariumEditor.NET.ViewModel;
+namespace GraphLib.ViewModel;
 
 public class MainWindowViewModel : INotifyPropertyChanged {
     public MainWindowViewModel() {
@@ -101,7 +101,7 @@ public enum PinType {
     Trigger
 }
 
-static class PinTypeExtensions {
+public static class PinTypeExtensions {
     public static PinType GetOpposite(this PinType pinType) {
         return pinType switch {
             PinType.Input => PinType.Output,

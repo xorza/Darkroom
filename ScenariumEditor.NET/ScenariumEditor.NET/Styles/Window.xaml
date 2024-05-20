@@ -1,10 +1,9 @@
 ﻿<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:controls="clr-namespace:ScenariumEditor.NET.Controls"
+                    xmlns:controls="clr-namespace:GraphLib.Controls;assembly=GraphLib"
                     x:Class="ScenariumEditor.NET.Styles.WindowResourceDictionary">
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="Basic.xaml" />
-        <ResourceDictionary Source="Button.xaml" />
     </ResourceDictionary.MergedDictionaries>
 
     <Style x:Key="BorderRect" TargetType="Rectangle">

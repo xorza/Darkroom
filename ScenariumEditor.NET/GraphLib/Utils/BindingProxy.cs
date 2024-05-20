@@ -1,6 +1,6 @@
 using System.Windows;
 
-namespace ScenariumEditor.NET.Utils;
+namespace GraphLib.Utils;
 
 public class BindingProxy : Freezable {
     public static readonly DependencyProperty DataContextProperty = DependencyProperty.Register (

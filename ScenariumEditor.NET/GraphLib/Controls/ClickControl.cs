@@ -2,7 +2,7 @@
 using System.Windows.Controls;
 using System.Windows.Input;
 
-namespace ScenariumEditor.NET;
+namespace GraphLib.Controls;
 
 public class ClickControl : Control {
     private bool _leftButtonDown;

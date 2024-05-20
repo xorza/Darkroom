@@ -5,9 +5,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
 
         xmlns:local="clr-namespace:ScenariumEditor.NET"
-        xmlns:viewModel="clr-namespace:ScenariumEditor.NET.ViewModel"
-        xmlns:controls="clr-namespace:ScenariumEditor.NET.Controls"
-        xmlns:utils="clr-namespace:ScenariumEditor.NET.Utils"
+        xmlns:viewModel="clr-namespace:GraphLib.ViewModel;assembly=GraphLib"
+        xmlns:controls="clr-namespace:GraphLib.Controls;assembly=GraphLib"
+        xmlns:utils="clr-namespace:GraphLib.Utils;assembly=GraphLib"
 
         d:DataContext="{d:DesignInstance Type=viewModel:DesignMainWindowViewModel}"
         mc:Ignorable="d"
@@ -63,13 +63,13 @@
                                   ItemsSource="{Binding Connections}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Connection}">
-                                <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
-                                                         Pin2Position="{Binding Output.CanvasPosition}"
-                                                         BorderBrush="{StaticResource Blue}"
-                                                         HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                         DeletedBrush="{StaticResource Yellow}"
-                                                         Loaded="ConnectionControl_OnLoaded"
-                                                         Unloaded="ConnectionControl_OnUnloaded" />
+                                <controls:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
+                                                            Pin2Position="{Binding Output.CanvasPosition}"
+                                                            BorderBrush="{StaticResource Blue}"
+                                                            HoverBrush="{StaticResource HighlightOverlayBrush}"
+                                                            DeletedBrush="{StaticResource Yellow}"
+                                                            Loaded="ConnectionControl_OnLoaded"
+                                                            Unloaded="ConnectionControl_OnUnloaded" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
@@ -105,13 +105,13 @@
                             </TransformGroup>
                         </Canvas.RenderTransform>
 
-                        <local:ConnectionControl x:Name="NewConnectionControl"
-                                                 Visibility="Collapsed"
-                                                 Pin1Position="{Binding Input.CanvasPosition}"
-                                                 Pin2Position="{Binding Output.CanvasPosition}"
-                                                 BorderBrush="{StaticResource Blue}"
-                                                 HoverBrush="{StaticResource Blue}"
-                                                 HoverThickness="2" />
+                        <controls:ConnectionControl x:Name="NewConnectionControl"
+                                                    Visibility="Collapsed"
+                                                    Pin1Position="{Binding Input.CanvasPosition}"
+                                                    Pin2Position="{Binding Output.CanvasPosition}"
+                                                    BorderBrush="{StaticResource Blue}"
+                                                    HoverBrush="{StaticResource Blue}"
+                                                    HoverThickness="2" />
 
                         <Path x:Name="CuttingPath"
                               Visibility="Collapsed"
@@ -127,10 +127,10 @@
                                   DataContext="{Binding}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type viewModel:Node}">
-                                <local:Node NodeDataContext="{Binding}"
-                                            PinClick="Node_OnPinClick"
-                                            DeletePressed="Node_OnDeletePressed"
-                                            Selected="Node_OnSelected" />
+                                <controls:NodeControl NodeDataContext="{Binding}"
+                                                      PinClick="Node_OnPinClick"
+                                                      DeletePressed="Node_OnDeletePressed"
+                                                      Selected="Node_OnSelected" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                         <ItemsControl.ItemsPanel>
