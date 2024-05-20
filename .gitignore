@@ -13,3 +13,7 @@
 
 # cs generated files
 *.g.cs
+
+**/obj/
+**/bin/
+*.DotSettings.user
