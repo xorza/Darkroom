@@ -14,6 +14,8 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using CoreInterop;
+using CsBindgen;
 using GraphLib.Controls;
 using GraphLib.Utils;
 using GraphLib.ViewModel;
@@ -29,12 +31,13 @@ public partial class MainWindow : Window {
         this.DataContext = _viewModel;
     }
 
+    private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
+        var result = ScenariumCore.Test();
+        MessageBox.Show(result.ToString());
+    }
+
 
     private void AddDesignNodeButton_OnClick(object sender, RoutedEventArgs e) {
         _viewModel.Nodes.Add(new DesignNode());
     }
-
-    private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
-    }
-
 }

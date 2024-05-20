@@ -17,3 +17,4 @@
 **/obj/
 **/bin/
 *.DotSettings.user
+/ScenariumEditor.NET/CoreInterop/core_interop.dll

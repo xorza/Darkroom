@@ -7,4 +7,14 @@
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
+    <ItemGroup>
+      <None Update="core_interop.dll">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </None>
+    </ItemGroup>
+
+    <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+      <Exec Command="$(ProjectDir)prebuild.bat $(SolutionDir) $(ProjectDir)&#xA;" />
+    </Target>
+
 </Project>
