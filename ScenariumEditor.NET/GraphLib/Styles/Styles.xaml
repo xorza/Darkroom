@@ -3,5 +3,6 @@
     <ResourceDictionary.MergedDictionaries>
         <ResourceDictionary Source="../Styles/Basic.xaml" />
         <ResourceDictionary Source="../Styles/Button.xaml" />
+        <ResourceDictionary Source="../Styles/TabControll.xaml" />
     </ResourceDictionary.MergedDictionaries>
 </ResourceDictionary>

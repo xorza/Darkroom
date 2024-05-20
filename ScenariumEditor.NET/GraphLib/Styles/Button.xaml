@@ -16,6 +16,7 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{StaticResource DarkWhite}" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
@@ -63,6 +64,7 @@
         <Setter Property="Height" Value="Auto"></Setter>
         <Setter Property="MinWidth" Value="0"></Setter>
         <Setter Property="MinHeight" Value="0"></Setter>
+        <Setter Property="Foreground" Value="{StaticResource DarkWhite}" />
         <!-- <Setter Property="VerticalContentAlignment" Value="Center"></Setter> -->
         <!-- <Setter Property="HorizontalContentAlignment" Value="Center"></Setter> -->
         <Setter Property="Template">

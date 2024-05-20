@@ -25,34 +25,36 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" MinHeight="50" />
-            <RowDefinition Height="1" />
+            <RowDefinition Height="2" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid>
+        <Border VerticalAlignment="Bottom"
+                CornerRadius="{StaticResource CornerRadius}"
+                Margin="10  0 10 8">
             <Button
                 Margin="0"
                 Content="click"
                 VerticalAlignment="Top"
                 HorizontalAlignment="Left"
                 Click="AddDesignNodeButton_OnClick" />
-        </Grid>
-
-        <!-- <Rectangle Grid.Row="1" Fill="{StaticResource Gray}" /> -->
+        </Border>
 
 
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="2" />
                 <ColumnDefinition Width="Auto" MinWidth="250" />
             </Grid.ColumnDefinitions>
 
             <controls:GraphControl DataContext="{Binding}" />
 
-            <!-- <Rectangle Grid.Column="1" Fill="{StaticResource Gray}" /> -->
+            <Rectangle Grid.Column="1"></Rectangle>
 
-            <Border Grid.Column="2"></Border>
+            <Border Grid.Column="2">
+                <controls:Playground />
+            </Border>
         </Grid>
     </Grid>
 </Window>

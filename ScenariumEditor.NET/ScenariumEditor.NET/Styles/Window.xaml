@@ -23,6 +23,7 @@
         <Setter Property="Background" Value="{StaticResource DarkerGray}" />
         <Setter Property="BorderBrush" Value="{x:Null}" />
         <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{StaticResource DarkWhite}" />
         <EventSetter Event="Loaded" Handler="Window_Loaded" />
 
         <Setter Property="Template">

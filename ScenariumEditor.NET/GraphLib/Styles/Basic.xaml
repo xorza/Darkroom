@@ -37,7 +37,12 @@
     <Style TargetType="Label">
         <Setter Property="Margin" Value="2"></Setter>
         <Setter Property="Padding" Value="0"></Setter>
-        <Setter Property="Foreground" Value="#D5D5D5"></Setter>
+        <Setter Property="Foreground" Value="{StaticResource DarkWhite}"></Setter>
+    </Style>
+
+    
+    <Style TargetType="UserControl">
+        <Setter Property="Foreground" Value="{StaticResource DarkWhite}"></Setter>
     </Style>
 
   
