@@ -15,7 +15,7 @@ public partial class NodeControl : UserControl {
     }
 
     private void Node_OnLoaded(object sender, RoutedEventArgs e) {
-        _viewModel = (Node)DataContext!;
+        _viewModel = (Node)DataContext;
         _viewModel.UpdatePinPositions();
     }
 

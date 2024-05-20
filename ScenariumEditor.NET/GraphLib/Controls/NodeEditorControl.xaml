@@ -1,0 +1,35 @@
+<UserControl x:Class="GraphLib.Controls.NodeEditorControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:local="clr-namespace:GraphLib.Controls"
+             xmlns:viewModel="clr-namespace:GraphLib.ViewModel"
+             mc:Ignorable="d"
+             d:DesignHeight="300" d:DesignWidth="300"
+
+             d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="../Styles/Styles.xaml"></ResourceDictionary>
+            </ResourceDictionary.MergedDictionaries>
+
+
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <Grid Background="{StaticResource DarkGray}">
+
+        <ContentControl Content="{Binding}">
+           
+            <ContentControl.Resources>
+                <DataTemplate DataType="{x:Type viewModel:Node}">
+                    <Label Content="{Binding Name}"></Label>
+                </DataTemplate>
+            </ContentControl.Resources>
+        </ContentControl>
+
+    </Grid>
+</UserControl>

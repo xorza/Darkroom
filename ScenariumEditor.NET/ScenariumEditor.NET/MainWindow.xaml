@@ -53,7 +53,22 @@
             <Rectangle Grid.Column="1"></Rectangle>
 
             <Border Grid.Column="2">
-                <controls:Playground />
+                <TabControl >
+                    <TabItem IsSelected="True">
+                        <TabItem.Header>
+                            <TextBlock FontWeight="Bold">Properties</TextBlock>
+                        </TabItem.Header>
+                        
+                        <controls:NodeEditorControl DataContext="{Binding SelectedNode}"></controls:NodeEditorControl>
+
+                    </TabItem>
+                    <TabItem >
+                        <TabItem.Header>
+                            <TextBlock FontWeight="Bold">Collection</TextBlock>
+                        </TabItem.Header>
+
+                    </TabItem>
+                </TabControl>
             </Border>
         </Grid>
     </Grid>
