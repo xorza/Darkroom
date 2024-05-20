@@ -120,7 +120,7 @@ mod tests {
 
         let buf: FfiBuf = vec![1u8, 2, 3, 4, 5].into();
         let data: Vec<u8> = buf.into();
-        assert_eq!(data, vec![1, 2, 3, 4, 5]);
+        assert_eq!(data, vec![1u8, 2, 3, 4, 5]);
 
         let buf: FfiBuf = vec![1u32, 2, 3, 4, 5].into();
         let data: Vec<u32> = buf.into();
