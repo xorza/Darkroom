@@ -9,7 +9,7 @@ using GraphLib.ViewModel;
 namespace GraphLib.Controls;
 
 public partial class GraphControl : UserControl {
-    private readonly MainWindowViewModel _viewModel = new DesignMainWindowViewModel();
+    private MainWindowViewModel _viewModel =null;
     
     public GraphControl() {
         InitializeComponent();
@@ -17,13 +17,14 @@ public partial class GraphControl : UserControl {
     
     
     private void CanvasgBg_OnLoaded(object sender, RoutedEventArgs e) {
+        _viewModel = (MainWindowViewModel)DataContext;
+        
         var graphCanvas = (UIElement)sender;
 
         graphCanvas.MouseDown += GraphCanvasBg_OnButtonDown;
         graphCanvas.MouseUp += GraphCanvasBg_OnButtonUp;
         graphCanvas.MouseMove += GraphCanvasBg_OnMouseMove;
         graphCanvas.MouseWheel += CanvasgBg_OnMouseWheel;
-        
     }
 
     #region graph canvas events
@@ -367,13 +368,13 @@ public partial class GraphControl : UserControl {
 
     private void Node_OnDeletePressed(object sender, EventArgs e) {
         var nodeControl = (NodeControl)sender;
-        var node = nodeControl.NodeDataContext;
+        var node = (Node)nodeControl.DataContext;
         _viewModel.Remove(node);
     }
 
     private void Node_OnSelected(object sender, EventArgs e) {
         var nodeControl = (NodeControl)sender;
-        var node = nodeControl.NodeDataContext;
+        var node = (Node)nodeControl.DataContext;
         _viewModel.SelectedNode = node;
     }
 }

@@ -7,7 +7,7 @@
              xmlns:local="clr-namespace:GraphLib"
              xmlns:viewModel="clr-namespace:GraphLib.ViewModel"
              xmlns:controls="clr-namespace:GraphLib.Controls"
-             d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}"
+             
              mc:Ignorable="d"
              Width="Auto"
              Height="Auto"
@@ -15,12 +15,13 @@
 
              Loaded="Node_OnLoaded"
              MouseDown="Node_OnMouseDown">
+    <!-- d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}" -->
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="/Styles/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            
+
             <sys:Double x:Key="PinSize">10</sys:Double>
 
             <Style x:Key="PinButton"
@@ -57,7 +58,7 @@
                 <Setter Property="BorderBrush" Value="#444" />
                 <Style.Triggers>
                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                        <Setter Property="BorderBrush" Value="OrangeRed" />
+                        <Setter Property="BorderBrush" Value="{StaticResource DarkWhite }" />
                     </DataTrigger>
                 </Style.Triggers>
             </Style>

@@ -8,34 +8,21 @@ using GraphLib.ViewModel;
 namespace GraphLib.Controls;
 
 public partial class NodeControl : UserControl {
+    private Node _viewModel = null!;
+    
     public NodeControl() {
         InitializeComponent();
     }
 
     private void Node_OnLoaded(object sender, RoutedEventArgs e) {
-        NodeDataContext.UpdatePinPositions();
+        _viewModel = (Node)DataContext!;
+        _viewModel.UpdatePinPositions();
     }
 
     public event EventHandler<Pin> PinClick = null;
-    public event EventHandler DeletePressed = null;
-    public event EventHandler Selected = null;
+    public event EventHandler      DeletePressed = null;
+    public event EventHandler      Selected = null;
 
-    public static readonly DependencyProperty NodeDataContextProperty = DependencyProperty.Register(
-        nameof(NodeDataContext),
-        typeof(ViewModel.Node),
-        typeof(NodeControl),
-        new PropertyMetadata(default(ViewModel.Node), NodeDataContextPropertyChangedCallback)
-    );
-
-    private static void
-        NodeDataContextPropertyChangedCallback(DependencyObject d, DependencyPropertyChangedEventArgs e) {
-        ((NodeControl)d).DataContext = e.NewValue;
-    }
-
-    public ViewModel.Node NodeDataContext {
-        get { return (ViewModel.Node)GetValue(NodeDataContextProperty); }
-        set { SetValue(NodeDataContextProperty, value); }
-    }
 
     #region dragging
 
@@ -64,8 +51,8 @@ public partial class NodeControl : UserControl {
         var header = (FrameworkElement)sender!;
         var currentPosition = e.GetPosition(header);
         var delta = currentPosition - _headerDragMousePosition;
-
-        NodeDataContext.CanvasPosition += delta;
+        
+        _viewModel.CanvasPosition += delta;
     }
 
     #endregion
@@ -77,7 +64,6 @@ public partial class NodeControl : UserControl {
         pin.NodePosition = position;
     }
 
-
     private void PinButton_OnClick(object sender, RoutedEventArgs e) {
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
@@ -85,7 +71,7 @@ public partial class NodeControl : UserControl {
     }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e) {
-      DeletePressed?.Invoke(this, EventArgs.Empty);
+        DeletePressed?.Invoke(this, EventArgs.Empty);
     }
 
     private void Node_OnMouseDown(object sender, MouseButtonEventArgs e) {

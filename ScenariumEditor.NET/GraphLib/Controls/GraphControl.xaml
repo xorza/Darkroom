@@ -92,11 +92,11 @@
             
             <!-- nodes -->
             <ItemsControl Grid.Row="0"
-                          ItemsSource="{Binding Nodes}"
-                          DataContext="{Binding}">
+                          DataContext="{Binding}"
+                          ItemsSource="{Binding Nodes}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type viewModel:Node}">
-                        <local:NodeControl NodeDataContext="{Binding}"
+                        <local:NodeControl DataContext="{Binding}"
                                            PinClick="Node_OnPinClick"
                                            DeletePressed="Node_OnDeletePressed"
                                            Selected="Node_OnSelected" />
