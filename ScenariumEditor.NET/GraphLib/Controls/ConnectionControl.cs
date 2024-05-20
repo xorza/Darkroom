@@ -5,14 +5,6 @@ using System.Windows.Media;
 
 namespace GraphLib.Controls;
 
-public class ConnectionEventArgs : RoutedEventArgs {
-    public ConnectionEventArgs(ConnectionControl connectionControl) {
-        ConnectionControl = connectionControl;
-    }
-
-    public ConnectionControl ConnectionControl { get; }
-}
-
 public class ConnectionControl : ClickControl {
     public static readonly DependencyProperty InputPositionDependencyProperty = DependencyProperty.Register(
         nameof(Pin1Position),
@@ -55,6 +47,36 @@ public class ConnectionControl : ClickControl {
         new PropertyMetadata(3.0, OnPropertyChangedCallback_InvalidateVisual)
     );
 
+    public static readonly DependencyProperty DeletedBrushProperty = DependencyProperty.Register(
+        nameof(DeletedBrush), typeof(Brush), typeof(ConnectionControl),
+        new PropertyMetadata(Brushes.IndianRed, OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public static readonly DependencyProperty IsDeletedProperty = DependencyProperty.Register(
+        nameof(IsDeleted), typeof(bool), typeof(ConnectionControl),
+        new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public static readonly DependencyProperty EventBrushProperty = DependencyProperty.Register(
+        nameof(EventBrush), typeof(Brush), typeof(ConnectionControl),
+        new PropertyMetadata(default(Brush), OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public static readonly DependencyProperty IsEventProperty = DependencyProperty.Register(
+        nameof(IsEvent), typeof(bool), typeof(ConnectionControl),
+        new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
+    );
+
+    public bool IsEvent {
+        get { return (bool)GetValue(IsEventProperty); }
+        set { SetValue(IsEventProperty, value); }
+    }
+
+    public Brush EventBrush {
+        get { return (Brush)GetValue(EventBrushProperty); }
+        set { SetValue(EventBrushProperty, value); }
+    }
+
     public double HoverThickness {
         get { return (double)GetValue(HoverThicknessProperty); }
         set { SetValue(HoverThicknessProperty, value); }
@@ -75,20 +97,10 @@ public class ConnectionControl : ClickControl {
         set => SetValue(HoverBrushDependencyProperty, value);
     }
 
-    public static readonly DependencyProperty DeletedBrushProperty = DependencyProperty.Register(
-        nameof(DeletedBrush), typeof(Brush), typeof(ConnectionControl),
-        new PropertyMetadata(Brushes.IndianRed, OnPropertyChangedCallback_InvalidateVisual)
-    );
-
     public Brush DeletedBrush {
         get { return (Brush)GetValue(DeletedBrushProperty); }
         set { SetValue(DeletedBrushProperty, value); }
     }
-
-    public static readonly DependencyProperty IsDeletedProperty = DependencyProperty.Register(
-        nameof(IsDeleted), typeof(bool), typeof(ConnectionControl),
-        new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
-    );
 
     public bool IsDeleted {
         get { return (bool)GetValue(IsDeletedProperty); }
@@ -135,6 +147,8 @@ public class ConnectionControl : ClickControl {
             drawingContext.DrawGeometry(null, new Pen(DeletedBrush, Thickness), Geometry);
         } else if (IsMouseOver) {
             drawingContext.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), Geometry);
+        } else if (IsEvent) {
+            drawingContext.DrawGeometry(null, new Pen(EventBrush, Thickness), Geometry);
         } else {
             drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), Geometry);
         }

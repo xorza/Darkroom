@@ -35,9 +35,11 @@
                     <DataTemplate DataType="{x:Type viewModel:Connection}">
                         <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
                                                  Pin2Position="{Binding Output.CanvasPosition}"
+                                                 IsEvent="{Binding IsEvent}"
                                                  BorderBrush="{StaticResource Blue}"
                                                  HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                 DeletedBrush="{StaticResource Yellow}"
+                                                 DeletedBrush="{StaticResource Red}"
+                                                 EventBrush="{StaticResource Yellow}"
                                                  Loaded="ConnectionControl_OnLoaded"
                                                  Unloaded="ConnectionControl_OnUnloaded" />
                     </DataTemplate>
@@ -79,13 +81,15 @@
                                          Visibility="Collapsed"
                                          Pin1Position="{Binding Input.CanvasPosition}"
                                          Pin2Position="{Binding Output.CanvasPosition}"
+                                         IsEvent="{Binding IsEvent}"
+                                         EventBrush="{StaticResource Yellow}"
                                          BorderBrush="{StaticResource Blue}"
                                          HoverBrush="{StaticResource Blue}"
                                          HoverThickness="2" />
 
                 <Path x:Name="CuttingPath"
                       Visibility="Collapsed"
-                      StrokeThickness="3"
+                      StrokeThickness="1"
                       Stroke="{StaticResource Red}" />
 
             </Canvas>

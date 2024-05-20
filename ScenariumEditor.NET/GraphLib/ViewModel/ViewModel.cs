@@ -50,7 +50,7 @@ public class MainWindowViewModel : INotifyPropertyChanged {
             }
 
             _selectedNode = value;
-            
+
             if (_selectedNode != null) {
                 _selectedNode.IsSelected = true;
             }
@@ -347,11 +347,14 @@ public class Connection : INotifyPropertyChanged {
     public Pin Output { get; init; }
     public Pin Input { get; init; }
 
+    public bool IsEvent { get; private init; }
+
     public Connection(Pin pin1, Pin pin2) {
         Debug.Assert(!ReferenceEquals(pin1, pin2));
         var (input, output) = Pin.Sort(pin1, pin2);
         Input = input;
         Output = output;
+        IsEvent = input.PinType == PinType.Trigger;
     }
 }
 

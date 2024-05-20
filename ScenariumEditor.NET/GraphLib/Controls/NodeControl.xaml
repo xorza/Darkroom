@@ -14,8 +14,10 @@
              Background="{x:Null}"
 
              Loaded="Node_OnLoaded"
-             MouseDown="Node_OnMouseDown">
-    <!-- d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}" -->
+             MouseDown="Node_OnMouseDown"
+             
+             d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}">
+
     <UserControl.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
@@ -81,7 +83,7 @@
                             VerticalAlignment="Top"
                             HorizontalAlignment="Left"
                             Margin="-6 1 0 0"
-                            Background="{StaticResource Red}"
+                            Background="{StaticResource Yellow}"
                             DataContext="{Binding Trigger}"
                             Loaded="PinButton_OnLoaded"
                             Click="PinButton_OnClick" />
@@ -149,7 +151,7 @@
 
                                         <Button Style="{StaticResource PinButton}"
                                                 Margin="0 0 -6 0"
-                                                Background="{StaticResource Red}"
+                                                Background="{StaticResource Yellow}"
                                                 Loaded="PinButton_OnLoaded"
                                                 Click="PinButton_OnClick" />
                                     </StackPanel>
