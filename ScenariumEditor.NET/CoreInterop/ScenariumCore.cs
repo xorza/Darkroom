@@ -17,11 +17,5 @@ public class ScenariumCore {
         }
     }
 
-
-    public String Test() {
-        var buf = CoreNative.test3();
-        var result = buf.ToString();
-        // buf.Dispose();
-        return result;
-    }
+    
 }

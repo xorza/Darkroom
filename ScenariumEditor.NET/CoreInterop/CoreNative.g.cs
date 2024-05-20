@@ -16,14 +16,8 @@ namespace CoreInterop
 
 
 
-        [DllImport(__DllName, EntryPoint = "test3", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern FfiBuf test3();
-
-        [DllImport(__DllName, EntryPoint = "add", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern uint add(uint left, uint right);
-
-        [DllImport(__DllName, EntryPoint = "test1", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void test1();
+        [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern void dummy(FfiBuf _a);
 
 
     }

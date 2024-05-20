@@ -1,36 +1,38 @@
+#![allow(dead_code)]
+#![deny(improper_ctypes_definitions)]
+
 use std::mem::forget;
 use std::string::FromUtf8Error;
 
-use graph::graph::Graph;
-use imaginarium::color_format::ColorFormat;
-use imaginarium::image::{Image, ImageDesc};
-
 #[repr(C)]
-pub struct FfiBuf {
+struct FfiBuf {
     bytes: *mut u8,
     length: u32,
     capacity: u32,
 }
 
 #[no_mangle]
-pub extern "C" fn test3() -> FfiBuf {
-    "Hello from Rust!".into()
-}
-
-#[no_mangle]
-pub extern "C" fn add(left: u32, right: u32) -> u32 {
-    left + right
-}
-
-#[no_mangle]
-pub extern "C" fn test1() {
-    let _img = Image::new_empty(ImageDesc::new(10, 10, ColorFormat::RGB_U8));
-    let _graph = Graph::default();
-}
+extern "C" fn dummy(_a: FfiBuf) {}
 
 impl FfiBuf {
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.bytes, self.length as usize) }
+    }
+}
+impl<const N: usize, T> From<[T; N]> for FfiBuf
+where
+    T: Clone,
+{
+    fn from(data: [T; N]) -> Self {
+        data.to_vec().into()
+    }
+}
+impl<T> From<&[T]> for FfiBuf
+where
+    T: Clone,
+{
+    fn from(data: &[T]) -> Self {
+        data.to_vec().into()
     }
 }
 impl From<&str> for FfiBuf {
@@ -61,16 +63,17 @@ impl From<FfiBuf> for Vec<u8> {
         unsafe { Vec::from_raw_parts(ptr, len, cap) }
     }
 }
-impl From<Vec<u8>> for FfiBuf {
-    fn from(mut data: Vec<u8>) -> Self {
-        let len = data.len();
-        let cap = data.capacity();
+impl<T> From<Vec<T>> for FfiBuf {
+    fn from(mut data: Vec<T>) -> Self {
+        let t_size = std::mem::size_of::<T>();
+        let len = data.len() * t_size;
+        let cap = data.capacity() * t_size;
         let ptr = data.as_mut_ptr();
 
         forget(data);
 
         FfiBuf {
-            bytes: ptr,
+            bytes: ptr as *mut u8,
             length: len as u32,
             capacity: cap as u32,
         }

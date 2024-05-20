@@ -41,6 +41,46 @@ internal unsafe partial struct FfiBuf : IDisposable {
         return this.ToArray().ToList();
     }
 
+    public T[] ToArray<T>() where T : unmanaged {
+        var type = typeof(T);
+
+        if (!type.IsPrimitive) {
+            if (type.IsValueType) {
+                if (!type.IsLayoutSequential && !type.IsExplicitLayout) {
+                    throw new InvalidOperationException(string.Format("{0} does not define a StructLayout attribute",
+                        type));
+                }
+            } else {
+                throw new InvalidOperationException(string.Format("{0} is not a primitive or value type", type));
+            }
+        }
+
+        var tSize = Marshal.SizeOf<T>();
+        if (this.length % tSize != 0) throw new InvalidOperationException("Invalid array size");
+
+        var tLength = (int)this.length / tSize;
+        var result = new T[tLength];
+
+        if (tLength == 0) return result;
+
+        GCHandle handle = new GCHandle();
+        try {
+            // Make sure the array won't be moved around by the GC 
+            handle = GCHandle.Alloc(result, GCHandleType.Pinned);
+            var destination = handle.AddrOfPinnedObject().ToPointer();
+            Buffer.MemoryCopy(bytes, destination, length, length);
+        } finally {
+            if (handle.IsAllocated)
+                handle.Free();
+        }
+
+        return result;
+    }
+
+    public List<T> ToList<T>() where T : unmanaged {
+        return this.ToArray<T>().ToList();
+    }
+
     public void Dispose() {
         if (bytes != null) {
             Marshal.FreeHGlobal((IntPtr)bytes);
@@ -50,14 +90,6 @@ internal unsafe partial struct FfiBuf : IDisposable {
 }
 
 internal static unsafe partial class CoreNative {
-    public static void Test() {
-        var buf = test3();
-        var result = buf.ToString();
-        buf.Dispose();
-        Console.WriteLine(result);
-    }
-    
-    
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern IntPtr LoadLibrary(string libname);
 
