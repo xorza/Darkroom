@@ -19,6 +19,7 @@
     </ItemGroup>
 
     <ItemGroup>
+      <ProjectReference Include="..\CoreInterop\CoreInterop.csproj" />
       <ProjectReference Include="..\GraphLib\GraphLib.csproj" />
     </ItemGroup>
 

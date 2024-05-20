@@ -3,6 +3,7 @@ members = [
     "graph",
     "imaginarium",
     "common",
+    "cs_interop",
 ]
 
 resolver = "2"
