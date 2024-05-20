@@ -9,7 +9,7 @@ namespace GraphLib.Controls;
 
 public partial class NodeControl : UserControl {
     private Node _viewModel = null!;
-    
+
     public NodeControl() {
         InitializeComponent();
     }
@@ -20,8 +20,8 @@ public partial class NodeControl : UserControl {
     }
 
     public event EventHandler<Pin> PinClick = null;
-    public event EventHandler      DeletePressed = null;
-    public event EventHandler      Selected = null;
+    public event EventHandler DeletePressed = null;
+    public event EventHandler Selected = null;
 
 
     #region dragging
@@ -51,7 +51,7 @@ public partial class NodeControl : UserControl {
         var header = (FrameworkElement)sender!;
         var currentPosition = e.GetPosition(header);
         var delta = currentPosition - _headerDragMousePosition;
-        
+
         _viewModel.CanvasPosition += delta;
     }
 

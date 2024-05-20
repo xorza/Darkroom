@@ -9,16 +9,16 @@ using GraphLib.ViewModel;
 namespace GraphLib.Controls;
 
 public partial class GraphControl : UserControl {
-    private MainWindowViewModel _viewModel =null;
-    
+    private MainWindowViewModel _viewModel = null;
+
     public GraphControl() {
         InitializeComponent();
     }
-    
-    
+
+
     private void CanvasgBg_OnLoaded(object sender, RoutedEventArgs e) {
         _viewModel = (MainWindowViewModel)DataContext;
-        
+
         var graphCanvas = (UIElement)sender;
 
         graphCanvas.MouseDown += GraphCanvasBg_OnButtonDown;
@@ -128,7 +128,7 @@ public partial class GraphControl : UserControl {
                 } else {
                     CancelCuttingConnections();
                 }
-                
+
                 _canvasState = CanvasState.Idle;
                 return;
 
@@ -216,7 +216,7 @@ public partial class GraphControl : UserControl {
             case CanvasState.Idle:
                 CancelCuttingConnections();
                 StopCanvasDragging();
-                
+
                 _activePin = e;
                 _tempMousePin = new Pin {
                     DataType = e.DataType,
@@ -227,18 +227,19 @@ public partial class GraphControl : UserControl {
 
                 NewConnectionControl.DataContext = new Connection(_activePin, _tempMousePin);
                 // NewConnectionControl.CaptureMouse();
-                
+
                 _canvasState = CanvasState.NewConnection;
                 return;
-            
+
             case CanvasState.NewConnection:
                 if (e.DataType == _activePin.DataType && e.PinType.GetOpposite() == _activePin.PinType) {
                     _viewModel.Connections.Add(new Connection(_activePin, e));
                     CancelNewConnection();
                     _canvasState = CanvasState.Idle;
                 }
+
                 return;
-            
+
             default:
                 throw new ArgumentOutOfRangeException();
         }
