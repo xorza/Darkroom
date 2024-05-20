@@ -15,122 +15,120 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="/Styles/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
-            
+
             <utils:BindingProxy x:Key="DataContextProxy" DataContext="{Binding}" />
-            
+
         </ResourceDictionary>
     </UserControl.Resources>
-    <Grid>
-        <local:ClippingBorder x:Name="GraphCanvasBg"
-                              ClipToBounds="True"
-                              Background="{StaticResource DarkGray}"
-                              CornerRadius="{StaticResource CornerRadius}"
-                              Loaded="CanvasgBg_OnLoaded">
-            <Grid>
-                <!-- connections -->
-                <ItemsControl Grid.Row="0"
-                              DataContext="{Binding}"
-                              ItemsSource="{Binding Connections}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Connection}">
-                            <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
-                                                     Pin2Position="{Binding Output.CanvasPosition}"
-                                                     BorderBrush="{StaticResource Blue}"
-                                                     HoverBrush="{StaticResource HighlightOverlayBrush}"
-                                                     DeletedBrush="{StaticResource Yellow}"
-                                                     Loaded="ConnectionControl_OnLoaded"
-                                                     Unloaded="ConnectionControl_OnUnloaded" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <Canvas IsItemsHost="True">
-                                <Canvas.RenderTransform>
-                                    <TransformGroup>
-                                        <ScaleTransform
-                                            ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
-                                            ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
+    
+    <local:ClippingBorder x:Name="GraphCanvasBg"
+                          ClipToBounds="True"
+                          Background="{StaticResource DarkGray}"
+                          CornerRadius="{StaticResource CornerRadius}"
+                          Loaded="CanvasgBg_OnLoaded">
+        <Grid>
+            <!-- connections -->
+            <ItemsControl Grid.Row="0"
+                          DataContext="{Binding}"
+                          ItemsSource="{Binding Connections}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type viewModel:Connection}">
+                        <local:ConnectionControl Pin1Position="{Binding Input.CanvasPosition}"
+                                                 Pin2Position="{Binding Output.CanvasPosition}"
+                                                 BorderBrush="{StaticResource Blue}"
+                                                 HoverBrush="{StaticResource HighlightOverlayBrush}"
+                                                 DeletedBrush="{StaticResource Yellow}"
+                                                 Loaded="ConnectionControl_OnLoaded"
+                                                 Unloaded="ConnectionControl_OnUnloaded" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas IsItemsHost="True">
+                            <Canvas.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform
+                                        ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
+                                        ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
 
-                                        <TranslateTransform
-                                            X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
-                                            Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
-                                    </TransformGroup>
-                                </Canvas.RenderTransform>
-                            </Canvas>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                </ItemsControl>
+                                    <TranslateTransform
+                                        X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
+                                        Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                </TransformGroup>
+                            </Canvas.RenderTransform>
+                        </Canvas>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+            </ItemsControl>
 
-                <!-- new connection -->
-                <Canvas>
-                    <Canvas.RenderTransform>
-                        <TransformGroup>
-                            <ScaleTransform
-                                ScaleX="{Binding CanvasScale}"
-                                ScaleY="{Binding CanvasScale}" />
+            <!-- new connection -->
+            <Canvas>
+                <Canvas.RenderTransform>
+                    <TransformGroup>
+                        <ScaleTransform
+                            ScaleX="{Binding CanvasScale}"
+                            ScaleY="{Binding CanvasScale}" />
 
-                            <TranslateTransform
-                                X="{Binding CanvasPosition.X}"
-                                Y="{Binding CanvasPosition.Y}" />
-                        </TransformGroup>
-                    </Canvas.RenderTransform>
+                        <TranslateTransform
+                            X="{Binding CanvasPosition.X}"
+                            Y="{Binding CanvasPosition.Y}" />
+                    </TransformGroup>
+                </Canvas.RenderTransform>
 
-                    <local:ConnectionControl x:Name="NewConnectionControl"
-                                             Visibility="Collapsed"
-                                             Pin1Position="{Binding Input.CanvasPosition}"
-                                             Pin2Position="{Binding Output.CanvasPosition}"
-                                             BorderBrush="{StaticResource Blue}"
-                                             HoverBrush="{StaticResource Blue}"
-                                             HoverThickness="2" />
+                <local:ConnectionControl x:Name="NewConnectionControl"
+                                         Visibility="Collapsed"
+                                         Pin1Position="{Binding Input.CanvasPosition}"
+                                         Pin2Position="{Binding Output.CanvasPosition}"
+                                         BorderBrush="{StaticResource Blue}"
+                                         HoverBrush="{StaticResource Blue}"
+                                         HoverThickness="2" />
 
-                    <Path x:Name="CuttingPath"
-                          Visibility="Collapsed"
-                          StrokeThickness="3"
-                          Stroke="{StaticResource Red}" />
+                <Path x:Name="CuttingPath"
+                      Visibility="Collapsed"
+                      StrokeThickness="3"
+                      Stroke="{StaticResource Red}" />
 
-                </Canvas>
+            </Canvas>
+            
+            <!-- nodes -->
+            <ItemsControl Grid.Row="0"
+                          ItemsSource="{Binding Nodes}"
+                          DataContext="{Binding}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type viewModel:Node}">
+                        <local:NodeControl NodeDataContext="{Binding}"
+                                           PinClick="Node_OnPinClick"
+                                           DeletePressed="Node_OnDeletePressed"
+                                           Selected="Node_OnSelected" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <Canvas IsItemsHost="True">
+                            <Canvas.RenderTransform>
+                                <TransformGroup>
+                                    <ScaleTransform
+                                        ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
+                                        ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
 
+                                    <TranslateTransform
+                                        X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
+                                        Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
+                                </TransformGroup>
+                            </Canvas.RenderTransform>
+                        </Canvas>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                        <Setter Property="Canvas.Left"
+                                Value="{Binding Path=CanvasPosition.X}" />
+                        <Setter Property="Canvas.Top"
+                                Value="{Binding Path=CanvasPosition.Y}" />
+                    </Style>
+                </ItemsControl.ItemContainerStyle>
+            </ItemsControl>
 
-                <!-- nodes -->
-                <ItemsControl Grid.Row="0"
-                              ItemsSource="{Binding Nodes}"
-                              DataContext="{Binding}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModel:Node}">
-                            <local:NodeControl NodeDataContext="{Binding}"
-                                               PinClick="Node_OnPinClick"
-                                               DeletePressed="Node_OnDeletePressed"
-                                               Selected="Node_OnSelected" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <Canvas IsItemsHost="True">
-                                <Canvas.RenderTransform>
-                                    <TransformGroup>
-                                        <ScaleTransform
-                                            ScaleX="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}"
-                                            ScaleY="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasScale}" />
-
-                                        <TranslateTransform
-                                            X="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.X}"
-                                            Y="{Binding Source={StaticResource DataContextProxy}, Path=DataContext.CanvasPosition.Y}" />
-                                    </TransformGroup>
-                                </Canvas.RenderTransform>
-                            </Canvas>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="Canvas.Left"
-                                    Value="{Binding Path=CanvasPosition.X}" />
-                            <Setter Property="Canvas.Top"
-                                    Value="{Binding Path=CanvasPosition.Y}" />
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
-                </ItemsControl>
-
-            </Grid>
-        </local:ClippingBorder>
-    </Grid>
+        </Grid>
+    </local:ClippingBorder>
 </UserControl>
