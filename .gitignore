@@ -11,9 +11,6 @@
 /test_output/
 **/logs/
 
-# cs generated files
-*.g.cs
-
 **/obj/
 **/bin/
 *.DotSettings.user

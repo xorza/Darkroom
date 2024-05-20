@@ -15,7 +15,6 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using CoreInterop;
-using CsBindgen;
 using GraphLib.Controls;
 using GraphLib.Utils;
 using GraphLib.ViewModel;
@@ -29,11 +28,19 @@ public partial class MainWindow : Window {
         InitializeComponent();
 
         this.DataContext = _viewModel;
+
+        Loaded += MainWindow_OnLoaded;
+        Unloaded += MainWindow_OnUnloaded;
     }
 
     private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
-        var result = ScenariumCore.Test();
-        MessageBox.Show(result.ToString());
+        ScenariumCore.Init();
+
+        var result = new ScenariumCore().Test();
+        MessageBox.Show(result);
+    }
+
+    private void MainWindow_OnUnloaded(object sender, RoutedEventArgs e) {
     }
 
 

@@ -1,17 +1,17 @@
 [workspace]
 members = [
-    "graph",
-    "imaginarium",
     "common",
+    "imaginarium",
+    "graph",
     "cs_interop",
 ]
 
 resolver = "2"
 
 [workspace.dependencies]
-graph_lib = { path = "graph", package = "graph", features = ["wgpu"] }
-common = { path = "common", package = "common" }
-imaginarium = { path = "imaginarium", package = "imaginarium", features = ["wgpu"] }
+common = { path = "common" }
+imaginarium = { path = "imaginarium", features = ["wgpu"] }
+graph = { path = "graph", features = ["wgpu"] }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"

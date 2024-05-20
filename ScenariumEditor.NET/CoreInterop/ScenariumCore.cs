@@ -1,10 +1,27 @@
-using CsBindgen;
+using System.Diagnostics;
+using System.Reflection;
+using System.Reflection.Metadata;
+using System.Runtime.InteropServices;
+
 
 namespace CoreInterop;
 
 public class ScenariumCore {
-    public static UInt32 Test()  {
-        // Call the generated method
-       return NativeMethods.add(1, 2);
+    public static void Init() {
+        CoreNative.LoadDll();
+    }
+
+    public ScenariumCore() {
+        if (!CoreNative.IsLoaded) {
+            throw new InvalidOperationException("CoreNative is not loaded, call CoreNative.LoadDll() first.");
+        }
+    }
+
+
+    public String Test() {
+        var buf = CoreNative.test3();
+        var result = buf.ToString();
+        // buf.Dispose();
+        return result;
     }
 }

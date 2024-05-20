@@ -17,9 +17,7 @@
         Width="800"
         Background="{StaticResource DarkerGray}"
 
-        Style="{StaticResource DefaultWindow}"
-
-        Loaded="MainWindow_OnLoaded">
+        Style="{StaticResource DefaultWindow}">
     <Window.Resources>
     </Window.Resources>
 

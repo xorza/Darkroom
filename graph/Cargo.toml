@@ -9,13 +9,14 @@ wgpu = ["imaginarium/wgpu"]
 default = ["wgpu"]
 
 [dependencies]
+common = { workspace = true }
 imaginarium = { workspace = true }
+
 serde = { workspace = true }
 serde_yaml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 mlua = { workspace = true }
-common = { workspace = true }
 once_cell = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }

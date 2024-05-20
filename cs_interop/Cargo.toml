@@ -7,7 +7,9 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-
+common = { workspace = true }
+imaginarium = { workspace = true }
+graph = { workspace = true }
 
 [build-dependencies]
 csbindgen = "1.9"
