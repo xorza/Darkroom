@@ -16,6 +16,12 @@ namespace CoreInterop
 
 
 
+        [DllImport(__DllName, EntryPoint = "create_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern byte* create_context();
+
+        [DllImport(__DllName, EntryPoint = "destroy_context", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern void destroy_context(byte* ctx);
+
         [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void dummy(FfiBuf _a);
 

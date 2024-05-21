@@ -187,3 +187,12 @@ impl Debug for UberInvoker {
             .finish()
     }
 }
+
+impl Debug for LambdaInvoker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LambdaInvoker")
+            .field("all_functions", &self.all_functions)
+            .field("lambdas", &self.lambdas.len())
+            .finish()
+    }
+}

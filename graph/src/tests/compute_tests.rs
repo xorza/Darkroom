@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::str::FromStr;
 
 use crate::compute::Compute;
-use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::data::{DataType, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::{Binding, FunctionBehavior, Graph};
 use crate::invoke_context::{InvokeCache, LambdaInvoker};
@@ -65,7 +65,7 @@ where
             events: vec![],
         },
         move |_, _, outputs| {
-            outputs[0] = DynamicValue::from(get_a() as f64).into();
+            outputs[0] = (get_a() as f64).into();
         },
     );
     // val 2
@@ -84,7 +84,7 @@ where
             events: vec![],
         },
         move |_, _, outputs| {
-            outputs[0] = DynamicValue::from(get_b()).into();
+            outputs[0] = (get_b() as f64).into();
         },
     );
     // sum
@@ -120,8 +120,8 @@ where
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_int();
             let b: i64 = inputs[1].as_int();
-            outputs[0] = DynamicValue::from(a + b).into();
             ctx.set(a + b);
+            outputs[0] = (a + b).into();
         },
     );
     // mult
@@ -157,7 +157,7 @@ where
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_int();
             let b: i64 = inputs[1].as_int();
-            outputs[0] = DynamicValue::from(a * b).into();
+            outputs[0] = (a * b).into();
             ctx.set(a * b);
         },
     );

@@ -28,7 +28,7 @@ pub struct RuntimeNode {
     pub(crate) total_binding_count: u32,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RuntimeGraph {
     pub nodes: Vec<RuntimeNode>,
 }

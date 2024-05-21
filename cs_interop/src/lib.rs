@@ -4,11 +4,25 @@
 use std::mem::forget;
 use std::string::FromUtf8Error;
 
+use crate::ctx::Context;
+
+mod ctx;
+
 #[repr(C)]
 struct FfiBuf {
     bytes: *mut u8,
     length: u32,
     capacity: u32,
+}
+
+#[no_mangle]
+extern "C" fn create_context() -> *mut u8 {
+    Box::into_raw(Box::<Context>::default()) as *mut u8
+}
+
+#[no_mangle]
+extern "C" fn destroy_context(ctx: *mut u8) {
+    unsafe { drop(Box::<Context>::from_raw(ctx as *mut Context)) };
 }
 
 #[no_mangle]

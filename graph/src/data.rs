@@ -1,4 +1,5 @@
 use std::any::Any;
+use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -460,16 +461,17 @@ impl DataType {
     }
 }
 
-impl ToString for DataType {
-    fn to_string(&self) -> String {
-        match &self {
+impl Display for DataType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let str = match &self {
             DataType::Float => "float".to_string(),
             DataType::Int => "int".to_string(),
             DataType::Bool => "bool".to_string(),
             DataType::String => "string".to_string(),
             DataType::Custom { type_name, .. } => type_name.clone(),
             _ => panic!("No string representation for {:?}", self),
-        }
+        };
+        write!(f, "{}", str)
     }
 }
 impl FromStr for DataType {
