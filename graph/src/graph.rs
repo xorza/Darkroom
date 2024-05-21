@@ -4,10 +4,10 @@ use uuid::Uuid;
 use common::id_type;
 
 use crate::data::StaticValue;
-use crate::function::{Function, FunctionId};
+use crate::function::{Func, FuncId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-pub enum FunctionBehavior {
+pub enum FuncBehavior {
     #[default]
     Active,
     Passive,
@@ -43,13 +43,13 @@ pub struct Event {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
-    self_id: NodeId,
-
-    pub function_id: FunctionId,
-
+    pub id: NodeId,
+    pub func_id: FuncId,
     pub name: String,
-    pub behavior: FunctionBehavior,
+
+    pub behavior: FuncBehavior,
     pub is_output: bool,
+
     pub cache_outputs: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -72,7 +72,7 @@ impl Graph {
     }
 
     pub fn add_node(&mut self, node: Node) {
-        match self.nodes.iter().position(|n| n.self_id == node.self_id) {
+        match self.nodes.iter().position(|n| n.id == node.id) {
             Some(index) => self.nodes[index] = node,
             None => self.nodes.push(node),
         }
@@ -80,7 +80,7 @@ impl Graph {
     pub fn remove_node_by_id(&mut self, id: NodeId) {
         assert_ne!(id.0, Uuid::nil());
 
-        self.nodes.retain(|node| node.self_id != id);
+        self.nodes.retain(|node| node.id != id);
 
         self.nodes
             .iter_mut()
@@ -108,12 +108,12 @@ impl Graph {
 
     pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
-        self.nodes.iter().find(|node| node.self_id == id)
+        self.nodes.iter().find(|node| node.id == id)
     }
     pub fn node_by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
 
-        self.nodes.iter_mut().find(|node| node.self_id == id)
+        self.nodes.iter_mut().find(|node| node.id == id)
     }
 
     pub fn to_yaml(&self) -> anyhow::Result<String> {
@@ -138,7 +138,7 @@ impl Graph {
 
     pub fn validate(&self) -> anyhow::Result<()> {
         for node in self.nodes.iter() {
-            if node.self_id == NodeId::nil() {
+            if node.id == NodeId::nil() {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
 
@@ -162,10 +162,10 @@ impl Node {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Node {
         Node {
-            self_id: NodeId::unique(),
-            function_id: FunctionId::nil(),
+            id: NodeId::unique(),
+            func_id: FuncId::nil(),
             name: "".to_string(),
-            behavior: FunctionBehavior::Active,
+            behavior: FuncBehavior::Active,
             is_output: false,
             cache_outputs: false,
             inputs: vec![],
@@ -173,7 +173,7 @@ impl Node {
         }
     }
 
-    pub fn from_function(function: &Function) -> Node {
+    pub fn from_function(function: &Func) -> Node {
         let inputs: Vec<Input> = function
             .inputs
             .iter()
@@ -193,19 +193,15 @@ impl Node {
             .collect();
 
         Node {
-            self_id: NodeId::unique(),
-            function_id: function.id,
+            id: NodeId::unique(),
+            func_id: function.id,
             name: function.name.clone(),
-            behavior: FunctionBehavior::Active,
+            behavior: FuncBehavior::Active,
             cache_outputs: false,
             is_output: function.is_output,
             inputs,
             events,
         }
-    }
-
-    pub fn id(&self) -> NodeId {
-        self.self_id
     }
 }
 
@@ -245,11 +241,11 @@ impl Binding {
     }
 }
 
-impl FunctionBehavior {
+impl FuncBehavior {
     pub fn toggle(&mut self) {
         *self = match *self {
-            FunctionBehavior::Active => FunctionBehavior::Passive,
-            FunctionBehavior::Passive => FunctionBehavior::Active,
+            FuncBehavior::Active => FuncBehavior::Passive,
+            FuncBehavior::Passive => FuncBehavior::Active,
         };
     }
 }

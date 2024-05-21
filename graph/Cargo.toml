@@ -25,3 +25,4 @@ tokio = { workspace = true }
 log = { workspace = true }
 flexi_logger = { workspace = true }
 parking_lot = { workspace = true }
+hashbrown = { workspace = true }

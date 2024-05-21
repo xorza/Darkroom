@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
-use crate::graph::FunctionBehavior;
+use crate::function::{Func, FuncId, FuncLib, InputInfo, OutputInfo};
+use crate::graph::FuncBehavior;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 #[derive(Debug)]
@@ -22,10 +22,10 @@ impl Default for TimersInvoker {
         let mut invoker = LambdaInvoker::default();
 
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
                 name: "frame event".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FuncBehavior::Active,
                 is_output: false,
                 category: "Timers".to_string(),
                 inputs: vec![InputInfo {
@@ -82,13 +82,13 @@ impl Default for TimersInvoker {
 }
 
 impl Invoker for TimersInvoker {
-    fn all_functions(&self) -> Vec<Function> {
-        self.lambda_invoker.all_functions()
+    fn take_func_lib(&mut self) -> FuncLib {
+        self.lambda_invoker.take_func_lib()
     }
 
     fn invoke(
         &self,
-        function_id: FunctionId,
+        function_id: FuncId,
         cache: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,

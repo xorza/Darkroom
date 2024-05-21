@@ -1,5 +1,5 @@
+use hashbrown::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -11,13 +11,13 @@ use common::output_stream::OutputStream;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::FunctionId;
+use crate::function::{Func, FuncId};
 use crate::graph::{Binding, Graph, Input, Node, NodeId};
 use crate::invoke_context::{InvokeArgs, InvokeCache};
 use crate::{data, function};
 
 struct LuaFuncInfo {
-    info: function::Function,
+    info: function::Func,
     lua_func: mlua::Function<'static>,
 }
 
@@ -31,7 +31,7 @@ struct FuncConnections {
 pub(crate) struct LuaInvokerInternal {
     lua: &'static mlua::Lua,
     output_stream: Arc<Mutex<Option<OutputStream>>>,
-    funcs: HashMap<FunctionId, LuaFuncInfo>,
+    funcs: HashMap<FuncId, LuaFuncInfo>,
 }
 
 impl Default for LuaInvokerInternal {
@@ -137,13 +137,19 @@ impl LuaInvokerInternal {
 
         Ok(())
     }
-    fn function_from_table(table: &mlua::Table) -> anyhow::Result<function::Function> {
+    fn function_from_table(table: &mlua::Table) -> anyhow::Result<function::Func> {
         let id_str: String = table.get("id")?;
 
-        let mut function_info = function::Function::new(FunctionId::from_str(&id_str)?);
-        function_info.name = table.get("name")?;
-        function_info.inputs = Vec::new();
-        function_info.outputs = Vec::new();
+        let mut function_info = Func {
+            id: FuncId::from_str(&id_str)?,
+            name: table.get("name")?,
+            category: "".to_string(),
+            behavior: Default::default(),
+            is_output: false,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
 
         let inputs: mlua::Table = table.get("inputs")?;
         for i in 1..=inputs.len()? {
@@ -294,12 +300,12 @@ impl LuaInvokerInternal {
                 });
             }
             for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
-                assert!(!node.id().is_nil());
+                assert!(!node.id.is_nil());
                 output_ids.insert(
                     output_id,
                     OutputAddr {
                         index: i as u32,
-                        node_id: node.id(),
+                        node_id: node.id,
                     },
                 );
             }
@@ -327,13 +333,13 @@ impl LuaInvokerInternal {
         self.output_stream = Arc::new(Mutex::new(Some(output_stream.clone())));
     }
 
-    pub fn get_all_functions(&self) -> Vec<&function::Function> {
+    pub fn get_all_functions(&self) -> Vec<&function::Func> {
         self.funcs.values().map(|f| &f.info).collect()
     }
 
     pub fn invoke(
         &self,
-        function_id: FunctionId,
+        function_id: FuncId,
         _cache: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,

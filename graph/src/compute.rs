@@ -4,6 +4,7 @@ use std::ops::{Index, IndexMut};
 use common::apply::ApplyMut;
 
 use crate::data::{DataType, DynamicValue};
+use crate::function::FuncLib;
 use crate::graph::{Binding, Graph};
 use crate::invoke_context::Invoker;
 use crate::runtime_graph::RuntimeGraph;
@@ -11,12 +12,20 @@ use crate::runtime_graph::RuntimeGraph;
 #[derive(Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
-pub struct Compute {
-    invoker: Box<dyn Invoker>,
-}
+#[derive(Debug, Default)]
+pub struct Compute {}
 
 impl Compute {
-    pub fn run(&self, graph: &Graph, runtime_graph: &mut RuntimeGraph) -> anyhow::Result<()> {
+    pub fn run<T>(
+        &self,
+        graph: &Graph,
+        func_lib: &FuncLib,
+        invoker: &T,
+        runtime_graph: &mut RuntimeGraph,
+    ) -> anyhow::Result<()>
+    where
+        T: Invoker,
+    {
         runtime_graph.next(graph);
 
         let mut inputs: ArgSet = ArgSet::default();
@@ -38,9 +47,7 @@ impl Compute {
             let node = graph
                 .node_by_id(runtime_graph.nodes[node_idx].id())
                 .unwrap();
-
-            // fixme: get node info from function registry
-            let node_info = crate::function::Function::default();
+            let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
 
             inputs.resize_and_fill(node.inputs.len());
             node.inputs
@@ -87,8 +94,8 @@ impl Compute {
 
             r_node.run_time = {
                 let start = std::time::Instant::now();
-                self.invoker.invoke(
-                    node.function_id,
+                invoker.invoke(
+                    node.func_id,
                     &mut r_node.cache,
                     inputs.as_mut_slice(),
                     outputs.as_mut_slice(),
@@ -151,26 +158,6 @@ impl Compute {
                 panic!("Unsupported conversion from {:?} to {:?}", src, dst);
             }
         }
-    }
-}
-
-impl<T: Invoker + 'static> From<T> for Compute {
-    fn from(invoker: T) -> Self {
-        Compute {
-            invoker: Box::new(invoker),
-        }
-    }
-}
-impl From<Box<dyn Invoker>> for Compute {
-    fn from(invoker: Box<dyn Invoker>) -> Self {
-        Compute { invoker }
-    }
-}
-impl Debug for Compute {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Compute")
-            .field("invoker", &self.invoker)
-            .finish()
     }
 }
 

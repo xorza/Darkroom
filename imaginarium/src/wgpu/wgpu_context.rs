@@ -1,5 +1,5 @@
+use hashbrown::HashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ops::RangeBounds;
 use std::rc::Rc;
 use std::thread;

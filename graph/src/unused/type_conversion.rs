@@ -14,7 +14,6 @@ pub struct TypeConverterDesc {
     pub dst: DataType,
 }
 
-
 impl TypeConverterKey for TypeConverterDesc {
     fn key(&self) -> (&DataType, &DataType) {
         (&self.src, &self.dst)
@@ -61,10 +60,9 @@ impl<'a> Borrow<dyn TypeConverterKey + 'a> for (&'a DataType, &'a DataType) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use hashbrown::HashMap;
 
     use super::*;
 
@@ -72,7 +70,10 @@ mod tests {
     fn test_type_converter_desc_hash() {
         let mut map = HashMap::new();
         map.insert(
-            TypeConverterDesc { src: DataType::Int, dst: DataType::Int },
+            TypeConverterDesc {
+                src: DataType::Int,
+                dst: DataType::Int,
+            },
             13,
         );
 
@@ -81,4 +82,3 @@ mod tests {
         assert_eq!(map.get(&borrowed as &dyn TypeConverterKey), Some(&13));
     }
 }
-

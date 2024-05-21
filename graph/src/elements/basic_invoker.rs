@@ -10,8 +10,8 @@ use strum_macros::{Display, EnumIter};
 use common::output_stream::OutputStream;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
-use crate::graph::FunctionBehavior;
+use crate::function::{Func, FuncId, FuncLib, InputInfo, OutputInfo};
+use crate::graph::FuncBehavior;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 #[derive(Debug)]
@@ -85,10 +85,10 @@ impl Default for BasicInvoker {
 
         //print
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
+            Func {
+                id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
                 name: "print".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FuncBehavior::Active,
                 is_output: true,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -103,22 +103,19 @@ impl Default for BasicInvoker {
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
-                let _ = output_stream_clone
-                    .lock()
-                    .as_mut()
-                    .is_some_and(|s| {
-                        s.write(value);
-                        true
-                    });
+                let _ = output_stream_clone.lock().as_mut().is_some_and(|s| {
+                    s.write(value);
+                    true
+                });
                 info!("{:?}", value);
             },
         );
         // math two argument operation
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
+            Func {
+                id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
                 name: "2 arg math".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -163,10 +160,10 @@ impl Default for BasicInvoker {
         );
         // to string
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
+            Func {
+                id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
                 name: "float to string".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -195,10 +192,10 @@ impl Default for BasicInvoker {
 
         // random
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
+            Func {
+                id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
                 name: "random".to_string(),
-                behavior: FunctionBehavior::Active,
+                behavior: FuncBehavior::Active,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -239,10 +236,10 @@ impl Default for BasicInvoker {
         );
         //add
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
                 name: "add".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -280,10 +277,10 @@ impl Default for BasicInvoker {
         );
         //subtract
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
                 name: "subtract".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -321,10 +318,10 @@ impl Default for BasicInvoker {
         );
         //multiply
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
                 name: "multiply".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -362,10 +359,10 @@ impl Default for BasicInvoker {
         );
         //divide
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
                 name: "divide".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -411,10 +408,10 @@ impl Default for BasicInvoker {
         );
         // power
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
                 name: "power".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -452,10 +449,10 @@ impl Default for BasicInvoker {
         );
         // sqrt
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
                 name: "sqrt".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -483,10 +480,10 @@ impl Default for BasicInvoker {
         );
         // sin
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
                 name: "sin".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -514,10 +511,10 @@ impl Default for BasicInvoker {
         );
         // cos
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
                 name: "cos".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -545,10 +542,10 @@ impl Default for BasicInvoker {
         );
         // tan
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
                 name: "tan".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -576,10 +573,10 @@ impl Default for BasicInvoker {
         );
         // asin
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
                 name: "asin".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -607,10 +604,10 @@ impl Default for BasicInvoker {
         );
         // acos
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
                 name: "acos".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -638,10 +635,10 @@ impl Default for BasicInvoker {
         );
         // atan
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
                 name: "atan".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![InputInfo {
@@ -669,10 +666,10 @@ impl Default for BasicInvoker {
         );
         // log
         invoker.add_lambda(
-            Function {
-                id: FunctionId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
+            Func {
+                id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
                 name: "log".to_string(),
-                behavior: FunctionBehavior::Passive,
+                behavior: FuncBehavior::Passive,
                 is_output: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -717,13 +714,13 @@ impl Default for BasicInvoker {
 }
 
 impl Invoker for BasicInvoker {
-    fn all_functions(&self) -> Vec<Function> {
-        self.lambda_invoker.all_functions()
+    fn take_func_lib(&mut self) -> FuncLib {
+        self.lambda_invoker.take_func_lib()
     }
 
     fn invoke(
         &self,
-        function_id: FunctionId,
+        function_id: FuncId,
         cache: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,

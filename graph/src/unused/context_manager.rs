@@ -1,5 +1,5 @@
+use hashbrown::HashMap;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 
 use common::is_debug;
 use common::scoped_ref::ScopeRefMut;
@@ -32,7 +32,6 @@ pub trait IContextManager {
     fn end_frame(&mut self);
 }
 
-
 impl IContextManager for ContextManager {
     fn get_mut<T: Context + 'static>(&mut self) -> Option<ScopeRefMut<T>> {
         if !self.frame_started {
@@ -40,8 +39,7 @@ impl IContextManager for ContextManager {
         }
 
         let type_id = TypeId::of::<T>();
-        let entry = self.contexts
-            .get_mut(&type_id);
+        let entry = self.contexts.get_mut(&type_id);
         if entry.is_none() {
             return None;
         }
@@ -65,23 +63,15 @@ impl IContextManager for ContextManager {
 
         ctx.begin_invoke();
 
-        Some(
-            ScopeRefMut::new(
-                ctx,
-                |ctx| ctx.end_invoke(),
-            )
-        )
+        Some(ScopeRefMut::new(ctx, |ctx| ctx.end_invoke()))
     }
 
     fn begin_frame(&mut self) {
         if is_debug() {
-            assert!(
-                self.contexts
-                    .values()
-                    .all(
-                        |entry| !entry.is_active_this_frame
-                    )
-            )
+            assert!(self
+                .contexts
+                .values()
+                .all(|entry| !entry.is_active_this_frame))
         }
         self.frame_started = true;
     }
@@ -93,15 +83,11 @@ impl IContextManager for ContextManager {
 
         self.contexts
             .values_mut()
-            .filter(
-                |entry| entry.is_active_this_frame
-            )
-            .for_each(
-                |entry| {
-                    entry.ending.take().unwrap()(entry);
-                    entry.is_active_this_frame = false;
-                }
-            )
+            .filter(|entry| entry.is_active_this_frame)
+            .for_each(|entry| {
+                entry.ending.take().unwrap()(entry);
+                entry.is_active_this_frame = false;
+            })
     }
 }
 impl ContextManager {
@@ -110,15 +96,14 @@ impl ContextManager {
             panic!("Cannot insert context during frame");
         }
 
-        self.contexts
-            .insert(
-                TypeId::of::<T>(),
-                ContextEntry {
-                    context: Box::new(context),
-                    is_active_this_frame: false,
-                    ending: None,
-                },
-            );
+        self.contexts.insert(
+            TypeId::of::<T>(),
+            ContextEntry {
+                context: Box::new(context),
+                is_active_this_frame: false,
+                ending: None,
+            },
+        );
     }
 }
 
@@ -162,13 +147,20 @@ mod tests {
 
         context_manager.begin_frame();
         let mut s = "test begin_frame begin_invoke".to_string();
-        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
+        assert_eq!(
+            context_manager.get_mut::<String>().unwrap().deref_mut(),
+            &mut s
+        );
         let mut s = "test begin_frame begin_invoke end_invoke begin_invoke".to_string();
-        assert_eq!(context_manager.get_mut::<String>().unwrap().deref_mut(), &mut s);
+        assert_eq!(
+            context_manager.get_mut::<String>().unwrap().deref_mut(),
+            &mut s
+        );
         context_manager.end_frame();
 
         {
-            let internal_string = context_manager.contexts
+            let internal_string = context_manager
+                .contexts
                 .get_mut(&TypeId::of::<String>())
                 .unwrap()
                 .context
@@ -182,7 +174,8 @@ mod tests {
 
         context_manager.begin_frame();
         {
-            let internal_string = context_manager.contexts
+            let internal_string = context_manager
+                .contexts
                 .get_mut(&TypeId::of::<String>())
                 .unwrap()
                 .context
@@ -196,13 +189,8 @@ mod tests {
         {
             let target =
                 "test begin_frame begin_invoke end_invoke begin_invoke end_invoke end_frame begin_frame begin_invoke";
-            let mut requested = context_manager
-                .get_mut::<String>()
-                .unwrap();
-            assert_eq!(
-                requested.deref_mut().deref_mut(),
-                target
-            );
+            let mut requested = context_manager.get_mut::<String>().unwrap();
+            assert_eq!(requested.deref_mut().deref_mut(), target);
         }
         context_manager.end_frame();
     }

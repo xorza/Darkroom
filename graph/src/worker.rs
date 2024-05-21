@@ -6,6 +6,7 @@ use tokio::runtime::Runtime;
 
 use crate::compute::Compute;
 use crate::event::EventId;
+use crate::function::FuncLib;
 use crate::graph::Graph;
 use crate::invoke_context::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
@@ -30,10 +31,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<Callback>(
-        invokers: Vec<Box<dyn Invoker>>,
-        compute_callback: Callback,
-    ) -> Self
+    pub fn new<Callback>(invokers: Vec<Box<dyn Invoker>>, compute_callback: Callback) -> Self
     where
         Callback: Fn() + Send + 'static,
     {
@@ -44,12 +42,11 @@ impl Worker {
 
         let thread_handle = thread::spawn(move || {
             let invoker = UberInvoker::new(invokers);
-            let compute = Compute::from(invoker);
             let compute_callback = Arc::new(compute_callback);
 
             load_tx.send(()).unwrap();
 
-            Self::worker_loop(compute, tx_clone, worker_rx, compute_callback);
+            Self::worker_loop(invoker, tx_clone, worker_rx, compute_callback);
         });
 
         load_rx.recv().unwrap();
@@ -61,12 +58,13 @@ impl Worker {
     }
 
     fn worker_loop(
-        compute: Compute,
+        mut invoker: UberInvoker,
         tx: std::sync::mpsc::Sender<WorkerMessage>,
         rx: std::sync::mpsc::Receiver<WorkerMessage>,
         compute_callback: Arc<ComputeEvent>,
     ) {
         let mut message: Option<WorkerMessage> = None;
+        let func_lib = invoker.take_func_lib();
 
         loop {
             if message.is_none() {
@@ -79,15 +77,22 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = RuntimeGraph::from(&graph);
+                    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+                    let compute = Compute::default();
                     compute
-                        .run(&graph, &mut runtime_graph)
+                        .run(&graph, &func_lib, &invoker, &mut runtime_graph)
                         .expect("Failed to run graph");
                 }
 
                 WorkerMessage::RunLoop(graph) => {
-                    message =
-                        Self::event_subloop(graph, &compute, tx.clone(), &rx, &compute_callback);
+                    message = Self::event_subloop(
+                        graph,
+                        &invoker,
+                        &func_lib,
+                        tx.clone(),
+                        &rx,
+                        &compute_callback,
+                    );
                 }
             }
 
@@ -98,7 +103,8 @@ impl Worker {
     #[allow(unreachable_code)]
     fn event_subloop(
         graph: Graph,
-        compute: &Compute,
+        invoker: &UberInvoker,
+        func_lib: &FuncLib,
         worker_tx: std::sync::mpsc::Sender<WorkerMessage>,
         worker_rx: &std::sync::mpsc::Receiver<WorkerMessage>,
         compute_callback: &Arc<ComputeEvent>,
@@ -106,7 +112,7 @@ impl Worker {
         let mut result_message: Option<WorkerMessage> = None;
 
         let runtime = Runtime::new().unwrap();
-        let mut runtime_graph = RuntimeGraph::from(&graph);
+        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
         let event_queue: EventQueue = Arc::new(tokio::sync::Mutex::new(Vec::new()));
         let (_event_tx, mut event_rx) = tokio::sync::mpsc::channel::<EventId>(25);
 
@@ -144,8 +150,9 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
+                    let compute = Compute::default();
                     compute
-                        .run(&graph, &mut runtime_graph)
+                        .run(&graph, func_lib, invoker, &mut runtime_graph)
                         .expect("Failed to run graph");
 
                     compute_callback();

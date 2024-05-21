@@ -21,4 +21,5 @@ glam = { workspace = true }
 common = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
+hashbrown = { workspace = true }
 

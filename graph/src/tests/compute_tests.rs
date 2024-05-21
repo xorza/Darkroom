@@ -5,9 +5,9 @@ use parking_lot::Mutex;
 
 use crate::compute::Compute;
 use crate::data::{DataType, StaticValue};
-use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
-use crate::graph::{Binding, FunctionBehavior, Graph};
-use crate::invoke_context::{InvokeCache, LambdaInvoker};
+use crate::function::{Func, FuncId, InputInfo, OutputInfo};
+use crate::graph::{Binding, FuncBehavior, Graph};
+use crate::invoke_context::{InvokeCache, Invoker, LambdaInvoker};
 use crate::runtime_graph::RuntimeGraph;
 
 struct TestValues {
@@ -16,11 +16,11 @@ struct TestValues {
     result: i64,
 }
 
-fn create_compute<GetA, GetB, SetResult>(
+fn create_invoker<GetA, GetB, SetResult>(
     get_a: GetA,
     get_b: GetB,
     result: SetResult,
-) -> anyhow::Result<Compute>
+) -> anyhow::Result<LambdaInvoker>
 where
     SetResult: Fn(i64) + Send + Sync + 'static,
     GetA: Fn() -> i64 + Send + Sync + 'static,
@@ -30,10 +30,10 @@ where
 
     // print
     invoker.add_lambda(
-        Function {
-            id: FunctionId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
+        Func {
+            id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
             name: "print".to_string(),
-            behavior: FunctionBehavior::Active,
+            behavior: FuncBehavior::Active,
             is_output: true,
             category: "Debug".to_string(),
             inputs: vec![InputInfo {
@@ -52,10 +52,10 @@ where
     );
     // val 1
     invoker.add_lambda(
-        Function {
-            id: FunctionId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
+        Func {
+            id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
             name: "get_a".to_string(),
-            behavior: FunctionBehavior::Passive,
+            behavior: FuncBehavior::Passive,
             is_output: false,
             category: "Debug".to_string(),
             inputs: vec![],
@@ -71,10 +71,10 @@ where
     );
     // val 2
     invoker.add_lambda(
-        Function {
-            id: FunctionId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
+        Func {
+            id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
             name: "get_b".to_string(),
-            behavior: FunctionBehavior::Passive,
+            behavior: FuncBehavior::Passive,
             is_output: false,
             category: "Debug".to_string(),
             inputs: vec![],
@@ -90,10 +90,10 @@ where
     );
     // sum
     invoker.add_lambda(
-        Function {
-            id: FunctionId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
+        Func {
+            id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
             name: "sum".to_string(),
-            behavior: FunctionBehavior::Active,
+            behavior: FuncBehavior::Active,
             is_output: true,
             category: "Debug".to_string(),
             inputs: vec![
@@ -127,10 +127,10 @@ where
     );
     // mult
     invoker.add_lambda(
-        Function {
-            id: FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+        Func {
+            id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
             name: "mult".to_string(),
-            behavior: FunctionBehavior::Passive,
+            behavior: FuncBehavior::Passive,
             is_output: true,
             category: "Debug".to_string(),
             inputs: vec![
@@ -163,7 +163,7 @@ where
         },
     );
 
-    Ok(invoker.into())
+    Ok(invoker)
 }
 
 #[test]
@@ -197,25 +197,27 @@ fn simple_compute_test() -> anyhow::Result<()> {
     let test_values_a = test_values.clone();
     let test_values_b = test_values.clone();
     let test_values_result = test_values.clone();
-    let compute = create_compute(
+    let mut invoker = create_invoker(
         move || test_values_a.lock().a,
         move || test_values_b.lock().b,
         move |result| test_values_result.lock().result = result,
     )?;
+    let func_lib = invoker.take_func_lib();
+    let compute = Compute::default();
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-    let mut runtime_graph = RuntimeGraph::from(&graph);
-    compute.run(&graph, &mut runtime_graph)?;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 35);
 
-    compute.run(&graph, &mut runtime_graph)?;
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 35);
 
     test_values.lock().b = 7;
-    graph.node_by_name_mut("get_b").unwrap().behavior = FunctionBehavior::Active;
-    let mut runtime_graph = RuntimeGraph::from(&graph);
-    compute.run(&graph, &mut runtime_graph)?;
+    graph.node_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 63);
 
     Ok(())
@@ -228,13 +230,15 @@ fn default_input_value() -> anyhow::Result<()> {
         b: 5,
         result: 0,
     }));
-
     let test_values_result = test_values.clone();
-    let compute = create_compute(
+
+    let mut invoker = create_invoker(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
         move |result| test_values_result.lock().result = result,
     )?;
+    let func_lib = invoker.take_func_lib();
+    let compute = Compute::default();
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
@@ -252,9 +256,9 @@ fn default_input_value() -> anyhow::Result<()> {
         mult_inputs[1].binding = Binding::Const;
     }
 
-    let mut runtime_graph = RuntimeGraph::from(&graph);
+    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
-    compute.run(&graph, &mut runtime_graph)?;
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 360);
 
     drop(graph);
@@ -273,7 +277,7 @@ fn cached_value() -> anyhow::Result<()> {
     let test_values_a = test_values.clone();
     let test_values_b = test_values.clone();
     let test_values_result = test_values.clone();
-    let compute = create_compute(
+    let mut invoker = create_invoker(
         move || {
             let a1 = test_values_a.lock().a;
             test_values_a.lock().a += 1;
@@ -291,12 +295,14 @@ fn cached_value() -> anyhow::Result<()> {
         },
         move |result| test_values_result.lock().result = result,
     )?;
+    let func_lib = invoker.take_func_lib();
+    let compute = Compute::default();
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap().cache_outputs = false;
 
-    let mut runtime_graph = RuntimeGraph::from(&graph);
-    compute.run(&graph, &mut runtime_graph)?;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that both nodes were called
     assert_eq!(test_values.lock().a, 3);
@@ -304,7 +310,7 @@ fn cached_value() -> anyhow::Result<()> {
     assert_eq!(test_values.lock().result, 35);
 
     // runtime_graph.update(&graph);
-    compute.run(&graph, &mut runtime_graph)?;
+    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that node a was called again
     assert_eq!(test_values.lock().a, 4);

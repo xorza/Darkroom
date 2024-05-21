@@ -1,12 +1,12 @@
 use std::str::FromStr;
 
-use mlua::{Function, Lua, Value, Variadic};
 use common::output_stream::OutputStream;
+use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::ArgSet;
 use crate::elements::lua_invoker::LuaInvokerInternal;
-use crate::function::FunctionId;
-use crate::invoke_context::{InvokeCache};
+use crate::function::FuncId;
+use crate::invoke_context::InvokeCache;
 
 #[test]
 fn lua_works() {
@@ -78,7 +78,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut invoker = LuaInvokerInternal::default();
     let output_stream = OutputStream::new();
     invoker.use_output_stream(&output_stream);
-    
+
     invoker.load_file("../test_resources/test_lua.lua")?;
 
     let funcs = invoker.get_all_functions();
@@ -90,7 +90,7 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let mut cache = InvokeCache::default();
     // call 'mult' function
     invoker.invoke(
-        FunctionId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+        FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
         &mut cache,
         inputs.as_mut_slice(),
         outputs.as_mut_slice(),

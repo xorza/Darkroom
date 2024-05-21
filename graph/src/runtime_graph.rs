@@ -4,7 +4,8 @@ use std::mem::take;
 use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
-use crate::graph::{Binding, FunctionBehavior, Graph, NodeId};
+use crate::function::FuncLib;
+use crate::graph::{Binding, FuncBehavior, Graph, NodeId};
 use crate::invoke_context::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -13,7 +14,7 @@ pub struct RuntimeNode {
 
     pub is_output: bool,
     pub has_missing_inputs: bool,
-    pub behavior: FunctionBehavior,
+    pub behavior: FuncBehavior,
     pub should_cache_outputs: bool,
     pub should_invoke: bool,
     pub run_time: f64,
@@ -47,6 +48,12 @@ impl RuntimeNode {
 }
 
 impl RuntimeGraph {
+    pub fn new(graph: &Graph, func_lib: &FuncLib) -> Self {
+        let runtime_graph = Self::run(graph, func_lib, &mut RuntimeGraph::default());
+
+        runtime_graph
+    }
+
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
         self.nodes.iter().find(|&p_node| p_node.id == node_id)
     }
@@ -59,35 +66,25 @@ impl RuntimeGraph {
     }
 }
 
-impl From<&Graph> for RuntimeGraph {
-    fn from(graph: &Graph) -> Self {
-        let runtime_graph = Self::run(graph, &mut RuntimeGraph::default());
-
-        runtime_graph
-    }
-}
-
 impl RuntimeGraph {
-    fn run(graph: &Graph, previous_runtime: &mut RuntimeGraph) -> RuntimeGraph {
+    fn run(graph: &Graph, func_lib: &FuncLib, previous_runtime: &mut RuntimeGraph) -> RuntimeGraph {
         debug_assert!(graph.validate().is_ok());
 
-        let mut r_nodes = Self::gather_nodes(graph, previous_runtime);
-        Self::forward_pass(graph, &mut r_nodes);
+        let mut r_nodes = Self::gather_nodes(graph, func_lib, previous_runtime);
+        Self::forward_pass(graph, func_lib, &mut r_nodes);
 
         RuntimeGraph { nodes: r_nodes }
     }
 
-    fn gather_nodes(graph: &Graph, previous_runtime: &mut RuntimeGraph) -> Vec<RuntimeNode> {
+    fn gather_nodes(
+        graph: &Graph,
+        func_lib: &FuncLib,
+        previous_runtime: &mut RuntimeGraph,
+    ) -> Vec<RuntimeNode> {
         let mut active_node_ids: Vec<NodeId> = graph
             .nodes()
             .iter()
-            .filter_map(|node| {
-                if node.is_output {
-                    Some(node.id())
-                } else {
-                    None
-                }
-            })
+            .filter_map(|node| if node.is_output { Some(node.id) } else { None })
             .collect();
 
         let mut index = 0;
@@ -115,9 +112,7 @@ impl RuntimeGraph {
             .iter()
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
-
-                // fixme: get node info from function registry
-                let node_info = crate::function::Function::default();
+                let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
 
                 let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
@@ -159,12 +154,11 @@ impl RuntimeGraph {
 
     // in forward pass, mark active nodes and nodes with missing inputs
     // if node is passive, mark it for caching outputs
-    fn forward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
+    fn forward_pass(graph: &Graph, func_lib: &FuncLib, r_nodes: &mut [RuntimeNode]) {
         for index in 0..r_nodes.len() {
             let mut r_node = take(&mut r_nodes[index]);
             let node = graph.node_by_id(r_node.id).unwrap();
-            // fixme: get node info from function registry
-            let node_info = crate::function::Function::default();
+            let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
 
             node.inputs
                 .iter()
@@ -179,14 +173,14 @@ impl RuntimeGraph {
                             .iter()
                             .find(|&p_node| p_node.id == output_binding.output_node_id)
                             .expect("Node not found among already processed ones");
-                        if output_r_node.behavior == FunctionBehavior::Active {
-                            r_node.behavior = FunctionBehavior::Active;
+                        if output_r_node.behavior == FuncBehavior::Active {
+                            r_node.behavior = FuncBehavior::Active;
                         }
                         r_node.has_missing_inputs |= output_r_node.has_missing_inputs;
                     }
                 });
 
-            if r_node.behavior == FunctionBehavior::Passive {
+            if r_node.behavior == FuncBehavior::Passive {
                 r_node.should_cache_outputs = true;
             }
             r_nodes[index] = r_node;
@@ -249,7 +243,7 @@ impl RuntimeGraph {
             true
         } else if r_node.output_values.is_none() {
             true
-        } else if r_node.behavior == FunctionBehavior::Active {
+        } else if r_node.behavior == FuncBehavior::Active {
             true
         } else {
             false

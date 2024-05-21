@@ -15,7 +15,7 @@ fn graph_to_yaml() -> anyhow::Result<()> {
     let mut node2 = Node::new();
     node2.inputs.push(Input {
         binding: Binding::Output(OutputBinding {
-            output_node_id: node1.id(),
+            output_node_id: node1.id,
             output_index: 0,
         }),
         const_value: None,
@@ -43,7 +43,7 @@ fn graph_from_yaml() -> anyhow::Result<()> {
 fn node_remove_test() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-    let node_id = graph.node_by_name("sum").unwrap().id();
+    let node_id = graph.node_by_name("sum").unwrap().id;
     graph.remove_node_by_id(node_id);
 
     assert!(graph.node_by_name("sum").is_none());
