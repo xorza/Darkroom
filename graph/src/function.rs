@@ -61,11 +61,17 @@ impl FuncLib {
         serde_yaml::to_string(self).unwrap()
     }
 
-    pub fn get_func_by_id(&self, id: FuncId) -> Option<&Func> {
+    pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
     }
-    pub fn get_func_by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
+    pub fn func_by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
         self.funcs.get_mut(&id)
+    }
+    pub fn func_by_name(&self, name: &str) -> Option<&Func> {
+        self.funcs.values().find(|func| func.name == name)
+    }
+    pub fn func_by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
+        self.funcs.values_mut().find(|func| func.name == name)
     }
     pub fn add(&mut self, func: Func) {
         let entry = self.funcs.entry(func.id);

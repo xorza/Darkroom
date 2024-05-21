@@ -202,10 +202,10 @@ fn simple_compute_test() -> anyhow::Result<()> {
         move || test_values_b.lock().b,
         move |result| test_values_result.lock().result = result,
     )?;
-    let func_lib = invoker.take_func_lib();
+    let mut func_lib = invoker.take_func_lib();
     let compute = Compute::default();
 
-    let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+    let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
     let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
     compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
@@ -215,7 +215,7 @@ fn simple_compute_test() -> anyhow::Result<()> {
     assert_eq!(test_values.lock().result, 35);
 
     test_values.lock().b = 7;
-    graph.node_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
+    func_lib.func_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
     let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
     compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 63);
@@ -295,21 +295,22 @@ fn cached_value() -> anyhow::Result<()> {
         },
         move |result| test_values_result.lock().result = result,
     )?;
-    let func_lib = invoker.take_func_lib();
-    let compute = Compute::default();
+
+    let mut func_lib = invoker.take_func_lib();
+    func_lib.func_by_name_mut("get_a").unwrap().behavior = FuncBehavior::Active;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap().cache_outputs = false;
 
     let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    Compute::default().run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that both nodes were called
     assert_eq!(test_values.lock().a, 3);
     assert_eq!(test_values.lock().b, 6);
     assert_eq!(test_values.lock().result, 35);
 
-    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    Compute::default().run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that node a was called again
     assert_eq!(test_values.lock().a, 4);

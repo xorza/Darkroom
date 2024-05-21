@@ -288,7 +288,7 @@ impl LuaInvokerInternal {
                 .unwrap()
                 .1
                 .info;
-            nodes.push(Node::new());
+            nodes.push(Node::default());
             let node = nodes.last_mut().unwrap();
 
             node.name = function.name.clone();

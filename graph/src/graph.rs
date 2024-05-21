@@ -45,11 +45,9 @@ pub struct Event {
 pub struct Node {
     pub id: NodeId,
     pub func_id: FuncId,
+
     pub name: String,
-
-    pub behavior: FuncBehavior,
     pub is_output: bool,
-
     pub cache_outputs: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -158,21 +156,21 @@ impl Graph {
     }
 }
 
-impl Node {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Node {
+impl Default for Node {
+    fn default() -> Self {
         Node {
             id: NodeId::unique(),
             func_id: FuncId::nil(),
             name: "".to_string(),
-            behavior: FuncBehavior::Active,
             is_output: false,
             cache_outputs: false,
             inputs: vec![],
             events: vec![],
         }
     }
+}
 
+impl Node {
     pub fn from_function(function: &Func) -> Node {
         let inputs: Vec<Input> = function
             .inputs
@@ -196,9 +194,8 @@ impl Node {
             id: NodeId::unique(),
             func_id: function.id,
             name: function.name.clone(),
-            behavior: FuncBehavior::Active,
-            cache_outputs: false,
             is_output: function.is_output,
+            cache_outputs: false,
             inputs,
             events,
         }

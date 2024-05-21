@@ -112,7 +112,7 @@ impl RuntimeGraph {
             .iter()
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
-                let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
+                let node_info = func_lib.func_by_id(node.func_id).unwrap();
 
                 let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
@@ -134,7 +134,7 @@ impl RuntimeGraph {
                     id: node_id,
                     is_output: node.is_output,
                     has_missing_inputs: false,
-                    behavior: node.behavior,
+                    behavior: node_info.behavior,
                     should_cache_outputs: node.cache_outputs,
                     run_time: 0.0,
                     should_invoke: false,
@@ -158,7 +158,7 @@ impl RuntimeGraph {
         for index in 0..r_nodes.len() {
             let mut r_node = take(&mut r_nodes[index]);
             let node = graph.node_by_id(r_node.id).unwrap();
-            let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
+            let node_info = func_lib.func_by_id(node.func_id).unwrap();
 
             node.inputs
                 .iter()

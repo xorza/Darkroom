@@ -47,7 +47,7 @@ impl Compute {
             let node = graph
                 .node_by_id(runtime_graph.nodes[node_idx].id())
                 .unwrap();
-            let node_info = func_lib.get_func_by_id(node.func_id).unwrap();
+            let node_info = func_lib.func_by_id(node.func_id).unwrap();
 
             inputs.resize_and_fill(node.inputs.len());
             node.inputs

@@ -6,13 +6,13 @@ use crate::graph::*;
 #[test]
 fn graph_to_yaml() -> anyhow::Result<()> {
     let mut graph = Graph::default();
-    let mut node1 = Node::new();
+    let mut node1 = Node::default();
 
     node1.inputs.push(Input {
         binding: Binding::Const,
         const_value: Some(StaticValue::Int(55)),
     });
-    let mut node2 = Node::new();
+    let mut node2 = Node::default();
     node2.inputs.push(Input {
         binding: Binding::Output(OutputBinding {
             output_node_id: node1.id,
