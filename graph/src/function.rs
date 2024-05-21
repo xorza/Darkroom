@@ -87,9 +87,9 @@ impl FuncLib {
     pub fn iter(&self) -> hashbrown::hash_map::Iter<FuncId, Func> {
         self.funcs.iter()
     }
-    pub fn merge(&mut self, other: FuncLib) {
-        for (_id, func) in other.funcs {
-            self.add(func);
+    pub fn merge(&mut self, other: &FuncLib) {
+        for (_id, func) in &other.funcs {
+            self.add(func.clone());
         }
     }
 }
@@ -101,9 +101,10 @@ impl From<&str> for EventInfo {
         }
     }
 }
+
 impl<It> From<It> for FuncLib
-where
-    It: IntoIterator<Item = Func>,
+    where
+        It: IntoIterator<Item=Func>,
 {
     fn from(iter: It) -> Self {
         let mut func_lib = FuncLib::default();
@@ -113,6 +114,7 @@ where
         func_lib
     }
 }
+
 impl FromStr for EventInfo {
     type Err = String;
 
@@ -232,7 +234,7 @@ mod tests {
                 events: vec![],
             },
         ]
-        .into()
+            .into()
     }
 
     #[test]

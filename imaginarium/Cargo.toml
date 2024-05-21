@@ -22,4 +22,4 @@ common = { workspace = true }
 serde = { workspace = true }
 uuid = { workspace = true }
 hashbrown = { workspace = true }
-
+parking_lot = { workspace = true }

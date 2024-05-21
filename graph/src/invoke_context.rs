@@ -15,10 +15,8 @@ pub struct InvokeCache {
     boxed: Option<Box<dyn Any>>,
 }
 
-pub trait Invoker: Debug + Send {
-    fn take_func_lib(&mut self) -> FuncLib {
-        FuncLib::default()
-    }
+pub trait Invoker: Debug + Send + Sync {
+    fn get_func_lib(&self) -> &FuncLib;
     fn invoke(
         &self,
         function_id: FuncId,
@@ -37,7 +35,7 @@ pub struct UberInvoker {
 
 #[derive(Default)]
 pub struct LambdaInvoker {
-    func_lib: FuncLib,
+    pub(crate) func_lib: FuncLib,
     lambdas: HashMap<FuncId, Box<Lambda>>,
 }
 
@@ -51,8 +49,8 @@ impl InvokeCache {
     }
 
     pub fn is_some<T>(&self) -> bool
-    where
-        T: Any,
+        where
+            T: Any,
     {
         match &self.boxed {
             None => false,
@@ -61,8 +59,8 @@ impl InvokeCache {
     }
 
     pub fn get<T>(&self) -> Option<&T>
-    where
-        T: Any,
+        where
+            T: Any,
     {
         self.boxed
             .as_ref()
@@ -70,8 +68,8 @@ impl InvokeCache {
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
-    where
-        T: Any,
+        where
+            T: Any,
     {
         self.boxed
             .as_mut()
@@ -79,15 +77,15 @@ impl InvokeCache {
     }
 
     pub fn set<T>(&mut self, value: T)
-    where
-        T: Any,
+        where
+            T: Any,
     {
         self.boxed = Some(Box::new(value));
     }
 
     pub fn get_or_default<T>(&mut self) -> &mut T
-    where
-        T: Any + Default,
+        where
+            T: Any + Default,
     {
         let is_some = self.is_some::<T>();
 
@@ -101,9 +99,9 @@ impl InvokeCache {
         }
     }
     pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
-    where
-        T: Any,
-        F: FnOnce() -> T,
+        where
+            T: Any,
+            F: FnOnce() -> T,
     {
         let is_some = self.is_some::<T>();
 
@@ -120,8 +118,8 @@ impl InvokeCache {
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Func, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+        where
+            F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
     {
         if self.lambdas.contains_key(&function.id) {
             panic!(
@@ -142,7 +140,7 @@ impl UberInvoker {
         let mut func_lib = FuncLib::default();
 
         invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
-            let new_func_lib = invoker.take_func_lib();
+            let new_func_lib = invoker.get_func_lib();
             new_func_lib.iter().for_each(|(id, _func)| {
                 function_id_to_invoker_index.insert(id.clone(), idx);
             });
@@ -158,9 +156,18 @@ impl UberInvoker {
     }
 }
 
+impl<It> From<It> for UberInvoker
+    where
+        It: IntoIterator<Item=Box<dyn Invoker>>,
+{
+    fn from(invokers: It) -> Self {
+        Self::new(invokers.into_iter().collect())
+    }
+}
+
 impl Invoker for UberInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&self) -> &FuncLib {
+        &self.func_lib
     }
     fn invoke(
         &self,
@@ -169,19 +176,26 @@ impl Invoker for UberInvoker {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        let &invoker_index = self
-            .function_id_to_invoker_index
-            .get(&function_id)
-            .expect("Missing invoker for function_id");
+        assert!(!self.invokers.is_empty(), "No invokers available");
 
-        let invoker = &self.invokers[invoker_index];
+        let invoker = if self.invokers.len() == 1 {
+            self.invokers.first().unwrap()
+        } else {
+            let &invoker_index = self
+                .function_id_to_invoker_index
+                .get(&function_id)
+                .expect("Missing invoker for function_id");
+
+            &self.invokers[invoker_index]
+        };
+
         invoker.invoke(function_id, cache, inputs, outputs)
     }
 }
 
 impl Invoker for LambdaInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&self) -> &FuncLib {
+        &self.func_lib
     }
     fn invoke(
         &self,

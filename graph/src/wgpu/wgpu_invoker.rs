@@ -8,10 +8,10 @@ use imaginarium::wgpu::wgpu_context::WgpuContext;
 use crate::function::{Func, FuncId, FuncLib};
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
-pub trait WgpuInvokable: Send {
+pub trait WgpuInvokable: Send + Sync {
     fn new(wgpu_context: &WgpuContext) -> Self
-    where
-        Self: Sized;
+        where
+            Self: Sized;
     fn func(&self) -> Func;
     fn invoke(
         &self,
@@ -30,8 +30,8 @@ pub(crate) struct WgpuInvoker {
 
 impl WgpuInvoker {
     pub fn add_function<T>(&mut self)
-    where
-        T: WgpuInvokable + 'static,
+        where
+            T: WgpuInvokable + 'static,
     {
         let wgpu_func = T::new(&self.context);
         let boxed_wgpu_func = Box::new(wgpu_func);
@@ -42,8 +42,8 @@ impl WgpuInvoker {
 }
 
 impl Invoker for WgpuInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&self) -> &FuncLib {
+        &self.func_lib
     }
 
     fn invoke(
@@ -59,6 +59,7 @@ impl Invoker for WgpuInvoker {
         Ok(())
     }
 }
+
 impl Debug for WgpuInvoker {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("WgpuInvoker")

@@ -1,10 +1,11 @@
-use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::ops::RangeBounds;
 use std::rc::Rc;
 use std::thread;
 
 use bytemuck::Pod;
+use hashbrown::HashMap;
+use parking_lot::Mutex;
 use pollster::FutureExt;
 use wgpu::util::DeviceExt;
 
@@ -39,7 +40,7 @@ pub struct WgpuContext {
     limits: wgpu::Limits,
     rect_one_vb: VertexBuffer,
     default_sampler: wgpu::Sampler,
-    encoder: RefCell<Option<wgpu::CommandEncoder>>,
+    encoder: Mutex<Option<wgpu::CommandEncoder>>,
     common_vertex_shader_module: wgpu::ShaderModule,
 }
 
@@ -103,7 +104,7 @@ impl WgpuContext {
             limits,
             rect_one_vb,
             default_sampler,
-            encoder: RefCell::new(None),
+            encoder: Mutex::new(None),
             common_vertex_shader_module: common_vertex_shader,
         })
     }
@@ -120,7 +121,7 @@ impl WgpuContext {
                     output_texture,
                     fragment_push_constant,
                 } => {
-                    let mut encoder_temp = self.encoder.borrow_mut();
+                    let mut encoder_temp = self.encoder.lock();
                     let encoder = encoder_temp.get_or_insert_with(|| {
                         self.device
                             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
@@ -163,8 +164,8 @@ impl WgpuContext {
                 }
 
                 Action::TexToImg(tex_img) => {
-                    let mut encoder_temp = self.encoder.borrow_mut();
-                    let encoder = encoder_temp.get_or_insert_with(|| {
+                    let mut encoder = self.encoder.lock();
+                    let encoder = encoder.get_or_insert_with(|| {
                         self.device
                             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None })
                     });
@@ -247,7 +248,7 @@ impl WgpuContext {
     }
 
     pub fn sync(&self) {
-        if let Some(encoder) = self.encoder.replace(None) {
+        if let Some(encoder) = self.encoder.lock().take() {
             self.queue.submit(Some(encoder.finish()));
             self.device.poll(wgpu::Maintain::Wait);
         }
@@ -374,7 +375,7 @@ impl WgpuContext {
 
 impl Drop for WgpuContext {
     fn drop(&mut self) {
-        if self.encoder.borrow().is_some() && !thread::panicking() {
+        if self.encoder.lock().is_some() && !thread::panicking() {
             panic!("WgpuContext dropped before encoder was submitted. Try calling WgpuContext::sync().");
         }
     }

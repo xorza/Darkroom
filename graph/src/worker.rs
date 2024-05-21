@@ -58,13 +58,13 @@ impl Worker {
     }
 
     fn worker_loop(
-        mut invoker: UberInvoker,
+        invoker: UberInvoker,
         tx: std::sync::mpsc::Sender<WorkerMessage>,
         rx: std::sync::mpsc::Receiver<WorkerMessage>,
         compute_callback: Arc<ComputeEvent>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = invoker.take_func_lib();
+        let func_lib = invoker.get_func_lib();
 
         loop {
             if message.is_none() {

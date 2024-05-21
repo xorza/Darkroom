@@ -1,11 +1,10 @@
-use std::str::FromStr;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 
 use crate::compute::Compute;
-use crate::data::{DataType, StaticValue};
-use crate::function::{Func, FuncId, InputInfo, OutputInfo};
+use crate::data::StaticValue;
+use crate::function::FuncLib;
 use crate::graph::{Binding, FuncBehavior, Graph};
 use crate::invoke_context::{InvokeCache, Invoker, LambdaInvoker};
 use crate::runtime_graph::RuntimeGraph;
@@ -21,103 +20,39 @@ fn create_invoker<GetA, GetB, SetResult>(
     get_b: GetB,
     result: SetResult,
 ) -> anyhow::Result<LambdaInvoker>
-where
-    SetResult: Fn(i64) + Send + Sync + 'static,
-    GetA: Fn() -> i64 + Send + Sync + 'static,
-    GetB: Fn() -> i64 + Send + Sync + 'static,
+    where
+        SetResult: Fn(i64) + Send + Sync + 'static,
+        GetA: Fn() -> i64 + Send + Sync + 'static,
+        GetB: Fn() -> i64 + Send + Sync + 'static,
 {
+    let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
+
     let mut invoker = LambdaInvoker::default();
 
     // print
     invoker.add_lambda(
-        Func {
-            id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")?,
-            name: "print".to_string(),
-            behavior: FuncBehavior::Active,
-            is_output: true,
-            category: "Debug".to_string(),
-            inputs: vec![InputInfo {
-                name: "message".to_string(),
-                is_required: true,
-                data_type: DataType::Int,
-                default_value: None,
-                variants: vec![],
-            }],
-            outputs: vec![],
-            events: vec![],
-        },
+        func_lib.func_by_name("print").unwrap().clone(),
         move |_, inputs, _| {
             result(inputs[0].as_int());
         },
     );
     // val 1
     invoker.add_lambda(
-        Func {
-            id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")?,
-            name: "get_a".to_string(),
-            behavior: FuncBehavior::Passive,
-            is_output: false,
-            category: "Debug".to_string(),
-            inputs: vec![],
-            outputs: vec![OutputInfo {
-                name: "value".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-        },
+        func_lib.func_by_name("get_a").unwrap().clone(),
         move |_, _, outputs| {
             outputs[0] = (get_a() as f64).into();
         },
     );
     // val 2
     invoker.add_lambda(
-        Func {
-            id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")?,
-            name: "get_b".to_string(),
-            behavior: FuncBehavior::Passive,
-            is_output: false,
-            category: "Debug".to_string(),
-            inputs: vec![],
-            outputs: vec![OutputInfo {
-                name: "value".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-        },
+        func_lib.func_by_name("get_b").unwrap().clone(),
         move |_, _, outputs| {
             outputs[0] = (get_b() as f64).into();
         },
     );
     // sum
     invoker.add_lambda(
-        Func {
-            id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")?,
-            name: "sum".to_string(),
-            behavior: FuncBehavior::Active,
-            is_output: true,
-            category: "Debug".to_string(),
-            inputs: vec![
-                InputInfo {
-                    name: "a".to_string(),
-                    is_required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    variants: vec![],
-                },
-                InputInfo {
-                    name: "b".to_string(),
-                    is_required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    variants: vec![],
-                },
-            ],
-            outputs: vec![OutputInfo {
-                name: "result".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-        },
+        func_lib.func_by_name("sum").unwrap().clone(),
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_int();
             let b: i64 = inputs[1].as_int();
@@ -127,34 +62,7 @@ where
     );
     // mult
     invoker.add_lambda(
-        Func {
-            id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-            name: "mult".to_string(),
-            behavior: FuncBehavior::Passive,
-            is_output: true,
-            category: "Debug".to_string(),
-            inputs: vec![
-                InputInfo {
-                    name: "a".to_string(),
-                    is_required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    variants: vec![],
-                },
-                InputInfo {
-                    name: "b".to_string(),
-                    is_required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
-                    variants: vec![],
-                },
-            ],
-            outputs: vec![OutputInfo {
-                name: "result".to_string(),
-                data_type: DataType::Int,
-            }],
-            events: vec![],
-        },
+        func_lib.func_by_name("mult").unwrap().clone(),
         |ctx, inputs, outputs| {
             let a: i64 = inputs[0].as_int();
             let b: i64 = inputs[1].as_int();
@@ -202,22 +110,22 @@ fn simple_compute_test() -> anyhow::Result<()> {
         move || test_values_b.lock().b,
         move |result| test_values_result.lock().result = result,
     )?;
-    let mut func_lib = invoker.take_func_lib();
-    let compute = Compute::default();
+
 
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+    Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 35);
 
-    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 35);
+
 
     test_values.lock().b = 7;
-    func_lib.func_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
-    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-    compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    invoker.func_lib.func_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+    Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
     assert_eq!(test_values.lock().result, 63);
 
     Ok(())
@@ -232,12 +140,12 @@ fn default_input_value() -> anyhow::Result<()> {
     }));
     let test_values_result = test_values.clone();
 
-    let mut invoker = create_invoker(
+    let invoker = create_invoker(
         || panic!("Unexpected call to get_a"),
         || panic!("Unexpected call to get_b"),
         move |result| test_values_result.lock().result = result,
     )?;
-    let func_lib = invoker.take_func_lib();
+    let func_lib = invoker.get_func_lib();
     let compute = Compute::default();
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
@@ -296,21 +204,20 @@ fn cached_value() -> anyhow::Result<()> {
         move |result| test_values_result.lock().result = result,
     )?;
 
-    let mut func_lib = invoker.take_func_lib();
-    func_lib.func_by_name_mut("get_a").unwrap().behavior = FuncBehavior::Active;
+    invoker.func_lib.func_by_name_mut("get_a").unwrap().behavior = FuncBehavior::Active;
 
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
     graph.node_by_name_mut("sum").unwrap().cache_outputs = false;
 
-    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-    Compute::default().run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+    Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that both nodes were called
     assert_eq!(test_values.lock().a, 3);
     assert_eq!(test_values.lock().b, 6);
     assert_eq!(test_values.lock().result, 35);
 
-    Compute::default().run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
+    Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that node a was called again
     assert_eq!(test_values.lock().a, 4);
