@@ -73,7 +73,7 @@ impl From<i64> for Math2ArgOp {
 
 impl BasicInvoker {
     pub(crate) fn use_output_stream(&mut self, output_stream: &OutputStream) {
-        self.output_stream = Arc::new(Mutex::new(Some(output_stream.clone())));
+        self.output_stream.lock().replace(output_stream.clone());
     }
 }
 
