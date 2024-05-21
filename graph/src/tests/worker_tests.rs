@@ -37,7 +37,7 @@ fn test_worker() {
     worker.event();
     rx.recv().unwrap();
 
-    let log =  logger.take_log();
+    let log = logger.take_log();
     let mut log = log.lines();
     assert_eq!(log.next(), Some("1"));
     assert_eq!(log.next(), Some("2"));

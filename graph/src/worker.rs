@@ -26,7 +26,7 @@ type EventQueue = Arc<tokio::sync::Mutex<Vec<EventId>>>;
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<thread::JoinHandle<()>>,
-    tx: std::sync::mpsc::Sender<WorkerMessage>
+    tx: std::sync::mpsc::Sender<WorkerMessage>,
 }
 
 impl Worker {
@@ -39,9 +39,9 @@ impl Worker {
         InvokerCreator: FnOnce() -> Vec<Box<dyn Invoker>> + Send + 'static,
     {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel::<WorkerMessage>();
-   
+
         let tx_clone = worker_tx.clone();
-        
+
         let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
 
         let thread_handle = thread::spawn(move || {
@@ -59,7 +59,7 @@ impl Worker {
 
         Self {
             thread_handle: Some(thread_handle),
-            tx: worker_tx
+            tx: worker_tx,
         }
     }
 

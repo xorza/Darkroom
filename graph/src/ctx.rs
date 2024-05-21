@@ -1,6 +1,6 @@
 use crate::compute::Compute;
 use crate::graph::Graph;
-use crate::invoke_context::{UberInvoker};
+use crate::invoke_context::UberInvoker;
 use crate::runtime_graph::RuntimeGraph;
 use crate::worker::Worker;
 
@@ -11,5 +11,5 @@ pub struct Context {
     pub(crate) invoker: UberInvoker,
 
     pub(crate) worker: Option<Worker>,
-    pub(crate) compute:  Option<Compute>,
+    pub(crate) compute: Option<Compute>,
 }

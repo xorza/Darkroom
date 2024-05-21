@@ -6,6 +6,7 @@ mod tests;
 
 pub mod common;
 pub mod compute;
+pub mod ctx;
 pub mod data;
 pub mod elements;
 pub mod event;
@@ -16,4 +17,3 @@ pub mod runtime_graph;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;
 pub mod worker;
-pub mod ctx;

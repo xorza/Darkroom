@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use crate::data::{ StaticValue};
+use crate::data::StaticValue;
 use crate::graph::*;
 
 #[test]

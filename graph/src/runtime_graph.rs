@@ -51,9 +51,7 @@ impl RuntimeGraph {
         self.nodes.iter().find(|&p_node| p_node.id == node_id)
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
-        self.nodes
-            .iter_mut()
-            .find(|p_node| p_node.id == node_id)
+        self.nodes.iter_mut().find(|p_node| p_node.id == node_id)
     }
 
     pub fn next(&mut self, graph: &Graph) {
@@ -194,7 +192,7 @@ impl RuntimeGraph {
             r_nodes[index] = r_node;
         }
     }
-    
+
     // in backward pass, mark active nodes without cached outputs for execution
     fn backward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
         r_nodes.iter_mut().for_each(|r_node| {

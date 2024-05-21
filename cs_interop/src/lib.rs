@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 #![deny(improper_ctypes_definitions)]
 
+use graph::ctx::Context;
 use std::mem::forget;
 use std::string::FromUtf8Error;
-use graph::ctx::Context;
-
 
 #[repr(C)]
 struct FfiBuf {
@@ -33,8 +32,8 @@ impl FfiBuf {
 }
 
 impl<const N: usize, T> From<[T; N]> for FfiBuf
-    where
-        T: Clone,
+where
+    T: Clone,
 {
     fn from(data: [T; N]) -> Self {
         data.to_vec().into()
@@ -42,8 +41,8 @@ impl<const N: usize, T> From<[T; N]> for FfiBuf
 }
 
 impl<T> From<&[T]> for FfiBuf
-    where
-        T: Clone,
+where
+    T: Clone,
 {
     fn from(data: &[T]) -> Self {
         data.to_vec().into()

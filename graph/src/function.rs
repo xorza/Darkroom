@@ -1,10 +1,11 @@
 use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 
 use common::id_type;
 
 use crate::data::*;
-use crate::graph::{ FunctionBehavior};
+use crate::graph::FunctionBehavior;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OutputInfo {
@@ -56,13 +57,17 @@ impl Function {
 
 impl From<&str> for EventInfo {
     fn from(s: &str) -> Self {
-        EventInfo { name: s.to_string() }
+        EventInfo {
+            name: s.to_string(),
+        }
     }
 }
 impl FromStr for EventInfo {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(EventInfo { name: s.to_string() })
+        Ok(EventInfo {
+            name: s.to_string(),
+        })
     }
 }

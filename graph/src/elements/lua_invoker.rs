@@ -30,7 +30,6 @@ struct FuncConnections {
     outputs: Vec<u32>,
 }
 
-
 pub(crate) struct LuaInvoker {
     lua: &'static Lua,
     cache: Rc<RefCell<Cache>>,

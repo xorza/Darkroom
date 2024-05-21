@@ -35,7 +35,9 @@ impl Compute {
             .collect::<Vec<usize>>();
 
         for node_idx in active_node_indexes {
-            let node = graph.node_by_id(runtime_graph.nodes[node_idx].id()).unwrap();
+            let node = graph
+                .node_by_id(runtime_graph.nodes[node_idx].id())
+                .unwrap();
 
             // fixme: get node info from function registry
             let node_info = crate::function::Function::default();

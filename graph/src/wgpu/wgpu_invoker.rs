@@ -21,7 +21,6 @@ pub trait WgpuInvokable {
     ) -> anyhow::Result<()>;
 }
 
-
 pub(crate) struct WgpuInvoker {
     context: WgpuContext,
     funcs: HashMap<FunctionId, Box<dyn WgpuInvokable>>,

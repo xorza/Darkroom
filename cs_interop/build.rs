@@ -6,6 +6,5 @@ fn main() {
         .csharp_namespace("CoreInterop")
         .csharp_class_accessibility("internal")
         .generate_csharp_file("../ScenariumEditor.NET/CoreInterop/CoreNative.g.cs")
-
         .unwrap();
 }
