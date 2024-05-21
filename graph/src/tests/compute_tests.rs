@@ -309,7 +309,6 @@ fn cached_value() -> anyhow::Result<()> {
     assert_eq!(test_values.lock().b, 6);
     assert_eq!(test_values.lock().result, 35);
 
-    // runtime_graph.update(&graph);
     compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
 
     //assert that node a was called again

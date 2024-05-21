@@ -1,0 +1,61 @@
+funcs:
+  a937baff-822d-48fd-9154-58751539b59b:
+    id: a937baff-822d-48fd-9154-58751539b59b
+    name: get_b
+    category: Debug
+    behavior: Passive
+    is_output: false
+    outputs:
+    - name: Int32 Value
+      data_type: Int
+  2d3b389d-7b58-44d9-b3d1-a595765b21a5:
+    id: 2d3b389d-7b58-44d9-b3d1-a595765b21a5
+    name: sum
+    category: Debug
+    behavior: Passive
+    is_output: false
+    inputs:
+    - name: A
+      is_required: true
+      data_type: Int
+    - name: B
+      is_required: true
+      data_type: Int
+    outputs:
+    - name: Sum
+      data_type: Int
+  d4d27137-5a14-437a-8bb5-b2f7be0941a2:
+    id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
+    name: get_a
+    category: Debug
+    behavior: Active
+    is_output: false
+    outputs:
+    - name: Int32 Value
+      data_type: Int
+  432b9bf1-f478-476c-a9c9-9a6e190124fc:
+    id: 432b9bf1-f478-476c-a9c9-9a6e190124fc
+    name: mult
+    category: Debug
+    behavior: Passive
+    is_output: false
+    inputs:
+    - name: A
+      is_required: true
+      data_type: Int
+    - name: B
+      is_required: true
+      data_type: Int
+    outputs:
+    - name: Prod
+      data_type: Int
+  f22cd316-1cdf-4a80-b86c-1277acd1408a:
+    id: f22cd316-1cdf-4a80-b86c-1277acd1408a
+    name: print
+    category: Debug
+    behavior: Passive
+    is_output: false
+    inputs:
+    - name: message
+      is_required: true
+      data_type: Int
