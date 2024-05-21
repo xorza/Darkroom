@@ -9,9 +9,8 @@ use crate::invoke_context::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
-    pub(crate) node_id: NodeId,
+    id: NodeId,
 
-    pub name: String,
     pub is_output: bool,
     pub has_missing_inputs: bool,
     pub behavior: FunctionBehavior,
@@ -34,8 +33,8 @@ pub struct RuntimeGraph {
 }
 
 impl RuntimeNode {
-    pub fn node_id(&self) -> NodeId {
-        self.node_id
+    pub fn id(&self) -> NodeId {
+        self.id
     }
 
     pub(crate) fn decrement_current_binding_count(&mut self, output_index: u32) {
@@ -48,17 +47,13 @@ impl RuntimeNode {
 }
 
 impl RuntimeGraph {
-    pub fn node_by_name(&self, name: &str) -> Option<&RuntimeNode> {
-        self.nodes.iter().find(|&p_node| p_node.name == name)
-    }
-
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
-        self.nodes.iter().find(|&p_node| p_node.node_id == node_id)
+        self.nodes.iter().find(|&p_node| p_node.id == node_id)
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
         self.nodes
             .iter_mut()
-            .find(|p_node| p_node.node_id == node_id)
+            .find(|p_node| p_node.id == node_id)
     }
 
     pub fn next(&mut self, graph: &Graph) {
@@ -123,11 +118,16 @@ impl RuntimeGraph {
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
 
+                // fixme: get node info from function registry
+                let node_info = crate::function::Function::default();
+
                 let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
                 let (invoke_context, output_values) = if let Some(prev_r_node) = prev_r_node {
-                    assert_eq!(prev_r_node.output_binding_count.len(), node.outputs.len());
-                    debug_assert_eq!(prev_r_node.name, node.name);
+                    assert_eq!(
+                        prev_r_node.output_binding_count.len(),
+                        node_info.outputs.len()
+                    );
 
                     (
                         take(&mut prev_r_node.cache),
@@ -138,8 +138,7 @@ impl RuntimeGraph {
                 };
 
                 let r_node = RuntimeNode {
-                    node_id,
-                    name: node.name.clone(),
+                    id: node_id,
                     is_output: node.is_output,
                     has_missing_inputs: false,
                     behavior: node.behavior,
@@ -149,7 +148,7 @@ impl RuntimeGraph {
                     cache: invoke_context,
                     output_values,
 
-                    output_binding_count: vec![0; node.outputs.len()],
+                    output_binding_count: vec![0; node_info.outputs.len()],
                     total_binding_count: 0,
                 };
 
@@ -165,26 +164,29 @@ impl RuntimeGraph {
     fn forward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
         for index in 0..r_nodes.len() {
             let mut r_node = take(&mut r_nodes[index]);
-            let node = graph.node_by_id(r_node.node_id).unwrap();
+            let node = graph.node_by_id(r_node.id).unwrap();
+            // fixme: get node info from function registry
+            let node_info = crate::function::Function::default();
 
-            for input in node.inputs.iter() {
-                match &input.binding {
+            node.inputs
+                .iter()
+                .enumerate()
+                .for_each(|(idx, input)| match &input.binding {
                     Binding::None => {
-                        r_node.has_missing_inputs |= input.is_required;
+                        r_node.has_missing_inputs |= node_info.inputs[idx].is_required;
                     }
                     Binding::Const => {}
                     Binding::Output(output_binding) => {
                         let output_r_node = r_nodes[0..index]
                             .iter()
-                            .find(|&p_node| p_node.node_id == output_binding.output_node_id)
+                            .find(|&p_node| p_node.id == output_binding.output_node_id)
                             .expect("Node not found among already processed ones");
                         if output_r_node.behavior == FunctionBehavior::Active {
                             r_node.behavior = FunctionBehavior::Active;
                         }
                         r_node.has_missing_inputs |= output_r_node.has_missing_inputs;
                     }
-                }
-            }
+                });
 
             if r_node.behavior == FunctionBehavior::Passive {
                 r_node.should_cache_outputs = true;
@@ -192,6 +194,7 @@ impl RuntimeGraph {
             r_nodes[index] = r_node;
         }
     }
+    
     // in backward pass, mark active nodes without cached outputs for execution
     fn backward_pass(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
         r_nodes.iter_mut().for_each(|r_node| {
@@ -204,7 +207,7 @@ impl RuntimeGraph {
             .iter()
             .filter_map(|r_node| {
                 if r_node.is_output {
-                    Some(r_node.node_id)
+                    Some(r_node.id)
                 } else {
                     None
                 }
@@ -220,7 +223,7 @@ impl RuntimeGraph {
             let node = graph.node_by_id(node_id).unwrap();
             let r_node = r_nodes
                 .iter_mut()
-                .find(|r_node| r_node.node_id == node_id)
+                .find(|r_node| r_node.id == node_id)
                 .unwrap();
 
             let is_active = Self::is_active(r_node);
@@ -233,7 +236,7 @@ impl RuntimeGraph {
                     }
                     let output_r_node = r_nodes
                         .iter_mut()
-                        .find(|r_node| r_node.node_id == output_binding.output_node_id)
+                        .find(|r_node| r_node.id == output_binding.output_node_id)
                         .unwrap();
                     output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
                     output_r_node.total_binding_count += 1;
@@ -242,6 +245,7 @@ impl RuntimeGraph {
         }
     }
 
+    #[allow(clippy::needless_bool)]
     fn is_active(r_node: &RuntimeNode) -> bool {
         if r_node.is_output {
             true

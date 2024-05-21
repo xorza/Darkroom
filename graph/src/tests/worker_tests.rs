@@ -12,14 +12,11 @@ fn test_worker() {
     setup_logging("debug");
 
     let (tx, rx) = mpsc::channel();
+    let mut basic_invoker = Box::<BasicInvoker>::default();
+    let logger = basic_invoker.init_logger();
 
     let mut worker = Worker::new(
-        move |logger| {
-            vec![
-                Box::new(BasicInvoker::new(logger)),
-                Box::<TimersInvoker>::default(),
-            ]
-        },
+        move || vec![basic_invoker, Box::<TimersInvoker>::default()],
         move || {
             tx.send(()).unwrap();
         },
@@ -29,10 +26,8 @@ fn test_worker() {
 
     worker.run_once(graph.clone());
     rx.recv().unwrap();
-    {
-        let logger = worker.logger.lock().unwrap();
-        assert_eq!(logger[0], "1");
-    }
+
+    assert_eq!(logger.take_log(), "1");
 
     worker.run_loop(graph.clone());
 
@@ -42,11 +37,10 @@ fn test_worker() {
     worker.event();
     rx.recv().unwrap();
 
-    {
-        let logger = worker.logger.lock().unwrap();
-        assert_eq!(logger[1], "1");
-        assert_eq!(logger[2], "2");
-    }
+    let log =  logger.take_log();
+    let mut log = log.lines();
+    assert_eq!(log.next(), Some("1"));
+    assert_eq!(log.next(), Some("2"));
 
     worker.stop();
 }

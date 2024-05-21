@@ -1,9 +1,8 @@
-use std::cell::RefCell;
-use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use log::info;
+use parking_lot::Mutex;
 use rand::Rng;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
@@ -13,10 +12,13 @@ use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
-pub type Logger = Arc<Mutex<Vec<String>>>;
+#[derive(Debug, Clone)]
+pub(crate) struct Logger(Arc<Mutex<Option<String>>>);
 
+#[derive(Debug)]
 pub struct BasicInvoker {
     lambda_invoker: LambdaInvoker,
+    logger: Logger,
 }
 
 #[repr(u32)]
@@ -32,9 +34,9 @@ enum Math2ArgOp {
 }
 
 impl Math2ArgOp {
-    fn list_variants() -> Vec<(StaticValue, String)> {
+    fn list_variants() -> Vec<( String,StaticValue)> {
         Math2ArgOp::iter()
-            .map(|op| (StaticValue::Int(op as i64), op.to_string()))
+            .map(|op| ( op.to_string(), StaticValue::Int(op as i64)))
             .collect()
     }
     fn invoke(&self, inputs: &InvokeArgs) -> anyhow::Result<DynamicValue> {
@@ -71,13 +73,28 @@ impl From<i64> for Math2ArgOp {
 }
 
 impl BasicInvoker {
-    pub fn new(logger: Logger) -> Self {
+    pub(crate) fn init_logger(&mut self) -> Logger {
+        self.logger = Logger(Arc::new(Mutex::new(Some("".to_string()))));
+        self.logger.clone()
+    }
+}
+
+impl Logger {
+    pub(crate) fn take_log(&self) -> String {
+        self.0.lock().take().unwrap()
+    }
+}
+
+impl Default for BasicInvoker {
+    fn default() -> Self {
         let mut invoker = LambdaInvoker::default();
+        let logger: Logger = Logger(Arc::new(Mutex::new(None)));
+        let logger_clone = logger.clone();
 
         //print
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
+                id: FunctionId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
                 name: "print".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: true,
@@ -87,21 +104,24 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::String,
                     default_value: None,
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![],
                 events: vec![],
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
-                logger.lock().unwrap().push(value.to_string());
+                let _ = logger_clone.0.lock().as_mut().is_some_and(|s| {
+                    s.push_str(value);
+                    true
+                });
                 info!("{:?}", value);
             },
         );
         // math two argument operation
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
+                id: FunctionId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
                 name: "2 arg math".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -112,21 +132,21 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: None,
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: None,
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "op".to_string(),
                         is_required: true,
                         data_type: DataType::Int,
                         default_value: Some(StaticValue::from(Math2ArgOp::Add)),
-                        variants: Some(Math2ArgOp::list_variants()),
+                        variants: Math2ArgOp::list_variants(),
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -149,7 +169,7 @@ impl BasicInvoker {
         // to string
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
+                id: FunctionId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
                 name: "float to string".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -159,7 +179,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: None,
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "result".to_string(),
@@ -179,10 +199,9 @@ impl BasicInvoker {
         );
 
         // random
-        let rng = Rc::new(RefCell::new(rand::thread_rng()));
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
+                id: FunctionId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
                 name: "random".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: false,
@@ -193,14 +212,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "max".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -209,13 +228,15 @@ impl BasicInvoker {
                 }],
                 events: vec![],
             },
-            move |_, inputs, outputs| {
+            move |cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
+                let rng = cache.get_or_default_with(rand::thread_rng);
+
                 let min: f64 = inputs[0].as_float();
                 let max: f64 = inputs[1].as_float();
-                let random = rng.borrow_mut().gen::<f64>();
+                let random = rng.gen::<f64>();
                 let result = min + (max - min) * random;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -224,7 +245,7 @@ impl BasicInvoker {
         //add
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
+                id: FunctionId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
                 name: "add".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -235,14 +256,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -265,7 +286,7 @@ impl BasicInvoker {
         //subtract
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
+                id: FunctionId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
                 name: "subtract".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -276,14 +297,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -306,7 +327,7 @@ impl BasicInvoker {
         //multiply
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
+                id: FunctionId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
                 name: "multiply".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -317,14 +338,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -347,7 +368,7 @@ impl BasicInvoker {
         //divide
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
+                id: FunctionId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
                 name: "divide".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -358,14 +379,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![
@@ -396,7 +417,7 @@ impl BasicInvoker {
         // power
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
+                id: FunctionId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
                 name: "power".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -407,14 +428,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "b".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -437,7 +458,7 @@ impl BasicInvoker {
         // sqrt
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
+                id: FunctionId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
                 name: "sqrt".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -447,7 +468,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "sqrt".to_string(),
@@ -468,7 +489,7 @@ impl BasicInvoker {
         // sin
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
+                id: FunctionId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
                 name: "sin".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -478,7 +499,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "sin".to_string(),
@@ -499,7 +520,7 @@ impl BasicInvoker {
         // cos
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
+                id: FunctionId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
                 name: "cos".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -509,7 +530,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "cos".to_string(),
@@ -530,7 +551,7 @@ impl BasicInvoker {
         // tan
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
+                id: FunctionId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
                 name: "tan".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -540,7 +561,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "tan".to_string(),
@@ -561,7 +582,7 @@ impl BasicInvoker {
         // asin
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
+                id: FunctionId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
                 name: "asin".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -571,7 +592,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "asin".to_string(),
@@ -592,7 +613,7 @@ impl BasicInvoker {
         // acos
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
+                id: FunctionId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
                 name: "acos".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -602,7 +623,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(1.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "acos".to_string(),
@@ -623,7 +644,7 @@ impl BasicInvoker {
         // atan
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
+                id: FunctionId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
                 name: "atan".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -633,7 +654,7 @@ impl BasicInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![OutputInfo {
                     name: "atan".to_string(),
@@ -654,7 +675,7 @@ impl BasicInvoker {
         // log
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
+                id: FunctionId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
                 name: "log".to_string(),
                 behavior: FunctionBehavior::Passive,
                 is_output: false,
@@ -665,14 +686,14 @@ impl BasicInvoker {
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                     InputInfo {
                         name: "base".to_string(),
                         is_required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(10.0)),
-                        variants: None,
+                        variants: vec![],
                     },
                 ],
                 outputs: vec![OutputInfo {
@@ -695,6 +716,7 @@ impl BasicInvoker {
 
         Self {
             lambda_invoker: invoker,
+            logger,
         }
     }
 }

@@ -1,28 +1,19 @@
 use std::hint::black_box;
 
-use crate::data::{DataType, StaticValue};
+use crate::data::{ StaticValue};
 use crate::graph::*;
 
 #[test]
 fn graph_to_yaml() -> anyhow::Result<()> {
     let mut graph = Graph::default();
     let mut node1 = Node::new();
-    node1.outputs.push(Output {
-        name: "output1".to_string(),
-        data_type: DataType::Int,
-    });
+
     node1.inputs.push(Input {
-        name: "input1".to_string(),
-        data_type: DataType::Int,
-        is_required: true,
         binding: Binding::Const,
         const_value: Some(StaticValue::Int(55)),
     });
     let mut node2 = Node::new();
     node2.inputs.push(Input {
-        name: "input2".to_string(),
-        data_type: DataType::Int,
-        is_required: true,
         binding: Binding::Output(OutputBinding {
             output_node_id: node1.id(),
             output_index: 0,

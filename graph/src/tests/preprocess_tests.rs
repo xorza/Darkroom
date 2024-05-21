@@ -3,6 +3,7 @@ use crate::graph::*;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 use crate::runtime_graph::RuntimeGraph;
 
+#[derive(Debug, Default)]
 struct EmptyInvoker {}
 
 impl Invoker for EmptyInvoker {
@@ -20,6 +21,7 @@ impl Invoker for EmptyInvoker {
 #[test]
 fn simple_run() -> anyhow::Result<()> {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+    let get_b_node_id = graph.node_by_name("get_b").unwrap().id();
 
     let mut runtime_graph = RuntimeGraph::from(&graph);
     runtime_graph.next(&graph);
@@ -27,7 +29,7 @@ fn simple_run() -> anyhow::Result<()> {
     assert_eq!(runtime_graph.nodes.len(), 5);
     assert_eq!(
         runtime_graph
-            .node_by_name("get_b")
+            .node_by_id(get_b_node_id)
             .unwrap()
             .total_binding_count,
         2
@@ -49,13 +51,15 @@ fn simple_run() -> anyhow::Result<()> {
 #[test]
 fn empty_run() {
     let graph = Graph::from_yaml_file("../test_resources/test_graph.yml").unwrap();
+    let get_b_node_id = graph.node_by_name("get_b").unwrap().id();
+
     let mut runtime_graph = RuntimeGraph::from(&graph);
     runtime_graph.next(&graph);
 
     assert_eq!(runtime_graph.nodes.len(), 5);
     assert_eq!(
         runtime_graph
-            .node_by_name("get_b")
+            .node_by_id(get_b_node_id)
             .unwrap()
             .total_binding_count,
         2
@@ -66,7 +70,7 @@ fn empty_run() {
     assert_eq!(runtime_graph.nodes.len(), 5);
     assert_eq!(
         runtime_graph
-            .node_by_name("get_b")
+            .node_by_id(get_b_node_id)
             .unwrap()
             .total_binding_count,
         2
@@ -76,6 +80,11 @@ fn empty_run() {
 #[test]
 fn missing_input() -> anyhow::Result<()> {
     let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+    let get_b_node_id = graph.node_by_name("get_b").unwrap().id();
+    let sum_node_id = graph.node_by_name("sum").unwrap().id();
+    let mult_node_id = graph.node_by_name("mult").unwrap().id();
+    let print_node_id = graph.node_by_name("print").unwrap().id();
+
     graph.node_by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
 
     let mut runtime_graph = RuntimeGraph::from(&graph);
@@ -84,38 +93,53 @@ fn missing_input() -> anyhow::Result<()> {
     assert_eq!(runtime_graph.nodes.len(), 4);
     assert_eq!(
         runtime_graph
-            .node_by_name("get_b")
+            .node_by_id(get_b_node_id)
             .unwrap()
             .total_binding_count,
         2
     );
 
-    assert!(runtime_graph.node_by_name("get_b").unwrap().should_invoke);
-    assert!(!runtime_graph.node_by_name("sum").unwrap().should_invoke);
-    assert!(!runtime_graph.node_by_name("mult").unwrap().should_invoke);
-    assert!(!runtime_graph.node_by_name("print").unwrap().should_invoke);
+    assert!(
+        runtime_graph
+            .node_by_id(get_b_node_id)
+            .unwrap()
+            .should_invoke
+    );
+    assert!(!runtime_graph.node_by_id(sum_node_id).unwrap().should_invoke);
+    assert!(
+        !runtime_graph
+            .node_by_id(mult_node_id)
+            .unwrap()
+            .should_invoke
+    );
+    assert!(
+        !runtime_graph
+            .node_by_id(print_node_id)
+            .unwrap()
+            .should_invoke
+    );
 
     assert!(
         !runtime_graph
-            .node_by_name("get_b")
+            .node_by_id(get_b_node_id)
             .unwrap()
             .has_missing_inputs
     );
     assert!(
         runtime_graph
-            .node_by_name("sum")
+            .node_by_id(sum_node_id)
             .unwrap()
             .has_missing_inputs
     );
     assert!(
         runtime_graph
-            .node_by_name("mult")
+            .node_by_id(mult_node_id)
             .unwrap()
             .has_missing_inputs
     );
     assert!(
         runtime_graph
-            .node_by_name("print")
+            .node_by_id(print_node_id)
             .unwrap()
             .has_missing_inputs
     );

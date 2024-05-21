@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::str::FromStr;
 
@@ -8,7 +9,7 @@ use mlua::{Error, Function, Lua, Table, Variadic};
 use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::FunctionId;
-use crate::graph::{Binding, Graph, Input, Node, NodeId, Output};
+use crate::graph::{Binding, Graph, Input, Node, NodeId};
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 use crate::{data, function};
 
@@ -28,6 +29,7 @@ struct FuncConnections {
     inputs: Vec<u32>,
     outputs: Vec<u32>,
 }
+
 
 pub(crate) struct LuaInvoker {
     lua: &'static Lua,
@@ -120,7 +122,7 @@ impl LuaInvoker {
             let lua_function: Function = self.lua.globals().get(function.name.as_str())?;
 
             self.funcs.insert(
-                function.self_id,
+                function.id,
                 LuaFuncInfo {
                     info: function,
                     lua_func: lua_function,
@@ -155,7 +157,7 @@ impl LuaInvoker {
                 is_required: true,
                 data_type,
                 default_value,
-                variants: None,
+                variants: vec![],
             });
         }
 
@@ -280,23 +282,13 @@ impl LuaInvoker {
 
             node.name = function.name.clone();
 
-            for (i, _input_id) in connection.inputs.iter().enumerate() {
-                let input = function.inputs.get(i).unwrap();
+            for (_idx, _input_id) in connection.inputs.iter().enumerate() {
                 node.inputs.push(Input {
-                    name: input.name.clone(),
-                    data_type: input.data_type.clone(),
-                    is_required: true,
                     binding: Binding::None,
                     const_value: None,
                 });
             }
             for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
-                let output = function.outputs.get(i).unwrap();
-                node.outputs.push(Output {
-                    name: output.name.clone(),
-                    data_type: output.data_type.clone(),
-                });
-
                 assert!(!node.id().is_nil());
                 output_ids.insert(
                     output_id,
@@ -380,6 +372,12 @@ impl Invoker for LuaInvoker {
         self.lua.globals().set("context_id", mlua::Value::Nil)?;
 
         Ok(())
+    }
+}
+
+impl Debug for LuaInvoker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LuaInvoker")
     }
 }
 

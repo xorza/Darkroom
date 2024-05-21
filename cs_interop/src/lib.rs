@@ -3,10 +3,8 @@
 
 use std::mem::forget;
 use std::string::FromUtf8Error;
+use graph::ctx::Context;
 
-use crate::ctx::Context;
-
-mod ctx;
 
 #[repr(C)]
 struct FfiBuf {

@@ -5,7 +5,6 @@ use std::thread;
 use tokio::runtime::Runtime;
 
 use crate::compute::Compute;
-use crate::elements::basic_invoker::Logger;
 use crate::event::EventId;
 use crate::graph::Graph;
 use crate::invoke_context::{Invoker, UberInvoker};
@@ -27,8 +26,7 @@ type EventQueue = Arc<tokio::sync::Mutex<Vec<EventId>>>;
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<thread::JoinHandle<()>>,
-    tx: std::sync::mpsc::Sender<WorkerMessage>,
-    pub logger: Logger,
+    tx: std::sync::mpsc::Sender<WorkerMessage>
 }
 
 impl Worker {
@@ -38,18 +36,16 @@ impl Worker {
     ) -> Self
     where
         Callback: Fn() + Send + 'static,
-        InvokerCreator: FnOnce(Logger) -> Vec<Box<dyn Invoker>> + Send + 'static,
+        InvokerCreator: FnOnce() -> Vec<Box<dyn Invoker>> + Send + 'static,
     {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel::<WorkerMessage>();
-        let logger = Arc::new(std::sync::Mutex::new(Vec::new()));
-
+   
         let tx_clone = worker_tx.clone();
-        let logger_clone = logger.clone();
-
+        
         let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
 
         let thread_handle = thread::spawn(move || {
-            let invokers = invoker_creator(logger_clone);
+            let invokers = invoker_creator();
             let invoker = UberInvoker::new(invokers);
             let compute = Compute::from(invoker);
             let compute_callback = Arc::new(compute_callback);
@@ -63,8 +59,7 @@ impl Worker {
 
         Self {
             thread_handle: Some(thread_handle),
-            tx: worker_tx,
-            logger,
+            tx: worker_tx
         }
     }
 

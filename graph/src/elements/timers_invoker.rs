@@ -6,10 +6,12 @@ use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
+#[derive(Debug)]
 pub struct TimersInvoker {
     lambda_invoker: LambdaInvoker,
 }
 
+#[derive(Debug)]
 struct FrameEventContext {
     last_frame: Instant,
     frame_no: i64,
@@ -21,7 +23,7 @@ impl Default for TimersInvoker {
 
         invoker.add_lambda(
             Function {
-                self_id: FunctionId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
+                id: FunctionId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
                 name: "frame event".to_string(),
                 behavior: FunctionBehavior::Active,
                 is_output: false,
@@ -31,7 +33,7 @@ impl Default for TimersInvoker {
                     is_required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(30.0)),
-                    variants: None,
+                    variants: vec![],
                 }],
                 outputs: vec![
                     OutputInfo {
@@ -43,7 +45,7 @@ impl Default for TimersInvoker {
                         data_type: DataType::Int,
                     },
                 ],
-                events: vec!["always".to_string(), "once".to_string(), "fps".to_string()],
+                events: vec!["always".into(), "once".into(), "fps".into()],
             },
             move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();

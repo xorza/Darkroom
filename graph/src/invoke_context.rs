@@ -7,14 +7,14 @@ use crate::function::{Function, FunctionId};
 
 pub type InvokeArgs = [DynamicValue];
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + 'static;
+pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static;
 
 #[derive(Debug, Default)]
 pub struct InvokeCache {
     boxed: Option<Box<dyn Any>>,
 }
 
-pub trait Invoker {
+pub trait Invoker: Debug {
     fn all_functions(&self) -> Vec<Function> {
         vec![]
     }
@@ -98,21 +98,37 @@ impl InvokeCache {
                 .unwrap()
         }
     }
+    pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
+    where
+        T: Any,
+        F: FnOnce() -> T,
+    {
+        let is_some = self.is_some::<T>();
+
+        if is_some {
+            self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
+        } else {
+            self.boxed
+                .insert(Box::<T>::new(f()))
+                .downcast_mut::<T>()
+                .unwrap()
+        }
+    }
 }
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Function, lambda: F)
     where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + 'static,
+        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
     {
-        if self.lambdas.contains_key(&function.self_id) {
+        if self.lambdas.contains_key(&function.id) {
             panic!(
                 "Function {}:{} with the same id already exists.",
-                function.self_id, function.name
+                function.id, function.name
             );
         }
 
-        self.lambdas.insert(function.self_id, Box::new(lambda));
+        self.lambdas.insert(function.id, Box::new(lambda));
 
         self.all_functions.push(function);
     }
@@ -123,7 +139,7 @@ impl UberInvoker {
         let mut function_id_to_invoker_index = HashMap::new();
         invokers.iter().enumerate().for_each(|(index, invoker)| {
             invoker.all_functions().iter().for_each(|function| {
-                function_id_to_invoker_index.insert(function.self_id, index);
+                function_id_to_invoker_index.insert(function.id, index);
             });
         });
 
@@ -179,7 +195,7 @@ impl Invoker for LambdaInvoker {
 impl Debug for UberInvoker {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("UberInvoker")
-            .field("invokers", &self.invokers.len())
+            .field("invokers", &self.invokers)
             .field(
                 "function_id_to_invoker_index",
                 &self.function_id_to_invoker_index,

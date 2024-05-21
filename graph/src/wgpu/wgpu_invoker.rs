@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
 
 use imaginarium::wgpu::wgpu_context::WgpuContext;
 
@@ -19,6 +21,7 @@ pub trait WgpuInvokable {
     ) -> anyhow::Result<()>;
 }
 
+
 pub(crate) struct WgpuInvoker {
     context: WgpuContext,
     funcs: HashMap<FunctionId, Box<dyn WgpuInvokable>>,
@@ -31,7 +34,7 @@ impl WgpuInvoker {
     {
         let wgpu_func = T::new(&self.context);
         let boxed_wgpu_func = Box::new(wgpu_func);
-        let func_id = boxed_wgpu_func.descriptor().self_id;
+        let func_id = boxed_wgpu_func.descriptor().id;
         self.funcs.insert(func_id, boxed_wgpu_func);
     }
 }
@@ -52,5 +55,13 @@ impl Invoker for WgpuInvoker {
         invokable.invoke(&self.context, ctx, inputs, outputs)?;
 
         Ok(())
+    }
+}
+impl Debug for WgpuInvoker {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WgpuInvoker")
+            .field("context", &self.context)
+            .field("funcs", &self.funcs.len())
+            .finish()
     }
 }

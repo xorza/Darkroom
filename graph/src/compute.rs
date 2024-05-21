@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
 use common::apply::ApplyMut;
@@ -33,26 +34,24 @@ impl Compute {
             })
             .collect::<Vec<usize>>();
 
-        for index in active_node_indexes {
-            let node = graph
-                .node_by_id(runtime_graph.nodes[index].node_id())
-                .unwrap();
+        for node_idx in active_node_indexes {
+            let node = graph.node_by_id(runtime_graph.nodes[node_idx].id()).unwrap();
+
+            // fixme: get node info from function registry
+            let node_info = crate::function::Function::default();
 
             inputs.resize_and_fill(node.inputs.len());
             node.inputs
                 .iter()
-                .map(|input| {
-                    let value = match &input.binding {
+                .enumerate()
+                .map(|(input_idx, input)| {
+                    let value: DynamicValue = match &input.binding {
                         Binding::None => DynamicValue::None,
-                        Binding::Const => {
-                            let value: DynamicValue = input
-                                .const_value
-                                .as_ref()
-                                .expect("Const value is not set")
-                                .into();
-
-                            value
-                        }
+                        Binding::Const => input
+                            .const_value
+                            .as_ref()
+                            .expect("Const value is not set")
+                            .into(),
 
                         Binding::Output(output_binding) => {
                             let output_r_node = runtime_graph
@@ -70,21 +69,19 @@ impl Compute {
                             value.clone()
                         }
                     };
-                    let data_type = &input.data_type;
 
-                    (data_type, value)
+                    let data_type = &node_info.inputs[input_idx].data_type;
+
+                    (input_idx, data_type, value)
                 })
-                .enumerate()
-                .for_each(|(index, (data_type, value))| {
-                    inputs[index] = self.convert_type(&value, data_type);
+                .for_each(|(input_idx, data_type, value)| {
+                    inputs[input_idx] = self.convert_type(&value, data_type);
                 });
 
-            let r_node = &mut runtime_graph.nodes[index];
+            let r_node = &mut runtime_graph.nodes[node_idx];
             let outputs = r_node
                 .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; node.outputs.len()]);
-
-            assert_eq!(outputs.len(), node.outputs.len());
+                .get_or_insert_with(|| vec![DynamicValue::None; node_info.outputs.len()]);
 
             r_node.run_time = {
                 let start = std::time::Instant::now();
@@ -165,6 +162,13 @@ impl<T: Invoker + 'static> From<T> for Compute {
 impl From<Box<dyn Invoker>> for Compute {
     fn from(invoker: Box<dyn Invoker>) -> Self {
         Compute { invoker }
+    }
+}
+impl Debug for Compute {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Compute")
+            .field("invoker", &self.invoker)
+            .finish()
     }
 }
 

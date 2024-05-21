@@ -3,9 +3,8 @@ use uuid::Uuid;
 
 use common::id_type;
 
-use crate::data::{DataType, StaticValue};
+use crate::data::StaticValue;
 use crate::function::{Function, FunctionId};
-use crate::subgraph::{SubGraph, SubGraphId};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FunctionBehavior {
@@ -15,12 +14,6 @@ pub enum FunctionBehavior {
 }
 
 id_type!(NodeId);
-
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
-pub struct Output {
-    pub name: String,
-    pub data_type: DataType,
-}
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct OutputBinding {
@@ -38,9 +31,6 @@ pub enum Binding {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Input {
-    pub name: String,
-    pub data_type: DataType,
-    pub is_required: bool,
     pub binding: Binding,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub const_value: Option<StaticValue>,
@@ -48,7 +38,6 @@ pub struct Input {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Event {
-    pub name: String,
     pub subscribers: Vec<NodeId>,
 }
 
@@ -66,19 +55,12 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<Output>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subgraph_id: Option<SubGraphId>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    subgraphs: Vec<SubGraph>,
 }
 
 impl Graph {
@@ -133,14 +115,6 @@ impl Graph {
 
         self.nodes.iter_mut().find(|node| node.self_id == id)
     }
-    pub fn nodes_by_subgraph_id(&self, subgraph_id: SubGraphId) -> Vec<&Node> {
-        assert!(!subgraph_id.is_nil());
-
-        self.nodes
-            .iter()
-            .filter(|node| node.subgraph_id == Some(subgraph_id))
-            .collect()
-    }
 
     pub fn to_yaml(&self) -> anyhow::Result<String> {
         let yaml = serde_yaml::to_string(&self)?;
@@ -168,12 +142,6 @@ impl Graph {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
 
-            // validate node has a valid subgraph
-            if let Some(subgraph_id) = node.subgraph_id {
-                self.subgraph_by_id(subgraph_id)
-                    .ok_or(anyhow::Error::msg("Node has invalid subgraph id"))?;
-            }
-
             // validate node has valid bindings
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
@@ -186,57 +154,7 @@ impl Graph {
             }
         }
 
-        for subgraph in self.subgraphs.iter() {
-            // validate all subgraph inputs are connected
-            for subinput in subgraph.inputs.iter() {
-                for connection in subinput.connections.iter() {
-                    let node = self
-                        .node_by_id(connection.subnode_id)
-                        .ok_or(anyhow::Error::msg(
-                            "Subgraph input connected to a non-existent node",
-                        ))?;
-                    if node.subgraph_id != Some(subgraph.id()) {
-                        return Err(anyhow::Error::msg(
-                            "Subgraph input connected to an external node",
-                        ));
-                    }
-
-                    // let input = node.inputs.get(connection.subnode_input_index as usize)
-                    //     .ok_or(anyhow::Error::msg("Subgraph input connected to a non-existent input"))?;
-                    // if !DataType::can_assign(&subinput.data_type, &input.data_type) {
-                    //     return Err(anyhow::Error::msg("Subgraph input connected to a node input with an incompatible data type"));
-                    // }
-                }
-            }
-
-            for suboutput in subgraph.outputs.iter() {
-                let node = self
-                    .node_by_id(suboutput.subnode_id)
-                    .ok_or(anyhow::Error::msg(
-                        "Subgraph output connected to a non-existent node",
-                    ))?;
-                if node.subgraph_id != Some(subgraph.id()) {
-                    return Err(anyhow::Error::msg(
-                        "Subgraph output connected to an external node",
-                    ));
-                }
-
-                // let output = node.outputs.get(suboutput.subnode_output_index as usize)
-                //     .ok_or(anyhow::Error::msg("Subgraph output connected to a non-existent output"))?;
-                // if !DataType::can_assign(&suboutput.data_type, &output.data_type) {
-                //     return Err(anyhow::Error::msg("Subgraph output connected to a node output with an incompatible data type"));
-                // }
-            }
-        }
-
         Ok(())
-    }
-
-    pub(crate) fn subgraphs(&self) -> &Vec<SubGraph> {
-        &self.subgraphs
-    }
-    pub(crate) fn subgraphs_mut(&mut self) -> &mut Vec<SubGraph> {
-        &mut self.subgraphs
     }
 }
 
@@ -251,9 +169,7 @@ impl Node {
             is_output: false,
             cache_outputs: false,
             inputs: vec![],
-            outputs: vec![],
             events: vec![],
-            subgraph_id: None,
         }
     }
 
@@ -262,9 +178,6 @@ impl Node {
             .inputs
             .iter()
             .map(|func_input| Input {
-                name: func_input.name.clone(),
-                data_type: func_input.data_type.clone(),
-                is_required: func_input.is_required,
                 binding: func_input
                     .default_value
                     .as_ref()
@@ -273,35 +186,21 @@ impl Node {
             })
             .collect();
 
-        let outputs: Vec<Output> = function
-            .outputs
-            .iter()
-            .map(|output| Output {
-                name: output.name.clone(),
-                data_type: output.data_type.clone(),
-            })
-            .collect();
-
         let events: Vec<Event> = function
             .events
             .iter()
-            .map(|event| Event {
-                name: event.clone(),
-                subscribers: vec![],
-            })
+            .map(|_event| Event::default())
             .collect();
 
         Node {
             self_id: NodeId::unique(),
-            function_id: function.self_id,
+            function_id: function.id,
             name: function.name.clone(),
             behavior: FunctionBehavior::Active,
             cache_outputs: false,
             is_output: function.is_output,
             inputs,
-            outputs,
             events,
-            subgraph_id: None,
         }
     }
 

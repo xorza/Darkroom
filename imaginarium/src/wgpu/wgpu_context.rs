@@ -32,6 +32,7 @@ pub enum Action<'a> {
     TexToImg(Vec<(&'a Texture, RefCell<&'a mut Image>)>),
 }
 
+#[derive(Debug)]
 pub struct WgpuContext {
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -379,6 +380,7 @@ impl Drop for WgpuContext {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct VertexBuffer {
     pub(crate) buffer: wgpu::Buffer,
     pub(crate) vert_count: u32,
