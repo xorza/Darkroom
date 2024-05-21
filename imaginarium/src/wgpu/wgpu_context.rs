@@ -62,8 +62,6 @@ impl WgpuContext {
             .block_on()
             .expect("Unable to find a suitable GPU adapter.");
 
-        assert!(adapter.features().contains(wgpu::Features::PUSH_CONSTANTS));
-
         let _limits = adapter.limits();
         let limits = wgpu::Limits {
             max_push_constant_size: 256,
