@@ -7,7 +7,7 @@ use imaginarium::wgpu::wgpu_context::WgpuContext;
 use crate::function::{Function, FunctionId};
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
-pub trait WgpuInvokable {
+pub trait WgpuInvokable :Send {
     fn new(wgpu_context: &WgpuContext) -> Self
     where
         Self: Sized;

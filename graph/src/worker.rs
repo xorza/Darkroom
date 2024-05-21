@@ -30,22 +30,19 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<Callback, InvokerCreator>(
-        invoker_creator: InvokerCreator,
+    pub fn new<Callback>(
+        invokers: Vec<Box<dyn Invoker>>,
         compute_callback: Callback,
     ) -> Self
     where
         Callback: Fn() + Send + 'static,
-        InvokerCreator: FnOnce() -> Vec<Box<dyn Invoker>> + Send + 'static,
     {
         let (worker_tx, worker_rx) = std::sync::mpsc::channel::<WorkerMessage>();
+        let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
 
         let tx_clone = worker_tx.clone();
 
-        let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
-
         let thread_handle = thread::spawn(move || {
-            let invokers = invoker_creator();
             let invoker = UberInvoker::new(invokers);
             let compute = Compute::from(invoker);
             let compute_callback = Arc::new(compute_callback);

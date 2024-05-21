@@ -3,24 +3,22 @@ use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
-use mlua::{Error, Function, Lua, Table, Variadic};
+use parking_lot::Mutex;
+
+use common::output_stream::OutputStream;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::FunctionId;
 use crate::graph::{Binding, Graph, Input, Node, NodeId};
-use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
+use crate::invoke_context::{InvokeArgs, InvokeCache};
 use crate::{data, function};
-
-#[derive(Default)]
-struct Cache {
-    output_stream: Vec<String>,
-}
 
 struct LuaFuncInfo {
     info: function::Function,
-    lua_func: Function<'static>,
+    lua_func: mlua::Function<'static>,
 }
 
 #[derive(Clone)]
@@ -30,41 +28,43 @@ struct FuncConnections {
     outputs: Vec<u32>,
 }
 
-pub(crate) struct LuaInvoker {
-    lua: &'static Lua,
-    cache: Rc<RefCell<Cache>>,
+pub(crate) struct LuaInvokerInternal {
+    lua: &'static mlua::Lua,
+    output_stream: Arc<Mutex<Option<OutputStream>>>,
     funcs: HashMap<FunctionId, LuaFuncInfo>,
 }
 
-impl Default for LuaInvoker {
+impl Default for LuaInvokerInternal {
     fn default() -> Self {
-        let lua = Box::new(Lua::new());
-        let lua: &'static Lua = Box::leak(lua);
+        let lua = Box::new(mlua::Lua::new());
+        let lua: &'static mlua::Lua = Box::leak(lua);
 
-        LuaInvoker {
+        LuaInvokerInternal {
             lua,
-            cache: Rc::new(RefCell::new(Cache::default())),
+            output_stream: Arc::new(Mutex::new(None)),
             funcs: HashMap::new(),
         }
     }
 }
 
-impl LuaInvoker {
+impl LuaInvokerInternal {
     pub fn load_file(&mut self, file: &str) -> anyhow::Result<()> {
         let script = std::fs::read_to_string(file)?;
         self.load(&script)?;
 
         Ok(())
     }
-    //noinspection RsNonExhaustiveMatch
+
     pub fn load(&mut self, script: &str) -> anyhow::Result<()> {
-        let cache = Rc::clone(&self.cache);
+        let output_stream = self.output_stream.clone();
+
         let print_function = self
             .lua
-            .create_function(move |_lua: &Lua, args: Variadic<mlua::Value>| {
+            .create_function(move |_lua: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
                 let mut output = String::new();
 
                 for arg in args {
+                    #[allow(unreachable_patterns)]
                     match arg {
                         mlua::Value::Nil => {
                             output += "Nil";
@@ -97,11 +97,17 @@ impl LuaInvoker {
                             output += "UserData";
                         }
                         mlua::Value::Error(err) => output += &err.to_string(),
+
+                        _ => {
+                            panic!("not supported");
+                        }
                     }
                 }
 
-                let mut cache = cache.borrow_mut();
-                cache.output_stream.push(output);
+                let _ = output_stream.lock().as_mut().is_some_and(|stream| {
+                    stream.write(output);
+                    true
+                });
                 Ok(())
             })
             .unwrap();
@@ -115,10 +121,10 @@ impl LuaInvoker {
     }
 
     fn read_function_info(&mut self) -> anyhow::Result<()> {
-        let functions_table: Table = self.lua.globals().get("functions")?;
+        let functions_table: mlua::Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
             let function = Self::function_from_table(&function_table)?;
-            let lua_function: Function = self.lua.globals().get(function.name.as_str())?;
+            let lua_function: mlua::Function = self.lua.globals().get(function.name.as_str())?;
 
             self.funcs.insert(
                 function.id,
@@ -131,7 +137,7 @@ impl LuaInvoker {
 
         Ok(())
     }
-    fn function_from_table(table: &Table) -> anyhow::Result<function::Function> {
+    fn function_from_table(table: &mlua::Table) -> anyhow::Result<function::Function> {
         let id_str: String = table.get("id")?;
 
         let mut function_info = function::Function::new(FunctionId::from_str(&id_str)?);
@@ -139,9 +145,9 @@ impl LuaInvoker {
         function_info.inputs = Vec::new();
         function_info.outputs = Vec::new();
 
-        let inputs: Table = table.get("inputs")?;
+        let inputs: mlua::Table = table.get("inputs")?;
         for i in 1..=inputs.len()? {
-            let input: Table = inputs.get(i).unwrap();
+            let input: mlua::Table = inputs.get(i).unwrap();
             let name: String = input.get(1).unwrap();
             let data_type_name: String = input.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
@@ -160,9 +166,9 @@ impl LuaInvoker {
             });
         }
 
-        let outputs: Table = table.get("outputs")?;
+        let outputs: mlua::Table = table.get("outputs")?;
         for i in 1..=outputs.len()? {
-            let output: Table = outputs.get(i).unwrap();
+            let output: mlua::Table = outputs.get(i).unwrap();
             let name: String = output.get(1).unwrap();
             let data_type_name: String = output.get(2).unwrap();
             let data_type = data_type_name.parse::<DataType>().unwrap();
@@ -180,7 +186,7 @@ impl LuaInvoker {
 
         self.restore_functions();
 
-        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        let graph_function: mlua::Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
 
         let graph = self.create_graph(connections);
@@ -202,9 +208,9 @@ impl LuaInvoker {
             let new_function = self
                 .lua
                 .create_function(
-                    move |_lua: &Lua,
-                          mut inputs: Variadic<mlua::Value>|
-                          -> Result<Variadic<mlua::Value>, Error> {
+                    move |_lua: &mlua::Lua,
+                          mut inputs: mlua::Variadic<mlua::Value>|
+                          -> Result<mlua::Variadic<mlua::Value>, mlua::Error> {
                         let mut connection = FuncConnections {
                             name: function_info_clone.name.clone(),
                             inputs: Vec::new(),
@@ -217,7 +223,7 @@ impl LuaInvoker {
                             }
                         }
 
-                        let mut result: Variadic<mlua::Value> = Variadic::new();
+                        let mut result: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
                         for i in 0..function_info_clone.outputs.len() {
                             let index = output_index + i as u32;
                             result.push(mlua::Value::Integer(index as i64));
@@ -240,7 +246,7 @@ impl LuaInvoker {
             output_index += lua_func_info.outputs.len() as u32;
         }
 
-        let graph_function: Function = self.lua.globals().get("graph").unwrap();
+        let graph_function: mlua::Function = self.lua.globals().get("graph").unwrap();
         graph_function.call::<_, ()>(()).unwrap();
 
         connections.take()
@@ -317,28 +323,15 @@ impl LuaInvoker {
         graph
     }
 
-    pub fn get_output(&self) -> String {
-        let mut cache = self.cache.borrow_mut();
-        let result = cache.output_stream.join("\n");
-        cache.output_stream.clear();
-        result
+    pub(crate) fn use_output_stream(&mut self, output_stream: &OutputStream) {
+        self.output_stream = Arc::new(Mutex::new(Some(output_stream.clone())));
     }
 
     pub fn get_all_functions(&self) -> Vec<&function::Function> {
         self.funcs.values().map(|f| &f.info).collect()
     }
-}
 
-impl Drop for LuaInvoker {
-    fn drop(&mut self) {
-        self.funcs.clear();
-
-        let _lua: Box<Lua> = unsafe { Box::from_raw((self.lua as *const Lua) as *mut Lua) };
-    }
-}
-
-impl Invoker for LuaInvoker {
-    fn invoke(
+    pub fn invoke(
         &self,
         function_id: FunctionId,
         _cache: &mut InvokeCache,
@@ -349,7 +342,7 @@ impl Invoker for LuaInvoker {
 
         let function_info = self.funcs.get(&function_id).unwrap();
 
-        let mut input_args: Variadic<mlua::Value> = Variadic::new();
+        let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
         for (index, input_info) in function_info.info.inputs.iter().enumerate() {
             let input = &inputs[index];
             assert_eq!(input_info.data_type, *input.data_type());
@@ -358,7 +351,7 @@ impl Invoker for LuaInvoker {
             input_args.push(invoke_value);
         }
 
-        let output_args: Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
+        let output_args: mlua::Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
 
         for (index, output_info) in function_info.info.outputs.iter().enumerate() {
             let output_arg: &mlua::Value = output_args.get(index).unwrap();
@@ -374,15 +367,24 @@ impl Invoker for LuaInvoker {
     }
 }
 
-impl Debug for LuaInvoker {
+impl Drop for LuaInvokerInternal {
+    fn drop(&mut self) {
+        self.funcs.clear();
+
+        let _lua: Box<mlua::Lua> =
+            unsafe { Box::from_raw((self.lua as *const mlua::Lua) as *mut mlua::Lua) };
+    }
+}
+
+impl Debug for LuaInvokerInternal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "LuaInvoker")
     }
 }
 
 fn to_lua_value<'lua>(
-    lua: &'lua Lua,
-    value: &data::DynamicValue,
+    lua: &'lua mlua::Lua,
+    value: &DynamicValue,
 ) -> anyhow::Result<mlua::Value<'lua>> {
     match value {
         data::DynamicValue::Null => Ok(mlua::Value::Nil),

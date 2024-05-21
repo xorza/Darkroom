@@ -6,6 +6,7 @@ pub mod apply;
 pub mod log_setup;
 pub mod scoped_ref;
 pub mod toggle;
+pub mod output_stream;
 
 pub const EPSILON: f64 = 1e-10;
 

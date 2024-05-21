@@ -1,11 +1,12 @@
 use std::str::FromStr;
 
 use mlua::{Function, Lua, Value, Variadic};
+use common::output_stream::OutputStream;
 
 use crate::compute::ArgSet;
-use crate::elements::lua_invoker::LuaInvoker;
+use crate::elements::lua_invoker::LuaInvokerInternal;
 use crate::function::FunctionId;
-use crate::invoke_context::{InvokeCache, Invoker};
+use crate::invoke_context::{InvokeCache};
 
 #[test]
 fn lua_works() {
@@ -74,7 +75,10 @@ fn local_data_test() {
 
 #[test]
 fn load_functions_from_lua_file() -> anyhow::Result<()> {
-    let mut invoker = LuaInvoker::default();
+    let mut invoker = LuaInvokerInternal::default();
+    let output_stream = OutputStream::new();
+    invoker.use_output_stream(&output_stream);
+    
     invoker.load_file("../test_resources/test_lua.lua")?;
 
     let funcs = invoker.get_all_functions();
@@ -113,8 +117,8 @@ fn load_functions_from_lua_file() -> anyhow::Result<()> {
     let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
     assert_eq!(bound_node.name, "get_b");
 
-    let output = invoker.get_output();
-    assert_eq!(output, "117");
+    let output = output_stream.take();
+    assert_eq!(output[0], "117");
 
     Ok(())
 }

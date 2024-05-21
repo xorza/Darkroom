@@ -1,6 +1,7 @@
 use std::sync::mpsc;
 
 use common::log_setup::setup_logging;
+use common::output_stream::OutputStream;
 
 use crate::elements::basic_invoker::BasicInvoker;
 use crate::elements::timers_invoker::TimersInvoker;
@@ -13,10 +14,11 @@ fn test_worker() {
 
     let (tx, rx) = mpsc::channel();
     let mut basic_invoker = Box::<BasicInvoker>::default();
-    let logger = basic_invoker.init_logger();
+    let output_stream = OutputStream::new();
+    basic_invoker.use_output_stream(&output_stream);
 
     let mut worker = Worker::new(
-        move || vec![basic_invoker, Box::<TimersInvoker>::default()],
+        vec![basic_invoker, Box::<TimersInvoker>::default()],
         move || {
             tx.send(()).unwrap();
         },
@@ -27,7 +29,7 @@ fn test_worker() {
     worker.run_once(graph.clone());
     rx.recv().unwrap();
 
-    assert_eq!(logger.take_log(), "1");
+    assert_eq!(output_stream.take()[0], "1");
 
     worker.run_loop(graph.clone());
 
@@ -37,10 +39,9 @@ fn test_worker() {
     worker.event();
     rx.recv().unwrap();
 
-    let log = logger.take_log();
-    let mut log = log.lines();
-    assert_eq!(log.next(), Some("1"));
-    assert_eq!(log.next(), Some("2"));
+    let log = output_stream.take();
+    assert_eq!(log[0], "1");
+    assert_eq!(log[1], "2");
 
     worker.stop();
 }

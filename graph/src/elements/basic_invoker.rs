@@ -7,18 +7,17 @@ use rand::Rng;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 
+use common::output_stream::OutputStream;
+
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Function, FunctionId, InputInfo, OutputInfo};
 use crate::graph::FunctionBehavior;
 use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
-#[derive(Debug, Clone)]
-pub(crate) struct Logger(Arc<Mutex<Option<String>>>);
-
 #[derive(Debug)]
 pub struct BasicInvoker {
     lambda_invoker: LambdaInvoker,
-    logger: Logger,
+    output_stream: Arc<Mutex<Option<OutputStream>>>,
 }
 
 #[repr(u32)]
@@ -73,23 +72,16 @@ impl From<i64> for Math2ArgOp {
 }
 
 impl BasicInvoker {
-    pub(crate) fn init_logger(&mut self) -> Logger {
-        self.logger = Logger(Arc::new(Mutex::new(Some("".to_string()))));
-        self.logger.clone()
-    }
-}
-
-impl Logger {
-    pub(crate) fn take_log(&self) -> String {
-        self.0.lock().take().unwrap()
+    pub(crate) fn use_output_stream(&mut self, output_stream: &OutputStream) {
+        self.output_stream = Arc::new(Mutex::new(Some(output_stream.clone())));
     }
 }
 
 impl Default for BasicInvoker {
     fn default() -> Self {
         let mut invoker = LambdaInvoker::default();
-        let logger: Logger = Logger(Arc::new(Mutex::new(None)));
-        let logger_clone = logger.clone();
+        let output_stream = Arc::new(Mutex::new(None::<OutputStream>));
+        let output_stream_clone = output_stream.clone();
 
         //print
         invoker.add_lambda(
@@ -111,10 +103,13 @@ impl Default for BasicInvoker {
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
-                let _ = logger_clone.0.lock().as_mut().is_some_and(|s| {
-                    s.push_str(value);
-                    true
-                });
+                let _ = output_stream_clone
+                    .lock()
+                    .as_mut()
+                    .is_some_and(|s| {
+                        s.write(value);
+                        true
+                    });
                 info!("{:?}", value);
             },
         );
@@ -716,7 +711,7 @@ impl Default for BasicInvoker {
 
         Self {
             lambda_invoker: invoker,
-            logger,
+            output_stream,
         }
     }
 }

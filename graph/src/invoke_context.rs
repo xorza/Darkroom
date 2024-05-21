@@ -14,7 +14,7 @@ pub struct InvokeCache {
     boxed: Option<Box<dyn Any>>,
 }
 
-pub trait Invoker: Debug {
+pub trait Invoker: Debug + Send {
     fn all_functions(&self) -> Vec<Function> {
         vec![]
     }
