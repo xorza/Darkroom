@@ -12,6 +12,6 @@ pub struct Context {
     pub(crate) compute: Compute,
     pub(crate) func_lib: FuncLib,
 
-    pub(crate) invoker: Option<UberInvoker>,
+    pub(crate) invoker: UberInvoker,
     pub(crate) worker: Option<Worker>,
 }

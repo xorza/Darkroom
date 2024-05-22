@@ -9,12 +9,12 @@ use parking_lot::Mutex;
 
 use common::output_stream::OutputStream;
 
-use crate::{data, function};
 use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncId, FuncLib};
 use crate::graph::{Binding, Graph, Input, Node, NodeId};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
+use crate::{data, function};
 
 #[derive(Clone)]
 struct FuncConnections {
@@ -29,7 +29,6 @@ pub struct LuaInvoker {
     func_lib: FuncLib,
 }
 
-
 pub(crate) struct LuaInner {
     lua: &'static mlua::Lua,
     output_stream: Arc<Mutex<Option<OutputStream>>>,
@@ -37,18 +36,25 @@ pub(crate) struct LuaInner {
     func_lib: FuncLib,
 }
 
-
 unsafe impl Send for LuaInvoker {}
 
 unsafe impl Sync for LuaInvoker {}
 
 impl Invoker for LuaInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&mut self) -> FuncLib {
+        self.func_lib.clone()
     }
 
-    fn invoke(&self, function_id: FuncId, cache: &mut InvokeCache, inputs: &mut InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
-        self.inner.lock().invoke(function_id, cache, inputs, outputs)
+    fn invoke(
+        &self,
+        function_id: FuncId,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .lock()
+            .invoke(function_id, cache, inputs, outputs)
     }
 }
 
@@ -170,7 +176,6 @@ impl LuaInner {
 
         self.read_function_info()?;
 
-
         Ok(())
     }
 
@@ -180,10 +185,7 @@ impl LuaInner {
             let func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            self.funcs.insert(
-                func.id,
-                lua_func,
-            );
+            self.funcs.insert(func.id, lua_func);
 
             self.func_lib.add(func);
         }
@@ -315,10 +317,7 @@ impl LuaInner {
             let func = self.func_lib.func_by_id(id).unwrap();
             self.lua
                 .globals()
-                .set(
-                    func.name.clone(),
-                    lua_func.clone(),
-                )
+                .set(func.name.clone(), lua_func.clone())
                 .unwrap();
         }
     }
@@ -467,7 +466,6 @@ impl From<&mlua::Value<'_>> for DynamicValue {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -491,8 +489,8 @@ mod tests {
         end
         "#,
         )
-            .exec()
-            .unwrap();
+        .exec()
+        .unwrap();
 
         let var_args = mlua::Variadic::from_iter(vec![
             mlua::Value::Integer(3),
@@ -552,7 +550,7 @@ mod tests {
 
         invoker.load_file("../test_resources/test_lua.lua")?;
 
-        let funcs = invoker.take_func_lib();
+        let funcs = invoker.get_func_lib();
         assert_eq!(funcs.len(), 5);
 
         let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);

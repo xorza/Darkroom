@@ -89,7 +89,7 @@ impl FuncLib {
     }
     pub fn merge(&mut self, other: FuncLib) {
         for (_id, func) in other.funcs {
-            self.add(func.clone());
+            self.add(func);
         }
     }
     pub fn len(&self) -> usize {
@@ -106,8 +106,8 @@ impl From<&str> for EventInfo {
 }
 
 impl<It> From<It> for FuncLib
-    where
-        It: IntoIterator<Item=Func>,
+where
+    It: IntoIterator<Item = Func>,
 {
     fn from(iter: It) -> Self {
         let mut func_lib = FuncLib::default();
@@ -237,7 +237,7 @@ mod tests {
                 events: vec![],
             },
         ]
-            .into()
+        .into()
     }
 
     #[test]

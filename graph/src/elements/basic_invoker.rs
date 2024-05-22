@@ -224,7 +224,6 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-
                 let rng = cache.get_or_default_with(rand::rngs::StdRng::from_entropy);
 
                 let min: f64 = inputs[0].as_float();
@@ -715,8 +714,8 @@ impl Default for BasicInvoker {
 }
 
 impl Invoker for BasicInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        self.lambda_invoker.take_func_lib()
+    fn get_func_lib(&mut self) -> FuncLib {
+        self.lambda_invoker.get_func_lib()
     }
 
     fn invoke(

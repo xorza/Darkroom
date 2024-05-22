@@ -8,7 +8,8 @@ use crate::function::{Func, FuncId, FuncLib};
 
 pub type InvokeArgs = [DynamicValue];
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static;
+pub type Lambda =
+    dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static;
 
 #[derive(Debug, Default)]
 pub struct InvokeCache {
@@ -16,7 +17,7 @@ pub struct InvokeCache {
 }
 
 pub trait Invoker: Debug + Send + Sync {
-    fn take_func_lib(&mut self) -> FuncLib;
+    fn get_func_lib(&mut self) -> FuncLib;
     fn invoke(
         &self,
         function_id: FuncId,
@@ -49,8 +50,8 @@ impl InvokeCache {
     }
 
     pub fn is_some<T>(&self) -> bool
-        where
-            T: Any + Send,
+    where
+        T: Any + Send,
     {
         match &self.boxed {
             None => false,
@@ -59,8 +60,8 @@ impl InvokeCache {
     }
 
     pub fn get<T>(&self) -> Option<&T>
-        where
-            T: Any + Send,
+    where
+        T: Any + Send,
     {
         self.boxed
             .as_ref()
@@ -68,8 +69,8 @@ impl InvokeCache {
     }
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
-        where
-            T: Any + Send,
+    where
+        T: Any + Send,
     {
         self.boxed
             .as_mut()
@@ -77,15 +78,15 @@ impl InvokeCache {
     }
 
     pub fn set<T>(&mut self, value: T)
-        where
-            T: Any + Send,
+    where
+        T: Any + Send,
     {
         self.boxed = Some(Box::new(value));
     }
 
     pub fn get_or_default<T>(&mut self) -> &mut T
-        where
-            T: Any + Send + Default,
+    where
+        T: Any + Send + Default,
     {
         let is_some = self.is_some::<T>();
 
@@ -99,9 +100,9 @@ impl InvokeCache {
         }
     }
     pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
-        where
-            T: Any + Send,
-            F: FnOnce() -> T,
+    where
+        T: Any + Send,
+        F: FnOnce() -> T,
     {
         let is_some = self.is_some::<T>();
 
@@ -118,8 +119,8 @@ impl InvokeCache {
 
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Func, lambda: F)
-        where
-            F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
     {
         if self.lambdas.contains_key(&function.id) {
             panic!(
@@ -140,7 +141,7 @@ impl UberInvoker {
         let mut func_lib = FuncLib::default();
 
         invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
-            let new_func_lib = invoker.take_func_lib();
+            let new_func_lib = invoker.get_func_lib();
             new_func_lib.iter().for_each(|(id, _func)| {
                 function_id_to_invoker_index.insert(id.clone(), idx);
             });
@@ -155,20 +156,38 @@ impl UberInvoker {
         }
     }
     pub fn merge<T>(&mut self, mut invoker: T)
-        where T: Invoker + 'static {
-        let idx = self.invokers.len();
-        invoker.take_func_lib().iter().for_each(|(id, _func)| {
-            self.function_id_to_invoker_index.insert(id.clone(), idx);
-        });
+    where
+        T: Invoker + Any + 'static,
+    {
+        if let Some(other_uber) = (&mut invoker as &mut dyn Any).downcast_mut::<UberInvoker>() {
+            self.func_lib
+                .merge(std::mem::take(&mut other_uber.func_lib));
 
-        self.func_lib.merge(invoker.take_func_lib());
-        self.invokers.push(Box::new(invoker));
+            let idx = self.invokers.len();
+            self.invokers.append(&mut other_uber.invokers);
+            other_uber
+                .function_id_to_invoker_index
+                .iter()
+                .for_each(|(&func_id, &old_idx)| {
+                    self.function_id_to_invoker_index
+                        .insert(func_id, idx + old_idx);
+                });
+        } else {
+            let idx = self.invokers.len();
+            let other_func_lib = invoker.get_func_lib();
+            other_func_lib.iter().for_each(|(&func_id, _func)| {
+                self.function_id_to_invoker_index.insert(func_id, idx);
+            });
+
+            self.func_lib.merge(other_func_lib);
+            self.invokers.push(Box::new(invoker));
+        }
     }
 }
 
 impl<It> From<It> for UberInvoker
-    where
-        It: IntoIterator<Item=Box<dyn Invoker>>,
+where
+    It: IntoIterator<Item = Box<dyn Invoker>>,
 {
     fn from(invokers: It) -> Self {
         Self::new(invokers.into_iter().collect())
@@ -176,8 +195,8 @@ impl<It> From<It> for UberInvoker
 }
 
 impl Invoker for UberInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&mut self) -> FuncLib {
+        self.func_lib.clone()
     }
     fn invoke(
         &self,
@@ -204,8 +223,8 @@ impl Invoker for UberInvoker {
 }
 
 impl Invoker for LambdaInvoker {
-    fn take_func_lib(&mut self) -> FuncLib {
-        std::mem::take(&mut self.func_lib)
+    fn get_func_lib(&mut self) -> FuncLib {
+        self.func_lib.clone()
     }
     fn invoke(
         &self,
@@ -229,6 +248,7 @@ impl Debug for UberInvoker {
                 "function_id_to_invoker_index",
                 &self.function_id_to_invoker_index,
             )
+            .field("func_lib", &self.func_lib)
             .finish()
     }
 }
@@ -250,9 +270,11 @@ mod tests {
 
     use crate::compute::Compute;
     use crate::data::StaticValue;
+    use crate::elements::basic_invoker::BasicInvoker;
+    use crate::elements::timers_invoker::TimersInvoker;
     use crate::function::FuncLib;
     use crate::graph::{Binding, FuncBehavior, Graph};
-    use crate::invoke::{InvokeCache, Invoker, LambdaInvoker};
+    use crate::invoke::{InvokeCache, Invoker, LambdaInvoker, UberInvoker};
     use crate::runtime_graph::RuntimeGraph;
 
     struct TestValues {
@@ -266,10 +288,10 @@ mod tests {
         get_b: GetB,
         result: SetResult,
     ) -> anyhow::Result<LambdaInvoker>
-        where
-            SetResult: Fn(i64) + Send + Sync + 'static,
-            GetA: Fn() -> i64 + Send + Sync + 'static,
-            GetB: Fn() -> i64 + Send + Sync + 'static,
+    where
+        SetResult: Fn(i64) + Send + Sync + 'static,
+        GetA: Fn() -> i64 + Send + Sync + 'static,
+        GetB: Fn() -> i64 + Send + Sync + 'static,
     {
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
@@ -357,7 +379,6 @@ mod tests {
             move |result| test_values_result.lock().result = result,
         )?;
 
-
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
         let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
@@ -366,7 +387,6 @@ mod tests {
 
         Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
         assert_eq!(test_values.lock().result, 35);
-
 
         test_values.lock().b = 7;
         invoker.func_lib.func_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
@@ -391,7 +411,7 @@ mod tests {
             || panic!("Unexpected call to get_b"),
             move |result| test_values_result.lock().result = result,
         )?;
-        let func_lib = invoker.take_func_lib();
+        let func_lib = invoker.get_func_lib();
         let compute = Compute::default();
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
@@ -472,6 +492,35 @@ mod tests {
         assert_eq!(test_values.lock().result, 40);
 
         drop(graph);
+
+        Ok(())
+    }
+
+    #[test]
+    fn user_invoker_merge() -> anyhow::Result<()> {
+        let uber1 = UberInvoker::new(vec![Box::<BasicInvoker>::default()]);
+        let uber2 = UberInvoker::new(vec![Box::<TimersInvoker>::default()]);
+
+        let mut uber = UberInvoker::default();
+        uber.merge(uber1);
+        uber.merge(uber2);
+
+        assert_eq!(uber.invokers.len(), 2);
+        assert_eq!(uber.function_id_to_invoker_index.len(), 18);
+
+        let basic_invoker_func_count = uber
+            .function_id_to_invoker_index
+            .values()
+            .filter(|&&idx| idx == 0)
+            .count();
+        assert_eq!(basic_invoker_func_count, 17);
+
+        let timers_invoker_func_count = uber
+            .function_id_to_invoker_index
+            .values()
+            .filter(|&&idx| idx == 1)
+            .count();
+        assert_eq!(timers_invoker_func_count, 1);
 
         Ok(())
     }

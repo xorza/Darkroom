@@ -34,8 +34,8 @@ pub struct Worker {
 
 impl Worker {
     pub fn new<Callback>(invoker: UberInvoker, compute_callback: Callback) -> Self
-        where
-            Callback: Fn() + Send + 'static,
+    where
+        Callback: Fn() + Send + 'static,
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
@@ -58,7 +58,7 @@ impl Worker {
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = invoker.take_func_lib();
+        let func_lib = invoker.get_func_lib();
         let compute = Compute::default();
 
         loop {
@@ -91,7 +91,8 @@ impl Worker {
                         tx.clone(),
                         &mut rx,
                         compute_callback.clone(),
-                    ).await;
+                    )
+                    .await;
                 }
             }
 
@@ -127,9 +128,7 @@ impl Worker {
             match msg {
                 WorkerMessage::Stop => break,
 
-                WorkerMessage::Exit
-                | WorkerMessage::RunOnce(_)
-                | WorkerMessage::RunLoop(_) => {
+                WorkerMessage::Exit | WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => {
                     result_message = Some(msg);
                     break;
                 }
@@ -138,7 +137,6 @@ impl Worker {
                     compute
                         .run(&graph, func_lib, invoker, &mut runtime_graph)
                         .expect("Failed to run graph");
-
 
                     (*compute_callback.lock().await)();
                     continue;
@@ -254,7 +252,6 @@ impl PartialOrd<Self> for WorkerMessage {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -284,10 +281,9 @@ mod tests {
             uber_invoker.merge(basic_invoker);
 
             let (tx, rx) = mpsc::channel();
-            let mut worker = Worker::new(
-                uber_invoker,
-                move || { tx.send(()).unwrap(); },
-            );
+            let mut worker = Worker::new(uber_invoker, move || {
+                tx.send(()).unwrap();
+            });
 
             let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();
 
