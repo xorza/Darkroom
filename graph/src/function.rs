@@ -47,7 +47,7 @@ pub struct Func {
     pub events: Vec<EventInfo>,
 }
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
     funcs: hashbrown::HashMap<FuncId, Func>,
 }
@@ -91,6 +91,9 @@ impl FuncLib {
         for (_id, func) in &other.funcs {
             self.add(func.clone());
         }
+    }
+    pub fn len(&self) -> usize {
+        self.funcs.len()
     }
 }
 

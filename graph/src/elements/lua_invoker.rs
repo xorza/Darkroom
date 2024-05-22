@@ -1,25 +1,20 @@
-use hashbrown::HashMap;
 use std::cell::RefCell;
 use std::fmt::{Debug, Formatter};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use hashbrown::HashMap;
 use parking_lot::Mutex;
 
 use common::output_stream::OutputStream;
 
+use crate::{data, function};
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncId};
+use crate::function::{Func, FuncId, FuncLib};
 use crate::graph::{Binding, Graph, Input, Node, NodeId};
-use crate::invoke_context::{InvokeArgs, InvokeCache};
-use crate::{data, function};
-
-struct LuaFuncInfo {
-    info: function::Func,
-    lua_func: mlua::Function<'static>,
-}
+use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
 
 #[derive(Clone)]
 struct FuncConnections {
@@ -28,26 +23,84 @@ struct FuncConnections {
     outputs: Vec<u32>,
 }
 
-pub(crate) struct LuaInvokerInternal {
-    lua: &'static mlua::Lua,
-    output_stream: Arc<Mutex<Option<OutputStream>>>,
-    funcs: HashMap<FuncId, LuaFuncInfo>,
+#[derive(Debug)]
+pub struct LuaInvoker {
+    inner: Arc<Mutex<LuaInner>>,
+    func_lib: FuncLib,
 }
 
-impl Default for LuaInvokerInternal {
-    fn default() -> Self {
-        let lua = Box::new(mlua::Lua::new());
-        let lua: &'static mlua::Lua = Box::leak(lua);
 
-        LuaInvokerInternal {
-            lua,
-            output_stream: Arc::new(Mutex::new(None)),
-            funcs: HashMap::new(),
+pub(crate) struct LuaInner {
+    lua: &'static mlua::Lua,
+    output_stream: Arc<Mutex<Option<OutputStream>>>,
+    funcs: HashMap<FuncId, mlua::Function<'static>>,
+    func_lib: FuncLib,
+}
+
+
+unsafe impl Send for LuaInvoker {}
+
+unsafe impl Sync for LuaInvoker {}
+
+impl Invoker for LuaInvoker {
+    fn get_func_lib(&self) -> &FuncLib {
+        &self.func_lib
+    }
+
+    fn invoke(&self, function_id: FuncId, cache: &mut InvokeCache, inputs: &mut InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
+        self.inner.lock().invoke(function_id, cache, inputs, outputs)
+    }
+}
+
+impl Default for LuaInvoker {
+    fn default() -> Self {
+        LuaInvoker {
+            inner: Arc::new(Mutex::new(LuaInner::default())),
+            func_lib: FuncLib::default(),
         }
     }
 }
 
-impl LuaInvokerInternal {
+impl LuaInvoker {
+    pub fn load_file(&mut self, file: &str) -> anyhow::Result<()> {
+        let script = std::fs::read_to_string(file)?;
+        self.load(&script)?;
+
+        Ok(())
+    }
+
+    pub fn load(&mut self, script: &str) -> anyhow::Result<()> {
+        let mut inner = self.inner.lock();
+        inner.load(script)?;
+        self.func_lib = inner.get_func_lib().clone();
+
+        Ok(())
+    }
+
+    pub fn use_output_stream(&mut self, output_stream: &OutputStream) {
+        self.inner.lock().use_output_stream(output_stream);
+    }
+
+    pub fn map_graph(&self) -> anyhow::Result<Graph> {
+        self.inner.lock().map_graph()
+    }
+}
+
+impl Default for LuaInner {
+    fn default() -> Self {
+        let lua = Box::new(mlua::Lua::new());
+        let lua: &'static mlua::Lua = Box::leak(lua);
+
+        LuaInner {
+            lua,
+            output_stream: Arc::new(Mutex::new(None)),
+            funcs: HashMap::new(),
+            func_lib: FuncLib::default(),
+        }
+    }
+}
+
+impl LuaInner {
     pub fn load_file(&mut self, file: &str) -> anyhow::Result<()> {
         let script = std::fs::read_to_string(file)?;
         self.load(&script)?;
@@ -117,27 +170,27 @@ impl LuaInvokerInternal {
 
         self.read_function_info()?;
 
+
         Ok(())
     }
 
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: mlua::Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
-            let function = Self::function_from_table(&function_table)?;
-            let lua_function: mlua::Function = self.lua.globals().get(function.name.as_str())?;
+            let func = Self::function_from_table(&function_table)?;
+            let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
             self.funcs.insert(
-                function.id,
-                LuaFuncInfo {
-                    info: function,
-                    lua_func: lua_function,
-                },
+                func.id,
+                lua_func,
             );
+
+            self.func_lib.add(func);
         }
 
         Ok(())
     }
-    fn function_from_table(table: &mlua::Table) -> anyhow::Result<function::Func> {
+    fn function_from_table(table: &mlua::Table) -> anyhow::Result<Func> {
         let id_str: String = table.get("id")?;
 
         let mut function_info = Func {
@@ -203,12 +256,12 @@ impl LuaInvokerInternal {
     fn substitute_functions(&self) -> Vec<FuncConnections> {
         let connections: Rc<RefCell<Vec<FuncConnections>>> = Rc::new(RefCell::new(Vec::new()));
 
-        let functions = self.get_all_functions();
+        let functions = &self.func_lib;
 
         let mut output_index: u32 = 0;
 
-        for lua_func_info in functions {
-            let function_info_clone = lua_func_info.clone();
+        for (_id, func) in functions.iter() {
+            let func_clone = func.clone();
             let connections = connections.clone();
 
             let new_function = self
@@ -218,7 +271,7 @@ impl LuaInvokerInternal {
                           mut inputs: mlua::Variadic<mlua::Value>|
                           -> Result<mlua::Variadic<mlua::Value>, mlua::Error> {
                         let mut connection = FuncConnections {
-                            name: function_info_clone.name.clone(),
+                            name: func_clone.name.clone(),
                             inputs: Vec::new(),
                             outputs: Vec::new(),
                         };
@@ -230,7 +283,7 @@ impl LuaInvokerInternal {
                         }
 
                         let mut result: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                        for i in 0..function_info_clone.outputs.len() {
+                        for i in 0..func_clone.outputs.len() {
                             let index = output_index + i as u32;
                             result.push(mlua::Value::Integer(index as i64));
                             connection.outputs.push(index);
@@ -246,10 +299,10 @@ impl LuaInvokerInternal {
 
             self.lua
                 .globals()
-                .set(lua_func_info.name.clone(), new_function)
+                .set(func.name.clone(), new_function)
                 .unwrap();
 
-            output_index += lua_func_info.outputs.len() as u32;
+            output_index += func.outputs.len() as u32;
         }
 
         let graph_function: mlua::Function = self.lua.globals().get("graph").unwrap();
@@ -258,14 +311,13 @@ impl LuaInvokerInternal {
         connections.take()
     }
     fn restore_functions(&self) {
-        let functions = self.funcs.values().collect::<Vec<&LuaFuncInfo>>();
-
-        for lua_func_info in functions.iter() {
+        for (&id, lua_func) in self.funcs.iter() {
+            let func = self.func_lib.func_by_id(id).unwrap();
             self.lua
                 .globals()
                 .set(
-                    lua_func_info.info.name.clone(),
-                    lua_func_info.lua_func.clone(),
+                    func.name.clone(),
+                    lua_func.clone(),
                 )
                 .unwrap();
         }
@@ -281,17 +333,11 @@ impl LuaInvokerInternal {
         let mut nodes: Vec<Node> = Vec::new();
 
         for connection in connections.iter() {
-            let function = &self
-                .funcs
-                .iter()
-                .find(|(_, func)| func.info.name == connection.name)
-                .unwrap()
-                .1
-                .info;
+            let func = self.func_lib.func_by_name(&connection.name).unwrap();
+
             nodes.push(Node::default());
             let node = nodes.last_mut().unwrap();
-
-            node.name = function.name.clone();
+            node.name = func.name.clone();
 
             for (_idx, _input_id) in connection.inputs.iter().enumerate() {
                 node.inputs.push(Input {
@@ -333,23 +379,24 @@ impl LuaInvokerInternal {
         self.output_stream.lock().replace(output_stream.clone());
     }
 
-    pub fn get_all_functions(&self) -> Vec<&function::Func> {
-        self.funcs.values().map(|f| &f.info).collect()
+    pub(crate) fn get_func_lib(&self) -> &FuncLib {
+        &self.func_lib
     }
 
     pub fn invoke(
         &self,
-        function_id: FuncId,
+        func_id: FuncId,
         _cache: &mut InvokeCache,
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
         // self.lua.globals().set("context_id", context_id.to_string())?;
 
-        let function_info = self.funcs.get(&function_id).unwrap();
+        let lua_func = self.funcs.get(&func_id).unwrap();
+        let func = self.func_lib.func_by_id(func_id).unwrap();
 
         let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-        for (index, input_info) in function_info.info.inputs.iter().enumerate() {
+        for (index, input_info) in func.inputs.iter().enumerate() {
             let input = &inputs[index];
             assert_eq!(input_info.data_type, *input.data_type());
 
@@ -357,9 +404,9 @@ impl LuaInvokerInternal {
             input_args.push(invoke_value);
         }
 
-        let output_args: mlua::Variadic<mlua::Value> = function_info.lua_func.call(input_args)?;
+        let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
 
-        for (index, output_info) in function_info.info.outputs.iter().enumerate() {
+        for (index, output_info) in func.outputs.iter().enumerate() {
             let output_arg: &mlua::Value = output_args.get(index).unwrap();
 
             let output = data::DynamicValue::from(output_arg);
@@ -373,7 +420,7 @@ impl LuaInvokerInternal {
     }
 }
 
-impl Drop for LuaInvokerInternal {
+impl Drop for LuaInner {
     fn drop(&mut self) {
         self.funcs.clear();
 
@@ -382,7 +429,7 @@ impl Drop for LuaInvokerInternal {
     }
 }
 
-impl Debug for LuaInvokerInternal {
+impl Debug for LuaInner {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "LuaInvoker")
     }

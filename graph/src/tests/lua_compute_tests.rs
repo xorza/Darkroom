@@ -1,16 +1,15 @@
 use std::str::FromStr;
 
 use common::output_stream::OutputStream;
-use mlua::{Function, Lua, Value, Variadic};
 
 use crate::compute::ArgSet;
-use crate::elements::lua_invoker::LuaInvokerInternal;
+use crate::elements::lua_invoker::LuaInvoker;
 use crate::function::FuncId;
-use crate::invoke_context::InvokeCache;
+use crate::invoke_context::{InvokeCache, Invoker};
 
 #[test]
 fn lua_works() {
-    let lua = Lua::new();
+    let lua = mlua::Lua::new();
 
     lua.load(
         r#"
@@ -20,27 +19,27 @@ fn lua_works() {
         end
         "#,
     )
-    .exec()
-    .unwrap();
+        .exec()
+        .unwrap();
 
-    let var_args = Variadic::from_iter(vec![
-        Value::Integer(3),
-        Value::String(lua.create_string("111").unwrap()),
-        Value::Table(
+    let var_args = mlua::Variadic::from_iter(vec![
+        mlua::Value::Integer(3),
+        mlua::Value::String(lua.create_string("111").unwrap()),
+        mlua::Value::Table(
             lua.create_table_from(vec![("val0", 11), ("val1", 7)])
                 .unwrap(),
         ),
     ]);
 
-    let test_func: Function = lua.globals().get("test_func").unwrap();
-    let result: Variadic<Value> = test_func.call(var_args).unwrap();
+    let test_func: mlua::Function = lua.globals().get("test_func").unwrap();
+    let result: mlua::Variadic<mlua::Value> = test_func.call(var_args).unwrap();
 
     for value in result {
         match value {
-            Value::Integer(int) => {
+            mlua::Value::Integer(int) => {
                 assert_eq!(int, 351);
             }
-            Value::String(text) => {
+            mlua::Value::String(text) => {
                 assert_eq!(text, "hello world!")
             }
             _ => {}
@@ -54,7 +53,7 @@ fn local_data_test() {
         a: i32,
         b: i32,
     }
-    let lua = Lua::new();
+    let lua = mlua::Lua::new();
 
     let data = TestStruct { a: 4, b: 5 };
     let data_ptr = &data as *const TestStruct;
@@ -75,13 +74,13 @@ fn local_data_test() {
 
 #[test]
 fn load_functions_from_lua_file() -> anyhow::Result<()> {
-    let mut invoker = LuaInvokerInternal::default();
+    let mut invoker = LuaInvoker::default();
     let output_stream = OutputStream::new();
     invoker.use_output_stream(&output_stream);
 
     invoker.load_file("../test_resources/test_lua.lua")?;
 
-    let funcs = invoker.get_all_functions();
+    let funcs = invoker.get_func_lib();
     assert_eq!(funcs.len(), 5);
 
     let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
