@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use imaginarium::wgpu::wgpu_context::WgpuContext;
 
 use crate::function::{Func, FuncId, FuncLib};
-use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
+use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
 
 pub trait WgpuInvokable: Send + Sync {
     fn new(wgpu_context: &WgpuContext) -> Self

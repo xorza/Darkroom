@@ -8,7 +8,7 @@ use crate::function::{Func, FuncId, FuncLib};
 
 pub type InvokeArgs = [DynamicValue];
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static;
+pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static;
 
 #[derive(Debug, Default)]
 pub struct InvokeCache {
@@ -119,7 +119,7 @@ impl InvokeCache {
 impl LambdaInvoker {
     pub fn add_lambda<F>(&mut self, function: Func, lambda: F)
         where
-            F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+            F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
     {
         if self.lambdas.contains_key(&function.id) {
             panic!(
@@ -242,7 +242,7 @@ mod tests {
     use crate::data::StaticValue;
     use crate::function::FuncLib;
     use crate::graph::{Binding, FuncBehavior, Graph};
-    use crate::invoke_context::{InvokeCache, Invoker, LambdaInvoker};
+    use crate::invoke::{InvokeCache, Invoker, LambdaInvoker};
     use crate::runtime_graph::RuntimeGraph;
 
     struct TestValues {

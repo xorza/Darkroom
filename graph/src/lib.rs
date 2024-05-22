@@ -12,7 +12,7 @@ pub mod elements;
 pub mod event;
 pub mod function;
 pub mod graph;
-pub mod invoke_context;
+pub mod invoke;
 pub mod runtime_graph;
 #[cfg(feature = "wgpu")]
 pub mod wgpu;

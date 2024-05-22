@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncId, FuncLib, InputInfo, OutputInfo};
 use crate::graph::FuncBehavior;
-use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
+use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 #[derive(Debug)]
 pub struct TimersInvoker {

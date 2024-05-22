@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::DynamicValue;
 use crate::function::FuncLib;
 use crate::graph::{Binding, FuncBehavior, Graph, NodeId};
-use crate::invoke_context::InvokeCache;
+use crate::invoke::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {

@@ -8,7 +8,7 @@ use crate::compute::Compute;
 use crate::event::EventId;
 use crate::function::FuncLib;
 use crate::graph::Graph;
-use crate::invoke_context::{Invoker, UberInvoker};
+use crate::invoke::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Debug)]

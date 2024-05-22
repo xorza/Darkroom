@@ -14,7 +14,7 @@ use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncId, FuncLib};
 use crate::graph::{Binding, Graph, Input, Node, NodeId};
-use crate::invoke_context::{InvokeArgs, InvokeCache, Invoker};
+use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
 
 #[derive(Clone)]
 struct FuncConnections {
@@ -477,7 +477,7 @@ mod tests {
     use crate::compute::ArgSet;
     use crate::elements::lua_invoker::LuaInvoker;
     use crate::function::FuncId;
-    use crate::invoke_context::{InvokeCache, Invoker};
+    use crate::invoke::{InvokeCache, Invoker};
 
     #[test]
     fn lua_works() {
