@@ -1,6 +1,8 @@
 #![allow(dead_code)]
 #![deny(improper_ctypes_definitions)]
 
+mod graph_api;
+
 use graph::ctx::Context;
 use std::mem::forget;
 use std::string::FromUtf8Error;
@@ -28,6 +30,16 @@ extern "C" fn dummy(_a: FfiBuf) {}
 impl FfiBuf {
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.bytes, self.length as usize) }
+    }
+}
+
+impl Default for FfiBuf {
+    fn default() -> Self {
+        FfiBuf {
+            bytes: std::ptr::null_mut(),
+            length: 0,
+            capacity: 0,
+        }
     }
 }
 

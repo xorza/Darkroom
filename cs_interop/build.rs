@@ -1,6 +1,7 @@
 fn main() {
     csbindgen::Builder::default()
         .input_extern_file("src/lib.rs")
+        .input_extern_file("src/graph_api.rs")
         .csharp_dll_name("core_interop")
         .csharp_class_name("CoreNative")
         .csharp_namespace("CoreInterop")

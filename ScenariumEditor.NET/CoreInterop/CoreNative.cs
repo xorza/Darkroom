@@ -126,3 +126,14 @@ internal static unsafe partial class CoreNative {
         get { return _coreInteropHandle != IntPtr.Zero; }
     }
 }
+
+internal unsafe partial struct Id {
+    public Guid ToGuid() {
+        // byte[] guidData = new byte[16];
+        // Array.Copy(BitConverter.GetBytes(Item1), guidData, 8);
+        // Array.Copy(BitConverter.GetBytes(Item2), 0, guidData, 8, 8);
+        // return new Guid(guidData);
+        
+        return new Guid(Item1.ToString());
+    }
+}

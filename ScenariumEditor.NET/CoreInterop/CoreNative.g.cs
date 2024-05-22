@@ -25,6 +25,12 @@ namespace CoreInterop
         [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void dummy(FfiBuf _a);
 
+        [DllImport(__DllName, EntryPoint = "get_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern FfiBuf get_nodes();
+
+        [DllImport(__DllName, EntryPoint = "dummy1", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern void dummy1(Node _a, Input _b);
+
 
     }
 
@@ -34,6 +40,30 @@ namespace CoreInterop
         public byte* bytes;
         public uint length;
         public uint capacity;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct Id
+    {
+        public FfiBuf Item1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct Input
+    {
+        public byte a;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct Node
+    {
+        public Id id;
+        public Id func_id;
+        public FfiBuf name;
+        [MarshalAs(UnmanagedType.U1)] public bool is_output;
+        [MarshalAs(UnmanagedType.U1)] public bool cache_outputs;
+        public FfiBuf inputs;
+        public FfiBuf events;
     }
 
 

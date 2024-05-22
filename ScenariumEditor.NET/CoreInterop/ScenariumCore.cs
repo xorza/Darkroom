@@ -21,6 +21,15 @@ public unsafe class ScenariumCore {
         _ctx = CoreNative.create_context();
     }
 
+    public void GetNodes() {
+        var buf = CoreNative.get_nodes();
+        var nodes = buf.ToArray<Node>();
+        foreach (var node in nodes) {
+            var id = node.id.ToGuid();
+            Console.WriteLine($"Node: {id}");
+        }
+    }
+
     ~ScenariumCore() {
         CoreNative.destroy_context(_ctx);
     }
