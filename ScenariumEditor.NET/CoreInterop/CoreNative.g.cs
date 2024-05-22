@@ -23,13 +23,19 @@ namespace CoreInterop
         public static extern void destroy_context(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void dummy(FfiBuf _a, FfiStr _b, Id _c);
+        public static extern void dummy(FfiBuf _a, FfiStr _b, FfiStrVec _c, Id _d);
 
         [DllImport(__DllName, EntryPoint = "get_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern FfiBuf get_nodes();
 
         [DllImport(__DllName, EntryPoint = "dummy1", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void dummy1(Node _a, Input _b);
+
+        [DllImport(__DllName, EntryPoint = "get_funcs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern FfiBuf get_funcs();
+
+        [DllImport(__DllName, EntryPoint = "dummy2", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern void dummy2(Func _a);
 
 
     }
@@ -75,9 +81,28 @@ namespace CoreInterop
         [MarshalAs(UnmanagedType.U1)] public bool is_output;
         [MarshalAs(UnmanagedType.U1)] public bool cache_outputs;
         public FfiBuf inputs;
+        public FfiBuf events;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct Func
+    {
+        public Id id;
+        public FfiStr name;
+        public FfiStr category;
+        public FuncBehavior behaviour;
+        [MarshalAs(UnmanagedType.U1)] public bool is_output;
+        public FfiBuf inputs;
+        public FfiBuf outputs;
         public FfiStrVec events;
     }
 
+
+    internal enum FuncBehavior : uint
+    {
+        Active,
+        Passive,
+    }
 
 
 }

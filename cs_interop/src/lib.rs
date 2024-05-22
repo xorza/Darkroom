@@ -8,9 +8,11 @@ use bytes::{Buf, BufMut};
 
 use graph::ctx::Context;
 
+mod func_lib_api;
 mod graph_api;
 
 #[repr(C)]
+#[derive(Debug)]
 struct FfiBuf {
     bytes: *mut u8,
     length: u32,
@@ -18,14 +20,15 @@ struct FfiBuf {
 }
 
 #[repr(C)]
+#[derive(Debug)]
 struct Id(FfiBuf);
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FfiStr(FfiBuf);
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct FfiStrVec(FfiBuf);
 
 #[no_mangle]
@@ -39,7 +42,7 @@ extern "C" fn destroy_context(ctx: *mut u8) {
 }
 
 #[no_mangle]
-extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: Id) {}
+extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: FfiStrVec, _d: Id) {}
 
 impl FfiBuf {
     pub fn is_null(&self) -> bool {
@@ -197,18 +200,18 @@ impl FfiStrVec {
     }
 }
 
-impl FromIterator<&'static str> for FfiStrVec {
+impl FromIterator<String> for FfiStrVec {
     fn from_iter<I>(iter: I) -> Self
     where
-        I: IntoIterator<Item = &'static str>,
+        I: IntoIterator<Item = String>,
     {
-        let data: Vec<&str> = iter.into_iter().map(Into::into).collect();
+        let data: Vec<String> = iter.into_iter().collect();
         let mut bytes = Vec::<u8>::new();
 
-        bytes.put_u32(data.len() as u32);
+        bytes.put_u32_ne(data.len() as u32);
         for s in data {
             let s = s.as_bytes();
-            bytes.put_u32(s.len() as u32);
+            bytes.put_u32_ne(s.len() as u32);
             bytes.put_slice(s);
         }
 
@@ -232,7 +235,7 @@ impl Iterator for FfiStrVecIter {
         }
 
         let mut reader = &self.data[self.offset..];
-        let length = reader.get_u32();
+        let length = reader.get_u32_ne();
         let str = &reader[0..length as usize];
 
         self.offset += 4 + length as usize;
@@ -258,7 +261,7 @@ impl IntoIterator for FfiStrVec {
 
         let data: Vec<u8> = self.0.into();
         let mut reader = data.as_slice();
-        let count = reader.get_u32();
+        let count = reader.get_u32_ne();
 
         FfiStrVecIter {
             data,
@@ -294,7 +297,11 @@ mod tests {
 
     #[test]
     fn ffi_bufstrvec_works() {
-        let buf: FfiStrVec = FfiStrVec::from_iter(vec!["Hello", "from", "Rust!"]);
+        let buf: FfiStrVec = FfiStrVec::from_iter(vec![
+            "Hello".to_string(),
+            "from".to_string(),
+            "Rust!".to_string(),
+        ]);
         let data: Vec<String> = buf.into_iter().collect();
         assert_eq!(data, vec!["Hello", "from", "Rust!"]);
     }

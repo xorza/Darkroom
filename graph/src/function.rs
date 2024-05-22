@@ -55,6 +55,9 @@ pub struct FuncLib {
 impl FuncLib {
     pub fn from_yaml_file(file_path: &str) -> anyhow::Result<Self> {
         let yaml = std::fs::read_to_string(file_path)?;
+        Ok(Self::from_yaml(&yaml)?)
+    }
+    pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
         Ok(serde_yaml::from_str(&yaml)?)
     }
     pub fn to_yaml(&self) -> String {

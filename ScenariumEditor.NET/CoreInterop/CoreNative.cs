@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace CoreInterop;
 
@@ -157,5 +158,42 @@ internal unsafe partial struct FfiStr : IDisposable {
 
     public void Dispose() {
         Item1.Dispose();
+    }
+}
+
+internal unsafe partial struct FfiStrVec : IDisposable {
+    public String[] ToStringArray() {
+        var reader = new BinaryReader(new UnmanagedMemoryStream(Item1.bytes, Item1.length));
+        
+        var count = reader.ReadUInt32();
+        var result = new String[count];
+        for (var i = 0; i < count; i++) {
+            var length = reader.ReadUInt32();
+            result[i] = Encoding.UTF8.GetString(reader.ReadBytes((int)length));
+        }
+
+        return result;
+    }
+
+    public void Dispose() {
+        Item1.Dispose();
+    }
+}
+
+internal unsafe partial struct Node : IDisposable {
+    public void Dispose() {
+        name.Dispose();
+        inputs.Dispose();
+        events.Dispose();
+    }
+}
+
+internal unsafe partial struct Func : IDisposable {
+    public void Dispose() {
+        name.Dispose();
+        category.Dispose();
+        inputs.Dispose();
+        outputs.Dispose();
+        events.Dispose();
     }
 }

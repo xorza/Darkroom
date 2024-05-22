@@ -1,6 +1,6 @@
 use graph::graph::Graph;
 
-use crate::{FfiBuf, FfiStr, FfiStrVec, Id};
+use crate::{FfiBuf, FfiStr, Id};
 
 #[repr(C)]
 struct Input {
@@ -15,7 +15,7 @@ struct Node {
     is_output: bool,
     cache_outputs: bool,
     inputs: FfiBuf,
-    events: FfiStrVec,
+    events: FfiBuf,
 }
 
 impl From<&graph::graph::Node> for Node {
@@ -27,7 +27,7 @@ impl From<&graph::graph::Node> for Node {
             is_output: node.is_output,
             cache_outputs: node.cache_outputs,
             inputs: FfiBuf::default(),
-            events: FfiStrVec::default(),
+            events: FfiBuf::default(),
         }
     }
 }
