@@ -1,8 +1,10 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
-use std::thread;
 
-use tokio::runtime::Runtime;
+use pollster::FutureExt;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use crate::compute::Compute;
 use crate::event::EventId;
@@ -22,34 +24,26 @@ enum WorkerMessage {
 
 type ComputeEvent = dyn Fn() + Send + 'static;
 
-type EventQueue = Arc<tokio::sync::Mutex<Vec<EventId>>>;
+type EventQueue = Arc<Mutex<Vec<EventId>>>;
 
 #[derive(Debug)]
 pub struct Worker {
-    thread_handle: Option<thread::JoinHandle<()>>,
-    tx: std::sync::mpsc::Sender<WorkerMessage>,
+    thread_handle: Option<JoinHandle<()>>,
+    tx: Sender<WorkerMessage>,
 }
 
 impl Worker {
-    pub fn new<Callback>(invokers: Vec<Box<dyn Invoker>>, compute_callback: Callback) -> Self
-    where
-        Callback: Fn() + Send + 'static,
+    pub fn new<Callback>(invoker: UberInvoker, compute_callback: Callback) -> Self
+        where
+            Callback: Fn() + Send + 'static,
     {
-        let (worker_tx, worker_rx) = std::sync::mpsc::channel::<WorkerMessage>();
-        let (load_tx, load_rx) = std::sync::mpsc::channel::<()>();
+        let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
-        let tx_clone = worker_tx.clone();
-
-        let thread_handle = thread::spawn(move || {
-            let invoker = UberInvoker::new(invokers);
-            let compute_callback = Arc::new(compute_callback);
-
-            load_tx.send(()).unwrap();
-
-            Self::worker_loop(invoker, tx_clone, worker_rx, compute_callback);
+        let (worker_tx, worker_rx) = channel::<WorkerMessage>(10);
+        let worker_tx_clone = worker_tx.clone();
+        let thread_handle: JoinHandle<()> = tokio::spawn(async move {
+            Self::worker_loop(invoker, worker_tx_clone, worker_rx, compute_callback).await;
         });
-
-        load_rx.recv().unwrap();
 
         Self {
             thread_handle: Some(thread_handle),
@@ -57,18 +51,22 @@ impl Worker {
         }
     }
 
-    fn worker_loop(
+    async fn worker_loop(
         invoker: UberInvoker,
-        tx: std::sync::mpsc::Sender<WorkerMessage>,
-        rx: std::sync::mpsc::Receiver<WorkerMessage>,
-        compute_callback: Arc<ComputeEvent>,
+        tx: Sender<WorkerMessage>,
+        mut rx: Receiver<WorkerMessage>,
+        compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
         let func_lib = invoker.get_func_lib();
+        let compute = Compute::default();
 
         loop {
             if message.is_none() {
-                message = Some(rx.recv().unwrap());
+                message = rx.recv().await;
+            }
+            if message.is_none() {
+                break;
             }
 
             match message.take().unwrap() {
@@ -78,7 +76,7 @@ impl Worker {
 
                 WorkerMessage::RunOnce(graph) => {
                     let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-                    let compute = Compute::default();
+
                     compute
                         .run(&graph, &func_lib, &invoker, &mut runtime_graph)
                         .expect("Failed to run graph");
@@ -87,36 +85,79 @@ impl Worker {
                 WorkerMessage::RunLoop(graph) => {
                     message = Self::event_subloop(
                         graph,
-                        &invoker,
                         &func_lib,
+                        &compute,
+                        &invoker,
                         tx.clone(),
-                        &rx,
-                        &compute_callback,
-                    );
+                        &mut rx,
+                        compute_callback.clone(),
+                    ).await;
                 }
             }
 
-            compute_callback();
+            (*compute_callback.lock().await)();
         }
     }
 
     #[allow(unreachable_code)]
-    fn event_subloop(
+    async fn event_subloop(
         graph: Graph,
-        invoker: &UberInvoker,
         func_lib: &FuncLib,
-        worker_tx: std::sync::mpsc::Sender<WorkerMessage>,
-        worker_rx: &std::sync::mpsc::Receiver<WorkerMessage>,
-        compute_callback: &Arc<ComputeEvent>,
+        compute: &Compute,
+        invoker: &UberInvoker,
+        worker_tx: Sender<WorkerMessage>,
+        worker_rx: &mut Receiver<WorkerMessage>,
+        compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
         let mut result_message: Option<WorkerMessage> = None;
 
-        let runtime = Runtime::new().unwrap();
-        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
-        let event_queue: EventQueue = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-        let (_event_tx, mut event_rx) = tokio::sync::mpsc::channel::<EventId>(25);
+        Self::start_event_thread(worker_tx);
 
-        runtime.spawn(async move {
+        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
+
+        loop {
+            // receive all messages and pick message with highest priority
+            let mut msg = worker_rx.recv().await.unwrap();
+            while let Ok(another_msg) = worker_rx.try_recv() {
+                if another_msg >= msg {
+                    msg = another_msg;
+                }
+            }
+
+            match msg {
+                WorkerMessage::Stop => break,
+
+                WorkerMessage::Exit
+                | WorkerMessage::RunOnce(_)
+                | WorkerMessage::RunLoop(_) => {
+                    result_message = Some(msg);
+                    break;
+                }
+
+                WorkerMessage::Event => {
+                    compute
+                        .run(&graph, func_lib, invoker, &mut runtime_graph)
+                        .expect("Failed to run graph");
+
+
+                    (*compute_callback.lock().await)();
+                    continue;
+                }
+            }
+
+            unreachable!();
+        }
+
+        result_message
+    }
+
+    fn start_event_thread(worker_tx: Sender<WorkerMessage>) {
+        // fire events here
+
+        let event_queue: EventQueue = Arc::new(Mutex::new(Vec::new()));
+        let (_event_tx, mut event_rx) = channel::<EventId>(25);
+
+        tokio::spawn(async move {
             loop {
                 let event = event_rx.recv().await;
                 if event.is_none() {
@@ -126,77 +167,43 @@ impl Worker {
                 let mut event_queue_mutex = event_queue.lock().await;
                 event_queue_mutex.push(event.unwrap());
 
-                let sent = worker_tx.send(WorkerMessage::Event);
+                let sent = worker_tx.send(WorkerMessage::Event).await;
                 if sent.is_err() {
                     break;
                 }
             }
         });
-
-        loop {
-            // receive all messages and pick message with highest priority
-            let mut msg = worker_rx.recv().unwrap();
-            while let Ok(another_msg) = worker_rx.try_recv() {
-                if another_msg >= msg {
-                    msg = another_msg;
-                }
-            }
-
-            match msg {
-                WorkerMessage::Stop => break,
-                WorkerMessage::Exit | WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => {
-                    result_message = Some(msg);
-                    break;
-                }
-
-                WorkerMessage::Event => {
-                    let compute = Compute::default();
-                    compute
-                        .run(&graph, func_lib, invoker, &mut runtime_graph)
-                        .expect("Failed to run graph");
-
-                    compute_callback();
-                    continue;
-                }
-            }
-
-            unreachable!();
-        }
-
-        runtime.shutdown_background();
-
-        result_message
     }
 
     pub fn run_once(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunOnce(graph);
 
-        self.tx.send(msg).unwrap();
+        self.tx.send(msg).block_on().unwrap();
     }
     pub fn run_loop(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunLoop(graph);
 
-        self.tx.send(msg).unwrap();
+        self.tx.send(msg).block_on().unwrap();
     }
     pub fn stop(&mut self) {
         let msg = WorkerMessage::Stop;
 
-        self.tx.send(msg).unwrap();
+        self.tx.send(msg).block_on().unwrap();
     }
 
     #[cfg(test)]
     pub(crate) fn event(&mut self) {
         let msg = WorkerMessage::Event;
 
-        self.tx.send(msg).unwrap();
+        self.tx.send(msg).block_on().unwrap();
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.tx.send(WorkerMessage::Exit).unwrap();
+        self.tx.send(WorkerMessage::Exit).block_on().unwrap();
         if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle.join().unwrap();
+            thread_handle.block_on().unwrap();
         }
     }
 }
@@ -258,43 +265,50 @@ mod tests {
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
     use crate::graph::Graph;
+    use crate::invoke::UberInvoker;
     use crate::worker::Worker;
 
     #[test]
     fn test_worker() {
-        setup_logging("debug");
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            setup_logging("debug");
 
-        let (tx, rx) = mpsc::channel();
-        let mut basic_invoker = Box::<BasicInvoker>::default();
-        let output_stream = OutputStream::new();
-        basic_invoker.use_output_stream(&output_stream);
+            let output_stream = OutputStream::new();
 
-        let mut worker = Worker::new(
-            vec![basic_invoker, Box::<TimersInvoker>::default()],
-            move || {
-                tx.send(()).unwrap();
-            },
-        );
+            let timers_invoker = TimersInvoker::default();
+            let mut basic_invoker = BasicInvoker::default();
+            basic_invoker.use_output_stream(&output_stream);
 
-        let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();
+            let mut uber_invoker = UberInvoker::default();
+            uber_invoker.merge(timers_invoker);
+            uber_invoker.merge(basic_invoker);
 
-        worker.run_once(graph.clone());
-        rx.recv().unwrap();
+            let (tx, rx) = mpsc::channel();
+            let mut worker = Worker::new(
+                uber_invoker,
+                move || { tx.send(()).unwrap(); },
+            );
 
-        assert_eq!(output_stream.take()[0], "1");
+            let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();
 
-        worker.run_loop(graph.clone());
+            worker.run_once(graph.clone());
+            rx.recv().unwrap();
 
-        worker.event();
-        rx.recv().unwrap();
+            assert_eq!(output_stream.take()[0], "1");
 
-        worker.event();
-        rx.recv().unwrap();
+            worker.run_loop(graph.clone());
 
-        let log = output_stream.take();
-        assert_eq!(log[0], "1");
-        assert_eq!(log[1], "2");
+            worker.event();
+            rx.recv().unwrap();
 
-        worker.stop();
+            worker.event();
+            rx.recv().unwrap();
+
+            let log = output_stream.take();
+            assert_eq!(log[0], "1");
+            assert_eq!(log[1], "2");
+
+            worker.stop();
+        });
     }
 }

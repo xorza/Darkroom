@@ -54,7 +54,7 @@ pub enum DynamicValue {
     // Array(Vec<DynamicValue>),
     Custom {
         data_type: DataType,
-        data: Box<dyn Any>,
+        data: Box<dyn Any + Send>,
     },
 }
 
@@ -149,7 +149,7 @@ impl DynamicValue {
             }
         }
     }
-    pub fn as_custom(&self) -> &Box<dyn Any> {
+    pub fn as_custom(&self) -> &Box<dyn Any + Send> {
         match self {
             DynamicValue::Custom { data, .. } => data,
             _ => {
@@ -217,6 +217,7 @@ impl From<StaticValue> for DynamicValue {
         }
     }
 }
+
 impl From<&StaticValue> for DynamicValue {
     fn from(value: &StaticValue) -> Self {
         match value {
@@ -228,16 +229,19 @@ impl From<&StaticValue> for DynamicValue {
         }
     }
 }
+
 impl From<DataType> for StaticValue {
     fn from(data_type: DataType) -> Self {
         Self::from(&data_type)
     }
 }
+
 impl From<DataType> for DynamicValue {
     fn from(data_type: DataType) -> Self {
         Self::from(&data_type)
     }
 }
+
 impl From<&DataType> for StaticValue {
     fn from(data_type: &DataType) -> Self {
         match data_type {
@@ -249,6 +253,7 @@ impl From<&DataType> for StaticValue {
         }
     }
 }
+
 impl From<&DataType> for DynamicValue {
     fn from(data_type: &DataType) -> Self {
         match data_type {
@@ -266,36 +271,43 @@ impl From<i64> for StaticValue {
         StaticValue::Int(value)
     }
 }
+
 impl From<i32> for StaticValue {
     fn from(value: i32) -> Self {
         StaticValue::Int(value as i64)
     }
 }
+
 impl From<f32> for StaticValue {
     fn from(value: f32) -> Self {
         StaticValue::Float(value as f64)
     }
 }
+
 impl From<f64> for StaticValue {
     fn from(value: f64) -> Self {
         StaticValue::Float(value)
     }
 }
+
 impl From<&str> for StaticValue {
     fn from(value: &str) -> Self {
         StaticValue::String(value.to_string())
     }
 }
+
 impl From<String> for StaticValue {
     fn from(value: String) -> Self {
         StaticValue::String(value)
     }
 }
+
 impl From<bool> for StaticValue {
     fn from(value: bool) -> Self {
         StaticValue::Bool(value)
     }
 }
+
 impl From<StaticValue> for i64 {
     fn from(value: StaticValue) -> Self {
         match value {
@@ -306,6 +318,7 @@ impl From<StaticValue> for i64 {
         }
     }
 }
+
 impl From<StaticValue> for f64 {
     fn from(value: StaticValue) -> Self {
         match value {
@@ -316,6 +329,7 @@ impl From<StaticValue> for f64 {
         }
     }
 }
+
 impl From<StaticValue> for i32 {
     fn from(value: StaticValue) -> Self {
         match value {
@@ -326,6 +340,7 @@ impl From<StaticValue> for i32 {
         }
     }
 }
+
 impl From<StaticValue> for f32 {
     fn from(value: StaticValue) -> Self {
         match value {
@@ -336,6 +351,7 @@ impl From<StaticValue> for f32 {
         }
     }
 }
+
 impl From<StaticValue> for bool {
     fn from(value: StaticValue) -> Self {
         match value {
@@ -352,36 +368,43 @@ impl From<i64> for DynamicValue {
         DynamicValue::Int(value)
     }
 }
+
 impl From<i32> for DynamicValue {
     fn from(value: i32) -> Self {
         DynamicValue::Int(value as i64)
     }
 }
+
 impl From<f32> for DynamicValue {
     fn from(value: f32) -> Self {
         DynamicValue::Float(value as f64)
     }
 }
+
 impl From<f64> for DynamicValue {
     fn from(value: f64) -> Self {
         DynamicValue::Float(value)
     }
 }
+
 impl From<&str> for DynamicValue {
     fn from(value: &str) -> Self {
         DynamicValue::String(value.to_string())
     }
 }
+
 impl From<String> for DynamicValue {
     fn from(value: String) -> Self {
         DynamicValue::String(value)
     }
 }
+
 impl From<bool> for DynamicValue {
     fn from(value: bool) -> Self {
         DynamicValue::Bool(value)
     }
 }
+
 impl From<DynamicValue> for i64 {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -392,6 +415,7 @@ impl From<DynamicValue> for i64 {
         }
     }
 }
+
 impl From<DynamicValue> for f64 {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -402,6 +426,7 @@ impl From<DynamicValue> for f64 {
         }
     }
 }
+
 impl From<DynamicValue> for i32 {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -412,6 +437,7 @@ impl From<DynamicValue> for i32 {
         }
     }
 }
+
 impl From<DynamicValue> for f32 {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -422,6 +448,7 @@ impl From<DynamicValue> for f32 {
         }
     }
 }
+
 impl From<DynamicValue> for bool {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -432,6 +459,7 @@ impl From<DynamicValue> for bool {
         }
     }
 }
+
 impl From<DynamicValue> for String {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -462,6 +490,7 @@ impl Display for DataType {
         write!(f, "{}", str)
     }
 }
+
 impl FromStr for DataType {
     type Err = ();
 
@@ -476,6 +505,7 @@ impl FromStr for DataType {
         }
     }
 }
+
 impl PartialEq for DataType {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -504,7 +534,9 @@ impl PartialEq for DataType {
         }
     }
 }
+
 impl Eq for DataType {}
+
 impl Hash for DataType {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {

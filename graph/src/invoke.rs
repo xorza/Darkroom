@@ -12,7 +12,7 @@ pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + S
 
 #[derive(Debug, Default)]
 pub struct InvokeCache {
-    boxed: Option<Box<dyn Any>>,
+    boxed: Option<Box<dyn Any + Send>>,
 }
 
 pub trait Invoker: Debug + Send + Sync {
@@ -50,7 +50,7 @@ impl InvokeCache {
 
     pub fn is_some<T>(&self) -> bool
         where
-            T: Any,
+            T: Any + Send,
     {
         match &self.boxed {
             None => false,
@@ -60,7 +60,7 @@ impl InvokeCache {
 
     pub fn get<T>(&self) -> Option<&T>
         where
-            T: Any,
+            T: Any + Send,
     {
         self.boxed
             .as_ref()
@@ -69,7 +69,7 @@ impl InvokeCache {
 
     pub fn get_mut<T>(&mut self) -> Option<&mut T>
         where
-            T: Any,
+            T: Any + Send,
     {
         self.boxed
             .as_mut()
@@ -78,14 +78,14 @@ impl InvokeCache {
 
     pub fn set<T>(&mut self, value: T)
         where
-            T: Any,
+            T: Any + Send,
     {
         self.boxed = Some(Box::new(value));
     }
 
     pub fn get_or_default<T>(&mut self) -> &mut T
         where
-            T: Any + Default,
+            T: Any + Send + Default,
     {
         let is_some = self.is_some::<T>();
 
@@ -100,7 +100,7 @@ impl InvokeCache {
     }
     pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
         where
-            T: Any,
+            T: Any + Send,
             F: FnOnce() -> T,
     {
         let is_some = self.is_some::<T>();
@@ -153,6 +153,16 @@ impl UberInvoker {
             func_lib,
             function_id_to_invoker_index,
         }
+    }
+    pub fn merge<T>(&mut self, invoker: T)
+        where T: Invoker + 'static {
+        let idx = self.invokers.len();
+        invoker.get_func_lib().iter().for_each(|(id, _func)| {
+            self.function_id_to_invoker_index.insert(id.clone(), idx);
+        });
+
+        self.func_lib.merge(invoker.get_func_lib());
+        self.invokers.push(Box::new(invoker));
     }
 }
 

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use log::info;
 use parking_lot::Mutex;
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
 
@@ -224,7 +224,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let rng = cache.get_or_default_with(rand::thread_rng);
+
+                let rng = cache.get_or_default_with(rand::rngs::StdRng::from_entropy);
 
                 let min: f64 = inputs[0].as_float();
                 let max: f64 = inputs[1].as_float();

@@ -26,3 +26,4 @@ log = { workspace = true }
 flexi_logger = { workspace = true }
 parking_lot = { workspace = true }
 hashbrown = { workspace = true }
+pollster = { workspace = true }
