@@ -10,7 +10,8 @@ crate-type = ["cdylib"]
 common = { workspace = true }
 imaginarium = { workspace = true }
 graph = { workspace = true }
-uuid = { version = "1.8.0", features = ["v4"] }
+uuid = { workspace = true }
+bytes = { workspace = true }
 
 [build-dependencies]
 csbindgen = "1.9"

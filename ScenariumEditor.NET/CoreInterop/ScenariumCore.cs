@@ -22,11 +22,12 @@ public unsafe class ScenariumCore {
     }
 
     public void GetNodes() {
-        var buf = CoreNative.get_nodes();
-        var nodes = buf.ToArray<Node>();
-        foreach (var node in nodes) {
-            var id = node.id.ToGuid();
-            Console.WriteLine($"Node: {id}");
+        using (var buf = CoreNative.get_nodes()) {
+            var nodes = buf.ToArray<Node>();
+            foreach (var node in nodes) {
+                var id = node.id.ToGuid();
+                Console.WriteLine($"Node: {id}, name: {node.name.ToString()}");
+            }
         }
     }
 

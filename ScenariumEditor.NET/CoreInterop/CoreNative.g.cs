@@ -23,7 +23,7 @@ namespace CoreInterop
         public static extern void destroy_context(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void dummy(FfiBuf _a);
+        public static extern void dummy(FfiBuf _a, FfiStr _b, Id _c);
 
         [DllImport(__DllName, EntryPoint = "get_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern FfiBuf get_nodes();
@@ -49,6 +49,18 @@ namespace CoreInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct FfiStr
+    {
+        public FfiBuf Item1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct FfiStrVec
+    {
+        public FfiBuf Item1;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct Input
     {
         public byte a;
@@ -59,11 +71,11 @@ namespace CoreInterop
     {
         public Id id;
         public Id func_id;
-        public FfiBuf name;
+        public FfiStr name;
         [MarshalAs(UnmanagedType.U1)] public bool is_output;
         [MarshalAs(UnmanagedType.U1)] public bool cache_outputs;
         public FfiBuf inputs;
-        public FfiBuf events;
+        public FfiStrVec events;
     }
 
 

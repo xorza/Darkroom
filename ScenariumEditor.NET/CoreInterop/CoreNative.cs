@@ -28,10 +28,13 @@ internal unsafe partial struct FfiBuf : IDisposable {
     }
 
     public override String ToString() {
+        if (bytes == null) throw new InvalidOperationException("Disposed buffer");
         return Marshal.PtrToStringAnsi((IntPtr)bytes, (int)length);
     }
 
     public byte[] ToArray() {
+        if (bytes == null) throw new InvalidOperationException("Disposed buffer");
+
         var result = new byte[length];
         Marshal.Copy((IntPtr)bytes, result, 0, (int)length);
         return result;
@@ -42,6 +45,9 @@ internal unsafe partial struct FfiBuf : IDisposable {
     }
 
     public T[] ToArray<T>() where T : unmanaged {
+        if (bytes == null) throw new InvalidOperationException("Disposed buffer");
+
+
         var type = typeof(T);
 
         if (!type.IsPrimitive) {
@@ -133,7 +139,23 @@ internal unsafe partial struct Id {
         // Array.Copy(BitConverter.GetBytes(Item1), guidData, 8);
         // Array.Copy(BitConverter.GetBytes(Item2), 0, guidData, 8, 8);
         // return new Guid(guidData);
-        
+
         return new Guid(Item1.ToString());
+    }
+}
+
+internal unsafe partial struct FfiStr : IDisposable {
+    public override String ToString() {
+        return Item1.ToString();
+    }
+
+    public FfiStr FromString(String s) {
+        return new FfiStr {
+            Item1 = FfiBuf.FromString(s)
+        };
+    }
+
+    public void Dispose() {
+        Item1.Dispose();
     }
 }

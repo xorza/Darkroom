@@ -1,11 +1,14 @@
 #![allow(dead_code)]
 #![deny(improper_ctypes_definitions)]
 
-mod graph_api;
+use std::mem::forget;
+use std::str::Utf8Error;
+
+use bytes::{Buf, BufMut};
 
 use graph::ctx::Context;
-use std::mem::forget;
-use std::string::FromUtf8Error;
+
+mod graph_api;
 
 #[repr(C)]
 struct FfiBuf {
@@ -13,6 +16,17 @@ struct FfiBuf {
     length: u32,
     capacity: u32,
 }
+
+#[repr(C)]
+struct Id(FfiBuf);
+
+#[repr(C)]
+#[derive(Default)]
+struct FfiStr(FfiBuf);
+
+#[repr(C)]
+#[derive(Default)]
+struct FfiStrVec(FfiBuf);
 
 #[no_mangle]
 extern "C" fn create_context() -> *mut u8 {
@@ -25,11 +39,19 @@ extern "C" fn destroy_context(ctx: *mut u8) {
 }
 
 #[no_mangle]
-extern "C" fn dummy(_a: FfiBuf) {}
+extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: Id) {}
 
 impl FfiBuf {
+    pub fn is_null(&self) -> bool {
+        self.bytes.is_null()
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.bytes, self.length as usize) }
+    }
+
+    pub fn as_str(&self) -> Result<&str, Utf8Error> {
+        std::str::from_utf8(self.as_slice())
     }
 }
 
@@ -63,21 +85,31 @@ where
 
 impl From<&str> for FfiBuf {
     fn from(data: &str) -> Self {
-        data.to_string().into()
+        data.as_bytes().into()
     }
 }
 
 impl From<String> for FfiBuf {
-    fn from(data: String) -> Self {
-        data.into_bytes().into()
+    fn from(mut data: String) -> Self {
+        let length = data.len() as u32;
+        let capacity = data.capacity() as u32;
+        let bytes = data.as_mut_ptr();
+
+        forget(data);
+
+        FfiBuf {
+            bytes,
+            length,
+            capacity,
+        }
     }
 }
 
 impl TryFrom<FfiBuf> for String {
-    type Error = FromUtf8Error;
+    type Error = Utf8Error;
 
     fn try_from(buf: FfiBuf) -> Result<Self, Self::Error> {
-        String::from_utf8(buf.into())
+        Ok(buf.as_str()?.to_string())
     }
 }
 
@@ -101,16 +133,16 @@ impl<T> From<FfiBuf> for Vec<T> {
 impl<T> From<Vec<T>> for FfiBuf {
     fn from(mut data: Vec<T>) -> Self {
         let t_size = std::mem::size_of::<T>();
-        let len = data.len() * t_size;
-        let cap = data.capacity() * t_size;
-        let ptr = data.as_mut_ptr();
+        let length = (data.len() * t_size) as u32;
+        let capacity = (data.capacity() * t_size) as u32;
+        let bytes = data.as_mut_ptr() as *mut u8;
 
         forget(data);
 
         FfiBuf {
-            bytes: ptr as *mut u8,
-            length: len as u32,
-            capacity: cap as u32,
+            bytes,
+            length,
+            capacity,
         }
     }
 }
@@ -131,12 +163,118 @@ impl Drop for FfiBuf {
     }
 }
 
+impl FfiStr {
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str().unwrap()
+    }
+}
+
+impl From<&str> for FfiStr {
+    fn from(data: &str) -> Self {
+        FfiStr(data.as_bytes().into())
+    }
+}
+
+impl From<String> for FfiStr {
+    fn from(data: String) -> Self {
+        FfiStr(data.into_bytes().into())
+    }
+}
+
+impl From<FfiStr> for String {
+    fn from(buf: FfiStr) -> Self {
+        buf.0.try_into().unwrap()
+    }
+}
+
+impl FfiStrVec {
+    pub fn is_null(&self) -> bool {
+        self.0.is_null()
+    }
+}
+
+impl FromIterator<&'static str> for FfiStrVec {
+    fn from_iter<I>(iter: I) -> Self
+    where
+        I: IntoIterator<Item = &'static str>,
+    {
+        let data: Vec<&str> = iter.into_iter().map(Into::into).collect();
+        let mut bytes = Vec::<u8>::new();
+
+        bytes.put_u32(data.len() as u32);
+        for s in data {
+            let s = s.as_bytes();
+            bytes.put_u32(s.len() as u32);
+            bytes.put_slice(s);
+        }
+
+        FfiStrVec(bytes.into())
+    }
+}
+
+struct FfiStrVecIter {
+    data: Vec<u8>,
+    count: u32,
+    idx: u32,
+    offset: usize,
+}
+
+impl Iterator for FfiStrVecIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.idx >= self.count {
+            return None;
+        }
+
+        let mut reader = &self.data[self.offset..];
+        let length = reader.get_u32();
+        let str = &reader[0..length as usize];
+
+        self.offset += 4 + length as usize;
+        self.idx += 1;
+
+        Some(std::str::from_utf8(str).unwrap().to_string())
+    }
+}
+
+impl IntoIterator for FfiStrVec {
+    type Item = String;
+    type IntoIter = FfiStrVecIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        if self.0.is_null() {
+            return FfiStrVecIter {
+                data: Vec::new(),
+                count: 0,
+                idx: 0,
+                offset: 0,
+            };
+        }
+
+        let data: Vec<u8> = self.0.into();
+        let mut reader = data.as_slice();
+        let count = reader.get_u32();
+
+        FfiStrVecIter {
+            data,
+            count,
+            idx: 0,
+            offset: 4,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
+    fn ffi_buf_works() {
         let buf: FfiBuf = "Hello from Rust!".into();
         let data: String = buf.try_into().unwrap();
         assert_eq!(data, "Hello from Rust!");
@@ -152,5 +290,12 @@ mod tests {
         let buf: FfiBuf = [1u32, 2, 3, 4, 5].into();
         let data: Vec<u32> = buf.into();
         assert_eq!(data, vec![1u32, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn ffi_bufstrvec_works() {
+        let buf: FfiStrVec = FfiStrVec::from_iter(vec!["Hello", "from", "Rust!"]);
+        let data: Vec<String> = buf.into_iter().collect();
+        assert_eq!(data, vec!["Hello", "from", "Rust!"]);
     }
 }
