@@ -87,8 +87,8 @@ impl FuncLib {
     pub fn iter(&self) -> hashbrown::hash_map::Iter<FuncId, Func> {
         self.funcs.iter()
     }
-    pub fn merge(&mut self, other: &FuncLib) {
-        for (_id, func) in &other.funcs {
+    pub fn merge(&mut self, other: FuncLib) {
+        for (_id, func) in other.funcs {
             self.add(func.clone());
         }
     }

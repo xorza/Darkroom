@@ -52,13 +52,13 @@ impl Worker {
     }
 
     async fn worker_loop(
-        invoker: UberInvoker,
+        mut invoker: UberInvoker,
         tx: Sender<WorkerMessage>,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = invoker.get_func_lib();
+        let func_lib = invoker.take_func_lib();
         let compute = Compute::default();
 
         loop {

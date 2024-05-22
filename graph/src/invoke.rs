@@ -16,7 +16,7 @@ pub struct InvokeCache {
 }
 
 pub trait Invoker: Debug + Send + Sync {
-    fn get_func_lib(&self) -> &FuncLib;
+    fn take_func_lib(&mut self) -> FuncLib;
     fn invoke(
         &self,
         function_id: FuncId,
@@ -140,7 +140,7 @@ impl UberInvoker {
         let mut func_lib = FuncLib::default();
 
         invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
-            let new_func_lib = invoker.get_func_lib();
+            let new_func_lib = invoker.take_func_lib();
             new_func_lib.iter().for_each(|(id, _func)| {
                 function_id_to_invoker_index.insert(id.clone(), idx);
             });
@@ -154,14 +154,14 @@ impl UberInvoker {
             function_id_to_invoker_index,
         }
     }
-    pub fn merge<T>(&mut self, invoker: T)
+    pub fn merge<T>(&mut self, mut invoker: T)
         where T: Invoker + 'static {
         let idx = self.invokers.len();
-        invoker.get_func_lib().iter().for_each(|(id, _func)| {
+        invoker.take_func_lib().iter().for_each(|(id, _func)| {
             self.function_id_to_invoker_index.insert(id.clone(), idx);
         });
 
-        self.func_lib.merge(invoker.get_func_lib());
+        self.func_lib.merge(invoker.take_func_lib());
         self.invokers.push(Box::new(invoker));
     }
 }
@@ -176,8 +176,8 @@ impl<It> From<It> for UberInvoker
 }
 
 impl Invoker for UberInvoker {
-    fn get_func_lib(&self) -> &FuncLib {
-        &self.func_lib
+    fn take_func_lib(&mut self) -> FuncLib {
+        std::mem::take(&mut self.func_lib)
     }
     fn invoke(
         &self,
@@ -204,8 +204,8 @@ impl Invoker for UberInvoker {
 }
 
 impl Invoker for LambdaInvoker {
-    fn get_func_lib(&self) -> &FuncLib {
-        &self.func_lib
+    fn take_func_lib(&mut self) -> FuncLib {
+        std::mem::take(&mut self.func_lib)
     }
     fn invoke(
         &self,
@@ -386,12 +386,12 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let invoker = create_invoker(
+        let mut invoker = create_invoker(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
             move |result| test_values_result.lock().result = result,
         )?;
-        let func_lib = invoker.get_func_lib();
+        let func_lib = invoker.take_func_lib();
         let compute = Compute::default();
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;

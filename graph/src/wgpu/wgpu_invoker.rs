@@ -42,8 +42,8 @@ impl WgpuInvoker {
 }
 
 impl Invoker for WgpuInvoker {
-    fn get_func_lib(&self) -> &FuncLib {
-        &self.func_lib
+    fn take_func_lib(&mut self) -> FuncLib {
+        std::mem::take(&mut self.func_lib)
     }
 
     fn invoke(

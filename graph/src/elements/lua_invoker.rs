@@ -43,8 +43,8 @@ unsafe impl Send for LuaInvoker {}
 unsafe impl Sync for LuaInvoker {}
 
 impl Invoker for LuaInvoker {
-    fn get_func_lib(&self) -> &FuncLib {
-        &self.func_lib
+    fn take_func_lib(&mut self) -> FuncLib {
+        std::mem::take(&mut self.func_lib)
     }
 
     fn invoke(&self, function_id: FuncId, cache: &mut InvokeCache, inputs: &mut InvokeArgs, outputs: &mut InvokeArgs) -> anyhow::Result<()> {
@@ -552,7 +552,7 @@ mod tests {
 
         invoker.load_file("../test_resources/test_lua.lua")?;
 
-        let funcs = invoker.get_func_lib();
+        let funcs = invoker.take_func_lib();
         assert_eq!(funcs.len(), 5);
 
         let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
