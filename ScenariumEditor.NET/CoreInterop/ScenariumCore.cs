@@ -25,8 +25,8 @@ public unsafe class ScenariumCore {
         using (var buf = CoreNative.get_nodes()) {
             var nodes = buf.ToArray<Node>();
             foreach (var node in nodes) {
-                var id = node.id.ToGuid();
-                Console.WriteLine($"Node: {id}, name: {node.name.ToString()}");
+                // var id = node.id.ToGuid();
+                // Console.WriteLine($"Node: {id}, name: {node.name.ToString()}");
                 
                 node.Dispose();
             }
@@ -34,7 +34,7 @@ public unsafe class ScenariumCore {
     }
 
     public void GetFuncs() {
-        using (var buf = CoreNative.get_funcs()) {
+        using (var buf = CoreNative.get_funcs(_ctx)) {
             var funcs = buf.ToArray<Func>();
             foreach (var func in funcs) {
                 var id = func.id.ToGuid();

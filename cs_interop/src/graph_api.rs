@@ -1,6 +1,4 @@
-use graph::graph::Graph;
-
-use crate::{FfiBuf, FfiStr, Id};
+use crate::{get_context, FfiBuf, FfiStr, Id};
 
 #[repr(C)]
 struct Input {
@@ -39,9 +37,11 @@ impl From<uuid::Uuid> for Id {
 }
 
 #[no_mangle]
-extern "C" fn get_nodes() -> FfiBuf {
-    let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
-    graph
+extern "C" fn get_nodes(ctx: *mut u8) -> FfiBuf {
+    // let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
+
+    get_context(ctx)
+        .graph
         .nodes()
         .iter()
         .map(Node::from)

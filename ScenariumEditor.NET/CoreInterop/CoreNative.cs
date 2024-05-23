@@ -134,7 +134,7 @@ internal static unsafe partial class CoreNative {
     }
 }
 
-internal unsafe partial struct Id {
+internal unsafe partial struct Id : IDisposable {
     public Guid ToGuid() {
         // byte[] guidData = new byte[16];
         // Array.Copy(BitConverter.GetBytes(Item1), guidData, 8);
@@ -142,6 +142,10 @@ internal unsafe partial struct Id {
         // return new Guid(guidData);
 
         return new Guid(Item1.ToString());
+    }
+
+    public void Dispose() {
+        Item1.Dispose();
     }
 }
 
@@ -182,6 +186,8 @@ internal unsafe partial struct FfiStrVec : IDisposable {
 
 internal unsafe partial struct Node : IDisposable {
     public void Dispose() {
+        id.Dispose();
+        func_id.Dispose();
         name.Dispose();
         inputs.Dispose();
         events.Dispose();
@@ -190,6 +196,7 @@ internal unsafe partial struct Node : IDisposable {
 
 internal unsafe partial struct Func : IDisposable {
     public void Dispose() {
+        id.Dispose();
         name.Dispose();
         category.Dispose();
         inputs.Dispose();

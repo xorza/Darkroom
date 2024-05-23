@@ -26,13 +26,13 @@ namespace CoreInterop
         public static extern void dummy(FfiBuf _a, FfiStr _b, FfiStrVec _c, Id _d);
 
         [DllImport(__DllName, EntryPoint = "get_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern FfiBuf get_nodes();
+        public static extern FfiBuf get_nodes(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy1", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void dummy1(Node _a, Input _b);
 
         [DllImport(__DllName, EntryPoint = "get_funcs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern FfiBuf get_funcs();
+        public static extern FfiBuf get_funcs(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy2", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern void dummy2(Func _a);

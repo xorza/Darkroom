@@ -7,6 +7,9 @@ use std::str::Utf8Error;
 use bytes::{Buf, BufMut};
 
 use graph::ctx::Context;
+use graph::elements::basic_invoker::BasicInvoker;
+use graph::elements::timers_invoker::TimersInvoker;
+use graph::invoke::Invoker;
 
 mod func_lib_api;
 mod graph_api;
@@ -33,12 +36,21 @@ struct FfiStrVec(FfiBuf);
 
 #[no_mangle]
 extern "C" fn create_context() -> *mut u8 {
-    Box::into_raw(Box::<Context>::default()) as *mut u8
+    let mut context = Box::<Context>::default();
+    context.invoker.merge(BasicInvoker::default());
+    context.invoker.merge(TimersInvoker::default());
+    context.func_lib.merge(context.invoker.get_func_lib());
+
+    Box::into_raw(context) as *mut u8
 }
 
 #[no_mangle]
 extern "C" fn destroy_context(ctx: *mut u8) {
     unsafe { drop(Box::<Context>::from_raw(ctx as *mut Context)) };
+}
+
+fn get_context<'a>(ctx: *mut u8) -> &'a mut Context {
+    unsafe { &mut *(ctx as *mut Context) }
 }
 
 #[no_mangle]

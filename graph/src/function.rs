@@ -98,6 +98,9 @@ impl FuncLib {
     pub fn len(&self) -> usize {
         self.funcs.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.funcs.is_empty()
+    }
 }
 
 impl From<&str> for EventInfo {
