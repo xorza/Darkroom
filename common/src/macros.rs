@@ -35,6 +35,13 @@ macro_rules! id_type {
                 self.0
             }
         }
+
+        impl From<uuid::Uuid> for $name {
+            fn from(uuid: uuid::Uuid) -> $name {
+                $name(uuid)
+            }
+        }
+
         impl std::str::FromStr for $name {
             type Err = anyhow::Error;
 
@@ -43,11 +50,7 @@ macro_rules! id_type {
                 Ok($name(uuid))
             }
         }
-        // impl std::string::ToString for $name {
-        //     fn to_string(&self) -> String {
-        //         self.0.to_string()
-        //     }
-        // }
+
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", self.0.to_string())

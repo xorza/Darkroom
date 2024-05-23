@@ -22,12 +22,10 @@ public unsafe class ScenariumCore {
     }
 
     public void GetNodes() {
-        using (var buf = CoreNative.get_nodes()) {
-            var nodes = buf.ToArray<Node>();
+        using (var buf = CoreNative.get_nodes(_ctx)) {
+            var nodes = buf.ToArray<FfiNode>();
             foreach (var node in nodes) {
-                // var id = node.id.ToGuid();
-                // Console.WriteLine($"Node: {id}, name: {node.name.ToString()}");
-                
+           
                 node.Dispose();
             }
         }
@@ -35,13 +33,19 @@ public unsafe class ScenariumCore {
 
     public void GetFuncs() {
         using (var buf = CoreNative.get_funcs(_ctx)) {
-            var funcs = buf.ToArray<Func>();
+            var funcs = buf.ToArray<FfiFunc>();
             foreach (var func in funcs) {
-                var id = func.id.ToGuid();
-                Console.WriteLine($"Func: {id}, name: {func.name.ToString()}");
+                var func_id = func.id.ToGuid();
+                Console.WriteLine($"Func: {func_id}, name: {func.name.ToString()}");
+                
                 var events = string.Join(", ", func.events.ToStringArray());
                 Console.WriteLine($"Events: {events}");
 
+                var new_node = CoreNative.new_node(_ctx, func.id);
+                var node_id = new_node.id.ToGuid();
+                Console.WriteLine($"Node: {node_id}, name: {new_node.name.ToString()}");
+               
+                new_node.Dispose();
                 func.Dispose();
             }
         }

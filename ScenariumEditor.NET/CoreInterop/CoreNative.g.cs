@@ -23,19 +23,22 @@ namespace CoreInterop
         public static extern void destroy_context(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void dummy(FfiBuf _a, FfiStr _b, FfiStrVec _c, Id _d);
+        public static extern void dummy(FfiBuf _a, FfiStr _b, FfiStrVec _c, FfiId _d);
 
         [DllImport(__DllName, EntryPoint = "get_nodes", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern FfiBuf get_nodes(byte* ctx);
 
+        [DllImport(__DllName, EntryPoint = "new_node", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        public static extern FfiNode new_node(byte* ctx, FfiId func_id);
+
         [DllImport(__DllName, EntryPoint = "dummy1", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void dummy1(Node _a, Input _b);
+        public static extern void dummy1(FfiNode _a, FfiInput _b);
 
         [DllImport(__DllName, EntryPoint = "get_funcs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         public static extern FfiBuf get_funcs(byte* ctx);
 
         [DllImport(__DllName, EntryPoint = "dummy2", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        public static extern void dummy2(Func _a);
+        public static extern void dummy2(FfiFunc _a);
 
 
     }
@@ -49,9 +52,9 @@ namespace CoreInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct Id
+    internal unsafe partial struct FfiId
     {
-        public FfiBuf Item1;
+        public FfiStr Item1;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -67,16 +70,16 @@ namespace CoreInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct Input
+    internal unsafe partial struct FfiInput
     {
         public byte a;
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct Node
+    internal unsafe partial struct FfiNode
     {
-        public Id id;
-        public Id func_id;
+        public FfiId id;
+        public FfiId func_id;
         public FfiStr name;
         [MarshalAs(UnmanagedType.U1)] public bool is_output;
         [MarshalAs(UnmanagedType.U1)] public bool cache_outputs;
@@ -85,9 +88,9 @@ namespace CoreInterop
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal unsafe partial struct Func
+    internal unsafe partial struct FfiFunc
     {
-        public Id id;
+        public FfiId id;
         public FfiStr name;
         public FfiStr category;
         public FuncBehavior behaviour;

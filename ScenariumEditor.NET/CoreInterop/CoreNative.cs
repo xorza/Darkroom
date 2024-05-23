@@ -4,6 +4,46 @@ using System.Text;
 
 namespace CoreInterop;
 
+
+internal static unsafe partial class CoreNative {
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr LoadLibrary(string libname);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+    private static extern bool FreeLibrary(IntPtr hModule);
+
+
+    private static IntPtr _coreInteropHandle;
+
+    public static void LoadDll() {
+        if (_coreInteropHandle != IntPtr.Zero) return;
+
+        var sw = Stopwatch.StartNew();
+
+        var fullDllPath = Path.GetFullPath(__DllName + ".dll");
+
+        _coreInteropHandle = LoadLibrary(fullDllPath);
+        if (_coreInteropHandle == IntPtr.Zero) {
+            int errorCode = Marshal.GetLastWin32Error();
+            throw new Exception(string.Format("Failed to load library (ErrorCode: {0})", errorCode));
+        }
+
+        var elapsed = sw.ElapsedMilliseconds;
+    }
+
+    public static void UnloadDll() {
+        if (_coreInteropHandle == IntPtr.Zero) return;
+
+        FreeLibrary(_coreInteropHandle);
+        _coreInteropHandle = IntPtr.Zero;
+    }
+
+    public static bool IsLoaded {
+        get { return _coreInteropHandle != IntPtr.Zero; }
+    }
+}
+
+
 internal unsafe partial struct FfiBuf : IDisposable {
     public static FfiBuf FromString(String s) {
         var bytes = Marshal.StringToHGlobalAnsi(s);
@@ -96,45 +136,7 @@ internal unsafe partial struct FfiBuf : IDisposable {
     }
 }
 
-internal static unsafe partial class CoreNative {
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-    private static extern IntPtr LoadLibrary(string libname);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
-    private static extern bool FreeLibrary(IntPtr hModule);
-
-
-    private static IntPtr _coreInteropHandle;
-
-    public static void LoadDll() {
-        if (_coreInteropHandle != IntPtr.Zero) return;
-
-        var sw = Stopwatch.StartNew();
-
-        var fullDllPath = Path.GetFullPath(__DllName + ".dll");
-
-        _coreInteropHandle = LoadLibrary(fullDllPath);
-        if (_coreInteropHandle == IntPtr.Zero) {
-            int errorCode = Marshal.GetLastWin32Error();
-            throw new Exception(string.Format("Failed to load library (ErrorCode: {0})", errorCode));
-        }
-
-        var elapsed = sw.ElapsedMilliseconds;
-    }
-
-    public static void UnloadDll() {
-        if (_coreInteropHandle == IntPtr.Zero) return;
-
-        FreeLibrary(_coreInteropHandle);
-        _coreInteropHandle = IntPtr.Zero;
-    }
-
-    public static bool IsLoaded {
-        get { return _coreInteropHandle != IntPtr.Zero; }
-    }
-}
-
-internal unsafe partial struct Id : IDisposable {
+internal unsafe partial struct FfiId : IDisposable {
     public Guid ToGuid() {
         // byte[] guidData = new byte[16];
         // Array.Copy(BitConverter.GetBytes(Item1), guidData, 8);
@@ -184,7 +186,7 @@ internal unsafe partial struct FfiStrVec : IDisposable {
     }
 }
 
-internal unsafe partial struct Node : IDisposable {
+internal unsafe partial struct FfiNode : IDisposable {
     public void Dispose() {
         id.Dispose();
         func_id.Dispose();
@@ -194,7 +196,7 @@ internal unsafe partial struct Node : IDisposable {
     }
 }
 
-internal unsafe partial struct Func : IDisposable {
+internal unsafe partial struct FfiFunc : IDisposable {
     public void Dispose() {
         id.Dispose();
         name.Dispose();

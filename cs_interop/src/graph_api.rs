@@ -1,14 +1,18 @@
-use crate::{get_context, FfiBuf, FfiStr, Id};
+use std::mem::ManuallyDrop;
+
+use graph::function::FuncId;
+
+use crate::{get_context, FfiBuf, FfiId, FfiStr};
 
 #[repr(C)]
-struct Input {
+struct FfiInput {
     a: u8,
 }
 
 #[repr(C)]
-struct Node {
-    id: Id,
-    func_id: Id,
+struct FfiNode {
+    id: FfiId,
+    func_id: FfiId,
     name: FfiStr,
     is_output: bool,
     cache_outputs: bool,
@@ -16,9 +20,9 @@ struct Node {
     events: FfiBuf,
 }
 
-impl From<&graph::graph::Node> for Node {
+impl From<&graph::graph::Node> for FfiNode {
     fn from(node: &graph::graph::Node) -> Self {
-        Node {
+        FfiNode {
             id: node.id.as_uuid().into(),
             func_id: node.func_id.as_uuid().into(),
             name: node.name.clone().into(),
@@ -30,12 +34,6 @@ impl From<&graph::graph::Node> for Node {
     }
 }
 
-impl From<uuid::Uuid> for Id {
-    fn from(value: uuid::Uuid) -> Self {
-        Id(value.to_string().into())
-    }
-}
-
 #[no_mangle]
 extern "C" fn get_nodes(ctx: *mut u8) -> FfiBuf {
     // let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
@@ -44,10 +42,22 @@ extern "C" fn get_nodes(ctx: *mut u8) -> FfiBuf {
         .graph
         .nodes()
         .iter()
-        .map(Node::from)
-        .collect::<Vec<Node>>()
+        .map(FfiNode::from)
+        .collect::<Vec<FfiNode>>()
         .into()
 }
 
 #[no_mangle]
-extern "C" fn dummy1(_a: Node, _b: Input) {}
+extern "C" fn new_node(ctx: *mut u8, func_id: FfiId) -> FfiNode {
+    let context = get_context(ctx);
+    let func_id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();
+
+    let func = context.func_lib.func_by_id(func_id).unwrap();
+    let node = graph::graph::Node::from_function(func);
+    context.graph.add_node(node);
+
+    context.graph.nodes().last().unwrap().into()
+}
+
+#[no_mangle]
+extern "C" fn dummy1(_a: FfiNode, _b: FfiInput) {}

@@ -1,4 +1,4 @@
-use crate::{get_context, FfiBuf, FfiStr, FfiStrVec, Id};
+use crate::{get_context, FfiBuf, FfiId, FfiStr, FfiStrVec};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -9,8 +9,8 @@ pub enum FuncBehavior {
 
 #[repr(C)]
 #[derive(Debug)]
-struct Func {
-    id: Id,
+struct FfiFunc {
+    id: FfiId,
     name: FfiStr,
     category: FfiStr,
     behaviour: FuncBehavior,
@@ -28,12 +28,12 @@ extern "C" fn get_funcs(ctx: *mut u8) -> FfiBuf {
     get_context(ctx)
         .func_lib
         .iter()
-        .map(|(_func_id, func)| Func::from(func))
-        .collect::<Vec<Func>>()
+        .map(|(_func_id, func)| FfiFunc::from(func))
+        .collect::<Vec<FfiFunc>>()
         .into()
 }
 
-impl From<&graph::function::Func> for Func {
+impl From<&graph::function::Func> for FfiFunc {
     fn from(func: &graph::function::Func) -> Self {
         let events: FfiStrVec = FfiStrVec::from_iter(
             func.events
@@ -42,7 +42,7 @@ impl From<&graph::function::Func> for Func {
                 .collect::<Vec<String>>(),
         );
 
-        Func {
+        FfiFunc {
             id: func.id.as_uuid().into(),
             name: func.name.clone().into(),
             category: func.category.clone().into(),
@@ -59,7 +59,7 @@ impl From<&graph::function::Func> for Func {
 }
 
 #[no_mangle]
-extern "C" fn dummy2(_a: Func) {}
+extern "C" fn dummy2(_a: FfiFunc) {}
 
 #[cfg(test)]
 mod tests {

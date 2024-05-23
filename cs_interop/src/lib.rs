@@ -24,7 +24,7 @@ struct FfiBuf {
 
 #[repr(C)]
 #[derive(Debug)]
-struct Id(FfiBuf);
+struct FfiId(FfiStr);
 
 #[repr(C)]
 #[derive(Default, Debug)]
@@ -54,7 +54,7 @@ fn get_context<'a>(ctx: *mut u8) -> &'a mut Context {
 }
 
 #[no_mangle]
-extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: FfiStrVec, _d: Id) {}
+extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: FfiStrVec, _d: FfiId) {}
 
 impl FfiBuf {
     pub fn is_null(&self) -> bool {
@@ -281,6 +281,24 @@ impl IntoIterator for FfiStrVec {
             idx: 0,
             offset: 4,
         }
+    }
+}
+
+impl FfiId {
+    pub fn to_uuid(&self) -> uuid::Uuid {
+        self.0.as_str().parse().unwrap()
+    }
+}
+
+impl From<uuid::Uuid> for FfiId {
+    fn from(value: uuid::Uuid) -> Self {
+        FfiId(value.to_string().into())
+    }
+}
+
+impl From<FfiId> for uuid::Uuid {
+    fn from(value: FfiId) -> Self {
+        uuid::Uuid::parse_str(value.0.as_str()).unwrap()
     }
 }
 
