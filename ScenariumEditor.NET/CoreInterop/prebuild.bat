@@ -13,4 +13,4 @@ if "%ConfigurationName%" == "Release" (
 
 set TARGET_DLL_FILENAME="%ProjectDir%core_interop.dll"
 
-xcopy %SOURCE_DLL_FILENAME% %TARGET_DLL_FILENAME% /D /Y
+echo F | xcopy %SOURCE_DLL_FILENAME% %TARGET_DLL_FILENAME% /D /Y
