@@ -17,42 +17,42 @@ public class MainWindowViewModel : INotifyPropertyChanged {
 
     public ObservableCollection<Connection> Connections { get; } = new();
 
-    private Point _canvasPosition;
+    private Point _canvas_position;
 
     public Point CanvasPosition {
-        get => _canvasPosition;
+        get => _canvas_position;
         set {
-            if (Equals(value, _canvasPosition)) return;
-            _canvasPosition = value;
+            if (Equals(value, _canvas_position)) return;
+            _canvas_position = value;
             OnPropertyChanged();
         }
     }
 
-    private double _canvasScale = 1.0;
+    private double _canvas_scale = 1.0;
 
     public double CanvasScale {
-        get => _canvasScale;
+        get => _canvas_scale;
         set {
-            if (Equals(value, _canvasScale)) return;
-            _canvasScale = value;
+            if (Equals(value, _canvas_scale)) return;
+            _canvas_scale = value;
             OnPropertyChanged();
         }
     }
 
-    private Node _selectedNode;
+    private Node _selected_node;
 
     public Node SelectedNode {
-        get => _selectedNode;
+        get => _selected_node;
         set {
-            if (ReferenceEquals(value, _selectedNode)) return;
-            if (_selectedNode != null) {
-                _selectedNode.IsSelected = false;
+            if (ReferenceEquals(value, _selected_node)) return;
+            if (_selected_node != null) {
+                _selected_node.IsSelected = false;
             }
 
-            _selectedNode = value;
+            _selected_node = value;
 
-            if (_selectedNode != null) {
-                _selectedNode.IsSelected = true;
+            if (_selected_node != null) {
+                _selected_node.IsSelected = true;
             }
 
             OnPropertyChanged();
@@ -61,7 +61,7 @@ public class MainWindowViewModel : INotifyPropertyChanged {
 
     public void Remove(Node node) {
         Nodes.Remove(node);
-        var connectionsToRemove = Connections
+        var connections_to_remove = Connections
             .Where(c => {
                 return node.Inputs.Contains(c.Input)
                        || node.Outputs.Contains(c.Output)
@@ -69,7 +69,7 @@ public class MainWindowViewModel : INotifyPropertyChanged {
                        || ReferenceEquals(c.Input, node.Trigger);
             })
             .ToList();
-        foreach (var connection in connectionsToRemove) {
+        foreach (var connection in connections_to_remove) {
             Connections.Remove(connection);
         }
     }
@@ -77,14 +77,14 @@ public class MainWindowViewModel : INotifyPropertyChanged {
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    private void OnPropertyChanged([CallerMemberName] string propertyName = null) {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    private void OnPropertyChanged([CallerMemberName] string property_name = null) {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property_name));
     }
 
-    private bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
+    private bool SetField<T>(ref T field, T value, [CallerMemberName] string property_name = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
-        OnPropertyChanged(propertyName);
+        OnPropertyChanged(property_name);
         return true;
     }
 }
@@ -102,19 +102,19 @@ public enum PinType {
 }
 
 public static class PinTypeExtensions {
-    public static PinType GetOpposite(this PinType pinType) {
-        return pinType switch {
+    public static PinType GetOpposite(this PinType pin_type) {
+        return pin_type switch {
             PinType.Input => PinType.Output,
             PinType.Output => PinType.Input,
             PinType.Event => PinType.Trigger,
             PinType.Trigger => PinType.Event,
-            _ => throw new ArgumentOutOfRangeException(nameof(pinType), pinType, null)
+            _ => throw new ArgumentOutOfRangeException(nameof(pin_type), pin_type, null)
         };
     }
 }
 
 public class Pin : INotifyPropertyChanged {
-    private DataType _dataType;
+    private DataType _data_type;
     private string _name = String.Empty;
 
 
@@ -128,66 +128,66 @@ public class Pin : INotifyPropertyChanged {
     }
 
     public DataType DataType {
-        get => _dataType;
+        get => _data_type;
         set {
-            if (value == _dataType) return;
-            _dataType = value;
+            if (value == _data_type) return;
+            _data_type = value;
             OnPropertyChanged();
         }
     }
 
 
-    private Point _nodeCanvasPosition;
+    private Point _node_canvas_position;
 
     public Point NodeCanvasPosition {
-        get => _nodeCanvasPosition;
+        get => _node_canvas_position;
         set {
-            if (value.Equals(_nodeCanvasPosition)) return;
-            _nodeCanvasPosition = value;
+            if (value.Equals(_node_canvas_position)) return;
+            _node_canvas_position = value;
             OnPropertyChanged();
 
             CanvasPosition = new Point(
-                _nodeCanvasPosition.X + _nodePosition.X,
-                _nodeCanvasPosition.Y + _nodePosition.Y
+                _node_canvas_position.X + _node_position.X,
+                _node_canvas_position.Y + _node_position.Y
             );
         }
     }
 
-    private Point _nodePosition;
+    private Point _node_position;
 
     public Point NodePosition {
-        get => _nodePosition;
+        get => _node_position;
         set {
-            if (value.Equals(_nodePosition)) return;
-            _nodePosition = value;
+            if (value.Equals(_node_position)) return;
+            _node_position = value;
             OnPropertyChanged();
 
             CanvasPosition = new Point(
-                _nodeCanvasPosition.X + _nodePosition.X,
-                _nodeCanvasPosition.Y + _nodePosition.Y
+                _node_canvas_position.X + _node_position.X,
+                _node_canvas_position.Y + _node_position.Y
             );
         }
     }
 
 
-    private Point _canvasPosition;
+    private Point _canvas_position;
 
     public Point CanvasPosition {
-        get => _canvasPosition;
+        get => _canvas_position;
         set {
-            if (value.Equals(_canvasPosition)) return;
-            _canvasPosition = value;
+            if (value.Equals(_canvas_position)) return;
+            _canvas_position = value;
             OnPropertyChanged();
         }
     }
 
-    private PinType _pinType;
+    private PinType _pin_type;
 
     public PinType PinType {
-        get => _pinType;
+        get => _pin_type;
         set {
-            if (value.Equals(_pinType)) return;
-            _pinType = value;
+            if (value.Equals(_pin_type)) return;
+            _pin_type = value;
             OnPropertyChanged();
         }
     }
@@ -195,14 +195,14 @@ public class Pin : INotifyPropertyChanged {
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected virtual void OnPropertyChanged([CallerMemberName] string property_name = null) {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property_name));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string property_name = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
-        OnPropertyChanged(propertyName);
+        OnPropertyChanged(property_name);
         return true;
     }
 
@@ -227,10 +227,10 @@ public class Pin : INotifyPropertyChanged {
 
 public class Node : INotifyPropertyChanged {
     private string _name = string.Empty;
-    private bool _isSelected = false;
-    private bool _isOutput = false;
-    private bool _isCached = false;
-    private Point _canvasPosition;
+    private bool _is_selected = false;
+    private bool _is_output = false;
+    private bool _is_cached = false;
+    private Point _canvas_position;
 
     private Pin _trigger = new Pin {
         Name = "Trigger",
@@ -248,37 +248,37 @@ public class Node : INotifyPropertyChanged {
     }
 
     public bool IsSelected {
-        get => _isSelected;
+        get => _is_selected;
         internal set {
-            if (value == _isSelected) return;
-            _isSelected = value;
+            if (value == _is_selected) return;
+            _is_selected = value;
             OnPropertyChanged();
         }
     }
 
     public bool IsOutput {
-        get => _isOutput;
+        get => _is_output;
         set {
-            if (value == _isOutput) return;
-            _isOutput = value;
+            if (value == _is_output) return;
+            _is_output = value;
             OnPropertyChanged();
         }
     }
 
     public bool IsCached {
-        get => _isCached;
+        get => _is_cached;
         set {
-            if (value == _isCached) return;
-            _isCached = value;
+            if (value == _is_cached) return;
+            _is_cached = value;
             OnPropertyChanged();
         }
     }
 
     public Point CanvasPosition {
-        get => _canvasPosition;
+        get => _canvas_position;
         set {
-            if (value.Equals(_canvasPosition)) return;
-            _canvasPosition = value;
+            if (value.Equals(_canvas_position)) return;
+            _canvas_position = value;
             OnPropertyChanged();
 
             UpdatePinPositions();
@@ -286,7 +286,7 @@ public class Node : INotifyPropertyChanged {
     }
 
     public void UpdatePinPositions() {
-        var value = _canvasPosition;
+        var value = _canvas_position;
 
         _trigger.NodeCanvasPosition = value;
 
@@ -318,14 +318,14 @@ public class Node : INotifyPropertyChanged {
 
     public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected virtual void OnPropertyChanged([CallerMemberName] string property_name = null) {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property_name));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string property_name = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
-        OnPropertyChanged(propertyName);
+        OnPropertyChanged(property_name);
         return true;
     }
 }
@@ -333,14 +333,14 @@ public class Node : INotifyPropertyChanged {
 public class Connection : INotifyPropertyChanged {
     public event PropertyChangedEventHandler PropertyChanged;
 
-    protected virtual void OnPropertyChanged([CallerMemberName] string propertyName = null) {
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    protected virtual void OnPropertyChanged([CallerMemberName] string property_name = null) {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property_name));
     }
 
-    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string propertyName = null) {
+    protected bool SetField<T>(ref T field, T value, [CallerMemberName] string property_name = null) {
         if (EqualityComparer<T>.Default.Equals(field, value)) return false;
         field = value;
-        OnPropertyChanged(propertyName);
+        OnPropertyChanged(property_name);
         return true;
     }
 

@@ -5,7 +5,7 @@ using System.Windows.Input;
 namespace GraphLib.Controls;
 
 public class ClickControl : Control {
-    private bool _leftButtonDown;
+    private bool _left_button_down;
 
     protected ClickControl() {
         MouseEnter += MouseEnterHandler;
@@ -17,23 +17,23 @@ public class ClickControl : Control {
     public event MouseButtonEventHandler LeftButtonClick;
 
     private void MouseEnterHandler(object sender, RoutedEventArgs ea) {
-        _leftButtonDown = false;
+        _left_button_down = false;
 
         InvalidateVisual();
     }
 
     private void MouseLeftButtonDownHandler(object sender, MouseButtonEventArgs ea) {
-        _leftButtonDown = true;
+        _left_button_down = true;
 
         InvalidateVisual();
     }
 
     private void MouseLeftButtonUpHandler(object sender, MouseButtonEventArgs ea) {
-        if (_leftButtonDown) {
+        if (_left_button_down) {
             LeftButtonClick?.Invoke(sender, ea);
         }
 
-        _leftButtonDown = false;
+        _left_button_down = false;
 
         InvalidateVisual();
     }

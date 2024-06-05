@@ -22,12 +22,12 @@ using GraphLib.ViewModel;
 namespace ScenariumEditor.NET;
 
 public partial class MainWindow : Window {
-    private readonly MainWindowViewModel _viewModel = new DesignMainWindowViewModel();
+    private readonly MainWindowViewModel _view_model = new DesignMainWindowViewModel();
 
     public MainWindow() {
         InitializeComponent();
 
-        this.DataContext = _viewModel;
+        this.DataContext = _view_model;
 
         Loaded += MainWindow_OnLoaded;
         Unloaded += MainWindow_OnUnloaded;
@@ -42,6 +42,6 @@ public partial class MainWindow : Window {
 
 
     private void AddDesignNodeButton_OnClick(object sender, RoutedEventArgs e) {
-        _viewModel.Nodes.Add(new DesignNode());
+        _view_model.Nodes.Add(new DesignNode());
     }
 }

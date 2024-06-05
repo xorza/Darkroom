@@ -23,11 +23,11 @@ partial class WindowResourceDictionary : ResourceDictionary {
         var wnd = Window.GetWindow((FrameworkElement)sender)!;
         if (wnd.WindowState == WindowState.Maximized) {
             wnd.WindowState = WindowState.Normal;
-            if (wnd.Tag is NormalWindowPosition normalPosition) {
-                wnd.Left = normalPosition.Position.X;
-                wnd.Top = normalPosition.Position.Y;
-                wnd.Width = normalPosition.Size.Width;
-                wnd.Height = normalPosition.Size.Height;
+            if (wnd.Tag is NormalWindowPosition normal_position) {
+                wnd.Left = normal_position.Position.X;
+                wnd.Top = normal_position.Position.Y;
+                wnd.Width = normal_position.Size.Width;
+                wnd.Height = normal_position.Size.Height;
             }
         } else {
             wnd.Tag = new NormalWindowPosition {
@@ -49,53 +49,53 @@ partial class WindowResourceDictionary : ResourceDictionary {
 
     #region resizing
 
-    bool _resizeInProcess = false;
+    bool _resize_in_process = false;
 
     private void borderRect_MouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
-        var senderRect = (Rectangle)sender;
-        _resizeInProcess = true;
-        senderRect.CaptureMouse();
+        var sender_rect = (Rectangle)sender;
+        _resize_in_process = true;
+        sender_rect.CaptureMouse();
     }
 
     private void borderRect_MouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
-        var senderRect = (Rectangle)sender;
-        _resizeInProcess = false;
-        senderRect.ReleaseMouseCapture();
+        var sender_rect = (Rectangle)sender;
+        _resize_in_process = false;
+        sender_rect.ReleaseMouseCapture();
     }
 
     private void borderRect_MouseMove(object sender, MouseEventArgs e) {
-        if (_resizeInProcess) {
-            var senderRect = (Rectangle)sender;
-            var mainWindow = Window.GetWindow(senderRect)!;
+        if (_resize_in_process) {
+            var sender_rect = (Rectangle)sender;
+            var main_window = Window.GetWindow(sender_rect)!;
 
-            double width = e.GetPosition(mainWindow).X;
-            double height = e.GetPosition(mainWindow).Y;
-            senderRect.CaptureMouse();
+            double width = e.GetPosition(main_window).X;
+            double height = e.GetPosition(main_window).Y;
+            sender_rect.CaptureMouse();
 
-            if (senderRect.Name.ToLower().Contains("right")) {
+            if (sender_rect.Name.ToLower().Contains("right")) {
                 if (width > 0)
-                    mainWindow.Width = width;
+                    main_window.Width = width;
             }
 
-            if (senderRect.Name.ToLower().Contains("left")) {
-                mainWindow.Left += width;
-                width = mainWindow.Width - width;
+            if (sender_rect.Name.ToLower().Contains("left")) {
+                main_window.Left += width;
+                width = main_window.Width - width;
                 if (width > 0) {
-                    mainWindow.Width = width;
+                    main_window.Width = width;
                 }
             }
 
-            if (senderRect.Name.ToLower().Contains("bottom")) {
+            if (sender_rect.Name.ToLower().Contains("bottom")) {
                 if (height > 0) {
-                    mainWindow.Height = height;
+                    main_window.Height = height;
                 }
             }
 
-            if (senderRect.Name.ToLower().Contains("top")) {
-                mainWindow.Top += height;
-                height = mainWindow.Height - height;
+            if (sender_rect.Name.ToLower().Contains("top")) {
+                main_window.Top += height;
+                height = main_window.Height - height;
                 if (height > 0) {
-                    mainWindow.Height = height;
+                    main_window.Height = height;
                 }
             }
         }

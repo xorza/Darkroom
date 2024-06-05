@@ -6,21 +6,21 @@ using System.Windows.Media;
 namespace GraphLib.Controls;
 
 public class ConnectionControl : ClickControl {
-    public static readonly DependencyProperty InputPositionDependencyProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty INPUT_POSITION_DEPENDENCY_PROPERTY = DependencyProperty.Register(
         nameof(Pin1Position),
         typeof(Point),
         typeof(ConnectionControl),
         new PropertyMetadata(OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty OutputPositionDependencyProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty OUTPUT_POSITION_DEPENDENCY_PROPERTY = DependencyProperty.Register(
         nameof(Pin2Position),
         typeof(Point),
         typeof(ConnectionControl),
         new PropertyMetadata(OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty HoverBrushDependencyProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty HOVER_BRUSH_DEPENDENCY_PROPERTY = DependencyProperty.Register(
         nameof(HoverBrush),
         typeof(Brush),
         typeof(ConnectionControl),
@@ -32,79 +32,79 @@ public class ConnectionControl : ClickControl {
         MouseDoubleClick += MouseButtonEventHandler;
     }
 
-    public static readonly DependencyProperty ThicknessProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty THICKNESS_PROPERTY = DependencyProperty.Register(
         nameof(Thickness), typeof(double), typeof(ConnectionControl),
         new PropertyMetadata(2.0, OnPropertyChangedCallback_InvalidateVisual)
     );
 
     public double Thickness {
-        get { return (double)GetValue(ThicknessProperty); }
-        set { SetValue(ThicknessProperty, value); }
+        get { return (double)GetValue(THICKNESS_PROPERTY); }
+        set { SetValue(THICKNESS_PROPERTY, value); }
     }
 
-    public static readonly DependencyProperty HoverThicknessProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty HOVER_THICKNESS_PROPERTY = DependencyProperty.Register(
         nameof(HoverThickness), typeof(double), typeof(ConnectionControl),
         new PropertyMetadata(3.0, OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty DeletedBrushProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty DELETED_BRUSH_PROPERTY = DependencyProperty.Register(
         nameof(DeletedBrush), typeof(Brush), typeof(ConnectionControl),
         new PropertyMetadata(Brushes.IndianRed, OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty IsDeletedProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty IS_DELETED_PROPERTY = DependencyProperty.Register(
         nameof(IsDeleted), typeof(bool), typeof(ConnectionControl),
         new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty EventBrushProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty EVENT_BRUSH_PROPERTY = DependencyProperty.Register(
         nameof(EventBrush), typeof(Brush), typeof(ConnectionControl),
         new PropertyMetadata(default(Brush), OnPropertyChangedCallback_InvalidateVisual)
     );
 
-    public static readonly DependencyProperty IsEventProperty = DependencyProperty.Register(
+    public static readonly DependencyProperty IS_EVENT_PROPERTY = DependencyProperty.Register(
         nameof(IsEvent), typeof(bool), typeof(ConnectionControl),
         new PropertyMetadata(default(bool), OnPropertyChangedCallback_InvalidateVisual)
     );
 
     public bool IsEvent {
-        get { return (bool)GetValue(IsEventProperty); }
-        set { SetValue(IsEventProperty, value); }
+        get { return (bool)GetValue(IS_EVENT_PROPERTY); }
+        set { SetValue(IS_EVENT_PROPERTY, value); }
     }
 
     public Brush EventBrush {
-        get { return (Brush)GetValue(EventBrushProperty); }
-        set { SetValue(EventBrushProperty, value); }
+        get { return (Brush)GetValue(EVENT_BRUSH_PROPERTY); }
+        set { SetValue(EVENT_BRUSH_PROPERTY, value); }
     }
 
     public double HoverThickness {
-        get { return (double)GetValue(HoverThicknessProperty); }
-        set { SetValue(HoverThicknessProperty, value); }
+        get { return (double)GetValue(HOVER_THICKNESS_PROPERTY); }
+        set { SetValue(HOVER_THICKNESS_PROPERTY, value); }
     }
 
     public Point Pin1Position {
-        get => (Point)GetValue(InputPositionDependencyProperty);
-        set => SetValue(InputPositionDependencyProperty, value);
+        get => (Point)GetValue(INPUT_POSITION_DEPENDENCY_PROPERTY);
+        set => SetValue(INPUT_POSITION_DEPENDENCY_PROPERTY, value);
     }
 
     public Point Pin2Position {
-        get => (Point)GetValue(OutputPositionDependencyProperty);
-        set => SetValue(OutputPositionDependencyProperty, value);
+        get => (Point)GetValue(OUTPUT_POSITION_DEPENDENCY_PROPERTY);
+        set => SetValue(OUTPUT_POSITION_DEPENDENCY_PROPERTY, value);
     }
 
     public Brush HoverBrush {
-        get => (Brush)GetValue(HoverBrushDependencyProperty);
-        set => SetValue(HoverBrushDependencyProperty, value);
+        get => (Brush)GetValue(HOVER_BRUSH_DEPENDENCY_PROPERTY);
+        set => SetValue(HOVER_BRUSH_DEPENDENCY_PROPERTY, value);
     }
 
     public Brush DeletedBrush {
-        get { return (Brush)GetValue(DeletedBrushProperty); }
-        set { SetValue(DeletedBrushProperty, value); }
+        get { return (Brush)GetValue(DELETED_BRUSH_PROPERTY); }
+        set { SetValue(DELETED_BRUSH_PROPERTY, value); }
     }
 
     public bool IsDeleted {
-        get { return (bool)GetValue(IsDeletedProperty); }
-        set { SetValue(IsDeletedProperty, value); }
+        get { return (bool)GetValue(IS_DELETED_PROPERTY); }
+        set { SetValue(IS_DELETED_PROPERTY, value); }
     }
 
     public PathGeometry Geometry { get; } = new();
@@ -120,8 +120,8 @@ public class ConnectionControl : ClickControl {
     private void MouseButtonEventHandler(object sender, MouseButtonEventArgs e) {
     }
 
-    protected override void OnRender(DrawingContext drawingContext) {
-        base.OnRender(drawingContext);
+    protected override void OnRender(DrawingContext drawing_context) {
+        base.OnRender(drawing_context);
 
         Point[] points = [
             new(Pin1Position.X - 5, Pin1Position.Y),
@@ -130,27 +130,27 @@ public class ConnectionControl : ClickControl {
             new(Pin2Position.X + 5, Pin2Position.Y)
         ];
 
-        var pathFigure = new PathFigure(
+        var path_figure = new PathFigure(
             points[0],
             [new BezierSegment(points[1], points[2], points[3], true)],
             false
         );
 
         Geometry.Clear();
-        Geometry.Figures.Add(pathFigure);
+        Geometry.Figures.Add(path_figure);
 
         // transparent line to make the connection easier to click
-        drawingContext.DrawGeometry(null, new Pen(Brushes.Transparent, 5), Geometry);
+        drawing_context.DrawGeometry(null, new Pen(Brushes.Transparent, 5), Geometry);
 
 
         if (IsDeleted) {
-            drawingContext.DrawGeometry(null, new Pen(DeletedBrush, Thickness), Geometry);
+            drawing_context.DrawGeometry(null, new Pen(DeletedBrush, Thickness), Geometry);
         } else if (IsMouseOver) {
-            drawingContext.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), Geometry);
+            drawing_context.DrawGeometry(null, new Pen(HoverBrush, HoverThickness), Geometry);
         } else if (IsEvent) {
-            drawingContext.DrawGeometry(null, new Pen(EventBrush, Thickness), Geometry);
+            drawing_context.DrawGeometry(null, new Pen(EventBrush, Thickness), Geometry);
         } else {
-            drawingContext.DrawGeometry(null, new Pen(BorderBrush, Thickness), Geometry);
+            drawing_context.DrawGeometry(null, new Pen(BorderBrush, Thickness), Geometry);
         }
     }
 }

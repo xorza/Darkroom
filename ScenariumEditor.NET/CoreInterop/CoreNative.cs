@@ -10,36 +10,36 @@ internal static unsafe partial class CoreNative {
     private static extern IntPtr LoadLibrary(string libname);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
-    private static extern bool FreeLibrary(IntPtr hModule);
+    private static extern bool FreeLibrary(IntPtr h_module);
 
 
-    private static IntPtr _coreInteropHandle;
+    private static IntPtr _core_interop_handle;
 
     public static void LoadDll() {
-        if (_coreInteropHandle != IntPtr.Zero) return;
+        if (_core_interop_handle != IntPtr.Zero) return;
 
         var sw = Stopwatch.StartNew();
 
-        var fullDllPath = Path.GetFullPath(__DllName + ".dll");
+        var full_dll_path = Path.GetFullPath(__DllName + ".dll");
 
-        _coreInteropHandle = LoadLibrary(fullDllPath);
-        if (_coreInteropHandle == IntPtr.Zero) {
-            int errorCode = Marshal.GetLastWin32Error();
-            throw new Exception(string.Format("Failed to load library (ErrorCode: {0})", errorCode));
+        _core_interop_handle = LoadLibrary(full_dll_path);
+        if (_core_interop_handle == IntPtr.Zero) {
+            int error_code = Marshal.GetLastWin32Error();
+            throw new Exception(string.Format("Failed to load library (ErrorCode: {0})", error_code));
         }
 
         var elapsed = sw.ElapsedMilliseconds;
     }
 
     public static void UnloadDll() {
-        if (_coreInteropHandle == IntPtr.Zero) return;
+        if (_core_interop_handle == IntPtr.Zero) return;
 
-        FreeLibrary(_coreInteropHandle);
-        _coreInteropHandle = IntPtr.Zero;
+        FreeLibrary(_core_interop_handle);
+        _core_interop_handle = IntPtr.Zero;
     }
 
     public static bool IsLoaded {
-        get { return _coreInteropHandle != IntPtr.Zero; }
+        get { return _core_interop_handle != IntPtr.Zero; }
     }
 }
 
@@ -102,13 +102,13 @@ internal unsafe partial struct FfiBuf : IDisposable {
             }
         }
 
-        var tSize = Marshal.SizeOf<T>();
-        if (this.length % tSize != 0) throw new InvalidOperationException("Invalid array size");
+        var t_size = Marshal.SizeOf<T>();
+        if (this.length % t_size != 0) throw new InvalidOperationException("Invalid array size");
 
-        var tLength = (int)this.length / tSize;
-        var result = new T[tLength];
+        var t_length = (int)this.length / t_size;
+        var result = new T[t_length];
 
-        if (tLength == 0) return result;
+        if (t_length == 0) return result;
 
         GCHandle handle = new GCHandle();
         try {
@@ -137,7 +137,7 @@ internal unsafe partial struct FfiBuf : IDisposable {
 }
 
 internal unsafe partial struct FfiId : IDisposable {
-    public Guid ToGuid() {
+    public readonly Guid ToGuid() {
         // byte[] guidData = new byte[16];
         // Array.Copy(BitConverter.GetBytes(Item1), guidData, 8);
         // Array.Copy(BitConverter.GetBytes(Item2), 0, guidData, 8, 8);
@@ -168,7 +168,7 @@ internal unsafe partial struct FfiStr : IDisposable {
 }
 
 internal unsafe partial struct FfiStrVec : IDisposable {
-    public String[] ToStringArray() {
+    public readonly String[] ToStringArray() {
         var reader = new BinaryReader(new UnmanagedMemoryStream(Item1.bytes, Item1.length));
         
         var count = reader.ReadUInt32();
