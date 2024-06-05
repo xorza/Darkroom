@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use mlua::FromLuaMulti;
 
 use parking_lot::Mutex;
 
@@ -28,7 +29,7 @@ impl LuaCtx {
         inner.load(script)
     }
 
-    fn call(&self, func: &str) -> Result<(), mlua::Error> {
+    fn call<R: FromLuaMulti<'static>>(&self, func: &str) -> Result<R, mlua::Error> {
         let inner = self.inner.lock();
         inner.call(func)
     }
@@ -57,14 +58,12 @@ impl LuaCtxInternal {
         Ok(())
     }
 
-    fn call(&self, func: &str) -> Result<(), mlua::Error> {
+    fn call<R: FromLuaMulti<'static>>(&self, func: &str) -> Result<R, mlua::Error> {
         let lua = unsafe { &mut *self.lua };
         let func: mlua::Function = lua.globals().get(func)?;
-        let num: u32 = func.call(())?;
+        let r: R = func.call(())?;
 
-        println!("Result: {}", num);
-
-        Ok(())
+        Ok(r)
     }
 }
 
@@ -88,13 +87,15 @@ mod tests {
             .block_on(async move {
                 let lua = LuaCtx::default();
                 lua.load(script).unwrap();
-                lua.call("test").unwrap();
+                let n = lua.call::<u32>("test").unwrap();
+                assert_eq!(42, n);
 
                 for _ in 0..1000 {
                     let lua = lua.clone();
 
                     tokio::spawn(async move {
-                        lua.call("test").unwrap();
+                        let n = lua.call::<u32>("test").unwrap();
+                        assert_eq!(42, n);
                     }).await.unwrap();
                 }
             });

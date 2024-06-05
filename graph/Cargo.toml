@@ -4,13 +4,8 @@ version = "0.1.1"
 edition = "2021"
 description = "A graph library for Scenarium"
 
-[features]
-wgpu = ["imaginarium/wgpu"]
-default = ["wgpu"]
-
 [dependencies]
 common = { workspace = true }
-imaginarium = { workspace = true }
 
 serde = { workspace = true }
 serde_yaml = { workspace = true }

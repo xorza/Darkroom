@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "common",
-    "imaginarium",
     "graph",
     "cs_interop",
 ]
@@ -10,8 +9,9 @@ resolver = "2"
 
 [workspace.dependencies]
 common = { path = "common" }
-imaginarium = { path = "imaginarium", features = ["wgpu"] }
-graph = { path = "graph", features = ["wgpu"] }
+graph = { path = "graph" }
+
+imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
