@@ -1,5 +1,4 @@
-**/target/
-**/cmake-build-*/
+
 **/.idea/
 
 **/Cargo.lock
@@ -15,3 +14,8 @@
 **/bin/
 *.DotSettings.user
 /ScenariumEditor.NET/CoreInterop/core_interop.dll
+
+**/target/
+**/cmake-build-*/
+**/build/
+
