@@ -6,6 +6,8 @@ class ArgumentController : public QObject {
 Q_OBJECT
 
     Q_PROPERTY(QString name READ name NOTIFY nameChanged)
+    Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
+
 
 public:
     explicit ArgumentController(QObject *parent = nullptr) : QObject(parent) {}
@@ -18,13 +20,22 @@ public:
 
     void setName(const QString &name);
 
+    [[nodiscard]] QPointF viewPos() const {
+        return m_viewPos;
+    }
+
+    void setViewPos(const QPointF &viewPos);
+
 signals:
 
     void nameChanged();
 
+    void viewPosChanged();
+
 private:
     QString m_name;
 
+    QPointF m_viewPos{};
 };
 
 

@@ -79,11 +79,17 @@ Rectangle {
                                 spacing: 5
 
                                 Rectangle {
+                                    id: inputPin
                                     width: 10
                                     height: 10
                                     color: inputMouseArea.containsMouse ? inputMouseArea.containsPress ? Qt.darker("red") : Qt.lighter("red") : "red"
                                     radius: 5
                                     anchors.verticalCenter: parent.verticalCenter
+
+                                    Component.onCompleted: {
+                                        const point = inputPin.mapToItem(root, 0, 0);
+                                        modelData.viewPos = point
+                                    }
                                 }
                                 Text {
                                     text: modelData.name
@@ -124,11 +130,17 @@ Rectangle {
                                     color: "darkgray"
                                 }
                                 Rectangle {
+                                    id: outputPin
                                     width: 10
                                     height: 10
                                     color: outputMouseArea.containsMouse ? outputMouseArea.containsPress ? Qt.darker("red") : Qt.lighter("red") : "red"
                                     radius: 5
                                     anchors.verticalCenter: parent.verticalCenter
+
+                                    Component.onCompleted: {
+                                        const point = outputPin.mapToItem(root, 0, 0);
+                                        modelData.viewPos = point
+                                    }
                                 }
                             }
                             MouseArea {

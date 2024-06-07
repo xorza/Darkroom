@@ -11,6 +11,15 @@ void ArgumentController::setName(const QString &name) {
 
 }
 
+void ArgumentController::setViewPos(const QPointF &viewPos) {
+    if (m_viewPos == viewPos) {
+        return;
+    }
+
+    m_viewPos = viewPos;
+    emit viewPosChanged();
+}
+
 void NodeController::setName(const QString &name)  {
     if (m_name == name) {
         return;
