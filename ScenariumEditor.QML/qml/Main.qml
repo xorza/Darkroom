@@ -7,36 +7,21 @@ Window {
     height: 480
     visible: true
     title: qsTr("Hello World")
+    color: "#1e1e1e"
 
-    Rectangle {
-        width: 100
-        height: 100
-        color: "lightgray"
+    Column {
         anchors.fill: parent
+        spacing: 10
+        anchors.margins: 10
 
-        Column {
-            anchors.fill: parent
-            spacing: 10
+        Repeater {
+            model: AppController.nodes
 
-            Repeater {
-                model: AppController.nodes
-                delegate:
-                    Rectangle {
-                        width: 100
-                        height: 100
-                        color: "lightblue"
-                        border.color: "blue"
-                        border.width: 2
-                        radius: 10
-
-                        Text {
-                            text: modelData.name
-                            font.pointSize: 20
-                        }
-                    }
+            delegate: Node {
+                nodeController: modelData
             }
         }
-
     }
+
 }
 

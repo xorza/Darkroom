@@ -2,15 +2,15 @@
 
 #include <QtCore>
 
-class InputController : public QObject {
+class ArgumentController : public QObject {
 Q_OBJECT
 
     Q_PROPERTY(QString name READ name NOTIFY nameChanged)
 
 public:
-    explicit InputController(QObject *parent = nullptr) : QObject(parent) {}
+    explicit ArgumentController(QObject *parent = nullptr) : QObject(parent) {}
 
-    ~InputController() override = default;
+    ~ArgumentController() override = default;
 
     [[nodiscard]] QString name() const {
         return m_name;
@@ -28,11 +28,13 @@ private:
 };
 
 
+
 class NodeController : public QObject {
 Q_OBJECT
 
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY nameChanged)
-    Q_PROPERTY(QList<InputController *> inputs READ inputs NOTIFY inputsChanged)
+    Q_PROPERTY(QList<ArgumentController *> inputs READ inputs NOTIFY inputsChanged)
+    Q_PROPERTY(QList<ArgumentController *> outputs READ outputs NOTIFY outputsChanged)
 
 public:
     explicit NodeController(QObject *parent = nullptr) : QObject(parent) {}
@@ -45,13 +47,22 @@ public:
 
     void setName(const QString &name);
 
-    [[nodiscard]] QList<InputController *> inputs() const {
+    [[nodiscard]] QList<ArgumentController *> inputs() const {
         return m_inputs;
     }
 
-    void addInput(InputController *const input) {
+    void addInput(ArgumentController *const input) {
         m_inputs.push_back(input);
         emit inputsChanged();
+    }
+
+    [[nodiscard]] QList<ArgumentController *> outputs() const {
+        return m_outputs;
+    }
+
+    void addOutput(ArgumentController *const output) {
+        m_outputs.push_back(output);
+        emit outputsChanged();
     }
 
 signals:
@@ -59,8 +70,10 @@ signals:
     void nameChanged();
 
     void inputsChanged();
+    void outputsChanged();
 
 private:
     QString m_name{};
-    QList<InputController *> m_inputs{};
+    QList<ArgumentController *> m_inputs{};
+    QList<ArgumentController *> m_outputs{};
 };

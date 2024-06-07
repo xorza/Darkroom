@@ -22,8 +22,11 @@ int main(int argc, char *argv[]) {
             Qt::QueuedConnection);
 
 
+
     auto *const appController = new AppController(&app);
     appController->loadSample();
+    qmlRegisterType<NodeController>("com.cssodessa.NodeController", 1, 0, "NodeController");
+    qmlRegisterType<ArgumentController>("com.cssodessa.ArgumentController", 1, 0, "ArgumentController");
     qmlRegisterSingletonInstance("com.cssodessa.AppController", 1, 0, "AppController", appController);
 
     engine.loadFromModule("scenarium_editor", "Main");

@@ -1,7 +1,7 @@
 #include "NodeController.hpp"
 
 
-void InputController::setName(const QString &name) {
+void ArgumentController::setName(const QString &name) {
     if (m_name == name) {
         return;
     }

@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 #set(CMAKE_CXX_SCAN_FOR_MODULES ON)  # enable this for cpp20 modules
 
+
 if (DEFINED ENV{Qt6})
     set(CMAKE_PREFIX_PATH $ENV{Qt6})
     message("-- Qt6 is set to ${CMAKE_PREFIX_PATH}")
