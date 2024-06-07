@@ -19,3 +19,12 @@ void NodeController::setName(const QString &name)  {
     m_name = name;
     emit nameChanged();
 }
+
+void NodeController::setViewPos(const QPointF &viewPos)  {
+    if (m_viewPos == viewPos) {
+        return;
+    }
+
+    m_viewPos = viewPos;
+    emit viewPosChanged();
+}

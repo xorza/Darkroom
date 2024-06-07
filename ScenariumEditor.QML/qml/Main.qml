@@ -9,9 +9,9 @@ Window {
     title: qsTr("Hello World")
     color: "#1e1e1e"
 
-    Column {
+    Item {
         anchors.fill: parent
-        spacing: 10
+
         anchors.margins: 10
 
         Repeater {
