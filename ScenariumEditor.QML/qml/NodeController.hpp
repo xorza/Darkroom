@@ -1,13 +1,16 @@
 #pragma once
 
+
 #include <QtCore>
+
+class QQuickItem;
 
 class ArgumentController : public QObject {
 Q_OBJECT
 
     Q_PROPERTY(QString name READ name NOTIFY nameChanged)
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
-
+    Q_PROPERTY(QObject *item READ item WRITE setItem NOTIFY itemChanged)
 
 public:
     explicit ArgumentController(QObject *parent = nullptr) : QObject(parent) {}
@@ -26,16 +29,24 @@ public:
 
     void setViewPos(const QPointF &viewPos);
 
+    [[nodiscard]] QObject *item() const {
+        return m_item;
+    }
+
+    void setItem(QObject *item);
+
 signals:
 
     void nameChanged();
 
     void viewPosChanged();
 
+    void itemChanged();
+
 private:
     QString m_name;
-
     QPointF m_viewPos{};
+    QObject *m_item{};
 };
 
 
@@ -47,6 +58,7 @@ Q_OBJECT
     Q_PROPERTY(QList<ArgumentController *> outputs READ outputs NOTIFY outputsChanged)
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
 
+    Q_PROPERTY(QObject *item READ item WRITE setItem NOTIFY itemChanged)
 
 public:
     explicit NodeController(QObject *parent = nullptr) : QObject(parent) {}
@@ -59,7 +71,7 @@ public:
 
     void setName(const QString &name);
 
-    [[nodiscard]] QList<ArgumentController *> inputs() const {
+    [[nodiscard]] const QList<ArgumentController *> &inputs() const {
         return m_inputs;
     }
 
@@ -68,7 +80,7 @@ public:
         emit inputsChanged();
     }
 
-    [[nodiscard]] QList<ArgumentController *> outputs() const {
+    [[nodiscard]] const QList<ArgumentController *> &outputs() const {
         return m_outputs;
     }
 
@@ -83,6 +95,12 @@ public:
 
     void setViewPos(const QPointF &viewPos);
 
+    [[nodiscard]] QObject *item() const {
+        return m_item;
+    }
+
+    void setItem(QObject *item);
+
 signals:
 
     void nameChanged();
@@ -93,12 +111,13 @@ signals:
 
     void viewPosChanged();
 
+    void itemChanged();
 
 private:
     QString m_name{};
     QList<ArgumentController *> m_inputs{};
     QList<ArgumentController *> m_outputs{};
     QPointF m_viewPos{};
-
+    QObject *m_item{};
 
 };

@@ -4,6 +4,8 @@
 
 #include <QtCore>
 
+class QQuickWindow;
+
 class AppController : public QObject {
 Q_OBJECT
 
@@ -14,7 +16,7 @@ public:
 
     ~AppController() override = default;
 
-    [[nodiscard]] QList<NodeController *> nodes() const {
+    [[nodiscard]] const QList<NodeController *>& nodes() const {
         return m_nodes;
     }
 
@@ -23,6 +25,10 @@ public:
 signals:
 
     void nodesChanged();
+
+public slots:
+
+    void onRendered(QQuickWindow *window);
 
 private:
     QList<NodeController *> m_nodes{};

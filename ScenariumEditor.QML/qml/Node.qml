@@ -21,6 +21,10 @@ Rectangle {
         anchors.fill: parent
     }
 
+    Component.onCompleted: {
+        nodeController.item = root
+    }
+
     ColumnLayout {
         id: columnLayout
 
@@ -64,6 +68,7 @@ Rectangle {
 
                 ColumnLayout {
                     id: inputsColumn
+                    objectName: "inputsColumn"
                     Layout.alignment: Qt.AlignTop
 
                     Repeater {
@@ -87,8 +92,7 @@ Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter
 
                                     Component.onCompleted: {
-                                        const point = inputPin.mapToItem(root, 0, 0);
-                                        modelData.viewPos = point
+                                        modelData.item = inputPin
                                     }
                                 }
                                 Text {
@@ -138,8 +142,7 @@ Rectangle {
                                     anchors.verticalCenter: parent.verticalCenter
 
                                     Component.onCompleted: {
-                                        const point = outputPin.mapToItem(root, 0, 0);
-                                        modelData.viewPos = point
+                                        modelData.item = outputPin
                                     }
                                 }
                             }

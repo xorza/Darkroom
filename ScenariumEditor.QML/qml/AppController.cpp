@@ -1,5 +1,8 @@
 #include "AppController.hpp"
 
+#include <QQuickItem>
+#include <QQuickWindow>
+
 void AppController::loadSample() {
     auto node = new NodeController(this);
     node->setName("Node 1");
@@ -38,5 +41,24 @@ void AppController::loadSample() {
     m_nodes.append(node);
 
     emit nodesChanged();
+
+}
+
+
+void AppController::onRendered(QQuickWindow *window) {
+    for (auto *const node: m_nodes) {
+        QQuickItem *const nodeRoot = qobject_cast<QQuickItem *>(node->item());
+
+        for (auto *const input: node->inputs()) {
+            QQuickItem *const item = qobject_cast<QQuickItem *>(input->item());
+            auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
+            input->setViewPos(pos);
+        }
+        for (auto *const output: node->outputs()) {
+            QQuickItem *const item = qobject_cast<QQuickItem *>(output->item());
+            auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
+            output->setViewPos(pos);
+        }
+    }
 
 }
