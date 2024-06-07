@@ -52,12 +52,12 @@ void AppController::onRendered(QQuickWindow *window) {
         for (auto *const input: node->inputs()) {
             QQuickItem *const item = qobject_cast<QQuickItem *>(input->item());
             auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-            input->setViewPos(pos);
+            input->setViewPos(pos + node->viewPos());
         }
         for (auto *const output: node->outputs()) {
             QQuickItem *const item = qobject_cast<QQuickItem *>(output->item());
             auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-            output->setViewPos(pos);
+            output->setViewPos(pos + node->viewPos());
         }
     }
 
