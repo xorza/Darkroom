@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use mlua::FromLuaMulti;
+use std::sync::Arc;
 
 use parking_lot::Mutex;
 
@@ -35,7 +35,6 @@ impl LuaCtx {
     }
 }
 
-
 impl Default for LuaCtxInternal {
     fn default() -> Self {
         let lua = Box::new(mlua::Lua::new());
@@ -46,7 +45,9 @@ impl Default for LuaCtxInternal {
 
 impl Drop for LuaCtxInternal {
     fn drop(&mut self) {
-        unsafe { drop(Box::from_raw(self.lua)); }
+        unsafe {
+            drop(Box::from_raw(self.lua));
+        }
     }
 }
 
@@ -83,7 +84,8 @@ mod tests {
             end
         "#;
 
-        tokio::runtime::Runtime::new().unwrap()
+        tokio::runtime::Runtime::new()
+            .unwrap()
             .block_on(async move {
                 let lua = LuaCtx::default();
                 lua.load(script).unwrap();
@@ -96,7 +98,9 @@ mod tests {
                     tokio::spawn(async move {
                         let n = lua.call::<u32>("test").unwrap();
                         assert_eq!(42, n);
-                    }).await.unwrap();
+                    })
+                    .await
+                    .unwrap();
                 }
             });
     }

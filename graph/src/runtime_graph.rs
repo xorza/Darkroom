@@ -251,7 +251,6 @@ impl RuntimeGraph {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use crate::function::FuncLib;

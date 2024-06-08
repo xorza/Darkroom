@@ -247,7 +247,6 @@ impl FuncBehavior {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::hint::black_box;
