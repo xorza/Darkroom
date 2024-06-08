@@ -12,42 +12,15 @@ Window {
 
     onAfterSynchronizing: {
         AppController.afterSynchronizing()
-        connectionCanvas.requestPaint()
+        connectionCanvas.repaintConnections()
     }
 
-
-    Canvas {
+    ConnectionsCanvas {
         id: connectionCanvas
-
         anchors.fill: parent
         anchors.margins: 10
-        contextType: "2d"
 
-        onPaint: {
-            context.save()
-            context.clearRect(0, 0, width, height)
-
-            context.strokeStyle = "green"
-            context.lineWidth = 3
-
-
-            for (var i = 0; i < AppController.connections.length; i++) {
-                var connection = AppController.connections[i]
-                var output = connection.source.outputs[connection.outputIdx]
-                var input = connection.target.inputs[connection.inputIdx]
-
-                context.beginPath()
-                context.moveTo(output.viewPos.x, output.viewPos.y)
-                context.bezierCurveTo(
-                    output.viewPos.x + 40, output.viewPos.y,
-                    input.viewPos.x - 40, input.viewPos.y,
-                    input.viewPos.x, input.viewPos.y
-                )
-                context.stroke()
-            }
-
-            context.restore()
-        }
+        appController: AppController
     }
 
     Item {
@@ -61,7 +34,8 @@ Window {
                 nodeController: modelData
 
                 onViewPosChanged: {
-                    connectionCanvas.requestPaint()
+                    // connectionCanvas.requestPaint()
+                    connectionCanvas.repaintConnections()
                 }
             }
         }

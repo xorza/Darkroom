@@ -5,6 +5,7 @@ import com.cssodessa.NodeController
 
 Rectangle {
     property NodeController nodeController
+
     signal viewPosChanged()
 
     id: root
@@ -61,11 +62,6 @@ Rectangle {
                             nodeController.viewPos = Qt.point(root.x, root.y)
                             viewPosChanged()
                         }
-                    }
-                    onPressed: {
-                    }
-                    onReleased: {
-
                     }
                 }
             }
