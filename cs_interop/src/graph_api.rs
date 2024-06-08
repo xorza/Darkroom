@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use std::mem::ManuallyDrop;
 
 use graph::function::FuncId;
@@ -35,7 +36,7 @@ impl From<&graph::graph::Node> for FfiNode {
 }
 
 #[no_mangle]
-extern "C" fn get_nodes(ctx: *mut u8) -> FfiBuf {
+extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
     // let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
 
     get_context(ctx)
@@ -48,7 +49,7 @@ extern "C" fn get_nodes(ctx: *mut u8) -> FfiBuf {
 }
 
 #[no_mangle]
-extern "C" fn new_node(ctx: *mut u8, func_id: FfiId) -> FfiNode {
+extern "C" fn new_node(ctx: *mut c_void, func_id: FfiId) -> FfiNode {
     let context = get_context(ctx);
     let func_id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();
 
@@ -59,5 +60,3 @@ extern "C" fn new_node(ctx: *mut u8, func_id: FfiId) -> FfiNode {
     context.graph.nodes().last().unwrap().into()
 }
 
-#[no_mangle]
-extern "C" fn dummy1(_a: FfiNode, _b: FfiInput) {}

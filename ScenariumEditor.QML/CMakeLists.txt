@@ -44,12 +44,36 @@ target_link_libraries(scenarium_editor
         PUBLIC
         Qt6::Quick
 )
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_link_libraries(scenarium_editor
+            PUBLIC
+            ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a
+    )
+else ()
+    target_link_libraries(scenarium_editor
+            PUBLIC
+            ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a
+    )
+endif ()
+
+target_include_directories(scenarium_editor PUBLIC lib)
+
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     target_link_options(scenarium_editor
             PUBLIC
             -static -static-libgcc -static-libstdc++
     )
 endif ()
+
+
+add_custom_command(
+        TARGET scenarium_editor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/cs_interop.dll
+        $<TARGET_FILE_DIR:scenarium_editor>
+        COMMENT "Copying DLL file to build directory"
+)
 
 set_target_properties(scenarium_editor PROPERTIES
         MACOSX_BUNDLE_GUI_IDENTIFIER com.cssodessa.scenarium_editor

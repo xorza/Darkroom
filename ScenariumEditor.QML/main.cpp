@@ -1,3 +1,5 @@
+#include "src/CoreContext.hpp"
+
 #include "qml/NodeController.hpp"
 #include "qml/AppController.hpp"
 #include "qml/ConnectionController.hpp"
@@ -10,6 +12,11 @@
 
 
 int main(int argc, char *argv[]) {
+    {
+        auto ctx = Ctx{};
+        auto funcs = ctx.get_funcs();
+    }
+
     QGuiApplication app(argc, argv);
     QQmlApplicationEngine engine;
     QObject::connect(
@@ -31,5 +38,6 @@ int main(int argc, char *argv[]) {
 
     engine.loadFromModule("scenarium_editor", "Main");
 
-    return QGuiApplication::exec();
+    int res = QGuiApplication::exec();
+    return res;
 }

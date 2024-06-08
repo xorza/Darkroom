@@ -1,3 +1,4 @@
+use std::ffi::c_void;
 use crate::{get_context, FfiBuf, FfiId, FfiStr, FfiStrVec};
 
 #[repr(C)]
@@ -21,7 +22,7 @@ struct FfiFunc {
 }
 
 #[no_mangle]
-extern "C" fn get_funcs(ctx: *mut u8) -> FfiBuf {
+extern "C" fn get_funcs(ctx: *mut c_void) -> FfiBuf {
     // let yaml = include_str!("../../test_resources/test_funcs.yml");
     // let func_lib = FuncLib::from_yaml(yaml).unwrap();
 
@@ -58,8 +59,6 @@ impl From<&graph::function::Func> for FfiFunc {
     }
 }
 
-#[no_mangle]
-extern "C" fn dummy2(_a: FfiFunc) {}
 
 #[cfg(test)]
 mod tests {

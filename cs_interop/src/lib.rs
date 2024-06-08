@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![deny(improper_ctypes_definitions)]
 
+use std::ffi::c_void;
 use std::mem::forget;
 use std::str::Utf8Error;
 
@@ -17,9 +18,9 @@ mod graph_api;
 #[repr(C)]
 #[derive(Debug)]
 struct FfiBuf {
-    bytes: *mut u8,
-    length: u32,
-    capacity: u32,
+    data: *mut u8,
+    len: u32,
+    cap: u32,
 }
 
 #[repr(C)]
@@ -35,34 +36,36 @@ struct FfiStr(FfiBuf);
 struct FfiStrVec(FfiBuf);
 
 #[no_mangle]
-extern "C" fn create_context() -> *mut u8 {
+extern "C" fn create_context() -> *mut c_void {
     let mut context = Box::<Context>::default();
     context.invoker.merge(BasicInvoker::default());
     context.invoker.merge(TimersInvoker::default());
     context.func_lib.merge(context.invoker.get_func_lib());
 
-    Box::into_raw(context) as *mut u8
+    Box::into_raw(context) as *mut c_void
 }
 
 #[no_mangle]
-extern "C" fn destroy_context(ctx: *mut u8) {
+extern "C" fn destroy_context(ctx: *mut c_void) {
     unsafe { drop(Box::<Context>::from_raw(ctx as *mut Context)) };
 }
 
-fn get_context<'a>(ctx: *mut u8) -> &'a mut Context {
+#[no_mangle]
+extern "C" fn destroy_ffi_buf(buf: FfiBuf) {
+    drop(buf);
+}
+
+pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
     unsafe { &mut *(ctx as *mut Context) }
 }
 
-#[no_mangle]
-extern "C" fn dummy(_a: FfiBuf, _b: FfiStr, _c: FfiStrVec, _d: FfiId) {}
-
 impl FfiBuf {
     pub fn is_null(&self) -> bool {
-        self.bytes.is_null()
+        self.data.is_null()
     }
 
     pub fn as_slice(&self) -> &[u8] {
-        unsafe { std::slice::from_raw_parts(self.bytes, self.length as usize) }
+        unsafe { std::slice::from_raw_parts(self.data, self.len as usize) }
     }
 
     pub fn as_str(&self) -> Result<&str, Utf8Error> {
@@ -73,16 +76,16 @@ impl FfiBuf {
 impl Default for FfiBuf {
     fn default() -> Self {
         FfiBuf {
-            bytes: std::ptr::null_mut(),
-            length: 0,
-            capacity: 0,
+            data: std::ptr::null_mut(),
+            len: 0,
+            cap: 0,
         }
     }
 }
 
 impl<const N: usize, T> From<[T; N]> for FfiBuf
-where
-    T: Clone,
+    where
+        T: Clone,
 {
     fn from(data: [T; N]) -> Self {
         data.to_vec().into()
@@ -90,8 +93,8 @@ where
 }
 
 impl<T> From<&[T]> for FfiBuf
-where
-    T: Clone,
+    where
+        T: Clone,
 {
     fn from(data: &[T]) -> Self {
         data.to_vec().into()
@@ -113,9 +116,9 @@ impl From<String> for FfiBuf {
         forget(data);
 
         FfiBuf {
-            bytes,
-            length,
-            capacity,
+            data: bytes,
+            len: length,
+            cap: capacity,
         }
     }
 }
@@ -131,13 +134,13 @@ impl TryFrom<FfiBuf> for String {
 impl<T> From<FfiBuf> for Vec<T> {
     fn from(buf: FfiBuf) -> Self {
         let t_size = std::mem::size_of::<T>();
-        if buf.length as usize % t_size != 0 {
+        if buf.len as usize % t_size != 0 {
             panic!("Invalid buffer size");
         }
 
-        let len = buf.length as usize / t_size;
-        let cap = buf.capacity as usize / t_size;
-        let ptr = buf.bytes as *mut T;
+        let len = buf.len as usize / t_size;
+        let cap = buf.cap as usize / t_size;
+        let ptr = buf.data as *mut T;
 
         forget(buf);
 
@@ -155,25 +158,25 @@ impl<T> From<Vec<T>> for FfiBuf {
         forget(data);
 
         FfiBuf {
-            bytes,
-            length,
-            capacity,
+            data: bytes,
+            len: length,
+            cap: capacity,
         }
     }
 }
 
 impl Drop for FfiBuf {
     fn drop(&mut self) {
-        if self.bytes.is_null() {
+        if self.data.is_null() {
             return;
         }
 
-        let len = self.length as usize;
-        let cap = self.capacity as usize;
-        let ptr = self.bytes;
+        let len = self.len as usize;
+        let cap = self.cap as usize;
+        let ptr = self.data;
 
         unsafe {
-            let _ = Vec::from_raw_parts(ptr, len, cap);
+            drop(Vec::from_raw_parts(ptr, len, cap));
         }
     }
 }
@@ -214,8 +217,8 @@ impl FfiStrVec {
 
 impl FromIterator<String> for FfiStrVec {
     fn from_iter<I>(iter: I) -> Self
-    where
-        I: IntoIterator<Item = String>,
+        where
+            I: IntoIterator<Item=String>,
     {
         let data: Vec<String> = iter.into_iter().collect();
         let mut bytes = Vec::<u8>::new();

@@ -12,6 +12,3 @@ imaginarium = { workspace = true }
 graph = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
-
-[build-dependencies]
-csbindgen = "1.9"
