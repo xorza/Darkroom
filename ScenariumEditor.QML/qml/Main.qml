@@ -10,8 +10,44 @@ Window {
     title: qsTr("Hello World")
     color: "#1e1e1e"
 
-    onAfterRendering: {
-        AppController.onRendered(root)
+    onAfterSynchronizing: {
+        AppController.afterSynchronizing()
+        connectionCanvas.requestPaint()
+    }
+
+
+    Canvas {
+        id: connectionCanvas
+
+        anchors.fill: parent
+        anchors.margins: 10
+        contextType: "2d"
+
+        onPaint: {
+            context.save()
+            context.clearRect(0, 0, width, height)
+
+            context.strokeStyle = "green"
+            context.lineWidth = 3
+
+
+            for (var i = 0; i < AppController.connections.length; i++) {
+                var connection = AppController.connections[i]
+                var output = connection.source.outputs[connection.outputIdx]
+                var input = connection.target.inputs[connection.inputIdx]
+
+                context.beginPath()
+                context.moveTo(output.viewPos.x, output.viewPos.y)
+                context.bezierCurveTo(
+                    output.viewPos.x + 40, output.viewPos.y,
+                    input.viewPos.x - 40, input.viewPos.y,
+                    input.viewPos.x, input.viewPos.y
+                )
+                context.stroke()
+            }
+
+            context.restore()
+        }
     }
 
     Item {
@@ -23,29 +59,14 @@ Window {
 
             delegate: Node {
                 nodeController: modelData
+
+                onViewPosChanged: {
+                    connectionCanvas.requestPaint()
+                }
             }
         }
 
-        Canvas {
-            width: 400; height: 200
-            contextType: "2d"
 
-            Path {
-                id: myPath
-                startX: 0; startY: 100
-
-                PathCurve { x: 75; y: 75 }
-                PathCurve { x: 200; y: 150 }
-                PathCurve { x: 325; y: 25 }
-                PathCurve { x: 400; y: 100 }
-            }
-
-            onPaint: {
-                context.strokeStyle = Qt.rgba(.4,.6,.8);
-                context.path = myPath;
-                context.stroke();
-            }
-        }
     }
 
 }

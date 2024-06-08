@@ -57,3 +57,18 @@ void NodeController::setItem(QObject *item) {
     m_item = item;
     emit itemChanged();
 }
+
+void NodeController::updateViewPos() {
+    QQuickItem *const nodeRoot = qobject_cast<QQuickItem *>(this->item());
+
+    for (auto *const input: this->inputs()) {
+        QQuickItem *const item = qobject_cast<QQuickItem *>(input->item());
+        auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
+        input->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+    }
+    for (auto *const output: this->outputs()) {
+        QQuickItem *const item = qobject_cast<QQuickItem *>(output->item());
+        auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
+        output->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+    }
+}

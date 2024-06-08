@@ -5,6 +5,7 @@ import com.cssodessa.NodeController
 
 Rectangle {
     property NodeController nodeController
+    signal viewPosChanged()
 
     id: root
 
@@ -55,10 +56,16 @@ Rectangle {
                     drag.target: root
                     drag.axis: Drag.XAxis | Drag.YAxis
 
+                    onPositionChanged: {
+                        if (drag.active) {
+                            nodeController.viewPos = Qt.point(root.x, root.y)
+                            viewPosChanged()
+                        }
+                    }
                     onPressed: {
                     }
                     onReleased: {
-                        nodeController.viewPos = Qt.point(root.x, root.y)
+
                     }
                 }
             }
@@ -109,7 +116,6 @@ Rectangle {
                         }
                     }
                 }
-
 
                 ColumnLayout {
                     id: outputsColumn

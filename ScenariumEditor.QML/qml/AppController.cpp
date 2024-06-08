@@ -1,5 +1,9 @@
 #include "AppController.hpp"
 
+
+#include "NodeController.hpp"
+#include "ConnectionController.hpp"
+
 #include <QQuickItem>
 #include <QQuickWindow>
 
@@ -33,32 +37,24 @@ void AppController::loadSample() {
     output->setName("value 2");
     node->addOutput(output);
 
-
     output = new ArgumentController(node);
     output->setName("asfahgd 2");
     node->addOutput(output);
 
     m_nodes.append(node);
 
-    emit nodesChanged();
+    auto connection = new ConnectionController(this);
+    connection->setSource(m_nodes[0], 0);
+    connection->setTarget(m_nodes[1], 0);
+    m_connections.append(connection);
 
+
+    emit nodesChanged();
+    emit connectionsChanged();
 }
 
-
-void AppController::onRendered(QQuickWindow *window) {
+[[maybe_unused]] void AppController::afterSynchronizing() {
     for (auto *const node: m_nodes) {
-        QQuickItem *const nodeRoot = qobject_cast<QQuickItem *>(node->item());
-
-        for (auto *const input: node->inputs()) {
-            QQuickItem *const item = qobject_cast<QQuickItem *>(input->item());
-            auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-            input->setViewPos(pos + node->viewPos());
-        }
-        for (auto *const output: node->outputs()) {
-            QQuickItem *const item = qobject_cast<QQuickItem *>(output->item());
-            auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-            output->setViewPos(pos + node->viewPos());
-        }
+        node->updateViewPos();
     }
-
 }

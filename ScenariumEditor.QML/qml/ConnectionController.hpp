@@ -1,30 +1,30 @@
 #pragma once
 
+#include "NodeController.hpp"
 
 #include <QtCore>
 
-class NodeController;
 
 class ConnectionController : public QObject {
 Q_OBJECT
 
     Q_PROPERTY(NodeController *source READ source NOTIFY sourceChanged)
+    Q_PROPERTY(int outputIdx READ outputIdx NOTIFY outputIdxChanged)
     Q_PROPERTY(NodeController *target READ target NOTIFY targetChanged)
     Q_PROPERTY(int inputIdx READ inputIdx NOTIFY inputIdxChanged)
-    Q_PROPERTY(int outputIdx READ outputIdx NOTIFY outputIdxChanged)
 
 public:
-    explicit ConnectionController(
-            NodeController *source, NodeController *target,
-            int inputIdx, int outputIdx,
-            QObject *parent = nullptr
-    )
-            : QObject(parent), m_source(source), m_target(target), m_inputIdx(inputIdx), m_outputIdx(outputIdx) {}
+    explicit ConnectionController(QObject *parent = nullptr)
+            : QObject(parent) {}
 
     ~ConnectionController() override = default;
 
     [[nodiscard]] NodeController *source() const {
         return m_source;
+    }
+
+    [[nodiscard]] int outputIdx() const {
+        return m_outputIdx;
     }
 
     [[nodiscard]] NodeController *target() const {
@@ -35,9 +35,9 @@ public:
         return m_inputIdx;
     }
 
-    [[nodiscard]] int outputIdx() const {
-        return m_outputIdx;
-    }
+    void setSource(NodeController *source, int outputIdx);
+
+    void setTarget(NodeController *target, int inputIdx);
 
 signals:
 

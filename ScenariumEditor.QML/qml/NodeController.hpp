@@ -101,6 +101,8 @@ public:
 
     void setItem(QObject *item);
 
+    void updateViewPos();
+
 signals:
 
     void nameChanged();
