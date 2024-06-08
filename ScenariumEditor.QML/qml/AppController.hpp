@@ -26,6 +26,8 @@ public:
         return m_connections;
     }
 
+    void addNode(NodeController *node);
+
     void loadSample();
 
 signals:
@@ -41,5 +43,5 @@ public slots:
 private:
     QList<NodeController *> m_nodes{};
     QList<ConnectionController *> m_connections{};
-
+    NodeController *m_selectedNode{};
 };

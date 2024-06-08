@@ -35,6 +35,7 @@ public:
 
     void setItem(QQuickItem *item);
 
+
 signals:
 
     void nameChanged();
@@ -63,6 +64,9 @@ Q_OBJECT
 
     Q_PROPERTY(QQuickItem *item READ item WRITE setItem NOTIFY itemChanged)
     Q_PROPERTY(QQuickItem *triggerItem READ triggerItem WRITE setTriggerItem NOTIFY triggerItemChanged)
+
+    Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
+
 
 public:
     explicit NodeController(QObject *parent = nullptr) : QObject(parent) {}
@@ -127,6 +131,13 @@ public:
     }
 
 
+    [[nodiscard]] bool selected() const {
+        return m_selected;
+    }
+
+    void setSelected(bool selected);
+
+
     void updateViewPos();
 
 signals:
@@ -147,6 +158,9 @@ signals:
 
     void eventsChanged();
 
+    void selectedChanged();
+
+
 private:
     QString m_name{};
     QList<ArgumentController *> m_inputs{};
@@ -156,5 +170,5 @@ private:
     QPointF m_triggerViewPos{};
     QQuickItem *m_triggerItem{};
     QList<ArgumentController *> m_events{};
-
+    bool m_selected = false;
 };

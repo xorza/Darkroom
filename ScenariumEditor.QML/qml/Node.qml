@@ -7,6 +7,7 @@ import com.cssodessa.NodeController
 Rectangle {
     property NodeController nodeController
 
+
     signal viewPosChanged()
 
     id: root
@@ -33,7 +34,7 @@ Rectangle {
         spacing: 5
 
         Rectangle {
-            color: "#242424"
+            color: nodeController.selected ? "orange" : "#242424"
             height: 28
             Layout.fillWidth: true
             topRightRadius: 2
@@ -65,7 +66,7 @@ Rectangle {
             }
 
             Text {
-                color: "lightgray"
+                color: nodeController.selected ? "black" : "lightgray"
                 anchors {
                     verticalCenter: parent.verticalCenter
                     horizontalCenter: parent.horizontalCenter
@@ -85,14 +86,16 @@ Rectangle {
                         viewPosChanged()
                     }
                 }
+                onClicked: {
+                    if (!nodeController.selected)
+                        nodeController.selected = true
+                }
             }
         }
 
         GridLayout {
             width: gridLayout.width
             columns: 3
-
-
 
             ColumnLayout {
                 id: inputsColumn
@@ -146,7 +149,6 @@ Rectangle {
 
             Item {
                 Layout.fillWidth: true
-
             }
 
             ColumnLayout {
@@ -247,7 +249,7 @@ Rectangle {
         }
 
         GridLayout {
-            id : gridLayout
+            id: gridLayout
             columns: 2
 
             ToggleButton {

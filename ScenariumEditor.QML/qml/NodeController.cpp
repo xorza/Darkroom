@@ -31,6 +31,15 @@ void ArgumentController::setItem(QQuickItem *item) {
     emit itemChanged();
 }
 
+void NodeController::setSelected(bool selected) {
+    if (m_selected == selected) {
+        return;
+    }
+
+    m_selected = selected;
+    emit selectedChanged();
+}
+
 void NodeController::setName(const QString &name) {
     if (m_name == name) {
         return;
@@ -98,3 +107,4 @@ void NodeController::setTriggerItem(QQuickItem *triggerItem) {
     m_triggerItem = triggerItem;
     emit triggerItemChanged();
 }
+
