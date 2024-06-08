@@ -41,6 +41,10 @@ void AppController::loadSample() {
     output->setName("asfahgd 2");
     node->addOutput(output);
 
+    auto event = new ArgumentController(node);
+    event->setName("event 2");
+    node->addEvent(event);
+
     m_nodes.append(node);
 
     auto connection = new ConnectionController(this);
