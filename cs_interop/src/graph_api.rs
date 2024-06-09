@@ -50,8 +50,6 @@ extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
 
 #[no_mangle]
 unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiBuf) -> FfiNode {
-    println!("func_id.len {} ", func_id.len);
-
     let context = get_context(ctx);
 
     let id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();

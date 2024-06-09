@@ -20,11 +20,9 @@ Rectangle {
         id: rowLayout
         Text {
             Layout.margins: 5
+            Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
             id: textLabel
             text: root.text
-            anchors.centerIn: parent
-            anchors.leftMargin: 30
-            anchors.rightMargin: 30
             color: pressed ? "black" : "darkgray"
         }
     }

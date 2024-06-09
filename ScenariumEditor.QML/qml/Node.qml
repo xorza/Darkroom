@@ -23,6 +23,11 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
+
+        onClicked: {
+            if (!nodeController.selected)
+                nodeController.selected = true
+        }
     }
 
     Component.onCompleted: {
