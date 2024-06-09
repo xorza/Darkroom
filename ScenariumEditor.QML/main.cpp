@@ -15,6 +15,7 @@ int main(int argc, char *argv[]) {
     {
         auto ctx = Ctx{};
         auto funcs = ctx.get_funcs();
+        auto nodes = ctx.get_nodes();
     }
 
     QGuiApplication app(argc, argv);
