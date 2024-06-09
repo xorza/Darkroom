@@ -89,7 +89,7 @@ Node Ctx::new_node(const uuid &func_id) const {
 }
 
 Func::Func(const FfiFunc &ffi_func) {
-    this->id = {Buf(ffi_func.id).to_string()};
+    this->id = uuid{Buf(ffi_func.id).to_string()};
     this->name = Buf(ffi_func.name).to_string();
     this->category = Buf(ffi_func.category).to_string();
     this->behaviour = ffi_func.behaviour;
@@ -100,8 +100,8 @@ Func::Func(const FfiFunc &ffi_func) {
 }
 
 Node::Node(const FfiNode &ffi_node) {
-    this->id = {Buf(ffi_node.id).to_string()};
-    this->func_id = {Buf(ffi_node.func_id).to_string()};
+    this->id = uuid{Buf(ffi_node.id).to_string()};
+    this->func_id = uuid{Buf(ffi_node.func_id).to_string()};
     this->name = Buf(ffi_node.name).to_string();
     this->output = ffi_node.output;
     this->cache_outputs = ffi_node.cache_outputs;

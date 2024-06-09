@@ -53,6 +53,6 @@ struct Ctx {
 
     [[nodiscard]] std::vector<Node> get_nodes() const;
 
-    Node new_node(const uuid &func_id) const;
+    [[nodiscard]] Node new_node(const uuid &func_id) const;
 };
 

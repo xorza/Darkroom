@@ -16,6 +16,10 @@ struct uuid {
         *this = from_string(str);
     }
 
+    uuid(const uuid &other) = default;
+
+    uuid &operator=(const uuid &other) = default;
+
     [[nodiscard]] bool operator==(const uuid &other) const {
         return a == other.a && b == other.b;
     }
