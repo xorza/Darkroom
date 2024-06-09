@@ -5,14 +5,14 @@
 #include <string>
 
 struct uuid {
-    uint64_t a;
-    uint64_t b;
+    uint64_t a = 0;
+    uint64_t b = 0;
 
     uuid() : a(0), b(0) {}
 
     uuid(uint64_t a, uint64_t b) : a(a), b(b) {}
 
-    uuid(const std::string &str) {
+    explicit uuid(const std::string &str) {
         *this = from_string(str);
     }
 
