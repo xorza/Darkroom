@@ -1,9 +1,9 @@
 use std::ffi::c_void;
-use std::mem::ManuallyDrop;
 
 use graph::function::FuncId;
 
 use crate::{get_context, FfiBuf};
+use crate::utils::FfiUuid;
 
 #[repr(C)]
 struct FfiInput {
@@ -49,11 +49,10 @@ extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
 }
 
 #[no_mangle]
-unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiBuf) -> FfiNode {
+unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
     let context = get_context(ctx);
 
-    let id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();
-
+    let id: FuncId = uuid::Uuid::from(func_id).into();
     let func = context.func_lib.func_by_id(id).unwrap();
     let node = graph::graph::Node::from_function(func);
     context.graph.add_node(node);

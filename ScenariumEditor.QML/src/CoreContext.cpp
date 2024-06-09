@@ -34,8 +34,12 @@ __declspec(dllimport) void destroy_context(void *ctx);
 
 __declspec(dllimport) FfiBuf get_funcs(void *ctx);
 __declspec(dllimport) FfiBuf get_nodes(void *ctx);
-__declspec(dllimport) FfiNode new_node(void *ctx, FfiBuf func_id);
+__declspec(dllimport) FfiNode new_node(void *ctx, FfiUuid func_id);
 
+}
+
+FfiUuid to_ffi(const uuid &id) {
+    return FfiUuid{id.a, id.b};
 }
 
 
@@ -78,14 +82,14 @@ std::vector<Node> Ctx::get_nodes() const {
     return result;
 }
 
-Node Ctx::new_node(const std::string &func_id) const {
-    auto buf = Buf{func_id};
-    auto ffi_node = ::new_node(this->ctx, buf.ffi_buf);
+Node Ctx::new_node(const uuid &func_id) const {
+    auto ffi_uuid = to_ffi(func_id);
+    auto ffi_node = ::new_node(this->ctx, ffi_uuid);
     return Node{ffi_node};
 }
 
 Func::Func(const FfiFunc &ffi_func) {
-    this->id = Buf(ffi_func.id).to_string();
+    this->id = {Buf(ffi_func.id).to_string()};
     this->name = Buf(ffi_func.name).to_string();
     this->category = Buf(ffi_func.category).to_string();
     this->behaviour = ffi_func.behaviour;
@@ -96,11 +100,11 @@ Func::Func(const FfiFunc &ffi_func) {
 }
 
 Node::Node(const FfiNode &ffi_node) {
-    this->id = Buf(ffi_node.id).to_string();
-    this->func_id = Buf(ffi_node.func_id).to_string();
+    this->id = {Buf(ffi_node.id).to_string()};
+    this->func_id = {Buf(ffi_node.func_id).to_string()};
     this->name = Buf(ffi_node.name).to_string();
     this->output = ffi_node.output;
     this->cache_outputs = ffi_node.cache_outputs;
     this->inputs = {};
-    this->outputs = {};
+    this->events = {};
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "utils/uuid.hpp"
+
 #include <vector>
 #include <cstdint>
 #include <memory>
@@ -8,7 +10,7 @@
 
 struct FfiFunc;
 struct Func {
-    std::string id;
+    uuid id;
     std::string name;
     std::string category;
     uint32_t behaviour = 0;
@@ -23,13 +25,13 @@ struct Func {
 
 struct FfiNode;
 struct Node {
-    std::string id;
-    std::string func_id;
+    uuid id;
+    uuid func_id;
     std::string name;
     bool output = false;
     bool cache_outputs = false;
     std::vector<std::string> inputs;
-    std::vector<std::string> outputs;
+    std::vector<uuid> events;
 
     Node() = default;
     explicit Node(const FfiNode &ffi_node);
@@ -51,6 +53,6 @@ struct Ctx {
 
     [[nodiscard]] std::vector<Node> get_nodes() const;
 
-    Node new_node(const std::string &func_id) const;
+    Node new_node(const uuid &func_id) const;
 };
 

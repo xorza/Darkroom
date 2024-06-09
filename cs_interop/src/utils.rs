@@ -3,7 +3,7 @@ use crate::FfiBuf;
 
 #[repr(C)]
 #[derive(Debug)]
-struct FfiUuid {
+pub(crate) struct FfiUuid {
     a: u64,
     b: u64,
 }

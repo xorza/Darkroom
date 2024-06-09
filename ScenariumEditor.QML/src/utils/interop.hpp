@@ -14,6 +14,10 @@ struct FfiBuf {
     uint32_t len;
     uint32_t cap;
 };
+struct FfiUuid {
+    uint64_t a;
+    uint64_t b;
+};
 }
 
 
