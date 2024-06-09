@@ -7,34 +7,34 @@
 #include <string>
 
 
-
 class BufferStream {
 private:
-    uint8_t *data = nullptr;
-    uint32_t len = 0;
-    uint32_t pos = 0;
+    uint8_t *_data = nullptr;
+    uint32_t _len = 0;
+    uint32_t _pos = 0;
 
 public:
+    BufferStream(void *data, uint32_t len) : _data(static_cast<uint8_t *>(data)), _len(len) {}
 
     ~BufferStream();
 
-    [[nodiscard]] uint32_t get_len() const {
-        return len;
+    [[nodiscard]] uint32_t len() const {
+        return _len;
     }
 
-    [[nodiscard]] void *get_data() const {
-        return data;
+    [[nodiscard]] void *data() const {
+        return _data;
     }
 
     template<typename T>
     [[maybe_unused]] T read() {
         static_assert(std::is_trivially_copyable<T>::value, "T must be trivially copyable");
-        if (pos + sizeof(T) > len) {
+        if (_pos + sizeof(T) > _len) {
             throw std::runtime_error("BufferStream: out of bounds");
         }
 
-        T val = *reinterpret_cast<T *>(data + pos);
-        pos += sizeof(T);
+        T val = *reinterpret_cast<T *>(_data + _pos);
+        _pos += sizeof(T);
         return val;
     }
 
@@ -43,7 +43,7 @@ public:
     template<typename T>
     [[maybe_unused]] std::vector<T> read_vec() {
         uint32_t vec_len = read<uint32_t>();
-        if (pos + vec_len * sizeof(T) > len) {
+        if (_pos + vec_len * sizeof(T) > _len) {
             throw std::runtime_error("BufferStream: out of bounds");
         }
 
@@ -54,10 +54,6 @@ public:
         }
         return vec;
     }
-
-    std::string read_cstr();
-
-    std::string read_str_buf();
 };
 
 

@@ -6,7 +6,7 @@
 
 extern "C" {
 struct FfiBuf {
-    uint8_t *data;
+    void *data;
     uint32_t len;
     uint32_t cap;
 
@@ -29,22 +29,60 @@ struct Buf {
         destroy_ffi_buf(ffi_buf);
     }
 
-//    Buf(const Buf &other) = delete;
-//
-//    Buf &operator=(const Buf &other) = delete;
-
     [[nodiscard]] uint32_t len() const {
         return ffi_buf.len;
     }
 
-    [[nodiscard]] uint8_t *data() const {
+    [[nodiscard]] void *data() const {
         return ffi_buf.data;
     }
 
     [[nodiscard]] std::string to_string() const {
+        if (len() == 0) {
+            return {};
+        }
+
         return std::string(reinterpret_cast<char *>(data()), len());
     }
+
+
+    template<class T>
+    [[nodiscard]] std::vector<T> read_vec() const {
+        if (len() == 0) {
+            return {};
+        }
+
+        assert(ffi_buf.len % sizeof(T) == 0); // check that the buffer is a multiple of the size of T
+
+        auto len = ffi_buf.len / sizeof(T);
+        auto data = static_cast <T *>(ffi_buf.data);
+
+        std::vector<T> result;
+        result.reserve(len);
+        for (uint32_t i = 0; i < len; i++) {
+            result.push_back(data[i]);
+        }
+        return result;
+    }
 };
+
+template<>
+std::vector<std::string> Buf::read_vec<std::string>() const {
+    if (len() == 0) {
+        return {};
+    }
+
+    BufferStream stream{data(), len()};
+    auto len = stream.read<uint32_t>();
+
+    std::vector<std::string> result{};
+    result.reserve(len);
+    for (uint32_t i = 0; i < len; i++) {
+        result.push_back(stream.read<std::string>());
+    }
+
+    return result;
+}
 
 struct FfiFunc {
     Buf id;
@@ -70,31 +108,30 @@ Ctx::~Ctx() {
 std::vector<Func> Ctx::get_funcs() const {
     Buf buf = Buf{::get_funcs(this->ctx)};
 
-    assert(buf.len() % sizeof(FfiFunc) == 0); // check that the buffer is a multiple of the size of FfiFunc
-    auto len = buf.len() / sizeof(FfiFunc);
-    auto funcs = static_cast <FfiFunc *>( static_cast <void *>(buf.data()));
+    auto funcs = buf.read_vec<FfiFunc>();
 
     std::vector<Func> result;
-    result.reserve(len);
+    result.reserve(funcs.size());
 
-    for (uint32_t i = 0; i < len; i++) {
-        auto ffi_func = funcs[i];
+    for (uint32_t i = 0; i < funcs.size(); i++) {
+        auto ffi_func = &funcs[i];
+
+        auto inputs = ffi_func->inputs.read_vec<std::string>();
+        auto outputs = ffi_func->outputs.read_vec<std::string>();
+        auto events = ffi_func->events.read_vec<std::string>();
+
         Func func{
-                ffi_func.id.to_string(),
-                ffi_func.name.to_string(),
-                ffi_func.category.to_string(),
-                ffi_func.behaviour,
-                ffi_func.output,
-                {},
-                {},
-                {}
-//                BufferStream{ffi_func->inputs.data(), ffi_func->inputs.len()}.read_strings(),
-//                BufferStream{ffi_func->outputs.data(), ffi_func->outputs.len()}.read_strings(),
-//                BufferStream{ffi_func->events.data(), ffi_func->events.len()}.read_strings()
+                ffi_func->id.to_string(),
+                ffi_func->name.to_string(),
+                ffi_func->category.to_string(),
+                ffi_func->behaviour,
+                ffi_func->output,
+                inputs,
+                outputs,
+                events,
         };
         result.push_back(func);
     }
-
 
     return result;
 }
