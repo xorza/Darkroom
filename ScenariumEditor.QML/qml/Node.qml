@@ -60,7 +60,7 @@ Rectangle {
                 y: -5
 
                 Component.onCompleted: {
-                    nodeController.triggerItem = triggerPin
+                    nodeController.trigger.item = triggerPin
                 }
 
                 MouseArea {
@@ -92,8 +92,9 @@ Rectangle {
                     }
                 }
                 onClicked: {
-                    if (!nodeController.selected)
+                    if (!nodeController.selected) {
                         nodeController.selected = true
+                    }
                 }
             }
         }

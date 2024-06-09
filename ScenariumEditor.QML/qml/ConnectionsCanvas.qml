@@ -26,8 +26,15 @@ Canvas {
 
         for (let i = 0; i < appController.connections.length; i++) {
             const connection = appController.connections[i];
-            const output = connection.source.outputs[connection.outputIdx];
-            const input = connection.target.inputs[connection.inputIdx];
+            let input;
+            let output;
+            if (connection.connectionType === ConnectionController.ConnectionType.Data) {
+                output = connection.source.outputs[connection.outputIdx];
+                input = connection.target.inputs[connection.inputIdx];
+            } else {
+                output = connection.source.events[connection.eventIdx];
+                input = connection.target.trigger;
+            }
 
             context.beginPath()
             context.moveTo(output.viewPos.x, output.viewPos.y)

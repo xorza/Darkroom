@@ -52,8 +52,13 @@ void AppController::loadSample() {
 
     {
         auto connection = new ConnectionController(this);
-        connection->setSource(m_nodes[0], 0);
-        connection->setTarget(m_nodes[1], 0);
+        connection->setSourceOutput(m_nodes[0], 0);
+        connection->setTargetInput(m_nodes[1], 0);
+        m_connections.append(connection);
+
+        connection = new ConnectionController(this, ConnectionController::ConnectionType::Event);
+        connection->setSourceEvent(m_nodes[1], 0);
+        connection->setTargetTrigger(m_nodes[0]);
         m_connections.append(connection);
     }
 
@@ -69,7 +74,7 @@ void AppController::loadSample() {
     }
 }
 
-void AppController::addNode(NodeController *node)  {
+void AppController::addNode(NodeController *node) {
     m_nodes.append(node);
 
     connect(node, &NodeController::selectedChanged, this, [this, node]() {

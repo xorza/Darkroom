@@ -58,18 +58,16 @@ Q_OBJECT
     Q_PROPERTY(QList<ArgumentController *> inputs READ inputs NOTIFY inputsChanged)
     Q_PROPERTY(QList<ArgumentController *> outputs READ outputs NOTIFY outputsChanged)
     Q_PROPERTY(QList<ArgumentController *> events READ events NOTIFY eventsChanged)
+    Q_PROPERTY(ArgumentController *trigger READ trigger NOTIFY triggerChanged)
 
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
-    Q_PROPERTY(QPointF triggerViewPos READ triggerViewPos WRITE setTriggerViewPos NOTIFY triggerViewPosChanged)
-
     Q_PROPERTY(QQuickItem *item READ item WRITE setItem NOTIFY itemChanged)
-    Q_PROPERTY(QQuickItem *triggerItem READ triggerItem WRITE setTriggerItem NOTIFY triggerItemChanged)
 
     Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
 
 
 public:
-    explicit NodeController(QObject *parent = nullptr) : QObject(parent) {}
+    explicit NodeController(QObject *parent = nullptr) ;
 
     ~NodeController() override = default;
 
@@ -109,17 +107,6 @@ public:
 
     void setItem(QQuickItem *item);
 
-    [[nodiscard]] QPointF triggerViewPos() const {
-        return m_triggerViewPos;
-    }
-
-    void setTriggerViewPos(const QPointF &triggerViewPos);
-
-    [[nodiscard]] QQuickItem *triggerItem() const {
-        return m_triggerItem;
-    }
-
-    void setTriggerItem(QQuickItem *triggerItem);
 
     [[nodiscard]] const QList<ArgumentController *> &events() const {
         return m_events;
@@ -137,6 +124,12 @@ public:
 
     void setSelected(bool selected);
 
+    [[nodiscard]] ArgumentController *trigger() const {
+        return m_trigger;
+    }
+
+
+
 
     void updateViewPos();
 
@@ -152,13 +145,11 @@ signals:
 
     void itemChanged();
 
-    void triggerViewPosChanged();
-
-    void triggerItemChanged();
-
     void eventsChanged();
 
     void selectedChanged();
+
+    void triggerChanged();
 
 
 private:
@@ -167,8 +158,7 @@ private:
     QList<ArgumentController *> m_outputs{};
     QPointF m_viewPos{};
     QQuickItem *m_item{};
-    QPointF m_triggerViewPos{};
-    QQuickItem *m_triggerItem{};
     QList<ArgumentController *> m_events{};
     bool m_selected = false;
+    ArgumentController *m_trigger{};
 };

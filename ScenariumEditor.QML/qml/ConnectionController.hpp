@@ -12,10 +12,22 @@ Q_OBJECT
     Q_PROPERTY(int outputIdx READ outputIdx NOTIFY outputIdxChanged)
     Q_PROPERTY(NodeController *target READ target NOTIFY targetChanged)
     Q_PROPERTY(int inputIdx READ inputIdx NOTIFY inputIdxChanged)
+    Q_PROPERTY(int eventIdx READ eventIdx NOTIFY eventIdxChanged)
+    Q_PROPERTY(ConnectionType connectionType READ connectionType NOTIFY connectionTypeChanged)
 
 public:
-    explicit ConnectionController(QObject *parent = nullptr)
+    enum class ConnectionType {
+        Data,
+        Event
+    };
+
+    Q_ENUM(ConnectionType)
+
+    explicit ConnectionController(QObject *parent)
             : QObject(parent) {}
+
+    ConnectionController(QObject *parent, ConnectionType connectionType)
+            : QObject(parent), m_connectionType(connectionType) {}
 
     ~ConnectionController() override = default;
 
@@ -35,9 +47,22 @@ public:
         return m_inputIdx;
     }
 
-    void setSource(NodeController *source, int outputIdx);
+    [[nodiscard]] int eventIdx() const {
+        return m_eventIdx;
+    }
 
-    void setTarget(NodeController *target, int inputIdx);
+
+    void setSourceOutput(NodeController *source, int outputIdx);
+
+    void setTargetInput(NodeController *target, int inputIdx);
+
+    void setSourceEvent(NodeController *source, int eventIdx);
+
+    void setTargetTrigger(NodeController *target);
+
+    [[nodiscard]] ConnectionType connectionType() const {
+        return m_connectionType;
+    }
 
 signals:
 
@@ -49,9 +74,15 @@ signals:
 
     void outputIdxChanged();
 
+    void eventIdxChanged();
+
+    void connectionTypeChanged();
+
 private:
     NodeController *m_source = nullptr;
     NodeController *m_target = nullptr;
     int m_inputIdx = 0;
     int m_outputIdx = 0;
+    int m_eventIdx = 0;
+    ConnectionType m_connectionType = ConnectionType::Data;
 };

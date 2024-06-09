@@ -3,6 +3,11 @@
 #include <QQuickItem>
 
 
+NodeController::NodeController(QObject *parent) : QObject(parent) {
+    this->m_trigger = new ArgumentController(this);
+    trigger()->setName("Trigger");
+}
+
 void ArgumentController::setName(const QString &name) {
     if (m_name == name) {
         return;
@@ -67,6 +72,7 @@ void NodeController::setItem(QQuickItem *item) {
     emit itemChanged();
 }
 
+
 void NodeController::updateViewPos() {
     QQuickItem *const nodeRoot = qobject_cast<QQuickItem *>(this->item());
 
@@ -85,26 +91,8 @@ void NodeController::updateViewPos() {
         auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
         event->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
     }
-    QQuickItem *const item = this->triggerItem();
+    QQuickItem *const item = this->trigger()->item();
     auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-    this->setTriggerViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
-}
-
-void NodeController::setTriggerViewPos(const QPointF &triggerViewPos) {
-    if (m_triggerViewPos == triggerViewPos) {
-        return;
-    }
-
-    m_triggerViewPos = triggerViewPos;
-    emit triggerViewPosChanged();
-}
-
-void NodeController::setTriggerItem(QQuickItem *triggerItem) {
-    if (m_triggerItem == triggerItem) {
-        return;
-    }
-
-    m_triggerItem = triggerItem;
-    emit triggerItemChanged();
+    this->trigger()->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
 }
 
