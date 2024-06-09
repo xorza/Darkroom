@@ -62,32 +62,43 @@ target_compile_options(scenarium_editor PRIVATE
         -Wno-unused-const-variable
 )
 
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_link_libraries(scenarium_editor
-            PUBLIC
-            ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a
-    )
-else ()
-    target_link_libraries(scenarium_editor
-            PUBLIC
-            ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a
-    )
-endif ()
-
-target_include_directories(scenarium_editor PUBLIC lib)
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     target_link_options(scenarium_editor
             PUBLIC
             -static -static-libgcc -static-libstdc++
     )
+
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a")
+        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/cs_interop.dll")
+    else ()
+        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a")
+        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/cs_interop.dll")
+    endif ()
+elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/debug/libcs_interop.dylib")
+        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/debug/libcs_interop.dylib")
+    else ()
+        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
+        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
+    endif ()
 endif ()
+
+
+target_link_libraries(scenarium_editor
+        PUBLIC
+        ${LIBB_CS_INTEROP_FILE}
+)
+
+target_include_directories(scenarium_editor PUBLIC lib)
 
 
 add_custom_command(
         TARGET scenarium_editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/cs_interop.dll
+        ${LIBB_CS_INTEROP_DYLIB_FILE}
         $<TARGET_FILE_DIR:scenarium_editor>
         COMMENT "Copying DLL file to build directory"
 )
@@ -107,7 +118,6 @@ install(TARGETS scenarium_editor
 )
 
 
-
 # Tests
 include(FetchContent)
 FetchContent_Declare(
@@ -121,7 +131,7 @@ file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
 add_executable(tests ${SRC_FILES} ${TEST_SRC_FILES})
 target_link_libraries(tests PRIVATE
         Catch2::Catch2WithMain
-        ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a
+        ${LIBB_CS_INTEROP_FILE}
 )
 #list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)

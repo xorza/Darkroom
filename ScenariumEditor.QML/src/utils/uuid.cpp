@@ -3,9 +3,9 @@
 #include "interop.hpp"
 
 extern "C" {
-__declspec(dllimport) FfiUuid uuid_new_v4_extern();
-__declspec(dllimport) FfiUuid uuid_from_string_extern(FfiBuf str);
-__declspec(dllimport) FfiBuf uuid_to_string_extern(FfiUuid uuid);
+DLL_IMPORT FfiUuid uuid_new_v4_extern();
+DLL_IMPORT FfiUuid uuid_from_string_extern(FfiBuf str);
+DLL_IMPORT FfiBuf uuid_to_string_extern(FfiUuid uuid);
 }
 
 uuid uuid::new_v4() {

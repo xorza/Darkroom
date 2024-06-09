@@ -8,6 +8,12 @@
 #include <vector>
 #include <cassert>
 
+#ifdef _WIN32
+#define DLL_IMPORT __declspec(dllimport)
+#else
+#define DLL_IMPORT
+#endif
+
 extern "C" {
 struct FfiBuf {
     void *data;

@@ -29,12 +29,12 @@ struct FfiNode {
     FfiBuf outputs;
 };
 
-__declspec(dllimport) void *create_context();
-__declspec(dllimport) void destroy_context(void *ctx);
+DLL_IMPORT void *create_context();
+DLL_IMPORT void destroy_context(void *ctx);
 
-__declspec(dllimport) FfiBuf get_funcs(void *ctx);
-__declspec(dllimport) FfiBuf get_nodes(void *ctx);
-__declspec(dllimport) FfiNode new_node(void *ctx, FfiUuid func_id);
+DLL_IMPORT FfiBuf get_funcs(void *ctx);
+DLL_IMPORT FfiBuf get_nodes(void *ctx);
+DLL_IMPORT FfiNode new_node(void *ctx, FfiUuid func_id);
 
 }
 

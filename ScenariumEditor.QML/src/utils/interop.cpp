@@ -2,7 +2,7 @@
 
 
 extern "C" {
-__declspec(dllimport) void destroy_ffi_buf(FfiBuf buf);
+DLL_IMPORT void destroy_ffi_buf(FfiBuf buf);
 }
 
 
