@@ -34,7 +34,8 @@ DLL_IMPORT void destroy_context(void *ctx);
 
 DLL_IMPORT FfiBuf get_funcs(void *ctx);
 DLL_IMPORT FfiBuf get_nodes(void *ctx);
-DLL_IMPORT FfiNode new_node(void *ctx, FfiUuid func_id);
+DLL_IMPORT FfiNode add_node(void *ctx, FfiUuid func_id);
+DLL_IMPORT FfiNode remove_node(void *ctx, FfiUuid node_id);
 
 }
 
@@ -82,10 +83,15 @@ std::vector<Node> Ctx::get_nodes() const {
     return result;
 }
 
-Node Ctx::new_node(const uuid &func_id) const {
+Node Ctx::add_node(const uuid &func_id) const {
     auto ffi_uuid = to_ffi(func_id);
-    auto ffi_node = ::new_node(this->ctx, ffi_uuid);
+    auto ffi_node = ::add_node(this->ctx, ffi_uuid);
     return Node{ffi_node};
+}
+
+void Ctx::remove_node(const uuid &node_id) const {
+    auto ffi_uuid = to_ffi(node_id);
+    ::remove_node(this->ctx, ffi_uuid);
 }
 
 Func::Func(const FfiFunc &ffi_func) {

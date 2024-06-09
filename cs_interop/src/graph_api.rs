@@ -1,6 +1,7 @@
 use std::ffi::c_void;
 
 use graph::function::FuncId;
+use graph::graph::NodeId;
 
 use crate::{get_context, FfiBuf};
 use crate::utils::FfiUuid;
@@ -49,7 +50,7 @@ extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
 }
 
 #[no_mangle]
-unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
+unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
     let context = get_context(ctx);
 
     let id: FuncId = uuid::Uuid::from(func_id).into();
@@ -60,3 +61,10 @@ unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
     context.graph.nodes().last().unwrap().into()
 }
 
+#[no_mangle]
+unsafe extern "C" fn remove_node(ctx: *mut c_void, node_id: FfiUuid) {
+    let context = get_context(ctx);
+
+    let node_id: NodeId = uuid::Uuid::from(node_id).into();
+    context.graph.remove_node_by_id(node_id);
+}

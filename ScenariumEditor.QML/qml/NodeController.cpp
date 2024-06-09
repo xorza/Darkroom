@@ -4,8 +4,10 @@
 
 
 NodeController::NodeController(QObject *parent) : QObject(parent) {
-    this->m_trigger = new ArgumentController(this);
-    trigger()->setName("Trigger");
+    m_trigger = new ArgumentController(this);
+    m_trigger->setType(ArgumentController::ArgumentType::Trigger);
+    m_trigger->setIndex(0);
+    m_trigger->setName("Trigger");
 }
 
 void ArgumentController::setName(const QString &name) {
@@ -33,7 +35,10 @@ void ArgumentController::setItem(QQuickItem *item) {
     }
 
     m_item = item;
-    emit itemChanged();
+}
+
+void ArgumentController::selected() {
+
 }
 
 void NodeController::setSelected(bool selected) {

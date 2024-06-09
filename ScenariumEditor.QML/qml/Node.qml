@@ -50,12 +50,12 @@ Rectangle {
                 id: triggerPin
                 width: 10
                 height: 10
+                radius: 5
                 color: triggerMouseArea.containsMouse
                     ? triggerMouseArea.containsPress
                         ? Qt.darker("yellow")
                         : Qt.lighter("yellow")
                     : "yellow"
-                radius: 5
                 x: -5
                 y: -5
 
@@ -67,6 +67,10 @@ Rectangle {
                     id: triggerMouseArea
                     anchors.fill: parent
                     hoverEnabled: true
+
+                    onClicked: {
+                        nodeController.trigger.selected()
+                    }
                 }
             }
 

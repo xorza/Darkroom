@@ -10,9 +10,21 @@ Q_OBJECT
 
     Q_PROPERTY(QString name READ name NOTIFY nameChanged)
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
-    Q_PROPERTY(QQuickItem *item READ item WRITE setItem NOTIFY itemChanged)
+    Q_PROPERTY(QQuickItem *item READ item WRITE setItem)
+
+    Q_PROPERTY(ArgumentType type READ type)
+
 
 public:
+    enum class ArgumentType {
+        Input,
+        Output,
+        Event,
+        Trigger
+    };
+
+    Q_ENUM(ArgumentType)
+
     explicit ArgumentController(QObject *parent = nullptr) : QObject(parent) {}
 
     ~ArgumentController() override = default;
@@ -35,6 +47,22 @@ public:
 
     void setItem(QQuickItem *item);
 
+    [[nodiscard]] ArgumentType type() const {
+        return m_type;
+    }
+
+    void setType(ArgumentType type) {
+        m_type = type;
+    }
+
+    [[nodiscard]] uint32_t index() const {
+        return idx;
+    }
+
+    void setIndex(uint32_t index) {
+        idx = index;
+    }
+
 
 signals:
 
@@ -42,12 +70,19 @@ signals:
 
     void viewPosChanged();
 
-    void itemChanged();
+    void selectedChenged();
+
+public slots:
+
+    void selected();
+
 
 private:
-    QString m_name;
+    QString m_name{};
     QPointF m_viewPos{};
     QQuickItem *m_item{};
+    ArgumentType m_type{};
+    uint32_t idx{};
 };
 
 
@@ -67,7 +102,7 @@ Q_OBJECT
 
 
 public:
-    explicit NodeController(QObject *parent = nullptr) ;
+    explicit NodeController(QObject *parent = nullptr);
 
     ~NodeController() override = default;
 
@@ -82,6 +117,9 @@ public:
     }
 
     void addInput(ArgumentController *const input) {
+        input->setType(ArgumentController::ArgumentType::Input);
+        input->setIndex(m_inputs.size());
+
         m_inputs.push_back(input);
         emit inputsChanged();
     }
@@ -91,6 +129,9 @@ public:
     }
 
     void addOutput(ArgumentController *const output) {
+        output->setType(ArgumentController::ArgumentType::Output);
+        output->setIndex(m_outputs.size());
+
         m_outputs.push_back(output);
         emit outputsChanged();
     }
@@ -113,6 +154,8 @@ public:
     }
 
     void addEvent(ArgumentController *const event) {
+        event->setType(ArgumentController::ArgumentType::Event);
+        event->setIndex(m_events.size());
         m_events.push_back(event);
         emit eventsChanged();
     }
@@ -127,8 +170,6 @@ public:
     [[nodiscard]] ArgumentController *trigger() const {
         return m_trigger;
     }
-
-
 
 
     void updateViewPos();
@@ -150,6 +191,8 @@ signals:
     void selectedChanged();
 
     void triggerChanged();
+
+    void argumentSelected(ArgumentController *arg);
 
 
 private:

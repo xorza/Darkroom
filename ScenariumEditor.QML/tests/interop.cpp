@@ -20,15 +20,31 @@ TEST_CASE("Uuid tests", "[uuid]") {
 }
 
 
-TEST_CASE("New node 1", "[context]") {
+TEST_CASE("add node", "[context]") {
     auto ctx = Ctx{};
 
     auto nodes1 = ctx.get_nodes();
+    REQUIRE(nodes1.empty());
 
     auto funcs = ctx.get_funcs();
-    auto new_node = ctx.new_node(funcs[0].id);
+    REQUIRE(!funcs.empty());
 
-    auto nodes2 = ctx.get_nodes();
+    auto new_node = ctx.add_node(funcs[0].id);
 
-    REQUIRE(nodes1.size() + 1 == nodes2.size());
+    auto nodes = ctx.get_nodes();
+
+    REQUIRE(1 == nodes.size());
+}
+
+
+TEST_CASE("remove node", "[context]") {
+    auto ctx = Ctx{};
+
+    auto funcs = ctx.get_funcs();
+    auto new_node = ctx.add_node(funcs[0].id);
+    ctx.remove_node(new_node.id);
+
+    auto nodes = ctx.get_nodes();
+
+    REQUIRE(nodes.empty());
 }
