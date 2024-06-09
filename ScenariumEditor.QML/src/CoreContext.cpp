@@ -1,91 +1,12 @@
 #include "CoreContext.hpp"
 
-#include "BufferStream.hpp"
+#include "utils/BufferStream.hpp"
+#include "utils/interop.hpp"
 
 #include <cassert>
 
+
 extern "C" {
-struct FfiBuf {
-    void *data;
-    uint32_t len;
-    uint32_t cap;
-
-};
-}
-
-
-struct Buf {
-    FfiBuf ffi_buf;
-    bool owns_data = true;
-
-    explicit Buf(FfiBuf ffi_buf) : ffi_buf(ffi_buf), owns_data(false) {}
-
-    explicit Buf(const std::string &str) {
-        ffi_buf.len = str.size();
-        ffi_buf.cap = str.size();
-        ffi_buf.data = malloc(ffi_buf.len);
-        memcpy(ffi_buf.data, str.data(), ffi_buf.len);
-        owns_data = true;
-    }
-
-
-    ~Buf();
-
-    [[nodiscard]] uint32_t len() const {
-        return ffi_buf.len;
-    }
-
-    [[nodiscard]] void *data() const {
-        return ffi_buf.data;
-    }
-
-    [[nodiscard]] std::string to_string() const {
-        if (len() == 0) {
-            return {};
-        }
-
-        return std::string(reinterpret_cast<char *>(data()), len());
-    }
-
-
-    template<class T>
-    [[nodiscard]] std::vector<T> read_vec() const {
-        if (len() == 0) {
-            return {};
-        }
-
-        assert(ffi_buf.len % sizeof(T) == 0); // check that the buffer is a multiple of the size of T
-
-        auto len = ffi_buf.len / sizeof(T);
-        auto data = static_cast <T *>(ffi_buf.data);
-
-        std::vector<T> result;
-        result.reserve(len);
-        for (uint32_t i = 0; i < len; i++) {
-            result.push_back(data[i]);
-        }
-        return result;
-    }
-};
-
-
-template<>
-std::vector<std::string> Buf::read_vec<std::string>() const {
-    if (len() == 0) {
-        return {};
-    }
-
-    BufferStream stream{data(), len()};
-    auto len = stream.read<uint32_t>();
-
-    std::vector<std::string> result{};
-    result.reserve(len);
-    for (uint32_t i = 0; i < len; i++) {
-        result.push_back(stream.read<std::string>());
-    }
-
-    return result;
-}
 
 struct FfiFunc {
     FfiBuf id;
@@ -98,9 +19,6 @@ struct FfiFunc {
     FfiBuf events;
 };
 
-
-
-extern "C" {
 struct FfiNode {
     FfiBuf id;
     FfiBuf func_id;
@@ -113,25 +31,11 @@ struct FfiNode {
 
 __declspec(dllimport) void *create_context();
 __declspec(dllimport) void destroy_context(void *ctx);
-__declspec(dllimport) void destroy_ffi_buf(FfiBuf buf);
 
 __declspec(dllimport) FfiBuf get_funcs(void *ctx);
 __declspec(dllimport) FfiBuf get_nodes(void *ctx);
 __declspec(dllimport) FfiNode new_node(void *ctx, FfiBuf func_id);
 
-}
-
-Buf::~Buf() {
-    if (owns_data) {
-        if (ffi_buf.data != nullptr) {
-            free(ffi_buf.data);
-        }
-        ffi_buf.data = nullptr;
-        ffi_buf.len = 0;
-        ffi_buf.cap = 0;
-    } else {
-        destroy_ffi_buf(ffi_buf);
-    }
 }
 
 

@@ -22,6 +22,7 @@ qt_policy(SET QTP0001 NEW)
 
 file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
 qt_add_executable(scenarium_editor ${SRC_FILES} main.cpp)
+set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
 
 file(GLOB_RECURSE QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.qml)
 file(GLOB_RECURSE SRC_QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.hpp qml/*.cpp)
@@ -43,6 +44,22 @@ qt_add_qml_module(scenarium_editor
 target_link_libraries(scenarium_editor
         PUBLIC
         Qt6::Quick
+)
+target_compile_options(scenarium_editor PRIVATE
+        #-fno-exceptions
+        -fno-rtti
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+        -Wno-unused-parameter
+        -Wno-unused-variable
+        -Wno-unused-function
+        -Wno-unused-but-set-variable
+        -Wno-unused-value
+        -Wno-unused-local-typedefs
+        #-Wno-unused-private-field
+        -Wno-unused-const-variable
 )
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -88,3 +105,25 @@ install(TARGETS scenarium_editor
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+
+
+# Tests
+include(FetchContent)
+FetchContent_Declare(
+        catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.6.0
+)
+FetchContent_MakeAvailable(catch2)
+
+file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
+add_executable(tests ${SRC_FILES} ${TEST_SRC_FILES})
+target_link_libraries(tests PRIVATE
+        Catch2::Catch2WithMain
+        ${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a
+)
+#list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(CTest)
+include(Catch)
+catch_discover_tests(tests)

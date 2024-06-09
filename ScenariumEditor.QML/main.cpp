@@ -1,4 +1,5 @@
 #include "src/CoreContext.hpp"
+#include "src/utils/uuid.hpp"
 
 #include "qml/NodeController.hpp"
 #include "qml/AppController.hpp"
@@ -12,12 +13,6 @@
 
 
 int main(int argc, char *argv[]) {
-    {
-        auto ctx = Ctx{};
-        auto funcs = ctx.get_funcs();
-        auto new_node = ctx.new_node(funcs[0].id);
-        auto nodes = ctx.get_nodes();
-    }
 
     QGuiApplication app(argc, argv);
     QQmlApplicationEngine engine;

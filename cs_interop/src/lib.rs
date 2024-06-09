@@ -2,6 +2,7 @@
 #![deny(improper_ctypes_definitions)]
 
 use std::ffi::c_void;
+use std::fmt::{Display, Formatter};
 use std::mem::forget;
 use std::str::Utf8Error;
 
@@ -14,6 +15,7 @@ use graph::invoke::Invoker;
 
 mod func_lib_api;
 mod graph_api;
+mod utils;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -62,6 +64,12 @@ impl FfiBuf {
 
     pub fn to_uuid(&self) -> uuid::Uuid {
         self.as_str().unwrap().parse().unwrap()
+    }
+}
+
+impl Display for FfiBuf {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str().unwrap())
     }
 }
 
