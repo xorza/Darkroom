@@ -12,13 +12,13 @@ struct FfiInput {
 
 #[repr(C)]
 struct FfiNode {
-    id: FfiBuf,
-    func_id: FfiBuf,
-    name: FfiBuf,
+    id: FfiBuf,             // string
+    func_id: FfiBuf,        // string
+    name: FfiBuf,           // string
     is_output: bool,
     cache_outputs: bool,
-    inputs: FfiBuf,
-    events: FfiBuf,
+    inputs: FfiBuf,         // vector of
+    events: FfiBuf,         // vector of ids of subscriber nodes
 }
 
 impl From<&graph::graph::Node> for FfiNode {

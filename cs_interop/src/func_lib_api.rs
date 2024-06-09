@@ -1,5 +1,5 @@
 use std::ffi::c_void;
-use crate::{get_context, FfiBuf, FfiId, FfiStr, FfiStrVec};
+use crate::{get_context, FfiBuf};
 
 #[repr(C)]
 #[derive(Debug)]
@@ -11,14 +11,14 @@ pub enum FuncBehavior {
 #[repr(C)]
 #[derive(Debug)]
 struct FfiFunc {
-    id: FfiId,
-    name: FfiStr,
-    category: FfiStr,
+    id: FfiBuf,                 // string
+    name: FfiBuf,               // string
+    category: FfiBuf,           // string
     behaviour: FuncBehavior,
     is_output: bool,
-    inputs: FfiBuf,
-    outputs: FfiBuf,
-    events: FfiStrVec,
+    inputs: FfiBuf,             // vector of
+    outputs: FfiBuf,            // vector of
+    events: FfiBuf,             // vector of strings
 }
 
 #[no_mangle]
@@ -36,7 +36,7 @@ extern "C" fn get_funcs(ctx: *mut c_void) -> FfiBuf {
 
 impl From<&graph::function::Func> for FfiFunc {
     fn from(func: &graph::function::Func) -> Self {
-        let events: FfiStrVec = FfiStrVec::from_iter(
+        let events: FfiBuf = FfiBuf::from_iter(
             func.events
                 .iter()
                 .map(|event| event.name.clone())

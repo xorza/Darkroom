@@ -14,12 +14,22 @@ struct FfiBuf {
 }
 
 
-struct RBuf {
+struct Buf {
     FfiBuf ffi_buf;
+    bool owns_data = true;
 
-    explicit RBuf(FfiBuf ffi_buf) : ffi_buf(ffi_buf) {}
+    explicit Buf(FfiBuf ffi_buf) : ffi_buf(ffi_buf), owns_data(false) {}
 
-    ~RBuf();
+    explicit Buf(const std::string &str) {
+        ffi_buf.len = str.size();
+        ffi_buf.cap = str.size();
+        ffi_buf.data = malloc(ffi_buf.len);
+        memcpy(ffi_buf.data, str.data(), ffi_buf.len);
+        owns_data = true;
+    }
+
+
+    ~Buf();
 
     [[nodiscard]] uint32_t len() const {
         return ffi_buf.len;
@@ -58,28 +68,9 @@ struct RBuf {
     }
 };
 
-struct SBuf {
-    FfiBuf ffi_buf{};
-
-    explicit SBuf(const std::string &str) {
-        ffi_buf.len = str.size();
-        ffi_buf.cap = str.size();
-        ffi_buf.data = malloc(ffi_buf.len);
-        memcpy(ffi_buf.data, str.data(), ffi_buf.len);
-    }
-
-    ~SBuf() {
-        if (ffi_buf.data != nullptr) {
-            free(ffi_buf.data);
-        }
-        ffi_buf.data = nullptr;
-        ffi_buf.len = 0;
-        ffi_buf.cap = 0;
-    }
-};
 
 template<>
-std::vector<std::string> RBuf::read_vec<std::string>() const {
+std::vector<std::string> Buf::read_vec<std::string>() const {
     if (len() == 0) {
         return {};
     }
@@ -97,27 +88,28 @@ std::vector<std::string> RBuf::read_vec<std::string>() const {
 }
 
 struct FfiFunc {
-    RBuf id;
-    RBuf name;
-    RBuf category;
+    FfiBuf id;
+    FfiBuf name;
+    FfiBuf category;
     uint32_t behaviour;
     bool output;
-    RBuf inputs;
-    RBuf outputs;
-    RBuf events;
+    FfiBuf inputs;
+    FfiBuf outputs;
+    FfiBuf events;
 };
 
-struct FfiNode {
-    RBuf id;
-    RBuf func_id;
-    RBuf name;
-    bool output;
-    bool cache_outputs;
-    RBuf inputs;
-    RBuf outputs;
-};
+
 
 extern "C" {
+struct FfiNode {
+    FfiBuf id;
+    FfiBuf func_id;
+    FfiBuf name;
+    bool output;
+    bool cache_outputs;
+    FfiBuf inputs;
+    FfiBuf outputs;
+};
 
 __declspec(dllimport) void *create_context();
 __declspec(dllimport) void destroy_context(void *ctx);
@@ -129,8 +121,17 @@ __declspec(dllimport) FfiNode new_node(void *ctx, FfiBuf func_id);
 
 }
 
-RBuf::~RBuf() {
-    destroy_ffi_buf(ffi_buf);
+Buf::~Buf() {
+    if (owns_data) {
+        if (ffi_buf.data != nullptr) {
+            free(ffi_buf.data);
+        }
+        ffi_buf.data = nullptr;
+        ffi_buf.len = 0;
+        ffi_buf.cap = 0;
+    } else {
+        destroy_ffi_buf(ffi_buf);
+    }
 }
 
 
@@ -144,27 +145,14 @@ Ctx::~Ctx() {
 }
 
 std::vector<Func> Ctx::get_funcs() const {
-    RBuf buf = RBuf{::get_funcs(this->ctx)};
+    Buf buf = Buf{::get_funcs(this->ctx)};
 
     auto funcs = buf.read_vec<FfiFunc>();
     std::vector<Func> result;
     result.reserve(funcs.size());
 
     for (uint32_t i = 0; i < funcs.size(); i++) {
-        auto ffi_func = &funcs[i];
-
-        auto events = ffi_func->events.read_vec<std::string>();
-
-        Func func{
-                ffi_func->id.to_string(),
-                ffi_func->name.to_string(),
-                ffi_func->category.to_string(),
-                ffi_func->behaviour,
-                ffi_func->output,
-                {},
-                {},
-                events,
-        };
+        Func func{funcs[i]};
         result.push_back(func);
     }
 
@@ -172,39 +160,43 @@ std::vector<Func> Ctx::get_funcs() const {
 }
 
 std::vector<Node> Ctx::get_nodes() const {
-    RBuf buf = RBuf{::get_nodes(this->ctx)};
+    Buf buf = Buf{::get_nodes(this->ctx)};
 
     auto nodes = buf.read_vec<FfiNode>();
     std::vector<Node> result;
     result.reserve(nodes.size());
 
     for (uint32_t i = 0; i < nodes.size(); i++) {
-        auto ffi_node = &nodes[i];
-        Node node{
-                ffi_node->id.to_string(),
-                ffi_node->func_id.to_string(),
-                ffi_node->name.to_string(),
-                ffi_node->output,
-                ffi_node->cache_outputs,
-                {},
-                {},
-        };
+        Node node{nodes[i]};
         result.push_back(node);
     }
 
     return result;
 }
 
-void Ctx::new_node(const std::string &func_id) const {
-    auto buf = SBuf{func_id};
-
+Node Ctx::new_node(const std::string &func_id) const {
+    auto buf = Buf{func_id};
     auto ffi_node = ::new_node(this->ctx, buf.ffi_buf);
+    return Node{ffi_node};
 }
 
 Func::Func(const FfiFunc &ffi_func) {
-
+    this->id = Buf(ffi_func.id).to_string();
+    this->name = Buf(ffi_func.name).to_string();
+    this->category = Buf(ffi_func.category).to_string();
+    this->behaviour = ffi_func.behaviour;
+    this->output = ffi_func.output;
+    this->inputs = {};
+    this->outputs = {};
+    this->events = Buf(ffi_func.events).read_vec<std::string>();
 }
 
 Node::Node(const FfiNode &ffi_node) {
-
+    this->id = Buf(ffi_node.id).to_string();
+    this->func_id = Buf(ffi_node.func_id).to_string();
+    this->name = Buf(ffi_node.name).to_string();
+    this->output = ffi_node.output;
+    this->cache_outputs = ffi_node.cache_outputs;
+    this->inputs = {};
+    this->outputs = {};
 }

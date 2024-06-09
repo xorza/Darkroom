@@ -15,7 +15,7 @@ int main(int argc, char *argv[]) {
     {
         auto ctx = Ctx{};
         auto funcs = ctx.get_funcs();
-        ctx.new_node(funcs[0].id);
+        auto new_node = ctx.new_node(funcs[0].id);
         auto nodes = ctx.get_nodes();
     }
 
