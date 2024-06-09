@@ -52,9 +52,9 @@ Rectangle {
                 height: 10
                 color: triggerMouseArea.containsMouse
                     ? triggerMouseArea.containsPress
-                        ? Qt.darker("blue")
-                        : Qt.lighter("blue")
-                    : "blue"
+                        ? Qt.darker("yellow")
+                        : Qt.lighter("yellow")
+                    : "yellow"
                 radius: 5
                 x: -5
                 y: -5

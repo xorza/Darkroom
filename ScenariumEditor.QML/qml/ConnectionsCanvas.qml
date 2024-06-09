@@ -21,7 +21,7 @@ Canvas {
         context.save()
         context.clearRect(0, 0, width, height)
 
-        context.strokeStyle = "orange"
+
         context.lineWidth = 3
 
         for (let i = 0; i < appController.connections.length; i++) {
@@ -31,16 +31,18 @@ Canvas {
             if (connection.connectionType === ConnectionController.ConnectionType.Data) {
                 output = connection.source.outputs[connection.outputIdx];
                 input = connection.target.inputs[connection.inputIdx];
+                context.strokeStyle = "red"
             } else {
                 output = connection.source.events[connection.eventIdx];
                 input = connection.target.trigger;
+                context.strokeStyle = "yellow"
             }
 
             context.beginPath()
             context.moveTo(output.viewPos.x, output.viewPos.y)
             context.bezierCurveTo(
-                output.viewPos.x + 40, output.viewPos.y,
-                input.viewPos.x - 40, input.viewPos.y,
+                output.viewPos.x + 70, output.viewPos.y,
+                input.viewPos.x - 70, input.viewPos.y,
                 input.viewPos.x, input.viewPos.y
             )
             context.stroke()
