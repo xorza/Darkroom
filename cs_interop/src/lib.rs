@@ -23,18 +23,6 @@ struct FfiBuf {
     cap: u32,
 }
 
-#[repr(C)]
-#[derive(Debug)]
-struct FfiId(FfiStr);
-
-#[repr(C)]
-#[derive(Default, Debug)]
-struct FfiStr(FfiBuf);
-
-#[repr(C)]
-#[derive(Default, Debug)]
-struct FfiStrVec(FfiBuf);
-
 #[no_mangle]
 extern "C" fn create_context() -> *mut c_void {
     let mut context = Box::<Context>::default();
@@ -71,6 +59,10 @@ impl FfiBuf {
     pub fn as_str(&self) -> Result<&str, Utf8Error> {
         std::str::from_utf8(self.as_slice())
     }
+
+    pub fn to_uuid(&self) -> uuid::Uuid {
+        self.as_str().unwrap().parse().unwrap()
+    }
 }
 
 impl Default for FfiBuf {
@@ -79,6 +71,22 @@ impl Default for FfiBuf {
             data: std::ptr::null_mut(),
             len: 0,
             cap: 0,
+        }
+    }
+}
+
+impl Drop for FfiBuf {
+    fn drop(&mut self) {
+        if self.data.is_null() {
+            return;
+        }
+
+        let len = self.len as usize;
+        let cap = self.cap as usize;
+        let ptr = self.data;
+
+        unsafe {
+            drop(Vec::from_raw_parts(ptr, len, cap));
         }
     }
 }
@@ -165,57 +173,7 @@ impl<T> From<Vec<T>> for FfiBuf {
     }
 }
 
-impl Drop for FfiBuf {
-    fn drop(&mut self) {
-        if self.data.is_null() {
-            return;
-        }
-
-        let len = self.len as usize;
-        let cap = self.cap as usize;
-        let ptr = self.data;
-
-        unsafe {
-            drop(Vec::from_raw_parts(ptr, len, cap));
-        }
-    }
-}
-
-impl FfiStr {
-    pub fn is_null(&self) -> bool {
-        self.0.is_null()
-    }
-
-    pub fn as_str(&self) -> &str {
-        self.0.as_str().unwrap()
-    }
-}
-
-impl From<&str> for FfiStr {
-    fn from(data: &str) -> Self {
-        FfiStr(data.as_bytes().into())
-    }
-}
-
-impl From<String> for FfiStr {
-    fn from(data: String) -> Self {
-        FfiStr(data.into_bytes().into())
-    }
-}
-
-impl From<FfiStr> for String {
-    fn from(buf: FfiStr) -> Self {
-        buf.0.try_into().unwrap()
-    }
-}
-
-impl FfiStrVec {
-    pub fn is_null(&self) -> bool {
-        self.0.is_null()
-    }
-}
-
-impl FromIterator<String> for FfiStrVec {
+impl FromIterator<String> for FfiBuf {
     fn from_iter<I>(iter: I) -> Self
         where
             I: IntoIterator<Item=String>,
@@ -230,7 +188,7 @@ impl FromIterator<String> for FfiStrVec {
             bytes.put_slice(s);
         }
 
-        FfiStrVec(bytes.into())
+        FfiBuf::from(bytes)
     }
 }
 
@@ -260,12 +218,12 @@ impl Iterator for FfiStrVecIter {
     }
 }
 
-impl IntoIterator for FfiStrVec {
+impl IntoIterator for FfiBuf {
     type Item = String;
     type IntoIter = FfiStrVecIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        if self.0.is_null() {
+        if self.is_null() {
             return FfiStrVecIter {
                 data: Vec::new(),
                 count: 0,
@@ -274,7 +232,7 @@ impl IntoIterator for FfiStrVec {
             };
         }
 
-        let data: Vec<u8> = self.0.into();
+        let data: Vec<u8> = self.into();
         let mut reader = data.as_slice();
         let count = reader.get_u32_ne();
 
@@ -287,23 +245,12 @@ impl IntoIterator for FfiStrVec {
     }
 }
 
-impl FfiId {
-    pub fn to_uuid(&self) -> uuid::Uuid {
-        self.0.as_str().parse().unwrap()
-    }
-}
-
-impl From<uuid::Uuid> for FfiId {
+impl From<uuid::Uuid> for FfiBuf {
     fn from(value: uuid::Uuid) -> Self {
-        FfiId(value.to_string().into())
+        FfiBuf::from(value.to_string())
     }
 }
 
-impl From<FfiId> for uuid::Uuid {
-    fn from(value: FfiId) -> Self {
-        uuid::Uuid::parse_str(value.0.as_str()).unwrap()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -330,7 +277,7 @@ mod tests {
 
     #[test]
     fn ffi_bufstrvec_works() {
-        let buf: FfiStrVec = FfiStrVec::from_iter(vec![
+        let buf: FfiBuf = FfiBuf::from_iter(vec![
             "Hello".to_string(),
             "from".to_string(),
             "Rust!".to_string(),

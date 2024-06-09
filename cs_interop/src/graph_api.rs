@@ -3,7 +3,7 @@ use std::mem::ManuallyDrop;
 
 use graph::function::FuncId;
 
-use crate::{get_context, FfiBuf, FfiId, FfiStr};
+use crate::{get_context, FfiBuf};
 
 #[repr(C)]
 struct FfiInput {
@@ -12,9 +12,9 @@ struct FfiInput {
 
 #[repr(C)]
 struct FfiNode {
-    id: FfiId,
-    func_id: FfiId,
-    name: FfiStr,
+    id: FfiBuf,
+    func_id: FfiBuf,
+    name: FfiBuf,
     is_output: bool,
     cache_outputs: bool,
     inputs: FfiBuf,
@@ -49,11 +49,14 @@ extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
 }
 
 #[no_mangle]
-extern "C" fn new_node(ctx: *mut c_void, func_id: FfiId) -> FfiNode {
-    let context = get_context(ctx);
-    let func_id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();
+unsafe extern "C" fn new_node(ctx: *mut c_void, func_id: FfiBuf) -> FfiNode {
+    println!("func_id.len {} ", func_id.len);
 
-    let func = context.func_lib.func_by_id(func_id).unwrap();
+    let context = get_context(ctx);
+
+    let id: FuncId = ManuallyDrop::new(func_id).to_uuid().into();
+
+    let func = context.func_lib.func_by_id(id).unwrap();
     let node = graph::graph::Node::from_function(func);
     context.graph.add_node(node);
 
