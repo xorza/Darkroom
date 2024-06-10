@@ -73,12 +73,3 @@ void ArgumentController::setMouseArea(QQuickItem *item) {
 
     m_mouseArea = item;
 }
-
-void ArgumentController::setHighlighted(bool highlighted) {
-    if (m_highlighted == highlighted) {
-        return;
-    }
-
-    m_highlighted = highlighted;
-    emit highlightedChanged();
-}

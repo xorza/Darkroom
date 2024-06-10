@@ -5,6 +5,7 @@
 #include "../src/CoreContext.hpp"
 
 #include <QtCore>
+#include <QQmlComponent>
 
 #include <memory>
 
@@ -76,6 +77,7 @@ private:
     ArgumentController *m_selectedArg{};
     QPointF m_mousePos{};
     std::unique_ptr<Ctx> m_coreContext;
+
 
     ConnectionController *createConnection(ArgumentController *a, ArgumentController *b);
 };

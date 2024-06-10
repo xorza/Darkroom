@@ -31,6 +31,8 @@ void AppController::loadSample() {
         output->setName("Output 2");
         node->addOutput(output);
 
+        node->setViewPos(QPointF(100, 100));
+
         addNode(node);
     }
 
@@ -53,6 +55,8 @@ void AppController::loadSample() {
         auto event = new ArgumentController(node);
         event->setName("event 2");
         node->addEvent(event);
+
+        node->setViewPos(QPointF(200, 200));
 
         addNode(node);
     }
@@ -77,7 +81,7 @@ void AppController::loadSample() {
 
 [[maybe_unused]] void AppController::afterSynchronizing() {
     for (auto *const node: m_nodes) {
-        node->updateViewPos();
+        node->updateViewPos(mousePos());
     }
 }
 

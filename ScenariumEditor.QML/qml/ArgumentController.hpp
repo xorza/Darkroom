@@ -18,7 +18,6 @@ Q_OBJECT
     Q_PROPERTY(QQuickItem *mouseArea READ mouseArea WRITE setMouseArea)
 
     Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
-    Q_PROPERTY(bool highlighted READ highlighted WRITE setHighlighted NOTIFY highlightedChanged)
 
     Q_PROPERTY(ArgumentType type READ type)
 
@@ -89,11 +88,6 @@ public:
 
     bool canConnectTo(ArgumentController *other) const;
 
-        [[nodiscard]] bool highlighted() const {
-            return m_highlighted;
-        }
-
-        void setHighlighted(bool highlighted) ;
 
 signals:
 
@@ -103,7 +97,6 @@ signals:
 
     void selectedChanged();
 
-    void highlightedChanged();
 
 public slots:
 
@@ -117,6 +110,5 @@ private:
     NodeController *m_parent{};
     bool m_selected = false;
     QQuickItem *m_mouseArea{};
-    bool m_highlighted = false;
 };
 

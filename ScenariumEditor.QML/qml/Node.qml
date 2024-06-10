@@ -3,53 +3,77 @@ import QtQuick.Layouts
 import QtQuick.Controls
 import com.cssodessa.NodeController
 import com.cssodessa.ArgumentController
+import "Enums.js" as Enums
 
 
 Rectangle {
     property NodeController nodeController
 
     component Pin:Item {
-        id: pin
-        property ArgumentController modelData
-        property real leftMargin: 0
+        id: pinItem
+        property ArgumentController argController
+        property int pinType: Enums.PinType.In
+        property color color: "red"
 
         width: inputRow.width
         height: inputRow.height
-        Layout.leftMargin: pin.leftMargin
 
         Row {
             id: inputRow
             spacing: 5
 
             Rectangle {
-                id: inputPin
+                id: pin1
+                visible: pinItem.pinType === Enums.PinType.In
                 width: 10
                 height: 10
-                color: modelData.highlighted
-                    ? inputMouseArea.containsPress
-                        ? Qt.darker("red")
-                        : Qt.lighter("red")
-                    : "red"
+                color: pinMouseArea.containsMouse
+                    ? pinMouseArea.containsPress
+                        ? Qt.darker(pinItem.color)
+                        : Qt.lighter(pinItem.color)
+                    : pinItem.color
                 radius: 5
                 anchors.verticalCenter: parent.verticalCenter
 
                 Component.onCompleted: {
-                    modelData.pin = inputPin
-                    modelData.mouseArea = inputMouseArea
+                    if (pinItem.input) {
+                        pinItem.argController.pin = pin1
+                        pinItem.argController.mouseArea = pinMouseArea
+                    }
                 }
             }
             Text {
-                text: modelData.name
+                text: pinItem.argController.name
                 anchors.verticalCenter: parent.verticalCenter
                 color: "darkgray"
             }
+            Rectangle {
+                id: pin2
+                visible: pinItem.pinType !== Enums.PinType.In
+                width: 10
+                height: 10
+                color: pinMouseArea.containsMouse
+                    ? pinMouseArea.containsPress
+                        ? Qt.darker(pinItem.color)
+                        : Qt.lighter(pinItem.color)
+                    : pinItem.color
+                radius: 5
+                anchors.verticalCenter: parent.verticalCenter
+
+                Component.onCompleted: {
+                    if (!pinItem.input) {
+                        pinItem.argController.pin = pin2
+                        pinItem.argController.mouseArea = pinMouseArea
+                    }
+                }
+            }
         }
         MouseArea {
-            id: inputMouseArea
+            id: pinMouseArea
             anchors.fill: parent
             hoverEnabled: true
             onClicked: {
-                modelData.selected = !modelData.selected
+                pinItem.argController.selected = !pinItem.argController.selected
             }
         }
     }
@@ -207,46 +231,11 @@ Rectangle {
                 Repeater {
                     model: nodeController.inputs
 
-                    delegate: Item {
-                        width: inputRow.width
-                        height: inputRow.height
+                    delegate: Pin {
+                        argController: modelData
                         Layout.leftMargin: -5
-
-                        Row {
-                            id: inputRow
-                            spacing: 5
-
-                            Rectangle {
-                                id: inputPin
-                                width: 10
-                                height: 10
-                                color: inputMouseArea.containsMouse
-                                    ? inputMouseArea.containsPress
-                                        ? Qt.darker("red")
-                                        : Qt.lighter("red")
-                                    : "red"
-                                radius: 5
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Component.onCompleted: {
-                                    modelData.pin = inputPin
-                                    modelData.mouseArea = inputMouseArea
-                                }
-                            }
-                            Text {
-                                text: modelData.name
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: "darkgray"
-                            }
-                        }
-                        MouseArea {
-                            id: inputMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                modelData.selected = !modelData.selected
-                            }
-                        }
+                        pinType: Enums.PinType.In
+                        color: "red"
                     }
                 }
             }
@@ -267,94 +256,24 @@ Rectangle {
                     Layout.alignment: Qt.AlignRight
                     Layout.fillWidth: true
 
-                    delegate: Item {
+                    delegate: Pin {
+                        argController: modelData
                         Layout.rightMargin: -5
                         Layout.alignment: Qt.AlignRight
-                        width: outputRow.width
-                        height: outputRow.height
-
-                        Row {
-                            id: outputRow
-                            spacing: 5
-
-                            Text {
-                                text: modelData.name
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: "darkgray"
-                            }
-                            Rectangle {
-                                id: outputPin
-                                width: 10
-                                height: 10
-                                color: outputMouseArea.containsMouse
-                                    ? outputMouseArea.containsPress
-                                        ? Qt.darker("red")
-                                        : Qt.lighter("red")
-                                    : "red"
-                                radius: 5
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Component.onCompleted: {
-                                    modelData.pin = outputPin
-                                    modelData.mouseArea = outputMouseArea
-                                }
-                            }
-                        }
-                        MouseArea {
-                            id: outputMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                modelData.selected = !modelData.selected
-                            }
-                        }
+                        pinType: Enums.PinType.Out
+                        color: "red"
                     }
                 }
 
                 Repeater {
                     model: nodeController.events
 
-                    delegate: Item {
+                    delegate: Pin {
+                        argController: modelData
                         Layout.rightMargin: -5
                         Layout.alignment: Qt.AlignRight
-                        width: eventRow.width
-                        height: eventRow.height
-
-                        Row {
-                            id: eventRow
-                            spacing: 5
-
-                            Text {
-                                text: modelData.name
-                                anchors.verticalCenter: parent.verticalCenter
-                                color: "darkgray"
-                            }
-                            Rectangle {
-                                id: eventPin
-                                width: 10
-                                height: 10
-                                color: eventMouseArea.containsMouse
-                                    ? eventMouseArea.containsPress
-                                        ? Qt.darker("yellow")
-                                        : Qt.lighter("yellow")
-                                    : "yellow"
-                                radius: 5
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Component.onCompleted: {
-                                    modelData.pin = eventPin
-                                    modelData.mouseArea = eventMouseArea
-                                }
-                            }
-                        }
-                        MouseArea {
-                            id: eventMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                modelData.selected = !modelData.selected
-                            }
-                        }
+                        pinType: Enums.PinType.Out
+                        color: "yellow"
                     }
                 }
             }
@@ -368,11 +287,14 @@ Rectangle {
                 text: "cache results"
                 Layout.fillWidth: true
                 Layout.leftMargin: 5
+                pressed: nodeController.cacheResults
             }
+
             ToggleButton {
                 text: "output"
                 Layout.fillWidth: true
                 Layout.rightMargin: 5
+                pressed: nodeController.output
             }
 
         }

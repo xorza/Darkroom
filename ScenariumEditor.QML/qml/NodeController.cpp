@@ -53,27 +53,30 @@ void NodeController::setItem(QQuickItem *item) {
     emit itemChanged();
 }
 
-void NodeController::updateViewPos() const {
+void NodeController::updateViewPos(QPointF mousePos) const {
     QQuickItem *const nodeRoot = qobject_cast<QQuickItem *>(this->item());
 
     for (auto *const input: this->inputs()) {
-        auto item = input->pin();
-        auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-        input->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+        auto pin = input->pin();
+        auto pos = nodeRoot->mapFromItem(pin, QPointF(0, 0));
+        input->setViewPos(pos + this->viewPos() + QPointF(pin->width() / 2.0, pin->height() / 2.0));
     }
+
     for (auto *const output: this->outputs()) {
-        auto item = output->pin();
-        auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-        output->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+        auto pin = output->pin();
+        auto pos = nodeRoot->mapFromItem(pin, QPointF(0, 0));
+        output->setViewPos(pos + this->viewPos() + QPointF(pin->width() / 2.0, pin->height() / 2.0));
     }
+
     for (auto *const event: this->events()) {
-        auto item = event->pin();
-        auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-        event->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+        auto pin = event->pin();
+        auto pos = nodeRoot->mapFromItem(pin, QPointF(0, 0));
+        event->setViewPos(pos + this->viewPos() + QPointF(pin->width() / 2.0, pin->height() / 2.0));
     }
-    QQuickItem *const item = this->trigger()->pin();
-    auto pos = nodeRoot->mapFromItem(item, QPointF(0, 0));
-    this->trigger()->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
+
+    QQuickItem *const trigger = this->trigger()->pin();
+    auto pos = nodeRoot->mapFromItem(trigger, QPointF(0, 0));
+    this->trigger()->setViewPos(pos + this->viewPos() + QPointF(trigger->width() / 2.0, trigger->height() / 2.0));
 }
 
 void NodeController::addInput(ArgumentController *const input) {

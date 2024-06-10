@@ -80,7 +80,7 @@ public:
         return m_id;
     }
 
-    void updateViewPos() const;
+    void updateViewPos(QPointF mousePos) const;
 
 signals:
 
