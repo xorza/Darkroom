@@ -19,4 +19,5 @@
 **/cmake-build-*/
 **/build/
 
-/cs_interop/fbs/interop_generated.h
+/cs_interop/fbs/*_generated.*
+
