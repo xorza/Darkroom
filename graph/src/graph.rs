@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use common::id_type;
 
@@ -76,7 +75,7 @@ impl Graph {
         }
     }
     pub fn remove_node_by_id(&mut self, id: NodeId) {
-        assert_ne!(id.0, Uuid::nil());
+        assert!(!id.is_nil());
 
         self.nodes.retain(|node| node.id != id);
 

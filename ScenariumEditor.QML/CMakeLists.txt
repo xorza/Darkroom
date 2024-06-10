@@ -72,6 +72,7 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a")
         set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/cs_interop.dll")
+        message(STATUS "LIBB_CS_INTEROP_FILE: ${LIBB_CS_INTEROP_FILE}")
     else ()
         set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a")
         set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/cs_interop.dll")
@@ -86,11 +87,7 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
     endif ()
 endif ()
 
-
-target_link_libraries(scenarium_editor
-        PUBLIC
-        ${LIBB_CS_INTEROP_FILE}
-)
+target_link_libraries(scenarium_editor PUBLIC ${LIBB_CS_INTEROP_FILE})
 
 target_include_directories(scenarium_editor PUBLIC lib)
 

@@ -35,7 +35,7 @@ DLL_IMPORT void destroy_context(void *ctx);
 DLL_IMPORT FfiBuf get_funcs(void *ctx);
 DLL_IMPORT FfiBuf get_nodes(void *ctx);
 DLL_IMPORT FfiNode add_node(void *ctx, FfiUuid func_id);
-DLL_IMPORT FfiNode remove_node(void *ctx, FfiUuid node_id);
+DLL_IMPORT void remove_node(void *ctx, FfiUuid node_id);
 
 }
 
