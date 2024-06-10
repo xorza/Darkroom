@@ -42,6 +42,55 @@ file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*
 qt_add_executable(scenarium_editor ${SRC_FILES} main.cpp)
 set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
 
+
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    target_link_options(scenarium_editor
+            PUBLIC
+            -static -static-libgcc -static-libstdc++
+    )
+
+    set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a")
+    set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/cs_interop.dll")
+elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
+    set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
+    set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
+endif ()
+
+
+# build Rust project
+add_custom_command(
+        OUTPUT ${LIBB_CS_INTEROP_FILE}
+        COMMAND cargo build --release --target x86_64-pc-windows-gnu
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../cs_interop
+        COMMENT "Building cs_interop Rust project"
+        VERBATIM
+)
+add_custom_target(build_rust ALL DEPENDS ${LIBB_CS_INTEROP_FILE})
+add_dependencies(scenarium_editor build_rust)
+# Copy the DLL file to the build directory
+add_custom_command(
+        TARGET scenarium_editor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${LIBB_CS_INTEROP_DYLIB_FILE}
+        $<TARGET_FILE_DIR:scenarium_editor>
+        COMMENT "Copying DLL file to build directory"
+)
+
+# generate the FlatBuffers code
+add_custom_command(
+        OUTPUT ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop_generated.h
+        COMMAND flatc.exe --cpp ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop.fbs
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
+        DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop.fbs
+        COMMENT "Generating FlatBuffers code"
+)
+add_custom_target(generate_flatbuffers ALL DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop_generated.h)
+add_dependencies(scenarium_editor generate_flatbuffers)
+
+
+
+
 file(GLOB_RECURSE QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.qml qml/*.js)
 file(GLOB_RECURSE SRC_QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.hpp qml/*.cpp)
 file(GLOB_RECURSE RESOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -78,34 +127,10 @@ target_compile_options(scenarium_editor PRIVATE
 )
 
 
-if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    target_link_options(scenarium_editor
-            PUBLIC
-            -static -static-libgcc -static-libstdc++
-    )
-
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/libcs_interop.dll.a")
-        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/debug/cs_interop.dll")
-        message(STATUS "LIBB_CS_INTEROP_FILE: ${LIBB_CS_INTEROP_FILE}")
-    else ()
-        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a")
-        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/cs_interop.dll")
-    endif ()
-elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
-    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/debug/libcs_interop.dylib")
-        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/debug/libcs_interop.dylib")
-    else ()
-        set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
-        set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/release/libcs_interop.dylib")
-    endif ()
-endif ()
-
-
 target_include_directories(scenarium_editor PUBLIC
         lib
         fbs
+        ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
 )
 
 target_link_libraries(scenarium_editor
@@ -113,16 +138,6 @@ target_link_libraries(scenarium_editor
         Qt6::Quick
         flatbuffers
         ${LIBB_CS_INTEROP_FILE}
-)
-
-
-# Copy the DLL file to the build directory
-add_custom_command(
-        TARGET scenarium_editor POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${LIBB_CS_INTEROP_DYLIB_FILE}
-        $<TARGET_FILE_DIR:scenarium_editor>
-        COMMENT "Copying DLL file to build directory"
 )
 
 # Copy the assets to the build directory
@@ -152,8 +167,12 @@ target_link_libraries(tests PRIVATE
 target_include_directories(tests PRIVATE
         lib
         fbs
+        ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
 )
+add_dependencies(scenarium_editor generate_flatbuffers)
+add_dependencies(scenarium_editor build_rust)
 #list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
 include(Catch)
 catch_discover_tests(tests)
+

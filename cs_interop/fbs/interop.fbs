@@ -1,0 +1,14 @@
+namespace Example;
+
+table InnerTable {
+  id: int;
+  value: string;
+}
+
+table OuterTable {
+  name: string;
+  items: [InnerTable];
+}
+
+root_type OuterTable;
+

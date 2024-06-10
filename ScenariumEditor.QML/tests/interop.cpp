@@ -2,7 +2,7 @@
 #include "../src/CoreContext.hpp"
 
 
-#include <example_generated.h>
+#include <interop_generated.h>
 
 #include <iostream>
 #include <fstream>
@@ -70,13 +70,13 @@ TEST_CASE("test fbs", "[fbs]") {
 
     // Verify the buffer
     auto verifier = flatbuffers::Verifier(reinterpret_cast<const uint8_t*>(buffer.data()), length);
-    if (!verifier.VerifyBuffer<Example::OuterStruct>(nullptr)) {
+    if (!verifier.VerifyBuffer<Example::OuterTable>(nullptr)) {
         std::cerr << "Failed to verify buffer" << std::endl;
         FAIL();
     }
 
     // Access the buffer
-    auto outer = flatbuffers::GetRoot<Example::OuterStruct>(buffer.data());
+    auto outer = flatbuffers::GetRoot<Example::OuterTable>(buffer.data());
 
     std::cout << "Name: " << outer->name()->c_str() << "\n";
     auto items = outer->items();
