@@ -4,9 +4,9 @@ fn main() {
     let fbs_file = "fbs/interop.fbs";
 
     Command::new("flatc.exe")
-        .args(["--rust", "--gen-object-api", "-o", "src", fbs_file])
+        .args(["--rust", "--gen-object-api", "-o", "src/gen", fbs_file])
         .status()
         .expect("Failed to generate Rust bindings");
 
-    println!("cargo:rerun-if-changed={}", fbs_file);
+    // println!("cargo:rerun-if-changed={}", fbs_file);
 }

@@ -13,4 +13,5 @@ imaginarium = { workspace = true }
 graph = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
+flatbuffers = { workspace = true }
 

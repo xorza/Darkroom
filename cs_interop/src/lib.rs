@@ -16,7 +16,7 @@ use graph::invoke::Invoker;
 mod func_lib_api;
 mod graph_api;
 mod utils;
-
+mod gen;
 
 #[repr(C)]
 #[derive(Debug)]
