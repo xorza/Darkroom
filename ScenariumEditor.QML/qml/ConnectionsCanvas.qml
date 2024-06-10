@@ -55,14 +55,17 @@ Canvas {
         context.restore()
     }
 
+
+    function handlePositionChanged(mouse) {
+        appController.mousePos = Qt.point(mouse.x, mouse.y)
+    }
+
     MouseArea {
         anchors.fill: parent
         enabled: appController.selectedArg != null
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.RightButton
-        onPositionChanged: {
-            appController.mousePos = Qt.point(mouse.x, mouse.y)
-        }
+        onPositionChanged: handlePositionChanged(mouse)
         onPressed: {
             if (appController.selectedArg != null) {
                 appController.selectedArg = null

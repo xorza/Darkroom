@@ -80,7 +80,7 @@ Rectangle {
                 y: -5
 
                 Component.onCompleted: {
-                    nodeController.trigger.item = triggerPin
+                    nodeController.trigger.pin = triggerPin
                 }
 
                 MouseArea {
@@ -182,7 +182,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 Component.onCompleted: {
-                                    modelData.item = inputPin
+                                    modelData.pin = inputPin
                                 }
                             }
                             Text {
@@ -247,7 +247,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 Component.onCompleted: {
-                                    modelData.item = outputPin
+                                    modelData.pin = outputPin
                                 }
                             }
                         }
@@ -293,7 +293,7 @@ Rectangle {
                                 anchors.verticalCenter: parent.verticalCenter
 
                                 Component.onCompleted: {
-                                    modelData.item = eventPin
+                                    modelData.pin = eventPin
                                 }
                             }
                         }

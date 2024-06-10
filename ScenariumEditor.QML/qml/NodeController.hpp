@@ -12,7 +12,7 @@ Q_OBJECT
 
     Q_PROPERTY(QString name READ name NOTIFY nameChanged)
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
-    Q_PROPERTY(QQuickItem *item READ item WRITE setItem)
+    Q_PROPERTY(QQuickItem *pin READ pin WRITE setPin)
 
     Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
     Q_PROPERTY(ArgumentType type READ type)
@@ -44,11 +44,11 @@ public:
 
     void setViewPos(const QPointF &viewPos);
 
-    [[nodiscard]] QQuickItem *item() const {
-        return m_item;
+    [[nodiscard]] QQuickItem *pin() const {
+        return m_pin;
     }
 
-    void setItem(QQuickItem *item);
+    void setPin(QQuickItem *item);
 
     [[nodiscard]] ArgumentType type() const {
         return m_type;
@@ -92,7 +92,7 @@ public slots:
 private:
     QString m_name{};
     QPointF m_viewPos{};
-    QQuickItem *m_item{};
+    QQuickItem *m_pin{};
     ArgumentType m_type{};
     uint32_t m_idx{};
     NodeController *m_parent{};
