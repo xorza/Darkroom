@@ -284,8 +284,8 @@ Rectangle {
                                 id: eventPin
                                 width: 10
                                 height: 10
-                                color: outputMouseArea.containsMouse
-                                    ? outputMouseArea.containsPress
+                                color: eventMouseArea.containsMouse
+                                    ? eventMouseArea.containsPress
                                         ? Qt.darker("yellow")
                                         : Qt.lighter("yellow")
                                     : "yellow"

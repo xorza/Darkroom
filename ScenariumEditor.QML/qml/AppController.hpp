@@ -20,7 +20,7 @@ Q_OBJECT
     Q_PROPERTY(QPointF mousePos READ mousePos WRITE setMousePos NOTIFY mousePosChanged)
 
 public:
-    explicit AppController(QObject *parent = nullptr)
+    explicit AppController(QObject *parent);
 
     ~AppController() override = default;
 
