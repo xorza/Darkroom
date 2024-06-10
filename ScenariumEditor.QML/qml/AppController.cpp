@@ -58,6 +58,9 @@ void AppController::loadSample() {
 
         node->setViewPos(QPointF(200, 200));
 
+        node->setOutput(true);
+        node->setCacheResults(true);
+
         addNode(node);
     }
 

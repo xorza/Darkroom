@@ -21,8 +21,8 @@ Q_OBJECT
     Q_PROPERTY(QQuickItem *item READ item WRITE setItem NOTIFY itemChanged)
 
     Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
-
-
+    Q_PROPERTY(bool cacheResults READ cacheResults WRITE setCacheResults NOTIFY cacheResultsChanged)
+    Q_PROPERTY(bool output READ output WRITE setOutput NOTIFY outputChanged)
 public:
     explicit NodeController(QObject *parent = nullptr);
 
@@ -82,6 +82,18 @@ public:
 
     void updateViewPos(QPointF mousePos) const;
 
+    [[nodiscard]] bool cacheResults() const {
+        return m_cacheResults;
+    }
+
+    void setCacheResults(bool cacheResults);
+
+    [[nodiscard]] bool output() const {
+        return m_output;
+    }
+
+    void setOutput(bool output);
+
 signals:
 
     void nameChanged();
@@ -104,6 +116,10 @@ signals:
 
     void removeRequested();
 
+    void cacheResultsChanged();
+
+    void outputChanged();
+
 public slots:
 
     void remove();
@@ -118,4 +134,6 @@ private:
     bool m_selected = false;
     ArgumentController *m_trigger{};
     uuid m_id{};
+    bool m_cacheResults = false;
+    bool m_output = false;
 };

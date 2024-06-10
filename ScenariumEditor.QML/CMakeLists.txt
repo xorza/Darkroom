@@ -4,20 +4,38 @@ project(scenarium_editor VERSION 0.1 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+include(FetchContent)
 #set(CMAKE_CXX_SCAN_FOR_MODULES ON)  # enable this for cpp20 modules
 
 
 if (DEFINED ENV{Qt6})
     set(CMAKE_PREFIX_PATH $ENV{Qt6})
-    message("-- Qt6 is set to ${CMAKE_PREFIX_PATH}")
+    message(STATUS "Qt6 is set to ${CMAKE_PREFIX_PATH}")
 else ()
     message(FATAL_ERROR "Qt6 environment variable is not set")
 endif ()
 
 
+# find qt
 find_package(Qt6 6.7 REQUIRED COMPONENTS Quick)
 qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
+
+# Fetch FlatBuffers
+FetchContent_Declare(
+        flatbuffers
+        GIT_REPOSITORY https://github.com/google/flatbuffers.git
+        GIT_TAG v24.3.25
+)
+FetchContent_MakeAvailable(flatbuffers)
+
+# Fetch Catch2
+FetchContent_Declare(
+        catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.6.0
+)
+FetchContent_MakeAvailable(catch2)
 
 
 file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
@@ -41,10 +59,7 @@ qt_add_qml_module(scenarium_editor
         SOURCES
         ${SRC_QML_FILES}
 )
-target_link_libraries(scenarium_editor
-        PUBLIC
-        Qt6::Quick
-)
+
 target_compile_options(scenarium_editor PRIVATE
         #-fno-exceptions
         -fno-rtti
@@ -87,11 +102,21 @@ elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
     endif ()
 endif ()
 
-target_link_libraries(scenarium_editor PUBLIC ${LIBB_CS_INTEROP_FILE})
 
-target_include_directories(scenarium_editor PUBLIC lib)
+target_include_directories(scenarium_editor PUBLIC
+        lib
+        fbs
+)
+
+target_link_libraries(scenarium_editor
+        PUBLIC
+        Qt6::Quick
+        flatbuffers
+        ${LIBB_CS_INTEROP_FILE}
+)
 
 
+# Copy the DLL file to the build directory
 add_custom_command(
         TARGET scenarium_editor POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -100,6 +125,7 @@ add_custom_command(
         COMMENT "Copying DLL file to build directory"
 )
 
+# Copy the assets to the build directory
 set_target_properties(scenarium_editor PROPERTIES
         MACOSX_BUNDLE_GUI_IDENTIFIER com.cssodessa.scenarium_editor
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
@@ -116,19 +142,16 @@ install(TARGETS scenarium_editor
 
 
 # Tests
-include(FetchContent)
-FetchContent_Declare(
-        catch2
-        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG v3.6.0
-)
-FetchContent_MakeAvailable(catch2)
-
 file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
 add_executable(tests ${SRC_FILES} ${TEST_SRC_FILES})
 target_link_libraries(tests PRIVATE
         Catch2::Catch2WithMain
         ${LIBB_CS_INTEROP_FILE}
+        flatbuffers
+)
+target_include_directories(tests PRIVATE
+        lib
+        fbs
 )
 #list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)

@@ -118,3 +118,20 @@ void NodeController::addEvent(ArgumentController *const event) {
 void NodeController::remove() {
     emit removeRequested();
 }
+
+void NodeController::setOutput(bool output) {
+    if (m_output == output) {
+        return;
+    }
+    m_output = output;
+    emit outputChanged();
+
+}
+
+void NodeController::setCacheResults(bool cacheResults) {
+    if (m_cacheResults == cacheResults) {
+        return;
+    }
+    m_cacheResults = cacheResults;
+    emit cacheResultsChanged();
+}
