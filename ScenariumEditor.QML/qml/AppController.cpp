@@ -2,6 +2,7 @@
 
 
 #include "NodeController.hpp"
+#include "ArgumentController.hpp"
 #include "ConnectionController.hpp"
 
 #include <QQuickItem>

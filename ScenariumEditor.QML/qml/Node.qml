@@ -2,11 +2,57 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls
 import com.cssodessa.NodeController
+import com.cssodessa.ArgumentController
 
 
 Rectangle {
     property NodeController nodeController
 
+    component Pin:Item {
+        id: pin
+        property ArgumentController modelData
+        property real leftMargin: 0
+
+        width: inputRow.width
+        height: inputRow.height
+        Layout.leftMargin: pin.leftMargin
+
+        Row {
+            id: inputRow
+            spacing: 5
+
+            Rectangle {
+                id: inputPin
+                width: 10
+                height: 10
+                color: modelData.highlighted
+                    ? inputMouseArea.containsPress
+                        ? Qt.darker("red")
+                        : Qt.lighter("red")
+                    : "red"
+                radius: 5
+                anchors.verticalCenter: parent.verticalCenter
+
+                Component.onCompleted: {
+                    modelData.pin = inputPin
+                    modelData.mouseArea = inputMouseArea
+                }
+            }
+            Text {
+                text: modelData.name
+                anchors.verticalCenter: parent.verticalCenter
+                color: "darkgray"
+            }
+        }
+        MouseArea {
+            id: inputMouseArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: {
+                modelData.selected = !modelData.selected
+            }
+        }
+    }
 
     signal viewPosChanged()
 
@@ -81,6 +127,7 @@ Rectangle {
 
                 Component.onCompleted: {
                     nodeController.trigger.pin = triggerPin
+                    nodeController.trigger.mouseArea = triggerPin
                 }
 
                 MouseArea {
@@ -183,6 +230,7 @@ Rectangle {
 
                                 Component.onCompleted: {
                                     modelData.pin = inputPin
+                                    modelData.mouseArea = inputMouseArea
                                 }
                             }
                             Text {
@@ -248,6 +296,7 @@ Rectangle {
 
                                 Component.onCompleted: {
                                     modelData.pin = outputPin
+                                    modelData.mouseArea = outputMouseArea
                                 }
                             }
                         }
@@ -294,6 +343,7 @@ Rectangle {
 
                                 Component.onCompleted: {
                                     modelData.pin = eventPin
+                                    modelData.mouseArea = eventMouseArea
                                 }
                             }
                         }

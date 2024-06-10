@@ -2,6 +2,7 @@
 #include "src/utils/uuid.hpp"
 
 #include "qml/NodeController.hpp"
+#include "qml/ArgumentController.hpp"
 #include "qml/AppController.hpp"
 #include "qml/ConnectionController.hpp"
 
