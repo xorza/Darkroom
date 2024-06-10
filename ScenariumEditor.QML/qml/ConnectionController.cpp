@@ -3,7 +3,7 @@
 #include <cassert>
 
 
-void ConnectionController::setSourceOutput(NodeController *source, int outputIdx) {
+void ConnectionController::setSourceOutput(NodeController *source, uint32_t outputIdx) {
     if (m_source == source && m_outputIdx == outputIdx) {
         return;
     }
@@ -18,7 +18,7 @@ void ConnectionController::setSourceOutput(NodeController *source, int outputIdx
 
 }
 
-void ConnectionController::setTargetInput(NodeController *target, int inputIdx) {
+void ConnectionController::setTargetInput(NodeController *target, uint32_t inputIdx) {
     if (m_target == target && m_inputIdx == inputIdx) {
         return;
     }
@@ -33,7 +33,7 @@ void ConnectionController::setTargetInput(NodeController *target, int inputIdx) 
 
 }
 
-void ConnectionController::setSourceEvent(NodeController *source, int eventIdx) {
+void ConnectionController::setSourceEvent(NodeController *source, uint32_t eventIdx) {
     if (m_source == source && m_eventIdx == eventIdx) {
         return;
     }

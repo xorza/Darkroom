@@ -52,11 +52,11 @@ public:
     }
 
 
-    void setSourceOutput(NodeController *source, int outputIdx);
+    void setSourceOutput(NodeController *source, uint32_t outputIdx);
 
-    void setTargetInput(NodeController *target, int inputIdx);
+    void setTargetInput(NodeController *target, uint32_t inputIdx);
 
-    void setSourceEvent(NodeController *source, int eventIdx);
+    void setSourceEvent(NodeController *source, uint32_t eventIdx);
 
     void setTargetTrigger(NodeController *target);
 
@@ -81,8 +81,8 @@ signals:
 private:
     NodeController *m_source = nullptr;
     NodeController *m_target = nullptr;
-    int m_inputIdx = 0;
-    int m_outputIdx = 0;
-    int m_eventIdx = 0;
+    uint32_t m_inputIdx = 0;
+    uint32_t m_outputIdx = 0;
+    uint32_t m_eventIdx = 0;
     ConnectionType m_connectionType = ConnectionType::Data;
 };

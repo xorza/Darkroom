@@ -4,8 +4,8 @@ use crate::FfiBuf;
 #[repr(C)]
 #[derive(Debug)]
 pub(crate) struct FfiUuid {
-    a: u64,
-    b: u64,
+   pub(crate) a: u64,
+   pub(crate) b: u64,
 }
 
 impl From<uuid::Uuid> for FfiUuid {

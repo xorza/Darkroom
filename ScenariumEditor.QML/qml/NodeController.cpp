@@ -8,6 +8,10 @@ NodeController::NodeController(QObject *parent) : QObject(parent) {
     m_trigger->setType(ArgumentController::ArgumentType::Trigger);
     m_trigger->setIndex(0);
     m_trigger->setName("Trigger");
+
+    connect(m_trigger, &ArgumentController::selectedChanged, this, [this]() {
+        emit selectedArgumentChanged(m_trigger);
+    });
 }
 
 void ArgumentController::setName(const QString &name) {
@@ -37,8 +41,39 @@ void ArgumentController::setItem(QQuickItem *item) {
     m_item = item;
 }
 
-void ArgumentController::selected() {
+ArgumentController::ArgumentController(NodeController *parent) : QObject(parent) {
+    m_parent = parent;
+}
 
+void ArgumentController::setSelected(bool selected) {
+    if (m_selected == selected) {
+        return;
+    }
+
+    m_selected = selected;
+    emit selectedChanged();
+
+}
+
+bool ArgumentController::canConnectTo(ArgumentController *other) const {
+    if (m_type == ArgumentType::Trigger) {
+        return other->type() == ArgumentType::Event;
+    }
+
+    if (m_type == ArgumentType::Event) {
+        return other->type() == ArgumentType::Trigger;
+    }
+
+    if (m_type == ArgumentType::Input) {
+        return other->type() == ArgumentType::Output;
+    }
+
+    if (m_type == ArgumentType::Output) {
+        return other->type() == ArgumentType::Input;
+    }
+
+    assert(false);
+    return false;
 }
 
 void NodeController::setSelected(bool selected) {
@@ -101,3 +136,38 @@ void NodeController::updateViewPos() {
     this->trigger()->setViewPos(pos + this->viewPos() + QPointF(item->width() / 2.0, item->height() / 2.0));
 }
 
+void NodeController::addInput(ArgumentController *const input) {
+    input->setType(ArgumentController::ArgumentType::Input);
+    input->setIndex(m_inputs.size());
+
+    connect(input, &ArgumentController::selectedChanged, this, [this, input]() {
+        emit selectedArgumentChanged(input);
+    });
+
+    m_inputs.push_back(input);
+    emit inputsChanged();
+}
+
+void NodeController::addOutput(ArgumentController *const output) {
+    output->setType(ArgumentController::ArgumentType::Output);
+    output->setIndex(m_outputs.size());
+
+    connect(output, &ArgumentController::selectedChanged, this, [this, output]() {
+        emit selectedArgumentChanged(output);
+    });
+
+    m_outputs.push_back(output);
+    emit outputsChanged();
+}
+
+void NodeController::addEvent(ArgumentController *const event) {
+    event->setType(ArgumentController::ArgumentType::Event);
+    event->setIndex(m_events.size());
+
+    connect(event, &ArgumentController::selectedChanged, this, [this, event]() {
+        emit selectedArgumentChanged(event);
+    });
+
+    m_events.push_back(event);
+    emit eventsChanged();
+}

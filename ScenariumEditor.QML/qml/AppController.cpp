@@ -88,6 +88,68 @@ void AppController::addNode(NodeController *node) {
         }
         this->m_selectedNode = node;
     });
+    connect(node, &NodeController::selectedArgumentChanged, this, [this](ArgumentController *argument) {
+        assert(argument != nullptr);
+
+        setSelectedArg(argument);
+    });
 
     emit nodesChanged();
+}
+
+void AppController::setSelectedArg(ArgumentController *selectedArg) {
+    if (m_selectedArg == selectedArg) {
+        m_selectedArg->setSelected(false);
+        m_selectedArg = nullptr;
+        emit selectedArgChanged();
+        return;
+    }
+
+    if (m_selectedArg == nullptr) {
+        m_selectedArg = selectedArg;
+        m_selectedArg->setSelected(true);
+        emit selectedArgChanged();
+        return;
+    }
+
+    if (!m_selectedArg->canConnectTo(selectedArg)) {
+        selectedArg->setSelected(false);
+        return;
+    }
+
+    auto connection = createConnection(m_selectedArg, selectedArg);
+
+    m_selectedArg->setSelected(false);
+    selectedArg->setSelected(false);
+    m_selectedArg = nullptr;
+    emit selectedArgChanged();
+}
+
+ConnectionController *AppController::createConnection(ArgumentController *a, ArgumentController *b) {
+    assert(a->canConnectTo(b));
+
+    ConnectionController *connection = nullptr;
+
+    if (a->type() == ArgumentController::ArgumentType::Trigger) {
+        connection = new ConnectionController(this, ConnectionController::ConnectionType::Event);
+        connection->setSourceEvent(a->node(), a->index());
+        connection->setTargetTrigger(b->node());
+    } else if (a->type() == ArgumentController::ArgumentType::Event) {
+        connection = new ConnectionController(this, ConnectionController::ConnectionType::Event);
+        connection->setSourceEvent(b->node(), b->index());
+        connection->setTargetTrigger(a->node());
+    } else if (a->type() == ArgumentController::ArgumentType::Input) {
+        connection = new ConnectionController(this, ConnectionController::ConnectionType::Data);
+        connection->setTargetInput(a->node(), a->index());
+        connection->setSourceOutput(b->node(), b->index());
+    } else if (a->type() == ArgumentController::ArgumentType::Output) {
+        connection = new ConnectionController(this, ConnectionController::ConnectionType::Data);
+        connection->setTargetInput(b->node(), b->index());
+        connection->setSourceOutput(a->node(), a->index());
+    } else {
+        assert(false);
+    }
+
+    m_connections.append(connection);
+    return connection;
 }

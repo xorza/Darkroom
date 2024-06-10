@@ -4,7 +4,7 @@
 #include <QtCore>
 #include <QQuickItem>
 
-
+class NodeController;
 class ArgumentController : public QObject {
 Q_OBJECT
 
@@ -12,6 +12,7 @@ Q_OBJECT
     Q_PROPERTY(QPointF viewPos READ viewPos WRITE setViewPos NOTIFY viewPosChanged)
     Q_PROPERTY(QQuickItem *item READ item WRITE setItem)
 
+    Q_PROPERTY(bool selected READ selected WRITE setSelected NOTIFY selectedChanged)
     Q_PROPERTY(ArgumentType type READ type)
 
 
@@ -25,7 +26,7 @@ public:
 
     Q_ENUM(ArgumentType)
 
-    explicit ArgumentController(QObject *parent = nullptr) : QObject(parent) {}
+    explicit ArgumentController(NodeController *parent);
 
     ~ArgumentController() override = default;
 
@@ -56,13 +57,24 @@ public:
     }
 
     [[nodiscard]] uint32_t index() const {
-        return idx;
+        return m_idx;
     }
 
     void setIndex(uint32_t index) {
-        idx = index;
+        m_idx = index;
     }
 
+    [[nodiscard]] NodeController *node() const {
+        return m_parent;
+    }
+
+    [[nodiscard]] bool selected() const {
+        return m_selected;
+    }
+
+    void setSelected(bool selected);
+
+    bool canConnectTo(ArgumentController *other) const;
 
 signals:
 
@@ -70,11 +82,10 @@ signals:
 
     void viewPosChanged();
 
-    void selectedChenged();
+    void selectedChanged();
 
 public slots:
 
-    void selected();
 
 
 private:
@@ -82,7 +93,9 @@ private:
     QPointF m_viewPos{};
     QQuickItem *m_item{};
     ArgumentType m_type{};
-    uint32_t idx{};
+    uint32_t m_idx{};
+    NodeController *m_parent{};
+    bool m_selected = false;
 };
 
 
@@ -116,25 +129,13 @@ public:
         return m_inputs;
     }
 
-    void addInput(ArgumentController *const input) {
-        input->setType(ArgumentController::ArgumentType::Input);
-        input->setIndex(m_inputs.size());
-
-        m_inputs.push_back(input);
-        emit inputsChanged();
-    }
+    void addInput(ArgumentController *const input) ;
 
     [[nodiscard]] const QList<ArgumentController *> &outputs() const {
         return m_outputs;
     }
 
-    void addOutput(ArgumentController *const output) {
-        output->setType(ArgumentController::ArgumentType::Output);
-        output->setIndex(m_outputs.size());
-
-        m_outputs.push_back(output);
-        emit outputsChanged();
-    }
+    void addOutput(ArgumentController *const output) ;
 
     [[nodiscard]] QPointF viewPos() const {
         return m_viewPos;
@@ -153,12 +154,7 @@ public:
         return m_events;
     }
 
-    void addEvent(ArgumentController *const event) {
-        event->setType(ArgumentController::ArgumentType::Event);
-        event->setIndex(m_events.size());
-        m_events.push_back(event);
-        emit eventsChanged();
-    }
+    void addEvent(ArgumentController *const event) ;
 
 
     [[nodiscard]] bool selected() const {
@@ -192,7 +188,7 @@ signals:
 
     void triggerChanged();
 
-    void argumentSelected(ArgumentController *arg);
+    void selectedArgumentChanged(ArgumentController *arg);
 
 
 private:

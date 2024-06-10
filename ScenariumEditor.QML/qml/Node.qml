@@ -23,6 +23,7 @@ Rectangle {
 
     MouseArea {
         anchors.fill: parent
+        hoverEnabled: true
 
         onClicked: {
             if (!nodeController.selected)
@@ -69,7 +70,7 @@ Rectangle {
                     hoverEnabled: true
 
                     onClicked: {
-                        nodeController.trigger.selected()
+                        nodeController.trigger.selected = !nodeController.trigger.selected
                     }
                 }
             }
@@ -152,6 +153,9 @@ Rectangle {
                             id: inputMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
+                            onClicked: {
+                                modelData.selected = !modelData.selected
+                            }
                         }
                     }
                 }
@@ -209,6 +213,9 @@ Rectangle {
                             id: outputMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
+                            onClicked: {
+                                modelData.selected = !modelData.selected
+                            }
                         }
                     }
                 }
@@ -219,11 +226,11 @@ Rectangle {
                     delegate: Item {
                         Layout.rightMargin: -5
                         Layout.alignment: Qt.AlignRight
-                        width: outputRow.width
-                        height: outputRow.height
+                        width: eventRow.width
+                        height: eventRow.height
 
                         Row {
-                            id: outputRow
+                            id: eventRow
                             spacing: 5
 
                             Text {
@@ -249,9 +256,12 @@ Rectangle {
                             }
                         }
                         MouseArea {
-                            id: outputMouseArea
+                            id: eventMouseArea
                             anchors.fill: parent
                             hoverEnabled: true
+                            onClicked: {
+                                modelData.selected = !modelData.selected
+                            }
                         }
                     }
                 }
