@@ -47,6 +47,25 @@ Rectangle {
             topLeftRadius: 2
             Layout.margins: 1
 
+            MouseArea {
+                anchors.fill: parent
+                pressAndHoldInterval: 10
+                drag.target: root
+                drag.axis: Drag.XAxis | Drag.YAxis
+
+                onPositionChanged: {
+                    if (drag.active) {
+                        nodeController.viewPos = Qt.point(root.x, root.y)
+                        viewPosChanged()
+                    }
+                }
+                onClicked: {
+                    if (!nodeController.selected) {
+                        nodeController.selected = true
+                    }
+                }
+            }
+
             Rectangle {
                 id: triggerPin
                 width: 10
@@ -84,21 +103,44 @@ Rectangle {
                 text: root.nodeController ? root.nodeController.name : "no nodeController"
             }
 
-            MouseArea {
-                anchors.fill: parent
-                pressAndHoldInterval: 10
-                drag.target: root
-                drag.axis: Drag.XAxis | Drag.YAxis
-
-                onPositionChanged: {
-                    if (drag.active) {
-                        nodeController.viewPos = Qt.point(root.x, root.y)
-                        viewPosChanged()
-                    }
+            Rectangle {
+                id: deleteButton
+                width: 16
+                height: 16
+                radius: 5
+                anchors {
+                    verticalCenter: parent.verticalCenter
+                    right: parent.right
+                    rightMargin: 5
                 }
-                onClicked: {
-                    if (!nodeController.selected) {
-                        nodeController.selected = true
+                color: deleteMouseArea.containsMouse
+                    ? deleteMouseArea.containsPress
+                        ? Qt.darker("gray")
+                        : Qt.lighter("gray")
+                    : "gray"
+
+                Rectangle {
+                    width: 10
+                    height: 1
+                    color: "darkgray"
+                    anchors.centerIn: parent
+                    rotation: 45
+                }
+                Rectangle {
+                    width: 10
+                    height: 1
+                    color: "darkgray"
+                    anchors.centerIn: parent
+                    rotation: -45
+                }
+
+                MouseArea {
+                    id: deleteMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+
+                    onClicked: {
+                        nodeController.remove()
                     }
                 }
             }

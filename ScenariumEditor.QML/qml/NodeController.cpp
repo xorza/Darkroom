@@ -14,6 +14,11 @@ NodeController::NodeController(QObject *parent) : QObject(parent) {
     });
 }
 
+ArgumentController::ArgumentController(NodeController *parent) : QObject(parent) {
+    m_parent = parent;
+}
+
+
 void ArgumentController::setName(const QString &name) {
     if (m_name == name) {
         return;
@@ -39,10 +44,6 @@ void ArgumentController::setItem(QQuickItem *item) {
     }
 
     m_item = item;
-}
-
-ArgumentController::ArgumentController(NodeController *parent) : QObject(parent) {
-    m_parent = parent;
 }
 
 void ArgumentController::setSelected(bool selected) {
@@ -170,4 +171,8 @@ void NodeController::addEvent(ArgumentController *const event) {
 
     m_events.push_back(event);
     emit eventsChanged();
+}
+
+void NodeController::remove() {
+    emit removeRequested();
 }

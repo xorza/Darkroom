@@ -1,10 +1,12 @@
 #pragma once
 
+#include "../src/utils/uuid.hpp"
 
 #include <QtCore>
 #include <QQuickItem>
 
 class NodeController;
+
 class ArgumentController : public QObject {
 Q_OBJECT
 
@@ -87,7 +89,6 @@ signals:
 public slots:
 
 
-
 private:
     QString m_name{};
     QPointF m_viewPos{};
@@ -129,13 +130,13 @@ public:
         return m_inputs;
     }
 
-    void addInput(ArgumentController *const input) ;
+    void addInput(ArgumentController *input);
 
     [[nodiscard]] const QList<ArgumentController *> &outputs() const {
         return m_outputs;
     }
 
-    void addOutput(ArgumentController *const output) ;
+    void addOutput(ArgumentController *output);
 
     [[nodiscard]] QPointF viewPos() const {
         return m_viewPos;
@@ -154,7 +155,7 @@ public:
         return m_events;
     }
 
-    void addEvent(ArgumentController *const event) ;
+    void addEvent(ArgumentController *event);
 
 
     [[nodiscard]] bool selected() const {
@@ -167,6 +168,9 @@ public:
         return m_trigger;
     }
 
+    [[nodiscard]] uuid id() const {
+        return m_id;
+    }
 
     void updateViewPos();
 
@@ -190,6 +194,11 @@ signals:
 
     void selectedArgumentChanged(ArgumentController *arg);
 
+    void removeRequested();
+
+public slots:
+
+    void remove();
 
 private:
     QString m_name{};
@@ -200,4 +209,5 @@ private:
     QList<ArgumentController *> m_events{};
     bool m_selected = false;
     ArgumentController *m_trigger{};
+    uuid m_id{};
 };

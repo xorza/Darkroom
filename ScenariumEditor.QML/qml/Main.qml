@@ -12,36 +12,36 @@ Window {
 
     onAfterSynchronizing: {
         AppController.afterSynchronizing()
-        connectionCanvas.repaintConnections()
+        allConnectionCanvas.repaintConnections()
+        newConnectionCanvas.repaintConnections()
     }
 
     ConnectionsCanvas {
-        id: connectionCanvas
+        id: allConnectionCanvas
         anchors.fill: parent
-        anchors.margins: 10
 
         appController: AppController
     }
 
-    Item {
+    Repeater {
+        model: AppController.nodes
         anchors.fill: parent
-        anchors.margins: 10
 
-        Repeater {
-            model: AppController.nodes
+        delegate: Node {
+            nodeController: modelData
 
-            delegate: Node {
-                nodeController: modelData
-
-                onViewPosChanged: {
-                    // connectionCanvas.requestPaint()
-                    connectionCanvas.repaintConnections()
-                }
+            onViewPosChanged: {
+                allConnectionCanvas.repaintConnections()
+                newConnectionCanvas.repaintConnections()
             }
         }
-
-
     }
 
+    NewConnectionCanvas {
+        id: newConnectionCanvas
+        anchors.fill: parent
+
+        appController: AppController
+    }
 }
 

@@ -7,6 +7,12 @@
 #include <QQuickItem>
 #include <QQuickWindow>
 
+
+AppController::AppController(QObject *parent) : QObject(parent) {
+    m_coreContext = std::make_unique<Ctx>();
+}
+
+
 void AppController::loadSample() {
     {
         auto node = new NodeController(this);
@@ -93,21 +99,33 @@ void AppController::addNode(NodeController *node) {
 
         setSelectedArg(argument);
     });
+    connect(node, &NodeController::removeRequested, this, [this, node]() {
+        removeNode(node);
+    });
 
     emit nodesChanged();
 }
 
 void AppController::setSelectedArg(ArgumentController *selectedArg) {
-    if (m_selectedArg == selectedArg) {
-        m_selectedArg->setSelected(false);
-        m_selectedArg = nullptr;
-        emit selectedArgChanged();
+    if (selectedArg == nullptr) {
+        if (m_selectedArg != nullptr) {
+            m_selectedArg->setSelected(false);
+            m_selectedArg = nullptr;
+            emit selectedArgChanged();
+        }
         return;
     }
 
     if (m_selectedArg == nullptr) {
         m_selectedArg = selectedArg;
         m_selectedArg->setSelected(true);
+        emit selectedArgChanged();
+        return;
+    }
+
+    if (m_selectedArg == selectedArg) {
+        m_selectedArg->setSelected(false);
+        m_selectedArg = nullptr;
         emit selectedArgChanged();
         return;
     }
@@ -152,4 +170,34 @@ ConnectionController *AppController::createConnection(ArgumentController *a, Arg
 
     m_connections.append(connection);
     return connection;
+}
+
+void AppController::removeNode(NodeController *node) {
+    m_coreContext->remove_node(node->id());
+
+
+    m_nodes.removeOne(node);
+
+    for (auto *const connection: m_connections) {
+        if (connection->source() == node || connection->target() == node) {
+            m_connections.removeOne(connection);
+            delete connection;
+        }
+    }
+
+    if (m_selectedNode == node) {
+        m_selectedNode = nullptr;
+    }
+
+    emit connectionsChanged();
+    emit nodesChanged();
+}
+
+void AppController::setMousePos(const QPointF &mousePos) {
+    if (m_mousePos == mousePos) {
+        return;
+    }
+
+    m_mousePos = mousePos;
+    emit mousePosChanged();
 }

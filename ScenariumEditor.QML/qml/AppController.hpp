@@ -2,8 +2,11 @@
 
 #include "ConnectionController.hpp"
 #include "NodeController.hpp"
+#include "../src/CoreContext.hpp"
 
 #include <QtCore>
+
+#include <memory>
 
 
 class AppController : public QObject {
@@ -14,8 +17,10 @@ Q_OBJECT
 
     Q_PROPERTY(ArgumentController *selectedArg READ selectedArg WRITE setSelectedArg NOTIFY selectedArgChanged)
 
+    Q_PROPERTY(QPointF mousePos READ mousePos WRITE setMousePos NOTIFY mousePosChanged)
+
 public:
-    explicit AppController(QObject *parent = nullptr) : QObject(parent) {}
+    explicit AppController(QObject *parent = nullptr)
 
     ~AppController() override = default;
 
@@ -29,12 +34,23 @@ public:
 
     void addNode(NodeController *node);
 
+    void removeNode(NodeController *node);
+
+    [[nodiscard]] NodeController *selectedNode() const {
+        return m_selectedNode;
+    }
+
     [[nodiscard]] ArgumentController *selectedArg() const {
         return m_selectedArg;
     }
 
     void setSelectedArg(ArgumentController *selectedArg);
 
+    [[nodiscard]] QPointF mousePos() const {
+        return m_mousePos;
+    }
+
+    void setMousePos(const QPointF &mousePos);
 
 
     void loadSample();
@@ -47,6 +63,8 @@ signals:
 
     void selectedArgChanged();
 
+    void mousePosChanged();
+
 public slots:
 
     void afterSynchronizing();
@@ -56,6 +74,8 @@ private:
     QList<ConnectionController *> m_connections{};
     NodeController *m_selectedNode{};
     ArgumentController *m_selectedArg{};
+    QPointF m_mousePos{};
+    std::unique_ptr<Ctx> m_coreContext;
 
-    ConnectionController* createConnection(ArgumentController* a, ArgumentController* b);
+    ConnectionController *createConnection(ArgumentController *a, ArgumentController *b);
 };
