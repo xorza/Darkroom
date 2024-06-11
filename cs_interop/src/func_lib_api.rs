@@ -36,7 +36,7 @@ extern "C" fn get_funcs(ctx: *mut c_void) -> FfiBuf {
         .map(|(_func_id, func)| to_proto_func(func))
         .collect::<Vec<proto::Func>>();
 
-    proto::FuncLibrary {
+    proto::FuncLib {
         funcs,
     }
         .encode_to_vec()

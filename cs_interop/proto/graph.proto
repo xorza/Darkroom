@@ -41,6 +41,6 @@ message Func {
   repeated EventInfo events = 8;
 }
 
-message FuncLibrary {
+message FuncLib {
   repeated Func funcs = 1;
 }

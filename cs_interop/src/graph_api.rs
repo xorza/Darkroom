@@ -6,51 +6,24 @@ use graph::graph::NodeId;
 use crate::{get_context, FfiBuf};
 use crate::utils::FfiUuid;
 
-#[repr(C)]
-struct FfiInput {
-    a: u8,
-}
-
-#[repr(C)]
-struct FfiNode {
-    id: FfiBuf,             // string
-    func_id: FfiBuf,        // string
-    name: FfiBuf,           // string
-    is_output: bool,
-    cache_outputs: bool,
-    inputs: FfiBuf,         // vector of
-    events: FfiBuf,         // vector of ids of subscriber nodes
-}
-
-impl From<&graph::graph::Node> for FfiNode {
-    fn from(node: &graph::graph::Node) -> Self {
-        FfiNode {
-            id: node.id.as_uuid().into(),
-            func_id: node.func_id.as_uuid().into(),
-            name: node.name.clone().into(),
-            is_output: node.is_output,
-            cache_outputs: node.cache_outputs,
-            inputs: FfiBuf::default(),
-            events: FfiBuf::default(),
-        }
-    }
-}
 
 #[no_mangle]
-extern "C" fn get_nodes(ctx: *mut c_void) -> FfiBuf {
+extern "C" fn get_nodes(_ctx: *mut c_void) -> FfiBuf {
     // let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
 
-    get_context(ctx)
-        .graph
-        .nodes()
-        .iter()
-        .map(FfiNode::from)
-        .collect::<Vec<FfiNode>>()
-        .into()
+    // get_context(ctx)
+    //     .graph
+    //     .nodes()
+    //     .iter()
+    //     .map(FfiNode::from)
+    //     .collect::<Vec<FfiNode>>()
+    //     .into()
+
+    FfiBuf::default()
 }
 
 #[no_mangle]
-unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
+unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiBuf {
     let context = get_context(ctx);
 
     let id: FuncId = uuid::Uuid::from(func_id).into();
@@ -58,7 +31,8 @@ unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiNode {
     let node = graph::graph::Node::from_function(func);
     context.graph.add_node(node);
 
-    context.graph.nodes().last().unwrap().into()
+    // context.graph.nodes().last().unwrap().into()
+    FfiBuf::default()
 }
 
 #[no_mangle]

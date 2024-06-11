@@ -8,7 +8,6 @@
 #include <string>
 #include <cstdlib>
 
-struct FfiFunc;
 struct Func {
     uuid id;
     std::string name;
@@ -20,10 +19,8 @@ struct Func {
     std::vector<std::string> events;
 
     Func() = default;
-    explicit Func(const FfiFunc &ffi_func);
 };
 
-struct FfiNode;
 struct Node {
     uuid id;
     uuid func_id;
@@ -34,7 +31,6 @@ struct Node {
     std::vector<uuid> events;
 
     Node() = default;
-    explicit Node(const FfiNode &ffi_node);
 };
 
 
