@@ -21,13 +21,14 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS Quick)
 qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
 
-# Fetch FlatBuffers
+# Fetch protobuf
+set(ABSL_PROPAGATE_CXX_STD ON)
 FetchContent_Declare(
-        flatbuffers
-        GIT_REPOSITORY https://github.com/google/flatbuffers.git
-        GIT_TAG v24.3.25
+        protobuf
+        GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
+        GIT_TAG v27.1
 )
-FetchContent_MakeAvailable(flatbuffers)
+FetchContent_MakeAvailable(protobuf)
 
 # Fetch Catch2
 FetchContent_Declare(
@@ -41,7 +42,6 @@ FetchContent_MakeAvailable(catch2)
 file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
 qt_add_executable(scenarium_editor ${SRC_FILES} main.cpp)
 set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
-
 
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -77,18 +77,19 @@ add_custom_command(
         COMMENT "Copying DLL file to build directory"
 )
 
-# generate the FlatBuffers code
+# generate the protobuf code
 add_custom_command(
-        OUTPUT ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop_generated.h
-        COMMAND flatc.exe --cpp ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop.fbs
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
-        DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop.fbs
-        COMMENT "Generating FlatBuffers code"
+        OUTPUT ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.h ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.cc
+        COMMAND protoc.exe --cpp_out . --proto_path . graph.proto
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../cs_interop/proto
+        DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.proto
+        COMMENT "Generating protobuf code"
 )
-add_custom_target(generate_flatbuffers ALL DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/fbs/interop_generated.h)
-add_dependencies(scenarium_editor generate_flatbuffers)
-
-
+add_custom_target(generate_protobuf ALL DEPENDS
+        ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.h
+        ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.cc
+)
+add_dependencies(scenarium_editor generate_protobuf)
 
 
 file(GLOB_RECURSE QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.qml qml/*.js)
@@ -130,13 +131,13 @@ target_compile_options(scenarium_editor PRIVATE
 target_include_directories(scenarium_editor PUBLIC
         lib
         fbs
-        ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
+        ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
 
 target_link_libraries(scenarium_editor
         PUBLIC
         Qt6::Quick
-        flatbuffers
+        protobuf::libprotobuf-lite
         ${LIBB_CS_INTEROP_FILE}
 )
 
@@ -158,21 +159,21 @@ install(TARGETS scenarium_editor
 
 # Tests
 file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
-add_executable(tests ${SRC_FILES} ${TEST_SRC_FILES})
-target_link_libraries(tests PRIVATE
+add_executable(scenarium-tests ${SRC_FILES} ${TEST_SRC_FILES})
+target_link_libraries(scenarium-tests PRIVATE
         Catch2::Catch2WithMain
         ${LIBB_CS_INTEROP_FILE}
-        flatbuffers
+        protobuf::libprotobuf-lite
 )
-target_include_directories(tests PRIVATE
+target_include_directories(scenarium-tests PRIVATE
         lib
         fbs
-        ${CMAKE_SOURCE_DIR}/../cs_interop/fbs
+        ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
-add_dependencies(scenarium_editor generate_flatbuffers)
-add_dependencies(scenarium_editor build_rust)
+add_dependencies(scenarium-tests generate_protobuf)
+add_dependencies(scenarium-tests build_rust)
 #list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
 include(Catch)
-catch_discover_tests(tests)
+catch_discover_tests(scenarium-tests)
 

@@ -1,12 +1,12 @@
-use std::process::Command;
+use std::env;
+use std::path::Path;
 
 fn main() {
-    let fbs_file = "fbs/interop.fbs";
+    let proto_file ="proto/graph.proto";
+    let out_dir = env::var("OUT_DIR").unwrap();
 
-    Command::new("flatc.exe")
-        .args(["--rust", "--gen-object-api", "-o", "src/gen", fbs_file])
-        .status()
-        .expect("Failed to generate Rust bindings");
-
-    // println!("cargo:rerun-if-changed={}", fbs_file);
+    prost_build::Config::new()
+        .out_dir(&out_dir)
+        .compile_protos(&[proto_file], &[Path::new(".")])
+        .expect("Failed to compile protobuf");
 }

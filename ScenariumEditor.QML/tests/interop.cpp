@@ -1,8 +1,7 @@
 #include "../src/utils/uuid.hpp"
 #include "../src/CoreContext.hpp"
 
-
-#include <interop_generated.h>
+#include <graph.pb.h>
 
 #include <iostream>
 #include <fstream>
@@ -52,35 +51,16 @@ TEST_CASE("remove node", "[context]") {
 }
 
 TEST_CASE("test fbs", "[fbs]") {
-    // Read the binary file
-    std::ifstream file("data.bin", std::ios::binary);
-    if (!file) {
-        std::cerr << "Failed to open file" << std::endl;
-        FAIL();
-    }
+    graph::Shirt shirt{};
+    shirt.set_color("graph::Color::Color_RED");
+    shirt.set_size(graph::Shirt_Size::Shirt_Size_MEDIUM);
 
-    // Get the length of the file
-    file.seekg(0, std::ios::end);
-    size_t length = file.tellg();
-    file.seekg(0, std::ios::beg);
 
-    // Read the file content into a buffer
-    std::vector<char> buffer(length);
-    file.read(buffer.data(), length);
+    auto str = shirt.SerializeAsString();
+    std::cout << str << std::endl;
 
-    // Verify the buffer
-    auto verifier = flatbuffers::Verifier(reinterpret_cast<const uint8_t*>(buffer.data()), length);
-    if (!verifier.VerifyBuffer<Example::OuterTable>(nullptr)) {
-        std::cerr << "Failed to verify buffer" << std::endl;
-        FAIL();
-    }
 
-    // Access the buffer
-    auto outer = flatbuffers::GetRoot<Example::OuterTable>(buffer.data());
-
-    std::cout << "Name: " << outer->name()->c_str() << "\n";
-    auto items = outer->items();
-    for (auto item : *items) {
-        std::cout << "Item ID: " << item->id() << ", Value: " << item->value()->c_str() << "\n";
-    }
+    graph::Shirt new_shirt{};
+    new_shirt.ParseFromString(str);
+    std::cout << "CoLor" << new_shirt.color() << std::endl;
 }

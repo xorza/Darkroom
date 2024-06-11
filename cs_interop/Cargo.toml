@@ -13,5 +13,9 @@ imaginarium = { workspace = true }
 graph = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
-flatbuffers = { workspace = true }
+prost = { workspace = true }
+
+[build-dependencies]
+prost-build =  { workspace = true }
+
 

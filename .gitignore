@@ -19,5 +19,5 @@
 **/cmake-build-*/
 **/build/
 
-/cs_interop/fbs/*_generated.*
-
+**/*.pb.h
+**/*.pb.cc

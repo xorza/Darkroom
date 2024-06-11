@@ -16,7 +16,7 @@ use graph::invoke::Invoker;
 mod func_lib_api;
 mod graph_api;
 mod utils;
-mod gen;
+mod proto;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -263,6 +263,7 @@ impl From<uuid::Uuid> for FfiBuf {
 
 #[cfg(test)]
 mod tests {
+    use prost::Message;
     use super::*;
 
     #[test]
@@ -293,5 +294,18 @@ mod tests {
         ]);
         let data: Vec<String> = buf.into_iter().collect();
         assert_eq!(data, vec!["Hello", "from", "Rust!"]);
+    }
+    
+    #[test]
+    fn proto_works(){
+        let mut shirt = proto::Shirt::default();
+        shirt.color = "red".to_string();
+        shirt.size = proto::shirt::Size::Medium as i32;
+
+        let mut buf = Vec::with_capacity(128);
+        prost::Message::encode(&shirt, &mut buf).unwrap();
+        
+        let shirt2 = proto::Shirt::decode(&buf[..]).unwrap();
+        assert_eq!(shirt, shirt2);
     }
 }
