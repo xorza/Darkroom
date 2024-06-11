@@ -50,7 +50,7 @@ TEST_CASE("remove node", "[context]") {
     REQUIRE(nodes.empty());
 }
 
-TEST_CASE("test fbs", "[fbs]") {
+TEST_CASE("test proto", "[proto]") {
     graph::Shirt shirt{};
     shirt.set_color("graph::Color::Color_RED");
     shirt.set_size(graph::Shirt_Size::Shirt_Size_MEDIUM);

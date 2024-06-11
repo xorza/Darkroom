@@ -22,16 +22,7 @@ qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
 
 # Fetch protobuf
-set(protobuf_BUILD_TESTS OFF)
-set(protobuf_INSTALL ON)
-set(protobuf_BUILD_EXAMPLES OFF)
-set(protobuf_BUILD_PROTOBUF_BINARIES ON)
-set(protobuf_BUILD_PROTOC_BINARIES OFF)
-set(protobuf_BUILD_LIBUPB OFF)
-set(protobuf_BUILD_LIBUPB OFF)
-set(protobuf_BUILD_SHARED_LIBS_DEFAULT OFF)
 set(ABSL_PROPAGATE_CXX_STD ON)
-
 FetchContent_Declare(
         protobuf
         GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
@@ -82,7 +73,6 @@ add_custom_target(generate_protobuf ALL DEPENDS
 )
 
 
-
 file(GLOB_RECURSE SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
 file(GLOB SRC_PB_FILES ${CMAKE_SOURCE_DIR} ../cs_interop/proto/*.cc)
 qt_add_executable(scenarium_editor ${SRC_FILES} ${SRC_PB_FILES} main.cpp)
@@ -117,36 +107,36 @@ qt_add_qml_module(scenarium_editor
         ${SRC_QML_FILES}
 )
 
-target_compile_options(scenarium_editor PRIVATE
-        #-fno-exceptions
-        -fno-rtti
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Werror
-        -Wno-unused-parameter
-        -Wno-unused-variable
-        -Wno-unused-function
-        -Wno-unused-but-set-variable
-        -Wno-unused-value
-        -Wno-unused-local-typedefs
-        #-Wno-unused-private-field
-        -Wno-unused-const-variable
-)
 
-
-target_include_directories(scenarium_editor PUBLIC
+target_include_directories(scenarium_editor PRIVATE
         lib
         fbs
         ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
 
 target_link_libraries(scenarium_editor
-        PUBLIC
+        PRIVATE
         Qt6::Quick
         protobuf::libprotobuf
         ${LIBB_CS_INTEROP_FILE}
 )
+
+target_compile_options(scenarium_editor PRIVATE
+        -fno-rtti
+#        -Wall
+#        -Wextra
+#        -Wpedantic
+#        -Werror
+#        -Wno-unused-parameter
+#        -Wno-unused-variable
+#        -Wno-unused-function
+#        -Wno-unused-but-set-variable
+#        -Wno-unused-value
+#        -Wno-unused-local-typedefs
+#        -Wno-unused-const-variable
+)
+
+
 
 # Copy the assets to the build directory
 set_target_properties(scenarium_editor PROPERTIES
