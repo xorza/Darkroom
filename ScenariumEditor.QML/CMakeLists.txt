@@ -22,7 +22,16 @@ qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
 
 # Fetch protobuf
+set(protobuf_BUILD_TESTS OFF)
+set(protobuf_INSTALL ON)
+set(protobuf_BUILD_EXAMPLES OFF)
+set(protobuf_BUILD_PROTOBUF_BINARIES ON)
+set(protobuf_BUILD_PROTOC_BINARIES OFF)
+set(protobuf_BUILD_LIBUPB OFF)
+set(protobuf_BUILD_LIBUPB OFF)
+set(protobuf_BUILD_SHARED_LIBS_DEFAULT OFF)
 set(ABSL_PROPAGATE_CXX_STD ON)
+
 FetchContent_Declare(
         protobuf
         GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
@@ -39,17 +48,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(catch2)
 
 
-file(GLOB_RECURSE SRC_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
-qt_add_executable(scenarium_editor ${SRC_FILES} main.cpp)
-set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
-
-
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    target_link_options(scenarium_editor
-            PUBLIC
-            -static -static-libgcc -static-libstdc++
-    )
-
     set(LIBB_CS_INTEROP_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/libcs_interop.dll.a")
     set(LIBB_CS_INTEROP_DYLIB_FILE "${CMAKE_SOURCE_DIR}/../target/x86_64-pc-windows-gnu/release/cs_interop.dll")
 elseif (${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
@@ -67,15 +66,7 @@ add_custom_command(
         VERBATIM
 )
 add_custom_target(build_rust ALL DEPENDS ${LIBB_CS_INTEROP_FILE})
-add_dependencies(scenarium_editor build_rust)
-# Copy the DLL file to the build directory
-add_custom_command(
-        TARGET scenarium_editor POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${LIBB_CS_INTEROP_DYLIB_FILE}
-        $<TARGET_FILE_DIR:scenarium_editor>
-        COMMENT "Copying DLL file to build directory"
-)
+
 
 # generate the protobuf code
 add_custom_command(
@@ -89,7 +80,23 @@ add_custom_target(generate_protobuf ALL DEPENDS
         ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.h
         ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.cc
 )
+
+
+
+file(GLOB_RECURSE SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
+file(GLOB SRC_PB_FILES ${CMAKE_SOURCE_DIR} ../cs_interop/proto/*.cc)
+qt_add_executable(scenarium_editor ${SRC_FILES} ${SRC_PB_FILES} main.cpp)
+set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
 add_dependencies(scenarium_editor generate_protobuf)
+add_dependencies(scenarium_editor build_rust)
+
+
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    target_link_options(scenarium_editor
+            PUBLIC
+            -static -static-libgcc -static-libstdc++
+    )
+endif ()
 
 
 file(GLOB_RECURSE QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.qml qml/*.js)
@@ -137,7 +144,7 @@ target_include_directories(scenarium_editor PUBLIC
 target_link_libraries(scenarium_editor
         PUBLIC
         Qt6::Quick
-        protobuf::libprotobuf-lite
+        protobuf::libprotobuf
         ${LIBB_CS_INTEROP_FILE}
 )
 
@@ -157,13 +164,23 @@ install(TARGETS scenarium_editor
 )
 
 
+# Copy the DLL file to the build directory
+add_custom_command(
+        TARGET scenarium_editor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${LIBB_CS_INTEROP_DYLIB_FILE}
+        $<TARGET_FILE_DIR:scenarium_editor>
+        COMMENT "Copying DLL file to build directory"
+)
+
+
 # Tests
 file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
-add_executable(scenarium-tests ${SRC_FILES} ${TEST_SRC_FILES})
+add_executable(scenarium-tests ${SRC_FILES} ${SRC_PB_FILES} ${TEST_SRC_FILES})
 target_link_libraries(scenarium-tests PRIVATE
         Catch2::Catch2WithMain
         ${LIBB_CS_INTEROP_FILE}
-        protobuf::libprotobuf-lite
+        protobuf::libprotobuf
 )
 target_include_directories(scenarium-tests PRIVATE
         lib
