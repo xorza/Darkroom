@@ -8,27 +8,32 @@
 #include <string>
 #include <cstdlib>
 
+enum class FuncBehavor {
+    Active = 1,
+    Passive = 2,
+};
+
 struct Func {
-    uuid id;
-    std::string name;
-    std::string category;
-    uint32_t behaviour = 0;
+    uuid id{};
+    std::string name{};
+    std::string category{};
+    FuncBehavor behaviour{};
     bool output = false;
-    std::vector<std::string> inputs;
-    std::vector<std::string> outputs;
-    std::vector<std::string> events;
+    std::vector<std::string> inputs{};
+    std::vector<std::string> outputs{};
+    std::vector<std::string> events{};
 
     Func() = default;
 };
 
 struct Node {
-    uuid id;
-    uuid func_id;
-    std::string name;
+    uuid id{};
+    uuid func_id{};
+    std::string name{};
     bool output = false;
     bool cache_outputs = false;
-    std::vector<std::string> inputs;
-    std::vector<uuid> events;
+    std::vector<std::string> inputs{};
+    std::vector<uuid> events{};
 
     Node() = default;
 };

@@ -49,7 +49,16 @@ std::vector<Func> Ctx::get_funcs() const {
         func.id = uuid{proto_func.id().a(), proto_func.id().b()};
         func.name = proto_func.name();
         func.category = proto_func.category();
-        func.behaviour = proto_func.behavior();
+        switch (proto_func.behavior()) {
+            case graph::FuncBehavior::ACTIVE:
+                func.behaviour = FuncBehavor::Active;
+                break;
+            case graph::FuncBehavior::PASSIVE:
+                func.behaviour = FuncBehavor::Passive;
+                break;
+            default:
+                assert(false);
+        }
         func.output = proto_func.is_output();
         func.inputs.reserve(proto_func.inputs_size());
         func.outputs.reserve(proto_func.outputs_size());
