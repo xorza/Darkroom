@@ -1,7 +1,6 @@
 #include "../src/utils/uuid.hpp"
 #include "../src/CoreContext.hpp"
 
-#include <graph.pb.h>
 
 #include <iostream>
 #include <fstream>
@@ -25,27 +24,28 @@ TEST_CASE("Uuid tests", "[uuid]") {
 TEST_CASE("add node", "[context]") {
     auto ctx = Ctx{};
 
-    auto nodes1 = ctx.get_nodes();
-    REQUIRE(nodes1.empty());
-
-    auto funcs = ctx.get_funcs();
+    auto funcs = ctx.get_func_lib();
     REQUIRE(!funcs.empty());
 
-    auto new_node = ctx.add_node(funcs[0].id);
+    auto nodes = ctx.get_graph();
+    REQUIRE(nodes.empty());
 
-    auto nodes = ctx.get_nodes();
+    ctx.add_node(funcs[0].id);
 
+    nodes = ctx.get_graph();
     REQUIRE(1 == nodes.size());
 }
 
 TEST_CASE("remove node", "[context]") {
     auto ctx = Ctx{};
 
-    auto funcs = ctx.get_funcs();
-    auto new_node = ctx.add_node(funcs[0].id);
-    ctx.remove_node(new_node.id);
+    auto funcs = ctx.get_func_lib();
+    ctx.add_node(funcs[0].id);
 
-    auto nodes = ctx.get_nodes();
+    auto nodes1 = ctx.get_graph();
+    ctx.remove_node(nodes1.back().id);
+
+    auto nodes = ctx.get_func_lib();
 
     REQUIRE(nodes.empty());
 }

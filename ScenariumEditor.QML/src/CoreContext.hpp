@@ -50,11 +50,11 @@ struct Ctx {
 
     Ctx &operator=(const Ctx &other) = delete;
 
-    [[nodiscard]] std::vector<Func> get_funcs() const;
+    [[nodiscard]] std::vector<Func> get_func_lib() const;
 
-    [[nodiscard]] std::vector<Node> get_nodes() const;
+    [[nodiscard]] std::vector<Node> get_graph() const;
 
-    [[nodiscard]] Node add_node(const uuid &func_id) const;
+    void add_node(const uuid &func_id) const;
 
     void remove_node(const uuid &node_id) const;
 };

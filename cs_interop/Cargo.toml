@@ -2,7 +2,6 @@
 name = "cs_interop"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
 
 [lib]
 crate-type = ["cdylib"]
@@ -13,9 +12,7 @@ imaginarium = { workspace = true }
 graph = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
-prost = { workspace = true }
+serde_json = { workspace = true }
 
-[build-dependencies]
-prost-build =  { workspace = true }
 
 

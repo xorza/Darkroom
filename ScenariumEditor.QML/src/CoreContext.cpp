@@ -3,9 +3,13 @@
 #include "utils/BufferStream.hpp"
 #include "utils/interop.hpp"
 
-#include <graph.pb.h>
+
+#include <json/value.h>
+#include <json/json.h>
+
 
 #include <cassert>
+#include <iostream>
 
 extern "C" {
 
@@ -13,9 +17,9 @@ extern "C" {
 DLL_IMPORT void *create_context();
 DLL_IMPORT void destroy_context(void *ctx);
 
-DLL_IMPORT FfiBuf get_funcs(void *ctx);
-DLL_IMPORT FfiBuf get_nodes(void *ctx);
-DLL_IMPORT FfiBuf add_node(void *ctx, FfiUuid func_id);
+DLL_IMPORT FfiBuf get_func_lib(void *ctx);
+DLL_IMPORT FfiBuf get_graph(void *ctx);
+DLL_IMPORT void add_node(void *ctx, FfiUuid func_id);
 DLL_IMPORT void remove_node(void *ctx, FfiUuid node_id);
 
 }
@@ -34,73 +38,66 @@ Ctx::~Ctx() {
     this->ctx = nullptr;
 }
 
-std::vector<Func> Ctx::get_funcs() const {
-    Buf buf = Buf{::get_funcs(this->ctx)};
-    graph::FuncLib func_lib{};
-    func_lib.ParseFromArray(buf.data(), buf.len());
+Json::Value parse_json(const Buf &buf) {
+    Json::Value root;
+    Json::CharReaderBuilder readerBuilder;
+    std::string errs;
 
-    std::vector<Func> result;
-    result.reserve(func_lib.funcs_size());
+    std::unique_ptr<Json::CharReader> reader(readerBuilder.newCharReader());
 
-    for (int i = 0; i < func_lib.funcs_size(); i++) {
-        const auto &proto_func = func_lib.funcs(i);
+    const char *data = static_cast <const char *>(buf.data());
+    bool parsingSuccessful = reader->parse(data, data + buf.len(), &root, &errs);
 
-        Func func{};
-        func.id = uuid{proto_func.id().a(), proto_func.id().b()};
-        func.name = proto_func.name();
-        func.category = proto_func.category();
-        switch (proto_func.behavior()) {
-            case graph::FuncBehavior::ACTIVE:
-                func.behaviour = FuncBehavor::Active;
-                break;
-            case graph::FuncBehavior::PASSIVE:
-                func.behaviour = FuncBehavor::Passive;
-                break;
-            default:
-                assert(false);
-        }
-        func.output = proto_func.is_output();
-        func.inputs.reserve(proto_func.inputs_size());
-        func.outputs.reserve(proto_func.outputs_size());
-        func.events.reserve(proto_func.events_size());
-
-        for (int j = 0; j < proto_func.inputs_size(); j++) {
-//            func.inputs.push_back(proto_func.inputs(j));
-        }
-
-        for (int j = 0; j < proto_func.outputs_size(); j++) {
-//            func.outputs.push_back(proto_func.outputs(j));
-        }
-
-        for (int j = 0; j < proto_func.events_size(); j++) {
-//            func.events.push_back(proto_func.events(j));
-        }
-
-        result.push_back(func);
+    if (!parsingSuccessful) {
+        std::cerr << "Failed to parse JSON: " << errs << std::endl;
+        assert(false);
     }
 
-    return result;
+    return root;
 }
 
-std::vector<Node> Ctx::get_nodes() const {
-//    Buf buf = Buf{::get_nodes(this->ctx)};
-//
-//    auto nodes = buf.read_vec<FfiNode>();
-//    std::vector<Node> result;
-//    result.reserve(nodes.size());
-//
-//    for (uint32_t i = 0; i < nodes.size(); i++) {
-//        Node node{nodes[i]};
-//        result.push_back(node);
-//    }
+std::vector<Func> Ctx::get_func_lib() const {
+    Buf buf = Buf{::get_func_lib(this->ctx)};
+    Json::Value root = parse_json(buf);
+
+    std::vector<Func> funcs{};
+    for (const auto &func: root) {
+        Func f;
+        f.id = uuid::from_string(func["id"].asString());
+        f.name = func["name"].asString();
+        f.category = func["category"].asString();
+
+        auto behaviorStr = func["behavior"].asString();
+        if (behaviorStr == "Active") {
+            f.behaviour = FuncBehavor::Active;
+        } else if (behaviorStr == "Passive") {
+            f.behaviour = FuncBehavor::Passive;
+        } else {
+            assert(false);
+        }
+
+        f.output = func["output"].asBool();
+
+
+        funcs.push_back(f);
+    }
+
+    return funcs;
+}
+
+std::vector<Node> Ctx::get_graph() const {
+    Buf buf = Buf{::get_graph(this->ctx)};
+    Json::Value root = parse_json(buf);
+
+
+
 
     return {};
 }
 
-Node Ctx::add_node(const uuid &func_id) const {
-//    auto ffi_uuid = to_ffi(func_id);
-//    auto ffi_node = ::add_node(this->ctx, ffi_uuid);
-    return Node{};
+void Ctx::add_node(const uuid &func_id) const {
+    auto ffi_uuid = to_ffi(func_id);
+    ::add_node(this->ctx, ffi_uuid);
 }
 
 void Ctx::remove_node(const uuid &node_id) const {

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use hashbrown::hash_map::Entry;
+use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 
 use common::id_type;
@@ -103,8 +103,8 @@ impl FuncLib {
             }
         }
     }
-    pub fn iter(&self) -> hashbrown::hash_map::Iter<FuncId, Func> {
-        self.funcs.iter()
+    pub fn iter(&self) -> Values<'_, FuncId, Func> {
+        self.funcs.values()
     }
     pub fn merge(&mut self, other: FuncLib) {
         for (_id, func) in other.funcs {

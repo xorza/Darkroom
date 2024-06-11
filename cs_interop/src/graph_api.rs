@@ -8,31 +8,20 @@ use crate::utils::FfiUuid;
 
 
 #[no_mangle]
-extern "C" fn get_nodes(_ctx: *mut c_void) -> FfiBuf {
-    // let graph = Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
+extern "C" fn get_graph(ctx: *mut c_void) -> FfiBuf {
+    let graph = &get_context(ctx).graph;
 
-    // get_context(ctx)
-    //     .graph
-    //     .nodes()
-    //     .iter()
-    //     .map(FfiNode::from)
-    //     .collect::<Vec<FfiNode>>()
-    //     .into()
-
-    FfiBuf::default()
+    serde_json::to_string(graph).unwrap().into()
 }
 
 #[no_mangle]
-unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) -> FfiBuf {
+unsafe extern "C" fn add_node(ctx: *mut c_void, func_id: FfiUuid) {
     let context = get_context(ctx);
 
     let id: FuncId = uuid::Uuid::from(func_id).into();
     let func = context.func_lib.func_by_id(id).unwrap();
     let node = graph::graph::Node::from_function(func);
     context.graph.add_node(node);
-
-    // context.graph.nodes().last().unwrap().into()
-    FfiBuf::default()
 }
 
 #[no_mangle]

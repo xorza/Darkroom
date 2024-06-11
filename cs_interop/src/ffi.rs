@@ -2,7 +2,6 @@ use std::fmt::{Display, Formatter};
 use std::mem::forget;
 use std::str::Utf8Error;
 use bytes::{Buf, BufMut};
-use prost::Message;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -28,13 +27,7 @@ impl FfiBuf {
     pub fn to_uuid(&self) -> uuid::Uuid {
         self.as_str().unwrap().parse().unwrap()
     }
-
-    pub fn from_message<T: Message>(msg: T) -> FfiBuf {
-        msg.encode_to_vec().into()
-    }
-    pub fn to_message<T: Message + Default>(&self) -> T {
-        T::decode(self.as_slice()).unwrap()
-    }
+    
 }
 
 impl Display for FfiBuf {

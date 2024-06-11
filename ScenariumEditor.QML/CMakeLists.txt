@@ -21,15 +21,6 @@ find_package(Qt6 6.7 REQUIRED COMPONENTS Quick)
 qt_standard_project_setup()
 qt_policy(SET QTP0001 NEW)
 
-# Fetch protobuf
-set(ABSL_PROPAGATE_CXX_STD ON)
-FetchContent_Declare(
-        protobuf
-        GIT_REPOSITORY https://github.com/protocolbuffers/protobuf.git
-        GIT_TAG v27.1
-)
-FetchContent_MakeAvailable(protobuf)
-
 # Fetch Catch2
 FetchContent_Declare(
         catch2
@@ -37,6 +28,14 @@ FetchContent_Declare(
         GIT_TAG v3.6.0
 )
 FetchContent_MakeAvailable(catch2)
+
+# Fetch Catch2
+FetchContent_Declare(
+        jsoncpp
+        GIT_REPOSITORY https://github.com/open-source-parsers/jsoncpp.git
+        GIT_TAG 1.9.5
+)
+FetchContent_MakeAvailable(jsoncpp)
 
 
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
@@ -59,20 +58,6 @@ add_custom_command(
 add_custom_target(build_rust ALL DEPENDS ${LIBB_CS_INTEROP_FILE})
 
 
-# generate the protobuf code
-add_custom_command(
-        OUTPUT ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.h ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.cc
-        COMMAND protoc.exe --cpp_out . --proto_path . graph.proto
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/../cs_interop/proto
-        DEPENDS ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.proto
-        COMMENT "Generating protobuf code"
-)
-add_custom_target(generate_protobuf ALL DEPENDS
-        ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.h
-        ${CMAKE_SOURCE_DIR}/../cs_interop/proto/graph.pb.cc
-)
-
-
 file(GLOB_RECURSE SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
 file(GLOB SRC_PB_FILES ${CMAKE_SOURCE_DIR} ../cs_interop/proto/*.cc)
 qt_add_executable(scenarium_editor main.cpp ${SRC_FILES} ${SRC_PB_FILES})
@@ -93,12 +78,10 @@ qt_add_qml_module(scenarium_editor
         SOURCES
         ${SRC_QML_FILES}
 )
-add_dependencies(scenarium_editor generate_protobuf)
 add_dependencies(scenarium_editor build_rust)
 
 target_include_directories(scenarium_editor PUBLIC
         lib
-        ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
     target_link_options(scenarium_editor
@@ -109,7 +92,7 @@ endif ()
 
 set(LINK_LIBRARIES_LIST
         Qt6::Quick
-        protobuf::libprotobuf
+        jsoncpp_lib
         ${LIBB_CS_INTEROP_FILE}
 )
 
@@ -161,7 +144,6 @@ file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
 add_executable(scenarium_tests ${TEST_SRC_FILES} ${SRC_FILES} ${SRC_PB_FILES})
 target_include_directories(scenarium_tests PRIVATE
         lib
-        ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
 target_link_libraries(scenarium_tests
         PUBLIC
