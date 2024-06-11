@@ -2,14 +2,45 @@ syntax = "proto3";
 
 package graph;
 
-// A snazzy new shirt!
-message Shirt {
-  enum Size {
-    SMALL = 0;
-    MEDIUM = 1;
-    LARGE = 2;
-  }
 
-  string color = 1;
-  Size size = 2;
+message Id {
+  uint64 a = 1;
+  uint64 b = 2;
+}
+
+enum FuncBehavior {
+  ACTIVE = 0;
+  PASSIVE = 1;
+}
+
+message InputInfo {
+  string name = 1;
+  bool is_required = 2;
+  uint64 data_type = 3;
+  uint64 default_value = 4;
+  repeated  uint64 variants = 5;
+}
+
+message OutputInfo {
+  string name = 1;
+  uint64 data_type = 2;
+}
+
+message EventInfo {
+  string name = 1;
+}
+
+message Func {
+  Id id = 1;
+  string name = 2;
+  string category = 3;
+  FuncBehavior behavior = 4;
+  bool is_output = 5;
+  repeated InputInfo inputs = 6;
+  repeated OutputInfo outputs = 7;
+  repeated EventInfo events = 8;
+}
+
+message FuncLibrary {
+  repeated Func funcs = 1;
 }

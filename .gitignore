@@ -21,3 +21,5 @@
 
 **/*.pb.h
 **/*.pb.cc
+/cs_interop/src/proto/*.rs
+

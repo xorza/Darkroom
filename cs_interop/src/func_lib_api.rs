@@ -1,70 +1,58 @@
 use std::ffi::c_void;
-use crate::{get_context, FfiBuf};
+use prost::Message;
+use crate::{get_context, FfiBuf, proto};
 
-#[repr(C)]
-#[derive(Debug)]
-pub enum FuncBehavior {
-    Active,
-    Passive,
+fn to_proto_id(id: &graph::function::FuncId) -> proto::Id {
+    let (a, b) = id.as_u64_pair();
+
+    proto::Id { a, b }
 }
 
-#[repr(C)]
-#[derive(Debug)]
-struct FfiFunc {
-    id: FfiBuf,                 // string
-    name: FfiBuf,               // string
-    category: FfiBuf,           // string
-    behaviour: FuncBehavior,
-    is_output: bool,
-    inputs: FfiBuf,             // vector of
-    outputs: FfiBuf,            // vector of
-    events: FfiBuf,             // vector of strings
+fn to_proto_behavior(behavior: graph::function::FuncBehavior) -> proto::FuncBehavior {
+    match behavior {
+        graph::function::FuncBehavior::Active => proto::FuncBehavior::Active,
+        graph::function::FuncBehavior::Passive => proto::FuncBehavior::Passive,
+    }
+}
+
+fn to_proto_func(func: &graph::function::Func) -> proto::Func {
+    proto::Func {
+        id: Some(to_proto_id(&func.id)),
+        name: func.name.clone(),
+        category: func.category.clone(),
+        behavior: to_proto_behavior(func.behavior) as i32,
+        is_output: func.is_output,
+        inputs: vec![],
+        outputs: vec![],
+        events: vec![],
+    }
 }
 
 #[no_mangle]
 extern "C" fn get_funcs(ctx: *mut c_void) -> FfiBuf {
-    // let yaml = include_str!("../../test_resources/test_funcs.yml");
-    // let func_lib = FuncLib::from_yaml(yaml).unwrap();
-
-    get_context(ctx)
+    let funcs = get_context(ctx)
         .func_lib
         .iter()
-        .map(|(_func_id, func)| FfiFunc::from(func))
-        .collect::<Vec<FfiFunc>>()
-        .into()
-}
+        .map(|(_func_id, func)| to_proto_func(func))
+        .collect::<Vec<proto::Func>>();
 
-impl From<&graph::function::Func> for FfiFunc {
-    fn from(func: &graph::function::Func) -> Self {
-        let events: FfiBuf = FfiBuf::from_iter(
-            func.events
-                .iter()
-                .map(|event| event.name.clone())
-                .collect::<Vec<String>>(),
-        );
-
-        FfiFunc {
-            id: func.id.as_uuid().into(),
-            name: func.name.clone().into(),
-            category: func.category.clone().into(),
-            behaviour: match func.behavior {
-                graph::graph::FuncBehavior::Active => FuncBehavior::Active,
-                graph::graph::FuncBehavior::Passive => FuncBehavior::Passive,
-            },
-            is_output: func.is_output,
-            inputs: FfiBuf::default(),
-            outputs: FfiBuf::default(),
-            events,
-        }
+    proto::FuncLibrary {
+        funcs,
     }
+        .encode_to_vec()
+        .into()
 }
 
 
 #[cfg(test)]
 mod tests {
-    // #[test]
-    // fn test_get_funcs() {
-    //     let funcs = super::get_funcs();
-    //     assert!(!funcs.is_null());
-    // }
+    use crate::create_context;
+    use crate::func_lib_api::get_funcs;
+
+    #[test]
+    fn test_get_funcs() {
+        let ctx = create_context();
+        let buf = get_funcs(ctx);
+        drop(buf);
+    }
 }

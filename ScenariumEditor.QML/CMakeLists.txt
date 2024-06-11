@@ -75,20 +75,7 @@ add_custom_target(generate_protobuf ALL DEPENDS
 
 file(GLOB_RECURSE SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR} src/*.hpp src/*.cpp)
 file(GLOB SRC_PB_FILES ${CMAKE_SOURCE_DIR} ../cs_interop/proto/*.cc)
-qt_add_executable(scenarium_editor ${SRC_FILES} ${SRC_PB_FILES} main.cpp)
-set_target_properties(scenarium_editor PROPERTIES ENABLE_EXPORTS ON) # for tests
-add_dependencies(scenarium_editor generate_protobuf)
-add_dependencies(scenarium_editor build_rust)
-
-
-if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
-    target_link_options(scenarium_editor
-            PUBLIC
-            -static -static-libgcc -static-libstdc++
-    )
-endif ()
-
-
+qt_add_executable(scenarium_editor main.cpp ${SRC_FILES} ${SRC_PB_FILES})
 file(GLOB_RECURSE QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.qml qml/*.js)
 file(GLOB_RECURSE SRC_QML_FILES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} qml/*.hpp qml/*.cpp)
 file(GLOB_RECURSE RESOURCES RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
@@ -106,23 +93,29 @@ qt_add_qml_module(scenarium_editor
         SOURCES
         ${SRC_QML_FILES}
 )
+add_dependencies(scenarium_editor generate_protobuf)
+add_dependencies(scenarium_editor build_rust)
 
-
-target_include_directories(scenarium_editor PRIVATE
+target_include_directories(scenarium_editor PUBLIC
         lib
-        fbs
         ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
+if (${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
+    target_link_options(scenarium_editor
+            PUBLIC
+            -static -static-libgcc -static-libstdc++
+    )
+endif ()
 
-target_link_libraries(scenarium_editor
-        PRIVATE
+set(LINK_LIBRARIES_LIST
         Qt6::Quick
         protobuf::libprotobuf
         ${LIBB_CS_INTEROP_FILE}
 )
 
-target_compile_options(scenarium_editor PRIVATE
-        -fno-rtti
+target_link_libraries(scenarium_editor PUBLIC ${LINK_LIBRARIES_LIST})
+#target_compile_options(scenarium_editor PRIVATE
+#        -fno-rtti
 #        -Wall
 #        -Wextra
 #        -Wpedantic
@@ -134,8 +127,7 @@ target_compile_options(scenarium_editor PRIVATE
 #        -Wno-unused-value
 #        -Wno-unused-local-typedefs
 #        -Wno-unused-const-variable
-)
-
+#)
 
 
 # Copy the assets to the build directory
@@ -166,21 +158,18 @@ add_custom_command(
 
 # Tests
 file(GLOB_RECURSE TEST_SRC_FILES "tests/*.cpp")
-add_executable(scenarium-tests ${SRC_FILES} ${SRC_PB_FILES} ${TEST_SRC_FILES})
-target_link_libraries(scenarium-tests PRIVATE
-        Catch2::Catch2WithMain
-        ${LIBB_CS_INTEROP_FILE}
-        protobuf::libprotobuf
-)
-target_include_directories(scenarium-tests PRIVATE
+add_executable(scenarium_tests ${TEST_SRC_FILES} ${SRC_FILES} ${SRC_PB_FILES})
+target_include_directories(scenarium_tests PRIVATE
         lib
-        fbs
         ${CMAKE_SOURCE_DIR}/../cs_interop/proto
 )
-add_dependencies(scenarium-tests generate_protobuf)
-add_dependencies(scenarium-tests build_rust)
+target_link_libraries(scenarium_tests
+        PUBLIC
+        Catch2::Catch2WithMain
+        ${LINK_LIBRARIES_LIST}
+)
 #list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
 include(Catch)
-catch_discover_tests(scenarium-tests)
+catch_discover_tests(scenarium_tests)
 

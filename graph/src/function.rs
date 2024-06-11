@@ -6,7 +6,13 @@ use serde::{Deserialize, Serialize};
 use common::id_type;
 
 use crate::data::*;
-use crate::graph::FuncBehavior;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum FuncBehavior {
+    #[default]
+    Active,
+    Passive,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct OutputInfo {
@@ -50,6 +56,16 @@ pub struct Func {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
     funcs: hashbrown::HashMap<FuncId, Func>,
+}
+
+
+impl FuncBehavior {
+    pub fn toggle(&mut self) {
+        *self = match *self {
+            FuncBehavior::Active => FuncBehavior::Passive,
+            FuncBehavior::Passive => FuncBehavior::Active,
+        };
+    }
 }
 
 impl FuncLib {
@@ -112,8 +128,8 @@ impl From<&str> for EventInfo {
 }
 
 impl<It> From<It> for FuncLib
-where
-    It: IntoIterator<Item = Func>,
+    where
+        It: IntoIterator<Item=Func>,
 {
     fn from(iter: It) -> Self {
         let mut func_lib = FuncLib::default();
@@ -139,8 +155,7 @@ mod tests {
     use std::str::FromStr;
 
     use crate::data::DataType;
-    use crate::function::{Func, FuncId, FuncLib, InputInfo, OutputInfo};
-    use crate::graph::FuncBehavior;
+    use crate::function::{Func, FuncBehavior, FuncId, FuncLib, InputInfo, OutputInfo};
 
     fn create_func_lib() -> FuncLib {
         [
@@ -243,7 +258,7 @@ mod tests {
                 events: vec![],
             },
         ]
-        .into()
+            .into()
     }
 
     #[test]

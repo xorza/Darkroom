@@ -5,12 +5,6 @@ use common::id_type;
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
-pub enum FuncBehavior {
-    #[default]
-    Active,
-    Passive,
-}
 
 id_type!(NodeId);
 
@@ -237,14 +231,6 @@ impl Binding {
     }
 }
 
-impl FuncBehavior {
-    pub fn toggle(&mut self) {
-        *self = match *self {
-            FuncBehavior::Active => FuncBehavior::Passive,
-            FuncBehavior::Passive => FuncBehavior::Active,
-        };
-    }
-}
 
 #[cfg(test)]
 mod tests {

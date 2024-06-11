@@ -1,7 +1,14 @@
 #![allow(unused_imports)]
 
-mod graph {
-    include!(concat!(env!("OUT_DIR"), "/graph.rs"));
-}
+mod graph;
 
 pub use graph::*;
+
+#[cfg(test)]
+mod tests {
+    use prost::Message;
+    use super::*;
+
+    #[test]
+    fn proto_works() {}
+}

@@ -272,8 +272,8 @@ mod tests {
     use crate::data::StaticValue;
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
-    use crate::function::FuncLib;
-    use crate::graph::{Binding, FuncBehavior, Graph};
+    use crate::function::{FuncBehavior, FuncLib};
+    use crate::graph::{Binding, Graph};
     use crate::invoke::{InvokeCache, Invoker, LambdaInvoker, UberInvoker};
     use crate::runtime_graph::RuntimeGraph;
 

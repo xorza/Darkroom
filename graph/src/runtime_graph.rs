@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
 use crate::function::FuncLib;
-use crate::graph::{Binding, FuncBehavior, Graph, NodeId};
+use crate::function::FuncBehavior;
+use crate::graph::{Binding, Graph, NodeId};
 use crate::invoke::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]

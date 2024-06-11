@@ -52,7 +52,7 @@ TEST_CASE("remove node", "[context]") {
 
 TEST_CASE("test proto", "[proto]") {
     graph::Shirt shirt{};
-    shirt.set_color("graph::Color::Color_RED");
+    shirt.add_color("graph::Color::Color_RED");
     shirt.set_size(graph::Shirt_Size::Shirt_Size_MEDIUM);
 
 
@@ -62,5 +62,5 @@ TEST_CASE("test proto", "[proto]") {
 
     graph::Shirt new_shirt{};
     new_shirt.ParseFromString(str);
-    std::cout << "CoLor" << new_shirt.color() << std::endl;
+    std::cout << "CoLor" << new_shirt.color(0) << std::endl;
 }
