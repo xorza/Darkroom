@@ -107,6 +107,8 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.id == id)
     }
 
+
+
     pub fn to_yaml(&self) -> anyhow::Result<String> {
         let yaml = serde_yaml::to_string(&self)?;
         Ok(yaml)

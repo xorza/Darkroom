@@ -14,11 +14,7 @@ pub enum FuncBehavior {
     Passive,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OutputInfo {
-    pub name: String,
-    pub data_type: DataType,
-}
+
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct InputInfo {
@@ -29,6 +25,12 @@ pub struct InputInfo {
     pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<(String, StaticValue)>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OutputInfo {
+    pub name: String,
+    pub data_type: DataType,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

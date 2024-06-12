@@ -56,7 +56,7 @@ Json::Value parse_json(const Buf &buf) {
     return root;
 }
 
-std::vector<Func> Ctx::get_func_lib() const {
+FuncLib Ctx::get_func_lib() const {
     Buf buf = Buf{::get_func_lib(this->ctx)};
     Json::Value root = parse_json(buf);
 
@@ -78,11 +78,38 @@ std::vector<Func> Ctx::get_func_lib() const {
 
         f.output = func["output"].asBool();
 
+        for (const auto &input: func["inputs"]) {
+            FuncInpu info;
+            info.name = input["name"].asString();
+            info.is_required = input["is_required"].asBool();
+
+            //todo: parse data_type value
+            //todo: parse default_value
+            //todo: parse variants
+
+            f.inputs.push_back(info);
+        }
+
+        for (const auto &output: func["outputs"]) {
+            FuncOutput info;
+            info.name = output["name"].asString();
+
+            //todo: parse data_type value
+
+            f.outputs.push_back(info);
+        }
+
+        for (const auto &event: func["events"]) {
+            FuncEvent info;
+            info.name = event["name"].asString();
+            f.events.push_back(info);
+        }
+
 
         funcs.push_back(f);
     }
 
-    return funcs;
+    return FuncLib{funcs};
 }
 
 Graph Ctx::get_graph() const {
@@ -100,7 +127,33 @@ Graph Ctx::get_graph() const {
         n.output = node["output"].asBool();
         n.cache_outputs = node["cache_outputs"].asBool();
 
-        for (const auto &input: node["inputs"]) {
+        for (const auto &json_input: node["inputs"]) {
+            NodeInput node_input{};
+
+            const auto &binding = json_input["binding"];
+            if (binding.isString()) {
+                node_input.output_index = 0;
+                node_input.output_node_id = uuid{};
+
+                auto binding_str = binding.asString();
+                if (binding_str == "None") {
+                    node_input.type = NodeInputType::None;
+
+                } else if (binding_str == "Const") {
+                    node_input.type = NodeInputType::Const;
+                    //todo: parse const value
+                } else {
+                    assert(false);
+                }
+            } else if (binding.isObject()) {
+                //todo: parse node output binding
+                std::string json_str = binding.toStyledString();
+
+            } else {
+                assert(false);
+            }
+
+            n.inputs.push_back(node_input);
         }
 
         for (const auto &event: node["events"]) {

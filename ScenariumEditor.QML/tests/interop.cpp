@@ -24,13 +24,13 @@ TEST_CASE("Uuid tests", "[uuid]") {
 TEST_CASE("add/remove node", "[context]") {
     auto ctx = Ctx{};
 
-    auto funcs = ctx.get_func_lib();
-    REQUIRE(!funcs.empty());
+    auto func_lib = ctx.get_func_lib();
+    REQUIRE(!func_lib.funcs.empty());
 
     auto graph = ctx.get_graph();
     REQUIRE(graph.nodes.empty());
 
-    ctx.add_node(funcs[0].id);
+    ctx.add_node(func_lib.funcs[0].id);
 
     graph = ctx.get_graph();
     REQUIRE(1 == graph.nodes.size());
@@ -42,6 +42,6 @@ TEST_CASE("add/remove node", "[context]") {
 }
 
 
-TEST_CASE("test proto", "[proto]") {
+TEST_CASE("test", "[tests]") {
 
 }

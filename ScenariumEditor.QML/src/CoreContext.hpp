@@ -7,10 +7,33 @@
 #include <memory>
 #include <string>
 #include <cstdlib>
+#include <optional>
 
 enum class FuncBehavor {
     Active = 1,
     Passive = 2,
+};
+
+struct DataType {
+
+};
+struct StaticValue {
+
+};
+
+struct FuncInpu {
+    std::string name{};
+    bool is_required = false;
+    DataType data_type{};
+    std::optional<StaticValue> default_value{};
+    std::vector<StaticValue> variants{};
+};
+struct FuncOutput {
+    std::string name{};
+    DataType data_type{};
+};
+struct FuncEvent {
+    std::string name{};
 };
 
 struct Func {
@@ -19,11 +42,32 @@ struct Func {
     std::string category{};
     FuncBehavor behaviour{};
     bool output = false;
-    std::vector<std::string> inputs{};
-    std::vector<std::string> outputs{};
-    std::vector<std::string> events{};
+    std::vector<FuncInpu> inputs{};
+    std::vector<FuncOutput> outputs{};
+    std::vector<FuncEvent> events{};
 
     Func() = default;
+};
+
+struct FuncLib {
+    std::vector<Func> funcs{};
+};
+
+struct NodeEvent {
+    std::vector<uuid> subscribers{};
+};
+
+enum class NodeInputType {
+    None = 1,
+    Output = 2,
+    Const = 3,
+};
+
+struct NodeInput {
+    NodeInputType type{};
+    uuid output_node_id{};
+    uint32_t output_index{};
+    std::optional<StaticValue> const_value{};
 };
 
 struct Node {
@@ -32,8 +76,8 @@ struct Node {
     std::string name{};
     bool output = false;
     bool cache_outputs = false;
-    std::vector<std::string> inputs{};
-    std::vector<uuid> events{};
+    std::vector<NodeInput> inputs{};
+    std::vector<NodeEvent> events{};
 
     Node() = default;
 };
@@ -54,7 +98,7 @@ struct Ctx {
 
     Ctx &operator=(const Ctx &other) = delete;
 
-    [[nodiscard]] std::vector<Func> get_func_lib() const;
+    [[nodiscard]] FuncLib get_func_lib() const;
 
     [[nodiscard]] Graph get_graph() const;
 

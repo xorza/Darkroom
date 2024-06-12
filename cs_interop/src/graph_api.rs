@@ -31,3 +31,21 @@ unsafe extern "C" fn remove_node(ctx: *mut c_void, node_id: FfiUuid) {
     let node_id: NodeId = uuid::Uuid::from(node_id).into();
     context.graph.remove_node_by_id(node_id);
 }
+
+#[no_mangle]
+unsafe extern "C" fn set_output_binding(
+    ctx: *mut c_void,
+    output_node_id: FfiUuid,
+    output_idx: u32,
+    input_node_id: FfiUuid,
+    input_idx: u32,
+) {
+    let ctx = get_context(ctx);
+    let output_node_id: NodeId = uuid::Uuid::from(output_node_id).into();
+    let input_node_id: NodeId = uuid::Uuid::from(input_node_id).into();
+    ctx.set_output_binding(output_node_id, output_idx, input_node_id, input_idx).unwrap();
+}
+
+
+
+
