@@ -12,7 +12,6 @@ use crate::ffi::FfiBuf;
 mod func_lib_api;
 mod graph_api;
 mod utils;
-mod proto;
 mod ffi;
 
 

@@ -85,14 +85,31 @@ std::vector<Func> Ctx::get_func_lib() const {
     return funcs;
 }
 
-std::vector<Node> Ctx::get_graph() const {
+Graph Ctx::get_graph() const {
     Buf buf = Buf{::get_graph(this->ctx)};
     Json::Value root = parse_json(buf);
 
+    auto json_nodes = root["nodes"];
+    std::vector<Node> nodes{};
 
+    for (const auto &node: json_nodes) {
+        Node n;
+        n.id = uuid::from_string(node["id"].asString());
+        n.func_id = uuid::from_string(node["func_id"].asString());
+        n.name = node["name"].asString();
+        n.output = node["output"].asBool();
+        n.cache_outputs = node["cache_outputs"].asBool();
 
+        for (const auto &input: node["inputs"]) {
+        }
 
-    return {};
+        for (const auto &event: node["events"]) {
+        }
+
+        nodes.push_back(n);
+    }
+
+    return Graph{nodes};
 }
 
 void Ctx::add_node(const uuid &func_id) const {

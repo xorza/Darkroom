@@ -38,6 +38,10 @@ struct Node {
     Node() = default;
 };
 
+struct Graph {
+    std::vector<Node> nodes{};
+};
+
 
 struct Ctx {
     void *ctx = nullptr;
@@ -52,7 +56,7 @@ struct Ctx {
 
     [[nodiscard]] std::vector<Func> get_func_lib() const;
 
-    [[nodiscard]] std::vector<Node> get_graph() const;
+    [[nodiscard]] Graph get_graph() const;
 
     void add_node(const uuid &func_id) const;
 
