@@ -14,10 +14,8 @@ pub enum FuncBehavior {
     Passive,
 }
 
-
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct InputInfo {
+pub struct FuncInput {
     pub name: String,
     pub is_required: bool,
     pub data_type: DataType,
@@ -28,13 +26,13 @@ pub struct InputInfo {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct OutputInfo {
+pub struct FuncOutput {
     pub name: String,
     pub data_type: DataType,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct EventInfo {
+pub struct FuncEvent {
     pub name: String,
 }
 
@@ -45,14 +43,16 @@ pub struct Func {
     pub id: FuncId,
     pub name: String,
     pub category: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub behavior: FuncBehavior,
     pub is_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<InputInfo>,
+    pub inputs: Vec<FuncInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<OutputInfo>,
+    pub outputs: Vec<FuncOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<EventInfo>,
+    pub events: Vec<FuncEvent>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -76,10 +76,15 @@ impl FuncLib {
         Ok(Self::from_yaml(&yaml)?)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
-        Ok(serde_yaml::from_str(&yaml)?)
+        let funcs: Vec<Func> = serde_yaml::from_str(&yaml)?;
+
+        Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
-        serde_yaml::to_string(self).unwrap()
+        let funcs: Vec<&Func> = self.funcs
+            .values()
+            .collect();
+        serde_yaml::to_string(&funcs).unwrap()
     }
 
     pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {
@@ -121,17 +126,17 @@ impl FuncLib {
     }
 }
 
-impl From<&str> for EventInfo {
+impl From<&str> for FuncEvent {
     fn from(s: &str) -> Self {
-        EventInfo {
+        FuncEvent {
             name: s.to_string(),
         }
     }
 }
 
 impl<It> From<It> for FuncLib
-    where
-        It: IntoIterator<Item=Func>,
+where
+    It: IntoIterator<Item=Func>,
 {
     fn from(iter: It) -> Self {
         let mut func_lib = FuncLib::default();
@@ -142,11 +147,11 @@ impl<It> From<It> for FuncLib
     }
 }
 
-impl FromStr for EventInfo {
+impl FromStr for FuncEvent {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(EventInfo {
+        Ok(FuncEvent {
             name: s.to_string(),
         })
     }
@@ -157,25 +162,26 @@ mod tests {
     use std::str::FromStr;
 
     use crate::data::DataType;
-    use crate::function::{Func, FuncBehavior, FuncId, FuncLib, InputInfo, OutputInfo};
+    use crate::function::{Func, FuncBehavior, FuncId, FuncLib, FuncInput, FuncOutput};
 
     fn create_func_lib() -> FuncLib {
         [
             Func {
                 id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc").unwrap(),
                 name: "mult".to_string(),
+                description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
                 is_output: false,
                 inputs: vec![
-                    InputInfo {
+                    FuncInput {
                         name: "A".to_string(),
                         is_required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
                     },
-                    InputInfo {
+                    FuncInput {
                         name: "B".to_string(),
                         is_required: true,
                         data_type: DataType::Int,
@@ -183,7 +189,7 @@ mod tests {
                         variants: vec![],
                     },
                 ],
-                outputs: vec![OutputInfo {
+                outputs: vec![FuncOutput {
                     name: "Prod".to_string(),
                     data_type: DataType::Int,
                 }],
@@ -192,11 +198,12 @@ mod tests {
             Func {
                 id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2").unwrap(),
                 name: "get_a".to_string(),
+                description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Active,
                 is_output: false,
                 inputs: vec![],
-                outputs: vec![OutputInfo {
+                outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
                     data_type: DataType::Int,
                 }],
@@ -205,11 +212,12 @@ mod tests {
             Func {
                 id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b").unwrap(),
                 name: "get_b".to_string(),
+                description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
                 is_output: false,
                 inputs: vec![],
-                outputs: vec![OutputInfo {
+                outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
                     data_type: DataType::Int,
                 }],
@@ -218,18 +226,19 @@ mod tests {
             Func {
                 id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5").unwrap(),
                 name: "sum".to_string(),
+                description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
                 is_output: false,
                 inputs: vec![
-                    InputInfo {
+                    FuncInput {
                         name: "A".to_string(),
                         is_required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
                     },
-                    InputInfo {
+                    FuncInput {
                         name: "B".to_string(),
                         is_required: true,
                         data_type: DataType::Int,
@@ -237,7 +246,7 @@ mod tests {
                         variants: vec![],
                     },
                 ],
-                outputs: vec![OutputInfo {
+                outputs: vec![FuncOutput {
                     name: "Sum".to_string(),
                     data_type: DataType::Int,
                 }],
@@ -246,10 +255,11 @@ mod tests {
             Func {
                 id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a").unwrap(),
                 name: "print".to_string(),
+                description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
                 is_output: false,
-                inputs: vec![InputInfo {
+                inputs: vec![FuncInput {
                     name: "message".to_string(),
                     is_required: true,
                     data_type: DataType::Int,

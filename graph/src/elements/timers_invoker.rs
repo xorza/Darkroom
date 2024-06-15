@@ -2,7 +2,7 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncId, FuncLib, InputInfo, OutputInfo};
+use crate::function::{Func, FuncId, FuncLib, FuncInput, FuncOutput};
 use crate::function::FuncBehavior;
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
@@ -25,10 +25,11 @@ impl Default for TimersInvoker {
             Func {
                 id: FuncId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
                 name: "frame event".to_string(),
+                description: None,
                 behavior: FuncBehavior::Active,
                 is_output: false,
                 category: "Timers".to_string(),
-                inputs: vec![InputInfo {
+                inputs: vec![FuncInput {
                     name: "frequency".to_string(),
                     is_required: true,
                     data_type: DataType::Float,
@@ -36,11 +37,11 @@ impl Default for TimersInvoker {
                     variants: vec![],
                 }],
                 outputs: vec![
-                    OutputInfo {
+                    FuncOutput {
                         name: "delta".to_string(),
                         data_type: DataType::Float,
                     },
-                    OutputInfo {
+                    FuncOutput {
                         name: "frame no".to_string(),
                         data_type: DataType::Int,
                     },
