@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace CoreInterop;
 
@@ -24,6 +26,9 @@ public unsafe class ScenariumCore {
 
     [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void destroy_ffi_buf(FfiBuf buf);
+
+    [DllImport(DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
+    private static extern FfiBuf get_func_lib(void* ctx);
 
 
     private static IntPtr _core_interop_handle = IntPtr.Zero;
@@ -52,11 +57,11 @@ public unsafe class ScenariumCore {
     }
 
 
+    private readonly void* _ctx = null;
+
     static ScenariumCore() {
         LoadDll();
     }
-
-    private readonly void* _ctx = null;
 
     public ScenariumCore() {
         _ctx = create_context();
@@ -66,16 +71,31 @@ public unsafe class ScenariumCore {
         destroy_context(_ctx);
     }
 
+
     public string GetGraph() {
         using var buf = get_graph(_ctx);
         return buf.ToString();
     }
+
+    public FuncLib GetFuncLib() {
+        using var buf = get_func_lib(_ctx);
+        var yaml = buf.ToString();
+
+        var deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .Build();
+
+        var funcs = deserializer.Deserialize<List<Func>>(new StringReader(yaml));
+        return new FuncLib() {
+            Funcs = funcs
+        };
+    }
 }
 
-internal unsafe struct FfiBuf : IDisposable {
-    public byte* _bytes = null;
-    public uint _length = 0;
-    public uint _capacity = 0;
+internal readonly unsafe struct FfiBuf : IDisposable {
+    readonly byte* _bytes = null;
+    readonly uint _length = 0;
+    readonly uint _capacity = 0;
 
     public FfiBuf() {
     }
