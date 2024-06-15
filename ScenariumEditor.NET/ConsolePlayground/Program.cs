@@ -1,11 +1,7 @@
-﻿using System.Diagnostics;
-using CoreInterop;
+﻿using CoreInterop;
 
 
-ScenariumCore.Init();
+var scenarium = new ScenariumCore();
+var buf = scenarium.GetGraph();
 
-for (int i = 0; i < 3; i++) {
-    var scenarium = new ScenariumCore();
-    // scenarium.GetNodes();
-    scenarium.GetFuncs();
-}
+Console.WriteLine(buf);

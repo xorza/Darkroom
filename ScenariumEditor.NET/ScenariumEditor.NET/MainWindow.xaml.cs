@@ -34,7 +34,6 @@ public partial class MainWindow : Window {
     }
 
     private void MainWindow_OnLoaded(object sender, RoutedEventArgs e) {
-        ScenariumCore.Init();
     }
 
     private void MainWindow_OnUnloaded(object sender, RoutedEventArgs e) {

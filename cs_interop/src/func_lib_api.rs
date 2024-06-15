@@ -1,16 +1,13 @@
 use std::ffi::c_void;
-use graph::function::Func;
 use crate::{get_context, FfiBuf};
 
 
 #[no_mangle]
 extern "C" fn get_func_lib(ctx: *mut c_void) -> FfiBuf {
-    let funcs = get_context(ctx)
+    get_context(ctx)
         .func_lib
-        .iter()
-        .collect::<Vec<&Func>>();
-
-    serde_json::to_string(&funcs).unwrap().into()
+        .to_yaml()
+        .into()
 }
 
 

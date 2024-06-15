@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 #![deny(improper_ctypes_definitions)]
 
-use std::ffi::c_void;
 
+use std::ffi::c_void;
 use graph::ctx::Context;
 use graph::elements::basic_invoker::BasicInvoker;
 use graph::elements::timers_invoker::TimersInvoker;
