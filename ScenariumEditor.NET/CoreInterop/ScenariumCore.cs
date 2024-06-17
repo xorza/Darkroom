@@ -73,6 +73,7 @@ public unsafe class ScenariumCore {
         .WithTagMapping("!Float", typeof(double))
         .WithTagMapping("!Int", typeof(Int64))
         .WithTagMapping("!Output", typeof(OutputBinding))
+        .WithTagMapping("!Const", typeof(ConstBinding))
         .WithTypeConverter(new UuidConverter())
         .Build();
 
