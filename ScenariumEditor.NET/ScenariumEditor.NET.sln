@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CoreInterop", "CoreInterop\
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConsolePlayground", "ConsolePlayground\ConsolePlayground.csproj", "{8394D066-8DA0-4C56-9B6D-EF2B8DDB8FBD}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "InteropTests", "InteropTests\InteropTests.csproj", "{38AAE86B-8DEB-44EE-9291-E17497B5F076}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{8394D066-8DA0-4C56-9B6D-EF2B8DDB8FBD}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8394D066-8DA0-4C56-9B6D-EF2B8DDB8FBD}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8394D066-8DA0-4C56-9B6D-EF2B8DDB8FBD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{38AAE86B-8DEB-44EE-9291-E17497B5F076}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{38AAE86B-8DEB-44EE-9291-E17497B5F076}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{38AAE86B-8DEB-44EE-9291-E17497B5F076}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{38AAE86B-8DEB-44EE-9291-E17497B5F076}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

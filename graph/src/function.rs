@@ -15,6 +15,12 @@ pub enum FuncBehavior {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValueVariant {
+    pub name: String,
+    pub value: StaticValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FuncInput {
     pub name: String,
     pub is_required: bool,
@@ -22,7 +28,7 @@ pub struct FuncInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variants: Vec<(String, StaticValue)>,
+    pub variants: Vec<ValueVariant>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -10,7 +10,7 @@ use strum_macros::{Display, EnumIter};
 use common::output_stream::OutputStream;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncId, FuncLib, FuncInput, FuncOutput};
+use crate::function::{Func, FuncId, FuncLib, FuncInput, FuncOutput, ValueVariant};
 use crate::function::FuncBehavior;
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
@@ -33,9 +33,9 @@ enum Math2ArgOp {
 }
 
 impl Math2ArgOp {
-    fn list_variants() -> Vec<(String, StaticValue)> {
+    fn list_variants() -> Vec<ValueVariant> {
         Math2ArgOp::iter()
-            .map(|op| (op.to_string(), StaticValue::Int(op as i64)))
+            .map(|op| ValueVariant { name: op.to_string(), value: StaticValue::Int(op as i64) })
             .collect()
     }
     fn invoke(&self, inputs: &InvokeArgs) -> anyhow::Result<DynamicValue> {
