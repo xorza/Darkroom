@@ -14,12 +14,13 @@ public enum FuncBehavior {
     Passive
 }
 
+
 public class ValueVariant {
     [YamlMember(Alias = "name")]
     public String Name { get; set; } = "";
 
     [YamlMember(Alias = "value")]
-    public String Value { get; set; } = "";
+    public Value Value { get; set; } = null;
 }
 
 public class FuncInput {
@@ -30,10 +31,10 @@ public class FuncInput {
     public bool IsRequired { get; set; } = false;
 
     [YamlMember(Alias = "data_type")]
-    public String DataType { get; set; } = "";
+    public DataType DataType { get; set; } = null;
 
     [YamlMember(Alias = "default_value")]
-    public String DefaultValue { get; set; } = "";
+    public Value DefaultValue { get; set; } = null;
 
     [YamlMember(Alias = "variants")]
     public List<ValueVariant> Variants { get; set; } = new();
@@ -44,7 +45,7 @@ public class FuncOutput {
     public String Name { get; set; } = "";
 
     [YamlMember(Alias = "data_type")]
-    public String DataType { get; set; } = "";
+    public DataType DataType { get; set; } = null;
 }
 
 public class FuncEvent {

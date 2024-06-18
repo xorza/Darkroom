@@ -70,11 +70,13 @@ public unsafe class ScenariumCore {
     }
 
     private readonly IDeserializer _deserializer = new DeserializerBuilder()
-        .WithTagMapping("!Float", typeof(double))
-        .WithTagMapping("!Int", typeof(Int64))
+        .WithTagMapping("!Float", typeof(Value))
+        .WithTagMapping("!Int", typeof(Value))
         .WithTagMapping("!Output", typeof(OutputBinding))
         .WithTagMapping("!Const", typeof(ConstBinding))
         .WithTypeConverter(new UuidConverter())
+        .WithTypeConverter(new DataTypeConverter())
+        .WithTypeConverter(new ValueConverter())
         .Build();
 
 

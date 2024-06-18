@@ -21,8 +21,8 @@ extern "C" fn create_context() -> *mut c_void {
     context.invoker.merge(BasicInvoker::default());
     context.invoker.merge(TimersInvoker::default());
     context.func_lib.merge(context.invoker.get_func_lib());
-    
-    context.graph= graph::graph::Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
+
+    context.graph = graph::graph::Graph::from_yaml(include_str!("../../test_resources/test_graph.yml")).unwrap();
 
     Box::into_raw(context) as *mut c_void
 }
@@ -43,7 +43,7 @@ pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
 
 
 #[cfg(test)]
-mod tests{
+mod tests {
     #[test]
     fn test_create_context() {
         let ctx = super::create_context();
