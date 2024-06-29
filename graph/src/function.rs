@@ -283,10 +283,8 @@ mod tests {
     fn serialization() {
         let yaml1 = std::fs::read_to_string("../test_resources/test_funcs.yml").unwrap();
         let func_lib = create_func_lib();
-        let yaml2 = serde_yaml::to_string(&func_lib).unwrap();
+        let yaml2 =   func_lib.to_yaml();
 
         assert_eq!(yaml1, yaml2);
-
-        // std::fs::write("../test_resources/test_funcs.yml", serialized).unwrap();
     }
 }

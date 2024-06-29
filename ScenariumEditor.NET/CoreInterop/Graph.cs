@@ -36,7 +36,7 @@ public class NodeInput {
     public Binding Binding { get; set; } = new();
 
     [YamlMember(Alias = "const_value")]
-    public String ConstValue { get; set; } = "";
+    public Value ConstValue { get; set; } = null;
 }
 
 public class NodeEvent {
