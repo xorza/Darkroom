@@ -9,7 +9,7 @@ internal readonly unsafe struct FfiBuf : IDisposable {
 
 
     [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern void destroy_ffi_buf(FfiBuf buf);
+    private static extern void destroy_ffi_buf(FfiBuf buf);
 
     public FfiBuf() {
     }
