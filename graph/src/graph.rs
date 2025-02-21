@@ -5,7 +5,6 @@ use common::id_type;
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId};
 
-
 id_type!(NodeId);
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -107,11 +106,8 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.id == id)
     }
 
-
-
-    pub fn to_yaml(&self) -> anyhow::Result<String> {
-        let yaml = serde_yaml::to_string(&self)?;
-        Ok(yaml)
+    pub fn to_yaml(&self) -> String {
+        serde_yaml::to_string(&self).unwrap()
     }
     pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
         let yaml = std::fs::read_to_string(path)?;
@@ -233,7 +229,6 @@ impl Binding {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::hint::black_box;
@@ -262,7 +257,7 @@ mod tests {
         graph.add_node(node1);
         graph.add_node(node2);
 
-        let _yaml: String = graph.to_yaml()?;
+        let _yaml: String = graph.to_yaml();
 
         Ok(())
     }
@@ -270,7 +265,7 @@ mod tests {
     #[test]
     fn graph_from_yaml() -> anyhow::Result<()> {
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-        let yaml: String = graph.to_yaml()?;
+        let yaml: String = graph.to_yaml();
         let graph = Graph::from_yaml(&yaml)?;
         black_box(graph);
 
