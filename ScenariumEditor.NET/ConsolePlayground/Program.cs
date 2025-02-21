@@ -9,3 +9,5 @@ var graph_yaml = scenarium.GetGraph();
 Console.WriteLine(graph_yaml);
 
 var func_lib_yaml = scenarium.GetFuncLib();
+
+scenarium.Dispose();

@@ -16,7 +16,6 @@ public class Tests {
         var uuid2 = Uuid.FromString(uuid_str);
 
         Assert.That(uuid2, Is.EqualTo(uuid));
-        Assert.Pass();
     }
 
     [Test]
@@ -24,16 +23,15 @@ public class Tests {
         var scenarium = new ScenariumCore();
         var func_lib = scenarium.GetFuncLib();
 
-        Assert.That(func_lib.Funcs.Count, Is.GreaterThan(0));
-        Assert.Pass();
+        Assert.That(func_lib.Funcs, Is.Not.Empty);
     }
 
     [Test]
     public void NodesDeserialization() {
         var scenarium = new ScenariumCore();
         var graph = scenarium.GetGraph();
+        scenarium.Dispose();
 
-        Assert.That(graph.Nodes.Count, Is.EqualTo(5));
-        Assert.Pass();
+        Assert.That(graph.Nodes, Has.Count.EqualTo(5));
     }
 }
