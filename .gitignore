@@ -14,6 +14,7 @@
 **/bin/
 *.DotSettings.user
 /ScenariumEditor.NET/CoreInterop/core_interop.dll
+/ScenariumEditor.NET/CoreInterop/libcore_interop.dylib
 
 **/target/
 **/cmake-build-*/
