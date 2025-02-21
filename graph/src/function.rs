@@ -66,7 +66,6 @@ pub struct FuncLib {
     funcs: hashbrown::HashMap<FuncId, Func>,
 }
 
-
 impl FuncBehavior {
     pub fn toggle(&mut self) {
         *self = match *self {
@@ -87,9 +86,7 @@ impl FuncLib {
         Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
-        let mut funcs: Vec<&Func> = self.funcs
-            .values()
-            .collect();
+        let mut funcs: Vec<&Func> = self.funcs.values().collect();
         funcs.sort_by(|a, b| a.id.cmp(&b.id));
         serde_yaml::to_string(&funcs).unwrap()
     }
@@ -143,7 +140,7 @@ impl From<&str> for FuncEvent {
 
 impl<It> From<It> for FuncLib
 where
-    It: IntoIterator<Item=Func>,
+    It: IntoIterator<Item = Func>,
 {
     fn from(iter: It) -> Self {
         let mut func_lib = FuncLib::default();
@@ -277,14 +274,14 @@ mod tests {
                 events: vec![],
             },
         ]
-            .into()
+        .into()
     }
 
     #[test]
     fn serialization() {
         let yaml1 = std::fs::read_to_string("../test_resources/test_funcs.yml").unwrap();
         let func_lib = create_func_lib();
-        let yaml2 =   func_lib.to_yaml();
+        let yaml2 = func_lib.to_yaml();
 
         assert_eq!(yaml1, yaml2);
     }

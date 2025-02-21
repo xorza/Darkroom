@@ -35,7 +35,10 @@ enum Math2ArgOp {
 impl Math2ArgOp {
     fn list_variants() -> Vec<ValueVariant> {
         Math2ArgOp::iter()
-            .map(|op| ValueVariant { name: op.to_string(), value: StaticValue::Int(op as i64) })
+            .map(|op| ValueVariant {
+                name: op.to_string(),
+                value: StaticValue::Int(op as i64),
+            })
             .collect()
     }
     fn invoke(&self, inputs: &InvokeArgs) -> anyhow::Result<DynamicValue> {

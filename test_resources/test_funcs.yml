@@ -34,16 +34,16 @@
   behavior: Passive
   is_output: false
   outputs:
-    - name: Int32 Value
-      data_type: Int
+  - name: Int32 Value
+    data_type: Int
 - id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
   name: get_a
   category: Debug
   behavior: Active
   is_output: false
   outputs:
-    - name: Int32 Value
-      data_type: Int
+  - name: Int32 Value
+    data_type: Int
 - id: f22cd316-1cdf-4a80-b86c-1277acd1408a
   name: print
   category: Debug
