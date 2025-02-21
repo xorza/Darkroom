@@ -1,12 +1,13 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="build" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="build --release --target x86_64-pc-windows-gnu" />
+    <option name="buildProfileId" value="dev" />
+    <option name="command" value="build" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <envs />
     <option name="emulateTerminal" value="true" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />
-    <option name="allFeatures" value="false" />
+    <option name="allFeatures" value="true" />
     <option name="withSudo" value="false" />
     <option name="buildTarget" value="REMOTE" />
     <option name="backtrace" value="SHORT" />
