@@ -10,8 +10,8 @@ use strum_macros::{Display, EnumIter};
 use common::output_stream::OutputStream;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncId, FuncLib, FuncInput, FuncOutput, ValueVariant};
 use crate::function::FuncBehavior;
+use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput, ValueVariant};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 #[derive(Debug)]
@@ -228,11 +228,11 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let rng = cache.get_or_default_with(rand::rngs::StdRng::from_entropy);
+                let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
 
                 let min: f64 = inputs[0].as_float();
                 let max: f64 = inputs[1].as_float();
-                let random = rng.gen::<f64>();
+                let random = rng.random::<f64>();
                 let result = min + (max - min) * random;
 
                 outputs[0] = DynamicValue::Float(result);

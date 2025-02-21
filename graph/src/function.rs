@@ -87,9 +87,10 @@ impl FuncLib {
         Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
-        let funcs: Vec<&Func> = self.funcs
+        let mut funcs: Vec<&Func> = self.funcs
             .values()
             .collect();
+        funcs.sort_by(|a, b| a.id.cmp(&b.id));
         serde_yaml::to_string(&funcs).unwrap()
     }
 
@@ -168,7 +169,7 @@ mod tests {
     use std::str::FromStr;
 
     use crate::data::DataType;
-    use crate::function::{Func, FuncBehavior, FuncId, FuncLib, FuncInput, FuncOutput};
+    use crate::function::{Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput};
 
     fn create_func_lib() -> FuncLib {
         [
