@@ -63,7 +63,8 @@ public unsafe partial class ScenariumCore : IDisposable {
     private static void UnloadDll() {
         lock (LOCK) {
             if (_core_interop_handle == IntPtr.Zero) return;
-            if (_ref_count == 0) return;
+            if (_ref_count == 0)
+                throw new Exception("Unloading library with 0 references");
 
             FreeLibrary(_core_interop_handle);
             _core_interop_handle = IntPtr.Zero;
