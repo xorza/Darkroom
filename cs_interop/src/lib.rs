@@ -43,19 +43,25 @@ pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
     unsafe { &mut *(ctx as *mut Context) }
 }
 
-pub type CallbackType = extern "C" fn(i32);
+#[repr(u32)]
+pub enum CallbackType {
+    OnGraphUpdate,
+    OnFuncLibUpdate,
+}
+
+pub type CallbackDelegate = extern "C" fn(CallbackType);
 
 lazy_static::lazy_static! {
-    static ref CALLBACK: Arc<Mutex<Option<CallbackType>>> = Arc::new(Mutex::new(None));
+    static ref CALLBACK: Arc<Mutex<Option<CallbackDelegate >>> = Arc::new(Mutex::new(None));
 }
 
 #[no_mangle]
-pub extern "C" fn register_callback(callback: CallbackType) {
+pub extern "C" fn register_callback(callback: CallbackDelegate) {
     let mut cb = CALLBACK.blocking_lock();
     *cb = Some(callback);
 }
 
-pub fn trigger_callback(value: i32) {
+pub fn trigger_callback(value: CallbackType) {
     let cb = CALLBACK.blocking_lock();
     if let Some(callback) = *cb {
         callback(value);
