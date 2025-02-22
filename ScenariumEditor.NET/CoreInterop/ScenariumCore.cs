@@ -26,15 +26,20 @@ public unsafe partial class ScenariumCore : IDisposable {
     [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static partial FfiBufInternal get_func_lib(void* ctx);
 
+    public enum CallbackType : UInt32 {
+        OnGraphUpdate,
+        OnFuncLibUpdate,
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void CallbackDelegate(int value);
-    
+    private delegate void CallbackDelegate(CallbackType value);
+
     [LibraryImport(DLL_NAME)]
     [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static partial void register_callback(CallbackDelegate callback);
 
-    private static void Callback(int value) {
-        Console.WriteLine($"Callback received from Rust: {value}");
+    private static void Callback(CallbackType value) {
+        throw new NotImplementedException("Callback not implemented");
     }
 
     private void* _ctx = null;
