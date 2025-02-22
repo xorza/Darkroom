@@ -4,7 +4,7 @@ namespace CoreInterop.Utils;
 
 internal static partial class LibraryLoader {
     private static readonly string DllName =
-        OperatingSystem.IsWindows() ? "libcore_interop.dll" : "libcore_interop.dylib";
+        OperatingSystem.IsWindows() ? "core_interop.dll" : "libcore_interop.dylib";
 
     // Windows P/Invoke
     [LibraryImport("kernel32.dll", EntryPoint = "LoadLibraryA", SetLastError = true,
@@ -12,7 +12,7 @@ internal static partial class LibraryLoader {
         StringMarshallingCustomType = typeof(System.Runtime.InteropServices.Marshalling.AnsiStringMarshaller))]
     private static partial IntPtr LoadLibrary(string lpFileName);
 
-    [LibraryImport("kernel32.dll", EntryPoint = "GetProcAddressA", SetLastError = true,
+    [LibraryImport("kernel32.dll", EntryPoint = "GetProcAddress", SetLastError = true,
         StringMarshalling = StringMarshalling.Custom,
         StringMarshallingCustomType = typeof(System.Runtime.InteropServices.Marshalling.AnsiStringMarshaller))]
     private static partial IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
@@ -55,7 +55,7 @@ internal static partial class LibraryLoader {
 
 
         create_context = FindFunction<CreateContextDelegate>("create_context");
-        destroy_context = FindFunction<DestroyContextDelegate>("create_context");
+        destroy_context = FindFunction<DestroyContextDelegate>("destroy_context");
         get_graph = FindFunction<GetGraphDelegate>("get_graph");
         get_func_lib = FindFunction<GetFuncLibDelegate>("get_func_lib");
         register_callback = FindFunction<RegisterCallbackDelegate>("register_callback");
