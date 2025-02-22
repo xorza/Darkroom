@@ -2,33 +2,57 @@
 
 namespace CoreInterop.Utils;
 
-internal readonly unsafe struct FfiBuf : IDisposable {
-    readonly byte* _bytes = null;
-    readonly uint _length = 0;
-    readonly uint _capacity = 0;
+internal unsafe partial struct FfiBufInternal : IDisposable {
+    [LibraryImport(ScenariumCore.DLL_NAME)]
+    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static partial void destroy_ffi_buf(FfiBufInternal ffi_buf);
 
+    public byte* Bytes = null;
+    public uint Length = 0;
+    public uint Capacity = 0;
 
-    [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern void destroy_ffi_buf(FfiBuf buf);
+    public FfiBufInternal() {
+    }
 
-    public FfiBuf() {
+    public FfiBufInternal(byte* bytes, uint length, uint capacity) {
+        Bytes = bytes;
+        Length = length;
+        Capacity = capacity;
+    }
+
+    public void Dispose() {
+        if (Bytes != null) {
+            destroy_ffi_buf(this);
+        }
+
+        Bytes = null;
+    }
+}
+
+internal unsafe class FfiBuf : IDisposable {
+    public FfiBufInternal BufInternal;
+    private bool _disposed = false;
+
+    public static implicit operator FfiBuf(FfiBufInternal value) {
+        var newbuf = new FfiBuf();
+        newbuf.BufInternal = value;
+        return newbuf;
+    }
+
+    private FfiBuf() {
     }
 
     public FfiBuf(String s) {
         var bytes = Marshal.StringToHGlobalAnsi(s);
 
-        _bytes = (byte*)bytes;
-        _length = (uint)s.Length;
-        _capacity = (uint)s.Length;
+        BufInternal = new FfiBufInternal((byte*)bytes, (uint)s.Length, (uint)s.Length);
     }
 
     public FfiBuf(byte[] array) {
         var bytes = Marshal.AllocHGlobal(array.Length);
         Marshal.Copy(array, 0, bytes, array.Length);
 
-        _bytes = (byte*)bytes;
-        _length = (uint)array.Length;
-        _capacity = (uint)array.Length;
+        BufInternal = new FfiBufInternal((byte*)bytes, (uint)array.Length, (uint)array.Length);
     }
 
     public FfiBuf(List<byte> list) {
@@ -36,21 +60,34 @@ internal readonly unsafe struct FfiBuf : IDisposable {
         var bytes = Marshal.AllocHGlobal(array.Length);
         Marshal.Copy(array, 0, bytes, array.Length);
 
-        _bytes = (byte*)bytes;
-        _length = (uint)array.Length;
-        _capacity = (uint)array.Length;
+        BufInternal = new FfiBufInternal((byte*)bytes, (uint)array.Length, (uint)array.Length);
+    }
+
+    ~FfiBuf() {
+        ReleaseUnmanagedResources();
+    }
+
+    private void ReleaseUnmanagedResources() {
+        if (_disposed) return;
+        BufInternal.Dispose();
+        _disposed = true;
+    }
+
+    public void Dispose() {
+        ReleaseUnmanagedResources();
+        GC.SuppressFinalize(this);
     }
 
     public override String ToString() {
-        if (_bytes == null) throw new InvalidOperationException("Disposed buffer");
-        return Marshal.PtrToStringAnsi((IntPtr)_bytes, (int)_length);
+        if (BufInternal.Bytes == null) throw new InvalidOperationException("Disposed buffer");
+        return Marshal.PtrToStringAnsi((IntPtr)BufInternal.Bytes, (int)BufInternal.Length);
     }
 
     public byte[] ToArray() {
-        if (_bytes == null) throw new InvalidOperationException("Disposed buffer");
+        if (BufInternal.Bytes == null) throw new InvalidOperationException("Disposed buffer");
 
-        var result = new byte[_length];
-        Marshal.Copy((IntPtr)_bytes, result, 0, (int)_length);
+        var result = new byte[BufInternal.Length];
+        Marshal.Copy((IntPtr)BufInternal.Bytes, result, 0, (int)BufInternal.Length);
         return result;
     }
 
@@ -59,8 +96,7 @@ internal readonly unsafe struct FfiBuf : IDisposable {
     }
 
     public T[] ToArray<T>() where T : unmanaged {
-        if (_bytes == null) throw new InvalidOperationException("Disposed buffer");
-
+        if (BufInternal.Bytes == null) throw new InvalidOperationException("Disposed buffer");
 
         var type = typeof(T);
 
@@ -76,9 +112,9 @@ internal readonly unsafe struct FfiBuf : IDisposable {
         }
 
         var t_size = Marshal.SizeOf<T>();
-        if (this._length % t_size != 0) throw new InvalidOperationException("Invalid array size");
+        if (this.BufInternal.Length % t_size != 0) throw new InvalidOperationException("Invalid array size");
 
-        var t_length = (int)this._length / t_size;
+        var t_length = (int)this.BufInternal.Length / t_size;
         var result = new T[t_length];
 
         if (t_length == 0) return result;
@@ -88,7 +124,7 @@ internal readonly unsafe struct FfiBuf : IDisposable {
             // Make sure the array won't be moved around by the GC 
             handle = GCHandle.Alloc(result, GCHandleType.Pinned);
             var destination = handle.AddrOfPinnedObject().ToPointer();
-            Buffer.MemoryCopy(_bytes, destination, _length, _length);
+            Buffer.MemoryCopy(BufInternal.Bytes, destination, BufInternal.Length, BufInternal.Length);
         } finally {
             if (handle.IsAllocated)
                 handle.Free();
@@ -99,11 +135,5 @@ internal readonly unsafe struct FfiBuf : IDisposable {
 
     public List<T> ToList<T>() where T : unmanaged {
         return this.ToArray<T>().ToList();
-    }
-
-    public void Dispose() {
-        if (_bytes != null) {
-            destroy_ffi_buf(this);
-        }
     }
 }

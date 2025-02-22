@@ -14,10 +14,10 @@ public readonly struct Uuid : IEquatable<Uuid> {
     private static extern Uuid uuid_new_v4_extern();
 
     [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern FfiBuf uuid_to_string_extern(Uuid uuid);
+    private static extern FfiBufInternal uuid_to_string_extern(Uuid uuid);
 
     [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern Uuid uuid_from_string_extern(FfiBuf buf);
+    private static extern Uuid uuid_from_string_extern(FfiBufInternal buf);
 
     public Uuid() {
     }
@@ -28,11 +28,12 @@ public readonly struct Uuid : IEquatable<Uuid> {
 
     public static Uuid FromString(String s) {
         using var buf = new FfiBuf(s);
-        return uuid_from_string_extern(buf);
+        return uuid_from_string_extern(buf.BufInternal);
     }
 
     public override String ToString() {
-        return uuid_to_string_extern(this).ToString();
+        using FfiBuf buf = uuid_to_string_extern(this);
+        return buf.ToString();
     }
 
     public override bool Equals(object obj) {

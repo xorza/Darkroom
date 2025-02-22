@@ -17,19 +17,33 @@ public unsafe partial class ScenariumCore : IDisposable {
     [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static partial void destroy_context(void* ctx);
 
+
+    [LibraryImport(DLL_NAME)]
+    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static partial FfiBufInternal get_graph(void* ctx);
+
+    [LibraryImport(DLL_NAME)]
+    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static partial FfiBufInternal get_func_lib(void* ctx);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void CallbackDelegate(int value);
     
     [LibraryImport(DLL_NAME)]
     [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial FfiBuf get_graph(void* ctx);
-    
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial FfiBuf get_func_lib(void* ctx);
-    
+    private static partial void register_callback(CallbackDelegate callback);
+
+    private static void Callback(int value) {
+        Console.WriteLine($"Callback received from Rust: {value}");
+    }
+
     private void* _ctx = null;
 
     public ScenariumCore() {
         _ctx = create_context();
+
+        var callback = new CallbackDelegate(Callback);
+        register_callback(callback);
     }
 
     ~ScenariumCore() {
@@ -48,14 +62,14 @@ public unsafe partial class ScenariumCore : IDisposable {
 
 
     public Graph GetGraph() {
-        using var buf = get_graph(_ctx);
+        using FfiBuf buf = get_graph(_ctx);
         var yaml = buf.ToString();
 
         return _deserializer.Deserialize<Graph>(new StringReader(yaml));
     }
 
     public FuncLib GetFuncLib() {
-        using var buf = get_func_lib(_ctx);
+        using FfiBuf buf = get_func_lib(_ctx);
         var yaml = buf.ToString();
 
         var funcs = _deserializer.Deserialize<List<Func>>(new StringReader(yaml));
