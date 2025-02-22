@@ -2,13 +2,11 @@
 #![deny(improper_ctypes_definitions)]
 
 use crate::ffi::FfiBuf;
-use graph::ctx::Context;
+use graph::ctx::{CallbackType, Context};
 use graph::elements::basic_invoker::BasicInvoker;
 use graph::elements::timers_invoker::TimersInvoker;
 use graph::invoke::Invoker;
 use std::ffi::c_void;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 
 mod ffi;
 mod func_lib_api;
@@ -43,30 +41,14 @@ pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
     unsafe { &mut *(ctx as *mut Context) }
 }
 
-#[repr(u32)]
-pub enum CallbackType {
-    OnGraphUpdate,
-    OnFuncLibUpdate,
-}
-
-pub type CallbackDelegate = extern "C" fn(CallbackType);
-
-lazy_static::lazy_static! {
-    static ref CALLBACK: Arc<Mutex<Option<CallbackDelegate >>> = Arc::new(Mutex::new(None));
-}
+pub type FfiCallbackDelegate = extern "C" fn(CallbackType);
 
 #[no_mangle]
-pub extern "C" fn register_callback(callback: CallbackDelegate) {
-    let mut cb = CALLBACK.blocking_lock();
-    *cb = Some(callback);
+pub extern "C" fn register_callback(ctx: *mut c_void, callback: FfiCallbackDelegate) {
+    let context = get_context(ctx);
+    context.callback = Some(Box::from(move |t|{ callback(t);} ));
 }
 
-pub fn trigger_callback(value: CallbackType) {
-    let cb = CALLBACK.blocking_lock();
-    if let Some(callback) = *cb {
-        callback(value);
-    }
-}
 
 #[cfg(test)]
 mod tests {

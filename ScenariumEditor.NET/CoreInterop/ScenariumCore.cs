@@ -6,49 +6,30 @@ using YamlDotNet.Serialization.NamingConventions;
 
 namespace CoreInterop;
 
-public unsafe partial class ScenariumCore : IDisposable {
-    internal const string DLL_NAME = "core_interop.dll";
-
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial void* create_context();
-
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial void destroy_context(void* ctx);
-
-
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial FfiBufInternal get_graph(void* ctx);
-
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial FfiBufInternal get_func_lib(void* ctx);
-
+public partial class ScenariumCore : IDisposable {
     public enum CallbackType : UInt32 {
         OnGraphUpdate,
         OnFuncLibUpdate,
     }
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void CallbackDelegate(CallbackType value);
-
-    [LibraryImport(DLL_NAME)]
-    [UnmanagedCallConv(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
-    private static partial void register_callback(CallbackDelegate callback);
-
-    private static void Callback(CallbackType value) {
-        throw new NotImplementedException("Callback not implemented");
+    
+    public class CallbackEventArgs : EventArgs {
+        public ScenariumCore Core { get; set; }
+        public CallbackType Type { get; set; }
     }
 
-    private void* _ctx = null;
+    public event EventHandler<EventArgs>? CallbackEvent;
+
+
+    private IntPtr _ctx = IntPtr.Zero;
 
     public ScenariumCore() {
-        _ctx = create_context();
-
-        var callback = new CallbackDelegate(Callback);
-        register_callback(callback);
+        _ctx = LibraryLoader.create_context();
+        LibraryLoader.register_callback(_ctx, (value) => {
+            CallbackEvent?.Invoke(this, new CallbackEventArgs {
+                Core = this,
+                Type = value
+            });
+        });
     }
 
     ~ScenariumCore() {
@@ -67,14 +48,14 @@ public unsafe partial class ScenariumCore : IDisposable {
 
 
     public Graph GetGraph() {
-        using FfiBuf buf = get_graph(_ctx);
+        using FfiBuf buf = LibraryLoader.GetGraph(_ctx);
         var yaml = buf.ToString();
 
         return _deserializer.Deserialize<Graph>(new StringReader(yaml));
     }
 
     public FuncLib GetFuncLib() {
-        using FfiBuf buf = get_func_lib(_ctx);
+        using FfiBuf buf = LibraryLoader.GetFuncLib(_ctx);
         var yaml = buf.ToString();
 
         var funcs = _deserializer.Deserialize<List<Func>>(new StringReader(yaml));
@@ -84,9 +65,9 @@ public unsafe partial class ScenariumCore : IDisposable {
     }
 
     private void ReleaseUnmanagedResources() {
-        if (_ctx != null)
-            destroy_context(_ctx);
-        _ctx = null;
+        if (_ctx != IntPtr.Zero)
+            LibraryLoader.destroy_context(_ctx);
+        _ctx = IntPtr.Zero;
     }
 
     public void Dispose() {

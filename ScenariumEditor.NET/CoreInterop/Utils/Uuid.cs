@@ -10,29 +10,20 @@ public readonly struct Uuid : IEquatable<Uuid> {
     private readonly UInt64 _b = 0;
 
 
-    [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern Uuid uuid_new_v4_extern();
-
-    [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern FfiBufInternal uuid_to_string_extern(Uuid uuid);
-
-    [DllImport(ScenariumCore.DLL_NAME, CallingConvention = CallingConvention.Cdecl)]
-    private static extern Uuid uuid_from_string_extern(FfiBufInternal buf);
-
     public Uuid() {
     }
 
     public static Uuid NewV4() {
-        return uuid_new_v4_extern();
+        return LibraryLoader.uuid_new_v4_extern();
     }
 
     public static Uuid FromString(String s) {
         using var buf = new FfiBuf(s);
-        return uuid_from_string_extern(buf.BufInternal);
+        return LibraryLoader.uuid_from_string_extern(buf._buf_intern);
     }
 
     public override String ToString() {
-        using FfiBuf buf = uuid_to_string_extern(this);
+        using FfiBuf buf = LibraryLoader.uuidToString(this);
         return buf.ToString();
     }
 
