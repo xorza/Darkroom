@@ -5,7 +5,15 @@ use crate::invoke::UberInvoker;
 use crate::runtime_graph::RuntimeGraph;
 use crate::worker::Worker;
 
-#[derive(Default, Debug)]
+#[repr(u32)]
+pub enum CallbackType {
+    OnGraphUpdate,
+    OnFuncLibUpdate,
+}
+
+pub type CallbackDelegate = dyn Fn(CallbackType);
+
+#[derive(Default)]
 pub struct Context {
     pub graph: Graph,
     pub runtime_graph: RuntimeGraph,
@@ -14,18 +22,26 @@ pub struct Context {
     pub func_lib: FuncLib,
 
     pub worker: Option<Worker>,
+    
+    pub callback: Option<Box<CallbackDelegate>>,
 }
 
 impl Context {
-    pub fn set_output_binding(&mut self,
-                              output_node_id: NodeId, output_index: u32,
-                              input_node_id: NodeId, input_index: u32)
-                              -> anyhow::Result<()>
-    {
+    pub fn set_output_binding(
+        &mut self,
+        output_node_id: NodeId,
+        output_index: u32,
+        input_node_id: NodeId,
+        input_index: u32,
+    ) -> anyhow::Result<()> {
         let output_data_type = {
-            let output_node = self.graph.node_by_id(output_node_id)
+            let output_node = self
+                .graph
+                .node_by_id(output_node_id)
                 .ok_or(anyhow::anyhow!("Output node not found"))?;
-            let output_func = self.func_lib.func_by_id(output_node.func_id)
+            let output_func = self
+                .func_lib
+                .func_by_id(output_node.func_id)
                 .ok_or(anyhow::anyhow!("Output function not found"))?;
 
             if output_func.outputs.len() <= output_index as usize {
@@ -44,10 +60,11 @@ impl Context {
         if input_func.inputs[input_index as usize].data_type != *output_data_type {
             return Err(anyhow::anyhow!("Data types do not match"));
         }
-        input_node.inputs[input_index as usize].binding = crate::graph::Binding::Output(crate::graph::OutputBinding {
-            output_node_id,
-            output_index,
-        });
+        input_node.inputs[input_index as usize].binding =
+            crate::graph::Binding::Output(crate::graph::OutputBinding {
+                output_node_id,
+                output_index,
+            });
 
         Ok(())
     }
