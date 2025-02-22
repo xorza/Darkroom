@@ -8,11 +8,11 @@ crate-type = ["cdylib"]
 
 [dependencies]
 common = { workspace = true }
-imaginarium = { workspace = true }
 graph = { workspace = true }
 uuid = { workspace = true }
 bytes = { workspace = true }
 serde_json = { workspace = true }
-
+lazy_static = { workspace = true }
+tokio = { workspace = true }
 
 

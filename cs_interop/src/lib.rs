@@ -7,6 +7,8 @@ use graph::elements::basic_invoker::BasicInvoker;
 use graph::elements::timers_invoker::TimersInvoker;
 use graph::invoke::Invoker;
 use std::ffi::c_void;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 mod ffi;
 mod func_lib_api;
@@ -41,22 +43,22 @@ pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
     unsafe { &mut *(ctx as *mut Context) }
 }
 
-pub type Callback = extern "C" fn(i32);
+pub type CallbackType = extern "C" fn(i32);
 
-static mut CALLBACK: Option<Callback> = None;
+lazy_static::lazy_static! {
+    static ref CALLBACK: Arc<Mutex<Option<CallbackType>>> = Arc::new(Mutex::new(None));
+}
 
 #[no_mangle]
-pub extern "C" fn register_callback(callback: Callback) {
-    unsafe {
-        CALLBACK = Some(callback);
-    }
+pub extern "C" fn register_callback(callback: CallbackType) {
+    let mut cb = CALLBACK.blocking_lock();
+    *cb = Some(callback);
 }
 
 pub fn trigger_callback(value: i32) {
-    unsafe {
-        if let Some(callback) = CALLBACK {
-            callback(value);
-        }
+    let cb = CALLBACK.blocking_lock();
+    if let Some(callback) = *cb {
+        callback(value);
     }
 }
 

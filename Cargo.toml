@@ -32,6 +32,7 @@ flexi_logger = "0.29"
 parking_lot = "0.12"
 hashbrown = { version = "0.15", features = ["serde"] }
 bytes = { version = "1.6" }
+lazy_static = "1.5"
 
 
 
