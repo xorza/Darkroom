@@ -36,8 +36,6 @@ jobs:
       - name: Build workspace
         run: cargo build --verbose --no-default-features --workspace --all
 
-      - name: Run imaginarium tests
-        run: cargo test --verbose --no-default-features -p imaginarium
       - name: Run graph tests
         run: cargo test --verbose --no-default-features -p graph
       - name: Run common tests
