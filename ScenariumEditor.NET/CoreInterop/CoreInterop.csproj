@@ -9,10 +9,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <None Update="core_interop.dll">
+      <None Update="libcore_interop.dylib">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
-      <None Update="libcore_interop.dylib">
+      <None Update="core_interop.dll">
         <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       </None>
     </ItemGroup>
