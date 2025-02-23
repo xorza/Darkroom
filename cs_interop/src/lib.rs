@@ -44,11 +44,18 @@ pub(crate) fn get_context<'a>(ctx: *mut c_void) -> &'a mut Context {
 pub type FfiCallbackDelegate = extern "C" fn(CallbackType);
 
 #[no_mangle]
-pub extern "C" fn register_callback(ctx: *mut c_void, callback: FfiCallbackDelegate) {
+pub extern "C" fn register_callback(ctx: *mut c_void, callback: Option<FfiCallbackDelegate>) {
     let context = get_context(ctx);
-    context.callback = Some(Box::from(move |t|{ callback(t);} ));
-}
 
+    match callback {
+        None => context.callback = None,
+        Some(callback) => {
+            context.callback = Some(Box::from(move |t| {
+                callback(t);
+            }));
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
