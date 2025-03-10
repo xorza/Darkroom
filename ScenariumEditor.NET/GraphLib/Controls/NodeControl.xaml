@@ -7,7 +7,7 @@
              xmlns:local="clr-namespace:GraphLib"
              xmlns:viewModel="clr-namespace:GraphLib.ViewModel"
              xmlns:controls="clr-namespace:GraphLib.Controls"
-             
+
              mc:Ignorable="d"
              Width="Auto"
              Height="Auto"
@@ -15,7 +15,7 @@
 
              Loaded="Node_OnLoaded"
              MouseDown="Node_OnMouseDown"
-             
+
              d:DataContext="{d:DesignInstance Type=viewModel:DesignNode}">
 
     <UserControl.Resources>
@@ -127,7 +127,10 @@
                                             Background="{StaticResource Blue}"
                                             DataContext="{Binding}"
                                             Loaded="PinButton_OnLoaded"
-                                            Click="PinButton_OnClick" />
+                                            Click="PinButton_OnClick"
+                                            PreviewMouseLeftButtonDown="PinButton_OnMouseLeftButtonDown"
+                                            PreviewMouseLeftButtonUp="PinButton_OnMouseLeftButtonUp"
+                                            />
                                     <Label
                                         VerticalAlignment="Center"
                                         Content="{Binding Name}">
@@ -153,7 +156,10 @@
                                                 Margin="0 0 -6 0"
                                                 Background="{StaticResource Yellow}"
                                                 Loaded="PinButton_OnLoaded"
-                                                Click="PinButton_OnClick" />
+                                                Click="PinButton_OnClick"
+                                                PreviewMouseLeftButtonDown="PinButton_OnMouseLeftButtonDown"
+                                                PreviewMouseLeftButtonUp="PinButton_OnMouseLeftButtonUp"
+                                                />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -173,7 +179,10 @@
                                                 Margin="0 0 -6 0"
                                                 Background="{StaticResource Blue}"
                                                 Loaded="PinButton_OnLoaded"
-                                                Click="PinButton_OnClick" />
+                                                Click="PinButton_OnClick"
+                                                PreviewMouseLeftButtonDown="PinButton_OnMouseLeftButtonDown"
+                                                PreviewMouseLeftButtonUp="PinButton_OnMouseLeftButtonUp"
+                                                />
                                     </StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

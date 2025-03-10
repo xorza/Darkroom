@@ -70,6 +70,21 @@ public partial class NodeControl : UserControl {
         PinClick?.Invoke(this, pin);
     }
 
+    private void PinButton_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
+        e.Handled = true;
+
+        var element = (FrameworkElement)sender;
+        var pin = (Pin)element.DataContext!;
+        PinClick?.Invoke(this, pin);
+    }
+    private void PinButton_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
+        e.Handled = true;
+
+        var element = (FrameworkElement)sender;
+        var pin = (Pin)element.DataContext!;
+        PinClick?.Invoke(this, pin);
+    }
+
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e) {
         DeletePressed?.Invoke(this, EventArgs.Empty);
     }

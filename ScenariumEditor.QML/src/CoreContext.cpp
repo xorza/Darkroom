@@ -19,8 +19,6 @@ DLL_IMPORT void destroy_context(void *ctx);
 
 DLL_IMPORT FfiBuf get_func_lib(void *ctx);
 DLL_IMPORT FfiBuf get_graph(void *ctx);
-DLL_IMPORT void add_node(void *ctx, FfiUuid func_id);
-DLL_IMPORT void remove_node(void *ctx, FfiUuid node_id);
 
 }
 
@@ -167,10 +165,8 @@ Graph Ctx::get_graph() const {
 
 void Ctx::add_node(const uuid &func_id) const {
     auto ffi_uuid = to_ffi(func_id);
-    ::add_node(this->ctx, ffi_uuid);
 }
 
 void Ctx::remove_node(const uuid &node_id) const {
     auto ffi_uuid = to_ffi(node_id);
-    ::remove_node(this->ctx, ffi_uuid);
 }

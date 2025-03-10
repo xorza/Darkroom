@@ -46,9 +46,10 @@ pub type FfiCallbackDelegate = extern "C" fn(CallbackType);
 #[no_mangle]
 pub extern "C" fn register_callback(ctx: *mut c_void, callback: FfiCallbackDelegate) {
     let context = get_context(ctx);
-    context.callback = Some(Box::from(move |t|{ callback(t);} ));
+    context.callback = Some(Box::from(move |t| {
+        callback(t);
+    }));
 }
-
 
 #[cfg(test)]
 mod tests {
