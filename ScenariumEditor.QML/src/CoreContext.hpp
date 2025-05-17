@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <optional>
 
-enum class FuncBehavor {
+enum class FuncBehavior {
     Active = 1,
     Passive = 2,
 };
@@ -21,7 +21,7 @@ struct StaticValue {
 
 };
 
-struct FuncInpu {
+struct FuncInput {
     std::string name{};
     bool is_required = false;
     DataType data_type{};
@@ -40,9 +40,9 @@ struct Func {
     uuid id{};
     std::string name{};
     std::string category{};
-    FuncBehavor behaviour{};
+    FuncBehavior behavior{};
     bool output = false;
-    std::vector<FuncInpu> inputs{};
+    std::vector<FuncInput> inputs{};
     std::vector<FuncOutput> outputs{};
     std::vector<FuncEvent> events{};
 
