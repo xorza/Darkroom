@@ -10,7 +10,7 @@ impl OutputStream {
         OutputStream(Arc::new(Mutex::new(Vec::new())))
     }
 
-    pub fn write<S: Into<String>>(&mut self, s: S) {
+    pub fn write<S: Into<String>>(&self, s: S) {
         self.0.lock().push(s.into());
     }
 

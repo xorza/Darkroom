@@ -25,6 +25,6 @@ uuid uuid::from_string(const std::string &str) {
 
 std::string uuid::to_string() const {
     FfiUuid ffi = {a, b};
-    auto buf_str = Buf{uuid_to_string_extern(ffi)};;
+    auto buf_str = Buf{uuid_to_string_extern(ffi)};
     return buf_str.to_string();
 }
