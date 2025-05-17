@@ -85,9 +85,8 @@ public partial class GraphControl : UserControl {
 
             case CanvasState.NewConnection:
                 if (_nearest_pin != null) {
-                    _view_model.Connections.Add(new Connection(_active_pin, _nearest_pin));
-                    CancelNewConnection();
-                    _canvas_state = CanvasState.Idle;
+                    e.Handled = true;
+                    CreateNewConnection(_active_pin, _nearest_pin);
                 }
 
                 return;
@@ -133,8 +132,13 @@ public partial class GraphControl : UserControl {
                 return;
 
             case CanvasState.NewConnection:
-                CancelNewConnection();
-                _canvas_state = CanvasState.Idle;
+                e.Handled = true;
+                if (_nearest_pin != null) {
+                    CreateNewConnection(_active_pin, _nearest_pin);
+                } else {
+                    CancelNewConnection();
+                }
+
                 return;
 
             default:
@@ -232,11 +236,7 @@ public partial class GraphControl : UserControl {
                 return;
 
             case CanvasState.NewConnection:
-                if (e.DataType == _active_pin.DataType && e.PinType.GetOpposite() == _active_pin.PinType) {
-                    _view_model.Connections.Add(new Connection(_active_pin, e));
-                    CancelNewConnection();
-                    _canvas_state = CanvasState.Idle;
-                }
+                CreateNewConnection(_active_pin, e);
 
                 return;
 
@@ -250,11 +250,10 @@ public partial class GraphControl : UserControl {
 
         _temp_mouse_pin.CanvasPosition = _canvas_mouse_position_with_offset;
         _nearest_pin = _view_model.Nodes
-            .SelectMany(
-                node => node.Events
-                    .Concat(node.Inputs)
-                    .Concat(node.Outputs)
-                    .Concat([node.Trigger])
+            .SelectMany(node => node.Events
+                .Concat(node.Inputs)
+                .Concat(node.Outputs)
+                .Concat([node.Trigger])
             )
             .Where(pin => pin.PinType == _temp_mouse_pin.PinType && pin.DataType == _temp_mouse_pin.DataType)
             .Where(pin => (pin.CanvasPosition - _temp_mouse_pin.CanvasPosition).LengthSquared < PIN_CONNECTION_DISTANCE)
@@ -268,6 +267,14 @@ public partial class GraphControl : UserControl {
         _temp_mouse_pin = null;
         NewConnectionControl.Visibility = Visibility.Collapsed;
         NewConnectionControl.DataContext = null;
+        _canvas_state = CanvasState.Idle;
+    }
+
+    private void CreateNewConnection(Pin p1, Pin p2) {
+        if (p1.DataType == p2.DataType && p1.PinType.GetOpposite() == p2.PinType) {
+            _view_model.Connections.Add(new Connection(p1, p2));
+            CancelNewConnection();
+        }
     }
 
     #endregion

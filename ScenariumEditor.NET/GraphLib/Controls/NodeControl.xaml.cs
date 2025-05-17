@@ -1,5 +1,6 @@
 ﻿using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -65,9 +66,14 @@ public partial class NodeControl : UserControl {
     }
 
     private void PinButton_OnClick(object sender, RoutedEventArgs e) {
+        e.Handled = true;
+        
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
         PinClick?.Invoke(this, pin);
+        
+        
+        Debug.WriteLine("PinButton_OnClick");
     }
 
     private void PinButton_OnMouseLeftButtonDown(object sender, MouseButtonEventArgs e) {
@@ -76,6 +82,8 @@ public partial class NodeControl : UserControl {
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
         PinClick?.Invoke(this, pin);
+        
+        Debug.WriteLine("PinButton_OnMouseLeftButtonDown");
     }
     private void PinButton_OnMouseLeftButtonUp(object sender, MouseButtonEventArgs e) {
         e.Handled = true;
@@ -83,6 +91,8 @@ public partial class NodeControl : UserControl {
         var element = (FrameworkElement)sender;
         var pin = (Pin)element.DataContext!;
         PinClick?.Invoke(this, pin);
+        
+        Debug.WriteLine("PinButton_OnMouseLeftButtonUp");
     }
 
     private void DeleteButton_OnClick(object sender, RoutedEventArgs e) {
