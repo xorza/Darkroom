@@ -67,9 +67,9 @@ FuncLib Ctx::get_func_lib() const {
 
         auto behaviorStr = func["behavior"].asString();
         if (behaviorStr == "Active") {
-            f.behaviour = FuncBehavor::Active;
+            f.behavior = FuncBehavior::Active;
         } else if (behaviorStr == "Passive") {
-            f.behaviour = FuncBehavor::Passive;
+            f.behavior = FuncBehavior::Passive;
         } else {
             assert(false);
         }
@@ -77,7 +77,7 @@ FuncLib Ctx::get_func_lib() const {
         f.output = func["output"].asBool();
 
         for (const auto &input: func["inputs"]) {
-            FuncInpu info;
+            FuncInput info;
             info.name = input["name"].asString();
             info.is_required = input["is_required"].asBool();
 
