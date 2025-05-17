@@ -164,7 +164,7 @@ impl FromStr for FuncEvent {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
-
+    use common::normalize_string::NormalizeString;
     use crate::data::DataType;
     use crate::function::{Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput};
 
@@ -279,9 +279,13 @@ mod tests {
 
     #[test]
     fn serialization() {
-        let yaml1 = std::fs::read_to_string("../test_resources/test_funcs.yml").unwrap();
+        let yaml1 = std::fs::read_to_string("../test_resources/test_funcs.yml")
+            .unwrap()
+            .normalize();
+  
         let func_lib = create_func_lib();
-        let yaml2 = func_lib.to_yaml();
+        let yaml2 = func_lib.to_yaml()
+            .normalize();
 
         assert_eq!(yaml1, yaml2);
     }

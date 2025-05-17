@@ -7,6 +7,7 @@ pub mod log_setup;
 pub mod output_stream;
 pub mod scoped_ref;
 pub mod toggle;
+pub mod normalize_string;
 
 pub const EPSILON: f64 = 1e-10;
 
