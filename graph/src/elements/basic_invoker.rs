@@ -82,12 +82,12 @@ impl BasicInvoker {
 
 impl Default for BasicInvoker {
     fn default() -> Self {
-        let mut invoker = LambdaInvoker::default();
+        let mut lambda_invoker = LambdaInvoker::default();
         let output_stream = Arc::new(Mutex::new(None::<OutputStream>));
         let output_stream_clone = output_stream.clone();
 
-        //print
-        invoker.add_lambda(
+        //print, outputs to output_stream
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
                 name: "print".to_string(),
@@ -115,7 +115,7 @@ impl Default for BasicInvoker {
             },
         );
         // math two argument operation
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
                 name: "2 arg math".to_string(),
@@ -164,7 +164,7 @@ impl Default for BasicInvoker {
             },
         );
         // to string
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
                 name: "float to string".to_string(),
@@ -197,7 +197,7 @@ impl Default for BasicInvoker {
         );
 
         // random
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
                 name: "random".to_string(),
@@ -242,7 +242,7 @@ impl Default for BasicInvoker {
             },
         );
         //add
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
                 name: "add".to_string(),
@@ -284,7 +284,7 @@ impl Default for BasicInvoker {
             },
         );
         //subtract
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
                 name: "subtract".to_string(),
@@ -326,7 +326,7 @@ impl Default for BasicInvoker {
             },
         );
         //multiply
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
                 name: "multiply".to_string(),
@@ -368,7 +368,7 @@ impl Default for BasicInvoker {
             },
         );
         //divide
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
                 name: "divide".to_string(),
@@ -418,7 +418,7 @@ impl Default for BasicInvoker {
             },
         );
         // power
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
                 name: "power".to_string(),
@@ -460,7 +460,7 @@ impl Default for BasicInvoker {
             },
         );
         // sqrt
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
                 name: "sqrt".to_string(),
@@ -492,7 +492,7 @@ impl Default for BasicInvoker {
             },
         );
         // sin
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
                 name: "sin".to_string(),
@@ -524,7 +524,7 @@ impl Default for BasicInvoker {
             },
         );
         // cos
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
                 name: "cos".to_string(),
@@ -556,7 +556,7 @@ impl Default for BasicInvoker {
             },
         );
         // tan
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
                 name: "tan".to_string(),
@@ -588,7 +588,7 @@ impl Default for BasicInvoker {
             },
         );
         // asin
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
                 name: "asin".to_string(),
@@ -620,7 +620,7 @@ impl Default for BasicInvoker {
             },
         );
         // acos
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
                 name: "acos".to_string(),
@@ -652,7 +652,7 @@ impl Default for BasicInvoker {
             },
         );
         // atan
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
                 name: "atan".to_string(),
@@ -684,7 +684,7 @@ impl Default for BasicInvoker {
             },
         );
         // log
-        invoker.add_lambda(
+        lambda_invoker.add_lambda(
             Func {
                 id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
                 name: "log".to_string(),
@@ -727,7 +727,7 @@ impl Default for BasicInvoker {
         );
 
         Self {
-            lambda_invoker: invoker,
+            lambda_invoker,
             output_stream,
         }
     }
