@@ -3,9 +3,9 @@ use std::str::FromStr;
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 
-use common::id_type;
-
 use crate::data::*;
+use common::id_type;
+use common::normalize_string::NormalizeString;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -88,7 +88,7 @@ impl FuncLib {
     pub fn to_yaml(&self) -> String {
         let mut funcs: Vec<&Func> = self.funcs.values().collect();
         funcs.sort_by(|a, b| a.id.cmp(&b.id));
-        serde_yaml::to_string(&funcs).unwrap()
+        serde_yaml::to_string(&funcs).unwrap().normalize()
     }
 
     pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {
@@ -163,10 +163,10 @@ impl FromStr for FuncEvent {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-    use common::normalize_string::NormalizeString;
     use crate::data::DataType;
     use crate::function::{Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput};
+    use common::yaml_format::reformat_yaml;
+    use std::str::FromStr;
 
     fn create_func_lib() -> FuncLib {
         [
@@ -278,15 +278,18 @@ mod tests {
     }
 
     #[test]
-    fn serialization() {
-        let yaml1 = std::fs::read_to_string("../test_resources/test_funcs.yml")
-            .unwrap()
-            .normalize();
-  
-        let func_lib = create_func_lib();
-        let yaml2 = func_lib.to_yaml()
-            .normalize();
+    fn serialization() -> anyhow::Result<()> {
+        let file_yaml: String = {
+            // This trick is used to make yaml formatting consistent
+            let str = std::fs::read_to_string("../test_resources/test_funcs.yml")?;
+            reformat_yaml(str.as_str())?
+        };
 
-        assert_eq!(yaml1, yaml2);
+        let func_lib = create_func_lib();
+        let serialized_yaml = func_lib.to_yaml();
+
+        assert_eq!(file_yaml, serialized_yaml);
+
+        Ok(())
     }
 }

@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use common::id_type;
-
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId};
+use common::id_type;
+use common::normalize_string::NormalizeString;
 
 id_type!(NodeId);
 
@@ -107,7 +107,7 @@ impl Graph {
     }
 
     pub fn to_yaml(&self) -> String {
-        serde_yaml::to_string(&self).unwrap()
+        serde_yaml::to_string(&self).unwrap().normalize()
     }
     pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
         let yaml = std::fs::read_to_string(path)?;
@@ -231,10 +231,10 @@ impl Binding {
 
 #[cfg(test)]
 mod tests {
-    use std::hint::black_box;
-
     use crate::data::StaticValue;
     use crate::graph::{Binding, Graph, Input, Node, OutputBinding};
+    use common::yaml_format::reformat_yaml;
+    use std::hint::black_box;
 
     #[test]
     fn graph_to_yaml() -> anyhow::Result<()> {
@@ -264,9 +264,19 @@ mod tests {
 
     #[test]
     fn graph_from_yaml() -> anyhow::Result<()> {
-        let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-        let yaml: String = graph.to_yaml();
-        let graph = Graph::from_yaml(&yaml)?;
+        let file_yaml: String = {
+            // This trick is used to make yaml formatting consistent
+            let str = std::fs::read_to_string("../test_resources/test_graph.yml")?;
+            reformat_yaml(str.as_str())?
+        };
+
+        let graph = Graph::from_yaml(file_yaml.as_str())?;
+        let serialized_yaml: String = graph.to_yaml();
+
+        assert_eq!(serialized_yaml, file_yaml);
+
+        let graph = Graph::from_yaml(&serialized_yaml)?;
+
         black_box(graph);
 
         Ok(())
