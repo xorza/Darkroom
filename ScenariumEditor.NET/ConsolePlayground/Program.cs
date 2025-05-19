@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using CoreInterop;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.TypeInspectors;
