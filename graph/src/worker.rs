@@ -256,7 +256,6 @@ impl PartialOrd<Self> for WorkerMessage {
 mod tests {
     use std::sync::mpsc;
 
-    use common::log_setup::setup_logging;
     use common::output_stream::OutputStream;
 
     use crate::elements::basic_invoker::BasicInvoker;
@@ -268,8 +267,6 @@ mod tests {
     #[test]
     fn test_worker() {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
-            setup_logging("debug");
-
             let output_stream = OutputStream::new();
 
             let timers_invoker = TimersInvoker::default();

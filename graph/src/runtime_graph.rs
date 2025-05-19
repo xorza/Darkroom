@@ -285,7 +285,7 @@ mod tests {
             .iter()
             .all(|r_node| !r_node.has_missing_inputs));
 
-        let _yaml = serde_yaml::to_string(&runtime_graph)?;
+        let _yaml = serde_yml::to_string(&runtime_graph)?;
 
         Ok(())
     }
@@ -392,7 +392,7 @@ mod tests {
                 .has_missing_inputs
         );
 
-        let _yaml = serde_yaml::to_string(&runtime_graph)?;
+        let _yaml = serde_yml::to_string(&runtime_graph)?;
 
         Ok(())
     }

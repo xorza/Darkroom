@@ -8,7 +8,7 @@ description = "A graph library for Scenarium"
 common = { workspace = true }
 
 serde = { workspace = true }
-serde_yaml = { workspace = true }
+serde_yml = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 strum = { workspace = true }

@@ -14,7 +14,7 @@ graph = { path = "graph" }
 imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
 serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
+serde_yml = "0.0"
 serde_json = "1.0"
 uuid = { version = "1.16", features = ["v4", "serde"] }
 anyhow = "1.0"

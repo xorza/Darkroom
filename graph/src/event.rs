@@ -152,7 +152,7 @@ mod tests {
                 event_index: 0,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(6)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             },
         );
         event_owner.start_node_event_loop(
@@ -162,7 +162,7 @@ mod tests {
                 event_index: 1,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
             },
         );
 

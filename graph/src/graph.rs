@@ -107,18 +107,18 @@ impl Graph {
     }
 
     pub fn to_yaml(&self) -> String {
-        serde_yaml::to_string(&self).unwrap().normalize()
+        serde_yml::to_string(&self).unwrap().normalize()
     }
     pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
         let yaml = std::fs::read_to_string(path)?;
-        let graph: Graph = serde_yaml::from_str(&yaml)?;
+        let graph: Graph = serde_yml::from_str(&yaml)?;
 
         graph.validate()?;
 
         Ok(graph)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Graph> {
-        let graph: Graph = serde_yaml::from_str(yaml)?;
+        let graph: Graph = serde_yml::from_str(yaml)?;
 
         graph.validate()?;
 

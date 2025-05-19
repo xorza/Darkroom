@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
-
 use crate::data::*;
 use common::id_type;
 use common::normalize_string::NormalizeString;
@@ -81,14 +80,15 @@ impl FuncLib {
         Ok(Self::from_yaml(&yaml)?)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
-        let funcs: Vec<Func> = serde_yaml::from_str(&yaml)?;
-
+         let funcs: Vec<Func> = serde_yml::from_str(&yaml)?;
+        
         Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
         let mut funcs: Vec<&Func> = self.funcs.values().collect();
         funcs.sort_by(|a, b| a.id.cmp(&b.id));
-        serde_yaml::to_string(&funcs).unwrap().normalize()
+
+        serde_yml::to_string(&funcs).unwrap().normalize()
     }
 
     pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {
