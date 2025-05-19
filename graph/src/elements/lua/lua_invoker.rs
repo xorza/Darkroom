@@ -67,9 +67,8 @@ impl LuaInvoker {
     pub fn load(&mut self, script: &str) -> anyhow::Result<()> {
         let output_stream = self.output_stream.clone();
 
-        let print_function = self
-            .lua
-            .create_function(move |_lua: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
+        let print_function = self.lua.create_function(
+            move |_lua: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
                 let mut output = String::new();
 
                 for arg in args {
@@ -118,7 +117,8 @@ impl LuaInvoker {
                     true
                 });
                 Ok(())
-            })?;
+            },
+        )?;
         self.lua.globals().set("print", print_function)?;
 
         self.lua.load(script).exec()?;
@@ -204,7 +204,8 @@ impl LuaInvoker {
 
         self.restore_functions();
 
-        let graph = self.create_graph(connections.lock().clone());
+        let connections: Vec<FuncConnections> = std::mem::take(&mut connections.lock());
+        let graph = self.create_graph(connections);
         Ok(graph)
     }
 
