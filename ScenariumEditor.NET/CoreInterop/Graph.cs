@@ -1,4 +1,4 @@
-﻿using CoreInterop.Utils;
+using CoreInterop.Utils;
 using YamlDotNet.Serialization;
 
 namespace CoreInterop;
