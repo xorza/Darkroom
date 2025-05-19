@@ -33,6 +33,6 @@ parking_lot = "0.12"
 hashbrown = { version = "0.15", features = ["serde"] }
 bytes = { version = "1.10" }
 lazy_static = "1.5"
-
+mlua = { version = "0.11.0-beta.1", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 
 

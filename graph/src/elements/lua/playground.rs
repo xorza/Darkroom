@@ -29,7 +29,7 @@ impl LuaCtx {
         inner.load(script)
     }
 
-    fn call<R: FromLuaMulti<'static>>(&self, func: &str) -> Result<R, mlua::Error> {
+    fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
         let inner = self.inner.lock();
         inner.call(func)
     }
@@ -59,7 +59,7 @@ impl LuaCtxInternal {
         Ok(())
     }
 
-    fn call<R: FromLuaMulti<'static>>(&self, func: &str) -> Result<R, mlua::Error> {
+    fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
         let lua = unsafe { &mut *self.lua };
         let func: mlua::Function = lua.globals().get(func)?;
         let r: R = func.call(())?;
