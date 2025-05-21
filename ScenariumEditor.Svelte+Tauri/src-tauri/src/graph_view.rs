@@ -1,8 +1,10 @@
 use crate::ctx::context;
+use crate::AppState;
 use graph::function::FuncId;
 use graph::graph::Node;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
+use tauri::State;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -76,8 +78,9 @@ pub(crate) fn get_graph_view() -> GraphView {
 }
 
 #[tauri::command]
-pub(crate) fn get_node_by_id(id: &str) -> NodeView {
-    let ctx = context.lock();
+pub(crate) fn get_node_by_id(state: State<'_, parking_lot::Mutex<AppState>>, id: &str) -> NodeView {
+    let ctx = &state.lock().ctx;
+
     let node = { ctx.graph_view.nodes.iter().find(|n| n.id == id).cloned() };
     node.expect("Node not found")
 }
@@ -173,6 +176,7 @@ pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ctx::Ctx;
     use graph::function::{Func, FuncBehavior, FuncId, FuncLib};
     use graph::graph::Graph;
     use lazy_static::lazy_static;
@@ -254,6 +258,80 @@ mod tests {
         lib.add(func);
         ctx.func_lib = lib;
         ctx.graph = Graph::default();
+    }
+
+    fn create_state() -> State<'static, parking_lot::Mutex<AppState>> {
+        let mut app_state = AppState::default();
+        let mut gv = GraphView {
+            nodes: vec![
+                NodeView {
+                    id: "0".to_string(),
+                    func_id: "0".to_string(),
+                    title: "Add".into(),
+                    x: 50.0,
+                    y: 50.0,
+                    inputs: vec!["A".into(), "B".into()],
+                    outputs: vec!["Result".into()],
+                },
+                NodeView {
+                    id: "1".to_string(),
+                    func_id: "1".to_string(),
+                    title: "Multiply".into(),
+                    x: 300.0,
+                    y: 50.0,
+                    inputs: vec!["A".into(), "B".into()],
+                    outputs: vec!["Result".into()],
+                },
+                NodeView {
+                    id: "2".to_string(),
+                    func_id: "2".to_string(),
+                    title: "Output".into(),
+                    x: 550.0,
+                    y: 50.0,
+                    inputs: vec!["Value".into()],
+                    outputs: vec![],
+                },
+            ],
+            connections: vec![
+                ConnectionView {
+                    from_node_id: "0".to_string(),
+                    from_index: 0,
+                    to_node_id: "1".to_string(),
+                    to_index: 0,
+                },
+                ConnectionView {
+                    from_node_id: "1".to_string(),
+                    from_index: 0,
+                    to_node_id: "2".to_string(),
+                    to_index: 0,
+                },
+            ],
+            view_scale: 1.0,
+            view_x: 0.0,
+            view_y: 0.0,
+        };
+        gv.connections.clear();
+        app_state.ctx.graph_view = gv;
+
+        // minimal function library for node creation
+        let func_id = FuncId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let func = Func {
+            id: func_id,
+            name: "Test".into(),
+            category: "".into(),
+            description: None,
+            behavior: FuncBehavior::Active,
+            is_output: false,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
+        let mut lib = FuncLib::default();
+        lib.add(func);
+        app_state.ctx.func_lib = lib;
+        app_state.ctx.graph = Graph::default();
+
+        State(&parking_lot::Mutex::new(app_state))
     }
 
     #[test]
@@ -350,10 +428,10 @@ mod tests {
 
     #[test]
     fn get_node_by_id_none() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
-        let result = std::panic::catch_unwind(|| {
-            get_node_by_id("999");
+        let state = create_state();
+
+        let result = std::panic::catch_unwind(move || {
+            get_node_by_id(state, "999");
         });
         assert!(result.is_err());
     }

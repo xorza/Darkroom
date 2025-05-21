@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use parking_lot::Mutex;
 use std::mem::swap;
 
+#[derive(Debug)]
 pub(crate) struct Ctx {
     pub(crate) graph_view: GraphView,
     pub(crate) func_library_view: FuncLibraryView,
