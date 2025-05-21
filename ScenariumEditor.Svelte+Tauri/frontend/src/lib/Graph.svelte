@@ -814,7 +814,7 @@
     </div>
 
     {#if showFuncLibrary}
-        <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag}/>
+        <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag} container={mainContainerEl}/>
     {/if}
 
     <div class="h-8 border-base-300 bg-base-100 text-xs flex items-center px-2 py-1">

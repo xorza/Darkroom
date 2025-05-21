@@ -1,11 +1,12 @@
 <script lang="ts">
-    import { onMount } from 'svelte';
-    import { invoke } from '@tauri-apps/api/core';
+    import {onMount} from 'svelte';
+    import {invoke} from '@tauri-apps/api/core';
     import type {FuncLibraryView, FuncView} from "$lib/types";
 
     interface FuncLibraryProps {
         close: () => void;
         startDrag?: (item: FuncView, event: PointerEvent) => void;
+        container: HTMLElement;
         x?: number;
         y?: number;
     }
@@ -13,6 +14,7 @@
     let {
         close,
         startDrag,
+        container,
         x = 0,
         y = 0,
     }: FuncLibraryProps = $props();
@@ -58,8 +60,14 @@
 
     function onPointerMove(event: PointerEvent) {
         if (!dragging) return;
-        x = event.clientX - startX;
-        y = event.clientY - startY;
+        let newX = event.clientX - startX;
+        let newY = event.clientY - startY;
+        const bounds = container.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        newX = Math.min(Math.max(newX, 0), bounds.width - panelRect.width);
+        newY = Math.min(Math.max(newY, 0), bounds.height - panelRect.height);
+        x = newX;
+        y = newY;
     }
 
     function onPointerUp(event: PointerEvent) {
