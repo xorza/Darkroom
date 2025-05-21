@@ -667,7 +667,7 @@
 <div class=" flex flex-col h-screen overflow-hidden">
 
     <div
-            class="flex-1 overflow-hidden graph-bg bg-base-100"
+            class="flex-1 relative overflow-hidden graph-bg bg-base-100"
             style="background-position: {bgX()}px {bgY()}px; background-size: {dotSpacing()}px {dotSpacing()}px;"
             id="main-container"
             bind:this={mainContainerEl}
@@ -680,7 +680,7 @@
             role="region"
     >
         <svg
-                class="h-screen pointer-events-none text-primary overflow-visible"
+                class="absolute top-0 left-0 w-full h-full pointer-events-none text-primary"
                 style="transform: translate({graphView.viewX}px, {graphView.viewY}px) scale({graphView.viewScale}); transform-origin: 0 0;"
         >
             {#each connectionPaths as _c, i}
@@ -691,7 +691,7 @@
             {/if}
 
         </svg>
-        <svg class="absolute top-0 left-0 w-full h-full pointer-events-none overflow-visible">
+        <svg class="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
             {#if connectionBreaker}
                 <path d={breakerPath()} stroke="red" fill="none" stroke-width="2"/>
             {/if}
