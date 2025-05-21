@@ -1,6 +1,6 @@
 use crate::AppState;
 use graph::function::{FuncId, FuncLib};
-use graph::graph::{Binding, Graph, Node};
+use graph::graph::{Binding, Graph, Input, Node, NodeId};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tauri::State;
@@ -124,7 +124,57 @@ impl GraphView {
 
 impl From<&GraphView> for Graph {
     fn from(value: &GraphView) -> Self {
-        todo!("Implement conversion from GraphView to Graph");
+        use std::collections::HashMap;
+
+        // Create nodes first so we can resolve connections later.
+        let mut nodes: Vec<Node> = Vec::new();
+        let mut id_map: HashMap<NodeId, usize> = HashMap::new();
+
+        for node in &value.nodes {
+            let id = NodeId::from_str(&node.id).expect("Invalid node id");
+            let func_id = FuncId::from_str(&node.func_id).expect("Invalid func id");
+
+            // Prepare input slots matching the number of inputs in the view.
+            let inputs = vec![Input::default(); node.inputs.len()];
+
+            let node_struct = Node {
+                id,
+                func_id,
+                name: node.title.clone(),
+                is_output: false,
+                cache_outputs: false,
+                inputs,
+                events: Vec::new(),
+                view_pos: glam::Vec2::new(node.view_pos_x, node.view_pos_y),
+            };
+
+            id_map.insert(id, nodes.len());
+            nodes.push(node_struct);
+        }
+
+        // Apply connections to the appropriate node inputs.
+        for conn in &value.connections {
+            let from_id = NodeId::from_str(&conn.from_node_id).expect("Invalid from node id");
+            let to_id = NodeId::from_str(&conn.to_node_id).expect("Invalid to node id");
+
+            let node_index = id_map
+                .get(&to_id)
+                .cloned()
+                .expect("Destination node missing");
+            let node = nodes.get_mut(node_index).expect("Invalid node index");
+            let input = node
+                .inputs
+                .get_mut(conn.to_index as usize)
+                .expect("Invalid connection index");
+
+            input.binding = Binding::from_output_binding(from_id, conn.from_index);
+        }
+
+        Graph {
+            nodes,
+            view_pos: glam::Vec2::new(value.view_pos_x, value.view_pos_y),
+            view_scale: value.view_scale,
+        }
     }
 }
 
@@ -249,6 +299,14 @@ pub(crate) fn update_graph(
     ctx.graph_view.view_scale = view_scale;
     ctx.graph_view.view_pos_x = view_pos_x;
     ctx.graph_view.view_pos_y = view_pos_y;
+}
+
+#[tauri::command]
+pub(crate) fn new_graph(state: State<'_, parking_lot::Mutex<AppState>>) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
+    ctx.graph = Graph::default();
+    ctx.graph_view = GraphView::default();
 }
 
 #[tauri::command]
@@ -475,5 +533,19 @@ mod tests {
         let state: State<'_, ParkingMutex<AppState>> = app.state();
         let gv = get_graph_view(state.clone());
         debug_assert_graph_view(state, gv);
+    }
+
+    #[test]
+    fn new_graph_clears_view() {
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
+
+        assert!(!state.lock().ctx.graph_view.nodes.is_empty());
+
+        new_graph(state.clone());
+
+        let gv = &state.lock().ctx.graph_view;
+        assert!(gv.nodes.is_empty());
+        assert!(gv.connections.is_empty());
     }
 }

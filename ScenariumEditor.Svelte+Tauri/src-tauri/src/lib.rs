@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod ctx;
 mod func_library_view;
 mod graph_view;
@@ -6,8 +8,8 @@ use crate::ctx::Ctx;
 use crate::func_library_view::{get_func_by_id, get_func_library};
 use crate::graph_view::{
     add_connection_to_graph_view, create_node, debug_assert_graph_view, get_graph_view,
-    get_node_by_id, remove_connections_from_graph_view, remove_node_from_graph_view, update_graph,
-    update_node,
+    get_node_by_id, new_graph, remove_connections_from_graph_view, remove_node_from_graph_view,
+    update_graph, update_node,
 };
 
 #[derive(Debug, Default)]
@@ -33,6 +35,7 @@ pub fn run() {
             remove_node_from_graph_view,
             update_node,
             update_graph,
+            new_graph,
             debug_assert_graph_view,
         ])
         .run(tauri::generate_context!())
