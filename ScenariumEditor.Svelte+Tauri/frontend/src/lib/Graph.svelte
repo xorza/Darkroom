@@ -85,6 +85,9 @@
 
     let pendingConnection: { start: Pin; x: number; y: number; hover: Pin | null } | null = $state(null);
 
+    // Track a node spawned from the function library that is being dragged
+    let newNodeDrag: { nodeId: string; pointerId: number } | null = null;
+
     let graphView: GraphView = $state({
         nodes: [],
         connections: [],
@@ -158,13 +161,16 @@
     });
 
 
+    // Use a separator that does not appear in UUIDs to build pin keys
+    const KEY_SEP = '|';
+
     function key(pin: Pin) {
-        return `${pin.nodeId}-${pin.type}-${pin.index}`;
+        return `${pin.nodeId}${KEY_SEP}${pin.type}${KEY_SEP}${pin.index}`;
     }
 
-    function registerPin(detail: { nodeId: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
-        const {nodeId, type, index, el} = detail;
-        pins.set(`${nodeId}-${type}-${index}`, el);
+    function registerPin(detail: Pin & { el: HTMLElement }) {
+        const {el, ...pin} = detail;
+        pins.set(key(pin), el);
     }
 
     function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
@@ -173,7 +179,7 @@
         const rect = mainContainerEl.getBoundingClientRect();
         for (const [k, el] of pins.entries()) {
             if (k === startKey) continue;
-            const [nodeIdStr, pinType, indexStr] = k.split('-');
+            const [nodeIdStr, pinType, indexStr] = k.split(KEY_SEP);
             if (pinType === startType) continue;
             const nodeId = String(nodeIdStr);
             const index = Number(indexStr);
@@ -188,6 +194,8 @@
                 nearest = {nodeId, type: pinType as 'input' | 'output', index};
             }
         }
+
+        console.log('nearest', nearest, nearestDist);
         return nearest;
     }
 
@@ -263,12 +271,12 @@
 
             graphView.nodes = [...graphView.nodes, node];
             graphView.selectedNodeIds = new Set([node.id]);
+            newNodeDrag = {nodeId: node.id, pointerId: event.pointerId};
         } catch (e) {
             console.error('Failed to persist new node', e);
             mainContainerEl.releasePointerCapture(event.pointerId);
             return;
         }
-
 
 
         updateSelection();
@@ -277,17 +285,17 @@
         showFuncLibrary = false;
     }
 
-    function startConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number; x: number; y: number }) {
+    function startConnection(detail: Pin & { x: number; y: number }) {
         const {nodeId, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
         const ny = (y - rect.top - graphView.viewY) / graphView.viewScale;
-        const startKeyStr = `${nodeId}-${type}-${index}`;
+        const startPin = {nodeId, type, index};
         pendingConnection = {
-            start: {nodeId: nodeId, type, index},
+            start: startPin,
             x: nx,
             y: ny,
-            hover: findNearestPin(nx, ny, type, startKeyStr)
+            hover: findNearestPin(nx, ny, type, key(startPin))
         };
         moveHandler = (e: PointerEvent) => {
             if (pendingConnection) {
@@ -312,29 +320,27 @@
         window.addEventListener('pointerup', upHandler);
     }
 
-    function endConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number }) {
-        const {nodeId, type, index} = detail;
+    function endConnection(pin: Pin) {
         if (!pendingConnection) return;
 
-        if (pendingConnection.start.nodeId === nodeId && pendingConnection.start.type === type && pendingConnection.start.index === index) {
+        if (pendingConnection.start.nodeId === pin.nodeId && pendingConnection.start.type === pin.type && pendingConnection.start.index === pin.index) {
             pendingConnection = null;
             window.removeEventListener('pointermove', moveHandler);
             window.removeEventListener('pointerup', upHandler);
             return;
         }
 
-        if (pendingConnection.start.type !== type) {
-            const from = pendingConnection.start.type === 'output'
+        if (pendingConnection.start.type !== pin.type) {
+            const from: Pin = pendingConnection.start.type === 'output'
                 ? pendingConnection.start
-                : {nodeId: nodeId, type: 'output' as const, index};
-            const to = pendingConnection.start.type === 'input'
+                : {nodeId: pin.nodeId, type: 'output' as const, index: pin.index};
+            const to: Pin = pendingConnection.start.type === 'input'
                 ? pendingConnection.start
-                : {nodeId: nodeId, type: 'input' as const, index};
+                : {nodeId: pin.nodeId, type: 'input' as const, index: pin.index};
 
             // ensure each input has at most one incoming connection
             graphView.connections = graphView.connections.filter(
-                (c) =>
-                    !(c.toNodeId === to.nodeId && c.toIndex === to.index)
+                (c) => !(c.toNodeId === to.nodeId && c.toIndex === to.index)
             );
 
             let newConnection: ConnectionView = {
@@ -547,6 +553,14 @@
             }
         } else if (selection && event.pointerId === selection.pointerId) {
             selection = {...selection, x: event.clientX, y: event.clientY};
+        } else if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
+            const rect = mainContainerEl.getBoundingClientRect();
+            const nx = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
+            const ny = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
+            const node = graphView.nodes.find((n) => n.id === newNodeDrag?.nodeId);
+            if (node) {
+                dragNode({nodeId: node.id, dx: nx - node.x, dy: ny - node.y});
+            }
         }
     }
 
@@ -628,6 +642,10 @@
             cancelSelection();
         } else if (selection && event.button !== 0) {
             cancelSelection();
+        } else if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
+            endDragNode(newNodeDrag.nodeId);
+            newNodeDrag = null;
+            mainContainerEl.releasePointerCapture(event.pointerId);
         }
     }
 
