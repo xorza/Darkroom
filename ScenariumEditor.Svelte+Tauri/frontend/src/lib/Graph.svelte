@@ -230,10 +230,10 @@
         trigger++;
     }
 
-    function endDragNode(id: string) {
-        const ids = graphView.selectedNodeIds.has(id)
+    function endDragNode(nodeId: string) {
+        const ids = graphView.selectedNodeIds.has(nodeId)
             ? [...graphView.selectedNodeIds]
-            : [id];
+            : [nodeId];
         for (const nid of ids) {
             const n = graphView.nodes.find((nn) => nn.id === nid);
             if (n) {
@@ -242,16 +242,16 @@
         }
     }
 
-    function removeNode(id: string) {
+    function removeNode(nodeId: string) {
         const beforeCount = graphView.nodes.length;
-        graphView.nodes = graphView.nodes.filter((n) => n.id !== id);
+        graphView.nodes = graphView.nodes.filter((n) => n.id !== nodeId);
         graphView.connections = graphView.connections.filter(
-            (c) => c.fromNodeId !== id && c.toNodeId !== id
+            (c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId
         );
-        graphView.selectedNodeIds.delete(id);
+        graphView.selectedNodeIds.delete(nodeId);
         updateSelection();
         if (graphView.nodes.length !== beforeCount) {
-            invoke('remove_node_from_graph_view', {id})
+            invoke('remove_node_from_graph_view', {id: nodeId})
                 .then(() => verifyGraphView())
                 .catch((e) => console.error('Failed to remove node', e));
         }
@@ -800,9 +800,8 @@
                 />
             {/each}
         </div>
+        <button class="btn btn-xs absolute top-2 left-2 w-5 h-5" onclick={() => showFuncLibrary = true}>+</button>
     </div>
-
-    <button class="btn btn-xs absolute top-2 left-2 w-5 h-5 " onclick={() => showFuncLibrary = true}>+</button>
 
     {#if showFuncLibrary}
         <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag}/>

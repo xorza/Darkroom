@@ -158,7 +158,7 @@
                 style="transform: translate(0.25rem, 0);"
         >
             {#each nodeView.outputs as output, i}
-                <div class="relative pl-2 pr-3 text-xs output">
+                <div class="relative pl-2 pr-3 text-xs">
                     {output}
                     <span
                             class="absolute right-0 top-1/2 w-2.5 h-2.5 -translate-y-1/2 rounded-full bg-primary hover:bg-blue-500 transition-colors"
