@@ -203,7 +203,6 @@
             }
         }
 
-        console.log('nearest', nearest, nearestDist);
         return nearest;
     }
 
@@ -251,19 +250,21 @@
     }
 
     function removeNode(nodeId: string) {
-        const beforeCount = graphView.nodes.length;
         graphView.nodes = graphView.nodes.filter((n) => n.id !== nodeId);
         graphView.connections = graphView.connections.filter(
             (c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId
         );
+
         unregisterPins(nodeId);
         graphView.selectedNodeIds.delete(nodeId);
         updateSelection();
-        if (graphView.nodes.length !== beforeCount) {
-            invoke('remove_node_from_graph_view', {id: nodeId})
-                .then(() => verifyGraphView())
-                .catch((e) => console.error('Failed to remove node', e));
-        }
+
+        invoke('remove_node_from_graph_view', {id: nodeId})
+            .then(() => verifyGraphView())
+            .catch((e) => console.error('Failed to remove node', e));
+
+        console.log('graphView', graphView);
+        console.log('pins', pins);
     }
 
     async function startFuncDrag(item: FuncView, event: PointerEvent) {
