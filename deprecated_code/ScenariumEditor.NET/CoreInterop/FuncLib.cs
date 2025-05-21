@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.Design;
+using System.ComponentModel.Design;
 using CoreInterop.Utils;
 using YamlDotNet.Serialization;
 

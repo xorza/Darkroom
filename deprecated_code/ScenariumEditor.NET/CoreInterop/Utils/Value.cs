@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using YamlDotNet.Core;
 using YamlDotNet.Core.Events;
 using YamlDotNet.Serialization;

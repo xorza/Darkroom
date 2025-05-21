@@ -31,7 +31,7 @@ impl TryFrom<String> for FfiUuid {
 
 impl From<FfiUuid> for String {
     fn from(ffi_uuid: FfiUuid) -> Self {
-        ffi_uuid.into()
+        uuid::Uuid::from(ffi_uuid).to_string()
     }
 }
 
