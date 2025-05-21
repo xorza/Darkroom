@@ -11,8 +11,8 @@ pub(crate) struct Ctx {
 impl Default for Ctx {
     fn default() -> Self {
         Self {
-            graph_view: Mutex::new(GraphView::default()),
-            func_library_view: FuncLibraryView::default(),
+            graph_view: Mutex::new(GraphView::new_test()),
+            func_library_view: FuncLibraryView::new_test(),
         }
     }
 }

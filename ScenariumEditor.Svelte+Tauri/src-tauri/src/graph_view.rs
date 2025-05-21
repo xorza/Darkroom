@@ -1,23 +1,7 @@
 use crate::ctx::context;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-enum PinType {
-    Input,
-    Output,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct Pin {
-    node_id: u32,
-    #[serde(rename = "type")]
-    pin_type: PinType,
-    index: u32,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
     from_node_id: u32,
@@ -26,7 +10,7 @@ pub(crate) struct ConnectionView {
     to_index: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
     id: u32,
@@ -38,7 +22,7 @@ pub(crate) struct NodeView {
     outputs: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
@@ -49,8 +33,8 @@ pub(crate) struct GraphView {
     selected_node_ids: Vec<u32>,
 }
 
-impl Default for GraphView {
-    fn default() -> Self {
+impl GraphView {
+    pub fn new_test() -> Self {
         Self {
             nodes: vec![
                 NodeView {

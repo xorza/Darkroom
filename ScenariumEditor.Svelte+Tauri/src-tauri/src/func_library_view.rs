@@ -1,7 +1,7 @@
 use crate::ctx::context;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FuncView {
     id: u32,
@@ -9,14 +9,14 @@ pub(crate) struct FuncView {
     description: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FuncLibraryView {
     pub(crate) funcs: Vec<FuncView>,
 }
 
-impl Default for FuncLibraryView {
-    fn default() -> Self {
+impl FuncLibraryView {
+    pub fn new_test() -> Self {
         Self {
             funcs: vec![
                 FuncView {
