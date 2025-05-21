@@ -122,6 +122,12 @@ impl GraphView {
     }
 }
 
+impl From<GraphView> for Graph {
+    fn from(value: GraphView) -> Self {
+        todo!("Implement conversion from GraphView to Graph");
+    }
+}
+
 #[tauri::command]
 pub(crate) fn get_graph_view(state: State<'_, parking_lot::Mutex<AppState>>) -> GraphView {
     state.lock().ctx.graph_view.clone()
