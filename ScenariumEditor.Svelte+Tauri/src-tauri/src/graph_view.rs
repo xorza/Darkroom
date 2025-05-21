@@ -91,9 +91,8 @@ impl PartialEq for NodeView {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
             && self.func_id == other.func_id
-            // todo: add validation for x and y
-            // && self.x == other.x
-            // && self.y == other.y
+            && self.x == other.x
+            && self.y == other.y
             && self.title == other.title
             && self.inputs == other.inputs
             && self.outputs == other.outputs
