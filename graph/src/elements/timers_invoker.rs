@@ -2,8 +2,8 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncId, FuncLib, FuncInput, FuncOutput};
 use crate::function::FuncBehavior;
+use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
 
 #[derive(Debug)]

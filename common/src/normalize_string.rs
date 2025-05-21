@@ -4,9 +4,7 @@ pub trait NormalizeString {
 
 impl NormalizeString for str {
     fn normalize(&self) -> String {
-        self
-            .replace("\r\n", "\n")
-            .replace("\r", "\n")
+        self.replace("\r\n", "\n").replace("\r", "\n")
     }
 }
 

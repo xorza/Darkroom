@@ -1,4 +1,3 @@
-
 use crate::normalize_string::NormalizeString;
 
 pub fn reformat_yaml(yaml: &str) -> anyhow::Result<String> {

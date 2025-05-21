@@ -4,10 +4,10 @@ use std::path::Path;
 pub mod macros;
 pub mod apply;
 pub mod log_setup;
+pub mod normalize_string;
 pub mod output_stream;
 pub mod scoped_ref;
 pub mod toggle;
-pub mod normalize_string;
 pub mod yaml_format;
 
 pub const EPSILON: f64 = 1e-10;

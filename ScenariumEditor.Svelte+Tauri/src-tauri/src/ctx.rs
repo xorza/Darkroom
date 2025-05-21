@@ -1,7 +1,7 @@
 use crate::func_library_view::FuncLibraryView;
 use crate::graph_view::GraphView;
-use std::sync::Mutex;
 use lazy_static::lazy_static;
+use std::sync::Mutex;
 
 pub(crate) struct Ctx {
     pub(crate) graph_view: Mutex<GraphView>,

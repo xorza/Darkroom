@@ -22,7 +22,7 @@ pub struct Context {
     pub func_lib: FuncLib,
 
     pub worker: Option<Worker>,
-    
+
     pub callback: Option<Box<CallbackDelegate>>,
 }
 

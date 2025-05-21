@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
-use hashbrown::hash_map::{Entry, Values};
-use serde::{Deserialize, Serialize};
 use crate::data::*;
 use common::id_type;
 use common::normalize_string::NormalizeString;
+use hashbrown::hash_map::{Entry, Values};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -80,8 +80,8 @@ impl FuncLib {
         Self::from_yaml(&yaml)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
-         let funcs: Vec<Func> = serde_yml::from_str(yaml)?;
-        
+        let funcs: Vec<Func> = serde_yml::from_str(yaml)?;
+
         Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
