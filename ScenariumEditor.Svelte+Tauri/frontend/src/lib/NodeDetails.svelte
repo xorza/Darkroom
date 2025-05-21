@@ -15,7 +15,7 @@
 
     let func: FuncView | null = $state(null);
 
-    async function load(){
+    async function load() {
         if (nodeId === null) {
             func = null;
             return;
@@ -30,19 +30,21 @@
         }
     }
 
-    $effect( () => {
+    $effect(() => {
         nodeId;
         load();
     });
 </script>
 
-{#if selectionCount === 0}
-    <p class="p-2 text-xs italic">no node selected</p>
-{:else if selectionCount > 1}
-    <p class="p-2 text-xs italic">multiple nodes selected</p>
-{:else if func}
-    <div class="p-2">
-        <h3 class="font-bold mb-1 text-sm">{func.title}</h3>
-        <p class="text-xs">{func.description}</p>
-    </div>
-{/if}
+<div class="h-screen bg-base-100">
+    {#if selectionCount === 0}
+        <p class="p-2 text-xs italic">no node selected</p>
+    {:else if selectionCount > 1}
+        <p class="p-2 text-xs italic">multiple nodes selected</p>
+    {:else if func}
+        <div class="p-2">
+            <h3 class="font-bold mb-1 text-sm">{func.title}</h3>
+            <p class="text-xs">{func.description}</p>
+        </div>
+    {/if}
+</div>

@@ -817,7 +817,7 @@
         <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag}/>
     {/if}
 
-    <div class="h-8 border-base-300 bg-base-200 text-xs flex items-center px-2 py-1">
+    <div class="h-8 border-base-300 bg-base-100 text-xs flex items-center px-2 py-1">
         <button class="btn btn-xs p-1 w-8" onclick={resetZoom}>{zoomPercent()}%</button>
         <button class="btn btn-xs p-1" onclick={centerView}>Center</button>
         <button class="btn btn-xs p-1" onclick={fitView}>Fit</button>
