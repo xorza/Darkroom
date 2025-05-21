@@ -6,7 +6,7 @@ use crate::graph_view::{
     get_graph_view, add_node_to_graph_view, add_connection_to_graph_view,
     remove_connections_from_graph_view,
 };
-use crate::func_library_view::get_func_library;
+use crate::func_library_view::{get_func_library, get_func_by_id};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,6 +15,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_graph_view,
             get_func_library,
+            get_func_by_id,
             add_node_to_graph_view,
             add_connection_to_graph_view,
             remove_connections_from_graph_view

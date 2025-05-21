@@ -44,3 +44,29 @@ impl Default for FuncLibraryView {
 pub(crate) fn get_func_library() -> &'static FuncLibraryView {
     &context.func_library_view
 }
+
+#[tauri::command]
+pub(crate) fn get_func_by_id(id: u32) -> Option<FuncView> {
+    context
+        .func_library_view
+        .funcs
+        .iter()
+        .find(|f| f.id == id)
+        .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_func_by_id_returns_func() {
+        let f = get_func_by_id(1).unwrap();
+        assert_eq!(f.title, "Multiply");
+    }
+
+    #[test]
+    fn get_func_by_id_none() {
+        assert!(get_func_by_id(999).is_none());
+    }
+}

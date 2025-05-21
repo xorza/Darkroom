@@ -3,6 +3,12 @@
     import FuncLibrary from '$lib/FuncLibrary.svelte';
     import type {GraphView, ConnectionView, Pin, NodeView, FuncView} from "$lib/types";
 
+    interface GraphProps {
+        selectedChange?: (ids: number[]) => void;
+    }
+
+    let { selectedChange }: GraphProps = $props();
+
 
     import {onMount} from 'svelte';
     import {invoke} from '@tauri-apps/api/core';
@@ -92,12 +98,17 @@
         selectedNodeIds: new Set(),
     });
 
+    function updateSelection() {
+        selectedChange?.([...graphView.selectedNodeIds]);
+    }
+
 
     onMount(async () => {
         try {
             const data: GraphView = await invoke('get_graph_view');
             graphView.nodes = data.nodes;
             graphView.selectedNodeIds = new Set(data.selectedNodeIds);
+            updateSelection();
             graphView.connections = [...data.connections];
             graphView.viewX = data.viewX;
             graphView.viewY = data.viewY;
@@ -168,6 +179,7 @@
             }
             graphView.selectedNodeIds = new Set([detail.id]);
         }
+        updateSelection();
     }
 
     function dragNode(detail: { id: number; dx: number; dy: number }) {
@@ -220,6 +232,7 @@
 
         graphView.nodes = [...graphView.nodes, node];
         graphView.selectedNodeIds = new Set([nextId]);
+        updateSelection();
         invoke('add_node_to_graph_view', { node }).catch((e) => {
             console.error('Failed to persist new node', e);
         });
@@ -444,6 +457,7 @@
             event.target === mainContainerEl
         ) {
             graphView.selectedNodeIds = new Set();
+            updateSelection();
             connectionBreaker = {
                 points: [{x: event.clientX, y: event.clientY}],
                 pointerId: event.pointerId
@@ -566,6 +580,7 @@
                 }
             }
             graphView.selectedNodeIds = new Set(ids);
+            updateSelection();
             cancelSelection();
         } else if (selection && event.button !== 0) {
             cancelSelection();
