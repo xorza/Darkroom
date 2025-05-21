@@ -23,6 +23,9 @@ nodes:
         subscribers: [ ]
       - name: fps
         subscribers: [ ]
+    view_pos:
+      - 0.0
+      - 0.0
   - id: eb6590aa-229d-4874-abba-37c56f5b97fa
     func_id: 01896a88-bf15-dead-4a15-5969da5a9e65
     name: float to string
@@ -39,6 +42,9 @@ nodes:
     outputs:
       - name: result
         data_type: String
+    view_pos:
+      - 0.0
+      - 0.0
   - id: 8be72298-dece-4a5f-8a1d-d2dee1e791d3
     func_id: 01896910-0790-ad1b-aa12-3f1437196789
     name: print
@@ -52,3 +58,10 @@ nodes:
         binding: !Output
           output_node_id: eb6590aa-229d-4874-abba-37c56f5b97fa
           output_index: 0
+    view_pos:
+      - 0.0
+      - 0.0
+view_pos:
+  - 0.0
+  - 0.0
+view_scale: 0.0

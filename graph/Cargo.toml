@@ -21,3 +21,5 @@ parking_lot = { workspace = true }
 hashbrown = { workspace = true }
 pollster = { workspace = true }
 mlua = { workspace = true }
+glam = { workspace = true }
+

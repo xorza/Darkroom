@@ -46,11 +46,15 @@ pub struct Node {
     pub inputs: Vec<Input>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
+
+    pub view_pos: glam::Vec2,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
     nodes: Vec<Node>,
+    view_pos: glam::Vec2,
+    view_scale: f32,
 }
 
 impl Graph {
@@ -157,6 +161,7 @@ impl Default for Node {
             cache_outputs: false,
             inputs: vec![],
             events: vec![],
+            view_pos: glam::Vec2::ZERO,
         }
     }
 }
@@ -189,6 +194,7 @@ impl Node {
             cache_outputs: false,
             inputs,
             events,
+            view_pos: glam::Vec2::ZERO,
         }
     }
 }

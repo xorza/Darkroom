@@ -23,7 +23,7 @@ wgpu = { version = "25" }
 bytemuck = { version = "1.23", features = ["derive"] }
 pollster = "0.4"
 num-traits = "0.2"
-glam = "0.30"
+glam = { version = "0.30", features = ["serde"] }
 strum = "0.27"
 strum_macros = "0.27"
 rand = "0.9"

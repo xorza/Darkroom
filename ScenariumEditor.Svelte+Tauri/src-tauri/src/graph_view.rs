@@ -1,4 +1,5 @@
 use crate::AppState;
+use glam::Vec2;
 use graph::function::FuncId;
 use graph::graph::Node;
 use serde::{Deserialize, Serialize};
@@ -19,8 +20,7 @@ pub(crate) struct ConnectionView {
 pub(crate) struct NodeView {
     id: String,
     func_id: String,
-    x: f32,
-    y: f32,
+    view_pos: Vec2,
     title: String,
     inputs: Vec<String>,
     outputs: Vec<String>,
@@ -32,8 +32,7 @@ pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
     connections: Vec<ConnectionView>,
     view_scale: f32,
-    view_x: f32,
-    view_y: f32,
+    view_pos: Vec2,
 }
 
 impl Default for GraphView {
@@ -42,8 +41,7 @@ impl Default for GraphView {
             nodes: vec![],
             connections: vec![],
             view_scale: 1.0,
-            view_x: 0.0,
-            view_y: 0.0,
+            view_pos: Vec2::ZERO,
         }
     }
 }
@@ -53,8 +51,7 @@ impl PartialEq for NodeView {
         self.id == other.id
             && self.func_id == other.func_id
             // comparing position often fails due to asynchronous updates
-            // && self.x == other.x
-            // && self.y == other.y
+            // && self.view_pos == other.view_pos
             && self.title == other.title
             && self.inputs == other.inputs
             && self.outputs == other.outputs
@@ -66,8 +63,7 @@ impl PartialEq for GraphView {
         self.nodes == other.nodes
             && self.connections == other.connections
             && self.view_scale == other.view_scale
-            && self.view_x == other.view_x
-            && self.view_y == other.view_y
+            && self.view_pos == other.view_pos
     }
 }
 
@@ -151,8 +147,7 @@ pub(crate) fn create_node(
     let node_view = NodeView {
         id: node.id.to_string(),
         func_id: node.func_id.to_string(),
-        x: 0.0,
-        y: 0.0,
+        view_pos: Vec2::ZERO,
         title: func.name.clone(),
         inputs: func.inputs.iter().map(|i| i.name.clone()).collect(),
         outputs: func.outputs.iter().map(|o| o.name.clone()).collect(),
@@ -167,14 +162,12 @@ pub(crate) fn create_node(
 pub(crate) fn update_node(
     state: State<'_, parking_lot::Mutex<AppState>>,
     id: &str,
-    x: f32,
-    y: f32,
+    view_pos: Vec2,
 ) {
     let mut app_state = state.lock();
     let ctx = &mut app_state.ctx;
     if let Some(node) = ctx.graph_view.nodes.iter_mut().find(|n| n.id == id) {
-        node.x = x;
-        node.y = y;
+        node.view_pos = view_pos;
     } else {
         panic!("Node with id {} not found", id);
     }
@@ -184,14 +177,12 @@ pub(crate) fn update_node(
 pub(crate) fn update_graph(
     state: State<'_, parking_lot::Mutex<AppState>>,
     view_scale: f32,
-    view_x: f32,
-    view_y: f32,
+    view_pos: Vec2,
 ) {
     let mut app_state = state.lock();
     let ctx = &mut app_state.ctx;
     ctx.graph_view.view_scale = view_scale;
-    ctx.graph_view.view_x = view_x;
-    ctx.graph_view.view_y = view_y;
+    ctx.graph_view.view_pos = view_pos;
 }
 
 #[tauri::command]
@@ -225,8 +216,7 @@ mod tests {
                     id: "0".to_string(),
                     func_id: "0".to_string(),
                     title: "Add".into(),
-                    x: 50.0,
-                    y: 50.0,
+                    view_pos: Vec2::new(50.0, 50.0),
                     inputs: vec!["A".into(), "B".into()],
                     outputs: vec!["Result".into()],
                 },
@@ -234,8 +224,7 @@ mod tests {
                     id: "1".to_string(),
                     func_id: "1".to_string(),
                     title: "Multiply".into(),
-                    x: 300.0,
-                    y: 50.0,
+                    view_pos: Vec2::new(300.0, 50.0),
                     inputs: vec!["A".into(), "B".into()],
                     outputs: vec!["Result".into()],
                 },
@@ -243,8 +232,7 @@ mod tests {
                     id: "2".to_string(),
                     func_id: "2".to_string(),
                     title: "Output".into(),
-                    x: 550.0,
-                    y: 50.0,
+                    view_pos: Vec2::new(550.0, 50.0),
                     inputs: vec!["Value".into()],
                     outputs: vec![],
                 },
@@ -264,8 +252,7 @@ mod tests {
                 },
             ],
             view_scale: 1.0,
-            view_x: 0.0,
-            view_y: 0.0,
+            view_pos: Vec2::ZERO,
         };
         gv.connections.clear();
         app_state.ctx.graph_view = gv;
@@ -405,11 +392,10 @@ mod tests {
     fn update_graph_persists() {
         let app = create_app_state();
         let state: State<'_, ParkingMutex<AppState>> = app.state();
-        update_graph(state.clone(), 2.0, 5.0, 6.0);
+        update_graph(state.clone(), 2.0, Vec2::new(5.0, 6.0));
         let gv = &state.lock().ctx.graph_view;
         assert_eq!(gv.view_scale, 2.0);
-        assert_eq!(gv.view_x, 5.0);
-        assert_eq!(gv.view_y, 6.0);
+        assert_eq!(gv.view_pos, Vec2::new(5.0, 6.0));
     }
 
     #[test]
