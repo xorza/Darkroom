@@ -162,9 +162,9 @@
         return `${pin.nodeId}-${pin.type}-${pin.index}`;
     }
 
-    function registerPin(detail: { id: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
-        const {id, type, index, el} = detail;
-        pins.set(`${id}-${type}-${index}`, el);
+    function registerPin(detail: { nodeId: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
+        const {nodeId, type, index, el} = detail;
+        pins.set(`${nodeId}-${type}-${index}`, el);
     }
 
     function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
@@ -191,28 +191,28 @@
         return nearest;
     }
 
-    function onNodeSelect(detail: { id: string; shiftKey: boolean }) {
+    function onNodeSelect(detail: { nodeId: string; shiftKey: boolean }) {
         if (detail.shiftKey) {
-            graphView.selectedNodeIds.add(detail.id);
+            graphView.selectedNodeIds.add(detail.nodeId);
             graphView.selectedNodeIds = new Set(graphView.selectedNodeIds);
         } else {
-            if (graphView.selectedNodeIds.has(detail.id) && graphView.selectedNodeIds.size > 1) {
+            if (graphView.selectedNodeIds.has(detail.nodeId) && graphView.selectedNodeIds.size > 1) {
                 return;
             }
-            graphView.selectedNodeIds = new Set([detail.id]);
+            graphView.selectedNodeIds = new Set([detail.nodeId]);
         }
         updateSelection();
     }
 
-    function dragNode(detail: { id: string; dx: number; dy: number }) {
-        const node = graphView.nodes.find((n) => n.id === detail.id);
+    function dragNode(detail: { nodeId: string; dx: number; dy: number }) {
+        const node = graphView.nodes.find((n) => n.id === detail.nodeId);
         if (!node) return;
         node.x += detail.dx;
         node.y += detail.dy;
 
-        if (graphView.selectedNodeIds.has(detail.id)) {
+        if (graphView.selectedNodeIds.has(detail.nodeId)) {
             for (const n of graphView.nodes) {
-                if (n.id !== detail.id && graphView.selectedNodeIds.has(n.id)) {
+                if (n.id !== detail.nodeId && graphView.selectedNodeIds.has(n.id)) {
                     n.x += detail.dx;
                     n.y += detail.dy;
                 }
@@ -279,14 +279,14 @@
         showFuncLibrary = false;
     }
 
-    function startConnection(detail: { id: string; type: 'input' | 'output'; index: number; x: number; y: number }) {
-        const {id, type, index, x, y} = detail;
+    function startConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number; x: number; y: number }) {
+        const {nodeId, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
         const ny = (y - rect.top - graphView.viewY) / graphView.viewScale;
-        const startKeyStr = `${id}-${type}-${index}`;
+        const startKeyStr = `${nodeId}-${type}-${index}`;
         pendingConnection = {
-            start: {nodeId: id, type, index},
+            start: {nodeId: nodeId, type, index},
             x: nx,
             y: ny,
             hover: findNearestPin(nx, ny, type, startKeyStr)
@@ -304,7 +304,7 @@
             if (pendingConnection) {
                 const target = pendingConnection.hover ?? pendingConnection.start;
                 endConnection({
-                    id: target.nodeId,
+                    nodeId: target.nodeId,
                     type: target.type,
                     index: target.index
                 });
@@ -314,11 +314,11 @@
         window.addEventListener('pointerup', upHandler);
     }
 
-    function endConnection(detail: { id: string; type: 'input' | 'output'; index: number }) {
-        const {id, type, index} = detail;
+    function endConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number }) {
+        const {nodeId, type, index} = detail;
         if (!pendingConnection) return;
 
-        if (pendingConnection.start.nodeId === id && pendingConnection.start.type === type && pendingConnection.start.index === index) {
+        if (pendingConnection.start.nodeId === nodeId && pendingConnection.start.type === type && pendingConnection.start.index === index) {
             pendingConnection = null;
             window.removeEventListener('pointermove', moveHandler);
             window.removeEventListener('pointerup', upHandler);
@@ -328,10 +328,10 @@
         if (pendingConnection.start.type !== type) {
             const from = pendingConnection.start.type === 'output'
                 ? pendingConnection.start
-                : {nodeId: id, type: 'output' as const, index};
+                : {nodeId: nodeId, type: 'output' as const, index};
             const to = pendingConnection.start.type === 'input'
                 ? pendingConnection.start
-                : {nodeId: id, type: 'input' as const, index};
+                : {nodeId: nodeId, type: 'input' as const, index};
 
             // ensure each input has at most one incoming connection
             graphView.connections = graphView.connections.filter(
@@ -373,13 +373,13 @@
         };
     }
 
-    function getInputPinPos(id: string, index: number) {
-        let inputPin: Pin = {nodeId: id, type: 'input', index};
+    function getInputPinPos(nodeId: string, index: number) {
+        let inputPin: Pin = {nodeId: nodeId, type: 'input', index};
         return getPinPos(inputPin)
     }
 
-    function getOutputPinPos(id: string, index: number) {
-        let outputPin: Pin = {nodeId: id, type: 'output', index};
+    function getOutputPinPos(nodeId: string, index: number) {
+        let outputPin: Pin = {nodeId: nodeId, type: 'output', index};
         return getPinPos(outputPin)
     }
 

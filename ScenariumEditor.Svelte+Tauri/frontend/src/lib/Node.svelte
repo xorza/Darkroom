@@ -1,8 +1,8 @@
 <script lang="ts">
     import type {NodeView} from "$lib/types";
 
-    interface CallbackDetail {
-        id: string;
+    interface NodeCallbackDetail {
+        nodeId: string;
         type: 'input' | 'output';
         index: number;
     }
@@ -16,14 +16,14 @@
 
         selected: boolean;
 
-        registerPin?: (detail: CallbackDetail & { el: HTMLElement }) => void;
+        registerPin?: (detail: NodeCallbackDetail & { el: HTMLElement }) => void;
         connectionStart?: (
-            detail: CallbackDetail & { x: number; y: number }
+            detail: NodeCallbackDetail & { x: number; y: number }
         ) => void;
-        connectionEnd?: (detail: CallbackDetail) => void;
-        drag?: (detail: { id: string; dx: number; dy: number }) => void;
+        connectionEnd?: (detail: NodeCallbackDetail) => void;
+        drag?: (detail: { nodeId: string; dx: number; dy: number }) => void;
         dragEnd?: (id: string) => void;
-        select?: (detail: { id: string; shiftKey: boolean }) => void;
+        select?: (detail: { nodeId: string; shiftKey: boolean }) => void;
         remove?: (id: string) => void;
     }
 
@@ -63,7 +63,7 @@
             const newY = (event.clientY - viewY) / viewScale - offsetY;
             const dx = newX - nodeView.x;
             const dy = newY - nodeView.y;
-            drag?.({id: nodeView.id, dx, dy});
+            drag?.({nodeId: nodeView.id, dx, dy});
         }
     }
 
@@ -77,7 +77,7 @@
 
     function registerPinEl(el: HTMLElement | null, type: 'input' | 'output', index: number) {
         if (el && registerPin) {
-            registerPin({id: nodeView.id, type, index, el});
+            registerPin({nodeId: nodeView.id, type, index, el});
         }
     }
 
@@ -93,7 +93,7 @@
     function onPinDown(event: PointerEvent, type: 'input' | 'output', index: number) {
         if (event.button !== 0) return;
         connectionStart?.({
-            id: nodeView.id,
+            nodeId: nodeView.id,
             type,
             index,
             x: event.clientX,
@@ -103,13 +103,13 @@
 
     function onPinUp(event: PointerEvent, type: 'input' | 'output', index: number) {
         if (event.button !== 0) return;
-        connectionEnd?.({id: nodeView.id, type, index});
+        connectionEnd?.({nodeId: nodeView.id, type, index});
     }
 
     function onNodePointerDown(event: PointerEvent) {
         if (event.button !== 0) return;
 
-        select?.({id: nodeView.id, shiftKey: event.shiftKey});
+        select?.({nodeId: nodeView.id, shiftKey: event.shiftKey});
     }
 </script>
 

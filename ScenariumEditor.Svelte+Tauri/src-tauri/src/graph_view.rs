@@ -22,7 +22,7 @@ pub(crate) struct NodeView {
     outputs: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
@@ -30,6 +30,18 @@ pub(crate) struct GraphView {
     view_scale: f32,
     view_x: f32,
     view_y: f32,
+}
+
+impl Default for GraphView {
+    fn default() -> Self {
+        Self {
+            nodes: vec![],
+            connections: vec![],
+            view_scale: 1.0,
+            view_x: 0.0,
+            view_y: 0.0,
+        }
+    }
 }
 
 impl PartialEq for NodeView {
