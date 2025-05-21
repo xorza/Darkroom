@@ -118,7 +118,7 @@
         onpointerdown={onNodePointerDown}
 >
     <h3
-            class="font-bold text-center text-sm pb-1 pt-1 px-4 m-0 relative"
+            class="font-bold text-center text-sm pb-1 pt-1 px-6 relative"
             bind:this={panel}
             onpointerdown={onPointerDown}
             onpointermove={onPointerMove}
@@ -129,10 +129,11 @@
         {nodeView.title}
 
         <button
-                class="btn btn-xs absolute right-0 top-0 rounded-full bg-red-500 text-white hover:bg-red-600"
+                class="btn btn-ghost btn-xs btn-circle absolute right-0 top-0 m-0 p-0 text-error"
                 onclick={() => remove?.(nodeView.id)}
-        >x
-        </button>
+                onpointerdown={(e) => e.stopPropagation()}
+                onpointerup={(e) => e.stopPropagation()}
+        >✕</button>
     </h3>
     <div class="flex flex-row gap-1">
         <div
