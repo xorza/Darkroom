@@ -129,6 +129,25 @@ pub(crate) fn remove_node_from_graph_view(id: u32) {
 }
 
 #[tauri::command]
+pub(crate) fn update_node(id: u32, x: f32, y: f32) {
+    let mut gv = context.graph_view.lock().unwrap();
+    if let Some(node) = gv.nodes.iter_mut().find(|n| n.id == id) {
+        node.x = x;
+        node.y = y;
+    } else {
+        panic!("Node with id {} not found", id);
+    }
+}
+
+#[tauri::command]
+pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
+    let mut gv = context.graph_view.lock().unwrap();
+    gv.view_scale = view_scale;
+    gv.view_x = view_x;
+    gv.view_y = view_y;
+}
+
+#[tauri::command]
 pub(crate) fn debug_assert_graph_view(_graph_view: GraphView) {
     #[cfg(debug_assertions)]
     {
@@ -232,6 +251,36 @@ mod tests {
             .connections
             .iter()
             .any(|c| c.from_node_id == 1 || c.to_node_id == 1));
+    }
+
+    #[test]
+    fn update_node_persists() {
+        reset_context();
+        let node = NodeView {
+            id: 0,
+            func_id: 0,
+            x: 0.0,
+            y: 0.0,
+            title: "N".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        add_node_to_graph_view(node);
+        update_node(0, 10.0, 20.0);
+        let gv = context.graph_view.lock().unwrap();
+        let node = gv.nodes.iter().find(|n| n.id == 0).unwrap();
+        assert_eq!(node.x, 10.0);
+        assert_eq!(node.y, 20.0);
+    }
+
+    #[test]
+    fn update_graph_persists() {
+        reset_context();
+        update_graph(2.0, 5.0, 6.0);
+        let gv = context.graph_view.lock().unwrap();
+        assert_eq!(gv.view_scale, 2.0);
+        assert_eq!(gv.view_x, 5.0);
+        assert_eq!(gv.view_y, 6.0);
     }
 
     #[test]

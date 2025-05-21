@@ -17,6 +17,8 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
   - Ensure that the documentation is clear and concise.
   - Add common terms and definitions to the documentation.
 - Keep components generated small and focused
+- Use asserts to check for invalid states in the code.
+- Use asserts to validate inputs to functions.
 - For rust projects:
   - Use cargo fmt to format the code and Clippy to lint the code.
   - Add tests for new features and bug fixes.

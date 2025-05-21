@@ -206,12 +206,14 @@
         if (!node) return;
         node.x += detail.dx;
         node.y += detail.dy;
+        invoke('update_node', { id: node.id, x: node.x, y: node.y });
 
         if (graphView.selectedNodeIds.has(detail.id)) {
             for (const n of graphView.nodes) {
                 if (n.id !== detail.id && graphView.selectedNodeIds.has(n.id)) {
                     n.x += detail.dx;
                     n.y += detail.dy;
+                    invoke('update_node', { id: n.id, x: n.x, y: n.y });
                 }
             }
         }
@@ -459,6 +461,11 @@
         graphView.viewX = mx - gx * newScale;
         graphView.viewY = my - gy * newScale;
         graphView.viewScale = newScale;
+        invoke('update_graph', {
+            viewScale: graphView.viewScale,
+            viewX: graphView.viewX,
+            viewY: graphView.viewY
+        });
     }
 
     function onContextMenu(event: MouseEvent) {
@@ -531,6 +538,11 @@
         } else if (panning) {
             graphView.viewX = startViewX + (event.clientX - panStartX);
             graphView.viewY = startViewY + (event.clientY - panStartY);
+            invoke('update_graph', {
+                viewScale: graphView.viewScale,
+                viewX: graphView.viewX,
+                viewY: graphView.viewY
+            });
         } else if (connectionBreaker) {
             if (event.buttons === 2) {
                 connectionBreaker = {
@@ -555,6 +567,11 @@
         } else if (event.button === 1 && panning) {
             panning = false;
             mainContainerEl.releasePointerCapture(event.pointerId);
+            invoke('update_graph', {
+                viewScale: graphView.viewScale,
+                viewX: graphView.viewX,
+                viewY: graphView.viewY
+            });
         } else if (event.button === 2 && connectionBreaker) {
             const rect = mainContainerEl.getBoundingClientRect();
             const pts = connectionBreaker.points.map((p) => ({
@@ -638,6 +655,11 @@
         graphView.viewScale = newScale;
         graphView.viewX = cx - gx * newScale;
         graphView.viewY = cy - gy * newScale;
+        invoke('update_graph', {
+            viewScale: graphView.viewScale,
+            viewX: graphView.viewX,
+            viewY: graphView.viewY
+        });
     }
 
     function centerView() {
@@ -665,6 +687,11 @@
         const centerY = (minY + maxY) / 2;
         graphView.viewX = containerRect.width / 2 - centerX * graphView.viewScale;
         graphView.viewY = containerRect.height / 2 - centerY * graphView.viewScale;
+        invoke('update_graph', {
+            viewScale: graphView.viewScale,
+            viewX: graphView.viewX,
+            viewY: graphView.viewY
+        });
     }
 
     function fitView() {
@@ -701,6 +728,11 @@
         graphView.viewScale = newScale;
         graphView.viewX = containerRect.width / 2 - centerX * newScale;
         graphView.viewY = containerRect.height / 2 - centerY * newScale;
+        invoke('update_graph', {
+            viewScale: graphView.viewScale,
+            viewX: graphView.viewX,
+            viewY: graphView.viewY
+        });
     }
 </script>
 
