@@ -38,4 +38,8 @@ impl Ctx {
             worker: None,
         }
     }
+
+    pub(crate) fn sync_graph_from_view(&mut self) {
+        self.graph = Graph::from(&self.graph_view);
+    }
 }

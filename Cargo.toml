@@ -42,3 +42,4 @@ tauri-build = { version = "2", features = [ ] }
 
 [workspace.lints.rust]
 unused_crate_dependencies = "allow"
+dead_code = "allow"

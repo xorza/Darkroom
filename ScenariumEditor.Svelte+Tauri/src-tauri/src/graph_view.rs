@@ -122,8 +122,8 @@ impl GraphView {
     }
 }
 
-impl From<GraphView> for Graph {
-    fn from(value: GraphView) -> Self {
+impl From<&GraphView> for Graph {
+    fn from(value: &GraphView) -> Self {
         todo!("Implement conversion from GraphView to Graph");
     }
 }
