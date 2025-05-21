@@ -6,6 +6,7 @@ interface Pin {
 
 interface NodeView {
     id: number;
+    func_id: number;
     x: number;
     y: number;
     title: string;

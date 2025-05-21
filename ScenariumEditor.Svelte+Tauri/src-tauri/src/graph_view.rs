@@ -30,6 +30,7 @@ pub(crate) struct ConnectionView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
     id: u32,
+    func_id: u32,
     x: f32,
     y: f32,
     title: String,
@@ -59,6 +60,7 @@ impl Default for GraphView {
                     y: 50.0,
                     inputs: vec!["A".into(), "B".into()],
                     outputs: vec!["Result".into()],
+                    func_id: 0,
                 },
                 NodeView {
                     id: 1,
@@ -67,6 +69,7 @@ impl Default for GraphView {
                     y: 50.0,
                     inputs: vec!["A".into(), "B".into()],
                     outputs: vec!["Result".into()],
+                    func_id: 1,
                 },
                 NodeView {
                     id: 2,
@@ -75,6 +78,7 @@ impl Default for GraphView {
                     y: 50.0,
                     inputs: vec!["Value".into()],
                     outputs: vec![],
+                    func_id: 2,
                 },
             ],
             connections: vec![
