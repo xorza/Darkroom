@@ -30,7 +30,6 @@ pub(crate) struct GraphView {
     view_scale: f32,
     view_x: f32,
     view_y: f32,
-    selected_node_ids: Vec<u32>,
 }
 
 impl GraphView {
@@ -82,7 +81,6 @@ impl GraphView {
             view_scale: 1.0,
             view_x: 0.0,
             view_y: 0.0,
-            selected_node_ids: vec![],
         }
     }
 }
@@ -107,7 +105,6 @@ impl PartialEq for GraphView {
             && self.view_scale == other.view_scale
             && self.view_x == other.view_x
             && self.view_y == other.view_y
-            && self.selected_node_ids == other.selected_node_ids
     }
 }
 
@@ -149,7 +146,6 @@ pub(crate) fn remove_node_from_graph_view(id: u32) {
     gv.nodes.retain(|n| n.id != id);
     gv.connections
         .retain(|c| c.from_node_id != id && c.to_node_id != id);
-    gv.selected_node_ids.retain(|nid| *nid != id);
 }
 
 #[tauri::command]
@@ -164,12 +160,11 @@ pub(crate) fn update_node(id: u32, x: f32, y: f32) {
 }
 
 #[tauri::command]
-pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32, selected_node_ids: Vec<u32>) {
+pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
     let mut gv = context.graph_view.lock().unwrap();
     gv.view_scale = view_scale;
     gv.view_x = view_x;
     gv.view_y = view_y;
-    gv.selected_node_ids = selected_node_ids;
 }
 
 #[tauri::command]
@@ -301,12 +296,11 @@ mod tests {
     #[test]
     fn update_graph_persists() {
         reset_context();
-        update_graph(2.0, 5.0, 6.0, vec![1, 2]);
+        update_graph(2.0, 5.0, 6.0);
         let gv = context.graph_view.lock().unwrap();
         assert_eq!(gv.view_scale, 2.0);
         assert_eq!(gv.view_x, 5.0);
         assert_eq!(gv.view_y, 6.0);
-        assert_eq!(gv.selected_node_ids, vec![1, 2]);
     }
 
     #[test]

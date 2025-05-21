@@ -45,13 +45,14 @@ pub(crate) fn get_func_library() -> &'static FuncLibraryView {
 }
 
 #[tauri::command]
-pub(crate) fn get_func_by_id(id: u32) -> Option<FuncView> {
+pub(crate) fn get_func_by_id(id: u32) -> FuncView {
     context
         .func_library_view
         .funcs
         .iter()
         .find(|f| f.id == id)
         .cloned()
+        .expect("Function not found")
 }
 
 #[cfg(test)]
@@ -60,12 +61,15 @@ mod tests {
 
     #[test]
     fn get_func_by_id_returns_func() {
-        let f = get_func_by_id(1).unwrap();
+        let f = get_func_by_id(1);
         assert_eq!(f.title, "Multiply");
     }
 
     #[test]
     fn get_func_by_id_none() {
-        assert!(get_func_by_id(999).is_none());
+        let result = std::panic::catch_unwind(|| {
+            get_func_by_id(999);
+        });
+        assert!(result.is_err());
     }
 }

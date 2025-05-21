@@ -4,7 +4,7 @@
     import type {GraphView, ConnectionView, Pin, NodeView, FuncView} from "$lib/types";
 
     interface GraphProps {
-        selectedChange?: (ids: number[]) => void;
+        selectedChange?: (node_ids: number[]) => void;
     }
 
     let {selectedChange}: GraphProps = $props();
@@ -103,8 +103,7 @@
         invoke('update_graph', {
             viewScale: graphView.viewScale,
             viewX: graphView.viewX,
-            viewY: graphView.viewY,
-            selectedNodeIds: [...graphView.selectedNodeIds]
+            viewY: graphView.viewY
         });
     }
 
@@ -482,8 +481,7 @@
         invoke('update_graph', {
             viewScale: graphView.viewScale,
             viewX: graphView.viewX,
-            viewY: graphView.viewY,
-            selectedNodeIds: [...graphView.selectedNodeIds]
+            viewY: graphView.viewY
         });
     }
 
@@ -560,8 +558,7 @@
             invoke('update_graph', {
                 viewScale: graphView.viewScale,
                 viewX: graphView.viewX,
-                viewY: graphView.viewY,
-                selectedNodeIds: [...graphView.selectedNodeIds]
+                viewY: graphView.viewY
             });
         } else if (connectionBreaker) {
             if (event.buttons === 2) {
@@ -590,8 +587,7 @@
             invoke('update_graph', {
                 viewScale: graphView.viewScale,
                 viewX: graphView.viewX,
-                viewY: graphView.viewY,
-                selectedNodeIds: [...graphView.selectedNodeIds]
+                viewY: graphView.viewY
             });
         } else if (event.button === 2 && connectionBreaker) {
             const rect = mainContainerEl.getBoundingClientRect();
@@ -679,8 +675,7 @@
         invoke('update_graph', {
             viewScale: graphView.viewScale,
             viewX: graphView.viewX,
-            viewY: graphView.viewY,
-            selectedNodeIds: [...graphView.selectedNodeIds]
+            viewY: graphView.viewY
         });
     }
 
@@ -712,8 +707,7 @@
         invoke('update_graph', {
             viewScale: graphView.viewScale,
             viewX: graphView.viewX,
-            viewY: graphView.viewY,
-            selectedNodeIds: [...graphView.selectedNodeIds]
+            viewY: graphView.viewY
         });
     }
 
@@ -754,8 +748,7 @@
         invoke('update_graph', {
             viewScale: graphView.viewScale,
             viewX: graphView.viewX,
-            viewY: graphView.viewY,
-            selectedNodeIds: [...graphView.selectedNodeIds]
+            viewY: graphView.viewY
         });
     }
 </script>
