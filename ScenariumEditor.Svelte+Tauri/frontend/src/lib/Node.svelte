@@ -22,6 +22,7 @@
         ) => void;
         connectionEnd?: (detail: CallbackDetail) => void;
         drag?: (detail: { id: number; dx: number; dy: number }) => void;
+        dragEnd?: (id: number) => void;
         select?: (detail: { id: number; shiftKey: boolean }) => void;
         remove?: (id: number) => void;
     }
@@ -39,6 +40,7 @@
         connectionStart,
         connectionEnd,
         drag,
+        dragEnd,
         select,
         remove,
     }: NodeProps = $props();
@@ -66,7 +68,10 @@
     }
 
     function onPointerUp(event: PointerEvent) {
-        dragging = false;
+        if (dragging) {
+            dragging = false;
+            dragEnd?.(nodeView.id);
+        }
         panel.releasePointerCapture(event.pointerId);
     }
 

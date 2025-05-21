@@ -212,19 +212,29 @@
         if (!node) return;
         node.x += detail.dx;
         node.y += detail.dy;
-        invoke('update_node', { id: node.id, x: node.x, y: node.y });
 
         if (graphView.selectedNodeIds.has(detail.id)) {
             for (const n of graphView.nodes) {
                 if (n.id !== detail.id && graphView.selectedNodeIds.has(n.id)) {
                     n.x += detail.dx;
                     n.y += detail.dy;
-                    invoke('update_node', { id: n.id, x: n.x, y: n.y });
                 }
             }
         }
 
         trigger++;
+    }
+
+    function endDragNode(id: number) {
+        const ids = graphView.selectedNodeIds.has(id)
+            ? [...graphView.selectedNodeIds]
+            : [id];
+        for (const nid of ids) {
+            const n = graphView.nodes.find((nn) => nn.id === nid);
+            if (n) {
+                invoke('update_node', { id: n.id, x: n.x, y: n.y });
+            }
+        }
     }
 
     function removeNode(id: number) {
@@ -794,6 +804,7 @@
                         connectionStart={startConnection}
                         connectionEnd={endConnection}
                         drag={dragNode}
+                        dragEnd={endDragNode}
                         viewScale={graphView.viewScale}
                         viewX={graphView.viewX}
                         viewY={graphView.viewY}
