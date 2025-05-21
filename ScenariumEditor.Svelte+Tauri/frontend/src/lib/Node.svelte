@@ -1,6 +1,7 @@
 <script lang="ts">
     import type {NodeView} from "$lib/types";
     import type {Pin} from "$lib/types";
+    import {onDestroy} from 'svelte';
 
     interface NodeProps {
         nodeView: NodeView;
@@ -15,9 +16,10 @@
         connectionStart?: (detail: Pin & { x: number; y: number }) => void;
         connectionEnd?: (pin: Pin) => void;
         drag?: (detail: { nodeId: string; dx: number; dy: number }) => void;
-        dragEnd?: (id: string) => void;
+        dragEnd?: (nodeId: string) => void;
         select?: (detail: { nodeId: string; shiftKey: boolean }) => void;
-        remove?: (id: string) => void;
+        remove?: (nodeId: string) => void;
+        unregisterPins?: (nodeId: string) => void;
     }
 
     let {
@@ -36,6 +38,7 @@
         dragEnd,
         select,
         remove,
+        unregisterPins,
     }: NodeProps = $props();
 
     let panel: HTMLDivElement;
@@ -104,6 +107,10 @@
 
         select?.({nodeId: nodeView.id, shiftKey: event.shiftKey});
     }
+
+    onDestroy(() => {
+        unregisterPins?.(nodeView.id);
+    });
 </script>
 
 

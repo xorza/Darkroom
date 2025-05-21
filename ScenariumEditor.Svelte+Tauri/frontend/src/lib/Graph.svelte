@@ -173,6 +173,14 @@
         pins.set(key(pin), el);
     }
 
+    function unregisterPins(nodeId: string) {
+        for (const k of [...pins.keys()]) {
+            if (k.startsWith(`${nodeId}${KEY_SEP}`)) {
+                pins.delete(k);
+            }
+        }
+    }
+
     function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
         let nearest: Pin | null = null;
         let nearestDist = Infinity;
@@ -248,6 +256,7 @@
         graphView.connections = graphView.connections.filter(
             (c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId
         );
+        unregisterPins(nodeId);
         graphView.selectedNodeIds.delete(nodeId);
         updateSelection();
         if (graphView.nodes.length !== beforeCount) {
