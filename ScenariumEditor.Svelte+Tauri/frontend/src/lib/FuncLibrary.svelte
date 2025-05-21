@@ -95,11 +95,13 @@
         />
 
     </div>
-    <ul class="flex flex-col gap-1 max-h-60 overflow-y-auto pr-1">
+    <ul class="flex flex-col gap-0.5 max-h-60 overflow-y-auto pr-1">
         {#each filtered() as item (item.id)}
-            <li class="p-1 border-b border-base-300 last:border-0">
-                <span class="font-semibold text-sm block">{item.title}</span>
-                <span class="text-xs opacity-75">{item.description}</span>
+            <li
+                    class="px-1 py-0.5 text-xs border-b border-base-300 last:border-0 hover:bg-base-300/50 rounded-sm cursor-pointer"
+            >
+                <span class="font-semibold block">{item.title}</span>
+                <span class="opacity-75">{item.description}</span>
             </li>
         {/each}
         {#if filtered().length === 0}
