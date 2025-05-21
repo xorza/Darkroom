@@ -85,7 +85,7 @@
                 onpointerup={onPointerUp}
                 onpointercancel={onPointerUp}
         >
-            Nodes
+            Functions library
         </h2>
         <input
                 type="text"
