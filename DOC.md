@@ -28,6 +28,12 @@ Connections between nodes are represented by `Binding::Output` values.
 Data structures life graph and funtion library can be serialized to YAML files.
 
 Runtime execution is handled by the `runtime_graph` module which determines which nodes should run each tick.
+Additional modules drive execution and integration:
+- `compute` runs active nodes through an `Invoker` and converts values between data types.
+- `invoke` defines the `Invoker` trait and the `UberInvoker` aggregator which dispatches function calls.
+- `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
+- `event` manages asynchronous event loops that send event IDs back to the worker.
+
 
 ### Svelte + Tauri editor
 Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Svelte UI while `src-tauri` contains the Rust code that exposes commands to the UI. The editor displays nodes and connections, allows panning/zooming and exposes a **Function Library** panel for inserting nodes. Functions in this panel are highlighted on hover, showing their description as a tooltip, and presented in a compact list for easier browsing. Dragging a function out of the panel spawns a new node that follows the cursor until the mouse button is released.
@@ -52,5 +58,8 @@ Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Sv
  - Node and graph positions use two fields `viewPosX` and `viewPosY` when exchanged between the frontend and backend.
 - **Pending connection** is a connection that has not yet been confirmed and currently being edited by user.
 - **Node details** – when exactly one node is selected the frontend calls `get_node_by_id` to obtain the node's function id and then `get_func_by_id` to show the function's title and description next to the graph. When no nodes are selected it displays "no node selected" and if multiple nodes are selected it displays "multiple nodes selected".
+
+## Editor Workflow
+The `Graph` component in the frontend loads its state using `get_graph_view` when the application starts. Editing nodes and connections updates the local view and immediately calls the matching Tauri commands to persist the change. Dragging a function from the library triggers `create_node` before the node appears in the view. The backend keeps a mirrored `GraphView` structure and `debug_assert_graph_view` can be used in debug builds to ensure both sides remain identical.
 
 
