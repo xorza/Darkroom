@@ -85,6 +85,9 @@
 
     let pendingConnection: { start: Pin; x: number; y: number; hover: Pin | null } | null = $state(null);
 
+    // Track a node spawned from the function library that is being dragged
+    let newNodeDrag: { nodeId: string; pointerId: number } | null = null;
+
     let graphView: GraphView = $state({
         nodes: [],
         connections: [],
@@ -263,6 +266,7 @@
 
             graphView.nodes = [...graphView.nodes, node];
             graphView.selectedNodeIds = new Set([node.id]);
+            newNodeDrag = { nodeId: node.id, pointerId: event.pointerId };
         } catch (e) {
             console.error('Failed to persist new node', e);
             mainContainerEl.releasePointerCapture(event.pointerId);
@@ -547,6 +551,14 @@
             }
         } else if (selection && event.pointerId === selection.pointerId) {
             selection = {...selection, x: event.clientX, y: event.clientY};
+        } else if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
+            const rect = mainContainerEl.getBoundingClientRect();
+            const nx = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
+            const ny = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
+            const node = graphView.nodes.find((n) => n.id === newNodeDrag.nodeId);
+            if (node) {
+                dragNode({ nodeId: node.id, dx: nx - node.x, dy: ny - node.y });
+            }
         }
     }
 
@@ -628,6 +640,10 @@
             cancelSelection();
         } else if (selection && event.button !== 0) {
             cancelSelection();
+        } else if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
+            endDragNode(newNodeDrag.nodeId);
+            newNodeDrag = null;
+            mainContainerEl.releasePointerCapture(event.pointerId);
         }
     }
 
