@@ -68,12 +68,6 @@ pub(crate) fn get_node_by_id(id: &str) -> NodeView {
 }
 
 #[tauri::command]
-pub(crate) fn add_node_to_graph_view(node: NodeView) {
-    let mut ctx = context.lock();
-    ctx.graph_view.nodes.push(node);
-}
-
-#[tauri::command]
 pub(crate) fn add_connection_to_graph_view(connection: ConnectionView) {
     let mut ctx = context.lock();
     ctx.graph_view
@@ -252,27 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn add_node_persists() {
-        reset_context();
-        let node = NodeView {
-            id: "3".to_string(),
-            func_id: "99".to_string(),
-            x: 0.0,
-            y: 0.0,
-            title: "Test".into(),
-            inputs: vec![],
-            outputs: vec![],
-        };
-        add_node_to_graph_view(node.clone());
-        assert!(context
-            .lock()
-            .graph_view
-            .nodes
-            .iter()
-            .any(|n| n.id == node.id));
-    }
-
-    #[test]
     fn remove_node_persists() {
         reset_context();
         remove_node_from_graph_view("1");
@@ -286,50 +259,12 @@ mod tests {
     }
 
     #[test]
-    fn get_node_by_id_returns_node() {
-        reset_context();
-        let node = NodeView {
-            id: "1".to_string(),
-            func_id: "1".to_string(),
-            x: 0.0,
-            y: 0.0,
-            title: "Test".into(),
-            inputs: vec![],
-            outputs: vec![],
-        };
-        add_node_to_graph_view(node.clone());
-        let result = get_node_by_id("1");
-        assert_eq!(result.id, node.id);
-    }
-
-    #[test]
     fn get_node_by_id_none() {
         reset_context();
         let result = std::panic::catch_unwind(|| {
             get_node_by_id("999");
         });
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn update_node_persists() {
-        reset_context();
-        let node = NodeView {
-            id: "0".to_string(),
-            func_id: "0".to_string(),
-            x: 0.0,
-            y: 0.0,
-            title: "N".into(),
-            inputs: vec![],
-            outputs: vec![],
-        };
-        add_node_to_graph_view(node);
-        update_node("0", 10.0, 20.0);
-
-        let ctx = context.lock();
-        let node = ctx.graph_view.nodes.iter().find(|n| n.id == "0").unwrap();
-        assert_eq!(node.x, 10.0);
-        assert_eq!(node.y, 20.0);
     }
 
     #[test]

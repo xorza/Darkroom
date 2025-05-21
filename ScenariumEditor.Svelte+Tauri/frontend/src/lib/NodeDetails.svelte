@@ -5,7 +5,7 @@
     interface NodeDetailsProps {
         // ID of the single selected node. `null` when none or multiple nodes
         // are selected.
-        nodeId: number | null;
+        nodeId: string | null;
         // Total number of selected nodes so the view can display state when
         // none or multiple nodes are selected.
         selectionCount?: number;

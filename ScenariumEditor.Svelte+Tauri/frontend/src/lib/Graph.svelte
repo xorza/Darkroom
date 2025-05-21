@@ -4,7 +4,7 @@
     import type {GraphView, ConnectionView, Pin, NodeView, FuncView} from "$lib/types";
 
     interface GraphProps {
-        selectedChange?: (node_ids: number[]) => void;
+        selectedChange?: (node_ids: string[]) => void;
     }
 
     let {selectedChange}: GraphProps = $props();
@@ -70,10 +70,6 @@
     let mainContainerEl: HTMLDivElement;
 
     let showFuncLibrary = $state(false);
-    let newNodeDrag: {
-        id: number;
-        pointerId: number;
-    } | null = $state(null);
     let selection: {
         startX: number;
         startY: number;
@@ -166,7 +162,7 @@
         return `${pin.nodeId}-${pin.type}-${pin.index}`;
     }
 
-    function registerPin(detail: { id: number; type: 'input' | 'output'; index: number; el: HTMLElement }) {
+    function registerPin(detail: { id: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
         const {id, type, index, el} = detail;
         pins.set(`${id}-${type}-${index}`, el);
     }
@@ -179,7 +175,7 @@
             if (k === startKey) continue;
             const [nodeIdStr, pinType, indexStr] = k.split('-');
             if (pinType === startType) continue;
-            const nodeId = Number(nodeIdStr);
+            const nodeId = String(nodeIdStr);
             const index = Number(indexStr);
             const r = el.getBoundingClientRect();
             const px = (r.left + r.width / 2 - rect.left - graphView.viewX) / graphView.viewScale;
@@ -195,7 +191,7 @@
         return nearest;
     }
 
-    function onNodeSelect(detail: { id: number; shiftKey: boolean }) {
+    function onNodeSelect(detail: { id: string; shiftKey: boolean }) {
         if (detail.shiftKey) {
             graphView.selectedNodeIds.add(detail.id);
             graphView.selectedNodeIds = new Set(graphView.selectedNodeIds);
@@ -208,7 +204,7 @@
         updateSelection();
     }
 
-    function dragNode(detail: { id: number; dx: number; dy: number }) {
+    function dragNode(detail: { id: string; dx: number; dy: number }) {
         const node = graphView.nodes.find((n) => n.id === detail.id);
         if (!node) return;
         node.x += detail.dx;
@@ -226,19 +222,19 @@
         trigger++;
     }
 
-    function endDragNode(id: number) {
+    function endDragNode(id: string) {
         const ids = graphView.selectedNodeIds.has(id)
             ? [...graphView.selectedNodeIds]
             : [id];
         for (const nid of ids) {
             const n = graphView.nodes.find((nn) => nn.id === nid);
             if (n) {
-                invoke('update_node', { id: n.id, x: n.x, y: n.y });
+                invoke('update_node', {id: n.id, x: n.x, y: n.y});
             }
         }
     }
 
-    function removeNode(id: number) {
+    function removeNode(id: string) {
         const beforeCount = graphView.nodes.length;
         graphView.nodes = graphView.nodes.filter((n) => n.id !== id);
         graphView.connections = graphView.connections.filter(
@@ -247,7 +243,7 @@
         graphView.selectedNodeIds.delete(id);
         updateSelection();
         if (graphView.nodes.length !== beforeCount) {
-            invoke('remove_node_from_graph_view', { id })
+            invoke('remove_node_from_graph_view', {id})
                 .then(() => verifyGraphView())
                 .catch((e) => console.error('Failed to remove node', e));
         }
@@ -258,53 +254,32 @@
         const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
         const y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
 
-        const nextId =
-            graphView.nodes.length > 0
-                ? Math.max(...graphView.nodes.map((n) => n.id)) + 1
-                : 0;
-
-        let inputs: string[] = [];
-        let outputs: string[] = [];
-        if (item.title === 'Add' || item.title === 'Multiply') {
-            inputs = ['A', 'B'];
-            outputs = ['Result'];
-        } else if (item.title === 'Output') {
-            inputs = ['Value'];
-            outputs = [];
-        }
-
-        const node: NodeView = {
-            id: nextId,
-            funcId: item.id,
-            x,
-            y,
-            title: item.title,
-            inputs,
-            outputs,
-        };
-        // Capture the pointer early so we don't lose move events while waiting
-        // for the backend to persist the node.
-        mainContainerEl.setPointerCapture(event.pointerId);
-
+        // todo: create backend function to create a node `create_node`
         try {
             // Persist the node before it becomes part of the view or is selected.
-            await invoke('add_node_to_graph_view', {node});
+            const node: NodeView = await invoke<NodeView>('create_node', {func_id: item.id});
+            node.x = x;
+            node.y = y;
+
+            graphView.nodes = [...graphView.nodes, node];
+            graphView.selectedNodeIds = new Set([node.id]);
         } catch (e) {
             console.error('Failed to persist new node', e);
             mainContainerEl.releasePointerCapture(event.pointerId);
             return;
         }
 
-        graphView.nodes = [...graphView.nodes, node];
-        graphView.selectedNodeIds = new Set([nextId]);
-        updateSelection();
-        verifyGraphView();
+        // Capture the pointer early so we don't lose move events while waiting
+        // for the backend to persist the node.
+        mainContainerEl.setPointerCapture(event.pointerId);
 
-        newNodeDrag = {id: nextId, pointerId: event.pointerId};
+        updateSelection();
+        await verifyGraphView();
+
         showFuncLibrary = false;
     }
 
-    function startConnection(detail: { id: number; type: 'input' | 'output'; index: number; x: number; y: number }) {
+    function startConnection(detail: { id: string; type: 'input' | 'output'; index: number; x: number; y: number }) {
         const {id, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
@@ -339,7 +314,7 @@
         window.addEventListener('pointerup', upHandler);
     }
 
-    function endConnection(detail: { id: number; type: 'input' | 'output'; index: number }) {
+    function endConnection(detail: { id: string; type: 'input' | 'output'; index: number }) {
         const {id, type, index} = detail;
         if (!pendingConnection) return;
 
@@ -398,12 +373,12 @@
         };
     }
 
-    function getInputPinPos(id: number, index: number) {
+    function getInputPinPos(id: string, index: number) {
         let inputPin: Pin = {nodeId: id, type: 'input', index};
         return getPinPos(inputPin)
     }
 
-    function getOutputPinPos(id: number, index: number) {
+    function getOutputPinPos(id: string, index: number) {
         let outputPin: Pin = {nodeId: id, type: 'output', index};
         return getPinPos(outputPin)
     }
@@ -552,14 +527,7 @@
     }
 
     function onPointerMove(event: PointerEvent) {
-        if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
-            const node = graphView.nodes.find((n) => n.id === newNodeDrag?.id);
-            if (node) {
-                const rect = mainContainerEl.getBoundingClientRect();
-                node.x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
-                node.y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
-            }
-        } else if (panning) {
+        if (panning) {
             graphView.viewX = startViewX + (event.clientX - panStartX);
             graphView.viewY = startViewY + (event.clientY - panStartY);
             invoke('update_graph', {
@@ -585,10 +553,7 @@
     }
 
     function onPointerUp(event: PointerEvent) {
-        if (newNodeDrag && event.pointerId === newNodeDrag.pointerId && event.button === 0) {
-            newNodeDrag = null;
-            mainContainerEl.releasePointerCapture(event.pointerId);
-        } else if (event.button === 1 && panning) {
+        if (event.button === 1 && panning) {
             panning = false;
             mainContainerEl.releasePointerCapture(event.pointerId);
             invoke('update_graph', {
@@ -648,7 +613,7 @@
             const nodesEls = Array.from(
                 mainContainerEl.querySelectorAll('[data-node-id]')
             ) as HTMLElement[];
-            const ids: number[] = [];
+            const ids: string[] = [];
             for (const el of nodesEls) {
                 const r = el.getBoundingClientRect();
                 const left = r.left - rect.left;
@@ -657,7 +622,7 @@
                 const bottom = r.bottom - rect.top;
                 if (left <= ex && right >= sx && top <= ey && bottom >= sy) {
                     const idAttr = el.getAttribute('data-node-id');
-                    if (idAttr) ids.push(Number(idAttr));
+                    if (idAttr) ids.push(String(idAttr));
                 }
             }
             graphView.selectedNodeIds = new Set(ids);
@@ -794,8 +759,8 @@
         </svg>
         {#if selectionBox()}
             <div id="selection-box"
-                    class="absolute border-2 border-blue-500 bg-blue-500/25 pointer-events-none"
-                    style="left: {selectionBox()?.left}px; top: {selectionBox()?.top}px; width: {selectionBox()?.width}px; height: {selectionBox()?.height}px;"
+                 class="absolute border-2 border-blue-500 bg-blue-500/25 pointer-events-none"
+                 style="left: {selectionBox()?.left}px; top: {selectionBox()?.top}px; width: {selectionBox()?.width}px; height: {selectionBox()?.height}px;"
             ></div>
         {/if}
         <div style="transform: translate({graphView.viewX}px, {graphView.viewY}px) scale({graphView.viewScale}); transform-origin: 0 0;">

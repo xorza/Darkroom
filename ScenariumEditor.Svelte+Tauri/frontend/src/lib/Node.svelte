@@ -2,7 +2,7 @@
     import type {NodeView} from "$lib/types";
 
     interface CallbackDetail {
-        id: number;
+        id: string;
         type: 'input' | 'output';
         index: number;
     }
@@ -21,10 +21,10 @@
             detail: CallbackDetail & { x: number; y: number }
         ) => void;
         connectionEnd?: (detail: CallbackDetail) => void;
-        drag?: (detail: { id: number; dx: number; dy: number }) => void;
-        dragEnd?: (id: number) => void;
-        select?: (detail: { id: number; shiftKey: boolean }) => void;
-        remove?: (id: number) => void;
+        drag?: (detail: { id: string; dx: number; dy: number }) => void;
+        dragEnd?: (id: string) => void;
+        select?: (detail: { id: string; shiftKey: boolean }) => void;
+        remove?: (id: string) => void;
     }
 
     let {

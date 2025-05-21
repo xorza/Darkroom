@@ -1,5 +1,5 @@
 interface Pin {
-    nodeId: number;
+    nodeId: string;
     type: 'input' | 'output';
     index: number;
 }
@@ -15,9 +15,9 @@ interface NodeView {
 }
 
 interface ConnectionView {
-    fromNodeId: number;
+    fromNodeId: string;
     fromIndex: number;
-    toNodeId: number;
+    toNodeId: string;
     toIndex: number;
 }
 
@@ -28,7 +28,7 @@ interface GraphView {
     viewScale: number;
     viewX: number;
     viewY: number;
-    selectedNodeIds: Set<number>
+    selectedNodeIds: Set<string>
 }
 
 interface FuncView {
