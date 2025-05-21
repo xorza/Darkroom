@@ -54,6 +54,7 @@ Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Sv
 - Use `update_node` to persist node position changes when dragging ends.
 - Use `update_graph` to persist zoom, pan, and current node selection in the editor.
 - Use `new_graph` to reset the editor to an empty graph. Call `get_graph_view` afterwards to obtain the fresh view model.
+- The editor includes a **File** menu with options `New`, `Load` and `Save`. `New` resets the graph via `new_graph` while the other options are placeholders.
 - `debug_assert_graph_view` verifies that the frontend and backend graph views are identical and is only used in debug builds.
  - Node and graph positions use two fields `viewPosX` and `viewPosY` when exchanged between the frontend and backend.
 - **Pending connection** is a connection that has not yet been confirmed and currently being edited by user.

@@ -35,7 +35,7 @@
     });
 </script>
 
-<div class="h-screen bg-base-100">
+<div class="h-full bg-base-100">
     {#if selectionCount === 0}
         <p class="p-2 text-xs italic">no node selected</p>
     {:else if selectionCount > 1}

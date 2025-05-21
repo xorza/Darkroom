@@ -744,7 +744,7 @@
     }
 </script>
 
-<div class=" flex flex-col h-screen overflow-hidden">
+<div class=" flex flex-col h-full overflow-hidden">
 
     <div
             class="flex-1 relative overflow-hidden graph-bg bg-base-100"
