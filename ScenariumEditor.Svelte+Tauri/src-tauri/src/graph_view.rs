@@ -10,7 +10,7 @@ pub(crate) struct ConnectionView {
     to_index: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
     id: u32,
@@ -22,7 +22,7 @@ pub(crate) struct NodeView {
     outputs: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
@@ -87,6 +87,31 @@ impl GraphView {
     }
 }
 
+impl PartialEq for NodeView {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.func_id == other.func_id
+            // todo: add validation for x and y
+            // && self.x == other.x
+            // && self.y == other.y
+            && self.title == other.title
+            && self.inputs == other.inputs
+            && self.outputs == other.outputs
+    }
+}
+
+impl PartialEq for GraphView {
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes
+            && self.connections == other.connections
+            && self.view_scale == other.view_scale
+            && self.view_x == other.view_x
+            && self.view_y == other.view_y
+        // todo: add validation for selected_node_ids
+        // && self.selected_node_ids == other.selected_node_ids
+    }
+}
+
 #[tauri::command]
 pub(crate) fn get_graph_view() -> GraphView {
     context.graph_view.lock().unwrap().clone()
@@ -148,11 +173,11 @@ pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
 }
 
 #[tauri::command]
-pub(crate) fn debug_assert_graph_view(_graph_view: GraphView) {
+pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
     #[cfg(debug_assertions)]
     {
-        // let gv = context.graph_view.lock().unwrap();
-        // debug_assert_eq!(graph_view, *gv);
+        let gv = context.graph_view.lock().unwrap();
+        debug_assert_eq!(graph_view, *gv);
     }
 }
 
