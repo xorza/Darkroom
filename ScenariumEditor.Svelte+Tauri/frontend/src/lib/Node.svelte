@@ -2,12 +2,6 @@
     import type {NodeView} from "$lib/types";
     import type {Pin} from "$lib/types";
 
-    interface NodeCallbackDetail {
-        nodeId: string;
-        type: 'input' | 'output';
-        index: number;
-    }
-
     interface NodeProps {
         nodeView: NodeView;
 
@@ -17,10 +11,8 @@
 
         selected: boolean;
 
-        registerPin?: (detail: NodeCallbackDetail & { el: HTMLElement }) => void;
-        connectionStart?: (
-            detail: NodeCallbackDetail & { x: number; y: number }
-        ) => void;
+        registerPin?: (detail: Pin & { el: HTMLElement }) => void;
+        connectionStart?: (detail: Pin & { x: number; y: number }) => void;
         connectionEnd?: (pin: Pin) => void;
         drag?: (detail: { nodeId: string; dx: number; dy: number }) => void;
         dragEnd?: (id: string) => void;

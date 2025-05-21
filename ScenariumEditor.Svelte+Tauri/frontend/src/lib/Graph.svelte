@@ -168,9 +168,9 @@
         return `${pin.nodeId}${KEY_SEP}${pin.type}${KEY_SEP}${pin.index}`;
     }
 
-    function registerPin(detail: { nodeId: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
-        const {nodeId, type, index, el} = detail;
-        pins.set(`${nodeId}${KEY_SEP}${type}${KEY_SEP}${index}`, el);
+    function registerPin(detail: Pin & { el: HTMLElement }) {
+        const {el, ...pin} = detail;
+        pins.set(key(pin), el);
     }
 
     function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
@@ -285,23 +285,17 @@
         showFuncLibrary = false;
     }
 
-    function startConnection(detail: {
-        nodeId: string;
-        type: 'input' | 'output';
-        index: number;
-        x: number;
-        y: number
-    }) {
+    function startConnection(detail: Pin & { x: number; y: number }) {
         const {nodeId, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
         const ny = (y - rect.top - graphView.viewY) / graphView.viewScale;
-        const startKeyStr = `${nodeId}${KEY_SEP}${type}${KEY_SEP}${index}`;
+        const startPin = {nodeId, type, index};
         pendingConnection = {
-            start: {nodeId: nodeId, type, index},
+            start: startPin,
             x: nx,
             y: ny,
-            hover: findNearestPin(nx, ny, type, startKeyStr)
+            hover: findNearestPin(nx, ny, type, key(startPin))
         };
         moveHandler = (e: PointerEvent) => {
             if (pendingConnection) {
