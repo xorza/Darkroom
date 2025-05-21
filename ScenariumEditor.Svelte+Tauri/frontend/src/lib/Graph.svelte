@@ -132,13 +132,15 @@
             const data: GraphView = await invoke('get_graph_view');
             graphView.nodes = data.nodes;
             graphView.selectedNodeIds = new Set(data.selectedNodeIds);
-            updateSelection();
             graphView.connections = [...data.connections];
             graphView.viewX = data.viewX;
             graphView.viewY = data.viewY;
             graphView.viewScale = data.viewScale;
+
+            updateSelection();
+            await verifyGraphView();
+
             console.log('Graph data loaded:', data);
-            verifyGraphView();
         } catch (e) {
             console.error('Failed to load graph data', e);
         }
