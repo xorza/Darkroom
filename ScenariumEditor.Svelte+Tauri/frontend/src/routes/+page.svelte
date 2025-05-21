@@ -3,6 +3,7 @@
 
     let selected: number[] = $state([]);
     const single = $derived(() => (selected.length === 1 ? selected[0] : null));
+    const count = $derived(() => selected.length);
 
     function onSelected(ids: number[]) {
         selected = ids;
@@ -15,7 +16,7 @@
     </div>
 
     <div class="w-64">
-        <NodeDetails funcId={single()}/>
+        <NodeDetails funcId={single()} selectionCount={count()}/>
     </div>
 </div>
 

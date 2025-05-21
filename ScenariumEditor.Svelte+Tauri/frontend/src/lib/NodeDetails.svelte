@@ -3,10 +3,15 @@
     import type { FuncView } from '$lib/types';
 
     interface NodeDetailsProps {
+        // ID of the single selected node. `null` when none or multiple nodes
+        // are selected.
         funcId: number | null;
+        // Total number of selected nodes so the view can display state when
+        // none or multiple nodes are selected.
+        selectionCount?: number;
     }
 
-    let { funcId = null }: NodeDetailsProps = $props();
+    let { funcId = null, selectionCount = 0 }: NodeDetailsProps = $props();
 
     let func: FuncView | null = $state(null);
 
@@ -25,7 +30,11 @@
     });
 </script>
 
-{#if func}
+{#if selectionCount === 0}
+<p class="p-2 text-xs italic">no node selected</p>
+{:else if selectionCount > 1}
+<p class="p-2 text-xs italic">multiple nodes selected</p>
+{:else if func}
 <div class="p-2">
     <h3 class="font-bold mb-1 text-sm">{func.title}</h3>
     <p class="text-xs">{func.description}</p>
