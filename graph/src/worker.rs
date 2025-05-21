@@ -52,7 +52,7 @@ impl Worker {
     }
 
     async fn worker_loop(
-        mut invoker: UberInvoker,
+        invoker: UberInvoker,
         tx: Sender<WorkerMessage>,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
@@ -117,7 +117,7 @@ impl Worker {
         let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
 
         loop {
-            // receive all messages and pick message with highest priority
+            // receive all messages and pick message with the highest priority
             let mut msg = worker_rx.recv().await.unwrap();
             while let Ok(another_msg) = worker_rx.try_recv() {
                 if another_msg >= msg {

@@ -30,7 +30,7 @@ pub struct LuaInvoker {
 }
 
 impl Invoker for LuaInvoker {
-    fn get_func_lib(&mut self) -> FuncLib {
+    fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
 

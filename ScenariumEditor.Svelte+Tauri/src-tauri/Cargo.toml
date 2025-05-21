@@ -25,4 +25,4 @@ serde_json = { workspace = true }
 lazy_static = { workspace = true }
 graph = { workspace = true }
 common = { workspace = true }
-
+parking_lot = { workspace = true }

@@ -4,17 +4,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
-    from_node_id: u32,
+    from_node_id: String,
     from_index: u32,
-    to_node_id: u32,
+    to_node_id: String,
     to_index: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
-    id: u32,
-    func_id: u32,
+    id: String,
+    func_id: String,
     x: f32,
     y: f32,
     title: String,
@@ -30,59 +30,6 @@ pub(crate) struct GraphView {
     view_scale: f32,
     view_x: f32,
     view_y: f32,
-}
-
-impl GraphView {
-    pub fn new_test() -> Self {
-        Self {
-            nodes: vec![
-                NodeView {
-                    id: 0,
-                    title: "Add".into(),
-                    x: 50.0,
-                    y: 50.0,
-                    inputs: vec!["A".into(), "B".into()],
-                    outputs: vec!["Result".into()],
-                    func_id: 0,
-                },
-                NodeView {
-                    id: 1,
-                    title: "Multiply".into(),
-                    x: 300.0,
-                    y: 50.0,
-                    inputs: vec!["A".into(), "B".into()],
-                    outputs: vec!["Result".into()],
-                    func_id: 1,
-                },
-                NodeView {
-                    id: 2,
-                    title: "Output".into(),
-                    x: 550.0,
-                    y: 50.0,
-                    inputs: vec!["Value".into()],
-                    outputs: vec![],
-                    func_id: 2,
-                },
-            ],
-            connections: vec![
-                ConnectionView {
-                    from_node_id: 0,
-                    from_index: 0,
-                    to_node_id: 1,
-                    to_index: 0,
-                },
-                ConnectionView {
-                    from_node_id: 1,
-                    from_index: 0,
-                    to_node_id: 2,
-                    to_index: 0,
-                },
-            ],
-            view_scale: 1.0,
-            view_x: 0.0,
-            view_y: 0.0,
-        }
-    }
 }
 
 impl PartialEq for NodeView {
@@ -110,36 +57,35 @@ impl PartialEq for GraphView {
 
 #[tauri::command]
 pub(crate) fn get_graph_view() -> GraphView {
-    context.graph_view.lock().unwrap().clone()
+    context.lock().graph_view.clone()
 }
 
 #[tauri::command]
-pub(crate) fn get_node_by_id(id: u32) -> NodeView {
-    let node = {
-        let gv = context.graph_view.lock().unwrap();
-        gv.nodes.iter().find(|n| n.id == id).cloned()
-    };
+pub(crate) fn get_node_by_id(id: &str) -> NodeView {
+    let ctx = context.lock();
+    let node = { ctx.graph_view.nodes.iter().find(|n| n.id == id).cloned() };
     node.expect("Node not found")
 }
 
 #[tauri::command]
 pub(crate) fn add_node_to_graph_view(node: NodeView) {
-    let mut gv = context.graph_view.lock().unwrap();
-    gv.nodes.push(node);
+    let mut ctx = context.lock();
+    ctx.graph_view.nodes.push(node);
 }
 
 #[tauri::command]
 pub(crate) fn add_connection_to_graph_view(connection: ConnectionView) {
-    let mut gv = context.graph_view.lock().unwrap();
-    gv.connections
+    let mut ctx = context.lock();
+    ctx.graph_view
+        .connections
         .retain(|c| !(c.to_node_id == connection.to_node_id && c.to_index == connection.to_index));
-    gv.connections.push(connection);
+    ctx.graph_view.connections.push(connection);
 }
 
 #[tauri::command]
 pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView>) {
-    let mut gv = context.graph_view.lock().unwrap();
-    gv.connections.retain(|c| {
+    let mut ctx = context.lock();
+    ctx.graph_view.connections.retain(|c| {
         !connections.iter().any(|r| {
             r.from_node_id == c.from_node_id
                 && r.from_index == c.from_index
@@ -150,17 +96,18 @@ pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView
 }
 
 #[tauri::command]
-pub(crate) fn remove_node_from_graph_view(id: u32) {
-    let mut gv = context.graph_view.lock().unwrap();
-    gv.nodes.retain(|n| n.id != id);
-    gv.connections
+pub(crate) fn remove_node_from_graph_view(id: &str) {
+    let mut ctx = context.lock();
+    ctx.graph_view.nodes.retain(|n| n.id != id);
+    ctx.graph_view
+        .connections
         .retain(|c| c.from_node_id != id && c.to_node_id != id);
 }
 
 #[tauri::command]
-pub(crate) fn update_node(id: u32, x: f32, y: f32) {
-    let mut gv = context.graph_view.lock().unwrap();
-    if let Some(node) = gv.nodes.iter_mut().find(|n| n.id == id) {
+pub(crate) fn update_node(id: &str, x: f32, y: f32) {
+    let mut ctx = context.lock();
+    if let Some(node) = ctx.graph_view.nodes.iter_mut().find(|n| n.id == id) {
         node.x = x;
         node.y = y;
     } else {
@@ -170,17 +117,17 @@ pub(crate) fn update_node(id: u32, x: f32, y: f32) {
 
 #[tauri::command]
 pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
-    let mut gv = context.graph_view.lock().unwrap();
-    gv.view_scale = view_scale;
-    gv.view_x = view_x;
-    gv.view_y = view_y;
+    let mut ctx = context.lock();
+    ctx.graph_view.view_scale = view_scale;
+    ctx.graph_view.view_x = view_x;
+    ctx.graph_view.view_y = view_y;
 }
 
 #[tauri::command]
 pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
     #[cfg(debug_assertions)]
     {
-        let gv = context.graph_view.lock().unwrap();
+        let gv = &context.lock().graph_view;
         debug_assert_eq!(graph_view, *gv);
     }
 }
@@ -190,23 +137,70 @@ mod tests {
     use super::*;
 
     fn reset_context() {
-        let mut gv = GraphView::default();
+        let mut gv = GraphView {
+            nodes: vec![
+                NodeView {
+                    id: "0".to_string(),
+                    func_id: "0".to_string(),
+                    title: "Add".into(),
+                    x: 50.0,
+                    y: 50.0,
+                    inputs: vec!["A".into(), "B".into()],
+                    outputs: vec!["Result".into()],
+                },
+                NodeView {
+                    id: "1".to_string(),
+                    func_id: "1".to_string(),
+                    title: "Multiply".into(),
+                    x: 300.0,
+                    y: 50.0,
+                    inputs: vec!["A".into(), "B".into()],
+                    outputs: vec!["Result".into()],
+                },
+                NodeView {
+                    id: "2".to_string(),
+                    func_id: "2".to_string(),
+                    title: "Output".into(),
+                    x: 550.0,
+                    y: 50.0,
+                    inputs: vec!["Value".into()],
+                    outputs: vec![],
+                },
+            ],
+            connections: vec![
+                ConnectionView {
+                    from_node_id: "0".to_string(),
+                    from_index: 0,
+                    to_node_id: "1".to_string(),
+                    to_index: 0,
+                },
+                ConnectionView {
+                    from_node_id: "1".to_string(),
+                    from_index: 0,
+                    to_node_id: "2".to_string(),
+                    to_index: 0,
+                },
+            ],
+            view_scale: 1.0,
+            view_x: 0.0,
+            view_y: 0.0,
+        };
         gv.connections.clear();
-        let mut lock = context.graph_view.lock().unwrap();
-        *lock = gv;
+
+        context.lock().graph_view = gv;
     }
 
     #[test]
     fn add_connection_persists() {
         reset_context();
         let conn = ConnectionView {
-            from_node_id: 0,
+            from_node_id: "0".to_string(),
             from_index: 0,
-            to_node_id: 1,
+            to_node_id: "1".to_string(),
             to_index: 0,
         };
         add_connection_to_graph_view(conn.clone());
-        let gv = context.graph_view.lock().unwrap();
+        let gv = &context.lock().graph_view;
         assert!(gv
             .connections
             .iter()
@@ -219,32 +213,36 @@ mod tests {
     #[test]
     fn remove_connections_persists() {
         reset_context();
+
         let c1 = ConnectionView {
-            from_node_id: 0,
+            from_node_id: "0".to_string(),
             from_index: 0,
-            to_node_id: 1,
+            to_node_id: "1".to_string(),
             to_index: 0,
         };
         let c2 = ConnectionView {
-            from_node_id: 1,
+            from_node_id: "1".to_string(),
             from_index: 0,
-            to_node_id: 2,
+            to_node_id: "2".to_string(),
             to_index: 0,
         };
         {
-            let mut gv = context.graph_view.lock().unwrap();
-            gv.connections = vec![c1.clone(), c2.clone()];
+            context.lock().graph_view.connections = vec![c1.clone(), c2.clone()];
         }
         remove_connections_from_graph_view(vec![c1.clone()]);
-        let gv = context.graph_view.lock().unwrap();
-        assert!(!gv
+
+        assert!(!context
+            .lock()
+            .graph_view
             .connections
             .iter()
             .any(|c| c.from_node_id == c1.from_node_id
                 && c.from_index == c1.from_index
                 && c.to_node_id == c1.to_node_id
                 && c.to_index == c1.to_index));
-        assert!(gv
+        assert!(context
+            .lock()
+            .graph_view
             .connections
             .iter()
             .any(|c| c.from_node_id == c2.from_node_id
@@ -257,8 +255,8 @@ mod tests {
     fn add_node_persists() {
         reset_context();
         let node = NodeView {
-            id: 3,
-            func_id: 99,
+            id: "3".to_string(),
+            func_id: "99".to_string(),
             x: 0.0,
             y: 0.0,
             title: "Test".into(),
@@ -266,28 +264,33 @@ mod tests {
             outputs: vec![],
         };
         add_node_to_graph_view(node.clone());
-        let gv = context.graph_view.lock().unwrap();
-        assert!(gv.nodes.iter().any(|n| n.id == node.id));
+        assert!(context
+            .lock()
+            .graph_view
+            .nodes
+            .iter()
+            .any(|n| n.id == node.id));
     }
 
     #[test]
     fn remove_node_persists() {
         reset_context();
-        remove_node_from_graph_view(1);
-        let gv = context.graph_view.lock().unwrap();
-        assert!(!gv.nodes.iter().any(|n| n.id == 1));
-        assert!(!gv
+        remove_node_from_graph_view("1");
+        assert!(!context.lock().graph_view.nodes.iter().any(|n| n.id == "1"));
+        assert!(!context
+            .lock()
+            .graph_view
             .connections
             .iter()
-            .any(|c| c.from_node_id == 1 || c.to_node_id == 1));
+            .any(|c| c.from_node_id == "1" || c.to_node_id == "1"));
     }
 
     #[test]
     fn get_node_by_id_returns_node() {
         reset_context();
         let node = NodeView {
-            id: 1,
-            func_id: 1,
+            id: "1".to_string(),
+            func_id: "1".to_string(),
             x: 0.0,
             y: 0.0,
             title: "Test".into(),
@@ -295,7 +298,7 @@ mod tests {
             outputs: vec![],
         };
         add_node_to_graph_view(node.clone());
-        let result = get_node_by_id(1);
+        let result = get_node_by_id("1");
         assert_eq!(result.id, node.id);
     }
 
@@ -303,7 +306,7 @@ mod tests {
     fn get_node_by_id_none() {
         reset_context();
         let result = std::panic::catch_unwind(|| {
-            get_node_by_id(999);
+            get_node_by_id("999");
         });
         assert!(result.is_err());
     }
@@ -312,8 +315,8 @@ mod tests {
     fn update_node_persists() {
         reset_context();
         let node = NodeView {
-            id: 0,
-            func_id: 0,
+            id: "0".to_string(),
+            func_id: "0".to_string(),
             x: 0.0,
             y: 0.0,
             title: "N".into(),
@@ -321,9 +324,10 @@ mod tests {
             outputs: vec![],
         };
         add_node_to_graph_view(node);
-        update_node(0, 10.0, 20.0);
-        let gv = context.graph_view.lock().unwrap();
-        let node = gv.nodes.iter().find(|n| n.id == 0).unwrap();
+        update_node("0", 10.0, 20.0);
+
+        let ctx = context.lock();
+        let node = ctx.graph_view.nodes.iter().find(|n| n.id == "0").unwrap();
         assert_eq!(node.x, 10.0);
         assert_eq!(node.y, 20.0);
     }
@@ -332,7 +336,7 @@ mod tests {
     fn update_graph_persists() {
         reset_context();
         update_graph(2.0, 5.0, 6.0);
-        let gv = context.graph_view.lock().unwrap();
+        let gv = &context.lock().graph_view;
         assert_eq!(gv.view_scale, 2.0);
         assert_eq!(gv.view_x, 5.0);
         assert_eq!(gv.view_y, 6.0);

@@ -83,7 +83,7 @@ impl Default for TimersInvoker {
 }
 
 impl Invoker for TimersInvoker {
-    fn get_func_lib(&mut self) -> FuncLib {
+    fn get_func_lib(&self) -> FuncLib {
         self.lambda_invoker.get_func_lib()
     }
 

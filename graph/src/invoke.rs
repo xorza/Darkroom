@@ -17,7 +17,7 @@ pub struct InvokeCache {
 }
 
 pub trait Invoker: Debug + Send + Sync {
-    fn get_func_lib(&mut self) -> FuncLib;
+    fn get_func_lib(&self) -> FuncLib;
     fn invoke(
         &self,
         function_id: FuncId,
@@ -195,7 +195,7 @@ where
 }
 
 impl Invoker for UberInvoker {
-    fn get_func_lib(&mut self) -> FuncLib {
+    fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
     fn invoke(
@@ -223,7 +223,7 @@ impl Invoker for UberInvoker {
 }
 
 impl Invoker for LambdaInvoker {
-    fn get_func_lib(&mut self) -> FuncLib {
+    fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
     fn invoke(
@@ -406,7 +406,7 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let mut invoker = create_invoker(
+        let invoker = create_invoker(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
             move |result| test_values_result.lock().result = result,

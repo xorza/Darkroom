@@ -734,7 +734,7 @@ impl Default for BasicInvoker {
 }
 
 impl Invoker for BasicInvoker {
-    fn get_func_lib(&mut self) -> FuncLib {
+    fn get_func_lib(&self) -> FuncLib {
         self.lambda_invoker.get_func_lib()
     }
 

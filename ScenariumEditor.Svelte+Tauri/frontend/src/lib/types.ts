@@ -5,8 +5,8 @@ interface Pin {
 }
 
 interface NodeView {
-    id: number;
-    funcId: number;
+    id: string;
+    funcId: string;
     x: number;
     y: number;
     title: string;
@@ -32,7 +32,7 @@ interface GraphView {
 }
 
 interface FuncView {
-    id: number;
+    id: string;
     title: string;
     description: string;
 }
