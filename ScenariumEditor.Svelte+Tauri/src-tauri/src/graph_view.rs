@@ -107,8 +107,7 @@ impl PartialEq for GraphView {
             && self.view_scale == other.view_scale
             && self.view_x == other.view_x
             && self.view_y == other.view_y
-        // todo: add validation for selected_node_ids
-        // && self.selected_node_ids == other.selected_node_ids
+            && self.selected_node_ids == other.selected_node_ids
     }
 }
 
@@ -165,11 +164,12 @@ pub(crate) fn update_node(id: u32, x: f32, y: f32) {
 }
 
 #[tauri::command]
-pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
+pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32, selected_node_ids: Vec<u32>) {
     let mut gv = context.graph_view.lock().unwrap();
     gv.view_scale = view_scale;
     gv.view_x = view_x;
     gv.view_y = view_y;
+    gv.selected_node_ids = selected_node_ids;
 }
 
 #[tauri::command]
@@ -301,11 +301,12 @@ mod tests {
     #[test]
     fn update_graph_persists() {
         reset_context();
-        update_graph(2.0, 5.0, 6.0);
+        update_graph(2.0, 5.0, 6.0, vec![1, 2]);
         let gv = context.graph_view.lock().unwrap();
         assert_eq!(gv.view_scale, 2.0);
         assert_eq!(gv.view_x, 5.0);
         assert_eq!(gv.view_y, 6.0);
+        assert_eq!(gv.selected_node_ids, vec![1, 2]);
     }
 
     #[test]

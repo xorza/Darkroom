@@ -44,7 +44,7 @@ Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Sv
 - Use `add_connection_to_graph_view` to persist a single connection and `remove_connections_from_graph_view` to delete one or more connections.
 - Use `remove_node_from_graph_view` to delete a node along with all of its connections.
 - Use `update_node` to persist node position changes made during dragging.
-- Use `update_graph` to persist zoom and pan changes in the editor.
+- Use `update_graph` to persist zoom, pan, and current node selection in the editor.
 - `debug_assert_graph_view` verifies that the frontend and backend graph views are identical and is only used in debug builds.
 - **Pending connection** is a connection that has not yet been confirmed and currently being edited by user.
 - **Node details** – when exactly one node is selected the frontend calls `get_func_by_id` to show that function's title and description next to the graph. When no nodes are selected it displays "no node selected" and if multiple nodes are selected it displays "multiple nodes selected".
