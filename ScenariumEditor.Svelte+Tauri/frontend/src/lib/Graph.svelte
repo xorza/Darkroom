@@ -271,13 +271,12 @@
 
             graphView.nodes = [...graphView.nodes, node];
             graphView.selectedNodeIds = new Set([node.id]);
-            newNodeDrag = { nodeId: node.id, pointerId: event.pointerId };
+            newNodeDrag = {nodeId: node.id, pointerId: event.pointerId};
         } catch (e) {
             console.error('Failed to persist new node', e);
             mainContainerEl.releasePointerCapture(event.pointerId);
             return;
         }
-
 
 
         updateSelection();
@@ -286,7 +285,13 @@
         showFuncLibrary = false;
     }
 
-    function startConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number; x: number; y: number }) {
+    function startConnection(detail: {
+        nodeId: string;
+        type: 'input' | 'output';
+        index: number;
+        x: number;
+        y: number
+    }) {
         const {nodeId, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
@@ -321,29 +326,27 @@
         window.addEventListener('pointerup', upHandler);
     }
 
-    function endConnection(detail: { nodeId: string; type: 'input' | 'output'; index: number }) {
-        const {nodeId, type, index} = detail;
+    function endConnection(pin: Pin) {
         if (!pendingConnection) return;
 
-        if (pendingConnection.start.nodeId === nodeId && pendingConnection.start.type === type && pendingConnection.start.index === index) {
+        if (pendingConnection.start.nodeId === pin.nodeId && pendingConnection.start.type === pin.type && pendingConnection.start.index === pin.index) {
             pendingConnection = null;
             window.removeEventListener('pointermove', moveHandler);
             window.removeEventListener('pointerup', upHandler);
             return;
         }
 
-        if (pendingConnection.start.type !== type) {
-            const from = pendingConnection.start.type === 'output'
+        if (pendingConnection.start.type !== pin.type) {
+            const from: Pin = pendingConnection.start.type === 'output'
                 ? pendingConnection.start
-                : {nodeId: nodeId, type: 'output' as const, index};
-            const to = pendingConnection.start.type === 'input'
+                : {nodeId: pin.nodeId, type: 'output' as const, index: pin.index};
+            const to: Pin = pendingConnection.start.type === 'input'
                 ? pendingConnection.start
-                : {nodeId: nodeId, type: 'input' as const, index};
+                : {nodeId: pin.nodeId, type: 'input' as const, index: pin.index};
 
             // ensure each input has at most one incoming connection
             graphView.connections = graphView.connections.filter(
-                (c) =>
-                    !(c.toNodeId === to.nodeId && c.toIndex === to.index)
+                (c) => !(c.toNodeId === to.nodeId && c.toIndex === to.index)
             );
 
             let newConnection: ConnectionView = {
@@ -562,7 +565,7 @@
             const ny = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
             const node = graphView.nodes.find((n) => n.id === newNodeDrag?.nodeId);
             if (node) {
-                dragNode({ nodeId: node.id, dx: nx - node.x, dy: ny - node.y });
+                dragNode({nodeId: node.id, dx: nx - node.x, dy: ny - node.y});
             }
         }
     }

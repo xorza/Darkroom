@@ -1,5 +1,6 @@
 <script lang="ts">
     import type {NodeView} from "$lib/types";
+    import type {Pin} from "$lib/types";
 
     interface NodeCallbackDetail {
         nodeId: string;
@@ -20,7 +21,7 @@
         connectionStart?: (
             detail: NodeCallbackDetail & { x: number; y: number }
         ) => void;
-        connectionEnd?: (detail: NodeCallbackDetail) => void;
+        connectionEnd?: (pin: Pin) => void;
         drag?: (detail: { nodeId: string; dx: number; dy: number }) => void;
         dragEnd?: (id: string) => void;
         select?: (detail: { nodeId: string; shiftKey: boolean }) => void;
