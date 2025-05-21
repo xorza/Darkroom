@@ -5,7 +5,6 @@
     import type {FuncLibraryView} from "$lib/types";
 
     onMount(async () => {
-        await invoke('init_ctx');
     });
 
 

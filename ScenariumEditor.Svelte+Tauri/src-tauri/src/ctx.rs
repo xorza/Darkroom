@@ -20,13 +20,18 @@ pub(crate) struct Ctx {
 impl Ctx {
     pub(crate) fn new() -> Self {
         let invoker = UberInvoker::new(vec![Box::<BasicInvoker>::default()]);
-        let func_lib = invoker.get_func_lib();
+        let mut func_lib = invoker.get_func_lib();
+
+        let graph = Graph::from_yaml_file("test_resources\\test_graph.yml").unwrap();
+        let graph_view = GraphView::from(&graph);
+
+        let func_lib2 = FuncLib::from_yaml_file("test_resources\\test_funcs.yml").unwrap();
+        func_lib.merge(func_lib2);
 
         Self {
-            graph_view: GraphView::default(),
+            graph_view,
             func_library_view: FuncLibraryView::from(&func_lib),
-
-            graph: Graph::default(),
+            graph,
             invoker,
             func_lib,
             worker: None,

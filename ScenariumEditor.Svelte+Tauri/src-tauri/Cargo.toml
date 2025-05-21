@@ -27,3 +27,4 @@ graph = { workspace = true }
 common = { workspace = true }
 parking_lot = { workspace = true }
 glam = { workspace = true }
+anyhow = { workspace = true }

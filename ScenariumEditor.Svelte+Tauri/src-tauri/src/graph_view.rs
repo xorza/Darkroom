@@ -1,7 +1,7 @@
 use crate::AppState;
 use glam::Vec2;
 use graph::function::FuncId;
-use graph::graph::Node;
+use graph::graph::{Graph, Node};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tauri::State;
@@ -64,6 +64,28 @@ impl PartialEq for GraphView {
             && self.connections == other.connections
             && self.view_scale == other.view_scale
             && self.view_pos == other.view_pos
+    }
+}
+
+impl From<&Graph> for GraphView {
+    fn from(value: &Graph) -> Self {
+        let mut nodes = Vec::new();
+        for node in value.nodes() {
+            nodes.push(NodeView {
+                id: node.id.to_string(),
+                func_id: node.func_id.to_string(),
+                view_pos: node.view_pos,
+                title: node.name.clone(),
+                inputs: vec![],
+                outputs: vec![],
+            });
+        }
+        Self {
+            nodes,
+            connections: vec![],
+            view_scale: 1.0,
+            view_pos: Vec2::ZERO,
+        }
     }
 }
 
