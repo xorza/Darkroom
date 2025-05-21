@@ -23,3 +23,6 @@ tauri-plugin-opener = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 lazy_static = { workspace = true }
+graph = { workspace = true }
+common = { workspace = true }
+
