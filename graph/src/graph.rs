@@ -52,9 +52,9 @@ pub struct Node {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
-    nodes: Vec<Node>,
-    view_pos: glam::Vec2,
-    view_scale: f32,
+    pub nodes: Vec<Node>,
+    pub view_pos: glam::Vec2,
+    pub view_scale: f32,
 }
 
 impl Graph {

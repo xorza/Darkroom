@@ -1,7 +1,7 @@
 use crate::AppState;
 use glam::Vec2;
-use graph::function::FuncId;
-use graph::graph::{Graph, Node};
+use graph::function::{FuncId, FuncLib};
+use graph::graph::{Binding, Graph, Node};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use tauri::State;
@@ -90,10 +90,51 @@ impl From<&Graph> for GraphView {
 }
 
 impl GraphView {
-    pub(crate) fn from_graph_func_lib(graph: &Graph, func_lib: &graph::function::FuncLib) -> Self {
-        // todo: implement, take inputs and outputs from func_lib
-        // take connections from Node input bindings
-        crate::graph_view::GraphView::default()
+    pub(crate) fn from_graph_func_lib(graph: &Graph, func_lib: &FuncLib) -> Self {
+        // Build node views using the function library to populate
+        // input and output names.
+        let mut nodes = Vec::new();
+        for node in graph.nodes() {
+            // Locate the function definition associated with the node.
+            let func = func_lib
+                .func_by_id(node.func_id)
+                .expect("Function not found in library");
+
+            let inputs = func.inputs.iter().map(|i| i.name.clone()).collect();
+            let outputs = func.outputs.iter().map(|o| o.name.clone()).collect();
+            let title = func.name.clone();
+
+            nodes.push(NodeView {
+                id: node.id.to_string(),
+                func_id: node.func_id.to_string(),
+                view_pos: node.view_pos,
+                title,
+                inputs,
+                outputs,
+            });
+        }
+
+        // Collect connections based on node input bindings.
+        let mut connections = Vec::new();
+        for node in graph.nodes() {
+            for (index, input) in node.inputs.iter().enumerate() {
+                if let Binding::Output(binding) = &input.binding {
+                    connections.push(ConnectionView {
+                        from_node_id: binding.output_node_id.to_string(),
+                        from_index: binding.output_index,
+                        to_node_id: node.id.to_string(),
+                        to_index: index as u32,
+                    });
+                }
+            }
+        }
+
+        Self {
+            nodes,
+            connections,
+            view_scale: graph.view_scale,
+            view_pos: graph.view_pos,
+        }
     }
 }
 
