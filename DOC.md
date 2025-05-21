@@ -14,6 +14,8 @@ Scenarium collects the tooling required to build node based applications. The re
 Each directory may contain its own `Cargo.toml` or build scripts.
 The root `Cargo.toml` defines the workspace and shared dependencies.
 
+Commit messages are often prompts sent to an AI agent to request a change.
+
 ## Subprojects
 
 ### common crate
