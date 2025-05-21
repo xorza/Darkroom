@@ -1,7 +1,4 @@
 {
-  "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.8"
-  },
   "scripts": {
     "dev": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build"
