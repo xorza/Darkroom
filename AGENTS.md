@@ -21,6 +21,8 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
   - Use cargo fmt to format the code and Clippy to lint the code.
   - Add tests for new features and bug fixes.
   - Use `cargo test` to run the tests.
+  - Use `cargo clippy` to run the linter.
+  - Use `cargo fmt` to format the code.
 - For Svelte projects:
   - Use prettier to format the code and eslint to lint the code.
   - Use Svelte 5 runes syntax instead of Svelte 3 `$:` syntax.
