@@ -77,10 +77,10 @@ impl FuncBehavior {
 impl FuncLib {
     pub fn from_yaml_file(file_path: &str) -> anyhow::Result<Self> {
         let yaml = std::fs::read_to_string(file_path)?;
-        Ok(Self::from_yaml(&yaml)?)
+        Self::from_yaml(&yaml)
     }
     pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
-         let funcs: Vec<Func> = serde_yml::from_str(&yaml)?;
+         let funcs: Vec<Func> = serde_yml::from_str(yaml)?;
         
         Ok(funcs.into())
     }
