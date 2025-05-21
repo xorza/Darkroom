@@ -253,7 +253,7 @@
         }
     }
 
-    function startFuncDrag(item: FuncView, event: PointerEvent) {
+    async function startFuncDrag(item: FuncView, event: PointerEvent) {
         const rect = mainContainerEl.getBoundingClientRect();
         const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
         const y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
@@ -282,18 +282,25 @@
             inputs,
             outputs,
         };
+        // Capture the pointer early so we don't lose move events while waiting
+        // for the backend to persist the node.
+        mainContainerEl.setPointerCapture(event.pointerId);
+
+        try {
+            // Persist the node before it becomes part of the view or is selected.
+            await invoke('add_node_to_graph_view', {node});
+        } catch (e) {
+            console.error('Failed to persist new node', e);
+            mainContainerEl.releasePointerCapture(event.pointerId);
+            return;
+        }
 
         graphView.nodes = [...graphView.nodes, node];
         graphView.selectedNodeIds = new Set([nextId]);
         updateSelection();
-        invoke('add_node_to_graph_view', {node})
-            .then(() => verifyGraphView())
-            .catch((e) => {
-                console.error('Failed to persist new node', e);
-            });
+        verifyGraphView();
 
         newNodeDrag = {id: nextId, pointerId: event.pointerId};
-        mainContainerEl.setPointerCapture(event.pointerId);
         showFuncLibrary = false;
     }
 
