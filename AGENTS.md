@@ -20,7 +20,7 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
 - For rust projects:
   - Use cargo fmt to format the code and Clippy to lint the code.
   - Add tests for new features and bug fixes.
-  - Use `cargo test` to run the tests.
+  - Use `cargo test --offline` to run the tests. `--offline` is required because Internet is disabled after the setup script runs.
   - Use `cargo clippy` to run the linter.
   - Use `cargo fmt` to format the code.
 - For Svelte projects:
