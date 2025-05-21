@@ -179,5 +179,22 @@ mod tests {
             && c.to_node_id == c2.to_node_id
             && c.to_index == c2.to_index));
     }
+
+    #[test]
+    fn add_node_persists() {
+        reset_context();
+        let node = NodeView {
+            id: 3,
+            func_id: 99,
+            x: 0.0,
+            y: 0.0,
+            title: "Test".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        add_node_to_graph_view(node.clone());
+        let gv = context.graph_view.lock().unwrap();
+        assert!(gv.nodes.iter().any(|n| n.id == node.id));
+    }
 }
 
