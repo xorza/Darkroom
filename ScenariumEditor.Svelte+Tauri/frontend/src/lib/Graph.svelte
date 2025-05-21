@@ -161,13 +161,16 @@
     });
 
 
+    // Use a separator that does not appear in UUIDs to build pin keys
+    const KEY_SEP = '|';
+
     function key(pin: Pin) {
-        return `${pin.nodeId}-${pin.type}-${pin.index}`;
+        return `${pin.nodeId}${KEY_SEP}${pin.type}${KEY_SEP}${pin.index}`;
     }
 
     function registerPin(detail: { nodeId: string; type: 'input' | 'output'; index: number; el: HTMLElement }) {
         const {nodeId, type, index, el} = detail;
-        pins.set(`${nodeId}-${type}-${index}`, el);
+        pins.set(`${nodeId}${KEY_SEP}${type}${KEY_SEP}${index}`, el);
     }
 
     function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
@@ -176,7 +179,7 @@
         const rect = mainContainerEl.getBoundingClientRect();
         for (const [k, el] of pins.entries()) {
             if (k === startKey) continue;
-            const [nodeIdStr, pinType, indexStr] = k.split('-');
+            const [nodeIdStr, pinType, indexStr] = k.split(KEY_SEP);
             if (pinType === startType) continue;
             const nodeId = String(nodeIdStr);
             const index = Number(indexStr);
@@ -191,6 +194,8 @@
                 nearest = {nodeId, type: pinType as 'input' | 'output', index};
             }
         }
+
+        console.log('nearest', nearest, nearestDist);
         return nearest;
     }
 
@@ -286,7 +291,7 @@
         const rect = mainContainerEl.getBoundingClientRect();
         const nx = (x - rect.left - graphView.viewX) / graphView.viewScale;
         const ny = (y - rect.top - graphView.viewY) / graphView.viewScale;
-        const startKeyStr = `${nodeId}-${type}-${index}`;
+        const startKeyStr = `${nodeId}${KEY_SEP}${type}${KEY_SEP}${index}`;
         pendingConnection = {
             start: {nodeId: nodeId, type, index},
             x: nx,
@@ -555,7 +560,7 @@
             const rect = mainContainerEl.getBoundingClientRect();
             const nx = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
             const ny = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
-            const node = graphView.nodes.find((n) => n.id === newNodeDrag.nodeId);
+            const node = graphView.nodes.find((n) => n.id === newNodeDrag?.nodeId);
             if (node) {
                 dragNode({ nodeId: node.id, dx: nx - node.x, dy: ny - node.y });
             }
