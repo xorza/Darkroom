@@ -129,7 +129,7 @@
         {nodeView.title}
 
         <button
-                class="btn btn-ghost btn-xs btn-circle absolute right-0 top-0 m-0 p-0 text-error"
+                class="btn btn-ghost btn-xs btn-circle absolute right-0 top-0 m-0 p-0 text-warning"
                 onclick={() => remove?.(nodeView.id)}
                 onpointerdown={(e) => e.stopPropagation()}
                 onpointerup={(e) => e.stopPropagation()}
