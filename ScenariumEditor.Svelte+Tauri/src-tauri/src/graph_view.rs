@@ -89,6 +89,14 @@ impl From<&Graph> for GraphView {
     }
 }
 
+impl GraphView {
+    pub(crate) fn from_graph_func_lib(graph: &Graph, func_lib: &graph::function::FuncLib) -> Self {
+        // todo: implement, take inputs and outputs from func_lib
+        // take connections from Node input bindings
+        crate::graph_view::GraphView::default()
+    }
+}
+
 #[tauri::command]
 pub(crate) fn get_graph_view(state: State<'_, parking_lot::Mutex<AppState>>) -> GraphView {
     state.lock().ctx.graph_view.clone()
