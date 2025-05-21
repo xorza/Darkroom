@@ -48,6 +48,7 @@ Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Sv
 - Use `update_node` to persist node position changes when dragging ends.
 - Use `update_graph` to persist zoom, pan, and current node selection in the editor.
 - `debug_assert_graph_view` verifies that the frontend and backend graph views are identical and is only used in debug builds.
+ - Node and graph positions use two fields `viewPosX` and `viewPosY` when exchanged between the frontend and backend.
 - **Pending connection** is a connection that has not yet been confirmed and currently being edited by user.
 - **Node details** – when exactly one node is selected the frontend calls `get_node_by_id` to obtain the node's function id and then `get_func_by_id` to show the function's title and description next to the graph. When no nodes are selected it displays "no node selected" and if multiple nodes are selected it displays "multiple nodes selected".
 

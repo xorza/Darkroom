@@ -7,7 +7,8 @@ interface Pin {
 interface NodeView {
     id: string;
     funcId: string;
-    viewPos: {x: number; y: number};
+    viewPosX: number;
+    viewPosY: number;
     title: string;
     inputs: string[];
     outputs: string[];
@@ -25,7 +26,8 @@ interface GraphView {
     nodes: NodeView[];
     connections: ConnectionView[];
     viewScale: number;
-    viewPos: {x: number; y: number};
+    viewPosX: number;
+    viewPosY: number;
     selectedNodeIds: Set<string>
 }
 

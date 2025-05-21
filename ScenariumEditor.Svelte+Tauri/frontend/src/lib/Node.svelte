@@ -6,7 +6,8 @@
         nodeView: NodeView;
 
         viewScale: number;
-        viewPos: {x: number; y: number};
+        viewPosX: number;
+        viewPosY: number;
 
         selected: boolean;
 
@@ -23,7 +24,8 @@
         nodeView,
 
         viewScale = 1,
-        viewPos = {x: 0, y: 0},
+        viewPosX = 0,
+        viewPosY = 0,
 
         selected = false,
 
@@ -43,17 +45,17 @@
 
     function onPointerDown(event: PointerEvent) {
         dragging = true;
-        offsetX = (event.clientX - viewPos.x) / viewScale - nodeView.viewPos.x;
-        offsetY = (event.clientY - viewPos.y) / viewScale - nodeView.viewPos.y;
+        offsetX = (event.clientX - viewPosX) / viewScale - nodeView.viewPosX;
+        offsetY = (event.clientY - viewPosY) / viewScale - nodeView.viewPosY;
         panel.setPointerCapture(event.pointerId);
     }
 
     function onPointerMove(event: PointerEvent) {
         if (dragging) {
-            const newX = (event.clientX - viewPos.x) / viewScale - offsetX;
-            const newY = (event.clientY - viewPos.y) / viewScale - offsetY;
-            const dx = newX - nodeView.viewPos.x;
-            const dy = newY - nodeView.viewPos.y;
+            const newX = (event.clientX - viewPosX) / viewScale - offsetX;
+            const newY = (event.clientY - viewPosY) / viewScale - offsetY;
+            const dx = newX - nodeView.viewPosX;
+            const dy = newY - nodeView.viewPosY;
             drag?.({nodeId: nodeView.id, dx, dy});
         }
     }
@@ -109,7 +111,7 @@
         class="absolute border bg-base-300 rounded-md shadow-md select-none pt-0 pb-2 transition-shadow hover:shadow-lg"
         class:border-primary={selected}
         class:border-base-300={!selected}
-        style="transform: translate({nodeView.viewPos.x}px, {nodeView.viewPos.y}px);"
+        style="transform: translate({nodeView.viewPosX}px, {nodeView.viewPosY}px);"
         data-node-id={nodeView.id}
         onpointerdown={onNodePointerDown}
 >

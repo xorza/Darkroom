@@ -27,8 +27,8 @@
 
     const dotFactor = $derived(() => graphView.viewScale / Math.pow(2, Math.floor(Math.log2(graphView.viewScale))));
     const dotSpacing = $derived(() => BG_DOT_BASE * dotFactor());
-    const bgX = $derived(() => mod(graphView.viewPos.x, dotSpacing()));
-    const bgY = $derived(() => mod(graphView.viewPos.y, dotSpacing()));
+    const bgX = $derived(() => mod(graphView.viewPosX, dotSpacing()));
+    const bgY = $derived(() => mod(graphView.viewPosY, dotSpacing()));
     const zoomPercent = $derived(() => Math.round(graphView.viewScale * 100));
 
     const pendingPath = $derived(() => pendingConnection
@@ -91,7 +91,8 @@
     let graphView: GraphView = $state({
         nodes: [],
         connections: [],
-        viewPos: {x: 0, y: 0},
+        viewPosX: 0,
+        viewPosY: 0,
         viewScale: 1,
         selectedNodeIds: new Set(),
     });
@@ -100,7 +101,8 @@
         selectedChange?.([...graphView.selectedNodeIds]);
         invoke('update_graph', {
             viewScale: graphView.viewScale,
-            viewPos: graphView.viewPos,
+            viewPosX: graphView.viewPosX,
+            viewPosY: graphView.viewPosY,
         });
     }
 
@@ -112,7 +114,8 @@
                     nodes: graphView.nodes,
                     connections: graphView.connections,
                     viewScale: graphView.viewScale,
-                    viewPos: graphView.viewPos,
+                    viewPosX: graphView.viewPosX,
+                    viewPosY: graphView.viewPosY,
                     selectedNodeIds: [...graphView.selectedNodeIds]
                 }
             });
@@ -128,7 +131,8 @@
             graphView.nodes = data.nodes;
             graphView.selectedNodeIds = new Set(data.selectedNodeIds);
             graphView.connections = [...data.connections];
-            graphView.viewPos = {...data.viewPos};
+            graphView.viewPosX = data.viewPosX;
+            graphView.viewPosY = data.viewPosY;
             graphView.viewScale = data.viewScale;
 
             updateSelection();
@@ -148,8 +152,8 @@
         trigger;
         graphView.nodes;
         graphView.connections;
-        graphView.viewPos.x;
-        graphView.viewPos.y;
+        graphView.viewPosX;
+        graphView.viewPosY;
         graphView.viewScale;
 
         connectionPaths = graphView.connections.map(connectionPath);
@@ -180,8 +184,8 @@
             const nodeId = String(nodeIdStr);
             const index = Number(indexStr);
             const r = el.getBoundingClientRect();
-            const px = (r.left + r.width / 2 - rect.left - graphView.viewPos.x) / graphView.viewScale;
-            const py = (r.top + r.height / 2 - rect.top - graphView.viewPos.y) / graphView.viewScale;
+            const px = (r.left + r.width / 2 - rect.left - graphView.viewPosX) / graphView.viewScale;
+            const py = (r.top + r.height / 2 - rect.top - graphView.viewPosY) / graphView.viewScale;
             const dx = px - x;
             const dy = py - y;
             const dist = Math.sqrt(dx * dx + dy * dy);
@@ -211,14 +215,14 @@
     function dragNode(detail: { nodeId: string; dx: number; dy: number }) {
         const node = graphView.nodes.find((n) => n.id === detail.nodeId);
         if (!node) return;
-        node.viewPos.x += detail.dx;
-        node.viewPos.y += detail.dy;
+        node.viewPosX += detail.dx;
+        node.viewPosY += detail.dy;
 
         if (graphView.selectedNodeIds.has(detail.nodeId)) {
             for (const n of graphView.nodes) {
                 if (n.id !== detail.nodeId && graphView.selectedNodeIds.has(n.id)) {
-                    n.viewPos.x += detail.dx;
-                    n.viewPos.y += detail.dy;
+                    n.viewPosX += detail.dx;
+                    n.viewPosY += detail.dy;
                 }
             }
         }
@@ -233,7 +237,7 @@
         for (const nid of ids) {
             const n = graphView.nodes.find((nn) => nn.id === nid);
             if (n) {
-                invoke('update_node', {id: n.id, viewPos: n.viewPos});
+                invoke('update_node', {id: n.id, viewPosX: n.viewPosX, viewPosY: n.viewPosY});
             }
         }
     }
@@ -255,14 +259,18 @@
 
     async function startFuncDrag(item: FuncView, event: PointerEvent) {
         const rect = mainContainerEl.getBoundingClientRect();
-        const x = (event.clientX - rect.left - graphView.viewPos.x) / graphView.viewScale;
-        const y = (event.clientY - rect.top - graphView.viewPos.y) / graphView.viewScale;
+        const x = (event.clientX - rect.left - graphView.viewPosX) / graphView.viewScale;
+        const y = (event.clientY - rect.top - graphView.viewPosY) / graphView.viewScale;
 
         mainContainerEl.setPointerCapture(event.pointerId);
         try {
             // Persist the node before it becomes part of the view or is selected.
-            const node: NodeView = await invoke<NodeView>('create_node', {funcId: item.id});
-            node.viewPos = {x, y};
+            const raw = await invoke<NodeView>('create_node', {funcId: item.id});
+            const node: NodeView = {
+                ...raw,
+                viewPosX: x,
+                viewPosY: y
+            };
 
             graphView.nodes = [...graphView.nodes, node];
             graphView.selectedNodeIds = new Set([node.id]);
@@ -283,8 +291,8 @@
     function startConnection(detail: Pin & { x: number; y: number }) {
         const {nodeId, type, index, x, y} = detail;
         const rect = mainContainerEl.getBoundingClientRect();
-        const nx = (x - rect.left - graphView.viewPos.x) / graphView.viewScale;
-        const ny = (y - rect.top - graphView.viewPos.y) / graphView.viewScale;
+        const nx = (x - rect.left - graphView.viewPosX) / graphView.viewScale;
+        const ny = (y - rect.top - graphView.viewPosY) / graphView.viewScale;
         const startPin = {nodeId, type, index};
         pendingConnection = {
             start: startPin,
@@ -294,8 +302,8 @@
         };
         moveHandler = (e: PointerEvent) => {
             if (pendingConnection) {
-                const mx = (e.clientX - rect.left - graphView.viewPos.x) / graphView.viewScale;
-                const my = (e.clientY - rect.top - graphView.viewPos.y) / graphView.viewScale;
+                const mx = (e.clientX - rect.left - graphView.viewPosX) / graphView.viewScale;
+                const my = (e.clientY - rect.top - graphView.viewPosY) / graphView.viewScale;
                 pendingConnection.x = mx;
                 pendingConnection.y = my;
                 pendingConnection.hover = findNearestPin(mx, my, pendingConnection.start.type, key(pendingConnection.start));
@@ -367,8 +375,8 @@
         const rect = mainContainerEl.getBoundingClientRect();
         const r = el.getBoundingClientRect();
         return {
-            x: (r.left + r.width / 2 - rect.left - graphView.viewPos.x) / graphView.viewScale,
-            y: (r.top + r.height / 2 - rect.top - graphView.viewPos.y) / graphView.viewScale
+            x: (r.left + r.width / 2 - rect.left - graphView.viewPosX) / graphView.viewScale,
+            y: (r.top + r.height / 2 - rect.top - graphView.viewPosY) / graphView.viewScale
         };
     }
 
@@ -453,15 +461,16 @@
         const my = event.clientY - rect.top;
         const scaleFactor = event.deltaY < 0 ? 1.1 : 0.9;
         const newScale = Math.min(Math.max(graphView.viewScale * scaleFactor, 0.2), 4);
-        const gx = (mx - graphView.viewPos.x) / graphView.viewScale;
-        const gy = (my - graphView.viewPos.y) / graphView.viewScale;
+        const gx = (mx - graphView.viewPosX) / graphView.viewScale;
+        const gy = (my - graphView.viewPosY) / graphView.viewScale;
 
-        graphView.viewPos.x = mx - gx * newScale;
-        graphView.viewPos.y = my - gy * newScale;
+        graphView.viewPosX = mx - gx * newScale;
+        graphView.viewPosY = my - gy * newScale;
         graphView.viewScale = newScale;
         invoke('update_graph', {
             viewScale: graphView.viewScale,
-            viewPos: graphView.viewPos
+            viewPosX: graphView.viewPosX,
+            viewPosY: graphView.viewPosY
         });
     }
 
@@ -490,8 +499,8 @@
             panning = true;
             panStartX = event.clientX;
             panStartY = event.clientY;
-            startViewX = graphView.viewPos.x;
-            startViewY = graphView.viewPos.y;
+            startViewX = graphView.viewPosX;
+            startViewY = graphView.viewPosY;
             mainContainerEl.setPointerCapture(event.pointerId);
         } else if (
             event.button === 2 &&
@@ -526,11 +535,12 @@
 
     function onPointerMove(event: PointerEvent) {
         if (panning) {
-            graphView.viewPos.x = startViewX + (event.clientX - panStartX);
-            graphView.viewPos.y = startViewY + (event.clientY - panStartY);
+            graphView.viewPosX = startViewX + (event.clientX - panStartX);
+            graphView.viewPosY = startViewY + (event.clientY - panStartY);
             invoke('update_graph', {
                 viewScale: graphView.viewScale,
-                viewPos: graphView.viewPos
+                viewPosX: graphView.viewPosX,
+                viewPosY: graphView.viewPosY
             });
         } else if (connectionBreaker) {
             if (event.buttons === 2) {
@@ -548,11 +558,11 @@
             selection = {...selection, x: event.clientX, y: event.clientY};
         } else if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
             const rect = mainContainerEl.getBoundingClientRect();
-            const nx = (event.clientX - rect.left - graphView.viewPos.x) / graphView.viewScale;
-            const ny = (event.clientY - rect.top - graphView.viewPos.y) / graphView.viewScale;
+            const nx = (event.clientX - rect.left - graphView.viewPosX) / graphView.viewScale;
+            const ny = (event.clientY - rect.top - graphView.viewPosY) / graphView.viewScale;
             const node = graphView.nodes.find((n) => n.id === newNodeDrag?.nodeId);
             if (node) {
-                dragNode({nodeId: node.id, dx: nx - node.viewPos.x, dy: ny - node.viewPos.y});
+                dragNode({nodeId: node.id, dx: nx - node.viewPosX, dy: ny - node.viewPosY});
             }
         }
     }
@@ -563,13 +573,14 @@
             mainContainerEl.releasePointerCapture(event.pointerId);
             invoke('update_graph', {
                 viewScale: graphView.viewScale,
-                viewPos: graphView.viewPos
+                viewPosX: graphView.viewPosX,
+                viewPosY: graphView.viewPosY
             });
         } else if (event.button === 2 && connectionBreaker) {
             const rect = mainContainerEl.getBoundingClientRect();
             const pts = connectionBreaker.points.map((p) => ({
-                x: (p.x - rect.left - graphView.viewPos.x) / graphView.viewScale,
-                y: (p.y - rect.top - graphView.viewPos.y) / graphView.viewScale
+                x: (p.x - rect.left - graphView.viewPosX) / graphView.viewScale,
+                y: (p.y - rect.top - graphView.viewPosY) / graphView.viewScale
             }));
             const before = [...graphView.connections];
             graphView.connections = graphView.connections.filter((c) => {
@@ -645,16 +656,17 @@
         const rect = mainContainerEl.getBoundingClientRect();
         const cx = rect.width / 2;
         const cy = rect.height / 2;
-        const gx = (cx - graphView.viewPos.x) / graphView.viewScale;
-        const gy = (cy - graphView.viewPos.y) / graphView.viewScale;
+        const gx = (cx - graphView.viewPosX) / graphView.viewScale;
+        const gy = (cy - graphView.viewPosY) / graphView.viewScale;
         const newScale = 1;
 
         graphView.viewScale = newScale;
-        graphView.viewPos.x = cx - gx * newScale;
-        graphView.viewPos.y = cy - gy * newScale;
+        graphView.viewPosX = cx - gx * newScale;
+        graphView.viewPosY = cy - gy * newScale;
         invoke('update_graph', {
             viewScale: graphView.viewScale,
-            viewPos: graphView.viewPos
+            viewPosX: graphView.viewPosX,
+            viewPosY: graphView.viewPosY
         });
     }
 
@@ -670,8 +682,8 @@
         let maxY = -Infinity;
         for (const el of nodes) {
             const r = el.getBoundingClientRect();
-            const left = (r.left - containerRect.left - graphView.viewPos.x) / graphView.viewScale;
-            const top = (r.top - containerRect.top - graphView.viewPos.y) / graphView.viewScale;
+            const left = (r.left - containerRect.left - graphView.viewPosX) / graphView.viewScale;
+            const top = (r.top - containerRect.top - graphView.viewPosY) / graphView.viewScale;
             const right = left + r.width / graphView.viewScale;
             const bottom = top + r.height / graphView.viewScale;
             if (left < minX) minX = left;
@@ -681,11 +693,12 @@
         }
         const centerX = (minX + maxX) / 2;
         const centerY = (minY + maxY) / 2;
-        graphView.viewPos.x = containerRect.width / 2 - centerX * graphView.viewScale;
-        graphView.viewPos.y = containerRect.height / 2 - centerY * graphView.viewScale;
+        graphView.viewPosX = containerRect.width / 2 - centerX * graphView.viewScale;
+        graphView.viewPosY = containerRect.height / 2 - centerY * graphView.viewScale;
         invoke('update_graph', {
             viewScale: graphView.viewScale,
-            viewPos: graphView.viewPos
+            viewPosX: graphView.viewPosX,
+            viewPosY: graphView.viewPosY
         });
     }
 
@@ -701,8 +714,8 @@
         let maxY = -Infinity;
         for (const el of nodes) {
             const r = el.getBoundingClientRect();
-            const left = (r.left - containerRect.left - graphView.viewPos.x) / graphView.viewScale;
-            const top = (r.top - containerRect.top - graphView.viewPos.y) / graphView.viewScale;
+            const left = (r.left - containerRect.left - graphView.viewPosX) / graphView.viewScale;
+            const top = (r.top - containerRect.top - graphView.viewPosY) / graphView.viewScale;
             const right = left + r.width / graphView.viewScale;
             const bottom = top + r.height / graphView.viewScale;
             if (left < minX) minX = left;
@@ -721,11 +734,12 @@
         const centerY = (minY + maxY) / 2;
 
         graphView.viewScale = newScale;
-        graphView.viewPos.x = containerRect.width / 2 - centerX * newScale;
-        graphView.viewPos.y = containerRect.height / 2 - centerY * newScale;
+        graphView.viewPosX = containerRect.width / 2 - centerX * newScale;
+        graphView.viewPosY = containerRect.height / 2 - centerY * newScale;
         invoke('update_graph', {
             viewScale: graphView.viewScale,
-            viewPos: graphView.viewPos
+            viewPosX: graphView.viewPosX,
+            viewPosY: graphView.viewPosY
         });
     }
 </script>
@@ -747,7 +761,7 @@
     >
         <svg
                 class="absolute top-0 left-0 w-full h-full pointer-events-none text-primary overflow-visible"
-                style="transform: translate({graphView.viewPos.x}px, {graphView.viewPos.y}px) scale({graphView.viewScale}); transform-origin: 0 0;"
+                style="transform: translate({graphView.viewPosX}px, {graphView.viewPosY}px) scale({graphView.viewScale}); transform-origin: 0 0;"
         >
             {#each connectionPaths as _c, i}
                 <path d={connectionPaths[i]} stroke="currentColor" fill="none" stroke-width="2"/>
@@ -768,7 +782,7 @@
                  style="left: {selectionBox()?.left}px; top: {selectionBox()?.top}px; width: {selectionBox()?.width}px; height: {selectionBox()?.height}px;"
             ></div>
         {/if}
-        <div style="transform: translate({graphView.viewPos.x}px, {graphView.viewPos.y}px) scale({graphView.viewScale}); transform-origin: 0 0;">
+        <div style="transform: translate({graphView.viewPosX}px, {graphView.viewPosY}px) scale({graphView.viewScale}); transform-origin: 0 0;">
             {#each graphView.nodes as node, i}
                 <Node
                         nodeView={node}
@@ -778,7 +792,8 @@
                         drag={dragNode}
                         dragEnd={endDragNode}
                         viewScale={graphView.viewScale}
-                        viewPos={graphView.viewPos}
+                        viewPosX={graphView.viewPosX}
+                        viewPosY={graphView.viewPosY}
                         selected={graphView.selectedNodeIds.has(node.id)}
                         select={onNodeSelect}
                         remove={removeNode}
