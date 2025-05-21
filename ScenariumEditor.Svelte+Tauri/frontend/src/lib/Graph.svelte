@@ -300,6 +300,9 @@
                 ...graphView.connections,
                 newConnection
             ];
+            invoke('add_connection_to_graph_view', { connection: newConnection }).catch((e) => {
+                console.error('Failed to persist new connection', e);
+            });
         }
 
         pendingConnection = null;
@@ -506,6 +509,7 @@
                 x: (p.x - rect.left - graphView.viewX) / graphView.viewScale,
                 y: (p.y - rect.top - graphView.viewY) / graphView.viewScale
             }));
+            const before = [...graphView.connections];
             graphView.connections = graphView.connections.filter((c) => {
                 const start = getOutputPinPos(c.fromNodeId, c.fromIndex);
                 const end = getInputPinPos(c.toNodeId, c.toIndex);
@@ -519,6 +523,21 @@
                 }
                 return true;
             });
+            const removed = before.filter(
+                (b) =>
+                    !graphView.connections.some(
+                        (c) =>
+                            c.fromNodeId === b.fromNodeId &&
+                            c.fromIndex === b.fromIndex &&
+                            c.toNodeId === b.toNodeId &&
+                            c.toIndex === b.toIndex
+                    )
+            );
+            if (removed.length > 0) {
+                invoke('remove_connections_from_graph_view', { connections: removed }).catch((e) => {
+                    console.error('Failed to remove connections', e);
+                });
+            }
             cancelBreaker();
         } else if (
             event.button === 0 &&

@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use crate::ctx::context;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize,Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 enum PinType {
     Input,
     Output,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize,Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Pin {
     node_id: u32,
@@ -17,7 +17,7 @@ pub(crate) struct Pin {
     index: u32,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize,Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
     from_node_id: u32,
@@ -38,7 +38,7 @@ pub(crate) struct NodeView {
     outputs: Vec<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize,Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
@@ -113,3 +113,71 @@ pub(crate) fn add_node_to_graph_view(node: NodeView)  {
     let mut gv = context.graph_view.lock().unwrap();
     gv.nodes.push(node);
 }
+
+#[tauri::command]
+pub(crate) fn add_connection_to_graph_view(connection: ConnectionView) {
+    let mut gv = context.graph_view.lock().unwrap();
+    gv.connections.retain(|c| {
+        !(c.to_node_id == connection.to_node_id && c.to_index == connection.to_index)
+    });
+    gv.connections.push(connection);
+}
+
+#[tauri::command]
+pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView>) {
+    let mut gv = context.graph_view.lock().unwrap();
+    gv.connections.retain(|c| {
+        !connections.iter().any(|r| {
+            r.from_node_id == c.from_node_id
+                && r.from_index == c.from_index
+                && r.to_node_id == c.to_node_id
+                && r.to_index == c.to_index
+        })
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reset_context() {
+        let mut gv = GraphView::default();
+        gv.connections.clear();
+        let mut lock = context.graph_view.lock().unwrap();
+        *lock = gv;
+    }
+
+    #[test]
+    fn add_connection_persists() {
+        reset_context();
+        let conn = ConnectionView { from_node_id: 0, from_index: 0, to_node_id: 1, to_index: 0 };
+        add_connection_to_graph_view(conn.clone());
+        let gv = context.graph_view.lock().unwrap();
+        assert!(gv.connections.iter().any(|c| c.from_node_id == conn.from_node_id
+            && c.from_index == conn.from_index
+            && c.to_node_id == conn.to_node_id
+            && c.to_index == conn.to_index));
+    }
+
+    #[test]
+    fn remove_connections_persists() {
+        reset_context();
+        let c1 = ConnectionView { from_node_id: 0, from_index: 0, to_node_id: 1, to_index: 0 };
+        let c2 = ConnectionView { from_node_id: 1, from_index: 0, to_node_id: 2, to_index: 0 };
+        {
+            let mut gv = context.graph_view.lock().unwrap();
+            gv.connections = vec![c1.clone(), c2.clone()];
+        }
+        remove_connections_from_graph_view(vec![c1.clone()]);
+        let gv = context.graph_view.lock().unwrap();
+        assert!(!gv.connections.iter().any(|c| c.from_node_id == c1.from_node_id
+            && c.from_index == c1.from_index
+            && c.to_node_id == c1.to_node_id
+            && c.to_index == c1.to_index));
+        assert!(gv.connections.iter().any(|c| c.from_node_id == c2.from_node_id
+            && c.from_index == c2.from_index
+            && c.to_node_id == c2.to_node_id
+            && c.to_index == c2.to_index));
+    }
+}
+
