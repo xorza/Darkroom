@@ -5,11 +5,9 @@ use graph::function::FuncLib;
 use graph::graph::Graph;
 use graph::invoke::{Invoker, UberInvoker};
 use graph::worker::Worker;
-use lazy_static::lazy_static;
-use parking_lot::Mutex;
-use std::mem::swap;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
+#[allow(dead_code)]
 pub(crate) struct Ctx {
     pub(crate) graph_view: GraphView,
     pub(crate) func_library_view: FuncLibraryView,
@@ -24,7 +22,7 @@ impl Ctx {
         let invoker = UberInvoker::new(vec![Box::<BasicInvoker>::default()]);
         let func_lib = invoker.get_func_lib();
 
-        let result = Self {
+        Self {
             graph_view: GraphView::default(),
             func_library_view: FuncLibraryView::from(&func_lib),
 
@@ -32,32 +30,6 @@ impl Ctx {
             invoker,
             func_lib,
             worker: None,
-        };
-
-        result
-    }
-}
-
-impl Default for Ctx {
-    fn default() -> Self {
-        Ctx {
-            graph_view: Default::default(),
-            func_library_view: Default::default(),
-            graph: Default::default(),
-            invoker: Default::default(),
-            func_lib: Default::default(),
-            worker: None,
         }
     }
-}
-
-#[tauri::command]
-pub(crate) fn init_ctx() {
-    let mut new_ctx = Ctx::new();
-    let mut ctx = context.lock();
-    swap(&mut *ctx, &mut new_ctx);
-}
-
-lazy_static! {
-    pub(crate) static ref context: Mutex<Ctx> = Mutex::new(Ctx::default());
 }

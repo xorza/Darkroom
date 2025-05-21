@@ -1,4 +1,3 @@
-use crate::ctx::context;
 use crate::AppState;
 use graph::function::FuncId;
 use graph::graph::Node;
@@ -73,8 +72,8 @@ impl PartialEq for GraphView {
 }
 
 #[tauri::command]
-pub(crate) fn get_graph_view() -> GraphView {
-    context.lock().graph_view.clone()
+pub(crate) fn get_graph_view(state: State<'_, parking_lot::Mutex<AppState>>) -> GraphView {
+    state.lock().ctx.graph_view.clone()
 }
 
 #[tauri::command]
@@ -86,8 +85,13 @@ pub(crate) fn get_node_by_id(state: State<'_, parking_lot::Mutex<AppState>>, id:
 }
 
 #[tauri::command]
-pub(crate) fn add_connection_to_graph_view(connection: ConnectionView) {
-    let mut ctx = context.lock();
+pub(crate) fn add_connection_to_graph_view(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    connection: ConnectionView,
+) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
+
     ctx.graph_view
         .connections
         .retain(|c| !(c.to_node_id == connection.to_node_id && c.to_index == connection.to_index));
@@ -95,8 +99,13 @@ pub(crate) fn add_connection_to_graph_view(connection: ConnectionView) {
 }
 
 #[tauri::command]
-pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView>) {
-    let mut ctx = context.lock();
+pub(crate) fn remove_connections_from_graph_view(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    connections: Vec<ConnectionView>,
+) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
+
     ctx.graph_view.connections.retain(|c| {
         !connections.iter().any(|r| {
             r.from_node_id == c.from_node_id
@@ -108,8 +117,13 @@ pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView
 }
 
 #[tauri::command]
-pub(crate) fn remove_node_from_graph_view(id: &str) {
-    let mut ctx = context.lock();
+pub(crate) fn remove_node_from_graph_view(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    id: &str,
+) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
+
     ctx.graph_view.nodes.retain(|n| n.id != id);
     ctx.graph_view
         .connections
@@ -123,7 +137,8 @@ pub(crate) fn create_node(
 ) -> NodeView {
     let func_id = FuncId::from_str(func_id).expect("Invalid func id");
 
-    let mut ctx = context.lock();
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
     let func = ctx
         .func_lib
         .func_by_id(func_id)
@@ -149,8 +164,14 @@ pub(crate) fn create_node(
 }
 
 #[tauri::command]
-pub(crate) fn update_node(id: &str, x: f32, y: f32) {
-    let mut ctx = context.lock();
+pub(crate) fn update_node(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    id: &str,
+    x: f32,
+    y: f32,
+) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
     if let Some(node) = ctx.graph_view.nodes.iter_mut().find(|n| n.id == id) {
         node.x = x;
         node.y = y;
@@ -160,18 +181,27 @@ pub(crate) fn update_node(id: &str, x: f32, y: f32) {
 }
 
 #[tauri::command]
-pub(crate) fn update_graph(view_scale: f32, view_x: f32, view_y: f32) {
-    let mut ctx = context.lock();
+pub(crate) fn update_graph(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    view_scale: f32,
+    view_x: f32,
+    view_y: f32,
+) {
+    let mut app_state = state.lock();
+    let ctx = &mut app_state.ctx;
     ctx.graph_view.view_scale = view_scale;
     ctx.graph_view.view_x = view_x;
     ctx.graph_view.view_y = view_y;
 }
 
 #[tauri::command]
-pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
+pub(crate) fn debug_assert_graph_view(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    graph_view: GraphView,
+) {
     #[cfg(debug_assertions)]
     {
-        let gv = &context.lock().graph_view;
+        let gv = &state.lock().ctx.graph_view;
         debug_assert_eq!(graph_view, *gv);
     }
 }
@@ -181,88 +211,11 @@ mod tests {
     use super::*;
     use graph::function::{Func, FuncBehavior, FuncId, FuncLib};
     use graph::graph::Graph;
-    use lazy_static::lazy_static;
+    use parking_lot::Mutex as ParkingMutex;
+    use std::panic::AssertUnwindSafe;
     use std::str::FromStr;
-    use std::sync::Mutex;
     use tauri::test::MockRuntime;
-    use tauri::{App, Manager};
-
-    lazy_static! {
-        static ref TEST_MUTEX: Mutex<()> = Mutex::new(());
-    }
-
-    fn reset_context() {
-        let mut gv = GraphView {
-            nodes: vec![
-                NodeView {
-                    id: "0".to_string(),
-                    func_id: "0".to_string(),
-                    title: "Add".into(),
-                    x: 50.0,
-                    y: 50.0,
-                    inputs: vec!["A".into(), "B".into()],
-                    outputs: vec!["Result".into()],
-                },
-                NodeView {
-                    id: "1".to_string(),
-                    func_id: "1".to_string(),
-                    title: "Multiply".into(),
-                    x: 300.0,
-                    y: 50.0,
-                    inputs: vec!["A".into(), "B".into()],
-                    outputs: vec!["Result".into()],
-                },
-                NodeView {
-                    id: "2".to_string(),
-                    func_id: "2".to_string(),
-                    title: "Output".into(),
-                    x: 550.0,
-                    y: 50.0,
-                    inputs: vec!["Value".into()],
-                    outputs: vec![],
-                },
-            ],
-            connections: vec![
-                ConnectionView {
-                    from_node_id: "0".to_string(),
-                    from_index: 0,
-                    to_node_id: "1".to_string(),
-                    to_index: 0,
-                },
-                ConnectionView {
-                    from_node_id: "1".to_string(),
-                    from_index: 0,
-                    to_node_id: "2".to_string(),
-                    to_index: 0,
-                },
-            ],
-            view_scale: 1.0,
-            view_x: 0.0,
-            view_y: 0.0,
-        };
-        gv.connections.clear();
-
-        let mut ctx = context.lock();
-        ctx.graph_view = gv;
-
-        // minimal function library for node creation
-        let func_id = FuncId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let func = Func {
-            id: func_id,
-            name: "Test".into(),
-            category: "".into(),
-            description: None,
-            behavior: FuncBehavior::Active,
-            is_output: false,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![],
-        };
-        let mut lib = FuncLib::default();
-        lib.add(func);
-        ctx.func_lib = lib;
-        ctx.graph = Graph::default();
-    }
+    use tauri::{App, Manager, State};
 
     fn create_app_state() -> App<MockRuntime> {
         let mut app_state = AppState::default();
@@ -336,23 +289,24 @@ mod tests {
         app_state.ctx.graph = Graph::default();
 
         let app = tauri::test::mock_app();
-        app.manage(Mutex::new(app_state));
+        app.manage(ParkingMutex::new(app_state));
 
         app
     }
 
     #[test]
     fn add_connection_persists() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
+
         let conn = ConnectionView {
             from_node_id: "0".to_string(),
             from_index: 0,
             to_node_id: "1".to_string(),
             to_index: 0,
         };
-        add_connection_to_graph_view(conn.clone());
-        let gv = &context.lock().graph_view;
+        add_connection_to_graph_view(state.clone(), conn.clone());
+        let gv = &state.lock().ctx.graph_view;
         assert!(gv
             .connections
             .iter()
@@ -364,8 +318,8 @@ mod tests {
 
     #[test]
     fn remove_connections_persists() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
 
         let c1 = ConnectionView {
             from_node_id: "0".to_string(),
@@ -380,22 +334,19 @@ mod tests {
             to_index: 0,
         };
         {
-            context.lock().graph_view.connections = vec![c1.clone(), c2.clone()];
+            state.lock().ctx.graph_view.connections = vec![c1.clone(), c2.clone()];
         }
-        remove_connections_from_graph_view(vec![c1.clone()]);
+        remove_connections_from_graph_view(state.clone(), vec![c1.clone()]);
 
-        assert!(!context
-            .lock()
-            .graph_view
+        let gv = &state.lock().ctx.graph_view;
+        assert!(!gv
             .connections
             .iter()
             .any(|c| c.from_node_id == c1.from_node_id
                 && c.from_index == c1.from_index
                 && c.to_node_id == c1.to_node_id
                 && c.to_index == c1.to_index));
-        assert!(context
-            .lock()
-            .graph_view
+        assert!(gv
             .connections
             .iter()
             .any(|c| c.from_node_id == c2.from_node_id
@@ -406,13 +357,12 @@ mod tests {
 
     #[test]
     fn remove_node_persists() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
-        remove_node_from_graph_view("1");
-        assert!(!context.lock().graph_view.nodes.iter().any(|n| n.id == "1"));
-        assert!(!context
-            .lock()
-            .graph_view
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
+        remove_node_from_graph_view(state.clone(), "1");
+        let gv = &state.lock().ctx.graph_view;
+        assert!(!gv.nodes.iter().any(|n| n.id == "1"));
+        assert!(!gv
             .connections
             .iter()
             .any(|c| c.from_node_id == "1" || c.to_node_id == "1"));
@@ -421,12 +371,18 @@ mod tests {
     #[test]
     fn create_node_persists() {
         let app = create_app_state();
-        let state = app.state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
 
-        let node = create_node(state, "00000000-0000-0000-0000-000000000001");
-        let ctx = context.lock();
-        assert!(ctx.graph_view.nodes.iter().any(|n| n.id == node.id));
-        assert!(ctx
+        let node = create_node(state.clone(), "00000000-0000-0000-0000-000000000001");
+        let app_state = state.lock();
+        assert!(app_state
+            .ctx
+            .graph_view
+            .nodes
+            .iter()
+            .any(|n| n.id == node.id));
+        assert!(app_state
+            .ctx
             .graph
             .nodes()
             .iter()
@@ -436,21 +392,21 @@ mod tests {
 
     #[test]
     fn get_node_by_id_none() {
-        let result = std::panic::catch_unwind(|| {
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
             let app = create_app_state();
-            let state = app.state();
+            let state: State<'_, ParkingMutex<AppState>> = app.state();
 
             get_node_by_id(state, "999");
-        });
+        }));
         assert!(result.is_err());
     }
 
     #[test]
     fn update_graph_persists() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
-        update_graph(2.0, 5.0, 6.0);
-        let gv = &context.lock().graph_view;
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
+        update_graph(state.clone(), 2.0, 5.0, 6.0);
+        let gv = &state.lock().ctx.graph_view;
         assert_eq!(gv.view_scale, 2.0);
         assert_eq!(gv.view_x, 5.0);
         assert_eq!(gv.view_y, 6.0);
@@ -458,9 +414,9 @@ mod tests {
 
     #[test]
     fn debug_assert_graph_view_matches() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
-        let gv = get_graph_view();
-        debug_assert_graph_view(gv);
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
+        let gv = get_graph_view(state.clone());
+        debug_assert_graph_view(state, gv);
     }
 }

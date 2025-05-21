@@ -1,6 +1,8 @@
-use crate::ctx::context;
+use crate::AppState;
 use graph::function::FuncLib;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -35,14 +37,15 @@ impl From<&FuncLib> for FuncLibraryView {
 }
 
 #[tauri::command]
-pub(crate) fn get_func_library() -> FuncLibraryView {
-    context.lock().func_library_view.clone()
+pub(crate) fn get_func_library(state: State<'_, Mutex<AppState>>) -> FuncLibraryView {
+    state.lock().ctx.func_library_view.clone()
 }
 
 #[tauri::command]
-pub(crate) fn get_func_by_id(id: &str) -> FuncView {
-    context
+pub(crate) fn get_func_by_id(state: State<'_, Mutex<AppState>>, id: &str) -> FuncView {
+    state
         .lock()
+        .ctx
         .func_library_view
         .funcs
         .iter()
@@ -54,8 +57,13 @@ pub(crate) fn get_func_by_id(id: &str) -> FuncView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parking_lot::Mutex as ParkingMutex;
+    use std::panic::AssertUnwindSafe;
+    use tauri::test::MockRuntime;
+    use tauri::{App, Manager, State};
 
-    fn reset_context() {
+    fn create_app_state() -> App<MockRuntime> {
+        let mut app_state = AppState::default();
         let func_library_view = FuncLibraryView {
             funcs: vec![
                 FuncView {
@@ -75,24 +83,30 @@ mod tests {
                 },
             ],
         };
-        context.lock().func_library_view = func_library_view;
+        app_state.ctx.func_library_view = func_library_view;
+
+        let app = tauri::test::mock_app();
+        app.manage(ParkingMutex::new(app_state));
+        app
     }
 
     #[test]
     fn get_func_by_id_returns_func() {
-        reset_context();
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
 
-        let f = get_func_by_id("1");
+        let f = get_func_by_id(state, "1");
         assert_eq!(f.title, "Multiply");
     }
 
     #[test]
     fn get_func_by_id_none() {
-        reset_context();
+        let app = create_app_state();
+        let state: State<'_, ParkingMutex<AppState>> = app.state();
 
-        let result = std::panic::catch_unwind(|| {
-            get_func_by_id("999");
-        });
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            get_func_by_id(state, "999");
+        }));
         assert!(result.is_err());
     }
 }
