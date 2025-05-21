@@ -1,7 +1,8 @@
 
+### Use Svelte 5 runes syntax instead of Svelte 3 `$:` syntax
 
-## Component events
-### createEventDispatcher is deprecated
+
+### Svelte createEventDispatcher is deprecated
 
 In Svelte 4, components could emit events by creating a dispatcher with createEventDispatcher.
 
