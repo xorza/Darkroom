@@ -220,6 +220,9 @@
 
         graphView.nodes = [...graphView.nodes, node];
         graphView.selectedNodeIds = new Set([nextId]);
+        invoke('add_node_to_graph_view', { node }).catch((e) => {
+            console.error('Failed to persist new node', e);
+        });
 
         newNodeDrag = {id: nextId, pointerId: event.pointerId};
         mainContainerEl.setPointerCapture(event.pointerId);
@@ -293,7 +296,10 @@
                 toIndex: to.index
             };
 
-            graphView.connections.concat([newConnection]);
+            graphView.connections = [
+                ...graphView.connections,
+                newConnection
+            ];
         }
 
         pendingConnection = null;

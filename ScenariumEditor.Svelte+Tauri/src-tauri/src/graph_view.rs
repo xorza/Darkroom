@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use crate::ctx::context;
 
 #[derive(Serialize, Clone)]
@@ -26,7 +26,7 @@ pub(crate) struct ConnectionView {
     to_index: u32,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
     id: u32,
@@ -104,6 +104,12 @@ impl Default for GraphView {
 }
 
 #[tauri::command]
-pub(crate) fn get_graph_view() -> &'static GraphView {
-    &context.graph_view
+pub(crate) fn get_graph_view() -> GraphView {
+    context.graph_view.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub(crate) fn add_node_to_graph_view(node: NodeView)  {
+    let mut gv = context.graph_view.lock().unwrap();
+    gv.nodes.push(node);
 }
