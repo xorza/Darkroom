@@ -125,13 +125,14 @@
             onpointerup={onPointerUp}
             onpointercancel={onPointerUp}
     >
-        <button
-                class="btn btn-xs p-0 absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4"
-                onclick={() => remove?.(nodeView.id)}
-        >
-            x
-        </button>
+
         {nodeView.title}
+
+        <button
+                class="btn btn-xs absolute right-0 top-0 rounded-full bg-red-500 text-white hover:bg-red-600"
+                onclick={() => remove?.(nodeView.id)}
+        >x
+        </button>
     </h3>
     <div class="flex flex-row gap-1">
         <div
