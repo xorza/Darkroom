@@ -1,11 +1,11 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { invoke } from '@tauri-apps/api/core';
-    import type {FuncLibraryItem} from "$lib/types";
+    import type {FuncLibraryView, FuncView} from "$lib/types";
 
     interface FuncLibraryProps {
         close: () => void;
-        startDrag?: (item: FuncLibraryItem, event: PointerEvent) => void;
+        startDrag?: (item: FuncView, event: PointerEvent) => void;
         x?: number;
         y?: number;
     }
@@ -17,20 +17,22 @@
         y = 0,
     }: FuncLibraryProps = $props();
 
-    let items: FuncLibraryItem[] = $state([])
+    let func_library: FuncLibraryView = $state({
+        funcs: [],
+    });
     let search = $state('');
 
     onMount(async () => {
         try {
-            items = await invoke<FuncLibraryItem[]>('get_func_library');
-            console.log('Node library items:', items);
+            func_library = await invoke<FuncLibraryView>('get_func_library');
+            console.log('Node library items:', func_library);
         } catch (e) {
             console.error('Failed to load node library', e);
         }
     });
 
     const filtered = $derived(() =>
-        items.filter(
+        func_library.funcs.filter(
             (i) =>
                 i.title.toLowerCase().includes(search.toLowerCase()) ||
                 i.description.toLowerCase().includes(search.toLowerCase())
@@ -42,7 +44,7 @@
     let startY = 0;
     let dragging = false;
 
-    let itemDragging: FuncLibraryItem | null = null;
+    let itemDragging: FuncView | null = null;
     let itemPointerId = 0;
 
     function onPointerDown(event: PointerEvent) {
@@ -64,7 +66,7 @@
         panel.releasePointerCapture(event.pointerId);
     }
 
-    function onItemPointerDown(item: FuncLibraryItem, event: PointerEvent) {
+    function onItemPointerDown(item: FuncView, event: PointerEvent) {
         if (event.button !== 0) return;
         itemDragging = item;
         itemPointerId = event.pointerId;

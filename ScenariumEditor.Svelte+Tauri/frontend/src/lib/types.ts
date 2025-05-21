@@ -31,10 +31,14 @@ interface GraphView {
     selectedNodeIds: Set<number>
 }
 
-interface FuncLibraryItem {
+interface FuncView {
     id: number;
     title: string;
     description: string;
+}
+
+interface FuncLibraryView {
+    funcs: FuncView[];
 }
 
 export type {
@@ -42,5 +46,6 @@ export type {
     ConnectionView,
     GraphView,
     Pin,
-    FuncLibraryItem
+    FuncView,
+    FuncLibraryView
 }

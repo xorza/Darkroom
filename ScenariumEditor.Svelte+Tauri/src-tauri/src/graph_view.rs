@@ -1,5 +1,5 @@
 use serde::Serialize;
-
+use crate::ctx::context;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -104,6 +104,6 @@ impl Default for GraphView {
 }
 
 #[tauri::command]
-pub(crate) fn get_graph_view() -> GraphView {
-    GraphView::default()
+pub(crate) fn get_graph_view() -> &'static GraphView {
+    &context.graph_view
 }

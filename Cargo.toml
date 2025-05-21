@@ -35,5 +35,7 @@ hashbrown = { version = "0.15", features = ["serde"] }
 bytes = { version = "1.10" }
 lazy_static = "1.5"
 mlua = { version = "0.11.0-beta.1", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
-
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-build = { version = "2", features = [] }
 

@@ -1,8 +1,9 @@
 mod graph_view;
-mod func_library;
+mod func_library_view;
+mod ctx;
 
 use crate::graph_view::get_graph_view;
-use crate::func_library::get_func_library;
+use crate::func_library_view::get_func_library;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

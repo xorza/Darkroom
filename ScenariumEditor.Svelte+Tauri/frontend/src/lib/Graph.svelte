@@ -1,7 +1,7 @@
 <script lang="ts">
     import Node from '$lib/Node.svelte';
     import FuncLibrary from '$lib/FuncLibrary.svelte';
-    import type {GraphView, ConnectionView, Pin, NodeView, FuncLibraryItem} from "$lib/types";
+    import type {GraphView, ConnectionView, Pin, NodeView, FuncView} from "$lib/types";
 
 
     import {onMount} from 'svelte';
@@ -188,7 +188,7 @@
         trigger++;
     }
 
-    function startFuncDrag(item: FuncLibraryItem, event: PointerEvent) {
+    function startFuncDrag(item: FuncView, event: PointerEvent) {
         const rect = mainContainerEl.getBoundingClientRect();
         const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
         const y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
