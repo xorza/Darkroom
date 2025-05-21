@@ -254,10 +254,10 @@
         const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
         const y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
 
-        // todo: create backend function to create a node `create_node`
+        mainContainerEl.setPointerCapture(event.pointerId);
         try {
             // Persist the node before it becomes part of the view or is selected.
-            const node: NodeView = await invoke<NodeView>('create_node', {func_id: item.id});
+            const node: NodeView = await invoke<NodeView>('create_node', {funcId: item.id});
             node.x = x;
             node.y = y;
 
@@ -269,9 +269,7 @@
             return;
         }
 
-        // Capture the pointer early so we don't lose move events while waiting
-        // for the backend to persist the node.
-        mainContainerEl.setPointerCapture(event.pointerId);
+
 
         updateSelection();
         await verifyGraphView();

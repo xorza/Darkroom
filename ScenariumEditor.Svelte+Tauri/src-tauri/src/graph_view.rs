@@ -1,5 +1,8 @@
 use crate::ctx::context;
+use graph::function::FuncId;
+use graph::graph::Node;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -111,6 +114,35 @@ pub(crate) fn remove_node_from_graph_view(id: &str) {
 }
 
 #[tauri::command]
+pub(crate) fn create_node(func_id: &str) -> NodeView {
+    let func_id = FuncId::from_str(func_id).expect("Invalid func id");
+
+    let mut ctx = context.lock();
+    let func = ctx
+        .func_lib
+        .func_by_id(func_id)
+        .cloned()
+        .expect("Function not found");
+
+    let node = Node::from_function(&func);
+    ctx.graph.add_node(node.clone());
+
+    let node_view = NodeView {
+        id: node.id.to_string(),
+        func_id: node.func_id.to_string(),
+        x: 0.0,
+        y: 0.0,
+        title: func.name.clone(),
+        inputs: func.inputs.iter().map(|i| i.name.clone()).collect(),
+        outputs: func.outputs.iter().map(|o| o.name.clone()).collect(),
+    };
+
+    ctx.graph_view.nodes.push(node_view.clone());
+
+    node_view
+}
+
+#[tauri::command]
 pub(crate) fn update_node(id: &str, x: f32, y: f32) {
     let mut ctx = context.lock();
     if let Some(node) = ctx.graph_view.nodes.iter_mut().find(|n| n.id == id) {
@@ -141,6 +173,15 @@ pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use graph::function::{Func, FuncBehavior, FuncId, FuncLib};
+    use graph::graph::Graph;
+    use lazy_static::lazy_static;
+    use std::str::FromStr;
+    use std::sync::Mutex;
+
+    lazy_static! {
+        static ref TEST_MUTEX: Mutex<()> = Mutex::new(());
+    }
 
     fn reset_context() {
         let mut gv = GraphView {
@@ -193,11 +234,31 @@ mod tests {
         };
         gv.connections.clear();
 
-        context.lock().graph_view = gv;
+        let mut ctx = context.lock();
+        ctx.graph_view = gv;
+
+        // minimal function library for node creation
+        let func_id = FuncId::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let func = Func {
+            id: func_id,
+            name: "Test".into(),
+            category: "".into(),
+            description: None,
+            behavior: FuncBehavior::Active,
+            is_output: false,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec![],
+        };
+        let mut lib = FuncLib::default();
+        lib.add(func);
+        ctx.func_lib = lib;
+        ctx.graph = Graph::default();
     }
 
     #[test]
     fn add_connection_persists() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
         let conn = ConnectionView {
             from_node_id: "0".to_string(),
@@ -218,6 +279,7 @@ mod tests {
 
     #[test]
     fn remove_connections_persists() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
 
         let c1 = ConnectionView {
@@ -259,6 +321,7 @@ mod tests {
 
     #[test]
     fn remove_node_persists() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
         remove_node_from_graph_view("1");
         assert!(!context.lock().graph_view.nodes.iter().any(|n| n.id == "1"));
@@ -271,7 +334,23 @@ mod tests {
     }
 
     #[test]
+    fn create_node_persists() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        reset_context();
+        let node = create_node("00000000-0000-0000-0000-000000000001");
+        let ctx = context.lock();
+        assert!(ctx.graph_view.nodes.iter().any(|n| n.id == node.id));
+        assert!(ctx
+            .graph
+            .nodes()
+            .iter()
+            .any(|n| n.id.to_string() == node.id));
+        assert_eq!(node.func_id, "00000000-0000-0000-0000-000000000001");
+    }
+
+    #[test]
     fn get_node_by_id_none() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
         let result = std::panic::catch_unwind(|| {
             get_node_by_id("999");
@@ -281,6 +360,7 @@ mod tests {
 
     #[test]
     fn update_graph_persists() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
         update_graph(2.0, 5.0, 6.0);
         let gv = &context.lock().graph_view;
@@ -291,6 +371,7 @@ mod tests {
 
     #[test]
     fn debug_assert_graph_view_matches() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         reset_context();
         let gv = get_graph_view();
         debug_assert_graph_view(gv);

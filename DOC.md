@@ -41,7 +41,8 @@ Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Sv
 - It can be fetched in the editor via the `get_func_library` Tauri command and is backed by data such as `test_resources/test_funcs.yml`.
 - Individual functions can be retrieved with the `get_func_by_id` command.
 - Nodes can be retrieved with the `get_node_by_id` command.
-- **Graph view** – contains the current nodes and connections. Use `get_graph_view` to fetch it and `add_node_to_graph_view` to persist new nodes created in the editor.
+- Use `create_node` to create a new node from a function id.
+- **Graph view** – contains the current nodes and connections. Use `get_graph_view` to fetch it and `create_node` to spawn new nodes from a function id.
 - Use `add_connection_to_graph_view` to persist a single connection and `remove_connections_from_graph_view` to delete one or more connections.
 - Use `remove_node_from_graph_view` to delete a node along with all of its connections.
 - Use `update_node` to persist node position changes when dragging ends.
