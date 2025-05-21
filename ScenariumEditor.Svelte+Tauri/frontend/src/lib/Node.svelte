@@ -1,7 +1,6 @@
 <script lang="ts">
     import type {NodeView} from "$lib/types";
     import type {Pin} from "$lib/types";
-    import {onDestroy} from 'svelte';
 
     interface NodeProps {
         nodeView: NodeView;
@@ -12,14 +11,12 @@
 
         selected: boolean;
 
-        registerPin?: (detail: Pin & { el: HTMLElement }) => void;
         connectionStart?: (detail: Pin & { x: number; y: number }) => void;
         connectionEnd?: (pin: Pin) => void;
         drag?: (detail: { nodeId: string; dx: number; dy: number }) => void;
         dragEnd?: (nodeId: string) => void;
         select?: (detail: { nodeId: string; shiftKey: boolean }) => void;
         remove?: (nodeId: string) => void;
-        unregisterPins?: (nodeId: string) => void;
     }
 
     let {
@@ -31,14 +28,12 @@
 
         selected = false,
 
-        registerPin,
         connectionStart,
         connectionEnd,
         drag,
         dragEnd,
         select,
         remove,
-        unregisterPins,
     }: NodeProps = $props();
 
     let panel: HTMLDivElement;
@@ -71,21 +66,6 @@
         panel.releasePointerCapture(event.pointerId);
     }
 
-    function registerPinEl(el: HTMLElement | null, type: 'input' | 'output', index: number) {
-        if (el && registerPin) {
-            registerPin({nodeId: nodeView.id, type, index, el});
-        }
-    }
-
-    function pinAction(el: HTMLElement, params: { type: 'input' | 'output'; index: number }) {
-        registerPinEl(el, params.type, params.index);
-        return {
-            update(newParams: { type: 'input' | 'output'; index: number }) {
-                registerPinEl(el, newParams.type, newParams.index);
-            }
-        };
-    }
-
     function onPinDown(event: PointerEvent, type: 'input' | 'output', index: number) {
         if (event.button !== 0) return;
         connectionStart?.({
@@ -108,9 +88,6 @@
         select?.({nodeId: nodeView.id, shiftKey: event.shiftKey});
     }
 
-    onDestroy(() => {
-        unregisterPins?.(nodeView.id);
-    });
 </script>
 
 
@@ -151,7 +128,9 @@
                 <div class="relative pl-3 pr-2 text-xs">
                     <span
                             class="absolute left-0 top-1/2 w-2.5 h-2.5 -translate-y-1/2 rounded-full bg-primary hover:bg-blue-500 transition-colors"
-                            use:pinAction={{ type: 'input', index: i }}
+                            data-pin-type="input"
+                            data-pin-index={i}
+                            data-node-id={nodeView.id}
                             onpointerdown={(e) => onPinDown(e, 'input', i)}
                             onpointerup={(e) => onPinUp(e, 'input', i)}
                     ></span>
@@ -169,7 +148,9 @@
                     {output}
                     <span
                             class="absolute right-0 top-1/2 w-2.5 h-2.5 -translate-y-1/2 rounded-full bg-primary hover:bg-blue-500 transition-colors"
-                            use:pinAction={{ type: 'output', index: i }}
+                            data-pin-type="output"
+                            data-pin-index={i}
+                            data-node-id={nodeView.id}
                             onpointerdown={(e) => onPinDown(e, 'output', i)}
                             onpointerup={(e) => onPinUp(e, 'output', i)}
                     ></span>

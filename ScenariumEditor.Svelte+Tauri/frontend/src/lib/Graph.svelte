@@ -14,7 +14,6 @@
     import {invoke} from '@tauri-apps/api/core';
 
 
-    const pins: Map<string, HTMLElement> = new Map();
     const SNAP_RADIUS = 15;
     let moveHandler: (e: PointerEvent) => void;
     let upHandler: (e: PointerEvent) => void;
@@ -160,37 +159,31 @@
         pendingConnectionPath = pendingPath();
     });
 
-
-    // Use a separator that does not appear in UUIDs to build pin keys
-    const KEY_SEP = '|';
-
-    function key(pin: Pin) {
-        return `${pin.nodeId}${KEY_SEP}${pin.type}${KEY_SEP}${pin.index}`;
+    function queryPins() {
+        return Array.from(
+            mainContainerEl.querySelectorAll('[data-pin-type]')
+        ) as HTMLElement[];
     }
 
-    function registerPin(detail: Pin & { el: HTMLElement }) {
-        const {el, ...pin} = detail;
-        pins.set(key(pin), el);
-    }
-
-    function unregisterPins(nodeId: string) {
-        for (const k of [...pins.keys()]) {
-            if (k.startsWith(`${nodeId}${KEY_SEP}`)) {
-                pins.delete(k);
-            }
-        }
-    }
-
-    function findNearestPin(x: number, y: number, startType: 'input' | 'output', startKey?: string): Pin | null {
+    function findNearestPin(x: number, y: number, startType: 'input' | 'output', startPin?: Pin): Pin | null {
         let nearest: Pin | null = null;
         let nearestDist = Infinity;
         const rect = mainContainerEl.getBoundingClientRect();
-        for (const [k, el] of pins.entries()) {
-            if (k === startKey) continue;
-            const [nodeIdStr, pinType, indexStr] = k.split(KEY_SEP);
+        for (const el of queryPins()) {
+            const pinType = el.getAttribute('data-pin-type') as 'input' | 'output';
+            const nodeId = el.getAttribute('data-node-id');
+            const indexStr = el.getAttribute('data-pin-index');
+            if (!nodeId || !indexStr) continue;
             if (pinType === startType) continue;
-            const nodeId = String(nodeIdStr);
             const index = Number(indexStr);
+            if (
+                startPin &&
+                startPin.nodeId === nodeId &&
+                startPin.type === pinType &&
+                startPin.index === index
+            ) {
+                continue;
+            }
             const r = el.getBoundingClientRect();
             const px = (r.left + r.width / 2 - rect.left - graphView.viewPosX) / graphView.viewScale;
             const py = (r.top + r.height / 2 - rect.top - graphView.viewPosY) / graphView.viewScale;
@@ -199,7 +192,7 @@
             const dist = Math.sqrt(dx * dx + dy * dy);
             if (dist < SNAP_RADIUS && dist < nearestDist) {
                 nearestDist = dist;
-                nearest = {nodeId, type: pinType as 'input' | 'output', index};
+                nearest = { nodeId, type: pinType, index };
             }
         }
 
@@ -255,7 +248,6 @@
             (c) => c.fromNodeId !== nodeId && c.toNodeId !== nodeId
         );
 
-        unregisterPins(nodeId);
         graphView.selectedNodeIds.delete(nodeId);
         updateSelection();
 
@@ -263,8 +255,6 @@
             .then(() => verifyGraphView())
             .catch((e) => console.error('Failed to remove node', e));
 
-        console.log('graphView', graphView);
-        console.log('pins', pins);
     }
 
     async function startFuncDrag(item: FuncView, event: PointerEvent) {
@@ -308,7 +298,7 @@
             start: startPin,
             x: nx,
             y: ny,
-            hover: findNearestPin(nx, ny, type, key(startPin))
+            hover: findNearestPin(nx, ny, type, startPin)
         };
         moveHandler = (e: PointerEvent) => {
             if (pendingConnection) {
@@ -316,7 +306,7 @@
                 const my = (e.clientY - rect.top - graphView.viewPosY) / graphView.viewScale;
                 pendingConnection.x = mx;
                 pendingConnection.y = my;
-                pendingConnection.hover = findNearestPin(mx, my, pendingConnection.start.type, key(pendingConnection.start));
+                pendingConnection.hover = findNearestPin(mx, my, pendingConnection.start.type, pendingConnection.start);
             }
         };
         upHandler = () => {
@@ -380,13 +370,14 @@
     }
 
     function getPinPos(pin: Pin) {
-        const el = pins.get(key(pin));
-        if (!el) return {x: 0, y: 0};
+        const selector = `[data-node-id="${pin.nodeId}"] [data-pin-type="${pin.type}"][data-pin-index="${pin.index}"]`;
+        const el = mainContainerEl.querySelector(selector) as HTMLElement | null;
+        if (!el) return { x: 0, y: 0 };
         const rect = mainContainerEl.getBoundingClientRect();
         const r = el.getBoundingClientRect();
         return {
             x: (r.left + r.width / 2 - rect.left - graphView.viewPosX) / graphView.viewScale,
-            y: (r.top + r.height / 2 - rect.top - graphView.viewPosY) / graphView.viewScale
+            y: (r.top + r.height / 2 - rect.top - graphView.viewPosY) / graphView.viewScale,
         };
     }
 
@@ -796,7 +787,6 @@
             {#each graphView.nodes as node, i}
                 <Node
                         nodeView={node}
-                        registerPin={registerPin}
                         connectionStart={startConnection}
                         connectionEnd={endConnection}
                         drag={dragNode}
