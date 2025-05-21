@@ -680,7 +680,7 @@
             role="region"
     >
         <svg
-                class="absolute top-0 left-0 w-full h-full pointer-events-none text-primary"
+                class="absolute top-0 left-0 w-full h-full pointer-events-none text-primary overflow-visible"
                 style="transform: translate({graphView.viewX}px, {graphView.viewY}px) scale({graphView.viewScale}); transform-origin: 0 0;"
         >
             {#each connectionPaths as _c, i}
