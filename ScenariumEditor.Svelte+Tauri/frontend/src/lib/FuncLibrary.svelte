@@ -24,8 +24,9 @@
 
     onMount(async () => {
         try {
-            func_library = await invoke<FuncLibraryView>('get_func_library');
-            console.log('Node library items:', func_library);
+            let data = await invoke<FuncLibraryView>('get_func_library');
+            func_library = data;
+            console.log('Loaded func library', data);
         } catch (e) {
             console.error('Failed to load node library', e);
         }

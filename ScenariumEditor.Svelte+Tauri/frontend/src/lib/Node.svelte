@@ -23,6 +23,7 @@
         connectionEnd?: (detail: CallbackDetail) => void;
         drag?: (detail: { id: number; dx: number; dy: number }) => void;
         select?: (detail: { id: number; shiftKey: boolean }) => void;
+        remove?: (id: number) => void;
     }
 
     let {
@@ -39,6 +40,7 @@
         connectionEnd,
         drag,
         select,
+        remove,
     }: NodeProps = $props();
 
     let panel: HTMLDivElement;
@@ -116,13 +118,19 @@
         onpointerdown={onNodePointerDown}
 >
     <h3
-            class="font-bold text-center text-sm pb-1 pt-1 px-4 m-0"
+            class="font-bold text-center text-sm pb-1 pt-1 px-4 m-0 relative"
             bind:this={panel}
             onpointerdown={onPointerDown}
             onpointermove={onPointerMove}
             onpointerup={onPointerUp}
             onpointercancel={onPointerUp}
     >
+        <button
+                class="btn btn-xs p-0 absolute left-0 top-1/2 -translate-y-1/2 w-4 h-4"
+                onclick={() => remove?.(nodeView.id)}
+        >
+            x
+        </button>
         {nodeView.title}
     </h3>
     <div class="flex flex-row gap-1">

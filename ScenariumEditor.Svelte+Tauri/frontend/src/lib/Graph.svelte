@@ -102,6 +102,24 @@
         selectedChange?.([...graphView.selectedNodeIds]);
     }
 
+    async function verifyGraphView() {
+        if (import.meta.env.PROD) return;
+        try {
+            await invoke('debug_assert_graph_view', {
+                graphView: {
+                    nodes: graphView.nodes,
+                    connections: graphView.connections,
+                    viewScale: graphView.viewScale,
+                    viewX: graphView.viewX,
+                    viewY: graphView.viewY,
+                    selectedNodeIds: [...graphView.selectedNodeIds]
+                }
+            });
+        } catch (e) {
+            console.error('Graph view mismatch', e);
+        }
+    }
+
 
     onMount(async () => {
         try {
@@ -114,6 +132,7 @@
             graphView.viewY = data.viewY;
             graphView.viewScale = data.viewScale;
             console.log('Graph data loaded:', data);
+            verifyGraphView();
         } catch (e) {
             console.error('Failed to load graph data', e);
         }
@@ -200,6 +219,21 @@
         trigger++;
     }
 
+    function removeNode(id: number) {
+        const beforeCount = graphView.nodes.length;
+        graphView.nodes = graphView.nodes.filter((n) => n.id !== id);
+        graphView.connections = graphView.connections.filter(
+            (c) => c.fromNodeId !== id && c.toNodeId !== id
+        );
+        graphView.selectedNodeIds.delete(id);
+        updateSelection();
+        if (graphView.nodes.length !== beforeCount) {
+            invoke('remove_node_from_graph_view', { id })
+                .then(() => verifyGraphView())
+                .catch((e) => console.error('Failed to remove node', e));
+        }
+    }
+
     function startFuncDrag(item: FuncView, event: PointerEvent) {
         const rect = mainContainerEl.getBoundingClientRect();
         const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
@@ -222,7 +256,7 @@
 
         const node: NodeView = {
             id: nextId,
-            func_id: item.id,
+            funcId: item.id,
             x,
             y,
             title: item.title,
@@ -233,9 +267,11 @@
         graphView.nodes = [...graphView.nodes, node];
         graphView.selectedNodeIds = new Set([nextId]);
         updateSelection();
-        invoke('add_node_to_graph_view', {node}).catch((e) => {
-            console.error('Failed to persist new node', e);
-        });
+        invoke('add_node_to_graph_view', {node})
+            .then(() => verifyGraphView())
+            .catch((e) => {
+                console.error('Failed to persist new node', e);
+            });
 
         newNodeDrag = {id: nextId, pointerId: event.pointerId};
         mainContainerEl.setPointerCapture(event.pointerId);
@@ -313,9 +349,11 @@
                 ...graphView.connections,
                 newConnection
             ];
-            invoke('add_connection_to_graph_view', {connection: newConnection}).catch((e) => {
-                console.error('Failed to persist new connection', e);
-            });
+            invoke('add_connection_to_graph_view', {connection: newConnection})
+                .then(() => verifyGraphView())
+                .catch((e) => {
+                    console.error('Failed to persist new connection', e);
+                });
         }
 
         pendingConnection = null;
@@ -548,9 +586,11 @@
                     )
             );
             if (removed.length > 0) {
-                invoke('remove_connections_from_graph_view', {connections: removed}).catch((e) => {
-                    console.error('Failed to remove connections', e);
-                });
+                invoke('remove_connections_from_graph_view', {connections: removed})
+                    .then(() => verifyGraphView())
+                    .catch((e) => {
+                        console.error('Failed to remove connections', e);
+                    });
             }
             cancelBreaker();
         } else if (
@@ -715,6 +755,7 @@
                         viewY={graphView.viewY}
                         selected={graphView.selectedNodeIds.has(node.id)}
                         select={onNodeSelect}
+                        remove={removeNode}
                 />
             {/each}
         </div>

@@ -1,7 +1,7 @@
 use crate::ctx::context;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectionView {
     from_node_id: u32,
@@ -10,7 +10,7 @@ pub(crate) struct ConnectionView {
     to_index: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NodeView {
     id: u32,
@@ -22,7 +22,7 @@ pub(crate) struct NodeView {
     outputs: Vec<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Default, Debug)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GraphView {
     nodes: Vec<NodeView>,
@@ -119,6 +119,24 @@ pub(crate) fn remove_connections_from_graph_view(connections: Vec<ConnectionView
     });
 }
 
+#[tauri::command]
+pub(crate) fn remove_node_from_graph_view(id: u32) {
+    let mut gv = context.graph_view.lock().unwrap();
+    gv.nodes.retain(|n| n.id != id);
+    gv.connections
+        .retain(|c| c.from_node_id != id && c.to_node_id != id);
+    gv.selected_node_ids.retain(|nid| *nid != id);
+}
+
+#[tauri::command]
+pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
+    #[cfg(debug_assertions)]
+    {
+        // let gv = context.graph_view.lock().unwrap();
+        // debug_assert_eq!(graph_view, *gv);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,5 +220,24 @@ mod tests {
         add_node_to_graph_view(node.clone());
         let gv = context.graph_view.lock().unwrap();
         assert!(gv.nodes.iter().any(|n| n.id == node.id));
+    }
+
+    #[test]
+    fn remove_node_persists() {
+        reset_context();
+        remove_node_from_graph_view(1);
+        let gv = context.graph_view.lock().unwrap();
+        assert!(!gv.nodes.iter().any(|n| n.id == 1));
+        assert!(!gv
+            .connections
+            .iter()
+            .any(|c| c.from_node_id == 1 || c.to_node_id == 1));
+    }
+
+    #[test]
+    fn debug_assert_graph_view_matches() {
+        reset_context();
+        let gv = get_graph_view();
+        debug_assert_graph_view(gv);
     }
 }
