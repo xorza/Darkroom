@@ -2,13 +2,13 @@
     import { onMount } from 'svelte';
     import { invoke } from '@tauri-apps/api/core';
 
-    interface NodeLibraryProps {
+    interface FuncLibraryProps {
         close: () => void;
         x?: number;
         y?: number;
     }
 
-    interface NodeLibraryItem {
+    interface FuncLibraryItem {
         id: number;
         title: string;
         description: string;
@@ -18,14 +18,14 @@
         close,
         x = 0,
         y = 0,
-    }: NodeLibraryProps = $props();
+    }: FuncLibraryProps = $props();
 
-    let items: NodeLibraryItem[] = $state([])
+    let items: FuncLibraryItem[] = $state([])
     let search = $state('');
 
     onMount(async () => {
         try {
-            items = await invoke<NodeLibraryItem[]>('get_node_library');
+            items = await invoke<FuncLibraryItem[]>('get_func_library');
             console.log('Node library items:', items);
         } catch (e) {
             console.error('Failed to load node library', e);
@@ -68,7 +68,7 @@
 <button
         class="absolute top-0 left-0 w-full h-full flex items-start justify-start bg-black/30 p-4"
         onclick={close}
-        aria-label="Close Node Library"
+        aria-label="Close Func Library"
 >
 </button>
 

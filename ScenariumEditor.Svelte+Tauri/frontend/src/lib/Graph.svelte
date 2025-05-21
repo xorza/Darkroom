@@ -1,6 +1,6 @@
 <script lang="ts">
     import Node from '$lib/Node.svelte';
-    import NodeLibrary from '$lib/NodeLibrary.svelte';
+    import FuncLibrary from '$lib/FuncLibrary.svelte';
     import type {GraphView, ConnectionView, Pin} from "$lib/types";
     import {onMount} from 'svelte';
     import {invoke} from '@tauri-apps/api/core';
@@ -61,7 +61,7 @@
     let startViewY = 0;
     let mainContainerEl: HTMLDivElement;
 
-    let showNodeLibrary = $state(false);
+    let showFuncLibrary = $state(false);
     let selection: {
         startX: number;
         startY: number;
@@ -626,10 +626,10 @@
         </div>
     </div>
 
-    <button class="btn btn-xs absolute top-2 left-2 w-5 h-5 " onclick={() => showNodeLibrary = true}>+</button>
+    <button class="btn btn-xs absolute top-2 left-2 w-5 h-5 " onclick={() => showFuncLibrary = true}>+</button>
 
-    {#if showNodeLibrary}
-        <NodeLibrary close={() => (showNodeLibrary = false)}/>
+    {#if showFuncLibrary}
+        <FuncLibrary close={() => (showFuncLibrary = false)}/>
     {/if}
 
     <div class="absolute bottom-0 left-0 w-full border-t border-base-300 bg-base-200 text-xs flex items-center  px-2 py-1">
