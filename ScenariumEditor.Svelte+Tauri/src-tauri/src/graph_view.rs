@@ -117,7 +117,10 @@ pub(crate) fn remove_node_from_graph_view(id: &str) {
 }
 
 #[tauri::command]
-pub(crate) fn create_node(func_id: &str) -> NodeView {
+pub(crate) fn create_node(
+    state: State<'_, parking_lot::Mutex<AppState>>,
+    func_id: &str,
+) -> NodeView {
     let func_id = FuncId::from_str(func_id).expect("Invalid func id");
 
     let mut ctx = context.lock();
@@ -176,12 +179,13 @@ pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ctx::Ctx;
     use graph::function::{Func, FuncBehavior, FuncId, FuncLib};
     use graph::graph::Graph;
     use lazy_static::lazy_static;
     use std::str::FromStr;
     use std::sync::Mutex;
+    use tauri::test::MockRuntime;
+    use tauri::{App, Manager};
 
     lazy_static! {
         static ref TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -260,7 +264,7 @@ mod tests {
         ctx.graph = Graph::default();
     }
 
-    fn create_state() -> State<'static, parking_lot::Mutex<AppState>> {
+    fn create_app_state() -> App<MockRuntime> {
         let mut app_state = AppState::default();
         let mut gv = GraphView {
             nodes: vec![
@@ -331,7 +335,10 @@ mod tests {
         app_state.ctx.func_lib = lib;
         app_state.ctx.graph = Graph::default();
 
-        State(&parking_lot::Mutex::new(app_state))
+        let app = tauri::test::mock_app();
+        app.manage(Mutex::new(app_state));
+
+        app
     }
 
     #[test]
@@ -413,9 +420,10 @@ mod tests {
 
     #[test]
     fn create_node_persists() {
-        let _guard = TEST_MUTEX.lock().unwrap();
-        reset_context();
-        let node = create_node("00000000-0000-0000-0000-000000000001");
+        let app = create_app_state();
+        let state = app.state();
+
+        let node = create_node(state, "00000000-0000-0000-0000-000000000001");
         let ctx = context.lock();
         assert!(ctx.graph_view.nodes.iter().any(|n| n.id == node.id));
         assert!(ctx
@@ -428,9 +436,10 @@ mod tests {
 
     #[test]
     fn get_node_by_id_none() {
-        let state = create_state();
+        let result = std::panic::catch_unwind(|| {
+            let app = create_app_state();
+            let state = app.state();
 
-        let result = std::panic::catch_unwind(move || {
             get_node_by_id(state, "999");
         });
         assert!(result.is_err());
