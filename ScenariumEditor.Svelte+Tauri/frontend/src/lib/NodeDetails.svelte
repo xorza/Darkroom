@@ -21,9 +21,8 @@
             return;
         }
         try {
-            // TODO: use the nodeId to get the function info
-            // let node = await invoke<NodeView>('get_node_by_id', {id: nodeId});
-            // func = await invoke<FuncView>('get_func_by_id', {id: node.funcId});
+            const node = await invoke<NodeView>('get_node_by_id', {id: nodeId});
+            func = await invoke<FuncView>('get_func_by_id', {id: node.funcId});
         } catch (e) {
             console.error('Failed to load function info', e);
             func = null;

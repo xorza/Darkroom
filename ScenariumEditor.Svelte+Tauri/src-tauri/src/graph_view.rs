@@ -114,6 +114,15 @@ pub(crate) fn get_graph_view() -> GraphView {
 }
 
 #[tauri::command]
+pub(crate) fn get_node_by_id(id: u32) -> NodeView {
+    let node = {
+        let gv = context.graph_view.lock().unwrap();
+        gv.nodes.iter().find(|n| n.id == id).cloned()
+    };
+    node.expect("Node not found")
+}
+
+#[tauri::command]
 pub(crate) fn add_node_to_graph_view(node: NodeView) {
     let mut gv = context.graph_view.lock().unwrap();
     gv.nodes.push(node);
@@ -271,6 +280,32 @@ mod tests {
             .connections
             .iter()
             .any(|c| c.from_node_id == 1 || c.to_node_id == 1));
+    }
+
+    #[test]
+    fn get_node_by_id_returns_node() {
+        reset_context();
+        let node = NodeView {
+            id: 1,
+            func_id: 1,
+            x: 0.0,
+            y: 0.0,
+            title: "Test".into(),
+            inputs: vec![],
+            outputs: vec![],
+        };
+        add_node_to_graph_view(node.clone());
+        let result = get_node_by_id(1);
+        assert_eq!(result.id, node.id);
+    }
+
+    #[test]
+    fn get_node_by_id_none() {
+        reset_context();
+        let result = std::panic::catch_unwind(|| {
+            get_node_by_id(999);
+        });
+        assert!(result.is_err());
     }
 
     #[test]
