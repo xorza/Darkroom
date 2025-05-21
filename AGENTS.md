@@ -24,7 +24,6 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
   - Use `cargo clippy` to run the linter.
   - Use `cargo fmt` to format the code.
 - For Svelte projects:
-  - Use prettier to format the code and eslint to lint the code.
   - Use Svelte 5 runes syntax instead of Svelte 3 `$:` syntax.
   - Use Svelte 5's callback props instead of `createEventDispatcher` for event handling. `createEventDispatcher` is deprecated in Svelte 5.
   - Put shared TS types in [types.ts](ScenariumEditor.Svelte%2BTauri/frontend/src/lib/types.ts) and import them in the components.
