@@ -1,21 +1,18 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { invoke } from '@tauri-apps/api/core';
+    import type {FuncLibraryItem} from "$lib/types";
 
     interface FuncLibraryProps {
         close: () => void;
+        startDrag?: (item: FuncLibraryItem, event: PointerEvent) => void;
         x?: number;
         y?: number;
     }
 
-    interface FuncLibraryItem {
-        id: number;
-        title: string;
-        description: string;
-    }
-
     let {
         close,
+        startDrag,
         x = 0,
         y = 0,
     }: FuncLibraryProps = $props();
@@ -45,6 +42,9 @@
     let startY = 0;
     let dragging = false;
 
+    let itemDragging: FuncLibraryItem | null = null;
+    let itemPointerId = 0;
+
     function onPointerDown(event: PointerEvent) {
         if (event.button !== 0) return;
         dragging = true;
@@ -62,6 +62,36 @@
     function onPointerUp(event: PointerEvent) {
         dragging = false;
         panel.releasePointerCapture(event.pointerId);
+    }
+
+    function onItemPointerDown(item: FuncLibraryItem, event: PointerEvent) {
+        if (event.button !== 0) return;
+        itemDragging = item;
+        itemPointerId = event.pointerId;
+        (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    }
+
+    function onItemPointerMove(event: PointerEvent) {
+        if (!itemDragging || event.pointerId !== itemPointerId) return;
+        const rect = panel.getBoundingClientRect();
+        const inside =
+            event.clientX >= rect.left &&
+            event.clientX <= rect.right &&
+            event.clientY >= rect.top &&
+            event.clientY <= rect.bottom;
+        if (!inside) {
+            (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+            startDrag?.(itemDragging, event);
+            itemDragging = null;
+            close();
+        }
+    }
+
+    function onItemPointerUp(event: PointerEvent) {
+        if (itemDragging && event.pointerId === itemPointerId) {
+            (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId);
+            itemDragging = null;
+        }
     }
 </script>
 
@@ -99,6 +129,10 @@
         {#each filtered() as item (item.id)}
             <li
                     class="px-1 py-0.5 text-xs border-b border-base-300 last:border-0 hover:bg-base-300/50 rounded-sm cursor-pointer"
+                    onpointerdown={(e) => onItemPointerDown(item, e)}
+                    onpointermove={onItemPointerMove}
+                    onpointerup={onItemPointerUp}
+                    onpointercancel={onItemPointerUp}
             >
                 <span class="font-semibold block">{item.title}</span>
                 <span class="opacity-75">{item.description}</span>

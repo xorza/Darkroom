@@ -10,6 +10,8 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
 
 - Use Svelte 5 runes syntax instead of Svelte 3 `$:` syntax.
 - Use Svelte 5's callback props instead of `createEventDispatcher` for event handling. `createEventDispatcher` is deprecated in Svelte 5.
+- Put Shared TS types in [types.ts](ScenariumEditor.Svelte%2BTauri/frontend/src/lib/types.ts) and import them in the components.
+Do not duplicate types in multiple files.
 - OpenAI Codex should follow the existing code style in each file.
 - Do not use Javascript. Use TypeScript instead.
 - Add comments for complex logic

@@ -28,7 +28,7 @@ Data structures life graph and funtion library can be serialized to YAML files.
 Runtime execution is handled by the `runtime_graph` module which determines which nodes should run each tick.
 
 ### Svelte + Tauri editor
-Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Svelte UI while `src-tauri` contains the Rust code that exposes commands to the UI. The editor displays nodes and connections, allows panning/zooming and exposes a **Function Library** panel for inserting nodes. Functions in this panel are highlighted on hover and presented in a compact list for easier browsing.
+Located in `ScenariumEditor.Svelte+Tauri`. The `frontend` folder contains the Svelte UI while `src-tauri` contains the Rust code that exposes commands to the UI. The editor displays nodes and connections, allows panning/zooming and exposes a **Function Library** panel for inserting nodes. Functions in this panel are highlighted on hover and presented in a compact list for easier browsing. Dragging a function out of the panel spawns a new node that follows the cursor until the mouse button is released.
 
 ## Common Terms
 

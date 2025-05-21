@@ -1,7 +1,9 @@
 <script lang="ts">
     import Node from '$lib/Node.svelte';
     import FuncLibrary from '$lib/FuncLibrary.svelte';
-    import type {GraphView, ConnectionView, Pin} from "$lib/types";
+    import type {GraphView, ConnectionView, Pin, NodeView, FuncLibraryItem} from "$lib/types";
+
+
     import {onMount} from 'svelte';
     import {invoke} from '@tauri-apps/api/core';
 
@@ -62,6 +64,10 @@
     let mainContainerEl: HTMLDivElement;
 
     let showFuncLibrary = $state(false);
+    let newNodeDrag: {
+        id: number;
+        pointerId: number;
+    } | null = $state(null);
     let selection: {
         startX: number;
         startY: number;
@@ -180,6 +186,44 @@
         }
 
         trigger++;
+    }
+
+    function startFuncDrag(item: FuncLibraryItem, event: PointerEvent) {
+        const rect = mainContainerEl.getBoundingClientRect();
+        const x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
+        const y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
+
+        const nextId =
+            graphView.nodes.length > 0
+                ? Math.max(...graphView.nodes.map((n) => n.id)) + 1
+                : 0;
+
+        let inputs: string[] = [];
+        let outputs: string[] = [];
+        if (item.title === 'Add' || item.title === 'Multiply') {
+            inputs = ['A', 'B'];
+            outputs = ['Result'];
+        } else if (item.title === 'Output') {
+            inputs = ['Value'];
+            outputs = [];
+        }
+
+        const node: NodeView = {
+            id: nextId,
+            func_id: item.id,
+            x,
+            y,
+            title: item.title,
+            inputs,
+            outputs,
+        };
+
+        graphView.nodes = [...graphView.nodes, node];
+        graphView.selectedNodeIds = new Set([nextId]);
+
+        newNodeDrag = {id: nextId, pointerId: event.pointerId};
+        mainContainerEl.setPointerCapture(event.pointerId);
+        showFuncLibrary = false;
     }
 
     function startConnection(detail: { id: number; type: 'input' | 'output'; index: number; x: number; y: number }) {
@@ -416,7 +460,14 @@
     }
 
     function onPointerMove(event: PointerEvent) {
-        if (panning) {
+        if (newNodeDrag && event.pointerId === newNodeDrag.pointerId) {
+            const node = graphView.nodes.find((n) => n.id === newNodeDrag?.id);
+            if (node) {
+                const rect = mainContainerEl.getBoundingClientRect();
+                node.x = (event.clientX - rect.left - graphView.viewX) / graphView.viewScale;
+                node.y = (event.clientY - rect.top - graphView.viewY) / graphView.viewScale;
+            }
+        } else if (panning) {
             graphView.viewX = startViewX + (event.clientX - panStartX);
             graphView.viewY = startViewY + (event.clientY - panStartY);
         } else if (connectionBreaker) {
@@ -437,7 +488,10 @@
     }
 
     function onPointerUp(event: PointerEvent) {
-        if (event.button === 1 && panning) {
+        if (newNodeDrag && event.pointerId === newNodeDrag.pointerId && event.button === 0) {
+            newNodeDrag = null;
+            mainContainerEl.releasePointerCapture(event.pointerId);
+        } else if (event.button === 1 && panning) {
             panning = false;
             mainContainerEl.releasePointerCapture(event.pointerId);
         } else if (event.button === 2 && connectionBreaker) {
@@ -629,7 +683,7 @@
     <button class="btn btn-xs absolute top-2 left-2 w-5 h-5 " onclick={() => showFuncLibrary = true}>+</button>
 
     {#if showFuncLibrary}
-        <FuncLibrary close={() => (showFuncLibrary = false)}/>
+        <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag}/>
     {/if}
 
     <div class="absolute bottom-0 left-0 w-full border-t border-base-300 bg-base-200 text-xs flex items-center  px-2 py-1">
