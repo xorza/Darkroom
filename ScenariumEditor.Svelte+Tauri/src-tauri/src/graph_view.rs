@@ -129,7 +129,7 @@ pub(crate) fn remove_node_from_graph_view(id: u32) {
 }
 
 #[tauri::command]
-pub(crate) fn debug_assert_graph_view(graph_view: GraphView) {
+pub(crate) fn debug_assert_graph_view(_graph_view: GraphView) {
     #[cfg(debug_assertions)]
     {
         // let gv = context.graph_view.lock().unwrap();
