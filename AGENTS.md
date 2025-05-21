@@ -20,11 +20,11 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
 - Use asserts to check for invalid states in the code.
 - Use asserts to validate inputs to functions.
 - For rust projects:
-  - Use cargo fmt to format the code and Clippy to lint the code.
   - Add tests for new features and bug fixes.
   - Use `cargo test --offline` to run the tests. `--offline` is required because Internet is disabled after the setup script runs.
   - Use `cargo clippy` to run the linter.
   - Use `cargo fmt` to format the code.
+  - If there are no rust code changes, skip the `cargo clippy`, `cargo fmt` and `cargo test` steps.
   - Add `Debug` derive to all structs and enums.
   - When changing structures like `Graph`, `Node`, etc., which are serialized, make sure to update yaml files in the `test_resources` folder, such as `test_graph.yml`, `test_funcs.taml`, etc.
 - For Svelte projects:
