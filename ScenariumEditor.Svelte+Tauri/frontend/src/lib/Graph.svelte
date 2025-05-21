@@ -697,7 +697,7 @@
             {/if}
         </svg>
         {#if selectionBox()}
-            <div
+            <div id="selection-box"
                     class="absolute border-2 border-blue-500 bg-blue-500/25 pointer-events-none"
                     style="left: {selectionBox()?.left}px; top: {selectionBox()?.top}px; width: {selectionBox()?.width}px; height: {selectionBox()?.height}px;"
             ></div>
