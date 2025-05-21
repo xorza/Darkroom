@@ -4,8 +4,8 @@ use std::mem::take;
 use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
-use crate::function::FuncLib;
 use crate::function::FuncBehavior;
+use crate::function::FuncLib;
 use crate::graph::{Binding, Graph, NodeId};
 use crate::invoke::InvokeCache;
 
@@ -50,9 +50,7 @@ impl RuntimeNode {
 
 impl RuntimeGraph {
     pub fn new(graph: &Graph, func_lib: &FuncLib) -> Self {
-        let runtime_graph = Self::run(graph, func_lib, &mut RuntimeGraph::default());
-
-        runtime_graph
+        Self::run(graph, func_lib, &mut RuntimeGraph::default())
     }
 
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
@@ -109,7 +107,7 @@ impl RuntimeGraph {
             active_node_ids.retain(|&x| set.insert(x));
         }
 
-        let r_nodes: Vec<RuntimeNode> = active_node_ids
+        active_node_ids
             .iter()
             .map(|&node_id| {
                 let node = graph.node_by_id(node_id).unwrap();
@@ -131,7 +129,7 @@ impl RuntimeGraph {
                     (InvokeCache::default(), None)
                 };
 
-                let r_node = RuntimeNode {
+                RuntimeNode {
                     id: node_id,
                     is_output: node.is_output,
                     has_missing_inputs: false,
@@ -144,13 +142,9 @@ impl RuntimeGraph {
 
                     output_binding_count: vec![0; node_info.outputs.len()],
                     total_binding_count: 0,
-                };
-
-                r_node
+                }
             })
-            .collect::<Vec<RuntimeNode>>();
-
-        r_nodes
+            .collect::<Vec<RuntimeNode>>()
     }
 
     // in forward pass, mark active nodes and nodes with missing inputs
@@ -238,17 +232,10 @@ impl RuntimeGraph {
         }
     }
 
-    #[allow(clippy::needless_bool)]
     fn is_active(r_node: &RuntimeNode) -> bool {
-        if r_node.is_output {
-            true
-        } else if r_node.output_values.is_none() {
-            true
-        } else if r_node.behavior == FuncBehavior::Active {
-            true
-        } else {
-            false
-        }
+        r_node.is_output
+            || r_node.output_values.is_none()
+            || r_node.behavior == FuncBehavior::Active
     }
 }
 

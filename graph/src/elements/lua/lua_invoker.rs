@@ -286,7 +286,7 @@ impl LuaInvoker {
             let node = nodes.last_mut().unwrap();
             node.name = func.name.clone();
 
-            for (_idx, _input_id) in connection.inputs.iter().enumerate() {
+            for _ in &connection.inputs {
                 node.inputs.push(Input {
                     binding: Binding::None,
                     const_value: None,

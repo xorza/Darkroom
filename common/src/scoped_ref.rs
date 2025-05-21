@@ -1,12 +1,17 @@
 use std::ops::{Deref, DerefMut};
 
+/// Callback executed when the scoped reference is dropped
+type DropFn<'a, T> = Box<dyn FnOnce(&T) + 'a>;
+/// Callback executed when the mutable scoped reference is dropped
+type DropFnMut<'a, T> = Box<dyn FnOnce(&mut T) + 'a>;
+
 pub struct ScopeRef<'a, T: 'a> {
     data: &'a T,
-    on_drop: Option<Box<dyn FnOnce(&T)>>,
+    on_drop: Option<DropFn<'a, T>>,
 }
 pub struct ScopeRefMut<'a, T: 'a> {
     data: &'a mut T,
-    on_drop: Option<Box<dyn FnOnce(&mut T)>>,
+    on_drop: Option<DropFnMut<'a, T>>,
 }
 
 impl<'a, T> ScopeRef<'a, T> {

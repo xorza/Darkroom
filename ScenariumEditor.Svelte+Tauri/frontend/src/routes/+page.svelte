@@ -9,11 +9,14 @@
     }
 </script>
 
-<div class="flex h-full">
-    <div class="flex-1 relative w-96">
+<div class="flex h-screen">
+    <div class="flex-1">
         <Graph selectedChange={onSelected}/>
     </div>
-    <div class="w-64 border-l border-base-300 overflow-auto">
+
+    <div class="w-64">
         <NodeDetails funcId={single()}/>
     </div>
 </div>
+
+

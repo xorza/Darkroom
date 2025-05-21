@@ -10,6 +10,11 @@ struct LuaCtxInternal {
     lua: *mut mlua::Lua,
 }
 
+// It is safe to send and share `LuaCtxInternal` across threads because access
+// to the underlying Lua instance is synchronized through a `Mutex`.
+unsafe impl Send for LuaCtxInternal {}
+unsafe impl Sync for LuaCtxInternal {}
+
 #[derive(Debug, Clone)]
 struct LuaCtx {
     inner: Arc<Mutex<LuaCtxInternal>>,

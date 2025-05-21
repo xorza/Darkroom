@@ -7,7 +7,7 @@
         selectedChange?: (ids: number[]) => void;
     }
 
-    let { selectedChange }: GraphProps = $props();
+    let {selectedChange}: GraphProps = $props();
 
 
     import {onMount} from 'svelte';
@@ -233,7 +233,7 @@
         graphView.nodes = [...graphView.nodes, node];
         graphView.selectedNodeIds = new Set([nextId]);
         updateSelection();
-        invoke('add_node_to_graph_view', { node }).catch((e) => {
+        invoke('add_node_to_graph_view', {node}).catch((e) => {
             console.error('Failed to persist new node', e);
         });
 
@@ -313,7 +313,7 @@
                 ...graphView.connections,
                 newConnection
             ];
-            invoke('add_connection_to_graph_view', { connection: newConnection }).catch((e) => {
+            invoke('add_connection_to_graph_view', {connection: newConnection}).catch((e) => {
                 console.error('Failed to persist new connection', e);
             });
         }
@@ -548,7 +548,7 @@
                     )
             );
             if (removed.length > 0) {
-                invoke('remove_connections_from_graph_view', { connections: removed }).catch((e) => {
+                invoke('remove_connections_from_graph_view', {connections: removed}).catch((e) => {
                     console.error('Failed to remove connections', e);
                 });
             }
@@ -664,10 +664,10 @@
     }
 </script>
 
-<div class="absolute top-0 left-0 w-full h-full">
+<div class=" flex flex-col h-screen overflow-hidden">
 
     <div
-            class="absolute top-0 left-0 w-full h-full overflow-hidden graph-bg bg-base-100"
+            class="flex-1 overflow-hidden graph-bg bg-base-100"
             style="background-position: {bgX()}px {bgY()}px; background-size: {dotSpacing()}px {dotSpacing()}px;"
             id="main-container"
             bind:this={mainContainerEl}
@@ -680,7 +680,7 @@
             role="region"
     >
         <svg
-                class="absolute top-0 left-0 w-full h-full pointer-events-none text-primary overflow-visible"
+                class="h-screen pointer-events-none text-primary overflow-visible"
                 style="transform: translate({graphView.viewX}px, {graphView.viewY}px) scale({graphView.viewScale}); transform-origin: 0 0;"
         >
             {#each connectionPaths as _c, i}
@@ -726,7 +726,7 @@
         <FuncLibrary close={() => (showFuncLibrary = false)} startDrag={startFuncDrag}/>
     {/if}
 
-    <div class="absolute bottom-0 left-0 w-full border-t border-base-300 bg-base-200 text-xs flex items-center  px-2 py-1">
+    <div class="h-8 border-base-300 bg-base-200 text-xs flex items-center px-2 py-1">
         <button class="btn btn-xs p-1 w-8" onclick={resetZoom}>{zoomPercent()}%</button>
         <button class="btn btn-xs p-1" onclick={centerView}>Center</button>
         <button class="btn btn-xs p-1" onclick={fitView}>Fit</button>

@@ -32,7 +32,7 @@ pub fn colored_detailed_format(
         style(level).paint(record.level().to_string()),
         record.module_path().unwrap_or("<unnamed>"),
         record.line().unwrap_or(0),
-        style(level).paint(&record.args().to_string())
+        style(level).paint(record.args().to_string())
     )
 }
 
