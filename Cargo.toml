@@ -2,7 +2,7 @@
 members = [
     "common",
     "graph",
-    "cs_interop",
+    "ScenariumEditor.Svelte+Tauri/src-tauri"
 ]
 
 resolver = "2"
@@ -10,6 +10,7 @@ resolver = "2"
 [workspace.dependencies]
 common = { path = "common" }
 graph = { path = "graph" }
+editor = { path = "ScenariumEditor.Svelte+Tauri/src-tauri" }
 
 imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 

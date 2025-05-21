@@ -27,3 +27,4 @@ impl From<&ColorFormat> for wgpu::TextureFormat {
         }
     }
 }
+
