@@ -1,8 +1,7 @@
 [workspace]
 members = [
     "common",
-    "graph",
-    "ScenariumEditor.Svelte+Tauri/src-tauri"
+    "graph"
 ]
 
 resolver = "2"
@@ -11,7 +10,6 @@ resolver = "2"
 [workspace.dependencies]
 common = { path = "common" }
 graph = { path = "graph" }
-scenarium_editor = { path = "ScenariumEditor.Svelte+Tauri/src-tauri" }
 
 imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
@@ -36,9 +34,7 @@ hashbrown = { version = "0.15", features = ["serde"] }
 bytes = { version = "1.10" }
 lazy_static = "1.5"
 mlua = { version = "0.11.0-beta.1", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
-tauri = { version = "2", features = ["test"] }
-tauri-plugin-opener = "2"
-tauri-build = { version = "2", features = [ ] }
+
 
 [workspace.lints.rust]
 unused_crate_dependencies = "allow"
