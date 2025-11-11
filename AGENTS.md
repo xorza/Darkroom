@@ -1,6 +1,6 @@
 # Project Agents.md Guide for OpenAI Codex and other AI agents
 
-This Agents.md file provides comprehensive guidance for OpenAI Codex and other AI agents working with this codebase.
+This Agents.md file provides comprehensive guidance for AI agents working with this codebase.
 
 ## Project Overview
 
@@ -9,7 +9,6 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
 ## Coding Conventions
 
 - Follow the existing code style in each file.
-- Do not use Javascript. Use TypeScript instead.
 - Add comments for complex logic
 - Use meaningful variable and function names
 - Update the documentation in the [DOC.md](DOC.md) file to reflect current state of the project.
@@ -27,9 +26,3 @@ This Agents.md file provides comprehensive guidance for OpenAI Codex and other A
   - If there are no rust code changes, skip the `cargo clippy`, `cargo fmt` and `cargo test` steps.
   - Add `Debug` derive to all structs and enums.
   - When changing structures like `Graph`, `Node`, etc., which are serialized, make sure to update yaml files in the `test_resources` folder, such as `test_graph.yml`, `test_funcs.taml`, etc.
-- For Svelte projects:
-  - Use Svelte 5 runes syntax instead of Svelte 3 `$:` syntax.
-  - Use Svelte 5's callback props instead of `createEventDispatcher` for event handling. `createEventDispatcher` is deprecated in Svelte 5.
-  - Put shared TS types in [types.ts](ScenariumEditor.Svelte%2BTauri/frontend/src/lib/types.ts) and import them in the components.
-    Do not duplicate types in multiple files.
-
