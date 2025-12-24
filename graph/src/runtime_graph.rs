@@ -316,52 +316,42 @@ impl RuntimeGraph {
     ) -> Vec<NodeId> {
         let mut visit_state: HashMap<NodeId, VisitState> = HashMap::new();
         let mut ordered: Vec<NodeId> = Vec::new();
+        let mut stack: Vec<(NodeId, bool)> = Vec::new();
 
         for node in graph.nodes().iter().filter(|node| node.is_output) {
-            Self::visit_node(
-                node.id,
-                graph,
-                graph_node_index_by_id,
-                &mut visit_state,
-                &mut ordered,
-            );
+            stack.push((node.id, false));
+        }
+
+        while let Some((node_id, expanded)) = stack.pop() {
+            if expanded {
+                visit_state.insert(node_id, VisitState::Visited);
+                ordered.push(node_id);
+                continue;
+            }
+
+            match visit_state.get(&node_id) {
+                Some(VisitState::Visited) => continue,
+                Some(VisitState::Visiting) => {
+                    panic!("Cycle detected while building runtime graph");
+                }
+                None => {}
+            }
+
+            visit_state.insert(node_id, VisitState::Visiting);
+            stack.push((node_id, true));
+
+            let node_index = *graph_node_index_by_id
+                .get(&node_id)
+                .expect("Node missing from graph");
+            let node = &graph.nodes()[node_index];
+            for input in node.inputs.iter() {
+                if let Binding::Output(output_binding) = &input.binding {
+                    stack.push((output_binding.output_node_id, false));
+                }
+            }
         }
 
         ordered
-    }
-
-    fn visit_node(
-        node_id: NodeId,
-        graph: &Graph,
-        graph_node_index_by_id: &HashMap<NodeId, usize>,
-        visit_state: &mut HashMap<NodeId, VisitState>,
-        ordered: &mut Vec<NodeId>,
-    ) {
-        match visit_state.get(&node_id) {
-            Some(VisitState::Visited) => return,
-            Some(VisitState::Visiting) => {
-                panic!("Cycle detected while building runtime graph");
-            }
-            None => {}
-        }
-
-        visit_state.insert(node_id, VisitState::Visiting);
-        let node = &graph.nodes[*graph_node_index_by_id
-            .get(&node_id)
-            .expect("Node missing from graph")];
-        for input in node.inputs.iter() {
-            if let Binding::Output(output_binding) = &input.binding {
-                Self::visit_node(
-                    output_binding.output_node_id,
-                    graph,
-                    graph_node_index_by_id,
-                    visit_state,
-                    ordered,
-                );
-            }
-        }
-        visit_state.insert(node_id, VisitState::Visited);
-        ordered.push(node_id);
     }
 
     fn build_node_index(nodes: &[RuntimeNode]) -> HashMap<NodeId, usize> {
