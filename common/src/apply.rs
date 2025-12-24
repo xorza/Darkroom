@@ -1,3 +1,4 @@
+// Tiny helpers to run closures on optional values without manual `if let` checks.
 pub trait Apply<T, F>
 where
     F: FnOnce(&T),

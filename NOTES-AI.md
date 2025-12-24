@@ -31,6 +31,9 @@ The only version bump needed in this update was `wgpu` to `28.0`; other workspac
 Provides small utilities such as logging helpers, macros for unique identifier types, and miscellaneous functions.
 See `common/src` for implementation details.
 
+Recent adjustments:
+- `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
+
 ### graph crate
 
 Implements the data structures for graphs and nodes. Nodes are created from functions defined in a function library.

@@ -1,70 +1,94 @@
 use std::ops::{Deref, DerefMut};
 
-/// Callback executed when the scoped reference is dropped
-type DropFn<'a, T> = Box<dyn FnOnce(&T) + 'a>;
-/// Callback executed when the mutable scoped reference is dropped
-type DropFnMut<'a, T> = Box<dyn FnOnce(&mut T) + 'a>;
-
-pub struct ScopeRef<'a, T: 'a> {
+#[derive(Debug)]
+pub struct ScopeRef<'a, T, F>
+where
+    F: FnOnce(&T) + 'a,
+{
     data: &'a T,
-    on_drop: Option<DropFn<'a, T>>,
+    on_drop: Option<F>,
 }
-pub struct ScopeRefMut<'a, T: 'a> {
+#[derive(Debug)]
+pub struct ScopeRefMut<'a, T, F>
+where
+    F: FnOnce(&mut T) + 'a,
+{
     data: &'a mut T,
-    on_drop: Option<DropFnMut<'a, T>>,
+    on_drop: Option<F>,
 }
 
-impl<'a, T> ScopeRef<'a, T> {
-    pub fn new<F>(data: &'a T, on_drop: F) -> Self
-    where
-        F: FnOnce(&T) + 'static,
-    {
+impl<'a, T, F> ScopeRef<'a, T, F>
+where
+    F: FnOnce(&T) + 'a,
+{
+    pub fn new(data: &'a T, on_drop: F) -> Self {
         Self {
             data,
-            on_drop: Some(Box::new(on_drop)),
+            on_drop: Some(on_drop),
         }
     }
 }
-impl<'a, T> Deref for ScopeRef<'a, T> {
+impl<'a, T, F> Deref for ScopeRef<'a, T, F>
+where
+    F: FnOnce(&T) + 'a,
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.data
     }
 }
-impl<'a, T> Drop for ScopeRef<'a, T> {
+impl<'a, T, F> Drop for ScopeRef<'a, T, F>
+where
+    F: FnOnce(&T) + 'a,
+{
     fn drop(&mut self) {
-        let on_drop = self.on_drop.take().unwrap();
+        let on_drop = self
+            .on_drop
+            .take()
+            .expect("ScopeRef missing on_drop callback");
         (on_drop)(self.data);
     }
 }
 
-impl<'a, T> ScopeRefMut<'a, T> {
-    pub fn new<F>(data: &'a mut T, on_drop: F) -> Self
-    where
-        F: FnOnce(&mut T) + 'static,
-    {
+impl<'a, T, F> ScopeRefMut<'a, T, F>
+where
+    F: FnOnce(&mut T) + 'a,
+{
+    pub fn new(data: &'a mut T, on_drop: F) -> Self {
         Self {
             data,
-            on_drop: Some(Box::new(on_drop)),
+            on_drop: Some(on_drop),
         }
     }
 }
-impl<'a, T> Deref for ScopeRefMut<'a, T> {
+impl<'a, T, F> Deref for ScopeRefMut<'a, T, F>
+where
+    F: FnOnce(&mut T) + 'a,
+{
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
         self.data
     }
 }
-impl<'a, T> DerefMut for ScopeRefMut<'a, T> {
+impl<'a, T, F> DerefMut for ScopeRefMut<'a, T, F>
+where
+    F: FnOnce(&mut T) + 'a,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.data
     }
 }
-impl<'a, T> Drop for ScopeRefMut<'a, T> {
+impl<'a, T, F> Drop for ScopeRefMut<'a, T, F>
+where
+    F: FnOnce(&mut T) + 'a,
+{
     fn drop(&mut self) {
-        let on_drop = self.on_drop.take().unwrap();
+        let on_drop = self
+            .on_drop
+            .take()
+            .expect("ScopeRefMut missing on_drop callback");
         (on_drop)(self.data);
     }
 }
