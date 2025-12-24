@@ -18,14 +18,16 @@ impl Default for OutputStream {
 impl OutputStream {
     pub fn new() -> Self {
         let (sender, receiver) = unbounded_channel();
-        OutputStream {
+        Self {
             sender,
             receiver: Arc::new(Mutex::new(receiver)),
         }
     }
 
     pub fn write<S: Into<String>>(&self, s: S) {
-        let _ = self.sender.send(s.into());
+        self.sender
+            .send(s.into())
+            .expect("OutputStream receiver dropped");
     }
 
     pub async fn take(&self) -> Vec<String> {
