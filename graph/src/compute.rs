@@ -7,7 +7,7 @@ use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
 use crate::runtime_graph::RuntimeGraph;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
 #[derive(Debug, Default)]
@@ -25,6 +25,7 @@ impl Compute {
         T: Invoker,
     {
         runtime_graph.next(graph);
+        let graph_node_index_by_id = graph.node_index_by_id();
 
         let mut inputs: ArgSet = ArgSet::default();
 
@@ -42,10 +43,20 @@ impl Compute {
             .collect::<Vec<usize>>();
 
         for node_idx in active_node_indexes {
-            let node = graph
-                .node_by_id(runtime_graph.nodes[node_idx].id())
-                .unwrap();
-            let node_info = func_lib.func_by_id(node.func_id).unwrap();
+            let node_id = runtime_graph.nodes[node_idx].id();
+            let node = &graph.nodes[*graph_node_index_by_id
+                .get(&node_id)
+                .expect("Runtime node missing from graph")];
+            let node_info = func_lib
+                .func_by_id(node.func_id)
+                .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
+
+            assert_eq!(
+                node.inputs.len(),
+                node_info.inputs.len(),
+                "Node {:?} input count mismatch",
+                node.id
+            );
 
             inputs.resize_and_fill(node.inputs.len());
             node.inputs
@@ -63,15 +74,28 @@ impl Compute {
                         Binding::Output(output_binding) => {
                             let output_r_node = runtime_graph
                                 .node_by_id_mut(output_binding.output_node_id)
-                                .unwrap();
+                                .unwrap_or_else(|| {
+                                    panic!(
+                                        "Runtime node with id {:?} not found",
+                                        output_binding.output_node_id
+                                    )
+                                });
+                            assert!(
+                                (output_binding.output_index as usize)
+                                    < output_r_node.output_binding_count.len(),
+                                "Output index out of range for node {:?}",
+                                output_binding.output_node_id
+                            );
 
                             output_r_node
                                 .decrement_current_binding_count(output_binding.output_index);
 
-                            let output_values = output_r_node.output_values.as_mut().unwrap();
+                            let output_values = output_r_node.output_values.as_mut().expect(
+                                "Output values missing for bound node; check execution order",
+                            );
                             let value = output_values
                                 .get_mut(output_binding.output_index as usize)
-                                .unwrap();
+                                .expect("Output index out of range for bound node");
 
                             value.clone()
                         }

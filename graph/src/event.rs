@@ -47,7 +47,10 @@ impl NodeEventManager {
     }
 
     pub fn stop_node_events(&mut self, node_id: NodeId) {
-        let mut node_event = self.node_events.remove(&node_id).unwrap();
+        let mut node_event = self
+            .node_events
+            .remove(&node_id)
+            .expect("Node event not found");
 
         Self::stop(&mut node_event);
     }
@@ -100,7 +103,7 @@ impl NodeEventManager {
 
                     trigger
                         .as_ref()
-                        .unwrap()
+                        .expect("Event trigger missing")
                         .send(EventId {
                             node_id,
                             event_index,

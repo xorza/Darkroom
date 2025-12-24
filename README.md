@@ -16,6 +16,9 @@ Workspace dependencies are kept at their latest minor versions (patch versions l
 Common utilities receive periodic safety and ergonomics updates.
 Shared utilities favor standard library functionality over custom helpers.
 Logging uses the tracing ecosystem.
+Runtime validation catches invalid bindings earlier.
+Some tests run on the Tokio async runtime.
+Option-based lookups are preferred with explicit `expect` at call sites.
 
 ## License
 

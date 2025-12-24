@@ -35,6 +35,11 @@ Recent adjustments:
 - `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
 - Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
+- Runtime graph construction now uses a DFS order with cycle detection, input/output binding validation, and ID-to-index maps for faster lookups.
+- Added `*_ref` accessors on `Graph`/`FuncLib`/`RuntimeGraph` for invariant-driven access (panic on missing IDs).
+- Replaced many unwraps with explicit `expect` messages in core runtime paths.
+- Invoke tests now use Tokio async tests with blocking sections around sync compute execution.
+- Removed `*_ref` accessors and standardized on `Option` lookups with explicit `expect` messages at call sites.
 
 ### graph crate
 

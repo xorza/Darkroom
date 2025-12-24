@@ -88,7 +88,9 @@ impl FuncLib {
         let mut funcs: Vec<&Func> = self.funcs.values().collect();
         funcs.sort_by(|a, b| a.id.cmp(&b.id));
 
-        serde_yml::to_string(&funcs).unwrap().normalize()
+        serde_yml::to_string(&funcs)
+            .expect("Failed to serialize function library to YAML")
+            .normalize()
     }
 
     pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {

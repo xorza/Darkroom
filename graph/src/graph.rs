@@ -1,3 +1,4 @@
+use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
@@ -110,8 +111,19 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.id == id)
     }
 
+    pub fn node_index_by_id(&self) -> HashMap<NodeId, usize> {
+        let mut map = HashMap::with_capacity(self.nodes.len());
+        for (index, node) in self.nodes.iter().enumerate() {
+            let prev = map.insert(node.id, index);
+            assert!(prev.is_none(), "Duplicate node id detected: {:?}", node.id);
+        }
+        map
+    }
+
     pub fn to_yaml(&self) -> String {
-        serde_yml::to_string(&self).unwrap().normalize()
+        serde_yml::to_string(&self)
+            .expect("Failed to serialize graph to YAML")
+            .normalize()
     }
     pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
         let yaml = std::fs::read_to_string(path)?;
@@ -134,6 +146,9 @@ impl Graph {
             if node.id == NodeId::nil() {
                 return Err(anyhow::Error::msg("Node has invalid id"));
             }
+            if !node.inputs.is_empty() && node.func_id == FuncId::nil() {
+                return Err(anyhow::Error::msg("Node has inputs but no function id"));
+            }
 
             // validate node has valid bindings
             for input in node.inputs.iter() {
@@ -143,6 +158,9 @@ impl Graph {
                             "Node input connected to a non-existent node",
                         ));
                     }
+                }
+                if matches!(input.binding, Binding::Const) && input.const_value.is_none() {
+                    return Err(anyhow::Error::msg("Const binding missing const_value"));
                 }
             }
         }
@@ -292,7 +310,10 @@ mod tests {
     fn node_remove_test() -> anyhow::Result<()> {
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-        let node_id = graph.node_by_name("sum").unwrap().id;
+        let node_id = graph
+            .node_by_name("sum")
+            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .id;
         graph.remove_node_by_id(node_id);
 
         assert!(graph.node_by_name("sum").is_none());

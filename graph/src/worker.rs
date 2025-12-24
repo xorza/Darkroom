@@ -69,7 +69,7 @@ impl Worker {
                 break;
             }
 
-            match message.take().unwrap() {
+            match message.take().expect("Worker loop received empty message") {
                 WorkerMessage::Stop | WorkerMessage::Event => panic!("Unexpected event message"),
 
                 WorkerMessage::Exit => break,
@@ -118,7 +118,10 @@ impl Worker {
 
         loop {
             // receive all messages and pick message with the highest priority
-            let mut msg = worker_rx.recv().await.unwrap();
+            let mut msg = worker_rx
+                .recv()
+                .await
+                .expect("Worker message channel closed");
             while let Ok(another_msg) = worker_rx.try_recv() {
                 if another_msg >= msg {
                     msg = another_msg;
@@ -152,7 +155,9 @@ impl Worker {
     fn start_event_thread(worker_tx: Sender<WorkerMessage>) {
         // fire events here
 
+        // do not remove this, will be used in the future
         let event_queue: EventQueue = Arc::new(Mutex::new(Vec::new()));
+
         let (_event_tx, mut event_rx) = channel::<EventId>(25);
 
         tokio::spawn(async move {
@@ -163,7 +168,7 @@ impl Worker {
                 }
 
                 let mut event_queue_mutex = event_queue.lock().await;
-                event_queue_mutex.push(event.unwrap());
+                event_queue_mutex.push(event.expect("Event channel closed"));
 
                 let sent = worker_tx.send(WorkerMessage::Event).await;
                 if sent.is_err() {
@@ -176,32 +181,49 @@ impl Worker {
     pub fn run_once(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunOnce(graph);
 
-        self.tx.send(msg).block_on().unwrap();
+        self.tx
+            .send(msg)
+            .block_on()
+            .expect("Failed to send run_once message");
     }
     pub fn run_loop(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunLoop(graph);
 
-        self.tx.send(msg).block_on().unwrap();
+        self.tx
+            .send(msg)
+            .block_on()
+            .expect("Failed to send run_loop message");
     }
     pub fn stop(&mut self) {
         let msg = WorkerMessage::Stop;
 
-        self.tx.send(msg).block_on().unwrap();
+        self.tx
+            .send(msg)
+            .block_on()
+            .expect("Failed to send stop message");
     }
 
     #[cfg(test)]
     pub(crate) fn event(&mut self) {
         let msg = WorkerMessage::Event;
 
-        self.tx.send(msg).block_on().unwrap();
+        self.tx
+            .send(msg)
+            .block_on()
+            .expect("Failed to send event message");
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.tx.send(WorkerMessage::Exit).block_on().unwrap();
+        self.tx
+            .send(WorkerMessage::Exit)
+            .block_on()
+            .expect("Failed to send exit message");
         if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle.block_on().unwrap();
+            thread_handle
+                .block_on()
+                .expect("Worker thread failed to join");
         }
     }
 }

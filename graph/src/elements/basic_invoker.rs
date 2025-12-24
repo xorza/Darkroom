@@ -70,7 +70,9 @@ impl From<Math2ArgOp> for StaticValue {
 
 impl From<i64> for Math2ArgOp {
     fn from(op: i64) -> Self {
-        Math2ArgOp::iter().find(|op_| *op_ as i64 == op).unwrap()
+        Math2ArgOp::iter()
+            .find(|op_| *op_ as i64 == op)
+            .expect("Unknown math op")
     }
 }
 
@@ -89,7 +91,8 @@ impl Default for BasicInvoker {
         //print, outputs to output_stream
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
+                id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789")
+                    .expect("Invalid func id"),
                 name: "print".to_string(),
                 description: None,
                 behavior: FuncBehavior::Active,
@@ -117,7 +120,8 @@ impl Default for BasicInvoker {
         // math two argument operation
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
+                id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE")
+                    .expect("Invalid func id"),
                 name: "2 arg math".to_string(),
                 behavior: FuncBehavior::Passive,
                 is_output: false,
@@ -166,7 +170,8 @@ impl Default for BasicInvoker {
         // to string
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
+                id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65")
+                    .expect("Invalid func id"),
                 name: "float to string".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -199,7 +204,8 @@ impl Default for BasicInvoker {
         // random
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
+                id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e")
+                    .expect("Invalid func id"),
                 name: "random".to_string(),
                 description: None,
                 behavior: FuncBehavior::Active,
@@ -244,7 +250,8 @@ impl Default for BasicInvoker {
         //add
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
+                id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee")
+                    .expect("Invalid func id"),
                 name: "add".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -286,7 +293,8 @@ impl Default for BasicInvoker {
         //subtract
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
+                id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2")
+                    .expect("Invalid func id"),
                 name: "subtract".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -328,7 +336,8 @@ impl Default for BasicInvoker {
         //multiply
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
+                id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc")
+                    .expect("Invalid func id"),
                 name: "multiply".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -370,7 +379,8 @@ impl Default for BasicInvoker {
         //divide
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
+                id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b")
+                    .expect("Invalid func id"),
                 name: "divide".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -420,7 +430,8 @@ impl Default for BasicInvoker {
         // power
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
+                id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264")
+                    .expect("Invalid func id"),
                 name: "power".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -462,7 +473,8 @@ impl Default for BasicInvoker {
         // sqrt
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
+                id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a")
+                    .expect("Invalid func id"),
                 name: "sqrt".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -494,7 +506,8 @@ impl Default for BasicInvoker {
         // sin
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
+                id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6")
+                    .expect("Invalid func id"),
                 name: "sin".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -526,7 +539,8 @@ impl Default for BasicInvoker {
         // cos
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
+                id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5")
+                    .expect("Invalid func id"),
                 name: "cos".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -558,7 +572,8 @@ impl Default for BasicInvoker {
         // tan
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
+                id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e")
+                    .expect("Invalid func id"),
                 name: "tan".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -590,7 +605,8 @@ impl Default for BasicInvoker {
         // asin
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
+                id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb")
+                    .expect("Invalid func id"),
                 name: "asin".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -622,7 +638,8 @@ impl Default for BasicInvoker {
         // acos
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
+                id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c")
+                    .expect("Invalid func id"),
                 name: "acos".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -654,7 +671,8 @@ impl Default for BasicInvoker {
         // atan
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
+                id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b")
+                    .expect("Invalid func id"),
                 name: "atan".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,
@@ -686,7 +704,8 @@ impl Default for BasicInvoker {
         // log
         lambda_invoker.add_lambda(
             Func {
-                id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
+                id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a")
+                    .expect("Invalid func id"),
                 name: "log".to_string(),
                 description: None,
                 behavior: FuncBehavior::Passive,

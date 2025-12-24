@@ -10,11 +10,11 @@ use common::output_stream::OutputStream;
 use crate::data::DataType;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncId, FuncLib};
-use crate::graph::{Binding, Graph, Input, Node, NodeId};
+use crate::graph::{Binding, Graph, Node, NodeId};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
 use crate::{data, function};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct FuncConnections {
     name: String,
     inputs: Vec<u32>,
@@ -90,7 +90,7 @@ impl LuaInvoker {
                             output += &v.to_string();
                         }
                         mlua::Value::String(v) => {
-                            output += v.to_str().unwrap().as_ref();
+                            output += v.to_str().expect("Lua string is not valid UTF-8").as_ref();
                         }
                         mlua::Value::Table(_) => {
                             output += "Table";
@@ -181,10 +181,12 @@ impl LuaInvoker {
 
         let outputs: mlua::Table = table.get("outputs")?;
         for i in 1..=outputs.len()? {
-            let output: mlua::Table = outputs.get(i).unwrap();
-            let name: String = output.get(1).unwrap();
-            let data_type_name: String = output.get(2).unwrap();
-            let data_type = data_type_name.parse::<DataType>().unwrap();
+            let output: mlua::Table = outputs.get(i).expect("Missing output entry in Lua table");
+            let name: String = output.get(1).expect("Missing output name in Lua table");
+            let data_type_name: String = output.get(2).expect("Missing output type in Lua table");
+            let data_type = data_type_name
+                .parse::<DataType>()
+                .expect("Invalid data type name in Lua table");
 
             function_info
                 .outputs
@@ -250,28 +252,32 @@ impl LuaInvoker {
                         Ok(result)
                     },
                 )
-                .unwrap();
+                .expect("Failed to register Lua function");
 
             self.lua
                 .globals()
                 .set(func.name.as_str(), new_function)
-                .unwrap();
+                .expect("Failed to bind Lua function");
 
             output_index += func.outputs.len() as u32;
         }
     }
     fn restore_functions(&self) {
         for (&id, lua_func) in self.funcs.iter() {
-            let func = self.func_lib.func_by_id(id).unwrap();
+            let func = self
+                .func_lib
+                .func_by_id(id)
+                .unwrap_or_else(|| panic!("Func with id {:?} not found", id));
             self.lua
                 .globals()
                 .set(func.name.clone(), lua_func.clone())
-                .unwrap();
+                .expect("Failed to restore Lua function");
         }
     }
     fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
         let mut graph = Graph::default();
 
+        #[derive(Debug)]
         struct OutputAddr {
             index: u32,
             node_id: NodeId,
@@ -280,18 +286,21 @@ impl LuaInvoker {
         let mut nodes: Vec<Node> = Vec::new();
 
         for connection in connections.iter() {
-            let func = self.func_lib.func_by_name(&connection.name).unwrap();
+            let func = self
+                .func_lib
+                .func_by_name(&connection.name)
+                .unwrap_or_else(|| panic!("Func named {:?} not found", connection.name));
 
-            nodes.push(Node::default());
-            let node = nodes.last_mut().unwrap();
-            node.name = func.name.clone();
+            nodes.push(Node::from_function(func));
+            let node = nodes
+                .last_mut()
+                .expect("Missing node while building Lua graph");
 
-            for _ in &connection.inputs {
-                node.inputs.push(Input {
-                    binding: Binding::None,
-                    const_value: None,
-                });
-            }
+            assert!(
+                connection.inputs.len() <= node.inputs.len(),
+                "Lua connections exceed function input count for {}",
+                node.name
+            );
             for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
                 assert!(!node.id.is_nil());
                 output_ids.insert(
@@ -305,11 +314,13 @@ impl LuaInvoker {
         }
 
         while let Some(connection) = connections.pop() {
-            let mut node = nodes.pop().unwrap();
+            let mut node = nodes.pop().expect("Missing node while wiring Lua graph");
 
             for (input_index, output_id) in connection.inputs.iter().enumerate() {
                 let input = &mut node.inputs[input_index];
-                let output_addr = output_ids.get(output_id).unwrap();
+                let output_addr = output_ids
+                    .get(output_id)
+                    .expect("Missing output address for Lua graph");
 
                 input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.index)
             }
@@ -344,8 +355,14 @@ impl LuaInvoker {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        let lua_func = self.funcs.get(&func_id).unwrap();
-        let func = self.func_lib.func_by_id(func_id).unwrap();
+        let lua_func = self
+            .funcs
+            .get(&func_id)
+            .expect("Missing Lua function binding");
+        let func = self
+            .func_lib
+            .func_by_id(func_id)
+            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
 
         let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
         for (index, input_info) in func.inputs.iter().enumerate() {
@@ -359,7 +376,9 @@ impl LuaInvoker {
         let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
 
         for (index, output_info) in func.outputs.iter().enumerate() {
-            let output_arg: &mlua::Value = output_args.get(index).unwrap();
+            let output_arg: &mlua::Value = output_args
+                .get(index)
+                .expect("Missing output value from Lua call");
 
             let output = data::DynamicValue::from(output_arg);
             assert_eq!(output_info.data_type, *output.data_type());
@@ -391,7 +410,9 @@ impl From<&mlua::Value> for DynamicValue {
             mlua::Value::Boolean(v) => (*v).into(),
             mlua::Value::Integer(v) => (*v).into(),
             mlua::Value::Number(v) => (*v).into(),
-            mlua::Value::String(v) => DynamicValue::from(v.to_str().unwrap().as_ref()),
+            mlua::Value::String(v) => {
+                DynamicValue::from(v.to_str().expect("Lua string is not valid UTF-8").as_ref())
+            }
             _ => {
                 panic!("not supported")
             }
@@ -451,6 +472,7 @@ mod tests {
 
     #[test]
     fn local_data_test() {
+        #[derive(Debug)]
         struct TestStruct {
             a: i32,
             b: i32,
@@ -501,16 +523,26 @@ mod tests {
             .nodes()
             .iter()
             .find(|node| node.name == "mult")
-            .unwrap();
+            .expect("Missing mult node");
         assert_eq!(mult_node.inputs.len(), 2);
         assert!(mult_node.inputs[0].binding.is_some());
 
-        let binding = mult_node.inputs[0].binding.as_output_binding().unwrap();
-        let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
+        let binding = mult_node.inputs[0]
+            .binding
+            .as_output_binding()
+            .expect("Missing output binding");
+        let bound_node = graph
+            .node_by_id(binding.output_node_id)
+            .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
         assert_eq!(bound_node.name, "sum");
 
-        let binding = mult_node.inputs[1].binding.as_output_binding().unwrap();
-        let bound_node = graph.node_by_id(binding.output_node_id).unwrap();
+        let binding = mult_node.inputs[1]
+            .binding
+            .as_output_binding()
+            .expect("Missing output binding");
+        let bound_node = graph
+            .node_by_id(binding.output_node_id)
+            .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
         assert_eq!(bound_node.name, "get_b");
 
         invoker.run()?;

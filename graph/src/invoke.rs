@@ -27,7 +27,7 @@ pub trait Invoker: Debug + Send + Sync {
     ) -> anyhow::Result<()>;
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct UberInvoker {
     invokers: Vec<Box<dyn Invoker>>,
     func_lib: FuncLib,
@@ -91,12 +91,16 @@ impl InvokeCache {
         let is_some = self.is_some::<T>();
 
         if is_some {
-            self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
+            self.boxed
+                .as_mut()
+                .expect("InvokeCache missing value")
+                .downcast_mut::<T>()
+                .expect("InvokeCache has unexpected type")
         } else {
             self.boxed
                 .insert(Box::<T>::default())
                 .downcast_mut::<T>()
-                .unwrap()
+                .expect("InvokeCache default insert failed")
         }
     }
     pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
@@ -107,12 +111,16 @@ impl InvokeCache {
         let is_some = self.is_some::<T>();
 
         if is_some {
-            self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
+            self.boxed
+                .as_mut()
+                .expect("InvokeCache missing value")
+                .downcast_mut::<T>()
+                .expect("InvokeCache has unexpected type")
         } else {
             self.boxed
                 .insert(Box::<T>::new(f()))
                 .downcast_mut::<T>()
-                .unwrap()
+                .expect("InvokeCache insert failed")
         }
     }
 }
@@ -208,7 +216,9 @@ impl Invoker for UberInvoker {
         assert!(!self.invokers.is_empty(), "No invokers available");
 
         let invoker = if self.invokers.len() == 1 {
-            self.invokers.first().unwrap()
+            self.invokers
+                .first()
+                .expect("Invoker list unexpectedly empty")
         } else {
             let &invoker_index = self
                 .function_id_to_invoker_index
@@ -233,23 +243,13 @@ impl Invoker for LambdaInvoker {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        let invokable = self.lambdas.get(&function_id).unwrap();
+        let invokable = self
+            .lambdas
+            .get(&function_id)
+            .expect("Missing lambda for function_id");
         (invokable)(cache, inputs, outputs);
 
         Ok(())
-    }
-}
-
-impl Debug for UberInvoker {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("UberInvoker")
-            .field("invokers", &self.invokers)
-            .field(
-                "function_id_to_invoker_index",
-                &self.function_id_to_invoker_index,
-            )
-            .field("func_lib", &self.func_lib)
-            .finish()
     }
 }
 
@@ -266,7 +266,7 @@ impl Debug for LambdaInvoker {
 mod tests {
     use std::sync::Arc;
 
-    use parking_lot::Mutex;
+    use tokio::sync::Mutex;
 
     use crate::compute::Compute;
     use crate::data::StaticValue;
@@ -277,6 +277,7 @@ mod tests {
     use crate::invoke::{InvokeCache, Invoker, LambdaInvoker, UberInvoker};
     use crate::runtime_graph::RuntimeGraph;
 
+    #[derive(Debug)]
     struct TestValues {
         a: i64,
         b: i64,
@@ -299,28 +300,40 @@ mod tests {
 
         // print
         invoker.add_lambda(
-            func_lib.func_by_name("print").unwrap().clone(),
+            func_lib
+                .func_by_name("print")
+                .unwrap_or_else(|| panic!("Func named \"print\" not found"))
+                .clone(),
             move |_, inputs, _| {
                 result(inputs[0].as_int());
             },
         );
         // val 1
         invoker.add_lambda(
-            func_lib.func_by_name("get_a").unwrap().clone(),
+            func_lib
+                .func_by_name("get_a")
+                .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
+                .clone(),
             move |_, _, outputs| {
                 outputs[0] = (get_a() as f64).into();
             },
         );
         // val 2
         invoker.add_lambda(
-            func_lib.func_by_name("get_b").unwrap().clone(),
+            func_lib
+                .func_by_name("get_b")
+                .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
+                .clone(),
             move |_, _, outputs| {
                 outputs[0] = (get_b() as f64).into();
             },
         );
         // sum
         invoker.add_lambda(
-            func_lib.func_by_name("sum").unwrap().clone(),
+            func_lib
+                .func_by_name("sum")
+                .unwrap_or_else(|| panic!("Func named \"sum\" not found"))
+                .clone(),
             |ctx, inputs, outputs| {
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
@@ -330,7 +343,10 @@ mod tests {
         );
         // mult
         invoker.add_lambda(
-            func_lib.func_by_name("mult").unwrap().clone(),
+            func_lib
+                .func_by_name("mult")
+                .unwrap_or_else(|| panic!("Func named \"mult\" not found"))
+                .clone(),
             |ctx, inputs, outputs| {
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
@@ -362,8 +378,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn simple_compute_test() -> anyhow::Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn simple_compute_test() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -374,31 +390,41 @@ mod tests {
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
         let mut invoker = create_invoker(
-            move || test_values_a.lock().a,
-            move || test_values_b.lock().b,
-            move |result| test_values_result.lock().result = result,
+            move || test_values_a.blocking_lock().a,
+            move || test_values_b.blocking_lock().b,
+            move |result| test_values_result.blocking_lock().result = result,
         )?;
 
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
         let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
-        assert_eq!(test_values.lock().result, 35);
+        tokio::task::block_in_place(|| {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+        })?;
+        assert_eq!(test_values.lock().await.result, 35);
 
-        Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
-        assert_eq!(test_values.lock().result, 35);
+        tokio::task::block_in_place(|| {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+        })?;
+        assert_eq!(test_values.lock().await.result, 35);
 
-        test_values.lock().b = 7;
-        invoker.func_lib.func_by_name_mut("get_b").unwrap().behavior = FuncBehavior::Active;
+        test_values.lock().await.b = 7;
+        invoker
+            .func_lib
+            .func_by_name_mut("get_b")
+            .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
+            .behavior = FuncBehavior::Active;
         let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
-        assert_eq!(test_values.lock().result, 63);
+        tokio::task::block_in_place(|| {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+        })?;
+        assert_eq!(test_values.lock().await.result, 63);
 
         Ok(())
     }
 
-    #[test]
-    fn default_input_value() -> anyhow::Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn default_input_value() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -409,7 +435,7 @@ mod tests {
         let invoker = create_invoker(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
-            move |result| test_values_result.lock().result = result,
+            move |result| test_values_result.blocking_lock().result = result,
         )?;
         let func_lib = invoker.get_func_lib();
         let compute = Compute::default();
@@ -417,7 +443,10 @@ mod tests {
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
         {
-            let sum_inputs = &mut graph.node_by_name_mut("sum").unwrap().inputs;
+            let sum_inputs = &mut graph
+                .node_by_name_mut("sum")
+                .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+                .inputs;
             sum_inputs[0].const_value = Some(StaticValue::from(29));
             sum_inputs[0].binding = Binding::Const;
             sum_inputs[1].const_value = Some(StaticValue::from(11));
@@ -425,23 +454,28 @@ mod tests {
         }
 
         {
-            let mult_inputs = &mut graph.node_by_name_mut("mult").unwrap().inputs;
+            let mult_inputs = &mut graph
+                .node_by_name_mut("mult")
+                .unwrap_or_else(|| panic!("Node named \"mult\" not found"))
+                .inputs;
             mult_inputs[1].const_value = Some(StaticValue::from(9));
             mult_inputs[1].binding = Binding::Const;
         }
 
         let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
-        compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)?;
-        assert_eq!(test_values.lock().result, 360);
+        tokio::task::block_in_place(|| {
+            compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)
+        })?;
+        assert_eq!(test_values.lock().await.result, 360);
 
         drop(graph);
 
         Ok(())
     }
 
-    #[test]
-    fn cached_value() -> anyhow::Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_value() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -453,43 +487,60 @@ mod tests {
         let test_values_result = test_values.clone();
         let mut invoker = create_invoker(
             move || {
-                let a1 = test_values_a.lock().a;
-                test_values_a.lock().a += 1;
+                let mut guard = test_values_a.blocking_lock();
+                let a1 = guard.a;
+                guard.a += 1;
 
                 a1
             },
             move || {
-                let b1 = test_values_b.lock().b;
-                test_values_b.lock().b += 1;
+                let mut guard = test_values_b.blocking_lock();
+                let b1 = guard.b;
+                guard.b += 1;
                 if b1 == 6 {
                     panic!("Unexpected call to get_b");
                 }
 
                 b1
             },
-            move |result| test_values_result.lock().result = result,
+            move |result| test_values_result.blocking_lock().result = result,
         )?;
 
-        invoker.func_lib.func_by_name_mut("get_a").unwrap().behavior = FuncBehavior::Active;
+        invoker
+            .func_lib
+            .func_by_name_mut("get_a")
+            .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
+            .behavior = FuncBehavior::Active;
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
-        graph.node_by_name_mut("sum").unwrap().cache_outputs = false;
+        graph
+            .node_by_name_mut("sum")
+            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .cache_outputs = false;
 
         let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
+        tokio::task::block_in_place(|| {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+        })?;
 
         //assert that both nodes were called
-        assert_eq!(test_values.lock().a, 3);
-        assert_eq!(test_values.lock().b, 6);
-        assert_eq!(test_values.lock().result, 35);
+        {
+            let guard = test_values.lock().await;
+            assert_eq!(guard.a, 3);
+            assert_eq!(guard.b, 6);
+            assert_eq!(guard.result, 35);
+        }
 
-        Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
+        tokio::task::block_in_place(|| {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+        })?;
 
         //assert that node a was called again
-        assert_eq!(test_values.lock().a, 4);
+        let guard = test_values.lock().await;
+        assert_eq!(guard.a, 4);
         //but node b was cached
-        assert_eq!(test_values.lock().b, 6);
-        assert_eq!(test_values.lock().result, 40);
+        assert_eq!(guard.b, 6);
+        assert_eq!(guard.result, 40);
 
         drop(graph);
 
