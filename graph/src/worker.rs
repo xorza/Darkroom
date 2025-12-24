@@ -101,7 +101,6 @@ impl Worker {
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
-        let mut result_message: Option<WorkerMessage> = None;
         let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
 
         loop {
@@ -118,11 +117,10 @@ impl Worker {
             }
 
             match msg {
-                WorkerMessage::Stop => break,
+                WorkerMessage::Stop => break None,
 
                 WorkerMessage::Exit | WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => {
-                    result_message = Some(msg);
-                    break;
+                    break Some(msg);
                 }
 
                 WorkerMessage::Event => {
@@ -135,8 +133,6 @@ impl Worker {
                 }
             }
         }
-
-        result_message
     }
 
     pub fn run_once(&mut self, graph: Graph) {
