@@ -58,7 +58,7 @@ Additional modules drive execution and integration:
 - `event` manages asynchronous event loops that send event IDs back to the worker.
 
 Benchmarks:
-- `graph/benches/b1.rs` loads `../test_resources/test_graph.yml` and `../test_resources/test_funcs.yml`, disables caching on the `sum` node, and benchmarks `RuntimeGraph::new` with Criterion.
+- `graph/benches/b1.rs` resolves `test_resources` via `CARGO_MANIFEST_DIR`, disables caching on the `sum` node, and benchmarks `RuntimeGraph::new` with Criterion.
 
 ## Common Terms
 

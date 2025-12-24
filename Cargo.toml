@@ -40,3 +40,7 @@ criterion = { version = "*" }
 [workspace.lints.rust]
 unused_crate_dependencies = "allow"
 dead_code = "allow"
+
+[profile.samply]
+inherits = "release"
+debug = true
