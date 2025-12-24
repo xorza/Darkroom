@@ -13,27 +13,27 @@ graph = { path = "graph" }
 
 imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
-serde = { version = "1.0", features = ["derive"] }
-serde_yml = "0.0"
-serde_json = "1.0"
-uuid = { version = "1.19", features = ["v4", "serde"] }
-anyhow = "1.0"
-wgpu = { version = "28.0" }
-bytemuck = { version = "1.24", features = ["derive"] }
-pollster = "0.4"
-num-traits = "0.2"
-glam = { version = "0.30", features = ["serde"] }
-strum = "0.27"
-strum_macros = "0.27"
-rand = "0.9"
-tokio = { version = "1.48", features = ["full"] }
-log = "0.4"
-flexi_logger = "0.31"
-parking_lot = "0.12"
-hashbrown = { version = "0.16", features = ["serde"] }
-bytes = { version = "1.11" }
-lazy_static = "1.5"
-mlua = { version = "0.11", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
+serde = { version = "*", features = ["derive"] }
+serde_yml = { version = "*" }
+serde_json =  { version = "*" }
+uuid = { version = "*", features = ["v4", "serde"] }
+anyhow =  { version = "*" }
+wgpu = { version = "*" }
+bytemuck = { version = "*", features = ["derive"] }
+pollster =  { version = "*" }
+num-traits =  { version = "*" }
+glam = { version = "*", features = ["serde"] }
+strum =  { version = "*" }
+strum_macros =  { version = "*" }
+rand =  { version = "*" }
+tokio = { version = "*", features = ["full"] }
+log = "*"
+flexi_logger = "*"
+parking_lot =  { version = "*" }
+hashbrown = { version = "*", features = ["serde"] }
+bytes = { version = "*" }
+lazy_static =  { version = "*" }
+mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 
 
 [workspace.lints.rust]
