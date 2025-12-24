@@ -10,6 +10,10 @@ The core graph and utilities are written in Rust.
 - **deprecated_code** – older editors and experimental code
 - **test_resources** – sample assets used by tests
 
+## Maintenance
+
+Workspace dependencies are kept at their latest minor versions (patch versions left open).
+
 ## License
 
 This project is licensed under the terms of the MIT license.

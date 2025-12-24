@@ -19,6 +19,11 @@ The root `Cargo.toml` defines the workspace and shared dependencies.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 
+## Dependency Versions
+
+As of 2025-12-24, workspace dependencies are set to the latest minor versions with patch versions left open.
+The only version bump needed in this update was `wgpu` to `28.0`; other workspace dependencies were already at their latest minor versions.
+
 ## Subprojects
 
 ### common crate
