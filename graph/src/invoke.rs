@@ -147,6 +147,30 @@ impl LambdaInvoker {
 }
 
 impl UberInvoker {
+    pub fn with<It>(invokers: It) -> Self
+    where
+        It: IntoIterator<Item = Box<dyn Invoker>>,
+    {
+        let mut invokers: Vec<Box<dyn Invoker>> = invokers.into_iter().collect();
+        let mut function_id_to_invoker_index = HashMap::new();
+        let mut func_lib = FuncLib::default();
+
+        invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
+            let new_func_lib = invoker.get_func_lib();
+            new_func_lib.iter().for_each(|func| {
+                function_id_to_invoker_index.insert(func.id, idx);
+            });
+
+            func_lib.merge(new_func_lib);
+        });
+
+        Self {
+            invokers,
+            func_lib,
+            function_id_to_invoker_index,
+        }
+    }
+
     pub fn merge<T>(&mut self, mut invoker: T)
     where
         T: Invoker + Any + 'static,
@@ -173,32 +197,6 @@ impl UberInvoker {
 
             self.func_lib.merge(other_func_lib);
             self.invokers.push(Box::new(invoker));
-        }
-    }
-}
-
-impl<It> From<It> for UberInvoker
-where
-    It: IntoIterator<Item = Box<dyn Invoker>>,
-{
-    fn from(invokers: It) -> Self {
-        let mut invokers: Vec<Box<dyn Invoker>> = invokers.into_iter().collect();
-        let mut function_id_to_invoker_index = HashMap::new();
-        let mut func_lib = FuncLib::default();
-
-        invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
-            let new_func_lib = invoker.get_func_lib();
-            new_func_lib.iter().for_each(|func| {
-                function_id_to_invoker_index.insert(func.id, idx);
-            });
-
-            func_lib.merge(new_func_lib);
-        });
-
-        Self {
-            invokers,
-            func_lib,
-            function_id_to_invoker_index,
         }
     }
 }
@@ -580,8 +578,8 @@ mod tests {
 
     #[test]
     fn user_invoker_merge() -> anyhow::Result<()> {
-        let uber1: UberInvoker = vec![Box::<BasicInvoker>::default() as Box<dyn Invoker>].into();
-        let uber2: UberInvoker = vec![Box::<TimersInvoker>::default() as Box<dyn Invoker>].into();
+        let uber1 = UberInvoker::with(vec![Box::<BasicInvoker>::default() as Box<dyn Invoker>]);
+        let uber2 = UberInvoker::with(vec![Box::<TimersInvoker>::default() as Box<dyn Invoker>]);
 
         let mut uber = UberInvoker::default();
         uber.merge(uber1);

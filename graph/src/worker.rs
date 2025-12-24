@@ -209,7 +209,7 @@ mod tests {
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
     use crate::graph::Graph;
-    use crate::invoke::UberInvoker;
+    use crate::invoke::{Invoker, UberInvoker};
     use crate::worker::Worker;
 
     #[test]
@@ -221,9 +221,10 @@ mod tests {
             let mut basic_invoker = BasicInvoker::default();
             basic_invoker.use_output_stream(&output_stream).await;
 
-            let mut uber_invoker = UberInvoker::default();
-            uber_invoker.merge(timers_invoker);
-            uber_invoker.merge(basic_invoker);
+            let uber_invoker = UberInvoker::with([
+                Box::new(basic_invoker) as Box<dyn Invoker>,
+                Box::new(timers_invoker) as Box<dyn Invoker>,
+            ]);
 
             let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
             let mut worker = Worker::new(uber_invoker, move || {
