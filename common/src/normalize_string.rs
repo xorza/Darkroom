@@ -29,10 +29,20 @@ impl NormalizeString for str {
         }
 
         if !changed {
-            return self.to_string();
+            if self.ends_with('\n') {
+                return self.to_string();
+            }
+
+            let mut out = String::with_capacity(self.len() + 1);
+            out.push_str(self);
+            out.push('\n');
+            return out;
         }
 
         out.push_str(&self[last..]);
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
         out
     }
 }
