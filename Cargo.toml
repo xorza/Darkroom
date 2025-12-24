@@ -34,8 +34,8 @@ hashbrown = { version = "*", features = ["serde"] }
 bytes = { version = "*" }
 lazy_static =  { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
-async-trait = "*"
-
+async-trait = { version = "*" }
+criterion = { version = "*" }
 
 [workspace.lints.rust]
 unused_crate_dependencies = "allow"

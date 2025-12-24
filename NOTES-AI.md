@@ -57,6 +57,9 @@ Additional modules drive execution and integration:
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `event` manages asynchronous event loops that send event IDs back to the worker.
 
+Benchmarks:
+- `graph/benches/b1.rs` loads `../test_resources/test_graph.yml` and `../test_resources/test_funcs.yml`, disables caching on the `sum` node, and benchmarks `RuntimeGraph::new` with Criterion.
+
 ## Common Terms
 
 Add shared terminology here as the project evolves.

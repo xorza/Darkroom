@@ -24,6 +24,11 @@ Async contexts use Tokio locks with awaits where possible.
 Blocking helpers are removed in favor of async/await or non-blocking try_lock.
 Core invocation and compute paths are async.
 
+## Benchmarks
+
+Benchmarks live under `graph/benches` and use Criterion.
+Run `cargo bench -p graph --bench b1` to execute the current benchmark.
+
 ## License
 
 This project is licensed under the terms of the MIT license.

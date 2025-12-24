@@ -6,7 +6,6 @@ description = "A graph library for Scenarium"
 
 [dependencies]
 common = { workspace = true }
-
 serde = { workspace = true }
 serde_yml = { workspace = true }
 uuid = { workspace = true }
@@ -21,3 +20,10 @@ pollster = { workspace = true }
 mlua = { workspace = true }
 async-trait = { workspace = true }
 glam = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+name = "b1"
+harness = false
