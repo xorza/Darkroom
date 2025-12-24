@@ -1,11 +1,11 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use log::info;
 use parking_lot::Mutex;
 use rand::{Rng, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
+use tracing::info;
 
 use common::output_stream::OutputStream;
 

@@ -34,6 +34,7 @@ See `common/src` for implementation details.
 Recent adjustments:
 - `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
+- Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
 
 ### graph crate
 

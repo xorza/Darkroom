@@ -2,9 +2,9 @@ use hashbrown::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use log::info;
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
+use tracing::info;
 
 use crate::graph::NodeId;
 

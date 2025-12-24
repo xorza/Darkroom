@@ -1,54 +1,51 @@
-use flexi_logger::{
-    style, DeferredNow, Duplicate, FileSpec, Logger, TS_DASHES_BLANK_COLONS_DOT_BLANK,
-};
-use log::Record;
+use std::sync::OnceLock;
 
-pub fn detailed_format(
-    w: &mut dyn std::io::Write,
-    now: &mut DeferredNow,
-    record: &Record,
-) -> Result<(), std::io::Error> {
-    write!(
-        w,
-        "[{}] {} [{}:{}]: {}",
-        now.format(TS_DASHES_BLANK_COLONS_DOT_BLANK),
-        record.level(),
-        record.module_path().unwrap_or("<unnamed>"),
-        record.line().unwrap_or(0),
-        &record.args()
-    )
-}
+use tracing::Level;
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::fmt::writer::MakeWriterExt;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-pub fn colored_detailed_format(
-    w: &mut dyn std::io::Write,
-    now: &mut DeferredNow,
-    record: &Record,
-) -> Result<(), std::io::Error> {
-    let level = record.level();
-    write!(
-        w,
-        "[{}] {} [{}:{}]: {}",
-        style(level).paint(now.format(TS_DASHES_BLANK_COLONS_DOT_BLANK).to_string()),
-        style(level).paint(record.level().to_string()),
-        record.module_path().unwrap_or("<unnamed>"),
-        record.line().unwrap_or(0),
-        style(level).paint(record.args().to_string())
-    )
-}
+static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 pub fn setup_logging(base_level: &str) {
-    let _ = Logger::try_with_str(base_level)
-        .unwrap_or_else(|e| panic!("Logger initialization failed with {}", e))
-        .log_to_file(FileSpec::default().directory("logs"))
-        .duplicate_to_stderr(Duplicate::Warn)
-        .duplicate_to_stdout(Duplicate::All)
-        .format(detailed_format)
-        .format_for_stdout(colored_detailed_format)
-        .rotate(
-            flexi_logger::Criterion::Size(1024 * 1024), //1MB
-            flexi_logger::Naming::Timestamps,
-            flexi_logger::Cleanup::KeepLogFiles(5),
-        )
-        .start()
-        .unwrap_or_else(|e| panic!("Logger initialization failed with {}", e));
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(base_level))
+        .unwrap_or_else(|e| panic!("Invalid log filter: {}", e));
+
+    std::fs::create_dir_all("logs")
+        .unwrap_or_else(|e| panic!("Failed to create logs directory: {}", e));
+
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("scenarium")
+        .filename_suffix("log")
+        .max_log_files(5)
+        .build("logs")
+        .unwrap_or_else(|e| panic!("Failed to create log file appender: {}", e));
+
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+    LOG_GUARD.set(guard).expect("Logging already initialized");
+
+    let console_writer = std::io::stdout.and(std::io::stderr.with_min_level(Level::WARN));
+
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_line_number(true)
+        .with_file(true)
+        .with_ansi(true)
+        .with_writer(console_writer);
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_target(true)
+        .with_line_number(true)
+        .with_file(true)
+        .with_ansi(false)
+        .with_writer(file_writer);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(console_layer)
+        .with(file_layer)
+        .try_init()
+        .unwrap_or_else(|e| panic!("Logger initialization failed: {}", e));
 }

@@ -27,8 +27,9 @@ strum =  { version = "*" }
 strum_macros =  { version = "*" }
 rand =  { version = "*" }
 tokio = { version = "*", features = ["full"] }
-log = "*"
-flexi_logger = "*"
+tracing = { version = "*" }
+tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
+tracing-appender =  { version = "*" }
 parking_lot =  { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
 bytes = { version = "*" }
