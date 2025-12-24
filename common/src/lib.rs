@@ -2,7 +2,6 @@ use std::path::Path;
 
 #[macro_use]
 pub mod macros;
-pub mod log_setup;
 pub mod normalize_string;
 pub mod output_stream;
 pub mod scoped_ref;
