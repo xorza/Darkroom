@@ -41,7 +41,7 @@ impl Worker {
 
         let (worker_tx, worker_rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(Arc::new(invoker), worker_rx, compute_callback).await;
+            Self::worker_loop(invoker, worker_rx, compute_callback).await;
         });
 
         Self {
@@ -51,12 +51,12 @@ impl Worker {
     }
 
     async fn worker_loop(
-        invoker: Arc<UberInvoker>,
+        invoker: UberInvoker,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = Arc::new(invoker.get_func_lib());
+        let func_lib = invoker.get_func_lib();
 
         loop {
             if message.is_none() {
@@ -74,7 +74,7 @@ impl Worker {
                 WorkerMessage::RunOnce(graph) => {
                     let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
                     Compute::default()
-                        .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                        .run(&graph, &func_lib, &invoker, &mut runtime_graph)
                         .await
                         .expect("Failed to run graph");
                     (*compute_callback.lock().await)();
@@ -82,9 +82,9 @@ impl Worker {
 
                 WorkerMessage::RunLoop(graph) => {
                     message = Self::event_subloop(
-                        Arc::new(graph),
-                        Arc::clone(&func_lib),
-                        Arc::clone(&invoker),
+                        graph,
+                        &func_lib,
+                        &invoker,
                         &mut rx,
                         compute_callback.clone(),
                     )
@@ -96,15 +96,15 @@ impl Worker {
 
     #[allow(unreachable_code)]
     async fn event_subloop(
-        graph: Arc<Graph>,
-        func_lib: Arc<FuncLib>,
-        invoker: Arc<UberInvoker>,
+        graph: Graph,
+        func_lib: &FuncLib,
+        invoker: &UberInvoker,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
         let mut result_message: Option<WorkerMessage> = None;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
 
         loop {
             // receive all messages and pick message with the highest priority
@@ -128,7 +128,7 @@ impl Worker {
 
                 WorkerMessage::Event => {
                     Compute::default()
-                        .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                        .run(&graph, func_lib, invoker, &mut runtime_graph)
                         .await
                         .expect("Failed to run graph");
 
