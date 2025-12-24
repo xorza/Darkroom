@@ -40,15 +40,8 @@ impl Worker {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
         let (worker_tx, worker_rx) = channel::<WorkerMessage>(10);
-        let worker_tx_clone = worker_tx.clone();
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(
-                Arc::new(invoker),
-                worker_tx_clone,
-                worker_rx,
-                compute_callback,
-            )
-            .await;
+            Self::worker_loop(Arc::new(invoker), worker_rx, compute_callback).await;
         });
 
         Self {
@@ -59,7 +52,6 @@ impl Worker {
 
     async fn worker_loop(
         invoker: Arc<UberInvoker>,
-        tx: Sender<WorkerMessage>,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
@@ -85,6 +77,7 @@ impl Worker {
                         .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
                         .await
                         .expect("Failed to run graph");
+                    (*compute_callback.lock().await)();
                 }
 
                 WorkerMessage::RunLoop(graph) => {
@@ -92,15 +85,12 @@ impl Worker {
                         Arc::new(graph),
                         Arc::clone(&func_lib),
                         Arc::clone(&invoker),
-                        tx.clone(),
                         &mut rx,
                         compute_callback.clone(),
                     )
                     .await;
                 }
             }
-
-            (*compute_callback.lock().await)();
         }
     }
 
@@ -109,13 +99,10 @@ impl Worker {
         graph: Arc<Graph>,
         func_lib: Arc<FuncLib>,
         invoker: Arc<UberInvoker>,
-        worker_tx: Sender<WorkerMessage>,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
         let mut result_message: Option<WorkerMessage> = None;
-
-        Self::start_event_thread(worker_tx);
 
         let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
@@ -146,40 +133,11 @@ impl Worker {
                         .expect("Failed to run graph");
 
                     (*compute_callback.lock().await)();
-                    continue;
                 }
             }
-
-            unreachable!();
         }
 
         result_message
-    }
-
-    fn start_event_thread(worker_tx: Sender<WorkerMessage>) {
-        // fire events here
-
-        // do not remove this, will be used in the future
-        let event_queue: EventQueue = Arc::new(Mutex::new(Vec::new()));
-
-        let (_event_tx, mut event_rx) = channel::<EventId>(25);
-
-        tokio::spawn(async move {
-            loop {
-                let event = event_rx.recv().await;
-                if event.is_none() {
-                    break;
-                }
-
-                let mut event_queue_mutex = event_queue.lock().await;
-                event_queue_mutex.push(event.expect("Event channel closed"));
-
-                let sent = worker_tx.send(WorkerMessage::Event).await;
-                if sent.is_err() {
-                    break;
-                }
-            }
-        });
     }
 
     pub fn run_once(&mut self, graph: Graph) {
