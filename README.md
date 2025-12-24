@@ -22,6 +22,7 @@ Option-based lookups are preferred with explicit `expect` at call sites.
 Synchronization uses Tokio primitives; parking_lot is not used.
 Async contexts use Tokio locks with awaits where possible.
 Blocking helpers are removed in favor of async/await or non-blocking try_lock.
+Core invocation and compute paths are async.
 
 ## License
 

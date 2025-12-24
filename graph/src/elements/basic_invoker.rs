@@ -7,6 +7,7 @@ use strum_macros::{Display, EnumIter};
 use tokio::sync::Mutex;
 use tracing::info;
 
+use async_trait::async_trait;
 use common::output_stream::OutputStream;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
@@ -758,12 +759,13 @@ impl Default for BasicInvoker {
     }
 }
 
+#[async_trait]
 impl Invoker for BasicInvoker {
     fn get_func_lib(&self) -> FuncLib {
         self.lambda_invoker.get_func_lib()
     }
 
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -772,5 +774,6 @@ impl Invoker for BasicInvoker {
     ) -> anyhow::Result<()> {
         self.lambda_invoker
             .invoke(function_id, cache, inputs, outputs)
+            .await
     }
 }

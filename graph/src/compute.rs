@@ -14,7 +14,7 @@ pub(crate) struct ArgSet(Vec<DynamicValue>);
 pub struct Compute {}
 
 impl Compute {
-    pub fn run<T>(
+    pub async fn run<T>(
         &self,
         graph: &Graph,
         func_lib: &FuncLib,
@@ -116,12 +116,14 @@ impl Compute {
 
             r_node.run_time = {
                 let start = std::time::Instant::now();
-                invoker.invoke(
-                    node.func_id,
-                    &mut r_node.cache,
-                    inputs.as_mut_slice(),
-                    outputs.as_mut_slice(),
-                )?;
+                invoker
+                    .invoke(
+                        node.func_id,
+                        &mut r_node.cache,
+                        inputs.as_mut_slice(),
+                        outputs.as_mut_slice(),
+                    )
+                    .await?;
 
                 start.elapsed().as_secs_f64()
             };

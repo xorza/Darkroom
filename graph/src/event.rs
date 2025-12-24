@@ -2,7 +2,6 @@ use hashbrown::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 
-use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 use tracing::info;
 
@@ -71,7 +70,7 @@ impl NodeEventManager {
 
     pub fn start_node_event_loop<F, Fut>(
         &mut self,
-        runtime: &Runtime,
+        runtime: &tokio::runtime::Handle,
         event_id: EventId,
         new_future: F,
     ) where
@@ -141,15 +140,15 @@ mod tests {
     use crate::event::{EventId, NodeEventManager};
     use crate::graph::NodeId;
 
-    #[test]
-    fn test_event() {
+    #[tokio::test]
+    async fn test_event() {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<EventId>(5);
         let (frame_tx, _frame_rx) = tokio::sync::broadcast::channel::<()>(5);
 
         let mut event_owner = NodeEventManager::new(frame_tx.clone(), event_tx);
-
-        let runtime = tokio::runtime::Runtime::new().unwrap();
         let node_id = NodeId::unique();
+
+        let runtime = tokio::runtime::Handle::current();
 
         event_owner.start_node_event_loop(
             &runtime,
@@ -172,15 +171,15 @@ mod tests {
             },
         );
 
-        let event = event_rx.blocking_recv().unwrap();
+        let event = event_rx.recv().await.expect("Missing event");
         assert_eq!(event.event_index, 0);
 
-        let event = event_rx.blocking_recv().unwrap();
+        let event = event_rx.recv().await.expect("Missing event");
         assert_eq!(event.event_index, 1);
 
         frame_tx.send(()).unwrap();
 
-        let event = event_rx.blocking_recv().unwrap();
+        let event = event_rx.recv().await.expect("Missing event");
         assert_eq!(event.event_index, 0);
 
         event_owner.stop_node_events(node_id);
@@ -196,7 +195,7 @@ mod tests {
             },
         );
 
-        let event = event_rx.blocking_recv().unwrap();
+        let event = event_rx.recv().await.expect("Missing event");
         assert_eq!(event.event_index, 2);
     }
 }

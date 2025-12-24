@@ -80,16 +80,11 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let invoker = Arc::clone(&invoker);
-                    let func_lib = Arc::clone(&func_lib);
-                    tokio::task::spawn_blocking(move || {
-                        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-                        Compute::default()
-                            .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
-                            .expect("Failed to run graph");
-                    })
-                    .await
-                    .expect("RunOnce compute task panicked");
+                    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+                    Compute::default()
+                        .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                        .await
+                        .expect("Failed to run graph");
                 }
 
                 WorkerMessage::RunLoop(graph) => {
@@ -145,18 +140,10 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    let invoker = Arc::clone(&invoker);
-                    let func_lib = Arc::clone(&func_lib);
-                    let graph = Arc::clone(&graph);
-                    runtime_graph = tokio::task::spawn_blocking(move || {
-                        let mut runtime_graph = runtime_graph;
-                        Compute::default()
-                            .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
-                            .expect("Failed to run graph");
-                        runtime_graph
-                    })
-                    .await
-                    .expect("Event compute task panicked");
+                    Compute::default()
+                        .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                        .await
+                        .expect("Failed to run graph");
 
                     (*compute_callback.lock().await)();
                     continue;

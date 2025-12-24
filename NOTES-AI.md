@@ -42,6 +42,7 @@ Recent adjustments:
 - Removed `*_ref` accessors and standardized on `Option` lookups with explicit `expect` messages at call sites.
 - Replaced parking_lot usage with Tokio mutexes and async/try_lock access patterns (no blocking_lock).
 - OutputStream now uses async drain via Tokio mpsc; sync writers send without blocking.
+- Invoker and Compute are async; worker and tests await compute instead of blocking.
 
 ### graph crate
 

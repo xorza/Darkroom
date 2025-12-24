@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use async_trait::async_trait;
 use common::output_stream::OutputStream;
 
 use crate::data::DataType;
@@ -29,12 +30,13 @@ pub struct LuaInvoker {
     func_lib: FuncLib,
 }
 
+#[async_trait]
 impl Invoker for LuaInvoker {
     fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
 
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -440,6 +442,7 @@ mod tests {
     use super::*;
     use crate::compute::ArgSet;
     use crate::function::FuncId;
+    use crate::invoke::Invoker;
 
     #[test]
     fn lua_works() {
@@ -518,12 +521,14 @@ mod tests {
 
         let mut cache = InvokeCache::default();
         // call 'mult' function
-        invoker.invoke(
+        Invoker::invoke(
+            &invoker,
             FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
             &mut cache,
             inputs.as_mut_slice(),
             outputs.as_mut_slice(),
-        )?;
+        )
+        .await?;
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 15);
 

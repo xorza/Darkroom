@@ -1,6 +1,8 @@
 use std::any::Any;
 use std::fmt::{Debug, Formatter};
 
+use async_trait::async_trait;
+
 use hashbrown::HashMap;
 
 use crate::data::DynamicValue;
@@ -16,9 +18,10 @@ pub struct InvokeCache {
     boxed: Option<Box<dyn Any + Send>>,
 }
 
+#[async_trait]
 pub trait Invoker: Debug + Send + Sync {
     fn get_func_lib(&self) -> FuncLib;
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -202,11 +205,12 @@ where
     }
 }
 
+#[async_trait]
 impl Invoker for UberInvoker {
     fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -228,15 +232,16 @@ impl Invoker for UberInvoker {
             &self.invokers[invoker_index]
         };
 
-        invoker.invoke(function_id, cache, inputs, outputs)
+        invoker.invoke(function_id, cache, inputs, outputs).await
     }
 }
 
+#[async_trait]
 impl Invoker for LambdaInvoker {
     fn get_func_lib(&self) -> FuncLib {
         self.func_lib.clone()
     }
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -389,7 +394,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let invoker = create_invoker(
+        let mut invoker = create_invoker(
             move || {
                 test_values_a
                     .try_lock()
@@ -412,11 +417,15 @@ mod tests {
 
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        let (invoker, runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        Compute::default()
+            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
-        let (mut invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        Compute::default()
+            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
         test_values.lock().await.b = 7;
@@ -425,8 +434,10 @@ mod tests {
             .func_by_name_mut("get_b")
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Active;
-        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        Compute::default()
+            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .await?;
         assert_eq!(test_values.lock().await.result, 63);
 
         Ok(())
@@ -475,9 +486,11 @@ mod tests {
             mult_inputs[1].binding = Binding::Const;
         }
 
-        let runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
-        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut runtime_graph)
+            .await?;
         assert_eq!(test_values.lock().await.result, 360);
 
         drop(graph);
@@ -538,8 +551,10 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .cache_outputs = false;
 
-        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        let (invoker, runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        Compute::default()
+            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .await?;
 
         //assert that both nodes were called
         {
@@ -549,7 +564,9 @@ mod tests {
             assert_eq!(guard.result, 35);
         }
 
-        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
+        Compute::default()
+            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .await?;
 
         //assert that node a was called again
         let guard = test_values.lock().await;
@@ -590,19 +607,5 @@ mod tests {
         assert_eq!(timers_invoker_func_count, 1);
 
         Ok(())
-    }
-
-    async fn run_compute(
-        invoker: LambdaInvoker,
-        graph: &Graph,
-        mut runtime_graph: RuntimeGraph,
-    ) -> anyhow::Result<(LambdaInvoker, RuntimeGraph)> {
-        let graph = graph.clone();
-        tokio::task::spawn_blocking(move || {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
-            Ok((invoker, runtime_graph))
-        })
-        .await
-        .expect("Compute task panicked")
     }
 }

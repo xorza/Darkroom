@@ -5,6 +5,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::FuncBehavior;
 use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
+use async_trait::async_trait;
 
 #[derive(Debug)]
 pub struct TimersInvoker {
@@ -83,12 +84,13 @@ impl Default for TimersInvoker {
     }
 }
 
+#[async_trait]
 impl Invoker for TimersInvoker {
     fn get_func_lib(&self) -> FuncLib {
         self.lambda_invoker.get_func_lib()
     }
 
-    fn invoke(
+    async fn invoke(
         &self,
         function_id: FuncId,
         cache: &mut InvokeCache,
@@ -97,5 +99,6 @@ impl Invoker for TimersInvoker {
     ) -> anyhow::Result<()> {
         self.lambda_invoker
             .invoke(function_id, cache, inputs, outputs)
+            .await
     }
 }
