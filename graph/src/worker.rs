@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
+use std::u8;
 
 use pollster::FutureExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -103,7 +104,6 @@ impl Worker {
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
         let mut result_message: Option<WorkerMessage> = None;
-
         let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
 
         loop {
@@ -190,49 +190,34 @@ impl Drop for Worker {
     }
 }
 
+impl WorkerMessage {
+    fn priority(&self) -> u8 {
+        match self {
+            WorkerMessage::Exit => 255,
+            WorkerMessage::Stop => 127,
+            WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => 64,
+            WorkerMessage::Event => 0,
+        }
+    }
+}
+
+impl Eq for WorkerMessage {}
+
 impl PartialEq<Self> for WorkerMessage {
     fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other)
-            .map(|ordering| ordering == Ordering::Equal)
-            .unwrap_or(false)
+        self.priority() == other.priority()
+    }
+}
+
+impl Ord for WorkerMessage {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.priority().cmp(&other.priority())
     }
 }
 
 impl PartialOrd<Self> for WorkerMessage {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match (self, other) {
-            // @formatter:off
-            (WorkerMessage::Event, WorkerMessage::Event) => Some(Ordering::Equal),
-            (WorkerMessage::Event, WorkerMessage::Exit) => Some(Ordering::Less),
-            (WorkerMessage::Event, WorkerMessage::Stop) => Some(Ordering::Less),
-            (WorkerMessage::Event, WorkerMessage::RunOnce(_)) => Some(Ordering::Less),
-            (WorkerMessage::Event, WorkerMessage::RunLoop(_)) => Some(Ordering::Less),
-
-            (WorkerMessage::Exit, WorkerMessage::Event) => Some(Ordering::Greater),
-            (WorkerMessage::Exit, WorkerMessage::Exit) => Some(Ordering::Equal),
-            (WorkerMessage::Exit, WorkerMessage::Stop) => Some(Ordering::Greater),
-            (WorkerMessage::Exit, WorkerMessage::RunOnce(_)) => Some(Ordering::Greater),
-            (WorkerMessage::Exit, WorkerMessage::RunLoop(_)) => Some(Ordering::Greater),
-
-            (WorkerMessage::Stop, WorkerMessage::Event) => Some(Ordering::Greater),
-            (WorkerMessage::Stop, WorkerMessage::Exit) => Some(Ordering::Less),
-            (WorkerMessage::Stop, WorkerMessage::Stop) => Some(Ordering::Equal),
-            (WorkerMessage::Stop, WorkerMessage::RunOnce(_)) => Some(Ordering::Less),
-            (WorkerMessage::Stop, WorkerMessage::RunLoop(_)) => Some(Ordering::Less),
-
-            (WorkerMessage::RunOnce(_), WorkerMessage::Event) => Some(Ordering::Greater),
-            (WorkerMessage::RunOnce(_), WorkerMessage::Exit) => Some(Ordering::Less),
-            (WorkerMessage::RunOnce(_), WorkerMessage::Stop) => Some(Ordering::Greater),
-            (WorkerMessage::RunOnce(_), WorkerMessage::RunOnce(_)) => None,
-            (WorkerMessage::RunOnce(_), WorkerMessage::RunLoop(_)) => None,
-
-            (WorkerMessage::RunLoop(_), WorkerMessage::Event) => Some(Ordering::Greater),
-            (WorkerMessage::RunLoop(_), WorkerMessage::Exit) => Some(Ordering::Less),
-            (WorkerMessage::RunLoop(_), WorkerMessage::Stop) => Some(Ordering::Greater),
-            (WorkerMessage::RunLoop(_), WorkerMessage::RunOnce(_)) => None,
-            (WorkerMessage::RunLoop(_), WorkerMessage::RunLoop(_)) => None,
-            // @formatter:on
-        }
+        Some(self.cmp(other))
     }
 }
 
