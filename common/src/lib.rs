@@ -8,7 +8,7 @@ pub mod scoped_ref;
 pub mod toggle;
 pub mod yaml_format;
 
-pub const EPSILON: f64 = 1e-10;
+pub const EPSILON: f64 = 1e-6;
 
 pub fn get_file_extension(filename: &str) -> anyhow::Result<&str> {
     let extension = Path::new(filename)
