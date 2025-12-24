@@ -225,25 +225,34 @@ mod tests {
             uber_invoker.merge(timers_invoker);
             uber_invoker.merge(basic_invoker);
 
-            let (tx, rx) = mpsc::channel();
+            let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
             let mut worker = Worker::new(uber_invoker, move || {
-                tx.send(()).unwrap();
+                compute_finish_tx
+                    .send(())
+                    .expect("Failed to send compute callback event");
             });
 
-            let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();
+            let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml")
+                .expect("Failed to load log_frame_no.yaml graph");
 
             worker.run_once(graph.clone()).await;
-            rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .expect("Failed to receive compute callback event after run_once");
 
             assert_eq!(output_stream.take().await[0], "1");
 
             worker.run_loop(graph.clone()).await;
 
             worker.event().await;
-            rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .expect("Failed to receive compute callback event after event");
 
             worker.event().await;
-            rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .expect("Failed to receive compute callback event after event");
 
             let log = output_stream.take().await;
             assert_eq!(log[0], "1");
