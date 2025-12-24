@@ -13,6 +13,7 @@ macro_rules! id_type {
             serde::Serialize,
             serde::Deserialize,
         )]
+        #[repr(transparent)]
         pub struct $name(uuid::Uuid);
 
         impl $name {
@@ -42,6 +43,18 @@ macro_rules! id_type {
             }
         }
 
+        impl From<$name> for uuid::Uuid {
+            fn from(id: $name) -> uuid::Uuid {
+                id.0
+            }
+        }
+
+        impl AsRef<uuid::Uuid> for $name {
+            fn as_ref(&self) -> &uuid::Uuid {
+                &self.0
+            }
+        }
+
         impl std::str::FromStr for $name {
             type Err = anyhow::Error;
 
@@ -53,7 +66,7 @@ macro_rules! id_type {
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.0.to_string())
+                write!(f, "{}", self.0)
             }
         }
         impl Default for $name {
