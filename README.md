@@ -7,15 +7,8 @@ The core graph and utilities are written in Rust.
 
 - **common** – shared utilities used across the workspace
 - **graph** – the main graph library
-
-## Building
-
-This repository is organised as a Rust workspace.  The native tools require a recent Rust toolchain.
-
-```bash
-# build all Rust crates
-cargo build --workspace
-```
+- **deprecated_code** – older editors and experimental code
+- **test_resources** – sample assets used by tests
 
 ## License
 

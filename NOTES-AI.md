@@ -1,6 +1,10 @@
-# Scenarium Project Overview
+# Scenarium Implementation Notes (AI)
 
-Scenarium collects the tooling required to build node based applications. The repository is a Rust workspace containing the core graph implementation and an editor front‑end.
+This file captures implementation details and internal structure for AI agents.
+
+## Project Overview
+
+Scenarium collects the tooling required to build node based applications. The repository is a Rust workspace containing the core graph implementation and an editor front end.
 
 ## Repository Layout
 
@@ -18,13 +22,15 @@ Commit messages are often prompts sent to an AI agent to request a change.
 ## Subprojects
 
 ### common crate
+
 Provides small utilities such as logging helpers, macros for unique identifier types, and miscellaneous functions.
 See `common/src` for implementation details.
 
 ### graph crate
+
 Implements the data structures for graphs and nodes. Nodes are created from functions defined in a function library.
 Connections between nodes are represented by `Binding::Output` values.
-Data structures life graph and funtion library can be serialized to YAML files.
+Data structures like graph and function library can be serialized to YAML files.
 
 Runtime execution is handled by the `runtime_graph` module which determines which nodes should run each tick.
 Additional modules drive execution and integration:
@@ -35,6 +41,8 @@ Additional modules drive execution and integration:
 
 ## Common Terms
 
-
+Add shared terminology here as the project evolves.
 
 ## Editor Workflow
+
+Add editor workflow details here as they are defined.

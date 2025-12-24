@@ -1,28 +1,11 @@
-# Project Agents.md Guide for OpenAI Codex and other AI agents
-
-This Agents.md file provides comprehensive guidance for AI agents working with this codebase.
-
-## Project Overview
-
- - Refer to [DOC.md](DOC.md) for high-level overview and common terms of the project.
-
-## Coding Conventions
-
-- Follow the existing code style in each file.
-- Add comments for complex logic
-- Use meaningful variable and function names
-- Update the documentation in the [DOC.md](DOC.md) file to reflect current state of the project.
-  - Maintain project structure and organization.
-  - Ensure that the documentation is clear and concise.
-  - Add common terms and definitions to the documentation.
-- Keep components generated small and focused
-- Use asserts to check for invalid states in the code.
-- Use asserts to validate inputs to functions.
-- For rust projects:
-  - Add tests for new features and bug fixes.
-  - Use `cargo test --offline` to run the tests. `--offline` is required because Internet is disabled after the setup script runs.
-  - Use `cargo clippy` to run the linter.
-  - Use `cargo fmt` to format the code.
-  - If there are no rust code changes, skip the `cargo clippy`, `cargo fmt` and `cargo test` steps.
-  - Add `Debug` derive to all structs and enums.
-  - When changing structures like `Graph`, `Node`, etc., which are serialized, make sure to update yaml files in the `test_resources` folder, such as `test_graph.yml`, `test_funcs.taml`, etc.
+AI coding rules for this project:
+- Avoid using Option<> and Result<> for cases that should not fail.
+- For required values, use `.expect("...")` with a clear, specific message.
+- Prefer crashing on logic errors rather than silently swallowing them.
+- Use Result<> only for expected/legitimate failures (e.g., network, I/O, external services, user input).
+- Always add `#[derive(Debug)]` to Rust structs.
+- If Rust code was changed, run `cargo check`, `cargo clippy`, `cargo fmt` and `cargo test` before confirming output.
+- Add asserts for function input arguments and outputs where applicable, so logic errors crash instead of being swallowed. Do not use asserts for user input and possible network failures.
+- Check online documentation for best practices and patterns.
+- Update README.md with any changes to the project.
+- `NOTES-AI.md` is AI-generated and contains implementation details, project structure, and functionality notes. Avoid adding implementation specifics to `README.md`; instead, update `NOTES-AI.md` and keep it current for fast AI access.
