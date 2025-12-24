@@ -78,11 +78,14 @@ impl From<i64> for Math2ArgOp {
 }
 
 impl BasicInvoker {
-    pub(crate) async fn use_output_stream(&mut self, output_stream: &OutputStream) {
-        self.output_stream
+    pub async fn with_output_stream(output_stream: &OutputStream) -> Self {
+        let invoker = Self::default();
+        invoker
+            .output_stream
             .lock()
             .await
             .replace(output_stream.clone());
+        invoker
     }
 }
 

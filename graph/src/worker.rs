@@ -218,8 +218,7 @@ mod tests {
             let output_stream = OutputStream::new();
 
             let timers_invoker = TimersInvoker::default();
-            let mut basic_invoker = BasicInvoker::default();
-            basic_invoker.use_output_stream(&output_stream).await;
+            let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
 
             let uber_invoker = UberInvoker::with([
                 Box::new(basic_invoker) as Box<dyn Invoker>,
