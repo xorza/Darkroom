@@ -1,6 +1,4 @@
-use std::cmp::Ordering;
 use std::sync::Arc;
-use std::u8;
 
 use pollster::FutureExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -113,7 +111,8 @@ impl Worker {
                 .await
                 .expect("Worker message channel closed");
             while let Ok(another_msg) = worker_rx.try_recv() {
-                if another_msg >= msg {
+                // latest message has higher priority
+                if another_msg.priority() >= msg.priority() {
                     msg = another_msg;
                 }
             }
@@ -198,26 +197,6 @@ impl WorkerMessage {
             WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => 64,
             WorkerMessage::Event => 0,
         }
-    }
-}
-
-impl Eq for WorkerMessage {}
-
-impl PartialEq<Self> for WorkerMessage {
-    fn eq(&self, other: &Self) -> bool {
-        self.priority() == other.priority()
-    }
-}
-
-impl Ord for WorkerMessage {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.priority().cmp(&other.priority())
-    }
-}
-
-impl PartialOrd<Self> for WorkerMessage {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
     }
 }
 
