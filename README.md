@@ -14,6 +14,7 @@ The core graph and utilities are written in Rust.
 
 Workspace dependencies are kept at their latest minor versions (patch versions left open).
 Common utilities receive periodic safety and ergonomics updates.
+Shared utilities favor standard library functionality over custom helpers.
 
 ## License
 

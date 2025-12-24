@@ -1,8 +1,6 @@
 use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
-use common::apply::ApplyMut;
-
 use crate::data::{DataType, DynamicValue};
 use crate::function::FuncLib;
 use crate::graph::{Binding, Graph};
@@ -109,10 +107,9 @@ impl Compute {
 
         for r_node in runtime_graph.nodes.iter_mut() {
             if !r_node.should_cache_outputs {
-                r_node
-                    .output_values
-                    .as_mut()
-                    .apply_mut(|values| values.fill(DynamicValue::None));
+                if let Some(values) = r_node.output_values.as_mut() {
+                    values.fill(DynamicValue::None);
+                }
             }
 
             assert_eq!(r_node.total_binding_count, 0);
