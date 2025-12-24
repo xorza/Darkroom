@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use pollster::FutureExt;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -135,52 +134,57 @@ impl Worker {
         }
     }
 
-    pub fn run_once(&mut self, graph: Graph) {
+    pub async fn run_once(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunOnce(graph);
 
         self.tx
             .send(msg)
-            .block_on()
+            .await
             .expect("Failed to send run_once message");
     }
-    pub fn run_loop(&mut self, graph: Graph) {
+    pub async fn run_loop(&mut self, graph: Graph) {
         let msg = WorkerMessage::RunLoop(graph);
 
         self.tx
             .send(msg)
-            .block_on()
+            .await
             .expect("Failed to send run_loop message");
     }
-    pub fn stop(&mut self) {
+    pub async fn stop(&mut self) {
         let msg = WorkerMessage::Stop;
 
         self.tx
             .send(msg)
-            .block_on()
+            .await
             .expect("Failed to send stop message");
     }
+    pub async fn exit(&mut self) {
+        let msg = WorkerMessage::Exit;
 
-    #[cfg(test)]
-    pub(crate) fn event(&mut self) {
+        self.tx
+            .send(msg)
+            .await
+            .expect("Failed to send exit message");
+
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.await.expect("Worker thread failed to join");
+        }
+    }
+
+    pub async fn event(&mut self) {
         let msg = WorkerMessage::Event;
 
         self.tx
             .send(msg)
-            .block_on()
+            .await
             .expect("Failed to send event message");
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.tx
-            .send(WorkerMessage::Exit)
-            .block_on()
-            .expect("Failed to send exit message");
-        if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle
-                .block_on()
-                .expect("Worker thread failed to join");
+        if self.thread_handle.is_some() {
+            panic!("Worker dropped while thread is still running; call Worker::exit() first");
         }
     }
 }
@@ -228,24 +232,24 @@ mod tests {
 
             let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml").unwrap();
 
-            worker.run_once(graph.clone());
+            worker.run_once(graph.clone()).await;
             rx.recv().unwrap();
 
             assert_eq!(output_stream.take().await[0], "1");
 
-            worker.run_loop(graph.clone());
+            worker.run_loop(graph.clone()).await;
 
-            worker.event();
+            worker.event().await;
             rx.recv().unwrap();
 
-            worker.event();
+            worker.event().await;
             rx.recv().unwrap();
 
             let log = output_stream.take().await;
             assert_eq!(log[0], "1");
             assert_eq!(log[1], "2");
 
-            worker.stop();
+            worker.exit().await;
         });
     }
 }
