@@ -1,9 +1,9 @@
 use anyhow::Error;
 use hashbrown::HashMap;
-use parking_lot::Mutex;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use common::output_stream::OutputStream;
 
@@ -112,7 +112,10 @@ impl LuaInvoker {
                     }
                 }
 
-                let _ = output_stream.lock().as_mut().is_some_and(|stream| {
+                let mut guard = output_stream
+                    .try_lock()
+                    .expect("Output stream mutex is already locked");
+                let _ = guard.as_mut().is_some_and(|stream| {
                     stream.write(output);
                     true
                 });
@@ -206,7 +209,11 @@ impl LuaInvoker {
 
         self.restore_functions();
 
-        let connections: Vec<FuncConnections> = std::mem::take(&mut connections.lock());
+        let connections: Vec<FuncConnections> = std::mem::take(
+            &mut connections
+                .try_lock()
+                .expect("Connections mutex is already locked"),
+        );
         let graph = self.create_graph(connections);
         Ok(graph)
     }
@@ -245,9 +252,10 @@ impl LuaInvoker {
                             connection.outputs.push(index);
                         }
 
-                        {
-                            connections.lock().push(connection);
-                        }
+                        connections
+                            .try_lock()
+                            .expect("Connections mutex is already locked")
+                            .push(connection);
 
                         Ok(result)
                     },
@@ -340,8 +348,11 @@ impl LuaInvoker {
         Ok(())
     }
 
-    pub(crate) fn use_output_stream(&mut self, output_stream: &OutputStream) {
-        self.output_stream.lock().replace(output_stream.clone());
+    pub(crate) async fn use_output_stream(&mut self, output_stream: &OutputStream) {
+        self.output_stream
+            .lock()
+            .await
+            .replace(output_stream.clone());
     }
 
     pub(crate) fn get_func_lib(&self) -> &FuncLib {
@@ -491,11 +502,11 @@ mod tests {
         assert_eq!(r, 9);
     }
 
-    #[test]
-    fn load_functions_from_lua_file() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn load_functions_from_lua_file() -> anyhow::Result<()> {
         let mut invoker = LuaInvoker::default();
         let output_stream = OutputStream::new();
-        invoker.use_output_stream(&output_stream);
+        invoker.use_output_stream(&output_stream).await;
 
         invoker.load_file("../test_resources/test_lua.lua")?;
 
@@ -547,7 +558,7 @@ mod tests {
 
         invoker.run()?;
 
-        let output = output_stream.take();
+        let output = output_stream.take().await;
         assert_eq!(output[0], "117");
 
         Ok(())

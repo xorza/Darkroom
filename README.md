@@ -19,6 +19,9 @@ Logging uses the tracing ecosystem.
 Runtime validation catches invalid bindings earlier.
 Some tests run on the Tokio async runtime.
 Option-based lookups are preferred with explicit `expect` at call sites.
+Synchronization uses Tokio primitives; parking_lot is not used.
+Async contexts use Tokio locks with awaits where possible.
+Blocking helpers are removed in favor of async/await or non-blocking try_lock.
 
 ## License
 

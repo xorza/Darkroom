@@ -389,23 +389,34 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut invoker = create_invoker(
-            move || test_values_a.blocking_lock().a,
-            move || test_values_b.blocking_lock().b,
-            move |result| test_values_result.blocking_lock().result = result,
+        let invoker = create_invoker(
+            move || {
+                test_values_a
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .a
+            },
+            move || {
+                test_values_b
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .b
+            },
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
         )?;
 
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        tokio::task::block_in_place(|| {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        let (invoker, runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
         assert_eq!(test_values.lock().await.result, 35);
 
-        tokio::task::block_in_place(|| {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let (mut invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
         assert_eq!(test_values.lock().await.result, 35);
 
         test_values.lock().await.b = 7;
@@ -414,10 +425,8 @@ mod tests {
             .func_by_name_mut("get_b")
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Active;
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        tokio::task::block_in_place(|| {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
         assert_eq!(test_values.lock().await.result, 63);
 
         Ok(())
@@ -435,10 +444,14 @@ mod tests {
         let invoker = create_invoker(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
-            move |result| test_values_result.blocking_lock().result = result,
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
         )?;
         let func_lib = invoker.get_func_lib();
-        let compute = Compute::default();
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
@@ -462,11 +475,9 @@ mod tests {
             mult_inputs[1].binding = Binding::Const;
         }
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
-        tokio::task::block_in_place(|| {
-            compute.run(&graph, &func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
         assert_eq!(test_values.lock().await.result, 360);
 
         drop(graph);
@@ -487,14 +498,18 @@ mod tests {
         let test_values_result = test_values.clone();
         let mut invoker = create_invoker(
             move || {
-                let mut guard = test_values_a.blocking_lock();
+                let mut guard = test_values_a
+                    .try_lock()
+                    .expect("TestValues mutex is already locked");
                 let a1 = guard.a;
                 guard.a += 1;
 
                 a1
             },
             move || {
-                let mut guard = test_values_b.blocking_lock();
+                let mut guard = test_values_b
+                    .try_lock()
+                    .expect("TestValues mutex is already locked");
                 let b1 = guard.b;
                 guard.b += 1;
                 if b1 == 6 {
@@ -503,7 +518,12 @@ mod tests {
 
                 b1
             },
-            move |result| test_values_result.blocking_lock().result = result,
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
         )?;
 
         invoker
@@ -518,10 +538,8 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .cache_outputs = false;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
-        tokio::task::block_in_place(|| {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        let (invoker, runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
 
         //assert that both nodes were called
         {
@@ -531,9 +549,7 @@ mod tests {
             assert_eq!(guard.result, 35);
         }
 
-        tokio::task::block_in_place(|| {
-            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
-        })?;
+        let (_invoker, _runtime_graph) = run_compute(invoker, &graph, runtime_graph).await?;
 
         //assert that node a was called again
         let guard = test_values.lock().await;
@@ -574,5 +590,19 @@ mod tests {
         assert_eq!(timers_invoker_func_count, 1);
 
         Ok(())
+    }
+
+    async fn run_compute(
+        invoker: LambdaInvoker,
+        graph: &Graph,
+        mut runtime_graph: RuntimeGraph,
+    ) -> anyhow::Result<(LambdaInvoker, RuntimeGraph)> {
+        let graph = graph.clone();
+        tokio::task::spawn_blocking(move || {
+            Compute::default().run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)?;
+            Ok((invoker, runtime_graph))
+        })
+        .await
+        .expect("Compute task panicked")
     }
 }

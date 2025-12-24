@@ -30,7 +30,6 @@ tokio = { version = "*", features = ["full"] }
 tracing = { version = "*" }
 tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
 tracing-appender =  { version = "*" }
-parking_lot =  { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
 bytes = { version = "*" }
 lazy_static =  { version = "*" }

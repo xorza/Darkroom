@@ -42,7 +42,13 @@ impl Worker {
         let (worker_tx, worker_rx) = channel::<WorkerMessage>(10);
         let worker_tx_clone = worker_tx.clone();
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(invoker, worker_tx_clone, worker_rx, compute_callback).await;
+            Self::worker_loop(
+                Arc::new(invoker),
+                worker_tx_clone,
+                worker_rx,
+                compute_callback,
+            )
+            .await;
         });
 
         Self {
@@ -52,14 +58,13 @@ impl Worker {
     }
 
     async fn worker_loop(
-        invoker: UberInvoker,
+        invoker: Arc<UberInvoker>,
         tx: Sender<WorkerMessage>,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = invoker.get_func_lib();
-        let compute = Compute::default();
+        let func_lib = Arc::new(invoker.get_func_lib());
 
         loop {
             if message.is_none() {
@@ -75,19 +80,23 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
-
-                    compute
-                        .run(&graph, &func_lib, &invoker, &mut runtime_graph)
-                        .expect("Failed to run graph");
+                    let invoker = Arc::clone(&invoker);
+                    let func_lib = Arc::clone(&func_lib);
+                    tokio::task::spawn_blocking(move || {
+                        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+                        Compute::default()
+                            .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                            .expect("Failed to run graph");
+                    })
+                    .await
+                    .expect("RunOnce compute task panicked");
                 }
 
                 WorkerMessage::RunLoop(graph) => {
                     message = Self::event_subloop(
-                        graph,
-                        &func_lib,
-                        &compute,
-                        &invoker,
+                        Arc::new(graph),
+                        Arc::clone(&func_lib),
+                        Arc::clone(&invoker),
                         tx.clone(),
                         &mut rx,
                         compute_callback.clone(),
@@ -102,10 +111,9 @@ impl Worker {
 
     #[allow(unreachable_code)]
     async fn event_subloop(
-        graph: Graph,
-        func_lib: &FuncLib,
-        compute: &Compute,
-        invoker: &UberInvoker,
+        graph: Arc<Graph>,
+        func_lib: Arc<FuncLib>,
+        invoker: Arc<UberInvoker>,
         worker_tx: Sender<WorkerMessage>,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
@@ -114,7 +122,7 @@ impl Worker {
 
         Self::start_event_thread(worker_tx);
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
+        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
 
         loop {
             // receive all messages and pick message with the highest priority
@@ -137,9 +145,18 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    compute
-                        .run(&graph, func_lib, invoker, &mut runtime_graph)
-                        .expect("Failed to run graph");
+                    let invoker = Arc::clone(&invoker);
+                    let func_lib = Arc::clone(&func_lib);
+                    let graph = Arc::clone(&graph);
+                    runtime_graph = tokio::task::spawn_blocking(move || {
+                        let mut runtime_graph = runtime_graph;
+                        Compute::default()
+                            .run(&graph, &func_lib, invoker.as_ref(), &mut runtime_graph)
+                            .expect("Failed to run graph");
+                        runtime_graph
+                    })
+                    .await
+                    .expect("Event compute task panicked");
 
                     (*compute_callback.lock().await)();
                     continue;
@@ -293,7 +310,7 @@ mod tests {
 
             let timers_invoker = TimersInvoker::default();
             let mut basic_invoker = BasicInvoker::default();
-            basic_invoker.use_output_stream(&output_stream);
+            basic_invoker.use_output_stream(&output_stream).await;
 
             let mut uber_invoker = UberInvoker::default();
             uber_invoker.merge(timers_invoker);
@@ -309,7 +326,7 @@ mod tests {
             worker.run_once(graph.clone());
             rx.recv().unwrap();
 
-            assert_eq!(output_stream.take()[0], "1");
+            assert_eq!(output_stream.take().await[0], "1");
 
             worker.run_loop(graph.clone());
 
@@ -319,7 +336,7 @@ mod tests {
             worker.event();
             rx.recv().unwrap();
 
-            let log = output_stream.take();
+            let log = output_stream.take().await;
             assert_eq!(log[0], "1");
             assert_eq!(log[1], "2");
 

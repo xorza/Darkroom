@@ -1,7 +1,7 @@
 use mlua::FromLuaMulti;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
+use tokio::sync::Mutex;
 
 trait SendSync: Sync + Send {}
 
@@ -29,14 +29,14 @@ impl Default for LuaCtx {
 }
 
 impl LuaCtx {
-    fn load(&self, script: &str) -> Result<(), mlua::Error> {
-        let inner = self.inner.lock();
-        inner.load(script)
+    async fn load(&self, script: &str) -> Result<(), mlua::Error> {
+        let guard = self.inner.lock().await;
+        guard.load(script)
     }
 
-    fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
-        let inner = self.inner.lock();
-        inner.call(func)
+    async fn call<R: FromLuaMulti>(&self, func: &str) -> Result<R, mlua::Error> {
+        let guard = self.inner.lock().await;
+        guard.call(func)
     }
 }
 
@@ -93,15 +93,15 @@ mod tests {
             .unwrap()
             .block_on(async move {
                 let lua = LuaCtx::default();
-                lua.load(script).unwrap();
-                let n = lua.call::<u32>("test").unwrap();
+                lua.load(script).await.unwrap();
+                let n = lua.call::<u32>("test").await.unwrap();
                 assert_eq!(42, n);
 
                 for _ in 0..1000 {
                     let lua = lua.clone();
 
                     tokio::spawn(async move {
-                        let n = lua.call::<u32>("test").unwrap();
+                        let n = lua.call::<u32>("test").await.unwrap();
                         assert_eq!(42, n);
                     })
                     .await

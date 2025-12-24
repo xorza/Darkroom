@@ -58,7 +58,10 @@ impl NodeEventManager {
     fn stop(node_event: &mut NodeEvent) {
         {
             // revoke old trigger
-            let mut trigger = node_event.trigger.blocking_lock();
+            let mut trigger = node_event
+                .trigger
+                .try_lock()
+                .expect("Event trigger mutex is already locked");
             *trigger = None;
         }
 

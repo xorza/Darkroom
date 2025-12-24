@@ -40,6 +40,8 @@ Recent adjustments:
 - Replaced many unwraps with explicit `expect` messages in core runtime paths.
 - Invoke tests now use Tokio async tests with blocking sections around sync compute execution.
 - Removed `*_ref` accessors and standardized on `Option` lookups with explicit `expect` messages at call sites.
+- Replaced parking_lot usage with Tokio mutexes and async/try_lock access patterns (no blocking_lock).
+- OutputStream now uses async drain via Tokio mpsc; sync writers send without blocking.
 
 ### graph crate
 

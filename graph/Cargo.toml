@@ -15,7 +15,6 @@ strum = { workspace = true }
 strum_macros = { workspace = true }
 rand = { workspace = true }
 tokio = { workspace = true }
-parking_lot = { workspace = true }
 tracing = { workspace = true }
 hashbrown = { workspace = true }
 pollster = { workspace = true }

@@ -1,10 +1,10 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use parking_lot::Mutex;
 use rand::{Rng, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
+use tokio::sync::Mutex;
 use tracing::info;
 
 use common::output_stream::OutputStream;
@@ -77,8 +77,11 @@ impl From<i64> for Math2ArgOp {
 }
 
 impl BasicInvoker {
-    pub(crate) fn use_output_stream(&mut self, output_stream: &OutputStream) {
-        self.output_stream.lock().replace(output_stream.clone());
+    pub(crate) async fn use_output_stream(&mut self, output_stream: &OutputStream) {
+        self.output_stream
+            .lock()
+            .await
+            .replace(output_stream.clone());
     }
 }
 
@@ -110,7 +113,10 @@ impl Default for BasicInvoker {
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
-                let _ = output_stream_clone.lock().as_mut().is_some_and(|s| {
+                let mut guard = output_stream_clone
+                    .try_lock()
+                    .expect("Output stream mutex is already locked");
+                let _ = guard.as_mut().is_some_and(|s| {
                     s.write(value);
                     true
                 });
