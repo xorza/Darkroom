@@ -70,18 +70,63 @@ impl RuntimeGraph {
             .map(move |index| &mut self.r_nodes[index])
     }
 
+    // mark active nodes without cached outputs for execution
     pub fn next(&mut self, graph: &Graph) {
-        self.schedule_invocations_with_index(graph);
+        Self::reset_runtime_state(&mut self.r_nodes);
+
+        let mut active_node_ids = Self::terminal_node_ids(&self.r_nodes);
+
+        let mut index = 0;
+        while index < active_node_ids.len() {
+            index += 1;
+            let index = index - 1;
+
+            let node_id = active_node_ids[index];
+            let node = graph
+                .node_by_id(node_id)
+                .unwrap_or_else(|| panic!("Node with id {:?} not found", node_id));
+            let r_node = self
+                .r_nodes
+                .get_mut(
+                    *self
+                        .node_index_by_id
+                        .get(&node_id)
+                        .expect("Runtime node missing"),
+                )
+                .expect("Runtime node missing");
+
+            let is_active = Self::should_execute_or_propagate(r_node);
+            r_node.should_invoke = is_active && !r_node.has_missing_inputs;
+
+            node.inputs.iter().for_each(|input| {
+                if let Binding::Output(output_binding) = &input.binding {
+                    if is_active {
+                        active_node_ids.push(output_binding.output_node_id);
+                    }
+                    let output_r_node = self
+                        .r_nodes
+                        .get_mut(
+                            *self
+                                .node_index_by_id
+                                .get(&output_binding.output_node_id)
+                                .expect("Runtime node missing"),
+                        )
+                        .expect("Runtime node missing");
+                    output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
+                    output_r_node.total_binding_count += 1;
+                }
+            });
+        }
     }
 
+    // update graph
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        Self::validate_runtime_inputs(graph, func_lib)
+        validate_runtime_inputs(graph, func_lib)
             .expect("RuntimeGraph build requires a validated graph and function library");
 
         let graph_node_index_by_id = graph.node_index_by_id();
 
-        let active_node_ids =
-            Self::collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
+        let active_node_ids = collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
 
         let mut previous_runtime = std::mem::take(self);
         self.r_nodes = Vec::with_capacity(graph.nodes.len());
@@ -201,60 +246,6 @@ impl RuntimeGraph {
         }
     }
 
-    // mark active nodes without cached outputs for execution
-    fn schedule_invocations(&mut self, graph: &Graph) {
-        // self.rebuild_node_index();
-        self.schedule_invocations_with_index(graph);
-    }
-
-    fn schedule_invocations_with_index(&mut self, graph: &Graph) {
-        Self::reset_runtime_state(&mut self.r_nodes);
-
-        let mut active_node_ids = Self::terminal_node_ids(&self.r_nodes);
-
-        let mut index = 0;
-        while index < active_node_ids.len() {
-            index += 1;
-            let index = index - 1;
-
-            let node_id = active_node_ids[index];
-            let node = graph
-                .node_by_id(node_id)
-                .unwrap_or_else(|| panic!("Node with id {:?} not found", node_id));
-            let r_node = self
-                .r_nodes
-                .get_mut(
-                    *self
-                        .node_index_by_id
-                        .get(&node_id)
-                        .expect("Runtime node missing"),
-                )
-                .expect("Runtime node missing");
-
-            let is_active = Self::should_execute_or_propagate(r_node);
-            r_node.should_invoke = is_active && !r_node.has_missing_inputs;
-
-            node.inputs.iter().for_each(|input| {
-                if let Binding::Output(output_binding) = &input.binding {
-                    if is_active {
-                        active_node_ids.push(output_binding.output_node_id);
-                    }
-                    let output_r_node = self
-                        .r_nodes
-                        .get_mut(
-                            *self
-                                .node_index_by_id
-                                .get(&output_binding.output_node_id)
-                                .expect("Runtime node missing"),
-                        )
-                        .expect("Runtime node missing");
-                    output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
-                    output_r_node.total_binding_count += 1;
-                }
-            });
-        }
-    }
-
     fn reset_runtime_state(r_nodes: &mut [RuntimeNode]) {
         r_nodes.iter_mut().for_each(|r_node| {
             r_node.should_invoke = false;
@@ -279,97 +270,93 @@ impl RuntimeGraph {
     fn should_execute_or_propagate(r_node: &RuntimeNode) -> bool {
         r_node.terminal || r_node.output_values.is_none() || r_node.behavior == FuncBehavior::Active
     }
+}
 
-    fn collect_ordered_terminal_dependencies(
-        graph: &Graph,
-        graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) -> Vec<NodeId> {
-        let node_count = graph.nodes.len();
-        let mut visit_state: HashMap<NodeId, VisitState> = HashMap::with_capacity(node_count);
-        let mut ordered: Vec<NodeId> = Vec::with_capacity(node_count);
-        let mut stack: Vec<(NodeId, bool)> = Vec::with_capacity(10);
+fn collect_ordered_terminal_dependencies(
+    graph: &Graph,
+    graph_node_index_by_id: &HashMap<NodeId, usize>,
+) -> Vec<NodeId> {
+    let node_count = graph.nodes.len();
+    let mut visit_state: HashMap<NodeId, VisitState> = HashMap::with_capacity(node_count);
+    let mut ordered: Vec<NodeId> = Vec::with_capacity(node_count);
+    let mut stack: Vec<(NodeId, bool)> = Vec::with_capacity(10);
 
-        for node in graph.nodes.iter().filter(|node| node.terminal) {
-            stack.push((node.id, false));
-        }
-
-        while let Some((node_id, expanded)) = stack.pop() {
-            if expanded {
-                visit_state.insert(node_id, VisitState::Visited);
-                ordered.push(node_id);
-                continue;
-            }
-
-            match visit_state.get(&node_id) {
-                Some(VisitState::Visited) => continue,
-                Some(VisitState::Visiting) => {
-                    panic!("Cycle detected while building runtime graph");
-                }
-                None => {}
-            }
-
-            visit_state.insert(node_id, VisitState::Visiting);
-            stack.push((node_id, true));
-
-            let node_index = *graph_node_index_by_id
-                .get(&node_id)
-                .expect("Node missing from graph");
-            let node = &graph.nodes[node_index];
-            for input in node.inputs.iter() {
-                if let Binding::Output(output_binding) = &input.binding {
-                    stack.push((output_binding.output_node_id, false));
-                }
-            }
-        }
-
-        ordered
+    for node in graph.nodes.iter().filter(|node| node.terminal) {
+        stack.push((node.id, false));
     }
 
-    fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
-        graph.validate()?;
+    while let Some((node_id, expanded)) = stack.pop() {
+        if expanded {
+            visit_state.insert(node_id, VisitState::Visited);
+            ordered.push(node_id);
+            continue;
+        }
 
-        for node in graph.nodes.iter() {
-            let func = func_lib.func_by_id(node.func_id).ok_or_else(|| {
-                anyhow::Error::msg(format!(
-                    "Missing function {:?} for node {:?}",
-                    node.func_id, node.id
-                ))
-            })?;
-
-            if node.inputs.len() != func.inputs.len() {
-                return Err(anyhow::Error::msg(format!(
-                    "Node {:?} input count mismatch",
-                    node.id
-                )));
+        match visit_state.get(&node_id) {
+            Some(VisitState::Visited) => continue,
+            Some(VisitState::Visiting) => {
+                panic!("Cycle detected while building runtime graph");
             }
+            None => {}
+        }
 
-            for input in node.inputs.iter() {
-                if let Binding::Output(output_binding) = &input.binding {
-                    let output_node =
-                        graph
-                            .node_by_id(output_binding.output_node_id)
-                            .ok_or_else(|| {
-                                anyhow::Error::msg("Output binding references missing node")
-                            })?;
-                    let output_func =
-                        func_lib.func_by_id(output_node.func_id).ok_or_else(|| {
-                            anyhow::Error::msg(format!(
-                                "Missing function {:?} for output node {:?}",
-                                output_node.func_id, output_node.id
-                            ))
-                        })?;
-                    if (output_binding.output_index as usize) >= output_func.outputs.len() {
-                        return Err(anyhow::Error::msg(format!(
-                            "Output index out of range for node {:?}",
-                            output_binding.output_node_id
-                        )));
-                    }
+        visit_state.insert(node_id, VisitState::Visiting);
+        stack.push((node_id, true));
+
+        let node_index = *graph_node_index_by_id
+            .get(&node_id)
+            .expect("Node missing from graph");
+        let node = &graph.nodes[node_index];
+        for input in node.inputs.iter() {
+            if let Binding::Output(output_binding) = &input.binding {
+                stack.push((output_binding.output_node_id, false));
+            }
+        }
+    }
+
+    ordered
+}
+
+fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+    graph.validate()?;
+
+    for node in graph.nodes.iter() {
+        let func = func_lib.func_by_id(node.func_id).ok_or_else(|| {
+            anyhow::Error::msg(format!(
+                "Missing function {:?} for node {:?}",
+                node.func_id, node.id
+            ))
+        })?;
+
+        if node.inputs.len() != func.inputs.len() {
+            return Err(anyhow::Error::msg(format!(
+                "Node {:?} input count mismatch",
+                node.id
+            )));
+        }
+
+        for input in node.inputs.iter() {
+            if let Binding::Output(output_binding) = &input.binding {
+                let output_node = graph
+                    .node_by_id(output_binding.output_node_id)
+                    .ok_or_else(|| anyhow::Error::msg("Output binding references missing node"))?;
+                let output_func = func_lib.func_by_id(output_node.func_id).ok_or_else(|| {
+                    anyhow::Error::msg(format!(
+                        "Missing function {:?} for output node {:?}",
+                        output_node.func_id, output_node.id
+                    ))
+                })?;
+                if (output_binding.output_index as usize) >= output_func.outputs.len() {
+                    return Err(anyhow::Error::msg(format!(
+                        "Output index out of range for node {:?}",
+                        output_binding.output_node_id
+                    )));
                 }
             }
         }
-
-        Ok(())
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
