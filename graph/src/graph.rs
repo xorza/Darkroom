@@ -40,7 +40,7 @@ pub struct Node {
     pub func_id: FuncId,
 
     pub name: String,
-    pub is_output: bool,
+    pub terminal: bool,
     pub cache_outputs: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -52,18 +52,9 @@ pub struct Node {
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
     pub nodes: Vec<Node>,
-    pub view_pos: glam::Vec2,
-    pub view_scale: f32,
 }
 
 impl Graph {
-    pub fn nodes(&self) -> &[Node] {
-        self.nodes.as_slice()
-    }
-    pub fn nodes_mut(&mut self) -> &mut [Node] {
-        self.nodes.as_mut_slice()
-    }
-
     pub fn add_node(&mut self, node: Node) {
         match self.nodes.iter().position(|n| n.id == node.id) {
             Some(index) => self.nodes[index] = node,
@@ -173,7 +164,7 @@ impl Default for Node {
             id: NodeId::unique(),
             func_id: FuncId::nil(),
             name: "".to_string(),
-            is_output: false,
+            terminal: false,
             cache_outputs: false,
             inputs: vec![],
             events: vec![],
@@ -205,7 +196,7 @@ impl Node {
             id: NodeId::unique(),
             func_id: function.id,
             name: function.name.clone(),
-            is_output: function.is_output,
+            terminal: function.terminal,
             cache_outputs: false,
             inputs,
             events,
@@ -314,9 +305,9 @@ mod tests {
         graph.remove_node_by_id(node_id);
 
         assert!(graph.node_by_name("sum").is_none());
-        assert_eq!(graph.nodes().len(), 4);
+        assert_eq!(graph.nodes.len(), 4);
 
-        for input in graph.nodes().iter().flat_map(|node| node.inputs.iter()) {
+        for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_output_binding() {
                 assert_ne!(binding.output_node_id, node_id);
             }

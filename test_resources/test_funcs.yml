@@ -2,7 +2,7 @@
   name: sum
   category: Debug
   behavior: Passive
-  is_output: false
+  terminal: false
   inputs:
     - name: A
       is_required: true
@@ -17,7 +17,7 @@
   name: mult
   category: Debug
   behavior: Passive
-  is_output: false
+  terminal: false
   inputs:
     - name: A
       is_required: true
@@ -32,7 +32,7 @@
   name: get_b
   category: Debug
   behavior: Passive
-  is_output: false
+  terminal: false
   outputs:
     - name: Int32 Value
       data_type: Int
@@ -40,7 +40,7 @@
   name: get_a
   category: Debug
   behavior: Active
-  is_output: false
+  terminal: false
   outputs:
     - name: Int32 Value
       data_type: Int
@@ -48,7 +48,7 @@
   name: print
   category: Debug
   behavior: Passive
-  is_output: false
+  terminal: false
   inputs:
     - name: message
       is_required: true

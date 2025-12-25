@@ -51,7 +51,7 @@ pub struct Func {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub behavior: FuncBehavior,
-    pub is_output: bool,
+    pub terminal: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<FuncInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -178,7 +178,7 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
-                is_output: false,
+                terminal: false,
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
@@ -207,7 +207,7 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Active,
-                is_output: false,
+                terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
@@ -221,7 +221,7 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
-                is_output: false,
+                terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
@@ -235,7 +235,7 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
-                is_output: false,
+                terminal: false,
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
@@ -264,7 +264,7 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Passive,
-                is_output: false,
+                terminal: false,
                 inputs: vec![FuncInput {
                     name: "message".to_string(),
                     is_required: true,

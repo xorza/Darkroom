@@ -14,7 +14,7 @@ use crate::invoke::InvokeCache;
 pub struct RuntimeNode {
     id: NodeId,
 
-    pub is_output: bool,
+    pub terminal: bool,
     pub has_missing_inputs: bool,
     pub behavior: FuncBehavior,
     pub cache_outputs: bool,
@@ -142,7 +142,7 @@ impl RuntimeGraph {
 
             result.push(RuntimeNode {
                 id: node_id,
-                is_output: node.is_output,
+                terminal: node.terminal,
                 has_missing_inputs: false,
                 behavior: func.behavior,
                 cache_outputs: node.cache_outputs,
@@ -268,7 +268,7 @@ impl RuntimeGraph {
         r_nodes
             .iter()
             .filter_map(|r_node| {
-                if r_node.is_output {
+                if r_node.terminal {
                     Some(r_node.id)
                 } else {
                     None
@@ -278,21 +278,19 @@ impl RuntimeGraph {
     }
 
     fn should_execute_or_propagate(r_node: &RuntimeNode) -> bool {
-        r_node.is_output
-            || r_node.output_values.is_none()
-            || r_node.behavior == FuncBehavior::Active
+        r_node.terminal || r_node.output_values.is_none() || r_node.behavior == FuncBehavior::Active
     }
 
     fn collect_ordered_output_dependencies(
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
     ) -> Vec<NodeId> {
-        let node_count = graph.nodes().len();
+        let node_count = graph.nodes.len();
         let mut visit_state: HashMap<NodeId, VisitState> = HashMap::with_capacity(node_count);
         let mut ordered: Vec<NodeId> = Vec::with_capacity(node_count);
         let mut stack: Vec<(NodeId, bool)> = Vec::with_capacity(10);
 
-        for node in graph.nodes().iter().filter(|node| node.is_output) {
+        for node in graph.nodes.iter().filter(|node| node.terminal) {
             stack.push((node.id, false));
         }
 
@@ -317,7 +315,7 @@ impl RuntimeGraph {
             let node_index = *graph_node_index_by_id
                 .get(&node_id)
                 .expect("Node missing from graph");
-            let node = &graph.nodes()[node_index];
+            let node = &graph.nodes[node_index];
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
                     stack.push((output_binding.output_node_id, false));
@@ -331,7 +329,7 @@ impl RuntimeGraph {
     fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
         graph.validate()?;
 
-        for node in graph.nodes().iter() {
+        for node in graph.nodes.iter() {
             let func = func_lib.func_by_id(node.func_id).ok_or_else(|| {
                 anyhow::Error::msg(format!(
                     "Missing function {:?} for node {:?}",

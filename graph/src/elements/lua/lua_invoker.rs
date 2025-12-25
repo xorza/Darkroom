@@ -155,7 +155,7 @@ impl LuaInvoker {
             category: "".to_string(),
             description: None,
             behavior: Default::default(),
-            is_output: false,
+            terminal: false,
             inputs: vec![],
             outputs: vec![],
             events: vec![],
@@ -533,10 +533,10 @@ mod tests {
         assert_eq!(result, 15);
 
         let graph = invoker.map_graph()?;
-        assert_eq!(graph.nodes().len(), 5);
+        assert_eq!(graph.nodes.len(), 5);
 
         let mult_node = graph
-            .nodes()
+            .nodes
             .iter()
             .find(|node| node.name == "mult")
             .expect("Missing mult node");

@@ -3,7 +3,7 @@ nodes:
     func_id: 01897c92-d605-5f5a-7a21-627ed74824ff
     name: frame event
     behavior: Active
-    is_output: false
+    terminal: false
     cache_outputs: false
     inputs:
       - name: frequency
@@ -18,11 +18,11 @@ nodes:
         data_type: Int
     events:
       - name: always
-        subscribers: [ ]
+        subscribers: []
       - name: once
-        subscribers: [ ]
+        subscribers: []
       - name: fps
-        subscribers: [ ]
+        subscribers: []
     view_pos:
       - 0.0
       - 0.0
@@ -30,7 +30,7 @@ nodes:
     func_id: 01896a88-bf15-dead-4a15-5969da5a9e65
     name: float to string
     behavior: Active
-    is_output: false
+    terminal: false
     cache_outputs: false
     inputs:
       - name: value
@@ -49,7 +49,7 @@ nodes:
     func_id: 01896910-0790-ad1b-aa12-3f1437196789
     name: print
     behavior: Active
-    is_output: true
+    terminal: true
     cache_outputs: false
     inputs:
       - name: value
