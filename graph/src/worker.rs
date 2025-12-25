@@ -70,7 +70,8 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+                    let mut runtime_graph = RuntimeGraph::default();
+                    runtime_graph.update(&graph, &func_lib);
                     Compute::default()
                         .run(&graph, &func_lib, &invoker, &mut runtime_graph)
                         .await
@@ -100,7 +101,8 @@ impl Worker {
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
-        let mut runtime_graph = RuntimeGraph::new(&graph, func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, func_lib);
 
         loop {
             // receive all messages and pick message with the highest priority

@@ -58,10 +58,6 @@ impl RuntimeNode {
 }
 
 impl RuntimeGraph {
-    pub fn new(graph: &Graph, func_lib: &FuncLib) -> Self {
-        Self::build(graph, func_lib, &mut RuntimeGraph::default())
-    }
-
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
         self.node_index_by_id
             .get(&node_id)
@@ -77,20 +73,20 @@ impl RuntimeGraph {
     pub fn next(&mut self, graph: &Graph) {
         Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.r_nodes);
     }
-}
 
-impl RuntimeGraph {
-    fn build(
-        graph: &Graph,
-        func_lib: &FuncLib,
-        previous_runtime: &mut RuntimeGraph,
-    ) -> RuntimeGraph {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         Self::validate_runtime_inputs(graph, func_lib)
             .expect("RuntimeGraph build requires a validated graph and function library");
 
+        let mut previous_runtime = std::mem::replace(self, RuntimeGraph::default());
         let graph_node_index_by_id = graph.node_index_by_id();
-        let mut r_nodes =
-            Self::collect_r_nodes(graph, func_lib, &graph_node_index_by_id, previous_runtime);
+
+        let mut r_nodes = Self::collect_r_nodes(
+            graph,
+            func_lib,
+            &graph_node_index_by_id,
+            &mut previous_runtime,
+        );
         Self::propagate_missing_inputs_and_behavior(
             graph,
             func_lib,
@@ -99,10 +95,8 @@ impl RuntimeGraph {
         );
         let node_index_by_id = Self::build_node_index(&r_nodes);
 
-        RuntimeGraph {
-            r_nodes,
-            node_index_by_id,
-        }
+        self.r_nodes = r_nodes;
+        self.node_index_by_id = node_index_by_id;
     }
 
     fn collect_r_nodes(
@@ -398,7 +392,8 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
             .id;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &func_lib);
         runtime_graph.next(&graph);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
@@ -433,7 +428,8 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
             .id;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &func_lib);
         runtime_graph.next(&graph);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
@@ -487,7 +483,8 @@ mod tests {
             .inputs[0]
             .binding = Binding::None;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &func_lib);
         runtime_graph.next(&graph);
 
         assert_eq!(runtime_graph.r_nodes.len(), 4);

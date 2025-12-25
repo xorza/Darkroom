@@ -413,7 +413,8 @@ mod tests {
 
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &invoker.func_lib);
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -430,7 +431,9 @@ mod tests {
             .func_by_name_mut("get_b")
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Active;
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &invoker.func_lib);
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -482,7 +485,8 @@ mod tests {
             mult_inputs[1].binding = Binding::Const;
         }
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &func_lib);
 
         Compute::default()
             .run(&graph, &func_lib, &invoker, &mut runtime_graph)
@@ -547,7 +551,9 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .cache_outputs = false;
 
-        let mut runtime_graph = RuntimeGraph::new(&graph, &invoker.func_lib);
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &invoker.func_lib);
+
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
