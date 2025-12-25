@@ -161,7 +161,7 @@ impl RuntimeGraph {
                 });
                 self.r_nodes.last_mut().unwrap()
             };
-            r_node.reset_from(&node, &func);
+            r_node.reset_from(node, func);
         }
 
         self.rebuild_node_index();
