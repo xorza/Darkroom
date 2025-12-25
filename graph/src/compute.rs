@@ -132,7 +132,7 @@ impl Compute {
         }
 
         for r_node in runtime_graph.nodes.iter_mut() {
-            if !r_node.should_cache_outputs {
+            if !r_node.cache_outputs {
                 if let Some(values) = r_node.output_values.as_mut() {
                     values.fill(DynamicValue::None);
                 }

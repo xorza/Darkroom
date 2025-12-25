@@ -16,7 +16,7 @@ pub struct RuntimeNode {
     pub is_output: bool,
     pub has_missing_inputs: bool,
     pub behavior: FuncBehavior,
-    pub should_cache_outputs: bool,
+    pub cache_outputs: bool,
     pub should_invoke: bool,
     pub run_time: f64,
 
@@ -111,13 +111,13 @@ impl RuntimeGraph {
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
                 .expect("Missing graph node for runtime node")];
-            let node_info = func_lib
+            let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
             assert_eq!(
                 node.inputs.len(),
-                node_info.inputs.len(),
+                func.inputs.len(),
                 "Node {:?} input count mismatch",
                 node.id
             );
@@ -127,12 +127,12 @@ impl RuntimeGraph {
                     let output_node = &graph.nodes[*graph_node_index_by_id
                         .get(&output_binding.output_node_id)
                         .expect("Output node not found in graph")];
-                    let output_info =
+                    let output_func =
                         func_lib.func_by_id(output_node.func_id).unwrap_or_else(|| {
                             panic!("Func with id {:?} not found", output_node.func_id)
                         });
                     assert!(
-                        (output_binding.output_index as usize) < output_info.outputs.len(),
+                        (output_binding.output_index as usize) < output_func.outputs.len(),
                         "Output index out of range for node {:?}",
                         output_binding.output_node_id
                     );
@@ -141,11 +141,8 @@ impl RuntimeGraph {
 
             let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
-            let (invoke_context, output_values) = if let Some(prev_r_node) = prev_r_node {
-                assert_eq!(
-                    prev_r_node.output_binding_count.len(),
-                    node_info.outputs.len()
-                );
+            let (cache, output_values) = if let Some(prev_r_node) = prev_r_node {
+                assert_eq!(prev_r_node.output_binding_count.len(), func.outputs.len());
 
                 (
                     take(&mut prev_r_node.cache),
@@ -159,14 +156,14 @@ impl RuntimeGraph {
                 id: node_id,
                 is_output: node.is_output,
                 has_missing_inputs: false,
-                behavior: node_info.behavior,
-                should_cache_outputs: node.cache_outputs,
+                behavior: func.behavior,
+                cache_outputs: node.cache_outputs,
                 run_time: 0.0,
                 should_invoke: false,
-                cache: invoke_context,
+                cache,
                 output_values,
 
-                output_binding_count: vec![0; node_info.outputs.len()],
+                output_binding_count: vec![0; func.outputs.len()],
                 total_binding_count: 0,
             });
         }
@@ -225,7 +222,7 @@ impl RuntimeGraph {
                 });
 
             if r_node.behavior == FuncBehavior::Passive {
-                r_node.should_cache_outputs = true;
+                r_node.cache_outputs = true;
             }
             r_nodes[index] = r_node;
         }
