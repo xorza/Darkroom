@@ -61,6 +61,7 @@ Benchmarks:
 - `graph/benches/b1.rs` resolves `test_resources` via `CARGO_MANIFEST_DIR`, disables caching on the `sum` node, and benchmarks `RuntimeGraph::new` with Criterion.
 
 Runtime graph construction now uses an explicit stack for active-node ordering to avoid deep recursion limits.
+Runtime graph creation and scheduling are split into clearer phases (node build, propagation, scheduling).
 
 ## Common Terms
 
