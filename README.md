@@ -28,6 +28,7 @@ Runtime graph construction separates node collection, dependency propagation, an
 Runtime graph builds assume validated graphs and function libraries.
 Runtime node collection centralizes reuse of prior runtime state.
 Runtime node updates use shared reset logic to keep state consistent.
+Runtime nodes own their own reset behavior for update passes.
 
 ## Benchmarks
 

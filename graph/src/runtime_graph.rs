@@ -55,6 +55,20 @@ impl RuntimeNode {
         self.output_binding_count[output_index as usize] -= 1;
         self.total_binding_count -= 1;
     }
+
+    fn reset_from(&mut self, node: &Node, func: &Func) {
+        self.terminal = node.terminal;
+        self.cache_outputs = node.cache_outputs;
+        self.behavior = func.behavior;
+
+        self.has_missing_inputs = false;
+        self.run_time = 0.0;
+        self.should_invoke = false;
+        self.total_binding_count = 0;
+
+        self.output_binding_count.resize(func.outputs.len(), 0);
+        self.output_binding_count.fill(0);
+    }
 }
 
 impl RuntimeGraph {
@@ -147,7 +161,7 @@ impl RuntimeGraph {
                 });
                 self.r_nodes.last_mut().unwrap()
             };
-            Self::reset_runtime_node(r_node, node, func);
+            r_node.reset_from(&node, &func);
         }
 
         self.rebuild_node_index();
@@ -158,20 +172,6 @@ impl RuntimeGraph {
             &graph_node_index_by_id,
             &mut self.r_nodes,
         );
-    }
-
-    fn reset_runtime_node(r_node: &mut RuntimeNode, node: &Node, func: &Func) {
-        r_node.terminal = node.terminal;
-        r_node.cache_outputs = node.cache_outputs;
-        r_node.behavior = func.behavior;
-
-        r_node.has_missing_inputs = false;
-        r_node.run_time = 0.0;
-        r_node.should_invoke = false;
-        r_node.total_binding_count = 0;
-
-        r_node.output_binding_count.resize(func.outputs.len(), 0);
-        r_node.output_binding_count.fill(0);
     }
 
     fn rebuild_node_index(&mut self) {

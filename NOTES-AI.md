@@ -65,6 +65,7 @@ Runtime graph creation and scheduling are split into clearer phases (node build,
 Runtime graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 Runtime graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous runtime.
 Runtime graph update now uses helpers to reset or build runtime nodes without duplicating state initialization logic.
+Runtime node reset logic now lives on `RuntimeNode` to keep update behavior self-contained.
 
 ## Common Terms
 
