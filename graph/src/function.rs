@@ -8,10 +8,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
-    // active means function could return different values each time it is called
+    // could return different values for same inputs
     #[default]
-    Active,
-    Passive,
+    Impure,
+    // always returns the same value for same inputs
+    Pure,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,8 +70,8 @@ pub struct FuncLib {
 impl FuncBehavior {
     pub fn toggle(&mut self) {
         *self = match *self {
-            FuncBehavior::Active => FuncBehavior::Passive,
-            FuncBehavior::Passive => FuncBehavior::Active,
+            FuncBehavior::Impure => FuncBehavior::Pure,
+            FuncBehavior::Pure => FuncBehavior::Impure,
         };
     }
 }
@@ -178,7 +179,7 @@ mod tests {
                 name: "mult".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 inputs: vec![
                     FuncInput {
@@ -207,7 +208,7 @@ mod tests {
                 name: "get_a".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Active,
+                behavior: FuncBehavior::Impure,
                 terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
@@ -221,7 +222,7 @@ mod tests {
                 name: "get_b".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
@@ -235,7 +236,7 @@ mod tests {
                 name: "sum".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 inputs: vec![
                     FuncInput {
@@ -264,7 +265,7 @@ mod tests {
                 name: "print".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 inputs: vec![FuncInput {
                     name: "message".to_string(),

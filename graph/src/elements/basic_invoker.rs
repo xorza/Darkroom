@@ -102,7 +102,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "print".to_string(),
                 description: None,
-                behavior: FuncBehavior::Active,
+                behavior: FuncBehavior::Impure,
                 terminal: true,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -133,7 +133,7 @@ impl Default for BasicInvoker {
                 id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE")
                     .expect("Invalid func id"),
                 name: "2 arg math".to_string(),
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -184,7 +184,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "float to string".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -218,7 +218,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "random".to_string(),
                 description: None,
-                behavior: FuncBehavior::Active,
+                behavior: FuncBehavior::Impure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -264,7 +264,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "add".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -307,7 +307,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "subtract".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -350,7 +350,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "multiply".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -393,7 +393,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "divide".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -444,7 +444,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "power".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
@@ -487,7 +487,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "sqrt".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -520,7 +520,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "sin".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -553,7 +553,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "cos".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -586,7 +586,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "tan".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -619,7 +619,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "asin".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -652,7 +652,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "acos".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -685,7 +685,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "atan".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
@@ -718,7 +718,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "log".to_string(),
                 description: None,
-                behavior: FuncBehavior::Passive,
+                behavior: FuncBehavior::Pure,
                 terminal: false,
                 category: "math".to_string(),
                 inputs: vec![

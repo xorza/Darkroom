@@ -220,14 +220,14 @@ impl RuntimeGraph {
                             .iter()
                             .find(|&p_node| p_node.id == output_binding.output_node_id)
                             .expect("Node not found among already processed ones");
-                        if output_r_node.behavior == FuncBehavior::Active {
-                            r_node.behavior = FuncBehavior::Active;
+                        if output_r_node.behavior == FuncBehavior::Impure {
+                            r_node.behavior = FuncBehavior::Impure;
                         }
                         r_node.has_missing_inputs |= output_r_node.has_missing_inputs;
                     }
                 });
 
-            if r_node.behavior == FuncBehavior::Passive {
+            if r_node.behavior == FuncBehavior::Pure {
                 r_node.cache_outputs = true;
             }
             r_nodes[index] = r_node;
@@ -256,7 +256,7 @@ impl RuntimeGraph {
     }
 
     fn should_execute_or_propagate(r_node: &RuntimeNode) -> bool {
-        r_node.terminal || r_node.output_values.is_none() || r_node.behavior == FuncBehavior::Active
+        r_node.terminal || r_node.output_values.is_none() || r_node.behavior == FuncBehavior::Impure
     }
 }
 

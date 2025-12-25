@@ -430,7 +430,7 @@ mod tests {
             .func_lib
             .func_by_name_mut("get_b")
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
-            .behavior = FuncBehavior::Active;
+            .behavior = FuncBehavior::Impure;
 
         let mut runtime_graph = RuntimeGraph::default();
         runtime_graph.update(&graph, &invoker.func_lib);
@@ -543,7 +543,7 @@ mod tests {
             .func_lib
             .func_by_name_mut("get_a")
             .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
-            .behavior = FuncBehavior::Active;
+            .behavior = FuncBehavior::Impure;
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
         graph

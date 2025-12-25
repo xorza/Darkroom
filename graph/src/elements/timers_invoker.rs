@@ -28,7 +28,7 @@ impl Default for TimersInvoker {
                     .expect("Invalid func id"),
                 name: "frame event".to_string(),
                 description: None,
-                behavior: FuncBehavior::Active,
+                behavior: FuncBehavior::Impure,
                 terminal: false,
                 category: "Timers".to_string(),
                 inputs: vec![FuncInput {
