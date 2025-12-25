@@ -114,30 +114,35 @@ impl RuntimeGraph {
 
             let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
-            let (cache, output_values) = if let Some(prev_r_node) = prev_r_node {
-                assert_eq!(prev_r_node.output_binding_count.len(), func.outputs.len());
+            let (cache, output_values, output_binding_count) =
+                if let Some(prev_r_node) = prev_r_node {
+                    assert_eq!(prev_r_node.output_binding_count.len(), func.outputs.len());
+                    let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
+                    output_binding_count.fill(0);
 
-                (
-                    take(&mut prev_r_node.cache),
-                    prev_r_node.output_values.take(),
-                )
-            } else {
-                (InvokeCache::default(), None)
-            };
+                    (
+                        take(&mut prev_r_node.cache),
+                        prev_r_node.output_values.take(),
+                        output_binding_count,
+                    )
+                } else {
+                    (InvokeCache::default(), None, vec![0; func.outputs.len()])
+                };
 
             self.r_nodes.push(RuntimeNode {
                 id: node_id,
                 terminal: node.terminal,
-                has_missing_inputs: false,
                 behavior: func.behavior,
                 cache_outputs: node.cache_outputs,
+
+                has_missing_inputs: false,
                 run_time: 0.0,
                 should_invoke: false,
+                total_binding_count: 0,
+
                 cache,
                 output_values,
-
-                output_binding_count: vec![0; func.outputs.len()],
-                total_binding_count: 0,
+                output_binding_count,
             });
         }
     }
