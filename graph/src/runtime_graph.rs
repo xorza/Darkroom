@@ -102,29 +102,17 @@ impl RuntimeGraph {
         self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
         for node_id in active_node_ids {
-            let node = &graph.nodes[*graph_node_index_by_id
+            let node_index = *graph_node_index_by_id
                 .get(&node_id)
-                .expect("Missing graph node for runtime node")];
+                .expect("Missing graph node for runtime node");
+            let node = &graph.nodes[node_index];
             let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
-
-            let prev_r_node = previous_runtime.node_by_id_mut(node_id);
-
-            let (cache, output_values, output_binding_count) =
-                if let Some(prev_r_node) = prev_r_node {
-                    assert_eq!(prev_r_node.output_binding_count.len(), func.outputs.len());
-                    let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
-                    output_binding_count.fill(0);
-
-                    (
-                        take(&mut prev_r_node.cache),
-                        prev_r_node.output_values.take(),
-                        output_binding_count,
-                    )
-                } else {
-                    (InvokeCache::default(), None, vec![0; func.outputs.len()])
-                };
+            let (cache, output_values, output_binding_count) = Self::take_previous_runtime_state(
+                previous_runtime.node_by_id_mut(node_id),
+                func.outputs.len(),
+            );
 
             self.r_nodes.push(RuntimeNode {
                 id: node_id,
@@ -143,7 +131,39 @@ impl RuntimeGraph {
             });
         }
 
-        self.node_index_by_id = Self::build_node_index(&self.r_nodes);
+        self.rebuild_node_index();
+    }
+
+    fn take_previous_runtime_state(
+        prev_r_node: Option<&mut RuntimeNode>,
+        output_len: usize,
+    ) -> (InvokeCache, Option<Vec<DynamicValue>>, Vec<u32>) {
+        if let Some(prev_r_node) = prev_r_node {
+            assert_eq!(prev_r_node.output_binding_count.len(), output_len);
+            let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
+            output_binding_count.fill(0);
+
+            (
+                take(&mut prev_r_node.cache),
+                prev_r_node.output_values.take(),
+                output_binding_count,
+            )
+        } else {
+            (InvokeCache::default(), None, vec![0; output_len])
+        }
+    }
+
+    fn rebuild_node_index(&mut self) {
+        self.node_index_by_id.reserve(self.r_nodes.len());
+        for (index, node) in self.r_nodes.iter().enumerate() {
+            let prev = self.node_index_by_id.insert(node.id, index);
+
+            assert!(
+                prev.is_none(),
+                "Duplicate runtime node id detected: {:?}",
+                node.id
+            );
+        }
     }
 
     // mark missing inputs and propagate behavior based on upstream active nodes
@@ -190,9 +210,9 @@ impl RuntimeGraph {
     }
 
     // mark active nodes without cached outputs for execution
-    fn schedule_invocations(graph: &Graph, r_nodes: &mut [RuntimeNode]) {
-        let runtime_node_index_by_id = Self::build_node_index(r_nodes);
-        Self::schedule_invocations_with_index(graph, &runtime_node_index_by_id, r_nodes);
+    fn schedule_invocations(&mut self, graph: &Graph) {
+        self.rebuild_node_index();
+        Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.r_nodes);
     }
 
     fn schedule_invocations_with_index(
@@ -357,19 +377,6 @@ impl RuntimeGraph {
         }
 
         Ok(())
-    }
-
-    fn build_node_index(nodes: &[RuntimeNode]) -> HashMap<NodeId, usize> {
-        let mut map = HashMap::with_capacity(nodes.len());
-        for (index, node) in nodes.iter().enumerate() {
-            let prev = map.insert(node.id, index);
-            assert!(
-                prev.is_none(),
-                "Duplicate runtime node id detected: {:?}",
-                node.id
-            );
-        }
-        map
     }
 }
 

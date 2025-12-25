@@ -26,6 +26,7 @@ Core invocation and compute paths are async.
 Runtime graph traversal is designed to handle large graphs safely.
 Runtime graph construction separates node collection, dependency propagation, and scheduling.
 Runtime graph builds assume validated graphs and function libraries.
+Runtime node collection centralizes reuse of prior runtime state.
 
 ## Benchmarks
 
