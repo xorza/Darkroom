@@ -47,8 +47,6 @@ pub struct Node {
     pub inputs: Vec<Input>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
-
-    pub view_pos: glam::Vec2,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -179,7 +177,6 @@ impl Default for Node {
             cache_outputs: false,
             inputs: vec![],
             events: vec![],
-            view_pos: glam::Vec2::ZERO,
         }
     }
 }
@@ -212,7 +209,6 @@ impl Node {
             cache_outputs: false,
             inputs,
             events,
-            view_pos: glam::Vec2::ZERO,
         }
     }
 }
@@ -296,6 +292,7 @@ mod tests {
 
         let graph = Graph::from_yaml(file_yaml.as_str())?;
         let serialized_yaml: String = graph.to_yaml();
+        // std::fs::write("../test_resources/test_graph.yml", &serialized_yaml)?;
 
         assert_eq!(serialized_yaml, file_yaml);
 
