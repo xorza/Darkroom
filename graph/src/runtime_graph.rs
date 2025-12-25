@@ -105,73 +105,73 @@ impl RuntimeGraph {
         previous_runtime: &mut RuntimeGraph,
     ) -> Vec<RuntimeNode> {
         let active_node_ids = Self::collect_active_node_ids(graph, graph_node_index_by_id);
+        let mut result = Vec::with_capacity(active_node_ids.len());
 
-        active_node_ids
-            .iter()
-            .map(|&node_id| {
-                let node = &graph.nodes[*graph_node_index_by_id
-                    .get(&node_id)
-                    .expect("Missing graph node for runtime node")];
-                let node_info = func_lib
-                    .func_by_id(node.func_id)
-                    .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
+        for node_id in active_node_ids {
+            let node = &graph.nodes[*graph_node_index_by_id
+                .get(&node_id)
+                .expect("Missing graph node for runtime node")];
+            let node_info = func_lib
+                .func_by_id(node.func_id)
+                .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
+            assert_eq!(
+                node.inputs.len(),
+                node_info.inputs.len(),
+                "Node {:?} input count mismatch",
+                node.id
+            );
+
+            for input in node.inputs.iter() {
+                if let Binding::Output(output_binding) = &input.binding {
+                    let output_node = &graph.nodes[*graph_node_index_by_id
+                        .get(&output_binding.output_node_id)
+                        .expect("Output node not found in graph")];
+                    let output_info =
+                        func_lib.func_by_id(output_node.func_id).unwrap_or_else(|| {
+                            panic!("Func with id {:?} not found", output_node.func_id)
+                        });
+                    assert!(
+                        (output_binding.output_index as usize) < output_info.outputs.len(),
+                        "Output index out of range for node {:?}",
+                        output_binding.output_node_id
+                    );
+                }
+            }
+
+            let prev_r_node = previous_runtime.node_by_id_mut(node_id);
+
+            let (invoke_context, output_values) = if let Some(prev_r_node) = prev_r_node {
                 assert_eq!(
-                    node.inputs.len(),
-                    node_info.inputs.len(),
-                    "Node {:?} input count mismatch",
-                    node.id
+                    prev_r_node.output_binding_count.len(),
+                    node_info.outputs.len()
                 );
 
-                for input in node.inputs.iter() {
-                    if let Binding::Output(output_binding) = &input.binding {
-                        let output_node = &graph.nodes[*graph_node_index_by_id
-                            .get(&output_binding.output_node_id)
-                            .expect("Output node not found in graph")];
-                        let output_info =
-                            func_lib.func_by_id(output_node.func_id).unwrap_or_else(|| {
-                                panic!("Func with id {:?} not found", output_node.func_id)
-                            });
-                        assert!(
-                            (output_binding.output_index as usize) < output_info.outputs.len(),
-                            "Output index out of range for node {:?}",
-                            output_binding.output_node_id
-                        );
-                    }
-                }
+                (
+                    take(&mut prev_r_node.cache),
+                    prev_r_node.output_values.take(),
+                )
+            } else {
+                (InvokeCache::default(), None)
+            };
 
-                let prev_r_node = previous_runtime.node_by_id_mut(node_id);
+            result.push(RuntimeNode {
+                id: node_id,
+                is_output: node.is_output,
+                has_missing_inputs: false,
+                behavior: node_info.behavior,
+                should_cache_outputs: node.cache_outputs,
+                run_time: 0.0,
+                should_invoke: false,
+                cache: invoke_context,
+                output_values,
 
-                let (invoke_context, output_values) = if let Some(prev_r_node) = prev_r_node {
-                    assert_eq!(
-                        prev_r_node.output_binding_count.len(),
-                        node_info.outputs.len()
-                    );
+                output_binding_count: vec![0; node_info.outputs.len()],
+                total_binding_count: 0,
+            });
+        }
 
-                    (
-                        take(&mut prev_r_node.cache),
-                        prev_r_node.output_values.take(),
-                    )
-                } else {
-                    (InvokeCache::default(), None)
-                };
-
-                RuntimeNode {
-                    id: node_id,
-                    is_output: node.is_output,
-                    has_missing_inputs: false,
-                    behavior: node_info.behavior,
-                    should_cache_outputs: node.cache_outputs,
-                    run_time: 0.0,
-                    should_invoke: false,
-                    cache: invoke_context,
-                    output_values,
-
-                    output_binding_count: vec![0; node_info.outputs.len()],
-                    total_binding_count: 0,
-                }
-            })
-            .collect::<Vec<RuntimeNode>>()
+        result
     }
 
     // in forward pass, mark active nodes and nodes with missing inputs
@@ -314,9 +314,10 @@ impl RuntimeGraph {
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
     ) -> Vec<NodeId> {
-        let mut visit_state: HashMap<NodeId, VisitState> = HashMap::new();
-        let mut ordered: Vec<NodeId> = Vec::new();
-        let mut stack: Vec<(NodeId, bool)> = Vec::new();
+        let node_count = graph.nodes().len();
+        let mut visit_state: HashMap<NodeId, VisitState> = HashMap::with_capacity(node_count);
+        let mut ordered: Vec<NodeId> = Vec::with_capacity(node_count);
+        let mut stack: Vec<(NodeId, bool)> = Vec::with_capacity(10);
 
         for node in graph.nodes().iter().filter(|node| node.is_output) {
             stack.push((node.id, false));
