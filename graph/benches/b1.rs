@@ -40,7 +40,8 @@ fn bench_foo(c: &mut Criterion) {
             .cache_outputs = false;
 
         b.iter(|| {
-            let runtime_graph = RuntimeGraph::new(&graph, &func_lib);
+            let mut runtime_graph = RuntimeGraph::default();
+            runtime_graph.update(&graph, &func_lib);
             black_box(runtime_graph);
         })
     });

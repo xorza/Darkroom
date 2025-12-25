@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
 use crate::function::FuncBehavior;
-use crate::function::FuncLib;
-use crate::graph::{Binding, Graph, NodeId};
+use crate::function::{Func, FuncLib};
+use crate::graph::{Binding, Graph, Node, NodeId};
 use crate::invoke::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -138,41 +138,16 @@ impl RuntimeGraph {
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
-            let r_node = self
-                .node_index_by_id
-                .get(&node_id)
-                .map(|index| &mut self.r_nodes[*index]);
-            if let Some(r_node) = r_node {
-                assert_eq!(r_node.output_binding_count.len(), func.outputs.len());
-
-                r_node.terminal = node.terminal;
-                r_node.behavior = func.behavior;
-                r_node.cache_outputs = node.cache_outputs;
-
-                r_node.has_missing_inputs = false;
-                r_node.run_time = 0.0;
-                r_node.should_invoke = false;
-                r_node.total_binding_count = 0;
-
-                r_node.output_binding_count.fill(0);
-                r_node.total_binding_count = 0;
+            let r_node = if let Some(&index) = self.node_index_by_id.get(&node_id) {
+                &mut self.r_nodes[index]
             } else {
                 self.r_nodes.push(RuntimeNode {
                     id: node_id,
-                    terminal: node.terminal,
-                    behavior: func.behavior,
-                    cache_outputs: node.cache_outputs,
-
-                    has_missing_inputs: false,
-                    run_time: 0.0,
-                    should_invoke: false,
-                    total_binding_count: 0,
-
-                    cache: InvokeCache::default(),
-                    output_values: None,
-                    output_binding_count: vec![0; func.outputs.len()],
+                    ..Default::default()
                 });
-            }
+                self.r_nodes.last_mut().unwrap()
+            };
+            Self::reset_runtime_node(r_node, node, func);
         }
 
         self.rebuild_node_index();
@@ -185,8 +160,24 @@ impl RuntimeGraph {
         );
     }
 
+    fn reset_runtime_node(r_node: &mut RuntimeNode, node: &Node, func: &Func) {
+        r_node.terminal = node.terminal;
+        r_node.cache_outputs = node.cache_outputs;
+        r_node.behavior = func.behavior;
+
+        r_node.has_missing_inputs = false;
+        r_node.run_time = 0.0;
+        r_node.should_invoke = false;
+        r_node.total_binding_count = 0;
+
+        r_node.output_binding_count.resize(func.outputs.len(), 0);
+        r_node.output_binding_count.fill(0);
+    }
+
     fn rebuild_node_index(&mut self) {
+        self.node_index_by_id.clear();
         self.node_index_by_id.reserve(self.r_nodes.len());
+
         for (index, node) in self.r_nodes.iter().enumerate() {
             let prev = self.node_index_by_id.insert(node.id, index);
 

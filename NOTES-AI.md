@@ -64,6 +64,7 @@ Runtime graph construction now uses an explicit stack for active-node ordering t
 Runtime graph creation and scheduling are split into clearer phases (node build, propagation, scheduling).
 Runtime graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 Runtime graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous runtime.
+Runtime graph update now uses helpers to reset or build runtime nodes without duplicating state initialization logic.
 
 ## Common Terms
 
