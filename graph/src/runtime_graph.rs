@@ -12,7 +12,7 @@ use crate::invoke::InvokeCache;
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
-    id: NodeId,
+    pub id: NodeId,
 
     pub terminal: bool,
     pub has_missing_inputs: bool,
@@ -32,7 +32,7 @@ pub struct RuntimeNode {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RuntimeGraph {
-    pub nodes: Vec<RuntimeNode>,
+    pub r_nodes: Vec<RuntimeNode>,
     node_index_by_id: HashMap<NodeId, usize>,
 }
 
@@ -43,10 +43,6 @@ enum VisitState {
 }
 
 impl RuntimeNode {
-    pub fn id(&self) -> NodeId {
-        self.id
-    }
-
     pub(crate) fn decrement_current_binding_count(&mut self, output_index: u32) {
         assert!(
             (output_index as usize) < self.output_binding_count.len(),
@@ -63,28 +59,28 @@ impl RuntimeNode {
 
 impl RuntimeGraph {
     pub fn new(graph: &Graph, func_lib: &FuncLib) -> Self {
-        Self::build_runtime_graph(graph, func_lib, &mut RuntimeGraph::default())
+        Self::build(graph, func_lib, &mut RuntimeGraph::default())
     }
 
     pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
         self.node_index_by_id
             .get(&node_id)
-            .map(|&index| &self.nodes[index])
+            .map(|&index| &self.r_nodes[index])
     }
     pub fn node_by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
         self.node_index_by_id
             .get(&node_id)
             .copied()
-            .map(move |index| &mut self.nodes[index])
+            .map(move |index| &mut self.r_nodes[index])
     }
 
     pub fn next(&mut self, graph: &Graph) {
-        Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.nodes);
+        Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.r_nodes);
     }
 }
 
 impl RuntimeGraph {
-    fn build_runtime_graph(
+    fn build(
         graph: &Graph,
         func_lib: &FuncLib,
         previous_runtime: &mut RuntimeGraph,
@@ -94,7 +90,7 @@ impl RuntimeGraph {
 
         let graph_node_index_by_id = graph.node_index_by_id();
         let mut r_nodes =
-            Self::build_runtime_nodes(graph, func_lib, &graph_node_index_by_id, previous_runtime);
+            Self::collect_r_nodes(graph, func_lib, &graph_node_index_by_id, previous_runtime);
         Self::propagate_missing_inputs_and_behavior(
             graph,
             func_lib,
@@ -104,19 +100,19 @@ impl RuntimeGraph {
         let node_index_by_id = Self::build_node_index(&r_nodes);
 
         RuntimeGraph {
-            nodes: r_nodes,
+            r_nodes,
             node_index_by_id,
         }
     }
 
-    fn build_runtime_nodes(
+    fn collect_r_nodes(
         graph: &Graph,
         func_lib: &FuncLib,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
         previous_runtime: &mut RuntimeGraph,
     ) -> Vec<RuntimeNode> {
         let active_node_ids =
-            Self::collect_ordered_output_dependencies(graph, graph_node_index_by_id);
+            Self::collect_ordered_terminal_dependencies(graph, graph_node_index_by_id);
         let mut result = Vec::with_capacity(active_node_ids.len());
 
         for node_id in active_node_ids {
@@ -171,7 +167,7 @@ impl RuntimeGraph {
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&r_node.id)
                 .expect("Runtime node missing from graph")];
-            let node_info = func_lib
+            let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
@@ -180,7 +176,7 @@ impl RuntimeGraph {
                 .enumerate()
                 .for_each(|(idx, input)| match &input.binding {
                     Binding::None => {
-                        r_node.has_missing_inputs |= node_info.inputs[idx].is_required;
+                        r_node.has_missing_inputs |= func.inputs[idx].is_required;
                     }
                     Binding::Const => {}
                     Binding::Output(output_binding) => {
@@ -215,7 +211,7 @@ impl RuntimeGraph {
     ) {
         Self::reset_runtime_state(r_nodes);
 
-        let mut active_node_ids = Self::output_node_ids(r_nodes);
+        let mut active_node_ids = Self::terminal_node_ids(r_nodes);
 
         let mut index = 0;
         while index < active_node_ids.len() {
@@ -264,7 +260,7 @@ impl RuntimeGraph {
         });
     }
 
-    fn output_node_ids(r_nodes: &[RuntimeNode]) -> Vec<NodeId> {
+    fn terminal_node_ids(r_nodes: &[RuntimeNode]) -> Vec<NodeId> {
         r_nodes
             .iter()
             .filter_map(|r_node| {
@@ -281,7 +277,7 @@ impl RuntimeGraph {
         r_node.terminal || r_node.output_values.is_none() || r_node.behavior == FuncBehavior::Active
     }
 
-    fn collect_ordered_output_dependencies(
+    fn collect_ordered_terminal_dependencies(
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
     ) -> Vec<NodeId> {
@@ -405,7 +401,7 @@ mod tests {
         let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
         runtime_graph.next(&graph);
 
-        assert_eq!(runtime_graph.nodes.len(), 5);
+        assert_eq!(runtime_graph.r_nodes.len(), 5);
         assert_eq!(
             runtime_graph
                 .node_by_id(get_b_node_id)
@@ -414,11 +410,11 @@ mod tests {
             2
         );
         assert!(runtime_graph
-            .nodes
+            .r_nodes
             .iter()
             .all(|r_node| r_node.should_invoke));
         assert!(runtime_graph
-            .nodes
+            .r_nodes
             .iter()
             .all(|r_node| !r_node.has_missing_inputs));
 
@@ -440,7 +436,7 @@ mod tests {
         let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
         runtime_graph.next(&graph);
 
-        assert_eq!(runtime_graph.nodes.len(), 5);
+        assert_eq!(runtime_graph.r_nodes.len(), 5);
         assert_eq!(
             runtime_graph
                 .node_by_id(get_b_node_id)
@@ -451,7 +447,7 @@ mod tests {
 
         runtime_graph.next(&graph);
 
-        assert_eq!(runtime_graph.nodes.len(), 5);
+        assert_eq!(runtime_graph.r_nodes.len(), 5);
         assert_eq!(
             runtime_graph
                 .node_by_id(get_b_node_id)
@@ -494,7 +490,7 @@ mod tests {
         let mut runtime_graph = RuntimeGraph::new(&graph, &func_lib);
         runtime_graph.next(&graph);
 
-        assert_eq!(runtime_graph.nodes.len(), 4);
+        assert_eq!(runtime_graph.r_nodes.len(), 4);
         assert_eq!(
             runtime_graph
                 .node_by_id(get_b_node_id)

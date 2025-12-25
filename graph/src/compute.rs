@@ -30,7 +30,7 @@ impl Compute {
         let mut inputs: ArgSet = ArgSet::default();
 
         let active_node_indexes = runtime_graph
-            .nodes
+            .r_nodes
             .iter_mut()
             .enumerate()
             .filter_map(|(index, r_node)| {
@@ -43,7 +43,7 @@ impl Compute {
             .collect::<Vec<usize>>();
 
         for node_idx in active_node_indexes {
-            let node_id = runtime_graph.nodes[node_idx].id();
+            let node_id = runtime_graph.r_nodes[node_idx].id;
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
                 .expect("Runtime node missing from graph")];
@@ -109,7 +109,7 @@ impl Compute {
                     inputs[input_idx] = self.convert_type(&value, data_type);
                 });
 
-            let r_node = &mut runtime_graph.nodes[node_idx];
+            let r_node = &mut runtime_graph.r_nodes[node_idx];
             let outputs = r_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; node_info.outputs.len()]);
@@ -131,7 +131,7 @@ impl Compute {
             inputs.fill();
         }
 
-        for r_node in runtime_graph.nodes.iter_mut() {
+        for r_node in runtime_graph.r_nodes.iter_mut() {
             if !r_node.cache_outputs {
                 if let Some(values) = r_node.output_values.as_mut() {
                     values.fill(DynamicValue::None);
