@@ -127,7 +127,6 @@ impl RuntimeGraph {
         let graph_node_index_by_id = graph.build_node_index_by_id();
         let active_node_ids = collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
 
-        // let mut previous_runtime = std::mem::take(self);
         self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
         for node_id in active_node_ids {
@@ -174,27 +173,6 @@ impl RuntimeGraph {
                     output_binding_count: vec![0; func.outputs.len()],
                 });
             }
-
-            // let (cache, output_values, output_binding_count) = Self::take_previous_runtime_state(
-            //     previous_runtime.node_by_id_mut(node_id),
-            //     func.outputs.len(),
-            // );
-
-            // self.r_nodes.push(RuntimeNode {
-            //     id: node_id,
-            //     terminal: node.terminal,
-            //     behavior: func.behavior,
-            //     cache_outputs: node.cache_outputs,
-
-            //     has_missing_inputs: false,
-            //     run_time: 0.0,
-            //     should_invoke: false,
-            //     total_binding_count: 0,
-
-            //     cache,
-            //     output_values,
-            //     output_binding_count,
-            // });
         }
 
         self.rebuild_node_index();
@@ -206,25 +184,6 @@ impl RuntimeGraph {
             &mut self.r_nodes,
         );
     }
-
-    // fn take_previous_runtime_state(
-    //     prev_r_node: Option<&mut RuntimeNode>,
-    //     output_len: usize,
-    // ) -> (InvokeCache, Option<Vec<DynamicValue>>, Vec<u32>) {
-    //     if let Some(prev_r_node) = prev_r_node {
-    //         assert_eq!(prev_r_node.output_binding_count.len(), output_len);
-    //         let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
-    //         output_binding_count.fill(0);
-
-    //         (
-    //             take(&mut prev_r_node.cache),
-    //             prev_r_node.output_values.take(),
-    //             output_binding_count,
-    //         )
-    //     } else {
-    //         (InvokeCache::default(), None, vec![0; output_len])
-    //     }
-    // }
 
     fn rebuild_node_index(&mut self) {
         self.node_index_by_id.reserve(self.r_nodes.len());
