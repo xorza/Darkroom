@@ -25,6 +25,7 @@ Blocking helpers are removed in favor of async/await or non-blocking try_lock.
 Core invocation and compute paths are async.
 Runtime graph traversal is designed to handle large graphs safely.
 Runtime graph construction separates node collection, dependency propagation, and scheduling.
+Runtime graph builds assume validated graphs and function libraries.
 
 ## Benchmarks
 

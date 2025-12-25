@@ -1,5 +1,6 @@
 use std::mem::take;
 
+use anyhow::Result;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +89,8 @@ impl RuntimeGraph {
         func_lib: &FuncLib,
         previous_runtime: &mut RuntimeGraph,
     ) -> RuntimeGraph {
-        debug_assert!(graph.validate().is_ok());
+        Self::validate_runtime_inputs(graph, func_lib)
+            .expect("RuntimeGraph build requires a validated graph and function library");
 
         let graph_node_index_by_id = graph.node_index_by_id();
         let mut r_nodes =
@@ -124,30 +126,6 @@ impl RuntimeGraph {
             let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
-
-            assert_eq!(
-                node.inputs.len(),
-                func.inputs.len(),
-                "Node {:?} input count mismatch",
-                node.id
-            );
-
-            for input in node.inputs.iter() {
-                if let Binding::Output(output_binding) = &input.binding {
-                    let output_node = &graph.nodes[*graph_node_index_by_id
-                        .get(&output_binding.output_node_id)
-                        .expect("Output node not found in graph")];
-                    let output_func =
-                        func_lib.func_by_id(output_node.func_id).unwrap_or_else(|| {
-                            panic!("Func with id {:?} not found", output_node.func_id)
-                        });
-                    assert!(
-                        (output_binding.output_index as usize) < output_func.outputs.len(),
-                        "Output index out of range for node {:?}",
-                        output_binding.output_node_id
-                    );
-                }
-            }
 
             let prev_r_node = previous_runtime.node_by_id_mut(node_id);
 
@@ -197,13 +175,6 @@ impl RuntimeGraph {
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
-            assert_eq!(
-                node.inputs.len(),
-                node_info.inputs.len(),
-                "Node {:?} input count mismatch",
-                node.id
-            );
-
             node.inputs
                 .iter()
                 .enumerate()
@@ -217,12 +188,6 @@ impl RuntimeGraph {
                             .iter()
                             .find(|&p_node| p_node.id == output_binding.output_node_id)
                             .expect("Node not found among already processed ones");
-                        assert!(
-                            (output_binding.output_index as usize)
-                                < output_r_node.output_binding_count.len(),
-                            "Output index out of range for node {:?}",
-                            output_binding.output_node_id
-                        );
                         if output_r_node.behavior == FuncBehavior::Active {
                             r_node.behavior = FuncBehavior::Active;
                         }
@@ -284,12 +249,6 @@ impl RuntimeGraph {
                                 .expect("Runtime node missing"),
                         )
                         .expect("Runtime node missing");
-                    assert!(
-                        (output_binding.output_index as usize)
-                            < output_r_node.output_binding_count.len(),
-                        "Output index out of range for node {:?}",
-                        output_binding.output_node_id
-                    );
                     output_r_node.output_binding_count[output_binding.output_index as usize] += 1;
                     output_r_node.total_binding_count += 1;
                 }
@@ -367,6 +326,52 @@ impl RuntimeGraph {
         }
 
         ordered
+    }
+
+    fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+        graph.validate()?;
+
+        for node in graph.nodes().iter() {
+            let func = func_lib.func_by_id(node.func_id).ok_or_else(|| {
+                anyhow::Error::msg(format!(
+                    "Missing function {:?} for node {:?}",
+                    node.func_id, node.id
+                ))
+            })?;
+
+            if node.inputs.len() != func.inputs.len() {
+                return Err(anyhow::Error::msg(format!(
+                    "Node {:?} input count mismatch",
+                    node.id
+                )));
+            }
+
+            for input in node.inputs.iter() {
+                if let Binding::Output(output_binding) = &input.binding {
+                    let output_node =
+                        graph
+                            .node_by_id(output_binding.output_node_id)
+                            .ok_or_else(|| {
+                                anyhow::Error::msg("Output binding references missing node")
+                            })?;
+                    let output_func =
+                        func_lib.func_by_id(output_node.func_id).ok_or_else(|| {
+                            anyhow::Error::msg(format!(
+                                "Missing function {:?} for output node {:?}",
+                                output_node.func_id, output_node.id
+                            ))
+                        })?;
+                    if (output_binding.output_index as usize) >= output_func.outputs.len() {
+                        return Err(anyhow::Error::msg(format!(
+                            "Output index out of range for node {:?}",
+                            output_binding.output_node_id
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     fn build_node_index(nodes: &[RuntimeNode]) -> HashMap<NodeId, usize> {

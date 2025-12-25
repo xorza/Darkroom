@@ -62,6 +62,7 @@ Benchmarks:
 
 Runtime graph construction now uses an explicit stack for active-node ordering to avoid deep recursion limits.
 Runtime graph creation and scheduling are split into clearer phases (node build, propagation, scheduling).
+Runtime graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 
 ## Common Terms
 
