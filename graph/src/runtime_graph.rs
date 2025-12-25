@@ -124,11 +124,10 @@ impl RuntimeGraph {
         validate_runtime_inputs(graph, func_lib)
             .expect("RuntimeGraph build requires a validated graph and function library");
 
-        let graph_node_index_by_id = graph.node_index_by_id();
-
+        let graph_node_index_by_id = graph.build_node_index_by_id();
         let active_node_ids = collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
 
-        let mut previous_runtime = std::mem::take(self);
+        // let mut previous_runtime = std::mem::take(self);
         self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
         for node_id in active_node_ids {
@@ -139,26 +138,63 @@ impl RuntimeGraph {
             let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
-            let (cache, output_values, output_binding_count) = Self::take_previous_runtime_state(
-                previous_runtime.node_by_id_mut(node_id),
-                func.outputs.len(),
-            );
 
-            self.r_nodes.push(RuntimeNode {
-                id: node_id,
-                terminal: node.terminal,
-                behavior: func.behavior,
-                cache_outputs: node.cache_outputs,
+            let r_node = self
+                .node_index_by_id
+                .get(&node_id)
+                .map(|index| &mut self.r_nodes[*index]);
+            if let Some(r_node) = r_node {
+                assert_eq!(r_node.output_binding_count.len(), func.outputs.len());
 
-                has_missing_inputs: false,
-                run_time: 0.0,
-                should_invoke: false,
-                total_binding_count: 0,
+                r_node.terminal = node.terminal;
+                r_node.behavior = func.behavior;
+                r_node.cache_outputs = node.cache_outputs;
 
-                cache,
-                output_values,
-                output_binding_count,
-            });
+                r_node.has_missing_inputs = false;
+                r_node.run_time = 0.0;
+                r_node.should_invoke = false;
+                r_node.total_binding_count = 0;
+
+                r_node.output_binding_count.fill(0);
+                r_node.total_binding_count = 0;
+            } else {
+                self.r_nodes.push(RuntimeNode {
+                    id: node_id,
+                    terminal: node.terminal,
+                    behavior: func.behavior,
+                    cache_outputs: node.cache_outputs,
+
+                    has_missing_inputs: false,
+                    run_time: 0.0,
+                    should_invoke: false,
+                    total_binding_count: 0,
+
+                    cache: InvokeCache::default(),
+                    output_values: None,
+                    output_binding_count: vec![0; func.outputs.len()],
+                });
+            }
+
+            // let (cache, output_values, output_binding_count) = Self::take_previous_runtime_state(
+            //     previous_runtime.node_by_id_mut(node_id),
+            //     func.outputs.len(),
+            // );
+
+            // self.r_nodes.push(RuntimeNode {
+            //     id: node_id,
+            //     terminal: node.terminal,
+            //     behavior: func.behavior,
+            //     cache_outputs: node.cache_outputs,
+
+            //     has_missing_inputs: false,
+            //     run_time: 0.0,
+            //     should_invoke: false,
+            //     total_binding_count: 0,
+
+            //     cache,
+            //     output_values,
+            //     output_binding_count,
+            // });
         }
 
         self.rebuild_node_index();
@@ -171,24 +207,24 @@ impl RuntimeGraph {
         );
     }
 
-    fn take_previous_runtime_state(
-        prev_r_node: Option<&mut RuntimeNode>,
-        output_len: usize,
-    ) -> (InvokeCache, Option<Vec<DynamicValue>>, Vec<u32>) {
-        if let Some(prev_r_node) = prev_r_node {
-            assert_eq!(prev_r_node.output_binding_count.len(), output_len);
-            let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
-            output_binding_count.fill(0);
+    // fn take_previous_runtime_state(
+    //     prev_r_node: Option<&mut RuntimeNode>,
+    //     output_len: usize,
+    // ) -> (InvokeCache, Option<Vec<DynamicValue>>, Vec<u32>) {
+    //     if let Some(prev_r_node) = prev_r_node {
+    //         assert_eq!(prev_r_node.output_binding_count.len(), output_len);
+    //         let mut output_binding_count = take(&mut prev_r_node.output_binding_count);
+    //         output_binding_count.fill(0);
 
-            (
-                take(&mut prev_r_node.cache),
-                prev_r_node.output_values.take(),
-                output_binding_count,
-            )
-        } else {
-            (InvokeCache::default(), None, vec![0; output_len])
-        }
-    }
+    //         (
+    //             take(&mut prev_r_node.cache),
+    //             prev_r_node.output_values.take(),
+    //             output_binding_count,
+    //         )
+    //     } else {
+    //         (InvokeCache::default(), None, vec![0; output_len])
+    //     }
+    // }
 
     fn rebuild_node_index(&mut self) {
         self.node_index_by_id.reserve(self.r_nodes.len());

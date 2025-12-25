@@ -100,7 +100,7 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.id == id)
     }
 
-    pub fn node_index_by_id(&self) -> HashMap<NodeId, usize> {
+    pub fn build_node_index_by_id(&self) -> HashMap<NodeId, usize> {
         let mut map = HashMap::with_capacity(self.nodes.len());
         for (index, node) in self.nodes.iter().enumerate() {
             let prev = map.insert(node.id, index);

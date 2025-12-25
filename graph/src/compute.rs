@@ -25,7 +25,7 @@ impl Compute {
         T: Invoker,
     {
         runtime_graph.next(graph);
-        let graph_node_index_by_id = graph.node_index_by_id();
+        let graph_node_index_by_id = graph.build_node_index_by_id();
 
         let mut inputs: ArgSet = ArgSet::default();
 
