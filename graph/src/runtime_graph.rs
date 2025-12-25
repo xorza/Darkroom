@@ -71,7 +71,7 @@ impl RuntimeGraph {
     }
 
     pub fn next(&mut self, graph: &Graph) {
-        Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.r_nodes);
+        self.schedule_invocations_with_index(graph);
     }
 
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
@@ -80,24 +80,9 @@ impl RuntimeGraph {
 
         let graph_node_index_by_id = graph.node_index_by_id();
 
-        self.collect_r_nodes(graph, func_lib, &graph_node_index_by_id);
-
-        Self::propagate_missing_inputs_and_behavior(
-            graph,
-            func_lib,
-            &graph_node_index_by_id,
-            &mut self.r_nodes,
-        );
-    }
-
-    fn collect_r_nodes(
-        &mut self,
-        graph: &Graph,
-        func_lib: &FuncLib,
-        graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) {
         let active_node_ids =
-            Self::collect_ordered_terminal_dependencies(graph, graph_node_index_by_id);
+            Self::collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
+
         let mut previous_runtime = std::mem::take(self);
         self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
@@ -132,6 +117,13 @@ impl RuntimeGraph {
         }
 
         self.rebuild_node_index();
+
+        Self::propagate_missing_inputs_and_behavior(
+            graph,
+            func_lib,
+            &graph_node_index_by_id,
+            &mut self.r_nodes,
+        );
     }
 
     fn take_previous_runtime_state(
@@ -211,18 +203,14 @@ impl RuntimeGraph {
 
     // mark active nodes without cached outputs for execution
     fn schedule_invocations(&mut self, graph: &Graph) {
-        self.rebuild_node_index();
-        Self::schedule_invocations_with_index(graph, &self.node_index_by_id, &mut self.r_nodes);
+        // self.rebuild_node_index();
+        self.schedule_invocations_with_index(graph);
     }
 
-    fn schedule_invocations_with_index(
-        graph: &Graph,
-        runtime_node_index_by_id: &HashMap<NodeId, usize>,
-        r_nodes: &mut [RuntimeNode],
-    ) {
-        Self::reset_runtime_state(r_nodes);
+    fn schedule_invocations_with_index(&mut self, graph: &Graph) {
+        Self::reset_runtime_state(&mut self.r_nodes);
 
-        let mut active_node_ids = Self::terminal_node_ids(r_nodes);
+        let mut active_node_ids = Self::terminal_node_ids(&self.r_nodes);
 
         let mut index = 0;
         while index < active_node_ids.len() {
@@ -233,9 +221,11 @@ impl RuntimeGraph {
             let node = graph
                 .node_by_id(node_id)
                 .unwrap_or_else(|| panic!("Node with id {:?} not found", node_id));
-            let r_node = r_nodes
+            let r_node = self
+                .r_nodes
                 .get_mut(
-                    *runtime_node_index_by_id
+                    *self
+                        .node_index_by_id
                         .get(&node_id)
                         .expect("Runtime node missing"),
                 )
@@ -249,9 +239,11 @@ impl RuntimeGraph {
                     if is_active {
                         active_node_ids.push(output_binding.output_node_id);
                     }
-                    let output_r_node = r_nodes
+                    let output_r_node = self
+                        .r_nodes
                         .get_mut(
-                            *runtime_node_index_by_id
+                            *self
+                                .node_index_by_id
                                 .get(&output_binding.output_node_id)
                                 .expect("Runtime node missing"),
                         )
