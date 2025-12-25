@@ -88,9 +88,6 @@ impl RuntimeGraph {
             &graph_node_index_by_id,
             &mut self.r_nodes,
         );
-        let node_index_by_id = Self::build_node_index(&self.r_nodes);
-
-        self.node_index_by_id = node_index_by_id;
     }
 
     fn collect_r_nodes(
@@ -145,6 +142,8 @@ impl RuntimeGraph {
                 output_binding_count,
             });
         }
+
+        self.node_index_by_id = Self::build_node_index(&self.r_nodes);
     }
 
     // mark missing inputs and propagate behavior based on upstream active nodes
