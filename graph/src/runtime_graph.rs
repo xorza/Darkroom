@@ -78,36 +78,31 @@ impl RuntimeGraph {
         Self::validate_runtime_inputs(graph, func_lib)
             .expect("RuntimeGraph build requires a validated graph and function library");
 
-        let mut previous_runtime = std::mem::replace(self, RuntimeGraph::default());
         let graph_node_index_by_id = graph.node_index_by_id();
 
-        let mut r_nodes = Self::collect_r_nodes(
-            graph,
-            func_lib,
-            &graph_node_index_by_id,
-            &mut previous_runtime,
-        );
+        self.collect_r_nodes(graph, func_lib, &graph_node_index_by_id);
+
         Self::propagate_missing_inputs_and_behavior(
             graph,
             func_lib,
             &graph_node_index_by_id,
-            &mut r_nodes,
+            &mut self.r_nodes,
         );
-        let node_index_by_id = Self::build_node_index(&r_nodes);
+        let node_index_by_id = Self::build_node_index(&self.r_nodes);
 
-        self.r_nodes = r_nodes;
         self.node_index_by_id = node_index_by_id;
     }
 
     fn collect_r_nodes(
+        &mut self,
         graph: &Graph,
         func_lib: &FuncLib,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
-        previous_runtime: &mut RuntimeGraph,
-    ) -> Vec<RuntimeNode> {
+    ) {
         let active_node_ids =
             Self::collect_ordered_terminal_dependencies(graph, graph_node_index_by_id);
-        let mut result = Vec::with_capacity(active_node_ids.len());
+        let mut previous_runtime = std::mem::take(self);
+        self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
         for node_id in active_node_ids {
             let node = &graph.nodes[*graph_node_index_by_id
@@ -130,7 +125,7 @@ impl RuntimeGraph {
                 (InvokeCache::default(), None)
             };
 
-            result.push(RuntimeNode {
+            self.r_nodes.push(RuntimeNode {
                 id: node_id,
                 terminal: node.terminal,
                 has_missing_inputs: false,
@@ -145,8 +140,6 @@ impl RuntimeGraph {
                 total_binding_count: 0,
             });
         }
-
-        result
     }
 
     // mark missing inputs and propagate behavior based on upstream active nodes
