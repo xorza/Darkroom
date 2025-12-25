@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
+    // active means function could return different values each time it is called
     #[default]
     Active,
     Passive,

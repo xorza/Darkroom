@@ -14,10 +14,12 @@ use crate::invoke::InvokeCache;
 pub struct RuntimeNode {
     pub id: NodeId,
 
+    // terminal means the node has side effects (file writes, ...)
     pub terminal: bool,
-    pub has_missing_inputs: bool,
     pub behavior: FuncBehavior,
     pub cache_outputs: bool,
+
+    pub has_missing_inputs: bool,
     pub should_invoke: bool,
     pub run_time: f64,
 
@@ -138,10 +140,10 @@ impl RuntimeGraph {
         validate_runtime_inputs(graph, func_lib)
             .expect("RuntimeGraph build requires a validated graph and function library");
 
+        self.r_nodes.reserve(graph.nodes.len());
+
         let graph_node_index_by_id = graph.build_node_index_by_id();
         let active_node_ids = collect_ordered_terminal_dependencies(graph, &graph_node_index_by_id);
-
-        self.r_nodes = Vec::with_capacity(graph.nodes.len());
 
         for node_id in active_node_ids {
             let node_index = *graph_node_index_by_id
