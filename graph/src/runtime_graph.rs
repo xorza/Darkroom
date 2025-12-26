@@ -38,6 +38,7 @@ pub struct RuntimeNode {
     pub has_missing_inputs: bool,
     pub has_changed_inputs: bool,
     pub should_invoke: bool,
+    pub invocation_order: u64,
 
     processing_state: ProcessingState,
 
@@ -137,11 +138,12 @@ impl RuntimeGraph {
         let active_node_indices =
             self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
 
-        for index in active_node_indices {
-            let mut r_node = take(&mut self.r_nodes[index]);
+        for (invocation_order, &node_index) in active_node_indices.iter().enumerate() {
+            let mut r_node = take(&mut self.r_nodes[node_index]);
             assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
             println!("{}", r_node.name);
 
+            r_node.invocation_order = invocation_order as u64;
             // avoid traversing inputs for NodeBehavior::Once nodes having outputs
             // even if having missing inputs
             if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
@@ -208,7 +210,7 @@ impl RuntimeGraph {
                 }
             }
 
-            self.r_nodes[index] = r_node;
+            self.r_nodes[node_index] = r_node;
         }
     }
 
