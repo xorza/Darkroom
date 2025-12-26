@@ -39,14 +39,14 @@ impl Worker {
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
-        let (worker_tx, worker_rx) = channel::<WorkerMessage>(10);
+        let (tx, rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(invoker, worker_rx, compute_callback).await;
+            Self::worker_loop(invoker, rx, compute_callback).await;
         });
 
         Self {
             thread_handle: Some(thread_handle),
-            tx: worker_tx,
+            tx,
         }
     }
 
@@ -66,7 +66,7 @@ impl Worker {
                 break;
             }
 
-            match message.take().expect("Worker loop received empty message") {
+            match message.take().unwrap() {
                 WorkerMessage::Stop | WorkerMessage::Event => panic!("Unexpected event message"),
 
                 WorkerMessage::Exit => break,
@@ -144,34 +144,26 @@ impl Worker {
     }
 
     pub async fn run_once(&mut self, graph: Graph) {
-        let msg = WorkerMessage::RunOnce(graph);
-
         self.tx
-            .send(msg)
+            .send(WorkerMessage::RunOnce(graph))
             .await
             .expect("Failed to send run_once message");
     }
     pub async fn run_loop(&mut self, graph: Graph) {
-        let msg = WorkerMessage::RunLoop(graph);
-
         self.tx
-            .send(msg)
+            .send(WorkerMessage::RunLoop(graph))
             .await
             .expect("Failed to send run_loop message");
     }
     pub async fn stop(&mut self) {
-        let msg = WorkerMessage::Stop;
-
         self.tx
-            .send(msg)
+            .send(WorkerMessage::Stop)
             .await
             .expect("Failed to send stop message");
     }
     pub async fn exit(&mut self) {
-        let msg = WorkerMessage::Exit;
-
         self.tx
-            .send(msg)
+            .send(WorkerMessage::Exit)
             .await
             .expect("Failed to send exit message");
 
@@ -181,10 +173,8 @@ impl Worker {
     }
 
     pub async fn event(&mut self) {
-        let msg = WorkerMessage::Event;
-
         self.tx
-            .send(msg)
+            .send(WorkerMessage::Event)
             .await
             .expect("Failed to send event message");
     }
