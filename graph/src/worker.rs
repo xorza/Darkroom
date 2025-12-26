@@ -6,6 +6,8 @@ use crate::function::FuncLib;
 use crate::graph::Graph;
 use crate::invoke::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
+use pollster::FutureExt;
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -104,14 +106,21 @@ impl Worker {
 
         loop {
             // receive all messages and pick message with the highest priority
-            let mut msg = worker_rx
-                .recv()
-                .await
-                .expect("Worker message channel closed");
-            while let Ok(another_msg) = worker_rx.try_recv() {
-                // latest message has higher priority
-                if another_msg.priority() >= msg.priority() {
-                    msg = another_msg;
+            let msg = worker_rx.recv().await;
+            if msg.is_none() {
+                return None;
+            }
+            let mut msg = msg.unwrap();
+            loop {
+                match worker_rx.try_recv() {
+                    Ok(another_msg) => {
+                        // latest message has higher priority
+                        if another_msg.priority() >= msg.priority() {
+                            msg = another_msg;
+                        }
+                    }
+                    Err(TryRecvError::Empty) => break,
+                    Err(TryRecvError::Disconnected) => return None,
                 }
             }
 
@@ -185,7 +194,6 @@ impl Drop for Worker {
     fn drop(&mut self) {
         if self.thread_handle.is_some() {
             error!("Worker dropped while the thread is still running; call Worker::exit() first");
-            let _future = self.exit();
         }
     }
 }
