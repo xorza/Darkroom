@@ -55,6 +55,8 @@ Additional modules drive execution and integration:
 - `compute` runs active nodes through an `Invoker` and converts values between data types.
 - `invoke` defines the `Invoker` trait and the `UberInvoker` aggregator which dispatches function calls.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
+- `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
+- `worker` event loops return `None` when the message channel closes to signal termination.
 - `event` manages asynchronous event loops that send event IDs back to the worker.
 
 Benchmarks:
@@ -62,6 +64,7 @@ Benchmarks:
 
 Runtime graph construction now uses an explicit stack for active-node ordering to avoid deep recursion limits.
 Runtime graph creation and scheduling are split into clearer phases (node build, propagation, scheduling).
+Runtime graph propagation asserts nodes were processed before input state evaluation.
 Runtime graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 Runtime graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous runtime.
 Runtime graph update now uses helpers to reset or build runtime nodes without duplicating state initialization logic.

@@ -106,11 +106,7 @@ impl Worker {
 
         loop {
             // receive all messages and pick message with the highest priority
-            let msg = worker_rx.recv().await;
-            if msg.is_none() {
-                return None;
-            }
-            let mut msg = msg.unwrap();
+            let mut msg = worker_rx.recv().await?;
             loop {
                 match worker_rx.try_recv() {
                     Ok(another_msg) => {

@@ -146,7 +146,11 @@ impl RuntimeGraph {
 
             {
                 let r_node = &mut self.r_nodes[node_index];
-                assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
+                assert_eq!(
+                    r_node.processing_state,
+                    ProcessingState::Processed,
+                    "Runtime node must be processed before input propagation"
+                );
                 // println!("{}", r_node.name);
 
                 r_node.invocation_order = invocation_order as u64;
