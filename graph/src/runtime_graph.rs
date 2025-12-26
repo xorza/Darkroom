@@ -31,7 +31,6 @@ pub struct RuntimeNode {
     pub should_invoke: bool,
 
     processing_state: ProcessingState,
-    is_active: bool,
 
     pub run_time: f64,
 
@@ -141,15 +140,16 @@ impl RuntimeGraph {
 
         for index in active_node_indices {
             let mut r_node = take(&mut self.r_nodes[index]);
+            println!("{}", r_node.name);
 
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&r_node.id)
                 .expect("Runtime node missing from graph")];
 
-            for (idx, input) in node.inputs.iter().enumerate() {
+            for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::None => {
-                        r_node.has_missing_inputs |= r_node.inputs[idx];
+                        r_node.has_missing_inputs |= r_node.inputs[input_idx];
                     }
                     Binding::Const => {}
                     Binding::Output(output_binding) => {
@@ -170,7 +170,7 @@ impl RuntimeGraph {
                                         r_node.should_invoke = true;
                                     }
                                     NodeBehavior::Once => {
-                                        r_node.should_invoke = r_node.cache.is_none();
+                                        r_node.should_invoke = r_node.output_values.is_none();
                                     }
                                 }
                             }
@@ -213,7 +213,7 @@ impl RuntimeGraph {
                 });
             });
 
-        while let Some(visit) = stack.pop_front() {
+        while let Some(visit) = stack.pop_back() {
             let r_node_index = self
                 .node_index_by_id
                 .get(&visit.node_id)
@@ -266,13 +266,11 @@ impl RuntimeGraph {
             }
         }
 
-        result.reverse();
         result
     }
 
     fn reset_runtime_state(&mut self) {
         self.r_nodes.iter_mut().for_each(|r_node| {
-            r_node.is_active = false;
             r_node.should_invoke = false;
             r_node.output_binding_count.fill(0);
             r_node.total_binding_count = 0;
