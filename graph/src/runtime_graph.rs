@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::mem::take;
 
 use anyhow::Result;
@@ -137,28 +136,35 @@ impl RuntimeGraph {
     // mark missing inputs and propagate behavior based on upstream active nodes
     fn propagate_missing_inputs_and_behavior(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let graph_node_index_by_id = graph.build_node_index_by_id();
-        let active_node_indices =
-            self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
+        let active_node_ids = self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
 
-        for (invocation_order, &node_index) in active_node_indices.iter().enumerate() {
-            let mut r_node = take(&mut self.r_nodes[node_index]);
-            assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
-            // println!("{}", r_node.name);
+        for (invocation_order, &node_id) in active_node_ids.iter().enumerate() {
+            let node_index = *self
+                .node_index_by_id
+                .get(&node_id)
+                .expect("Node index not found");
 
-            r_node.invocation_order = invocation_order as u64;
-            // avoid traversing inputs for NodeBehavior::Once nodes having outputs
-            // even if having missing inputs
-            if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
-                // should_invoke is false
-                self.r_nodes[node_index] = r_node;
-                continue;
+            {
+                let r_node = &mut self.r_nodes[node_index];
+                assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
+                // println!("{}", r_node.name);
+
+                r_node.invocation_order = invocation_order as u64;
+                // avoid traversing inputs for NodeBehavior::Once nodes having outputs
+                // even if having missing inputs
+                if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
+                    // should_invoke is false
+                    continue;
+                }
             }
 
             let node = &graph.nodes[*graph_node_index_by_id
-                .get(&r_node.id)
+                .get(&node_id)
                 .expect("Runtime node missing from graph")];
 
             let mut has_changed_inputs = false;
+            let mut has_missing_inputs = false;
+
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
@@ -189,12 +195,14 @@ impl RuntimeGraph {
                             .unwrap_or_else(|| todo!())
                             .inputs[input_idx]
                             .is_required;
-                        r_node.has_missing_inputs |= is_required;
+                        has_missing_inputs |= is_required;
                     }
                     InputState::Unknown => panic!("unprocessed input"),
                 }
             }
 
+            let r_node = &mut self.r_nodes[node_index];
+            r_node.has_missing_inputs = has_missing_inputs;
             if !r_node.has_missing_inputs {
                 match r_node.behavior {
                     NodeBehavior::Terminal | NodeBehavior::Always => {
@@ -209,8 +217,6 @@ impl RuntimeGraph {
                     }
                 }
             }
-
-            self.r_nodes[node_index] = r_node;
         }
     }
 
@@ -218,9 +224,9 @@ impl RuntimeGraph {
         &mut self,
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) -> Vec<usize> {
+    ) -> Vec<NodeId> {
         let node_count = graph.nodes.len();
-        let mut result: Vec<usize> = Vec::with_capacity(node_count);
+        let mut result: Vec<NodeId> = Vec::with_capacity(node_count);
 
         enum VisitCause {
             Terminal,
@@ -263,7 +269,7 @@ impl RuntimeGraph {
                 }
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push(r_node_index);
+                    result.push(r_node.id);
                     continue;
                 }
             }

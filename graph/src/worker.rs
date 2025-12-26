@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
-use tracing::error;
 use crate::compute::Compute;
 use crate::event::EventId;
 use crate::function::FuncLib;
 use crate::graph::Graph;
 use crate::invoke::{Invoker, UberInvoker};
 use crate::runtime_graph::RuntimeGraph;
+use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
+use tracing::error;
 
 #[derive(Debug)]
 enum WorkerMessage {
@@ -184,7 +184,8 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         if self.thread_handle.is_some() {
-            error!("Worker dropped while thread is still running; call Worker::exit() first");
+            error!("Worker dropped while the thread is still running; call Worker::exit() first");
+            let _future = self.exit();
         }
     }
 }
