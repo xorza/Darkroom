@@ -112,7 +112,7 @@ impl RuntimeGraph {
     // mark active nodes without cached outputs for execution
     pub fn next(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.build_node_cache(graph);
-        self.propagate_missing_inputs_and_behavior(graph, func_lib);
+        self.propagate_input_state(graph, func_lib);
     }
 
     fn build_node_cache(&mut self, graph: &Graph) {
@@ -134,7 +134,7 @@ impl RuntimeGraph {
     }
 
     // mark missing inputs and propagate behavior based on upstream active nodes
-    fn propagate_missing_inputs_and_behavior(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    fn propagate_input_state(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let graph_node_index_by_id = graph.build_node_index_by_id();
         let active_node_ids = self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
 
@@ -208,6 +208,8 @@ impl RuntimeGraph {
                     }
                     InputState::Unknown => panic!("unprocessed input"),
                 }
+
+                self.r_nodes[node_index].inputs[input_idx] = input_state;
             }
 
             let r_node = &mut self.r_nodes[node_index];
