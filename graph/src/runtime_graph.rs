@@ -139,8 +139,8 @@ impl RuntimeGraph {
         let active_node_indices =
             self.build_active_node_indices_ordered(graph, &graph_node_index_by_id);
 
-        for (invocation_order, &node_idx) in active_node_indices.iter().enumerate() {
-            let node_id = {
+        for (invocation_order, &(node_idx, node_id)) in active_node_indices.iter().enumerate() {
+            {
                 let r_node = &mut self.r_nodes[node_idx];
                 assert_eq!(
                     r_node.processing_state,
@@ -156,26 +156,42 @@ impl RuntimeGraph {
                     // should_invoke is false
                     continue;
                 }
-
-                r_node.id
-            };
+            }
 
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
                 .expect("Runtime node missing from graph")];
+            let func = func_lib
+                .func_by_id(node.func_id)
+                .expect("Missing function for node during input propagation");
+
+            self.r_nodes[node_idx]
+                .output_binding_count
+                .resize(func.outputs.len(), 0);
 
             let mut has_changed_inputs = false;
             let mut has_missing_inputs = false;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
+                assert!(
+                    input_idx < func.inputs.len(),
+                    "Node input index {} out of range for function {:?}",
+                    input_idx,
+                    node.func_id
+                );
+
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
                     // todo implement notifying of const binding changes
                     Binding::Const => InputState::Changed,
                     Binding::Output(output_binding) => {
                         let output_r_node = self
-                            .node_by_id(output_binding.output_node_id)
+                            .node_by_id_mut(output_binding.output_node_id)
                             .expect("Output binding references missing node");
+
+                        output_r_node.output_binding_count[output_binding.output_index as usize] +=
+                            1;
+                        output_r_node.total_binding_count += 1;
 
                         assert_eq!(output_r_node.processing_state, ProcessingState::Processed);
 
@@ -192,15 +208,6 @@ impl RuntimeGraph {
                     InputState::Unchanged => {}
                     InputState::Changed => has_changed_inputs = true,
                     InputState::Missing => {
-                        let func = func_lib
-                            .func_by_id(node.func_id)
-                            .expect("Missing function for node during input propagation");
-                        assert!(
-                            input_idx < func.inputs.len(),
-                            "Node input index {} out of range for function {:?}",
-                            input_idx,
-                            node.func_id
-                        );
                         let is_required = func.inputs[input_idx].is_required;
                         has_missing_inputs |= is_required;
                     }
@@ -233,8 +240,8 @@ impl RuntimeGraph {
         &mut self,
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) -> Vec<usize> {
-        let mut result: Vec<usize> = Vec::with_capacity(graph.nodes.len());
+    ) -> Vec<(usize, NodeId)> {
+        let mut result: Vec<(usize, NodeId)> = Vec::with_capacity(graph.nodes.len());
 
         enum VisitCause {
             Terminal,
@@ -269,15 +276,10 @@ impl RuntimeGraph {
 
             match visit.cause {
                 VisitCause::Terminal => {}
-                VisitCause::OutputRequest { output_index } => {
-                    let output_index = output_index as usize;
-                    // r_node.output_binding_count.resize(output_index + 1, 0);
-                    r_node.output_binding_count[output_index] += 1;
-                    r_node.total_binding_count += 1;
-                }
+                VisitCause::OutputRequest { .. } => {}
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push(r_node_index);
+                    result.push((r_node_index, r_node.id));
                     continue;
                 }
             }
