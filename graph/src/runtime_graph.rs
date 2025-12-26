@@ -79,14 +79,13 @@ impl RuntimeNode {
 
         self.id = node.id;
         self.name = take(&mut prev_state.name);
-        if self.name != node.name {
-            self.name = node.name.clone();
-        }
+        self.name.clear();
+        self.name.push_str(&node.name);
         self.behavior = node.behavior;
 
         self.inputs = take(&mut prev_state.inputs);
-        self.inputs.resize(node.inputs.len(), InputState::Unknown);
         self.inputs.fill(InputState::Unknown);
+        self.inputs.resize(node.inputs.len(), InputState::Unknown);
 
         self.output_binding_count = take(&mut prev_state.output_binding_count);
         self.output_binding_count.fill(0);
@@ -207,10 +206,7 @@ impl RuntimeGraph {
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => has_changed_inputs = true,
-                    InputState::Missing => {
-                        let is_required = func.inputs[input_idx].is_required;
-                        has_missing_inputs |= is_required;
-                    }
+                    InputState::Missing => has_missing_inputs |= func.inputs[input_idx].is_required,
                     InputState::Unknown => panic!("unprocessed input"),
                 }
 
