@@ -234,8 +234,7 @@ impl RuntimeGraph {
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
     ) -> Vec<usize> {
-        let node_count = graph.nodes.len();
-        let mut result: Vec<usize> = Vec::with_capacity(node_count);
+        let mut result: Vec<usize> = Vec::with_capacity(graph.nodes.len());
 
         enum VisitCause {
             Terminal,
@@ -272,7 +271,7 @@ impl RuntimeGraph {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_index } => {
                     let output_index = output_index as usize;
-                    r_node.output_binding_count.resize(output_index + 1, 0);
+                    // r_node.output_binding_count.resize(output_index + 1, 0);
                     r_node.output_binding_count[output_index] += 1;
                     r_node.total_binding_count += 1;
                 }
