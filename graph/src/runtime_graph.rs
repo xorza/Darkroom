@@ -194,11 +194,16 @@ impl RuntimeGraph {
                     InputState::Unchanged => {}
                     InputState::Changed => has_changed_inputs = true,
                     InputState::Missing => {
-                        let is_required = func_lib
+                        let func = func_lib
                             .func_by_id(node.func_id)
-                            .unwrap_or_else(|| todo!())
-                            .inputs[input_idx]
-                            .is_required;
+                            .expect("Missing function for node during input propagation");
+                        assert!(
+                            input_idx < func.inputs.len(),
+                            "Node input index {} out of range for function {:?}",
+                            input_idx,
+                            node.func_id
+                        );
+                        let is_required = func.inputs[input_idx].is_required;
                         has_missing_inputs |= is_required;
                     }
                     InputState::Unknown => panic!("unprocessed input"),
