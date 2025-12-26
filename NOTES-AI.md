@@ -66,6 +66,8 @@ Runtime graph build validates graph+func-lib alignment once up front and no long
 Runtime graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous runtime.
 Runtime graph update now uses helpers to reset or build runtime nodes without duplicating state initialization logic.
 Runtime node reset logic now lives on `RuntimeNode` to keep update behavior self-contained.
+Runtime graph node cache now creates missing runtime nodes when new graph nodes appear, clears cached outputs if function output arity changes, and rebuilds output binding counts each pass.
+Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms
 

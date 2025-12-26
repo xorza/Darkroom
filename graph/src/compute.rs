@@ -24,7 +24,7 @@ impl Compute {
     where
         T: Invoker,
     {
-        runtime_graph.next(graph);
+        runtime_graph.next(graph, func_lib);
         let graph_node_index_by_id = graph.build_node_index_by_id();
 
         let mut inputs: ArgSet = ArgSet::default();
@@ -58,7 +58,7 @@ impl Compute {
                 node.id
             );
 
-            inputs.resize_and_fill(node.inputs.len());
+            inputs.resize_and_clear(node.inputs.len());
             node.inputs
                 .iter()
                 .enumerate()
@@ -128,17 +128,16 @@ impl Compute {
                 start.elapsed().as_secs_f64()
             };
 
-            inputs.fill();
+            inputs.clear();
         }
 
         for r_node in runtime_graph.r_nodes.iter_mut() {
-            if !r_node.cache_outputs {
-                if let Some(values) = r_node.output_values.as_mut() {
-                    values.fill(DynamicValue::None);
+            if r_node.should_invoke {
+                if r_node.total_binding_count != 0 {
+                    println!("{:?}", r_node);
                 }
+                assert_eq!(r_node.total_binding_count, 0);
             }
-
-            assert_eq!(r_node.total_binding_count, 0);
         }
 
         Ok(())
@@ -191,11 +190,11 @@ impl ArgSet {
     {
         ArgSet(vec.into_iter().map(|v| v.into()).collect())
     }
-    pub(crate) fn resize_and_fill(&mut self, size: usize) {
+    pub(crate) fn resize_and_clear(&mut self, size: usize) {
         self.0.resize(size, DynamicValue::None);
-        self.fill();
+        self.clear();
     }
-    pub(crate) fn fill(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.0.fill(DynamicValue::None);
     }
     pub(crate) fn as_slice(&self) -> &[DynamicValue] {

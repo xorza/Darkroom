@@ -29,7 +29,6 @@ impl Default for TimersInvoker {
                 name: "frame event".to_string(),
                 description: None,
                 behavior: FuncBehavior::Impure,
-                terminal: false,
                 category: "Timers".to_string(),
                 inputs: vec![FuncInput {
                     name: "frequency".to_string(),

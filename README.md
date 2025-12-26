@@ -29,6 +29,8 @@ Runtime graph builds assume validated graphs and function libraries.
 Runtime node collection centralizes reuse of prior runtime state.
 Runtime node updates use shared reset logic to keep state consistent.
 Runtime nodes own their own reset behavior for update passes.
+Runtime graph updates handle dynamic graph changes across runs.
+Editor debug tasks can be configured per-project.
 
 ## Benchmarks
 

@@ -103,7 +103,6 @@ impl Default for BasicInvoker {
                 name: "print".to_string(),
                 description: None,
                 behavior: FuncBehavior::Impure,
-                terminal: true,
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "value".to_string(),
@@ -134,7 +133,7 @@ impl Default for BasicInvoker {
                     .expect("Invalid func id"),
                 name: "2 arg math".to_string(),
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -185,7 +184,7 @@ impl Default for BasicInvoker {
                 name: "float to string".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "value".to_string(),
@@ -219,7 +218,7 @@ impl Default for BasicInvoker {
                 name: "random".to_string(),
                 description: None,
                 behavior: FuncBehavior::Impure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -265,7 +264,7 @@ impl Default for BasicInvoker {
                 name: "add".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -308,7 +307,7 @@ impl Default for BasicInvoker {
                 name: "subtract".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -351,7 +350,6 @@ impl Default for BasicInvoker {
                 name: "multiply".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -394,7 +392,6 @@ impl Default for BasicInvoker {
                 name: "divide".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -445,7 +442,7 @@ impl Default for BasicInvoker {
                 name: "power".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {
@@ -488,7 +485,7 @@ impl Default for BasicInvoker {
                 name: "sqrt".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
@@ -521,7 +518,7 @@ impl Default for BasicInvoker {
                 name: "sin".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
@@ -554,7 +551,7 @@ impl Default for BasicInvoker {
                 name: "cos".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
@@ -587,7 +584,7 @@ impl Default for BasicInvoker {
                 name: "tan".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
@@ -620,7 +617,7 @@ impl Default for BasicInvoker {
                 name: "asin".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "sin".to_string(),
@@ -653,7 +650,7 @@ impl Default for BasicInvoker {
                 name: "acos".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "cos".to_string(),
@@ -686,7 +683,7 @@ impl Default for BasicInvoker {
                 name: "atan".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "tan".to_string(),
@@ -719,7 +716,7 @@ impl Default for BasicInvoker {
                 name: "log".to_string(),
                 description: None,
                 behavior: FuncBehavior::Pure,
-                terminal: false,
+
                 category: "math".to_string(),
                 inputs: vec![
                     FuncInput {

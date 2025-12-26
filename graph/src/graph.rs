@@ -2,7 +2,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
-use crate::function::{Func, FuncId};
+use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
 use common::normalize_string::NormalizeString;
 
@@ -34,14 +34,22 @@ pub struct Event {
     pub subscribers: Vec<NodeId>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum NodeBehavior {
+    #[default]
+    Always,
+    Once,
+    OnInputChange,
+    Output,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
     pub id: NodeId,
     pub func_id: FuncId,
-
     pub name: String,
-    pub terminal: bool,
-    pub cache_outputs: bool,
+
+    pub behavior: NodeBehavior,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
@@ -164,8 +172,7 @@ impl Default for Node {
             id: NodeId::unique(),
             func_id: FuncId::nil(),
             name: "".to_string(),
-            terminal: false,
-            cache_outputs: false,
+            behavior: NodeBehavior::Always,
             inputs: vec![],
             events: vec![],
         }
@@ -192,12 +199,17 @@ impl Node {
             .map(|_event| Event::default())
             .collect();
 
+        let behavior = match function.behavior {
+            FuncBehavior::Pure => NodeBehavior::OnInputChange,
+            FuncBehavior::Impure => NodeBehavior::Always,
+            FuncBehavior::Output => NodeBehavior::Output,
+        };
+
         Node {
             id: NodeId::unique(),
             func_id: function.id,
             name: function.name.clone(),
-            terminal: function.terminal,
-            cache_outputs: false,
+            behavior,
             inputs,
             events,
         }
@@ -283,7 +295,7 @@ mod tests {
 
         let graph = Graph::from_yaml(file_yaml.as_str())?;
         let serialized_yaml: String = graph.to_yaml();
-        // std::fs::write("../test_resources/test_graph.yml", &serialized_yaml)?;
+        std::fs::write("../test_resources/test_graph.yml", &serialized_yaml)?;
 
         assert_eq!(serialized_yaml, file_yaml);
 

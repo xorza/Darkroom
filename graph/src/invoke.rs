@@ -7,6 +7,7 @@ use hashbrown::HashMap;
 
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncId, FuncLib};
+use crate::graph::NodeBehavior;
 
 pub type InvokeArgs = [DynamicValue];
 
@@ -269,14 +270,16 @@ mod tests {
 
     use tokio::sync::Mutex;
 
-    use crate::compute::Compute;
-    use crate::data::StaticValue;
-    use crate::elements::basic_invoker::BasicInvoker;
-    use crate::elements::timers_invoker::TimersInvoker;
-    use crate::function::{FuncBehavior, FuncLib};
-    use crate::graph::{Binding, Graph};
-    use crate::invoke::{InvokeCache, Invoker, LambdaInvoker, UberInvoker};
-    use crate::runtime_graph::RuntimeGraph;
+    use crate::{
+        compute::Compute,
+        data::StaticValue,
+        elements::{basic_invoker::BasicInvoker, timers_invoker::TimersInvoker},
+        function::FuncBehavior,
+        graph::{Binding, Graph},
+        runtime_graph::RuntimeGraph,
+    };
+
+    use super::*;
 
     #[derive(Debug)]
     struct TestValues {
@@ -414,7 +417,6 @@ mod tests {
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.update(&graph, &invoker.func_lib);
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -433,7 +435,6 @@ mod tests {
             .behavior = FuncBehavior::Impure;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.update(&graph, &invoker.func_lib);
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -486,7 +487,6 @@ mod tests {
         }
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.update(&graph, &func_lib);
 
         Compute::default()
             .run(&graph, &func_lib, &invoker, &mut runtime_graph)
@@ -549,10 +549,9 @@ mod tests {
         graph
             .node_by_name_mut("sum")
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
-            .cache_outputs = false;
+            .behavior = NodeBehavior::OnInputChange;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.update(&graph, &invoker.func_lib);
 
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)

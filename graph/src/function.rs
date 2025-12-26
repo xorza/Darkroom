@@ -13,6 +13,8 @@ pub enum FuncBehavior {
     Impure,
     // always returns the same value for same inputs
     Pure,
+    // function designed to be terminal in graph, i.e. save results to io
+    Output,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -50,10 +52,11 @@ pub struct Func {
     pub id: FuncId,
     pub name: String,
     pub category: String,
+
+    pub behavior: FuncBehavior,
+
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub behavior: FuncBehavior,
-    pub terminal: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<FuncInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -65,15 +68,6 @@ pub struct Func {
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
     funcs: hashbrown::HashMap<FuncId, Func>,
-}
-
-impl FuncBehavior {
-    pub fn toggle(&mut self) {
-        *self = match *self {
-            FuncBehavior::Impure => FuncBehavior::Pure,
-            FuncBehavior::Pure => FuncBehavior::Impure,
-        };
-    }
 }
 
 impl FuncLib {
@@ -180,7 +174,6 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Pure,
-                terminal: false,
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
@@ -209,7 +202,6 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Impure,
-                terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
@@ -223,7 +215,6 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Pure,
-                terminal: false,
                 inputs: vec![],
                 outputs: vec![FuncOutput {
                     name: "Int32 Value".to_string(),
@@ -237,7 +228,6 @@ mod tests {
                 description: None,
                 category: "Debug".to_string(),
                 behavior: FuncBehavior::Pure,
-                terminal: false,
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
@@ -265,8 +255,7 @@ mod tests {
                 name: "print".to_string(),
                 description: None,
                 category: "Debug".to_string(),
-                behavior: FuncBehavior::Pure,
-                terminal: false,
+                behavior: FuncBehavior::Impure,
                 inputs: vec![FuncInput {
                     name: "message".to_string(),
                     is_required: true,
@@ -291,6 +280,7 @@ mod tests {
 
         let func_lib = create_func_lib();
         let serialized_yaml = func_lib.to_yaml();
+        // std::fs::write("../test_resources/test_funcs.yml", &serialized_yaml)?;
 
         assert_eq!(file_yaml, serialized_yaml);
 

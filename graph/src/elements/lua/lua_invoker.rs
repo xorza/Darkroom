@@ -10,6 +10,7 @@ use common::output_stream::OutputStream;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
+use crate::function::FuncBehavior;
 use crate::function::{Func, FuncId, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeId};
 use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
@@ -154,8 +155,7 @@ impl LuaInvoker {
             name: table.get("name")?,
             category: "".to_string(),
             description: None,
-            behavior: Default::default(),
-            terminal: false,
+            behavior: FuncBehavior::Impure,
             inputs: vec![],
             outputs: vec![],
             events: vec![],

@@ -1,0 +1,17 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "label": "Rust (break on panic)",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": {
+      "command": "cargo",
+      "args": ["build"],
+    },
+    "sourceLanguages": ["rust"],
+    "initCommands": ["breakpoint set -n rust_panic"],
+  },
+]
