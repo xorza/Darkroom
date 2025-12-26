@@ -125,7 +125,7 @@ impl RuntimeGraph {
 
     fn build_node_cache(&mut self, graph: &Graph) {
         for (node_idx, node) in graph.nodes.iter().enumerate() {
-            assert!(!node.id.is_nil(), "Graph node has invalid id");
+            assert!(!node.id.is_nil(), "Graph node has nil id");
 
             let r_node_index = match self.node_index_by_id.get(&node.id).copied() {
                 Some(index) => index,
@@ -170,9 +170,12 @@ impl RuntimeGraph {
                 node
             };
 
-            let func = func_lib
-                .func_by_id(node.func_id)
-                .expect("Missing function for a node during input propagation");
+            let func = func_lib.func_by_id(node.func_id).unwrap_or_else(|| {
+                panic!(
+                    "Missing function {:?} for node {:?} during input propagation",
+                    node.func_id, node.id
+                )
+            });
             assert_eq!(node.inputs.len(), func.inputs.len(),);
 
             #[cfg(debug_assertions)]
@@ -191,7 +194,12 @@ impl RuntimeGraph {
                     Binding::Output(output_binding) => {
                         let output_r_node = self
                             .node_by_id_mut(output_binding.output_node_id)
-                            .expect("Output binding references missing node");
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "Output binding references missing runtime node {:?}",
+                                    output_binding.output_node_id
+                                )
+                            });
 
                         #[cfg(debug_assertions)]
                         {

@@ -72,6 +72,8 @@ Runtime graph update now uses helpers to reset or build runtime nodes without du
 Runtime node reset logic now lives on `RuntimeNode` to keep update behavior self-contained.
 Runtime graph node cache now creates missing runtime nodes when new graph nodes appear, clears cached outputs if function output arity changes, and rebuilds output binding counts each pass.
 Runtime graph scheduling asserts when runtime node indices are missing.
+Runtime graph propagation asserts when output bindings reference missing runtime nodes.
+Runtime graph propagation panics with function and node IDs on missing functions.
 Compute now sorts invocations by `RuntimeNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
