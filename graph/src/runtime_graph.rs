@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::mem::take;
 
 use anyhow::Result;
@@ -8,6 +9,14 @@ use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::invoke::InvokeCache;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+enum ProcessingState {
+    #[default]
+    None,
+    Processing,
+    Processed,
+}
 
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
@@ -20,7 +29,9 @@ pub struct RuntimeNode {
 
     pub has_missing_inputs: bool,
     pub should_invoke: bool,
-    pub is_active: bool,
+
+    processing_state: ProcessingState,
+    is_active: bool,
 
     pub run_time: f64,
 
@@ -38,12 +49,6 @@ pub struct RuntimeNode {
 pub struct RuntimeGraph {
     pub r_nodes: Vec<RuntimeNode>,
     node_index_by_id: HashMap<NodeId, usize>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VisitState {
-    Visiting,
-    Visited,
 }
 
 impl RuntimeNode {
@@ -159,7 +164,7 @@ impl RuntimeGraph {
                         } else {
                             if output_r_node.should_invoke {
                                 match r_node.behavior {
-                                    NodeBehavior::Output
+                                    NodeBehavior::Terminal
                                     | NodeBehavior::OnInputChange
                                     | NodeBehavior::Always => {
                                         r_node.should_invoke = true;
@@ -179,54 +184,90 @@ impl RuntimeGraph {
     }
 
     fn collect_ordered_active_node_ids(
-        &self,
+        &mut self,
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
     ) -> Vec<usize> {
         let node_count = graph.nodes.len();
-        let mut visit_state: HashMap<NodeId, VisitState> = HashMap::with_capacity(node_count);
-        let mut ordered: Vec<usize> = Vec::with_capacity(node_count);
-        let mut stack: Vec<(NodeId, bool)> = Vec::with_capacity(10);
+        let mut result: Vec<usize> = Vec::with_capacity(node_count);
 
-        for node in graph
+        enum VisitCause {
+            Terminal,
+            OutputRequest { output_index: u32 },
+            Processed,
+        }
+        struct Visit {
+            node_id: NodeId,
+            cause: VisitCause,
+        }
+        let mut stack: VecDeque<Visit> = VecDeque::with_capacity(10);
+
+        graph
             .nodes
             .iter()
-            .filter(|node| node.behavior == NodeBehavior::Output)
-        {
-            stack.push((node.id, false));
-        }
+            .filter(|&node| node.behavior == NodeBehavior::Terminal)
+            .for_each(|node| {
+                stack.push_back(Visit {
+                    node_id: node.id,
+                    cause: VisitCause::Terminal,
+                });
+            });
 
-        while let Some((node_id, expanded)) = stack.pop() {
-            if expanded {
-                visit_state.insert(node_id, VisitState::Visited);
-                ordered.push(self.node_index_by_id.get(&node_id).copied().unwrap());
-                continue;
+        while let Some(visit) = stack.pop_front() {
+            let r_node_index = self
+                .node_index_by_id
+                .get(&visit.node_id)
+                .copied()
+                .expect("node not found");
+            let r_node = &mut self.r_nodes[r_node_index];
+
+            match visit.cause {
+                VisitCause::Terminal => {}
+                VisitCause::OutputRequest { output_index } => {
+                    r_node.output_binding_count[output_index as usize] += 1;
+                    r_node.total_binding_count += 1;
+                }
+                VisitCause::Processed => {
+                    r_node.processing_state = ProcessingState::Processed;
+                    result.push(r_node_index);
+                    continue;
+                }
             }
 
-            match visit_state.get(&node_id) {
-                Some(VisitState::Visited) => continue,
-                Some(VisitState::Visiting) => {
+            match r_node.processing_state {
+                ProcessingState::Processed => {
+                    continue;
+                }
+                ProcessingState::Processing => {
+                    // todo replace with result<>
                     panic!("Cycle detected while building runtime graph");
                 }
-                None => {}
+                ProcessingState::None => {}
             }
 
-            visit_state.insert(node_id, VisitState::Visiting);
-            stack.push((node_id, true));
+            r_node.processing_state = ProcessingState::Processing;
+            stack.push_back(Visit {
+                node_id: visit.node_id,
+                cause: VisitCause::Processed,
+            });
 
-            let node_index = *graph_node_index_by_id
-                .get(&node_id)
-                .expect("Node missing from graph");
-            let node = &graph.nodes[node_index];
+            let node = &graph.nodes[*graph_node_index_by_id
+                .get(&visit.node_id)
+                .expect("Node missing from graph")];
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    stack.push((output_binding.output_node_id, false));
+                    stack.push_back(Visit {
+                        node_id: output_binding.output_node_id,
+                        cause: VisitCause::OutputRequest {
+                            output_index: output_binding.output_index,
+                        },
+                    });
                 }
             }
         }
 
-        ordered.reverse();
-        ordered
+        result.reverse();
+        result
     }
 
     fn reset_runtime_state(&mut self) {

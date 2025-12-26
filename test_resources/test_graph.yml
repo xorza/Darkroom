@@ -35,7 +35,7 @@ nodes:
   - id: b88ab7e2-17b7-46cb-bc8e-b428bb45141e
     func_id: f22cd316-1cdf-4a80-b86c-1277acd1408a
     name: print
-    behavior: Output
+    behavior: Terminal
     inputs:
       - binding: !Output
           output_node_id: '579ae1d6-10a3-4906-8948-135cb7d7508b'

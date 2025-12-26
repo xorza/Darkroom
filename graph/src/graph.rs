@@ -40,7 +40,7 @@ pub enum NodeBehavior {
     Always,
     Once,
     OnInputChange,
-    Output,
+    Terminal,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -202,7 +202,7 @@ impl Node {
         let behavior = match function.behavior {
             FuncBehavior::Pure => NodeBehavior::OnInputChange,
             FuncBehavior::Impure => NodeBehavior::Always,
-            FuncBehavior::Output => NodeBehavior::Output,
+            FuncBehavior::Output => NodeBehavior::Terminal,
         };
 
         Node {
