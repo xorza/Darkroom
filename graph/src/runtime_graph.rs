@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncLib};
+use crate::function::FuncLib;
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::invoke::InvokeCache;
 
@@ -18,16 +18,25 @@ enum ProcessingState {
     Processed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum InputState {
+    #[default]
+    Unknown,
+    Unchanged,
+    Changed,
+    Missing,
+}
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
     pub id: NodeId,
     pub name: String,
     pub behavior: NodeBehavior,
 
-    // required inputs
-    pub inputs: Vec<bool>,
+    pub inputs: Vec<InputState>,
 
     pub has_missing_inputs: bool,
+    pub has_changed_inputs: bool,
     pub should_invoke: bool,
 
     processing_state: ProcessingState,
@@ -57,6 +66,7 @@ impl RuntimeNode {
             "Output index out of range: {}",
             output_index
         );
+        assert!(self.output_binding_count.len() > output_index as usize);
         assert!(self.output_binding_count[output_index as usize] >= 1);
         assert!(self.total_binding_count >= 1);
 
@@ -64,20 +74,21 @@ impl RuntimeNode {
         self.total_binding_count -= 1;
     }
 
-    fn reset_from(&mut self, node: &Node, func: &Func) {
-        self.name = node.name.clone();
+    fn reset_from(&mut self, node: &Node) {
+        let mut prev_state = take(self);
+
+        self.id = node.id;
+        self.name = take(&mut prev_state.name);
+        if self.name != node.name {
+            self.name = node.name.clone();
+        }
         self.behavior = node.behavior;
 
-        // todo optimize to reuse memory
-        self.inputs = func.inputs.iter().map(|i| i.is_required).collect();
+        self.inputs = take(&mut prev_state.inputs);
+        self.inputs.resize(node.inputs.len(), InputState::Unknown);
+        self.inputs.fill(InputState::Unknown);
 
-        self.has_missing_inputs = false;
-        self.should_invoke = false;
-        self.total_binding_count = 0;
-
-        self.run_time = 0.0;
-
-        self.output_binding_count.resize(func.outputs.len(), 0);
+        self.output_binding_count = take(&mut prev_state.output_binding_count);
         self.output_binding_count.fill(0);
     }
 }
@@ -97,84 +108,102 @@ impl RuntimeGraph {
 
     // mark active nodes without cached outputs for execution
     pub fn next(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        self.build_node_cache(graph, func_lib);
-        self.rebuild_node_index();
+        self.build_node_cache(graph);
         self.reset_runtime_state();
-        self.propagate_missing_inputs_and_behavior(graph);
+        self.propagate_missing_inputs_and_behavior(graph, func_lib);
     }
 
-    fn build_node_cache(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    fn build_node_cache(&mut self, graph: &Graph) {
         for node in graph.nodes.iter() {
             assert!(!node.id.is_nil(), "Graph node has invalid id");
-
-            let func = func_lib.func_by_id(node.func_id).unwrap_or_else(|| {
-                panic!(
-                    "Missing function {:?} for node {:?}",
-                    node.func_id, node.name
-                )
-            });
 
             let r_node_index = match self.node_index_by_id.get(&node.id).copied() {
                 Some(index) => index,
                 None => {
-                    self.r_nodes.push(RuntimeNode {
-                        id: node.id,
-                        ..Default::default()
-                    });
-
+                    self.r_nodes.push(RuntimeNode::default());
                     self.r_nodes.len() - 1
                 }
             };
 
-            let r_node = &mut self.r_nodes[r_node_index];
-            assert_eq!(r_node.id, node.id, "");
-            r_node.reset_from(node, func);
+            self.r_nodes[r_node_index].reset_from(node);
         }
+
+        self.rebuild_node_index();
     }
 
     // mark missing inputs and propagate behavior based on upstream active nodes
-    fn propagate_missing_inputs_and_behavior(&mut self, graph: &Graph) {
+    fn propagate_missing_inputs_and_behavior(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let graph_node_index_by_id = graph.build_node_index_by_id();
         let active_node_indices =
             self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
 
         for index in active_node_indices {
             let mut r_node = take(&mut self.r_nodes[index]);
+            assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
             println!("{}", r_node.name);
+
+            // avoid traversing inputs for NodeBehavior::Once nodes having outputs
+            // even if having missing inputs
+            if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
+                // should_invoke is false
+                continue;
+            }
 
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&r_node.id)
                 .expect("Runtime node missing from graph")];
 
+            let mut has_changed_inputs = false;
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                match &input.binding {
-                    Binding::None => {
-                        r_node.has_missing_inputs |= r_node.inputs[input_idx];
-                    }
-                    Binding::Const => {}
+                let input_state = match &input.binding {
+                    Binding::None => InputState::Missing,
+                    // todo implement notifying of const binding changes
+                    Binding::Const => InputState::Unchanged,
                     Binding::Output(output_binding) => {
                         let output_r_node = self
                             .r_nodes
                             .iter()
                             .find(|&p_node| p_node.id == output_binding.output_node_id)
-                            .expect("node not found");
+                            .unwrap_or_else(|| todo!());
+                        assert_eq!(output_r_node.processing_state, ProcessingState::Processed);
 
                         if output_r_node.has_missing_inputs {
-                            r_node.has_missing_inputs = true;
+                            InputState::Missing
                         } else {
                             if output_r_node.should_invoke {
-                                match r_node.behavior {
-                                    NodeBehavior::Terminal
-                                    | NodeBehavior::OnInputChange
-                                    | NodeBehavior::Always => {
-                                        r_node.should_invoke = true;
-                                    }
-                                    NodeBehavior::Once => {
-                                        r_node.should_invoke = r_node.output_values.is_none();
-                                    }
-                                }
+                                InputState::Changed
+                            } else {
+                                InputState::Unchanged
                             }
                         }
+                    }
+                };
+                match input_state {
+                    InputState::Unchanged => {}
+                    InputState::Changed => has_changed_inputs = true,
+                    InputState::Missing => {
+                        let is_required = func_lib
+                            .func_by_id(node.func_id)
+                            .unwrap_or_else(|| todo!())
+                            .inputs[input_idx]
+                            .is_required;
+                        r_node.has_missing_inputs |= is_required;
+                    }
+                    InputState::Unknown => panic!("unprocessed input"),
+                }
+            }
+
+            if !r_node.has_missing_inputs {
+                match r_node.behavior {
+                    NodeBehavior::Terminal | NodeBehavior::Always => {
+                        r_node.should_invoke = true;
+                    }
+                    NodeBehavior::Once => {
+                        // has no cached outputs so should_invoke = true
+                        r_node.should_invoke = true;
+                    }
+                    NodeBehavior::OnInputChange => {
+                        r_node.should_invoke = has_changed_inputs;
                     }
                 }
             }
@@ -224,7 +253,9 @@ impl RuntimeGraph {
             match visit.cause {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_index } => {
-                    r_node.output_binding_count[output_index as usize] += 1;
+                    let output_index = output_index as usize;
+                    r_node.output_binding_count.resize(output_index + 1, 0);
+                    r_node.output_binding_count[output_index] += 1;
                     r_node.total_binding_count += 1;
                 }
                 VisitCause::Processed => {
