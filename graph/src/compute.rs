@@ -79,7 +79,8 @@ impl Compute {
                                         output_binding.output_node_id
                                     )
                                 });
-                            assert!(
+                            #[cfg(debug_assertions)]
+                            debug_assert!(
                                 (output_binding.output_index as usize)
                                     < output_r_node.output_binding_count.len(),
                                 "Output index out of range for node {:?}",
@@ -130,9 +131,10 @@ impl Compute {
             inputs.clear();
         }
 
+        #[cfg(debug_assertions)]
         for r_node in runtime_graph.r_nodes.iter() {
             if r_node.should_invoke {
-                assert_eq!(r_node.total_binding_count, 0);
+                debug_assert_eq!(r_node.total_binding_count, 0);
             }
         }
 

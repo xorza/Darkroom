@@ -29,7 +29,6 @@ pub enum InputState {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
     pub id: NodeId,
-    pub name: String,
     pub behavior: NodeBehavior,
 
     pub inputs: Vec<InputState>,
@@ -48,8 +47,12 @@ pub struct RuntimeNode {
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
+    #[cfg(debug_assertions)]
+    pub name: String,
     //these used for validation that all bindings were visited
+    #[cfg(debug_assertions)]
     pub(crate) output_binding_count: Vec<u32>,
+    #[cfg(debug_assertions)]
     pub(crate) total_binding_count: u32,
 }
 
@@ -60,35 +63,44 @@ pub struct RuntimeGraph {
 }
 
 impl RuntimeNode {
-    pub(crate) fn decrement_current_binding_count(&mut self, output_index: u32) {
-        assert!(
-            (output_index as usize) < self.output_binding_count.len(),
-            "Output index out of range: {}",
-            output_index
-        );
-        assert!(self.output_binding_count.len() > output_index as usize);
-        assert!(self.output_binding_count[output_index as usize] >= 1);
-        assert!(self.total_binding_count >= 1);
+    pub(crate) fn decrement_current_binding_count(&mut self, _output_index: u32) {
+        #[cfg(debug_assertions)]
+        {
+            debug_assert!(
+                (_output_index as usize) < self.output_binding_count.len(),
+                "Output index out of range: {}",
+                _output_index
+            );
+            debug_assert!(self.output_binding_count.len() > _output_index as usize);
+            debug_assert!(self.output_binding_count[_output_index as usize] >= 1);
+            debug_assert!(self.total_binding_count >= 1);
 
-        self.output_binding_count[output_index as usize] -= 1;
-        self.total_binding_count -= 1;
+            self.output_binding_count[_output_index as usize] -= 1;
+            self.total_binding_count -= 1;
+        }
     }
 
     fn reset_from(&mut self, node: &Node) {
         let mut prev_state = take(self);
 
         self.id = node.id;
-        self.name = take(&mut prev_state.name);
-        self.name.clear();
-        self.name.push_str(&node.name);
+        #[cfg(debug_assertions)]
+        {
+            self.name = take(&mut prev_state.name);
+            self.name.clear();
+            self.name.push_str(&node.name);
+        }
         self.behavior = node.behavior;
 
         self.inputs = take(&mut prev_state.inputs);
         self.inputs.fill(InputState::Unknown);
         self.inputs.resize(node.inputs.len(), InputState::Unknown);
 
-        self.output_binding_count = take(&mut prev_state.output_binding_count);
-        self.output_binding_count.fill(0);
+        #[cfg(debug_assertions)]
+        {
+            self.output_binding_count = take(&mut prev_state.output_binding_count);
+            self.output_binding_count.fill(0);
+        }
 
         self.cache = take(&mut prev_state.cache);
         self.output_values = take(&mut prev_state.output_values);
@@ -164,6 +176,7 @@ impl RuntimeGraph {
                 .func_by_id(node.func_id)
                 .expect("Missing function for node during input propagation");
 
+            #[cfg(debug_assertions)]
             self.r_nodes[node_idx]
                 .output_binding_count
                 .resize(func.outputs.len(), 0);
@@ -188,9 +201,12 @@ impl RuntimeGraph {
                             .node_by_id_mut(output_binding.output_node_id)
                             .expect("Output binding references missing node");
 
-                        output_r_node.output_binding_count[output_binding.output_index as usize] +=
-                            1;
-                        output_r_node.total_binding_count += 1;
+                        #[cfg(debug_assertions)]
+                        {
+                            output_r_node.output_binding_count
+                                [output_binding.output_index as usize] += 1;
+                            output_r_node.total_binding_count += 1;
+                        }
 
                         assert_eq!(output_r_node.processing_state, ProcessingState::Processed);
 
@@ -382,7 +398,7 @@ mod tests {
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
-        let get_b_node_id = graph
+        let _get_b_node_id = graph
             .node_by_name("get_b")
             .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
             .id;
@@ -391,10 +407,11 @@ mod tests {
         runtime_graph.next(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
-        assert_eq!(
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
             runtime_graph
-                .node_by_id(get_b_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
+                .node_by_id(_get_b_node_id)
+                .unwrap_or_else(|| panic!("Runtime node {:?} missing", _get_b_node_id))
                 .total_binding_count,
             2
         );
@@ -417,7 +434,7 @@ mod tests {
         let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
-        let get_b_node_id = graph
+        let _get_b_node_id = graph
             .node_by_name("get_b")
             .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
             .id;
@@ -426,10 +443,11 @@ mod tests {
         runtime_graph.next(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
-        assert_eq!(
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
             runtime_graph
-                .node_by_id(get_b_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
+                .node_by_id(_get_b_node_id)
+                .unwrap_or_else(|| panic!("Runtime node {:?} missing", _get_b_node_id))
                 .total_binding_count,
             2
         );
@@ -437,10 +455,11 @@ mod tests {
         runtime_graph.next(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
-        assert_eq!(
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
             runtime_graph
-                .node_by_id(get_b_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
+                .node_by_id(_get_b_node_id)
+                .unwrap_or_else(|| panic!("Runtime node {:?} missing", _get_b_node_id))
                 .total_binding_count,
             2
         );
@@ -480,7 +499,8 @@ mod tests {
         runtime_graph.next(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
-        assert_eq!(
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
             runtime_graph
                 .node_by_id(get_b_node_id)
                 .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
