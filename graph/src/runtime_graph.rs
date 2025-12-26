@@ -29,7 +29,6 @@ pub enum InputState {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct RuntimeNode {
     pub id: NodeId,
-    pub behavior: NodeBehavior,
 
     pub inputs: Vec<InputState>,
 
@@ -84,7 +83,6 @@ impl RuntimeNode {
         let mut prev_state = take(self);
 
         self.id = node.id;
-        self.behavior = node.behavior;
 
         self.inputs = take(&mut prev_state.inputs);
         self.inputs.fill(InputState::Unknown);
@@ -149,6 +147,10 @@ impl RuntimeGraph {
             self.build_active_node_indices_ordered(graph, &graph_node_index_by_id);
 
         for (invocation_order, &(node_idx, node_id)) in active_node_indices.iter().enumerate() {
+            let node = &graph.nodes[*graph_node_index_by_id
+                .get(&node_id)
+                .expect("Runtime node missing from graph")];
+
             {
                 let r_node = &mut self.r_nodes[node_idx];
                 assert_eq!(
@@ -161,15 +163,12 @@ impl RuntimeGraph {
                 r_node.invocation_order = invocation_order as u64;
                 // avoid traversing inputs for NodeBehavior::Once nodes having outputs
                 // even if having missing inputs
-                if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
+                if node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
                     // should_invoke is false
                     continue;
                 }
             }
 
-            let node = &graph.nodes[*graph_node_index_by_id
-                .get(&node_id)
-                .expect("Runtime node missing from graph")];
             let func = func_lib
                 .func_by_id(node.func_id)
                 .expect("Missing function for node during input propagation");
@@ -230,7 +229,7 @@ impl RuntimeGraph {
             let r_node = &mut self.r_nodes[node_idx];
             r_node.has_missing_inputs = has_missing_inputs;
             if !r_node.has_missing_inputs {
-                match r_node.behavior {
+                match node.behavior {
                     NodeBehavior::Terminal | NodeBehavior::Always => {
                         r_node.should_invoke = true;
                     }
