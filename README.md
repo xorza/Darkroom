@@ -30,6 +30,7 @@ Runtime node collection centralizes reuse of prior runtime state.
 Runtime node updates use shared reset logic to keep state consistent.
 Runtime nodes own their own reset behavior for update passes.
 Runtime graph updates handle dynamic graph changes across runs.
+Compute execution follows the runtime scheduling order.
 Editor debug tasks can be configured per-project.
 
 ## Benchmarks

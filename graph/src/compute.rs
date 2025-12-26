@@ -29,18 +29,17 @@ impl Compute {
 
         let mut inputs: ArgSet = ArgSet::default();
 
-        let active_node_indexes = runtime_graph
-            .r_nodes
-            .iter_mut()
-            .enumerate()
-            .filter_map(|(index, r_node)| {
-                if r_node.should_invoke {
-                    Some(index)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<usize>>();
+        let active_node_indexes = {
+            let mut active_node_indexes = runtime_graph
+                .r_nodes
+                .iter()
+                .enumerate()
+                .filter_map(|(index, r_node)| r_node.should_invoke.then_some(index))
+                .collect::<Vec<usize>>();
+
+            active_node_indexes.sort_by_key(|&index| runtime_graph.r_nodes[index].invocation_order);
+            active_node_indexes
+        };
 
         for node_idx in active_node_indexes {
             let node_id = runtime_graph.r_nodes[node_idx].id;

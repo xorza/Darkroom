@@ -171,12 +171,10 @@ impl RuntimeGraph {
 
                         if output_r_node.has_missing_inputs {
                             InputState::Missing
+                        } else if output_r_node.should_invoke {
+                            InputState::Changed
                         } else {
-                            if output_r_node.should_invoke {
-                                InputState::Changed
-                            } else {
-                                InputState::Unchanged
-                            }
+                            InputState::Unchanged
                         }
                     }
                 };
@@ -305,6 +303,7 @@ impl RuntimeGraph {
     fn reset_runtime_state(&mut self) {
         self.r_nodes.iter_mut().for_each(|r_node| {
             r_node.should_invoke = false;
+            r_node.invocation_order = u64::MAX;
             r_node.output_binding_count.fill(0);
             r_node.total_binding_count = 0;
         });
