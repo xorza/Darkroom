@@ -565,18 +565,18 @@ mod tests {
             assert_eq!(guard.result, 35);
         }
 
+        println!();
+
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
 
-        //assert that node a was called again
+        //assert that node was called again
         let guard = test_values.lock().await;
         assert_eq!(guard.a, 4);
         //but node b was cached
         assert_eq!(guard.b, 6);
         assert_eq!(guard.result, 40);
-
-        drop(graph);
 
         Ok(())
     }

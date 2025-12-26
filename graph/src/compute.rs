@@ -46,13 +46,13 @@ impl Compute {
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
                 .expect("Runtime node missing from the graph")];
-            let node_info = func_lib
+            let func = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
             assert_eq!(
                 node.inputs.len(),
-                node_info.inputs.len(),
+                func.inputs.len(),
                 "Node {:?} input count mismatch",
                 node.id
             );
@@ -100,7 +100,7 @@ impl Compute {
                         }
                     };
 
-                    let data_type = &node_info.inputs[input_idx].data_type;
+                    let data_type = &func.inputs[input_idx].data_type;
 
                     (input_idx, data_type, value)
                 })
@@ -111,7 +111,7 @@ impl Compute {
             let r_node = &mut runtime_graph.r_nodes[node_idx];
             let outputs = r_node
                 .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; node_info.outputs.len()]);
+                .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
 
             r_node.run_time = {
                 let start = std::time::Instant::now();
@@ -130,11 +130,8 @@ impl Compute {
             inputs.clear();
         }
 
-        for r_node in runtime_graph.r_nodes.iter_mut() {
+        for r_node in runtime_graph.r_nodes.iter() {
             if r_node.should_invoke {
-                if r_node.total_binding_count != 0 {
-                    println!("{:?}", r_node);
-                }
                 assert_eq!(r_node.total_binding_count, 0);
             }
         }

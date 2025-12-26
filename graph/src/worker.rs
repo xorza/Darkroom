@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-
+use tracing::error;
 use crate::compute::Compute;
 use crate::event::EventId;
 use crate::function::FuncLib;
@@ -184,7 +184,7 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         if self.thread_handle.is_some() {
-            panic!("Worker dropped while thread is still running; call Worker::exit() first");
+            error!("Worker dropped while thread is still running; call Worker::exit() first");
         }
     }
 }
@@ -229,16 +229,16 @@ mod tests {
             let mut worker = Worker::new(uber_invoker, move || {
                 compute_finish_tx
                     .send(())
-                    .expect("Failed to send compute callback event");
+                    .expect("Failed to send a compute callback event");
             });
 
             let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml")
-                .expect("Failed to load log_frame_no.yaml graph");
+                .expect("Failed to load the log_frame_no.yaml graph");
 
             worker.run_once(graph.clone()).await;
             compute_finish_rx
                 .recv()
-                .expect("Failed to receive compute callback event after run_once");
+                .expect("Failed to receive a compute callback event after run_once");
 
             assert_eq!(output_stream.take().await[0], "1");
 

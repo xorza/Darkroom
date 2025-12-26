@@ -38,7 +38,7 @@ nodes:
   - id: 8be72298-dece-4a5f-8a1d-d2dee1e791d3
     func_id: 01896910-0790-ad1b-aa12-3f1437196789
     name: print
-    behavior: Always
+    behavior: Terminal
     inputs:
       - name: value
         data_type: String

@@ -49,7 +49,7 @@ pub struct RuntimeNode {
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
-    //these used for validation that all binding were visited
+    //these used for validation that all bindings were visited
     pub(crate) output_binding_count: Vec<u32>,
     pub(crate) total_binding_count: u32,
 }
@@ -91,6 +91,9 @@ impl RuntimeNode {
 
         self.output_binding_count = take(&mut prev_state.output_binding_count);
         self.output_binding_count.fill(0);
+
+        self.cache = take(&mut prev_state.cache);
+        self.output_values = take(&mut prev_state.output_values);
     }
 }
 
@@ -140,13 +143,14 @@ impl RuntimeGraph {
         for (invocation_order, &node_index) in active_node_indices.iter().enumerate() {
             let mut r_node = take(&mut self.r_nodes[node_index]);
             assert_eq!(r_node.processing_state, ProcessingState::Processed, "todo");
-            println!("{}", r_node.name);
+            // println!("{}", r_node.name);
 
             r_node.invocation_order = invocation_order as u64;
             // avoid traversing inputs for NodeBehavior::Once nodes having outputs
             // even if having missing inputs
             if r_node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
                 // should_invoke is false
+                self.r_nodes[node_index] = r_node;
                 continue;
             }
 
@@ -162,10 +166,9 @@ impl RuntimeGraph {
                     Binding::Const => InputState::Changed,
                     Binding::Output(output_binding) => {
                         let output_r_node = self
-                            .r_nodes
-                            .iter()
-                            .find(|&p_node| p_node.id == output_binding.output_node_id)
-                            .unwrap_or_else(|| todo!());
+                            .node_by_id(output_binding.output_node_id)
+                            .expect("Output binding references missing node");
+
                         assert_eq!(output_r_node.processing_state, ProcessingState::Processed);
 
                         if output_r_node.has_missing_inputs {
