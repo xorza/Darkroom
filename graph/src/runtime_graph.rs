@@ -136,7 +136,7 @@ impl RuntimeGraph {
     // mark missing inputs and propagate behavior based on upstream active nodes
     fn propagate_input_state(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let graph_node_index_by_id = graph.build_node_index_by_id();
-        let active_node_ids = self.collect_ordered_active_node_ids(graph, &graph_node_index_by_id);
+        let active_node_ids = self.build_active_node_ids_ordered(graph, &graph_node_index_by_id);
 
         for (invocation_order, &node_id) in active_node_ids.iter().enumerate() {
             let node_index = *self
@@ -231,7 +231,7 @@ impl RuntimeGraph {
         }
     }
 
-    fn collect_ordered_active_node_ids(
+    fn build_active_node_ids_ordered(
         &mut self,
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
