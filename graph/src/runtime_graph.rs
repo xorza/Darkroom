@@ -266,11 +266,12 @@ impl RuntimeGraph {
             });
 
         while let Some(visit) = stack.pop() {
-            let r_node_index = self
+            let r_node_index = *self
                 .node_index_by_id
                 .get(&visit.node_id)
-                .copied()
-                .expect("node not found");
+                .unwrap_or_else(|| {
+                    panic!("Runtime node index missing for node {:?}", visit.node_id)
+                });
             let r_node = &mut self.r_nodes[r_node_index];
             // println!("{}", r_node.name);
 

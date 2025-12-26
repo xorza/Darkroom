@@ -29,6 +29,7 @@ Runtime graph propagation asserts nodes were processed before computing input st
 Runtime graph propagation assumes function library alignment and asserts on missing functions.
 Runtime graph builds assume validated graphs and function libraries.
 Runtime node collection centralizes reuse of prior runtime state.
+Runtime graph scheduling asserts when runtime nodes are missing.
 Worker event loops terminate when their message channel closes.
 Runtime node updates use shared reset logic to keep state consistent.
 Runtime nodes own their own reset behavior for update passes.
