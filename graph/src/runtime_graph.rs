@@ -68,12 +68,19 @@ impl RuntimeNode {
         {
             debug_assert!(
                 (_output_index as usize) < self.output_binding_count.len(),
-                "Output index out of range: {}",
+                "Output index {} out of range for {} outputs",
+                _output_index,
+                self.output_binding_count.len()
+            );
+            debug_assert!(
+                self.output_binding_count[_output_index as usize] >= 1,
+                "Output binding count already zero for index {}",
                 _output_index
             );
-            debug_assert!(self.output_binding_count.len() > _output_index as usize);
-            debug_assert!(self.output_binding_count[_output_index as usize] >= 1);
-            debug_assert!(self.total_binding_count >= 1);
+            debug_assert!(
+                self.total_binding_count >= 1,
+                "Total binding count already zero"
+            );
 
             self.output_binding_count[_output_index as usize] -= 1;
             self.total_binding_count -= 1;
@@ -125,7 +132,11 @@ impl RuntimeGraph {
 
     fn build_node_cache(&mut self, graph: &Graph) {
         for (node_idx, node) in graph.nodes.iter().enumerate() {
-            assert!(!node.id.is_nil(), "Graph node has nil id");
+            assert!(
+                !node.id.is_nil(),
+                "Graph node has nil id at index {}",
+                node_idx
+            );
 
             let r_node_index = match self.node_index_by_id.get(&node.id).copied() {
                 Some(index) => index,
@@ -176,7 +187,15 @@ impl RuntimeGraph {
                     node.func_id, node.id
                 )
             });
-            assert_eq!(node.inputs.len(), func.inputs.len(),);
+            assert_eq!(
+                node.inputs.len(),
+                func.inputs.len(),
+                "Node {:?} input count {} does not match function {:?} input count {}",
+                node.id,
+                node.inputs.len(),
+                node.func_id,
+                func.inputs.len()
+            );
 
             #[cfg(debug_assertions)]
             self.r_nodes[r_node_idx]
@@ -208,7 +227,12 @@ impl RuntimeGraph {
                             output_r_node.total_binding_count += 1;
                         }
 
-                        assert_eq!(output_r_node.processing_state, ProcessingState::Processed);
+                        assert_eq!(
+                            output_r_node.processing_state,
+                            ProcessingState::Processed,
+                            "Output runtime node {:?} not processed before input propagation",
+                            output_binding.output_node_id
+                        );
 
                         if output_r_node.has_missing_inputs {
                             InputState::Missing
@@ -299,7 +323,10 @@ impl RuntimeGraph {
                 }
                 ProcessingState::Processing => {
                     // todo replace with result<>
-                    panic!("Cycle detected while building runtime graph");
+                    panic!(
+                        "Cycle detected while building runtime graph at node {:?}",
+                        visit.node_id
+                    );
                 }
                 ProcessingState::None => {}
             }

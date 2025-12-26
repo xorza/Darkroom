@@ -32,6 +32,7 @@ Runtime node collection centralizes reuse of prior runtime state.
 Runtime graph scheduling asserts when runtime nodes are missing.
 Runtime graph propagation asserts when output bindings point at missing runtime nodes.
 Runtime graph propagation panics with function + node IDs when functions are missing.
+Runtime graph assertions include node indices and IDs for easier debugging.
 Worker event loops terminate when their message channel closes.
 Runtime node updates use shared reset logic to keep state consistent.
 Runtime nodes own their own reset behavior for update passes.
