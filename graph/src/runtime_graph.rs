@@ -136,16 +136,12 @@ impl RuntimeGraph {
     // mark missing inputs and propagate behavior based on upstream active nodes
     fn propagate_input_state(&mut self, graph: &Graph, func_lib: &FuncLib) {
         let graph_node_index_by_id = graph.build_node_index_by_id();
-        let active_node_ids = self.build_active_node_ids_ordered(graph, &graph_node_index_by_id);
+        let active_node_indices =
+            self.build_active_node_indices_ordered(graph, &graph_node_index_by_id);
 
-        for (invocation_order, &node_id) in active_node_ids.iter().enumerate() {
-            let node_index = *self
-                .node_index_by_id
-                .get(&node_id)
-                .expect("Node index not found");
-
-            {
-                let r_node = &mut self.r_nodes[node_index];
+        for (invocation_order, &node_idx) in active_node_indices.iter().enumerate() {
+            let node_id = {
+                let r_node = &mut self.r_nodes[node_idx];
                 assert_eq!(
                     r_node.processing_state,
                     ProcessingState::Processed,
@@ -160,7 +156,9 @@ impl RuntimeGraph {
                     // should_invoke is false
                     continue;
                 }
-            }
+
+                r_node.id
+            };
 
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
@@ -209,10 +207,10 @@ impl RuntimeGraph {
                     InputState::Unknown => panic!("unprocessed input"),
                 }
 
-                self.r_nodes[node_index].inputs[input_idx] = input_state;
+                self.r_nodes[node_idx].inputs[input_idx] = input_state;
             }
 
-            let r_node = &mut self.r_nodes[node_index];
+            let r_node = &mut self.r_nodes[node_idx];
             r_node.has_missing_inputs = has_missing_inputs;
             if !r_node.has_missing_inputs {
                 match r_node.behavior {
@@ -231,13 +229,13 @@ impl RuntimeGraph {
         }
     }
 
-    fn build_active_node_ids_ordered(
+    fn build_active_node_indices_ordered(
         &mut self,
         graph: &Graph,
         graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) -> Vec<NodeId> {
+    ) -> Vec<usize> {
         let node_count = graph.nodes.len();
-        let mut result: Vec<NodeId> = Vec::with_capacity(node_count);
+        let mut result: Vec<usize> = Vec::with_capacity(node_count);
 
         enum VisitCause {
             Terminal,
@@ -280,7 +278,7 @@ impl RuntimeGraph {
                 }
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push(r_node.id);
+                    result.push(r_node_index);
                     continue;
                 }
             }
