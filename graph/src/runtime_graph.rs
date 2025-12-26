@@ -84,12 +84,6 @@ impl RuntimeNode {
         let mut prev_state = take(self);
 
         self.id = node.id;
-        #[cfg(debug_assertions)]
-        {
-            self.name = take(&mut prev_state.name);
-            self.name.clear();
-            self.name.push_str(&node.name);
-        }
         self.behavior = node.behavior;
 
         self.inputs = take(&mut prev_state.inputs);
@@ -98,6 +92,10 @@ impl RuntimeNode {
 
         #[cfg(debug_assertions)]
         {
+            self.name = take(&mut prev_state.name);
+            self.name.clear();
+            self.name.push_str(&node.name);
+
             self.output_binding_count = take(&mut prev_state.output_binding_count);
             self.output_binding_count.fill(0);
         }
