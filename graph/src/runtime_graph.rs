@@ -110,7 +110,6 @@ impl RuntimeGraph {
     // mark active nodes without cached outputs for execution
     pub fn next(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.build_node_cache(graph);
-        self.reset_runtime_state();
         self.propagate_missing_inputs_and_behavior(graph, func_lib);
     }
 
@@ -160,7 +159,7 @@ impl RuntimeGraph {
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
                     // todo implement notifying of const binding changes
-                    Binding::Const => InputState::Unchanged,
+                    Binding::Const => InputState::Changed,
                     Binding::Output(output_binding) => {
                         let output_r_node = self
                             .r_nodes
@@ -199,7 +198,7 @@ impl RuntimeGraph {
                         r_node.should_invoke = true;
                     }
                     NodeBehavior::Once => {
-                        // has no cached outputs so should_invoke = true
+                        // has no cached outputs, so should_invoke = true
                         r_node.should_invoke = true;
                     }
                     NodeBehavior::OnInputChange => {
@@ -229,26 +228,27 @@ impl RuntimeGraph {
             node_id: NodeId,
             cause: VisitCause,
         }
-        let mut stack: VecDeque<Visit> = VecDeque::with_capacity(10);
+        let mut stack: Vec<Visit> = Vec::with_capacity(10);
 
         graph
             .nodes
             .iter()
             .filter(|&node| node.behavior == NodeBehavior::Terminal)
             .for_each(|node| {
-                stack.push_back(Visit {
+                stack.push(Visit {
                     node_id: node.id,
                     cause: VisitCause::Terminal,
                 });
             });
 
-        while let Some(visit) = stack.pop_back() {
+        while let Some(visit) = stack.pop() {
             let r_node_index = self
                 .node_index_by_id
                 .get(&visit.node_id)
                 .copied()
                 .expect("node not found");
             let r_node = &mut self.r_nodes[r_node_index];
+            // println!("{}", r_node.name);
 
             match visit.cause {
                 VisitCause::Terminal => {}
@@ -277,7 +277,7 @@ impl RuntimeGraph {
             }
 
             r_node.processing_state = ProcessingState::Processing;
-            stack.push_back(Visit {
+            stack.push(Visit {
                 node_id: visit.node_id,
                 cause: VisitCause::Processed,
             });
@@ -287,7 +287,7 @@ impl RuntimeGraph {
                 .expect("Node missing from graph")];
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    stack.push_back(Visit {
+                    stack.push(Visit {
                         node_id: output_binding.output_node_id,
                         cause: VisitCause::OutputRequest {
                             output_index: output_binding.output_index,
@@ -298,15 +298,6 @@ impl RuntimeGraph {
         }
 
         result
-    }
-
-    fn reset_runtime_state(&mut self) {
-        self.r_nodes.iter_mut().for_each(|r_node| {
-            r_node.should_invoke = false;
-            r_node.invocation_order = u64::MAX;
-            r_node.output_binding_count.fill(0);
-            r_node.total_binding_count = 0;
-        });
     }
 
     fn rebuild_node_index(&mut self) {

@@ -45,7 +45,7 @@ impl Compute {
             let node_id = runtime_graph.r_nodes[node_idx].id;
             let node = &graph.nodes[*graph_node_index_by_id
                 .get(&node_id)
-                .expect("Runtime node missing from graph")];
+                .expect("Runtime node missing from the graph")];
             let node_info = func_lib
                 .func_by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
