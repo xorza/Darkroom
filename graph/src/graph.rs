@@ -295,7 +295,7 @@ mod tests {
 
         let graph = Graph::from_yaml(file_yaml.as_str())?;
         let serialized_yaml: String = graph.to_yaml();
-        std::fs::write("../test_resources/test_graph.yml", &serialized_yaml)?;
+        // std::fs::write("../test_resources/test_graph.yml", &serialized_yaml)?;
 
         assert_eq!(serialized_yaml, file_yaml);
 
