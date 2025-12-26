@@ -38,6 +38,7 @@ pub struct RuntimeNode {
     pub invocation_order: u64,
 
     processing_state: ProcessingState,
+    node_idx: u32,
 
     pub run_time: f64,
 
@@ -123,7 +124,7 @@ impl RuntimeGraph {
     }
 
     fn build_node_cache(&mut self, graph: &Graph) {
-        for node in graph.nodes.iter() {
+        for (node_idx, node) in graph.nodes.iter().enumerate() {
             assert!(!node.id.is_nil(), "Graph node has invalid id");
 
             let r_node_index = match self.node_index_by_id.get(&node.id).copied() {
@@ -134,7 +135,9 @@ impl RuntimeGraph {
                 }
             };
 
-            self.r_nodes[r_node_index].reset_from(node);
+            let r_node = &mut self.r_nodes[r_node_index];
+            r_node.reset_from(node);
+            r_node.node_idx = node_idx as u32;
         }
 
         self.rebuild_node_index();
@@ -142,17 +145,11 @@ impl RuntimeGraph {
 
     // mark missing inputs and propagate behavior based on upstream active nodes
     fn propagate_input_state(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        let graph_node_index_by_id = graph.build_node_index_by_id();
-        let active_node_indices =
-            self.build_active_node_indices_ordered(graph, &graph_node_index_by_id);
+        let active_node_indices = self.build_active_node_indices_ordered(graph);
 
-        for (invocation_order, &(node_idx, node_id)) in active_node_indices.iter().enumerate() {
-            let node = &graph.nodes[*graph_node_index_by_id
-                .get(&node_id)
-                .expect("Runtime node missing from graph")];
-
-            {
-                let r_node = &mut self.r_nodes[node_idx];
+        for (invocation_order, &r_node_idx) in active_node_indices.iter().enumerate() {
+            let node = {
+                let r_node = &mut self.r_nodes[r_node_idx];
                 assert_eq!(
                     r_node.processing_state,
                     ProcessingState::Processed,
@@ -161,20 +158,25 @@ impl RuntimeGraph {
                 // println!("{}", r_node.name);
 
                 r_node.invocation_order = invocation_order as u64;
+
+                let node = &graph.nodes[r_node.node_idx as usize];
                 // avoid traversing inputs for NodeBehavior::Once nodes having outputs
                 // even if having missing inputs
                 if node.behavior == NodeBehavior::Once && r_node.output_values.is_some() {
                     // should_invoke is false
                     continue;
                 }
-            }
+
+                node
+            };
 
             let func = func_lib
                 .func_by_id(node.func_id)
-                .expect("Missing function for node during input propagation");
+                .expect("Missing function for a node during input propagation");
+            assert_eq!(node.inputs.len(), func.inputs.len(),);
 
             #[cfg(debug_assertions)]
-            self.r_nodes[node_idx]
+            self.r_nodes[r_node_idx]
                 .output_binding_count
                 .resize(func.outputs.len(), 0);
 
@@ -182,13 +184,6 @@ impl RuntimeGraph {
             let mut has_missing_inputs = false;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                assert!(
-                    input_idx < func.inputs.len(),
-                    "Node input index {} out of range for function {:?}",
-                    input_idx,
-                    node.func_id
-                );
-
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
                     // todo implement notifying of const binding changes
@@ -223,10 +218,10 @@ impl RuntimeGraph {
                     InputState::Unknown => panic!("unprocessed input"),
                 }
 
-                self.r_nodes[node_idx].inputs[input_idx] = input_state;
+                self.r_nodes[r_node_idx].inputs[input_idx] = input_state;
             }
 
-            let r_node = &mut self.r_nodes[node_idx];
+            let r_node = &mut self.r_nodes[r_node_idx];
             r_node.has_missing_inputs = has_missing_inputs;
             if !r_node.has_missing_inputs {
                 match node.behavior {
@@ -245,12 +240,8 @@ impl RuntimeGraph {
         }
     }
 
-    fn build_active_node_indices_ordered(
-        &mut self,
-        graph: &Graph,
-        graph_node_index_by_id: &HashMap<NodeId, usize>,
-    ) -> Vec<(usize, NodeId)> {
-        let mut result: Vec<(usize, NodeId)> = Vec::with_capacity(graph.nodes.len());
+    fn build_active_node_indices_ordered(&mut self, graph: &Graph) -> Vec<usize> {
+        let mut result: Vec<usize> = Vec::with_capacity(graph.nodes.len());
 
         enum VisitCause {
             Terminal,
@@ -288,7 +279,7 @@ impl RuntimeGraph {
                 VisitCause::OutputRequest { .. } => {}
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push((r_node_index, r_node.id));
+                    result.push(r_node_index);
                     continue;
                 }
             }
@@ -310,10 +301,7 @@ impl RuntimeGraph {
                 cause: VisitCause::Processed,
             });
 
-            let node = &graph.nodes[*graph_node_index_by_id
-                .get(&visit.node_id)
-                .expect("Node missing from graph")];
-            for input in node.inputs.iter() {
+            for input in graph.nodes[r_node.node_idx as usize].inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
                     stack.push(Visit {
                         node_id: output_binding.output_node_id,
