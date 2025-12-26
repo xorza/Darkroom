@@ -43,7 +43,7 @@
 - id: f22cd316-1cdf-4a80-b86c-1277acd1408a
   name: print
   category: Debug
-  behavior: Output
+  behavior: Impure
   inputs:
     - name: message
       is_required: true
