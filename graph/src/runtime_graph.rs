@@ -297,7 +297,6 @@ impl RuntimeGraph {
 
             let mut has_changed_inputs = false;
             let mut has_missing_inputs = false;
-            let mut output_address: Option<RuntimePortAddress> = None;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let input_state = match &input.binding {
@@ -305,11 +304,10 @@ impl RuntimeGraph {
                     // todo implement notifying of const binding changes
                     Binding::Const => InputState::Changed,
                     Binding::Output(output_binding) => {
-                        let output_r_node_idx = self
-                            .r_nodes
-                            .iter()
-                            .position(|r_node| r_node.id == output_binding.output_node_id)
-                            .expect("Output binding references missing runtime node");
+                        let output_r_node_idx = self.r_nodes[r_node_idx].inputs[input_idx]
+                            .output_address
+                            .expect("Output binding references missing runtime node")
+                            .r_node_idx;
                         let output_r_node = &self.r_nodes[output_r_node_idx];
 
                         assert_eq!(
@@ -318,11 +316,6 @@ impl RuntimeGraph {
                             "Output runtime node {:?} not processed before input propagation",
                             output_binding.output_node_id
                         );
-
-                        output_address = Some(RuntimePortAddress {
-                            r_node_idx: output_r_node_idx,
-                            port_idx: output_binding.output_idx,
-                        });
 
                         if output_r_node.has_missing_inputs {
                             InputState::Missing
@@ -342,9 +335,7 @@ impl RuntimeGraph {
                     InputState::Unknown => panic!("unprocessed input"),
                 }
 
-                let runtime_input = &mut self.r_nodes[r_node_idx].inputs[input_idx];
-                runtime_input.state = input_state;
-                runtime_input.output_address = output_address;
+                self.r_nodes[r_node_idx].inputs[input_idx].state = input_state;
             }
 
             let r_node = &mut self.r_nodes[r_node_idx];
