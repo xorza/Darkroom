@@ -232,13 +232,18 @@ impl RuntimeGraph {
                 cause: VisitCause::Processed,
             });
 
-            for input in graph.nodes[r_node.node_idx].inputs.iter() {
+            for (input_idx, input) in graph.nodes[r_node.node_idx].inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
                     let output_r_node_idx = self
                         .r_nodes
                         .iter()
                         .position(|r_node| r_node.id == output_binding.output_node_id)
                         .expect("Runtime node index missing for node");
+                    self.r_nodes[r_node_idx].inputs[input_idx].output_address =
+                        Some(RuntimePortAddress {
+                            r_node_idx: output_r_node_idx,
+                            port_idx: output_binding.output_idx,
+                        });
                     stack.push(Visit {
                         r_node_idx: output_r_node_idx,
                         cause: VisitCause::OutputRequest {
