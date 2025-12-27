@@ -183,56 +183,60 @@ impl RuntimeGraph {
         let mut invocation_order: usize = 0;
         while let Some(visit) = stack.pop() {
             let r_node_idx = visit.r_node_idx;
-            let r_node = &mut self.r_nodes[r_node_idx];
-            // println!("{}", r_node.name);
+            let node_idx = {
+                let r_node = &mut self.r_nodes[r_node_idx];
+                // println!("{}", r_node.name);
 
-            let output_address = match visit.cause {
-                VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_address } => {
-                    assert_eq!(
-                        visit.r_node_idx, output_address.r_node_idx,
-                        "Visit r_node_idx {} does not match output address r_node_idx {}",
-                        visit.r_node_idx, output_address.r_node_idx
-                    );
-                    Some(output_address)
+                let output_address = match visit.cause {
+                    VisitCause::Terminal => None,
+                    VisitCause::OutputRequest { output_address } => {
+                        assert_eq!(
+                            visit.r_node_idx, output_address.r_node_idx,
+                            "Visit r_node_idx {} does not match output address r_node_idx {}",
+                            visit.r_node_idx, output_address.r_node_idx
+                        );
+                        Some(output_address)
+                    }
+                    VisitCause::Processed => {
+                        r_node.processing_state = ProcessingState::Processed;
+                        r_node.invocation_order = invocation_order;
+                        invocation_order += 1;
+                        continue;
+                    }
+                };
+
+                match r_node.processing_state {
+                    ProcessingState::Processed => {
+                        continue;
+                    }
+                    ProcessingState::Processing => {
+                        // todo replace with result<>
+                        panic!(
+                            "Cycle detected while building runtime graph at node {:?}",
+                            visit.r_node_idx
+                        );
+                    }
+                    ProcessingState::None => {
+                        let func = func_lib
+                            .by_id(graph.nodes[r_node.node_idx].func_id)
+                            .expect("FuncLib missing function for graph node func_id");
+                        r_node.reset_ports_from_func(func);
+                    }
                 }
-                VisitCause::Processed => {
-                    r_node.processing_state = ProcessingState::Processed;
-                    r_node.invocation_order = invocation_order;
-                    invocation_order += 1;
-                    continue;
+
+                if let Some(output_address) = output_address {
+                    r_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
                 }
+                r_node.processing_state = ProcessingState::Processing;
+                stack.push(Visit {
+                    r_node_idx,
+                    cause: VisitCause::Processed,
+                });
+
+                r_node.node_idx
             };
 
-            match r_node.processing_state {
-                ProcessingState::Processed => {
-                    continue;
-                }
-                ProcessingState::Processing => {
-                    // todo replace with result<>
-                    panic!(
-                        "Cycle detected while building runtime graph at node {:?}",
-                        visit.r_node_idx
-                    );
-                }
-                ProcessingState::None => {
-                    let func = func_lib
-                        .by_id(graph.nodes[r_node.node_idx].func_id)
-                        .expect("FuncLib missing function for graph node func_id");
-                    r_node.reset_ports_from_func(func);
-                }
-            }
-
-            if let Some(output_address) = output_address {
-                r_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
-            }
-            r_node.processing_state = ProcessingState::Processing;
-            stack.push(Visit {
-                r_node_idx,
-                cause: VisitCause::Processed,
-            });
-
-            for (input_idx, input) in graph.nodes[r_node.node_idx].inputs.iter().enumerate() {
+            for (input_idx, input) in graph.nodes[node_idx].inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
                     let output_r_node_idx = self
                         .r_nodes
