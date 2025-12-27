@@ -281,30 +281,30 @@ impl RuntimeGraph {
             Processed,
         }
         struct Visit {
-            node_id: NodeId,
+            r_node_idx: usize,
             cause: VisitCause,
         }
         let mut stack: Vec<Visit> = Vec::with_capacity(10);
 
-        graph
-            .nodes
+        self.r_nodes
             .iter()
-            .filter(|&node| node.behavior == NodeBehavior::Terminal)
-            .for_each(|node| {
+            .enumerate()
+            .filter_map(|(idx, r_node)| {
+                if graph.nodes[r_node.node_idx as usize].behavior == NodeBehavior::Terminal {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .for_each(|idx| {
                 stack.push(Visit {
-                    node_id: node.id,
+                    r_node_idx: idx,
                     cause: VisitCause::Terminal,
                 });
             });
 
         while let Some(visit) = stack.pop() {
-            let r_node_index = *self
-                .node_index_by_id
-                .get(&visit.node_id)
-                .unwrap_or_else(|| {
-                    panic!("Runtime node index missing for node {:?}", visit.node_id)
-                });
-            let r_node = &mut self.r_nodes[r_node_index];
+            let r_node = &mut self.r_nodes[visit.r_node_idx];
             // println!("{}", r_node.name);
 
             match visit.cause {
@@ -312,7 +312,7 @@ impl RuntimeGraph {
                 VisitCause::OutputRequest { .. } => {}
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push(r_node_index);
+                    result.push(visit.r_node_idx);
                     continue;
                 }
             }
@@ -325,7 +325,7 @@ impl RuntimeGraph {
                     // todo replace with result<>
                     panic!(
                         "Cycle detected while building runtime graph at node {:?}",
-                        visit.node_id
+                        visit.r_node_idx
                     );
                 }
                 ProcessingState::None => {}
@@ -333,14 +333,23 @@ impl RuntimeGraph {
 
             r_node.processing_state = ProcessingState::Processing;
             stack.push(Visit {
-                node_id: visit.node_id,
+                r_node_idx: visit.r_node_idx,
                 cause: VisitCause::Processed,
             });
 
             for input in graph.nodes[r_node.node_idx as usize].inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
+                    let output_r_node_idx = *self
+                        .node_index_by_id
+                        .get(&output_binding.output_node_id)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Runtime node index missing for node {:?}",
+                                output_binding.output_node_id
+                            )
+                        });
                     stack.push(Visit {
-                        node_id: output_binding.output_node_id,
+                        r_node_idx: output_r_node_idx,
                         cause: VisitCause::OutputRequest {
                             output_index: output_binding.output_index,
                         },
