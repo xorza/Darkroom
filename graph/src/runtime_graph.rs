@@ -177,6 +177,35 @@ impl RuntimeGraph {
         // Prune stale id->index entries that point past the new length or mismatched ids.
         self.r_node_idx_by_id
             .retain(|id, idx| *idx < self.r_nodes.len() && self.r_nodes[*idx].id == *id);
+
+        #[cfg(debug_assertions)]
+        {
+            assert_eq!(
+                self.r_nodes.len(),
+                self.r_node_idx_by_id.len(),
+                "Runtime node count mismatch"
+            );
+            assert_eq!(
+                self.r_nodes.len(),
+                graph.nodes.len(),
+                "Runtime node count mismatch"
+            );
+            // Check that the runtime graph is in a consistent state.
+            self.r_nodes.iter().enumerate().for_each(|(idx, r_node)| {
+                assert_eq!(
+                    idx, self.r_node_idx_by_id[&r_node.id],
+                    "Runtime node index mismatch"
+                );
+                assert!(
+                    r_node.node_idx < graph.nodes.len(),
+                    "Runtime node index out of bounds"
+                );
+                assert_eq!(
+                    graph.nodes[r_node.node_idx].id, r_node.id,
+                    "Runtime node id mismatch"
+                );
+            });
+        }
     }
 
     // Walk upstream dependencies to mark active nodes and compute invocation order.
