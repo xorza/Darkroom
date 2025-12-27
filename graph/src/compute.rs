@@ -42,6 +42,8 @@ impl Compute {
         for r_node_idx in active_r_node_indexes {
             let (node, func) = {
                 let r_node = &runtime_graph.r_nodes[r_node_idx];
+                assert!(!r_node.id.is_nil());
+
                 let node = &graph.nodes[r_node.node_idx];
                 let func = &func_lib.funcs[r_node.func_idx];
 
