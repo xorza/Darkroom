@@ -305,7 +305,7 @@ mod tests {
         // print
         invoker.add_lambda(
             func_lib
-                .func_by_name("print")
+                .by_name("print")
                 .unwrap_or_else(|| panic!("Func named \"print\" not found"))
                 .clone(),
             move |_, inputs, _| {
@@ -315,7 +315,7 @@ mod tests {
         // val 1
         invoker.add_lambda(
             func_lib
-                .func_by_name("get_a")
+                .by_name("get_a")
                 .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
                 .clone(),
             move |_, _, outputs| {
@@ -325,7 +325,7 @@ mod tests {
         // val 2
         invoker.add_lambda(
             func_lib
-                .func_by_name("get_b")
+                .by_name("get_b")
                 .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
                 .clone(),
             move |_, _, outputs| {
@@ -335,7 +335,7 @@ mod tests {
         // sum
         invoker.add_lambda(
             func_lib
-                .func_by_name("sum")
+                .by_name("sum")
                 .unwrap_or_else(|| panic!("Func named \"sum\" not found"))
                 .clone(),
             |ctx, inputs, outputs| {
@@ -348,7 +348,7 @@ mod tests {
         // mult
         invoker.add_lambda(
             func_lib
-                .func_by_name("mult")
+                .by_name("mult")
                 .unwrap_or_else(|| panic!("Func named \"mult\" not found"))
                 .clone(),
             |ctx, inputs, outputs| {
@@ -430,7 +430,7 @@ mod tests {
         test_values.lock().await.b = 7;
         invoker
             .func_lib
-            .func_by_name_mut("get_b")
+            .by_name_mut("get_b")
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Impure;
 
@@ -541,7 +541,7 @@ mod tests {
 
         invoker
             .func_lib
-            .func_by_name_mut("get_a")
+            .by_name_mut("get_a")
             .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
             .behavior = FuncBehavior::Impure;
 

@@ -4,10 +4,10 @@
   behavior: Pure
   inputs:
     - name: A
-      is_required: true
+      required: true
       data_type: Int
     - name: B
-      is_required: true
+      required: true
       data_type: Int
   outputs:
     - name: Sum
@@ -18,10 +18,10 @@
   behavior: Pure
   inputs:
     - name: A
-      is_required: true
+      required: true
       data_type: Int
     - name: B
-      is_required: true
+      required: true
       data_type: Int
   outputs:
     - name: Prod
@@ -46,5 +46,5 @@
   behavior: Impure
   inputs:
     - name: message
-      is_required: true
+      required: true
       data_type: Int

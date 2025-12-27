@@ -32,7 +32,7 @@ impl Default for TimersInvoker {
                 category: "Timers".to_string(),
                 inputs: vec![FuncInput {
                     name: "frequency".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(30.0)),
                     variants: vec![],

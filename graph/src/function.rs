@@ -26,7 +26,7 @@ pub struct ValueVariant {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FuncInput {
     pub name: String,
-    pub is_required: bool,
+    pub required: bool,
     pub data_type: DataType,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<StaticValue>,
@@ -89,16 +89,16 @@ impl FuncLib {
             .normalize()
     }
 
-    pub fn func_by_id(&self, id: FuncId) -> Option<&Func> {
+    pub fn by_id(&self, id: FuncId) -> Option<&Func> {
         self.funcs.get(&id)
     }
-    pub fn func_by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
+    pub fn by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
         self.funcs.get_mut(&id)
     }
-    pub fn func_by_name(&self, name: &str) -> Option<&Func> {
+    pub fn by_name(&self, name: &str) -> Option<&Func> {
         self.funcs.values().find(|func| func.name == name)
     }
-    pub fn func_by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
+    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
         self.funcs.values_mut().find(|func| func.name == name)
     }
     pub fn add(&mut self, func: Func) {
@@ -177,14 +177,14 @@ mod tests {
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
                     },
                     FuncInput {
                         name: "B".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
@@ -231,14 +231,14 @@ mod tests {
                 inputs: vec![
                     FuncInput {
                         name: "A".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
                     },
                     FuncInput {
                         name: "B".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Int,
                         default_value: None,
                         variants: vec![],
@@ -258,7 +258,7 @@ mod tests {
                 behavior: FuncBehavior::Impure,
                 inputs: vec![FuncInput {
                     name: "message".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Int,
                     default_value: None,
                     variants: vec![],

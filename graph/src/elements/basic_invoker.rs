@@ -106,7 +106,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "value".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::String,
                     default_value: None,
                     variants: vec![],
@@ -138,21 +138,21 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: None,
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: None,
                         variants: vec![],
                     },
                     FuncInput {
                         name: "op".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Int,
                         default_value: Some(StaticValue::from(Math2ArgOp::Add)),
                         variants: Math2ArgOp::list_variants(),
@@ -188,7 +188,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "value".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: None,
                     variants: vec![],
@@ -223,14 +223,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "min".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "max".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -269,14 +269,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -312,14 +312,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -354,14 +354,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -396,14 +396,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -447,14 +447,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "a".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(0.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "b".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
@@ -489,7 +489,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -522,7 +522,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -555,7 +555,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -588,7 +588,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "a".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -621,7 +621,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "sin".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -654,7 +654,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "cos".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(1.0)),
                     variants: vec![],
@@ -687,7 +687,7 @@ impl Default for BasicInvoker {
                 category: "math".to_string(),
                 inputs: vec![FuncInput {
                     name: "tan".to_string(),
-                    is_required: true,
+                    required: true,
                     data_type: DataType::Float,
                     default_value: Some(StaticValue::Float(0.0)),
                     variants: vec![],
@@ -721,14 +721,14 @@ impl Default for BasicInvoker {
                 inputs: vec![
                     FuncInput {
                         name: "value".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(1.0)),
                         variants: vec![],
                     },
                     FuncInput {
                         name: "base".to_string(),
-                        is_required: true,
+                        required: true,
                         data_type: DataType::Float,
                         default_value: Some(StaticValue::Float(10.0)),
                         variants: vec![],

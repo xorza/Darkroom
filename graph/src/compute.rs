@@ -47,7 +47,7 @@ impl Compute {
                 .get(&node_id)
                 .expect("Runtime node missing from the graph")];
             let func = func_lib
-                .func_by_id(node.func_id)
+                .by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
 
             assert_eq!(

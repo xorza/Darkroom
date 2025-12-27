@@ -177,7 +177,7 @@ impl LuaInvoker {
 
             function_info.inputs.push(function::FuncInput {
                 name,
-                is_required: true,
+                required: true,
                 data_type,
                 default_value,
                 variants: vec![],
@@ -276,7 +276,7 @@ impl LuaInvoker {
         for (&id, lua_func) in self.funcs.iter() {
             let func = self
                 .func_lib
-                .func_by_id(id)
+                .by_id(id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", id));
             self.lua
                 .globals()
@@ -298,7 +298,7 @@ impl LuaInvoker {
         for connection in connections.iter() {
             let func = self
                 .func_lib
-                .func_by_name(&connection.name)
+                .by_name(&connection.name)
                 .unwrap_or_else(|| panic!("Func named {:?} not found", connection.name));
 
             nodes.push(Node::from_function(func));
@@ -374,7 +374,7 @@ impl LuaInvoker {
             .expect("Missing Lua function binding");
         let func = self
             .func_lib
-            .func_by_id(func_id)
+            .by_id(func_id)
             .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
 
         let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
