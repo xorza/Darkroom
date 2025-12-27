@@ -70,13 +70,15 @@ Runtime graph build validates graph+func-lib alignment once up front and no long
 Runtime graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous runtime.
 Runtime graph update now uses helpers to reset or build runtime nodes without duplicating state initialization logic.
 Runtime node reset logic now lives on `RuntimeNode` to keep update behavior self-contained.
+Runtime node port resets are centralized in `RuntimeNode::reset_ports_from_func`.
 Runtime graph node cache now creates missing runtime nodes when new graph nodes appear, clears cached outputs if function output arity changes, and rebuilds output binding counts each pass.
-Runtime graph node cache lookup uses `unwrap_or_else` to streamline creating missing runtime nodes.
+Runtime graph node cache lookup uses explicit matches to keep the insert path obvious.
 Runtime graph scheduling asserts when runtime node indices are missing.
 Runtime graph propagation asserts when output bindings reference missing runtime nodes.
 Runtime graph propagation panics with function and node IDs on missing functions.
 Runtime graph debug assertions include node indices and IDs to speed up diagnosis.
 Runtime graph visit/output assertions now include index mismatch context for faster debugging.
+Runtime graph invariant lookups and tests now use `expect` instead of `unwrap_or_else`.
 Compute now sorts invocations by `RuntimeNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 

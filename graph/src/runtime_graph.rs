@@ -5,7 +5,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::data::DynamicValue;
-use crate::function::FuncLib;
+use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::invoke::InvokeCache;
 
@@ -97,6 +97,21 @@ impl RuntimeNode {
         self.cache = take(&mut prev_state.cache);
         self.output_values = take(&mut prev_state.output_values);
     }
+
+    fn reset_ports_from_func(&mut self, func: &Func) {
+        self.inputs.clear();
+        self.inputs.reserve(func.inputs.len());
+        for input in &func.inputs {
+            self.inputs.push(RuntimeInput {
+                required: input.required,
+                ..Default::default()
+            });
+        }
+
+        self.outputs.fill(RuntimeOutput::Unused);
+        self.outputs
+            .resize(func.outputs.len(), RuntimeOutput::default());
+    }
 }
 
 impl RuntimeGraph {
@@ -122,14 +137,13 @@ impl RuntimeGraph {
                 node_idx
             );
 
-            let r_node_idx = self
-                .r_nodes
-                .iter()
-                .position(|r_node| r_node.id == node.id)
-                .unwrap_or_else(|| {
+            let r_node_idx = match self.r_nodes.iter().position(|r_node| r_node.id == node.id) {
+                Some(idx) => idx,
+                None => {
                     self.r_nodes.push(RuntimeNode::default());
                     self.r_nodes.len() - 1
-                });
+                }
+            };
 
             let r_node = &mut self.r_nodes[r_node_idx];
             r_node.reset_from(node);
@@ -204,20 +218,8 @@ impl RuntimeGraph {
                 ProcessingState::None => {
                     let func = func_lib
                         .by_id(graph.nodes[r_node.node_idx].func_id)
-                        .unwrap_or_else(|| todo!());
-                    r_node.inputs.clear();
-                    r_node.inputs.reserve(func.inputs.len());
-                    func.inputs.iter().for_each(|input| {
-                        r_node.inputs.push(RuntimeInput {
-                            required: input.required,
-                            ..Default::default()
-                        });
-                    });
-
-                    r_node.outputs.fill(RuntimeOutput::Unused);
-                    r_node
-                        .outputs
-                        .resize(func.outputs.len(), RuntimeOutput::default());
+                        .expect("FuncLib missing function for graph node func_id");
+                    r_node.reset_ports_from_func(func);
                 }
             }
 
@@ -236,12 +238,7 @@ impl RuntimeGraph {
                         .r_nodes
                         .iter()
                         .position(|r_node| r_node.id == output_binding.output_node_id)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "Runtime node index missing for node {:?}",
-                                output_binding.output_node_id
-                            )
-                        });
+                        .expect("Runtime node index missing for node");
                     stack.push(Visit {
                         r_node_idx: output_r_node_idx,
                         cause: VisitCause::OutputRequest {
@@ -307,12 +304,7 @@ impl RuntimeGraph {
                             .r_nodes
                             .iter()
                             .position(|r_node| r_node.id == output_binding.output_node_id)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "Output binding references missing runtime node {:?}",
-                                    output_binding.output_node_id
-                                )
-                            });
+                            .expect("Output binding references missing runtime node");
                         let output_r_node = &self.r_nodes[output_r_node_idx];
 
                         assert_eq!(
@@ -423,7 +415,7 @@ mod tests {
 
         let _get_b_node_id = graph
             .node_by_name("get_b")
-            .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
+            .expect("Node named \"get_b\" not found")
             .id;
 
         let mut runtime_graph = RuntimeGraph::default();
@@ -451,7 +443,7 @@ mod tests {
 
         let _get_b_node_id = graph
             .node_by_name("get_b")
-            .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
+            .expect("Node named \"get_b\" not found")
             .id;
 
         let mut runtime_graph = RuntimeGraph::default();
@@ -473,24 +465,24 @@ mod tests {
 
         let get_b_node_id = graph
             .node_by_name("get_b")
-            .unwrap_or_else(|| panic!("Node named \"get_b\" not found"))
+            .expect("Node named \"get_b\" not found")
             .id;
         let sum_node_id = graph
             .node_by_name("sum")
-            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .expect("Node named \"sum\" not found")
             .id;
         let mult_node_id = graph
             .node_by_name("mult")
-            .unwrap_or_else(|| panic!("Node named \"mult\" not found"))
+            .expect("Node named \"mult\" not found")
             .id;
         let print_node_id = graph
             .node_by_name("print")
-            .unwrap_or_else(|| panic!("Node named \"print\" not found"))
+            .expect("Node named \"print\" not found")
             .id;
 
         graph
             .node_by_name_mut("sum")
-            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .expect("Node named \"sum\" not found")
             .inputs[0]
             .binding = Binding::None;
 
@@ -501,50 +493,50 @@ mod tests {
         assert!(
             runtime_graph
                 .node_by_id(get_b_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
+                .expect("Runtime node for get_b missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
                 .node_by_id(sum_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", sum_node_id))
+                .expect("Runtime node for sum missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
                 .node_by_id(mult_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", mult_node_id))
+                .expect("Runtime node for mult missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
                 .node_by_id(print_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", print_node_id))
+                .expect("Runtime node for print missing")
                 .should_invoke
         );
 
         assert!(
             !runtime_graph
                 .node_by_id(get_b_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", get_b_node_id))
+                .expect("Runtime node for get_b missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
                 .node_by_id(sum_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", sum_node_id))
+                .expect("Runtime node for sum missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
                 .node_by_id(mult_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", mult_node_id))
+                .expect("Runtime node for mult missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
                 .node_by_id(print_node_id)
-                .unwrap_or_else(|| panic!("Runtime node {:?} missing", print_node_id))
+                .expect("Runtime node for print missing")
                 .has_missing_inputs
         );
 
