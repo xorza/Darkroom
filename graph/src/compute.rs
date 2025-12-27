@@ -42,9 +42,7 @@ impl Compute {
         for r_node_idx in active_node_indexes {
             let r_node = &runtime_graph.r_nodes[r_node_idx];
             let node = &graph.nodes[r_node.node_idx];
-            let func = func_lib
-                .by_id(node.func_id)
-                .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
+            let func = &func_lib.funcs[r_node.func_idx];
 
             assert_eq!(
                 node.inputs.len(),
