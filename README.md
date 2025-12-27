@@ -33,12 +33,14 @@ Runtime graph scheduling asserts when runtime nodes are missing.
 Runtime graph propagation asserts when output bindings point at missing runtime nodes.
 Runtime graph propagation panics with function + node IDs when functions are missing.
 Runtime graph assertions include node indices and IDs for easier debugging.
+Runtime graph assertions include mismatch context to speed up diagnosis.
 Worker event loops terminate when their message channel closes.
 Runtime node updates use shared reset logic to keep state consistent.
 Runtime nodes own their own reset behavior for update passes.
 Runtime graph updates handle dynamic graph changes across runs.
 Compute execution follows the runtime scheduling order.
 Editor debug tasks can be configured per-project.
+Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 
 ## Benchmarks
 

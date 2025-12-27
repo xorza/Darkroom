@@ -40,9 +40,7 @@ pub struct RuntimeInput {
 pub enum RuntimeOutput {
     #[default]
     Unused,
-    Used {
-        input_address: RuntimePortAddress,
-    },
+    Used,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -124,14 +122,14 @@ impl RuntimeGraph {
                 node_idx
             );
 
-            // todo optimize
-            let r_node_idx = match self.r_nodes.iter().position(|r_node| r_node.id == node.id) {
-                Some(idx) => idx,
-                None => {
+            let r_node_idx = self
+                .r_nodes
+                .iter()
+                .position(|r_node| r_node.id == node.id)
+                .unwrap_or_else(|| {
                     self.r_nodes.push(RuntimeNode::default());
                     self.r_nodes.len() - 1
-                }
-            };
+                });
 
             let r_node = &mut self.r_nodes[r_node_idx];
             r_node.reset_from(node);
@@ -140,13 +138,9 @@ impl RuntimeGraph {
     }
 
     fn build_active_node_indices_ordered(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        struct Connection {
-            output_address: RuntimePortAddress,
-            input_address: RuntimePortAddress,
-        }
         enum VisitCause {
             Terminal,
-            OutputRequest { connection: Connection },
+            OutputRequest { output_address: RuntimePortAddress },
             Processed,
         }
         struct Visit {
@@ -178,14 +172,15 @@ impl RuntimeGraph {
             let r_node = &mut self.r_nodes[r_node_idx];
             // println!("{}", r_node.name);
 
-            let connection = match visit.cause {
+            let output_address = match visit.cause {
                 VisitCause::Terminal => None,
-                VisitCause::OutputRequest { connection } => {
+                VisitCause::OutputRequest { output_address } => {
                     assert_eq!(
-                        visit.r_node_idx, connection.output_address.r_node_idx,
-                        "todo"
+                        visit.r_node_idx, output_address.r_node_idx,
+                        "Visit r_node_idx {} does not match output address r_node_idx {}",
+                        visit.r_node_idx, output_address.r_node_idx
                     );
-                    Some(connection)
+                    Some(output_address)
                 }
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
@@ -225,10 +220,8 @@ impl RuntimeGraph {
                         .outputs
                         .resize(func.outputs.len(), RuntimeOutput::default());
 
-                    if let Some(connection) = connection {
-                        r_node.outputs[connection.output_address.port_idx] = RuntimeOutput::Used {
-                            input_address: connection.input_address,
-                        }
+                    if let Some(output_address) = output_address {
+                        r_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
                     }
                 }
             }
@@ -239,7 +232,7 @@ impl RuntimeGraph {
                 cause: VisitCause::Processed,
             });
 
-            for (input_idx, input) in graph.nodes[r_node.node_idx].inputs.iter().enumerate() {
+            for input in graph.nodes[r_node.node_idx].inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
                     let output_r_node_idx = self
                         .r_nodes
@@ -254,15 +247,9 @@ impl RuntimeGraph {
                     stack.push(Visit {
                         r_node_idx: output_r_node_idx,
                         cause: VisitCause::OutputRequest {
-                            connection: Connection {
-                                output_address: RuntimePortAddress {
-                                    r_node_idx: output_r_node_idx,
-                                    port_idx: output_binding.output_idx,
-                                },
-                                input_address: RuntimePortAddress {
-                                    r_node_idx: r_node_idx,
-                                    port_idx: input_idx,
-                                },
+                            output_address: RuntimePortAddress {
+                                r_node_idx: output_r_node_idx,
+                                port_idx: output_binding.output_idx,
                             },
                         },
                     });
