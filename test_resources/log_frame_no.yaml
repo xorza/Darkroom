@@ -31,7 +31,7 @@ nodes:
         is_required: true
         binding: !Output
           output_node_id: e69c3f32-ac66-4447-a3f6-9e8528c5d830
-          output_index: 1
+          output_idx: 1
     outputs:
       - name: result
         data_type: String
@@ -45,4 +45,4 @@ nodes:
         is_required: true
         binding: !Output
           output_node_id: eb6590aa-229d-4874-abba-37c56f5b97fa
-          output_index: 0
+          output_idx: 0

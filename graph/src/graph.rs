@@ -11,7 +11,7 @@ id_type!(NodeId);
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct OutputBinding {
     pub output_node_id: NodeId,
-    pub output_index: u32,
+    pub output_idx: usize,
 }
 
 #[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
@@ -217,10 +217,10 @@ impl Node {
 }
 
 impl Binding {
-    pub fn from_output_binding(output_node_id: NodeId, output_index: u32) -> Binding {
+    pub fn from_output_binding(output_node_id: NodeId, output_idx: usize) -> Binding {
         Binding::Output(OutputBinding {
             output_node_id,
-            output_index,
+            output_idx,
         })
     }
 
@@ -272,7 +272,7 @@ mod tests {
         node2.inputs.push(Input {
             binding: Binding::Output(OutputBinding {
                 output_node_id: node1.id,
-                output_index: 0,
+                output_idx: 0,
             }),
             const_value: None,
         });

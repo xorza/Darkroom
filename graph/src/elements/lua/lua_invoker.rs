@@ -289,7 +289,7 @@ impl LuaInvoker {
 
         #[derive(Debug)]
         struct OutputAddr {
-            index: u32,
+            idx: usize,
             node_id: NodeId,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
@@ -311,12 +311,12 @@ impl LuaInvoker {
                 "Lua connections exceed function input count for {}",
                 node.name
             );
-            for (i, output_id) in connection.outputs.iter().cloned().enumerate() {
+            for (idx, output_id) in connection.outputs.iter().cloned().enumerate() {
                 assert!(!node.id.is_nil());
                 output_ids.insert(
                     output_id,
                     OutputAddr {
-                        index: i as u32,
+                        idx,
                         node_id: node.id,
                     },
                 );
@@ -332,7 +332,7 @@ impl LuaInvoker {
                     .get(output_id)
                     .expect("Missing output address for Lua graph");
 
-                input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.index)
+                input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.idx)
             }
 
             graph.add_node(node);

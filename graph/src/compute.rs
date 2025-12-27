@@ -79,22 +79,12 @@ impl Compute {
                                         output_binding.output_node_id
                                     )
                                 });
-                            #[cfg(debug_assertions)]
-                            debug_assert!(
-                                (output_binding.output_index as usize)
-                                    < output_r_node.output_binding_count.len(),
-                                "Output index out of range for node {:?}",
-                                output_binding.output_node_id
-                            );
-
-                            output_r_node
-                                .decrement_current_binding_count(output_binding.output_index);
 
                             let output_values = output_r_node.output_values.as_mut().expect(
                                 "Output values missing for bound node; check execution order",
                             );
                             let value = output_values
-                                .get_mut(output_binding.output_index as usize)
+                                .get_mut(output_binding.output_idx)
                                 .expect("Output index out of range for bound node");
 
                             value.clone()
@@ -129,13 +119,6 @@ impl Compute {
             };
 
             inputs.clear();
-        }
-
-        #[cfg(debug_assertions)]
-        for r_node in runtime_graph.r_nodes.iter() {
-            if r_node.should_invoke {
-                debug_assert_eq!(r_node.total_binding_count, 0);
-            }
         }
 
         Ok(())
