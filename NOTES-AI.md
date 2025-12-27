@@ -84,6 +84,8 @@ Compute input value conversion now uses a single loop instead of iterator chains
 Runtime graph update/backward/forward comments now describe traversal intent and invariants.
 Runtime graph now rebuilds the `r_node_idx_by_id` cache each update and uses it for node lookups.
 Runtime node cache rebuild now drops runtime nodes missing from the current graph.
+Runtime node cache update compacts in-place with swaps and truncation to minimize allocations.
+Runtime node cache compaction includes inline comments describing the swap-and-truncate flow.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms

@@ -45,6 +45,8 @@ Runtime graph invariant lookups use explicit `expect` messages for clarity.
 Runtime graph traversal comments now document the update/backward/forward phases.
 Runtime node cache rebuilds drop runtime nodes that are no longer in the graph.
 Editor debug tasks can be configured per-project.
+Runtime node cache compacts runtime nodes in-place to avoid extra allocations.
+Runtime node cache compaction now has inline comments explaining the swap/truncate flow.
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 
 ## Benchmarks

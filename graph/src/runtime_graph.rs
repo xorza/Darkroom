@@ -133,6 +133,9 @@ impl RuntimeGraph {
 
     // Update the node cache with the current graph.
     fn update_node_cache(&mut self, graph: &Graph) {
+        // Compact r_nodes in-place to keep only nodes that still exist in graph.
+        // We reuse existing RuntimeNode slots to avoid extra allocations.
+        let mut write_idx = 0;
         for (node_idx, node) in graph.nodes.iter().enumerate() {
             assert!(
                 !node.id.is_nil(),
@@ -140,33 +143,40 @@ impl RuntimeGraph {
                 node_idx
             );
 
-            // remove node idx from cache
-            let r_node_idx = self.r_node_idx_by_id.remove(&node.id).unwrap_or_else(|| {
-                self.r_nodes.push(RuntimeNode::default());
-                self.r_nodes.len() - 1
-            });
+            // Look up the current slot for this node id (if any), otherwise append a new slot.
+            let r_node_idx = match self.r_node_idx_by_id.get(&node.id).copied() {
+                Some(idx) => idx,
+                None => {
+                    if write_idx >= self.r_nodes.len() {
+                        self.r_nodes.push(RuntimeNode::default());
+                    }
+                    write_idx
+                }
+            };
 
-            let r_node = &mut self.r_nodes[r_node_idx];
+            // Move the runtime node we want into the next compacted slot.
+            if r_node_idx != write_idx {
+                self.r_nodes.swap(r_node_idx, write_idx);
+                let swapped_id = self.r_nodes[r_node_idx].id;
+                if !swapped_id.is_nil() {
+                    // The swapped node moved; update its cached index.
+                    self.r_node_idx_by_id.insert(swapped_id, r_node_idx);
+                }
+            }
+
+            // Reset the runtime node with the latest graph node data.
+            let r_node = &mut self.r_nodes[write_idx];
             r_node.reset_from(node);
             r_node.node_idx = node_idx;
+            self.r_node_idx_by_id.insert(node.id, write_idx);
+            write_idx += 1;
         }
 
-        // r_node_idx_by_id now contains only nodes that are not in the graph
-        // remove them
-        for r_node_idx in self.r_nodes.len() - 1..0 {
-            if self
-                .r_node_idx_by_id
-                .contains_key(&self.r_nodes[r_node_idx].id)
-            {
-                self.r_nodes.remove(r_node_idx);
-            }
-        }
-        assert_eq!(self.r_node_idx_by_id.len(), 0, "Node cache is not empty");
-
-        //rebuild index cache
-        for (idx, r_node) in self.r_nodes.iter().enumerate() {
-            self.r_node_idx_by_id.insert(r_node.id, idx);
-        }
+        // Drop any runtime nodes past the compacted range.
+        self.r_nodes.truncate(write_idx);
+        // Prune stale id->index entries that point past the new length or mismatched ids.
+        self.r_node_idx_by_id
+            .retain(|id, idx| *idx < self.r_nodes.len() && self.r_nodes[*idx].id == *id);
     }
 
     // Walk upstream dependencies to mark active nodes and compute invocation order.
