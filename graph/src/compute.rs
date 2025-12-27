@@ -58,6 +58,18 @@ impl Compute {
                     "Node {:?} input count mismatch",
                     node.id
                 );
+                assert_eq!(
+                    r_node.outputs.len(),
+                    func.outputs.len(),
+                    "Node {:?} output count mismatch",
+                    node.id
+                );
+                assert_eq!(
+                    r_node.inputs.len(),
+                    func.inputs.len(),
+                    "Node {:?} output count mismatch",
+                    node.id
+                );
 
                 (node, func)
             };
