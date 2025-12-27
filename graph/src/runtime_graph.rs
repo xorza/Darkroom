@@ -71,6 +71,7 @@ pub struct RuntimeNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct RuntimeGraph {
     pub r_nodes: Vec<RuntimeNode>,
+    r_node_idx_by_id: HashMap<NodeId, usize>,
 }
 
 impl RuntimeNode {
@@ -141,7 +142,10 @@ impl RuntimeGraph {
                 Some(idx) => idx,
                 None => {
                     self.r_nodes.push(RuntimeNode::default());
-                    self.r_nodes.len() - 1
+                    let idx = self.r_nodes.len() - 1;
+                    self.r_node_idx_by_id.insert(node.id, idx);
+
+                    idx
                 }
             };
 
@@ -238,11 +242,7 @@ impl RuntimeGraph {
 
             for (input_idx, input) in graph.nodes[node_idx].inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    let output_r_node_idx = self
-                        .r_nodes
-                        .iter()
-                        .position(|r_node| r_node.id == output_binding.output_node_id)
-                        .expect("Runtime node index missing for node");
+                    let output_r_node_idx = self.r_node_idx_by_id[&output_binding.output_node_id];
                     self.r_nodes[r_node_idx].inputs[input_idx].output_address =
                         Some(RuntimePortAddress {
                             r_node_idx: output_r_node_idx,
