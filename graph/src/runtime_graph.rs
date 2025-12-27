@@ -54,6 +54,7 @@ pub struct RuntimeNode {
 
     processing_state: ProcessingState,
     pub node_idx: usize,
+    pub func_idx: usize,
     pub inputs: Vec<RuntimeInput>,
     pub outputs: Vec<RuntimeOutput>,
 
@@ -222,10 +223,13 @@ impl RuntimeGraph {
                         );
                     }
                     ProcessingState::None => {
-                        let func = func_lib
-                            .by_id(graph.nodes[r_node.node_idx].func_id)
+                        let func_idx = func_lib
+                            .funcs
+                            .iter()
+                            .position(|func| func.id == graph.nodes[r_node.node_idx].func_id)
                             .expect("FuncLib missing function for graph node func_id");
-                        r_node.reset_ports_from_func(func);
+                        r_node.reset_ports_from_func(&func_lib.funcs[func_idx]);
+                        r_node.func_idx = func_idx;
                     }
                 }
 

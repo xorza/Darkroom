@@ -67,7 +67,7 @@ pub struct Func {
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct FuncLib {
-    funcs: hashbrown::HashMap<FuncId, Func>,
+    pub funcs: Vec<Func>,
 }
 
 impl FuncLib {
@@ -81,8 +81,8 @@ impl FuncLib {
         Ok(funcs.into())
     }
     pub fn to_yaml(&self) -> String {
-        let mut funcs: Vec<&Func> = self.funcs.values().collect();
-        funcs.sort_by(|a, b| a.id.cmp(&b.id));
+        let mut funcs = self.funcs.clone();
+        funcs.sort_by_key(|func| func.id);
 
         serde_yml::to_string(&funcs)
             .expect("Failed to serialize function library to YAML")
@@ -90,41 +90,32 @@ impl FuncLib {
     }
 
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
-        self.funcs.get(&id)
+        self.funcs.iter().find(|func| func.id == id)
     }
     pub fn by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
-        self.funcs.get_mut(&id)
+        self.funcs.iter_mut().find(|func| func.id == id)
     }
     pub fn by_name(&self, name: &str) -> Option<&Func> {
-        self.funcs.values().find(|func| func.name == name)
+        self.funcs.iter().find(|func| func.name == name)
     }
     pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
-        self.funcs.values_mut().find(|func| func.name == name)
+        self.funcs.iter_mut().find(|func| func.name == name)
     }
     pub fn add(&mut self, func: Func) {
-        let entry = self.funcs.entry(func.id);
+        let entry = self.by_id(func.id);
         match entry {
-            Entry::Occupied(_) => {
+            Some(_) => {
                 panic!("Func already exists");
             }
-            Entry::Vacant(_) => {
-                entry.insert(func);
+            None => {
+                self.funcs.push(func);
             }
         }
     }
-    pub fn iter(&self) -> Values<'_, FuncId, Func> {
-        self.funcs.values()
-    }
     pub fn merge(&mut self, other: FuncLib) {
-        for (_id, func) in other.funcs {
+        for func in other.funcs {
             self.add(func);
         }
-    }
-    pub fn len(&self) -> usize {
-        self.funcs.len()
-    }
-    pub fn is_empty(&self) -> bool {
-        self.funcs.is_empty()
     }
 }
 

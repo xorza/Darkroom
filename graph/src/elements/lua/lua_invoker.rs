@@ -221,11 +221,9 @@ impl LuaInvoker {
     }
 
     fn substitute_functions(&self, connections: Arc<Mutex<Vec<FuncConnections>>>) {
-        let functions = &self.func_lib;
-
         let mut output_index: u32 = 0;
 
-        for func in functions.iter() {
+        for func in self.func_lib.funcs.iter() {
             let func_clone = func.clone();
             let connections = Arc::clone(&connections);
 
@@ -514,7 +512,7 @@ mod tests {
         invoker.load_file("../test_resources/test_lua.lua")?;
 
         let funcs = invoker.get_func_lib();
-        assert_eq!(funcs.len(), 5);
+        assert_eq!(funcs.funcs.len(), 5);
 
         let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
         let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);

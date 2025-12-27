@@ -158,7 +158,7 @@ impl UberInvoker {
 
         invokers.iter_mut().enumerate().for_each(|(idx, invoker)| {
             let new_func_lib = invoker.get_func_lib();
-            new_func_lib.iter().for_each(|func| {
+            new_func_lib.funcs.iter().for_each(|func| {
                 function_id_to_invoker_index.insert(func.id, idx);
             });
 
@@ -192,7 +192,7 @@ impl UberInvoker {
         } else {
             let idx = self.invokers.len();
             let other_func_lib = invoker.get_func_lib();
-            other_func_lib.iter().for_each(|func| {
+            other_func_lib.funcs.iter().for_each(|func| {
                 self.function_id_to_invoker_index.insert(func.id, idx);
             });
 
