@@ -63,13 +63,13 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn add_node(&mut self, node: Node) {
+    pub fn add(&mut self, node: Node) {
         match self.nodes.iter().position(|n| n.id == node.id) {
             Some(index) => self.nodes[index] = node,
             None => self.nodes.push(node),
         }
     }
-    pub fn remove_node_by_id(&mut self, id: NodeId) {
+    pub fn remove_by_id(&mut self, id: NodeId) {
         assert!(!id.is_nil());
 
         self.nodes.retain(|node| node.id != id);
@@ -91,30 +91,21 @@ impl Graph {
             });
     }
 
-    pub fn node_by_name(&self, name: &str) -> Option<&Node> {
+    pub fn by_name(&self, name: &str) -> Option<&Node> {
         self.nodes.iter().find(|node| node.name == name)
     }
-    pub fn node_by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
+    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
         self.nodes.iter_mut().find(|node| node.name == name)
     }
 
-    pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
+    pub fn by_id(&self, id: NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
         self.nodes.iter().find(|node| node.id == id)
     }
-    pub fn node_by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+    pub fn by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
 
         self.nodes.iter_mut().find(|node| node.id == id)
-    }
-
-    pub fn build_node_index_by_id(&self) -> HashMap<NodeId, usize> {
-        let mut map = HashMap::with_capacity(self.nodes.len());
-        for (index, node) in self.nodes.iter().enumerate() {
-            let prev = map.insert(node.id, index);
-            assert!(prev.is_none(), "Duplicate node id detected: {:?}", node.id);
-        }
-        map
     }
 
     pub fn to_yaml(&self) -> String {
@@ -150,7 +141,7 @@ impl Graph {
             // validate node has valid bindings
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    if self.node_by_id(output_binding.output_node_id).is_none() {
+                    if self.by_id(output_binding.output_node_id).is_none() {
                         return Err(anyhow::Error::msg(
                             "Node input connected to a non-existent node",
                         ));
@@ -277,8 +268,8 @@ mod tests {
             const_value: None,
         });
 
-        graph.add_node(node1);
-        graph.add_node(node2);
+        graph.add(node1);
+        graph.add(node2);
 
         let _yaml: String = graph.to_yaml();
 
@@ -311,12 +302,12 @@ mod tests {
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
 
         let node_id = graph
-            .node_by_name("sum")
+            .by_name("sum")
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .id;
-        graph.remove_node_by_id(node_id);
+        graph.remove_by_id(node_id);
 
-        assert!(graph.node_by_name("sum").is_none());
+        assert!(graph.by_name("sum").is_none());
         assert_eq!(graph.nodes.len(), 4);
 
         for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {

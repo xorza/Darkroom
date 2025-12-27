@@ -335,7 +335,7 @@ impl LuaInvoker {
                 input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.idx)
             }
 
-            graph.add_node(node);
+            graph.add(node);
         }
 
         assert!(graph.validate().is_ok());
@@ -548,7 +548,7 @@ mod tests {
             .as_output_binding()
             .expect("Missing output binding");
         let bound_node = graph
-            .node_by_id(binding.output_node_id)
+            .by_id(binding.output_node_id)
             .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
         assert_eq!(bound_node.name, "sum");
 
@@ -557,7 +557,7 @@ mod tests {
             .as_output_binding()
             .expect("Missing output binding");
         let bound_node = graph
-            .node_by_id(binding.output_node_id)
+            .by_id(binding.output_node_id)
             .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
         assert_eq!(bound_node.name, "get_b");
 

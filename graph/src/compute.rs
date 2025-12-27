@@ -24,28 +24,24 @@ impl Compute {
     where
         T: Invoker,
     {
-        runtime_graph.next(graph, func_lib);
-        let graph_node_index_by_id = graph.build_node_index_by_id();
-
+        runtime_graph.update(graph, func_lib);
         let mut inputs: ArgSet = ArgSet::default();
 
         let active_node_indexes = {
-            let mut active_node_indexes = runtime_graph
+            let mut active_node_indexes: Vec<usize> = runtime_graph
                 .r_nodes
                 .iter()
                 .enumerate()
-                .filter_map(|(index, r_node)| r_node.should_invoke.then_some(index))
-                .collect::<Vec<usize>>();
+                .filter_map(|(idx, r_node)| r_node.should_invoke.then_some(idx))
+                .collect::<_>();
 
             active_node_indexes.sort_by_key(|&index| runtime_graph.r_nodes[index].invocation_order);
             active_node_indexes
         };
 
-        for node_idx in active_node_indexes {
-            let node_id = runtime_graph.r_nodes[node_idx].id;
-            let node = &graph.nodes[*graph_node_index_by_id
-                .get(&node_id)
-                .expect("Runtime node missing from the graph")];
+        for r_node_idx in active_node_indexes {
+            let r_node = &runtime_graph.r_nodes[r_node_idx];
+            let node = &graph.nodes[r_node.node_idx];
             let func = func_lib
                 .by_id(node.func_id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", node.func_id));
@@ -72,7 +68,7 @@ impl Compute {
 
                         Binding::Output(output_binding) => {
                             let output_r_node = runtime_graph
-                                .node_by_id_mut(output_binding.output_node_id)
+                                .by_id_mut(output_binding.output_node_id)
                                 .unwrap_or_else(|| {
                                     panic!(
                                         "Runtime node with id {:?} not found",
@@ -99,7 +95,7 @@ impl Compute {
                     inputs[input_idx] = self.convert_type(&value, data_type);
                 });
 
-            let r_node = &mut runtime_graph.r_nodes[node_idx];
+            let r_node = &mut runtime_graph.r_nodes[r_node_idx];
             let outputs = r_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);

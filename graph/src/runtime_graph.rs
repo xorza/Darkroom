@@ -53,7 +53,7 @@ pub struct RuntimeNode {
     pub invocation_order: usize,
 
     processing_state: ProcessingState,
-    node_idx: usize,
+    pub node_idx: usize,
     pub inputs: Vec<RuntimeInput>,
     pub outputs: Vec<RuntimeOutput>,
 
@@ -116,18 +116,18 @@ impl RuntimeNode {
 }
 
 impl RuntimeGraph {
-    pub fn node_by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
+    pub fn by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
         self.r_nodes.iter().find(|node| node.id == node_id)
     }
-    pub fn node_by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
+    pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
         self.r_nodes.iter_mut().find(|node| node.id == node_id)
     }
 
-    // mark active nodes without cached outputs for execution
-    pub fn next(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    // todo
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.build_node_cache(graph);
-        self.build_active_node_indices_ordered(graph, func_lib);
-        self.propagate_input_state(graph);
+        self.backward(graph, func_lib);
+        self.forward(graph);
     }
 
     fn build_node_cache(&mut self, graph: &Graph) {
@@ -155,7 +155,8 @@ impl RuntimeGraph {
         }
     }
 
-    fn build_active_node_indices_ordered(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    // todo
+    fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) {
         enum VisitCause {
             Terminal,
             OutputRequest { output_address: RuntimePortAddress },
@@ -262,8 +263,8 @@ impl RuntimeGraph {
         }
     }
 
-    // mark missing inputs and propagate behavior based on upstream active nodes
-    fn propagate_input_state(&mut self, graph: &Graph) {
+    // todo
+    fn forward(&mut self, graph: &Graph) {
         let mut active_node_indices = self
             .r_nodes
             .iter()
@@ -383,7 +384,7 @@ fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
         for input in node.inputs.iter() {
             if let Binding::Output(output_binding) = &input.binding {
                 let output_node = graph
-                    .node_by_id(output_binding.output_node_id)
+                    .by_id(output_binding.output_node_id)
                     .ok_or_else(|| anyhow::Error::msg("Output binding references missing node"))?;
                 let output_func = func_lib.by_id(output_node.func_id).ok_or_else(|| {
                     anyhow::Error::msg(format!(
@@ -414,12 +415,12 @@ mod tests {
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let _get_b_node_id = graph
-            .node_by_name("get_b")
+            .by_name("get_b")
             .expect("Node named \"get_b\" not found")
             .id;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.next(&graph, &func_lib);
+        runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
         assert!(runtime_graph
@@ -442,16 +443,16 @@ mod tests {
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let _get_b_node_id = graph
-            .node_by_name("get_b")
+            .by_name("get_b")
             .expect("Node named \"get_b\" not found")
             .id;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.next(&graph, &func_lib);
+        runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
 
-        runtime_graph.next(&graph, &func_lib);
+        runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
 
@@ -464,78 +465,78 @@ mod tests {
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let get_b_node_id = graph
-            .node_by_name("get_b")
+            .by_name("get_b")
             .expect("Node named \"get_b\" not found")
             .id;
         let sum_node_id = graph
-            .node_by_name("sum")
+            .by_name("sum")
             .expect("Node named \"sum\" not found")
             .id;
         let mult_node_id = graph
-            .node_by_name("mult")
+            .by_name("mult")
             .expect("Node named \"mult\" not found")
             .id;
         let print_node_id = graph
-            .node_by_name("print")
+            .by_name("print")
             .expect("Node named \"print\" not found")
             .id;
 
         graph
-            .node_by_name_mut("sum")
+            .by_name_mut("sum")
             .expect("Node named \"sum\" not found")
             .inputs[0]
             .binding = Binding::None;
 
         let mut runtime_graph = RuntimeGraph::default();
-        runtime_graph.next(&graph, &func_lib);
+        runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.r_nodes.len(), 5);
         assert!(
             runtime_graph
-                .node_by_id(get_b_node_id)
+                .by_id(get_b_node_id)
                 .expect("Runtime node for get_b missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
-                .node_by_id(sum_node_id)
+                .by_id(sum_node_id)
                 .expect("Runtime node for sum missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
-                .node_by_id(mult_node_id)
+                .by_id(mult_node_id)
                 .expect("Runtime node for mult missing")
                 .should_invoke
         );
         assert!(
             !runtime_graph
-                .node_by_id(print_node_id)
+                .by_id(print_node_id)
                 .expect("Runtime node for print missing")
                 .should_invoke
         );
 
         assert!(
             !runtime_graph
-                .node_by_id(get_b_node_id)
+                .by_id(get_b_node_id)
                 .expect("Runtime node for get_b missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
-                .node_by_id(sum_node_id)
+                .by_id(sum_node_id)
                 .expect("Runtime node for sum missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
-                .node_by_id(mult_node_id)
+                .by_id(mult_node_id)
                 .expect("Runtime node for mult missing")
                 .has_missing_inputs
         );
         assert!(
             runtime_graph
-                .node_by_id(print_node_id)
+                .by_id(print_node_id)
                 .expect("Runtime node for print missing")
                 .has_missing_inputs
         );

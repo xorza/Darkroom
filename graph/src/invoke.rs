@@ -468,7 +468,7 @@ mod tests {
 
         {
             let sum_inputs = &mut graph
-                .node_by_name_mut("sum")
+                .by_name_mut("sum")
                 .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
                 .inputs;
             sum_inputs[0].const_value = Some(StaticValue::from(29));
@@ -479,7 +479,7 @@ mod tests {
 
         {
             let mult_inputs = &mut graph
-                .node_by_name_mut("mult")
+                .by_name_mut("mult")
                 .unwrap_or_else(|| panic!("Node named \"mult\" not found"))
                 .inputs;
             mult_inputs[1].const_value = Some(StaticValue::from(9));
@@ -547,7 +547,7 @@ mod tests {
 
         let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
         graph
-            .node_by_name_mut("sum")
+            .by_name_mut("sum")
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .behavior = NodeBehavior::OnInputChange;
 
