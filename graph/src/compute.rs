@@ -35,58 +35,57 @@ impl Compute {
                 .filter_map(|(idx, r_node)| r_node.should_invoke.then_some(idx))
                 .collect::<_>();
 
-            active_node_indexes.sort_by_key(|&index| runtime_graph.r_nodes[index].invocation_order);
+            active_node_indexes.sort_by_key(|&idx| runtime_graph.r_nodes[idx].invocation_order);
             active_node_indexes
         };
 
         for r_node_idx in active_r_node_indexes {
-            let r_node = &runtime_graph.r_nodes[r_node_idx];
-            let node = &graph.nodes[r_node.node_idx];
-            let func = &func_lib.funcs[r_node.func_idx];
+            let (node, func) = {
+                let r_node = &runtime_graph.r_nodes[r_node_idx];
+                let node = &graph.nodes[r_node.node_idx];
+                let func = &func_lib.funcs[r_node.func_idx];
 
-            assert_eq!(
-                node.inputs.len(),
-                func.inputs.len(),
-                "Node {:?} input count mismatch",
-                node.id
-            );
+                assert_eq!(
+                    node.func_id, func.id,
+                    "Node {:?} function ID mismatch",
+                    node.id
+                );
+                assert_eq!(
+                    node.inputs.len(),
+                    func.inputs.len(),
+                    "Node {:?} input count mismatch",
+                    node.id
+                );
+
+                (node, func)
+            };
 
             inputs.resize_and_clear(node.inputs.len());
-            node.inputs
-                .iter()
-                .enumerate()
-                .map(|(input_idx, input)| {
-                    let value: DynamicValue = match &input.binding {
-                        Binding::None => DynamicValue::None,
-                        Binding::Const => input
-                            .const_value
-                            .as_ref()
-                            .expect("Const value is not set")
-                            .into(),
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                let value: DynamicValue = match &input.binding {
+                    Binding::None => DynamicValue::None,
+                    Binding::Const => input
+                        .const_value
+                        .as_ref()
+                        .expect("Const value is not set")
+                        .into(),
 
-                        Binding::Output(output_binding) => {
-                            let output_address = &runtime_graph.r_nodes[r_node_idx].inputs
-                                [input_idx]
-                                .output_address
-                                .expect("Output address is not set");
-                            let output_values = runtime_graph.r_nodes[output_address.r_node_idx]
-                                .output_values
-                                .as_mut()
-                                .expect(
-                                    "Output values missing for bound node; check execution order",
-                                );
+                    Binding::Output(output_binding) => {
+                        let output_address = &runtime_graph.r_nodes[r_node_idx].inputs[input_idx]
+                            .output_address
+                            .expect("Output address is not set");
+                        let output_values = runtime_graph.r_nodes[output_address.r_node_idx]
+                            .output_values
+                            .as_mut()
+                            .expect("Output values missing for bound node; check execution order");
 
-                            output_values[output_binding.output_idx].clone()
-                        }
-                    };
+                        output_values[output_binding.output_idx].clone()
+                    }
+                };
 
-                    let data_type = &func.inputs[input_idx].data_type;
-
-                    (input_idx, data_type, value)
-                })
-                .for_each(|(input_idx, data_type, value)| {
-                    inputs[input_idx] = self.convert_type(&value, data_type);
-                });
+                let data_type = &func.inputs[input_idx].data_type;
+                inputs[input_idx] = self.convert_type(&value, data_type);
+            }
 
             let r_node = &mut runtime_graph.r_nodes[r_node_idx];
             let outputs = r_node

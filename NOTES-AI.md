@@ -80,6 +80,7 @@ Runtime graph debug assertions include node indices and IDs to speed up diagnosi
 Runtime graph visit/output assertions now include index mismatch context for faster debugging.
 Runtime graph invariant lookups and tests now use `expect` instead of `unwrap_or_else`.
 Compute now sorts invocations by `RuntimeNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
+Compute input value conversion now uses a single loop instead of iterator chains.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms
