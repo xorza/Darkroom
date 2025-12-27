@@ -101,15 +101,15 @@ impl RuntimeGraph {
             );
 
             // todo optimize
-            let r_node_index = match self.r_nodes.iter().position(|r_node| r_node.id == node.id) {
-                Some(index) => index,
+            let r_node_idx = match self.r_nodes.iter().position(|r_node| r_node.id == node.id) {
+                Some(idx) => idx,
                 None => {
                     self.r_nodes.push(RuntimeNode::default());
                     self.r_nodes.len() - 1
                 }
             };
 
-            let r_node = &mut self.r_nodes[r_node_index];
+            let r_node = &mut self.r_nodes[r_node_idx];
             r_node.reset_from(node);
             r_node.node_idx = node_idx;
         }
@@ -218,7 +218,7 @@ impl RuntimeGraph {
 
         enum VisitCause {
             Terminal,
-            OutputRequest { output_index: usize },
+            OutputRequest { output_idx: usize },
             Processed,
         }
         struct Visit {
@@ -293,7 +293,7 @@ impl RuntimeGraph {
                     stack.push(Visit {
                         r_node_idx: output_r_node_idx,
                         cause: VisitCause::OutputRequest {
-                            output_index: output_binding.output_idx,
+                            output_idx: output_binding.output_idx,
                         },
                     });
                 }
