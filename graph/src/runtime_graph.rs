@@ -32,9 +32,9 @@ pub enum InputState {
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct RuntimeInput {
-    state: InputState,
-    required: bool,
-    output_address: Option<RuntimePortAddress>,
+    pub state: InputState,
+    pub required: bool,
+    pub output_address: Option<RuntimePortAddress>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum RuntimeOutput {

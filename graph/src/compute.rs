@@ -27,7 +27,7 @@ impl Compute {
         runtime_graph.update(graph, func_lib);
         let mut inputs: ArgSet = ArgSet::default();
 
-        let active_node_indexes = {
+        let active_r_node_indexes = {
             let mut active_node_indexes: Vec<usize> = runtime_graph
                 .r_nodes
                 .iter()
@@ -39,7 +39,7 @@ impl Compute {
             active_node_indexes
         };
 
-        for r_node_idx in active_node_indexes {
+        for r_node_idx in active_r_node_indexes {
             let r_node = &runtime_graph.r_nodes[r_node_idx];
             let node = &graph.nodes[r_node.node_idx];
             let func = &func_lib.funcs[r_node.func_idx];
@@ -65,23 +65,18 @@ impl Compute {
                             .into(),
 
                         Binding::Output(output_binding) => {
-                            let output_r_node = runtime_graph
-                                .by_id_mut(output_binding.output_node_id)
-                                .unwrap_or_else(|| {
-                                    panic!(
-                                        "Runtime node with id {:?} not found",
-                                        output_binding.output_node_id
-                                    )
-                                });
+                            let output_address = &runtime_graph.r_nodes[r_node_idx].inputs
+                                [input_idx]
+                                .output_address
+                                .expect("Output address is not set");
+                            let output_values = runtime_graph.r_nodes[output_address.r_node_idx]
+                                .output_values
+                                .as_mut()
+                                .expect(
+                                    "Output values missing for bound node; check execution order",
+                                );
 
-                            let output_values = output_r_node.output_values.as_mut().expect(
-                                "Output values missing for bound node; check execution order",
-                            );
-                            let value = output_values
-                                .get_mut(output_binding.output_idx)
-                                .expect("Output index out of range for bound node");
-
-                            value.clone()
+                            output_values[output_binding.output_idx].clone()
                         }
                     };
 
