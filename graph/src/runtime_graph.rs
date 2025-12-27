@@ -205,27 +205,25 @@ impl RuntimeGraph {
                     let func = func_lib
                         .by_id(graph.nodes[r_node.node_idx].func_id)
                         .unwrap_or_else(|| todo!());
-                    r_node
-                        .inputs
-                        .resize(func.inputs.len(), RuntimeInput::default());
-                    func.inputs.iter().enumerate().for_each(|(idx, input)| {
-                        r_node.inputs[idx] = RuntimeInput {
+                    r_node.inputs.clear();
+                    r_node.inputs.reserve(func.inputs.len());
+                    func.inputs.iter().for_each(|input| {
+                        r_node.inputs.push(RuntimeInput {
                             required: input.required,
                             ..Default::default()
-                        };
+                        });
                     });
 
                     r_node.outputs.fill(RuntimeOutput::Unused);
                     r_node
                         .outputs
                         .resize(func.outputs.len(), RuntimeOutput::default());
-
-                    if let Some(output_address) = output_address {
-                        r_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
-                    }
                 }
             }
 
+            if let Some(output_address) = output_address {
+                r_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
+            }
             r_node.processing_state = ProcessingState::Processing;
             stack.push(Visit {
                 r_node_idx,
