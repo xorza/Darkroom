@@ -126,12 +126,13 @@ impl RuntimeGraph {
 
     // Rebuild runtime state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        self.build_node_cache(graph);
+        self.update_node_cache(graph);
         self.backward(graph, func_lib);
         self.forward(graph);
     }
 
-    fn build_node_cache(&mut self, graph: &Graph) {
+    // Update the node cache with the current graph.
+    fn update_node_cache(&mut self, graph: &Graph) {
         for (node_idx, node) in graph.nodes.iter().enumerate() {
             assert!(
                 !node.id.is_nil(),
@@ -139,20 +140,32 @@ impl RuntimeGraph {
                 node_idx
             );
 
-            let r_node_idx = match self.r_nodes.iter().position(|r_node| r_node.id == node.id) {
-                Some(idx) => idx,
-                None => {
-                    self.r_nodes.push(RuntimeNode::default());
-                    let idx = self.r_nodes.len() - 1;
-                    self.r_node_idx_by_id.insert(node.id, idx);
-
-                    idx
-                }
-            };
+            // remove node idx from cache
+            let r_node_idx = self.r_node_idx_by_id.remove(&node.id).unwrap_or_else(|| {
+                self.r_nodes.push(RuntimeNode::default());
+                self.r_nodes.len() - 1
+            });
 
             let r_node = &mut self.r_nodes[r_node_idx];
             r_node.reset_from(node);
             r_node.node_idx = node_idx;
+        }
+
+        // r_node_idx_by_id now contains only nodes that are not in the graph
+        // remove them
+        for r_node_idx in self.r_nodes.len() - 1..0 {
+            if self
+                .r_node_idx_by_id
+                .contains_key(&self.r_nodes[r_node_idx].id)
+            {
+                self.r_nodes.remove(r_node_idx);
+            }
+        }
+        assert_eq!(self.r_node_idx_by_id.len(), 0, "Node cache is not empty");
+
+        //rebuild index cache
+        for (idx, r_node) in self.r_nodes.iter().enumerate() {
+            self.r_node_idx_by_id.insert(r_node.id, idx);
         }
     }
 
