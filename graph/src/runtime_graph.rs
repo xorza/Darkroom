@@ -269,21 +269,17 @@ impl RuntimeGraph {
 
     // Propagate input state forward from scheduled nodes to set invoke/missing flags.
     fn forward(&mut self, graph: &Graph) {
-        let mut active_node_indices = self
+        let mut active_r_node_indices = self
             .r_nodes
             .iter()
             .enumerate()
             .filter_map(|(idx, r_node)| {
-                if r_node.processing_state == ProcessingState::Processed {
-                    Some(idx)
-                } else {
-                    None
-                }
+                (r_node.processing_state == ProcessingState::Processed).then_some(idx)
             })
             .collect::<Vec<_>>();
-        active_node_indices.sort_unstable_by_key(|&idx| self.r_nodes[idx].invocation_order);
+        active_r_node_indices.sort_unstable_by_key(|&idx| self.r_nodes[idx].invocation_order);
 
-        for r_node_idx in active_node_indices {
+        for r_node_idx in active_r_node_indices {
             let node = {
                 let r_node = &mut self.r_nodes[r_node_idx];
                 assert_eq!(
