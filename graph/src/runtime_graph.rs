@@ -89,6 +89,8 @@ impl RuntimeGraph {
     // mark active nodes without cached outputs for execution
     pub fn next(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.build_node_cache(graph);
+
+        self.build_active_node_indices_ordered(graph);
         self.propagate_input_state(graph, func_lib);
     }
 
@@ -117,9 +119,21 @@ impl RuntimeGraph {
 
     // mark missing inputs and propagate behavior based on upstream active nodes
     fn propagate_input_state(&mut self, graph: &Graph, func_lib: &FuncLib) {
-        let active_node_indices = self.build_active_node_indices_ordered(graph);
+        let mut active_node_indices = self
+            .r_nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, r_node)| {
+                if r_node.processing_state == ProcessingState::Processed {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        active_node_indices.sort_unstable_by_key(|&idx| self.r_nodes[idx].invocation_order);
 
-        for (invocation_order, &r_node_idx) in active_node_indices.iter().enumerate() {
+        for r_node_idx in active_node_indices {
             let node = {
                 let r_node = &mut self.r_nodes[r_node_idx];
                 assert_eq!(
@@ -128,8 +142,6 @@ impl RuntimeGraph {
                     "Runtime node must be processed before input propagation"
                 );
                 // println!("{}", r_node.name);
-
-                r_node.invocation_order = invocation_order;
 
                 let node = &graph.nodes[r_node.node_idx];
                 // avoid traversing inputs for NodeBehavior::Once nodes having outputs
@@ -213,9 +225,7 @@ impl RuntimeGraph {
         }
     }
 
-    fn build_active_node_indices_ordered(&mut self, graph: &Graph) -> Vec<usize> {
-        let mut result: Vec<usize> = Vec::with_capacity(graph.nodes.len());
-
+    fn build_active_node_indices_ordered(&mut self, graph: &Graph) {
         enum VisitCause {
             Terminal,
             OutputRequest { output_idx: usize },
@@ -244,6 +254,7 @@ impl RuntimeGraph {
                 });
             });
 
+        let mut invocation_order: usize = 0;
         while let Some(visit) = stack.pop() {
             let r_node = &mut self.r_nodes[visit.r_node_idx];
             // println!("{}", r_node.name);
@@ -253,7 +264,8 @@ impl RuntimeGraph {
                 VisitCause::OutputRequest { .. } => {}
                 VisitCause::Processed => {
                     r_node.processing_state = ProcessingState::Processed;
-                    result.push(visit.r_node_idx);
+                    r_node.invocation_order = invocation_order;
+                    invocation_order += 1;
                     continue;
                 }
             }
@@ -299,8 +311,6 @@ impl RuntimeGraph {
                 }
             }
         }
-
-        result
     }
 }
 
