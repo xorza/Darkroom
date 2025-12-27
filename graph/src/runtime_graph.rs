@@ -124,7 +124,7 @@ impl RuntimeGraph {
         self.r_nodes.iter_mut().find(|node| node.id == node_id)
     }
 
-    // todo
+    // Rebuild runtime state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.build_node_cache(graph);
         self.backward(graph, func_lib);
@@ -156,7 +156,7 @@ impl RuntimeGraph {
         }
     }
 
-    // todo
+    // Walk upstream dependencies to mark active nodes and compute invocation order.
     fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) {
         enum VisitCause {
             Terminal,
@@ -267,7 +267,7 @@ impl RuntimeGraph {
         }
     }
 
-    // todo
+    // Propagate input state forward from scheduled nodes to set invoke/missing flags.
     fn forward(&mut self, graph: &Graph) {
         let mut active_node_indices = self
             .r_nodes
@@ -310,7 +310,7 @@ impl RuntimeGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
-                    // todo implement notifying of const binding changes
+                    // Const bindings are treated as changed each run until change tracking exists.
                     Binding::Const => InputState::Changed,
                     Binding::Output(output_binding) => {
                         let output_r_node_idx = self.r_nodes[r_node_idx].inputs[input_idx]

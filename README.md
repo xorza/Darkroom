@@ -42,6 +42,7 @@ Runtime graph updates handle dynamic graph changes across runs.
 Compute execution follows the runtime scheduling order.
 Compute input setup now uses a straight loop to avoid layered iterator chains.
 Runtime graph invariant lookups use explicit `expect` messages for clarity.
+Runtime graph traversal comments now document the update/backward/forward phases.
 Editor debug tasks can be configured per-project.
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 
