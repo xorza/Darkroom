@@ -2,16 +2,31 @@ use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
 use crate::data::{DataType, DynamicValue};
-use crate::execution_graph::ExecutionGraph;
-use crate::function::FuncLib;
+use crate::execution_graph::{ExecutionGraph, ExecutionGraphError};
+use crate::function::{FuncId, FuncLib};
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
+use thiserror::Error;
 
 #[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
 #[derive(Debug, Default)]
 pub struct Compute {}
+
+#[derive(Debug, Error)]
+pub enum ComputeError {
+    #[error("Execution graph update failed: {0}")]
+    ExecutionGraph(#[from] ExecutionGraphError),
+    #[error("Invoker failed for function {function_id:?}: {source}")]
+    Invoke {
+        function_id: FuncId,
+        #[source]
+        source: anyhow::Error,
+    },
+}
+
+type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
     pub async fn run<T>(
@@ -20,7 +35,7 @@ impl Compute {
         func_lib: &FuncLib,
         invoker: &T,
         execution_graph: &mut ExecutionGraph,
-    ) -> anyhow::Result<()>
+    ) -> ComputeResult<()>
     where
         T: Invoker,
     {
@@ -115,7 +130,11 @@ impl Compute {
                         inputs.as_mut_slice(),
                         outputs.as_mut_slice(),
                     )
-                    .await?;
+                    .await
+                    .map_err(|source| ComputeError::Invoke {
+                        function_id: node.func_id,
+                        source,
+                    })?;
 
                 start.elapsed().as_secs_f64()
             };
