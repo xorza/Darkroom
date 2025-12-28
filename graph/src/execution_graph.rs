@@ -738,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn graph_changes_properly_changes_execution_graph() {
+    fn execution_graph_updates_after_graph_change() {
         let mut graph = test_graph();
         let func_lib = test_func_lib();
 
