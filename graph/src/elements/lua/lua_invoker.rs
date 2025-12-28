@@ -211,7 +211,7 @@ impl LuaInvoker {
                 required: true,
                 data_type,
                 default_value,
-                variants: vec![],
+                value_options: vec![],
             });
         }
 

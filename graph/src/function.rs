@@ -161,7 +161,7 @@ impl InvokeCache {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ValueVariant {
+pub struct ValueOption {
     pub name: String,
     pub value: StaticValue,
 }
@@ -174,7 +174,7 @@ pub struct FuncInput {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub variants: Vec<ValueVariant>,
+    pub value_options: Vec<ValueOption>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -378,14 +378,14 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
-                    variants: vec![],
+                    value_options: vec![],
                 },
                 FuncInput {
                     name: "B".to_string(),
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
-                    variants: vec![],
+                    value_options: vec![],
                 },
             ],
             outputs: vec![FuncOutput {
@@ -474,14 +474,14 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
-                    variants: vec![],
+                    value_options: vec![],
                 },
                 FuncInput {
                     name: "B".to_string(),
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
-                    variants: vec![],
+                    value_options: vec![],
                 },
             ],
             outputs: vec![FuncOutput {
@@ -521,7 +521,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 required: true,
                 data_type: DataType::Int,
                 default_value: None,
-                variants: vec![],
+                value_options: vec![],
             }],
             outputs: vec![],
             events: vec![],

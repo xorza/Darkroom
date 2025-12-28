@@ -40,7 +40,7 @@ impl Default for TimersInvoker {
                 required: true,
                 data_type: DataType::Float,
                 default_value: Some(StaticValue::Float(30.0)),
-                variants: vec![],
+                value_options: vec![],
             }],
             outputs: vec![
                 FuncOutput {
