@@ -50,6 +50,7 @@ Runtime node cache compaction now has inline comments explaining the swap/trunca
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
 Tests use in-code function library fixtures for the standard sample functions.
+Graph and function library file loaders now auto-detect YAML or JSON based on file extension.
 
 ## Benchmarks
 

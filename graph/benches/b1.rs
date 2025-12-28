@@ -11,7 +11,7 @@ fn bench_foo(c: &mut Criterion) {
     c.bench_function("foo", |b| {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let graph_path = manifest_dir.join("../test_resources/test_graph.yml");
-        let graph = Graph::from_yaml_file(
+        let graph = Graph::from_file(
             graph_path
                 .to_str()
                 .expect("Benchmark graph path is not valid UTF-8"),

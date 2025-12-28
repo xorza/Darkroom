@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::common::FileFormat;
 use crate::data::*;
 use common::id_type;
 use common::normalize_string::NormalizeString;
@@ -71,22 +72,32 @@ pub struct FuncLib {
 }
 
 impl FuncLib {
-    pub fn from_yaml_file(file_path: &str) -> anyhow::Result<Self> {
-        let yaml = std::fs::read_to_string(file_path)?;
-        Self::from_yaml(&yaml)
+    pub fn from_file(file_path: &str) -> anyhow::Result<Self> {
+        let format = FileFormat::from_file_name(file_path)
+            .expect("Failed to infer function library file format from file name");
+        let contents = std::fs::read_to_string(file_path)?;
+        Self::deserialize(&contents, format)
     }
-    pub fn from_yaml(yaml: &str) -> anyhow::Result<Self> {
-        let funcs: Vec<Func> = serde_yml::from_str(yaml)?;
+    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
+        let funcs: Vec<Func> = match format {
+            FileFormat::Yaml => serde_yml::from_str(serialized)?,
+            FileFormat::Json => serde_json::from_str(serialized)?,
+        };
 
         Ok(funcs.into())
     }
-    pub fn to_yaml(&self) -> String {
+    pub fn serialize(&self, format: FileFormat) -> String {
         let mut funcs = self.funcs.clone();
         funcs.sort_by_key(|func| func.id);
 
-        serde_yml::to_string(&funcs)
-            .expect("Failed to serialize function library to YAML")
-            .normalize()
+        match format {
+            FileFormat::Yaml => serde_yml::to_string(&funcs)
+                .expect("Failed to serialize function library to YAML")
+                .normalize(),
+            FileFormat::Json => serde_json::to_string_pretty(&funcs)
+                .expect("Failed to serialize function library to JSON")
+                .normalize(),
+        }
     }
 
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {
@@ -260,18 +271,84 @@ pub fn test_func_lib() -> FuncLib {
 }
 
 #[cfg(test)]
+const TEST_FUNCS_YAML: &str = r#"- id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5"
+  name: sum
+  category: Debug
+  behavior: Pure
+  inputs:
+    - name: A
+      required: true
+      data_type: Int
+    - name: B
+      required: true
+      data_type: Int
+  outputs:
+    - name: Sum
+      data_type: Int
+- id: "432b9bf1-f478-476c-a9c9-9a6e190124fc"
+  name: mult
+  category: Debug
+  behavior: Pure
+  inputs:
+    - name: A
+      required: true
+      data_type: Int
+    - name: B
+      required: true
+      data_type: Int
+  outputs:
+    - name: Prod
+      data_type: Int
+- id: a937baff-822d-48fd-9154-58751539b59b
+  name: get_b
+  category: Debug
+  behavior: Pure
+  outputs:
+    - name: Int32 Value
+      data_type: Int
+- id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
+  name: get_a
+  category: Debug
+  behavior: Impure
+  outputs:
+    - name: Int32 Value
+      data_type: Int
+- id: f22cd316-1cdf-4a80-b86c-1277acd1408a
+  name: print
+  category: Debug
+  behavior: Impure
+  inputs:
+    - name: message
+      required: true
+      data_type: Int
+"#;
+
+#[cfg(test)]
 mod tests {
-    use crate::function::{test_func_lib, FuncLib};
+    use crate::common::FileFormat;
+    use crate::function::test_func_lib;
     use common::yaml_format::reformat_yaml;
 
     #[test]
-    fn yaml_roundtrip_serialization() -> anyhow::Result<()> {
+    fn serialization() {
         let func_lib = test_func_lib();
-        let serialized_yaml1 = func_lib.to_yaml();
-        let func_lib = FuncLib::from_yaml(&serialized_yaml1)?;
-        let serialized_yaml2 = func_lib.to_yaml();
+        let file_yaml = reformat_yaml(super::TEST_FUNCS_YAML)
+            .expect("Failed to normalize embedded test function YAML");
+        let serialized_yaml = func_lib.serialize(FileFormat::Yaml);
 
-        assert_eq!(serialized_yaml1, serialized_yaml2);
+        assert_eq!(file_yaml, serialized_yaml);
+    }
+
+    #[test]
+    fn roundtrip_serialization() -> anyhow::Result<()> {
+        let func_lib = test_func_lib();
+
+        for format in [FileFormat::Yaml, FileFormat::Json] {
+            let serialized = func_lib.serialize(format);
+            let deserialized = super::FuncLib::deserialize(serialized.as_str(), format)?;
+            let serialized_again = deserialized.serialize(format);
+            assert_eq!(serialized_again, serialized);
+        }
 
         Ok(())
     }

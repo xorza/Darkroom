@@ -1,6 +1,7 @@
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::common::FileFormat;
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
@@ -108,21 +109,27 @@ impl Graph {
         self.nodes.iter_mut().find(|node| node.id == id)
     }
 
-    pub fn to_yaml(&self) -> String {
-        serde_yml::to_string(&self)
-            .expect("Failed to serialize graph to YAML")
-            .normalize()
+    pub fn serialize(&self, format: FileFormat) -> String {
+        match format {
+            FileFormat::Yaml => serde_yml::to_string(&self)
+                .expect("Failed to serialize graph to YAML")
+                .normalize(),
+            FileFormat::Json => serde_json::to_string_pretty(&self)
+                .expect("Failed to serialize graph to JSON")
+                .normalize(),
+        }
     }
-    pub fn from_yaml_file(path: &str) -> anyhow::Result<Graph> {
-        let yaml = std::fs::read_to_string(path)?;
-        let graph: Graph = serde_yml::from_str(&yaml)?;
-
-        graph.validate()?;
-
-        Ok(graph)
+    pub fn from_file(path: &str) -> anyhow::Result<Graph> {
+        let format = FileFormat::from_file_name(path)
+            .expect("Failed to infer graph file format from file name");
+        let contents = std::fs::read_to_string(path)?;
+        Self::deserialize(&contents, format)
     }
-    pub fn from_yaml(yaml: &str) -> anyhow::Result<Graph> {
-        let graph: Graph = serde_yml::from_str(yaml)?;
+    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Graph> {
+        let graph: Graph = match format {
+            FileFormat::Yaml => serde_yml::from_str(serialized)?,
+            FileFormat::Json => serde_json::from_str(serialized)?,
+        };
 
         graph.validate()?;
 
@@ -359,6 +366,7 @@ pub fn test_graph() -> Graph {
 
 #[cfg(test)]
 mod tests {
+    use crate::common::FileFormat;
     use crate::data::StaticValue;
     use crate::graph::{Binding, Graph, Input, Node, OutputBinding};
     use std::hint::black_box;
@@ -384,23 +392,22 @@ mod tests {
         graph.add(node1);
         graph.add(node2);
 
-        let _yaml: String = graph.to_yaml();
+        let _yaml: String = graph.serialize(FileFormat::Yaml);
 
         Ok(())
     }
 
     #[test]
-    fn yaml_roundtrip_serialization() -> anyhow::Result<()> {
+    fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
-        let file_yaml: String = graph.to_yaml();
-        let graph = Graph::from_yaml(file_yaml.as_str())?;
-        let serialized_yaml: String = graph.to_yaml();
 
-        assert_eq!(serialized_yaml, file_yaml);
-
-        let graph = Graph::from_yaml(&serialized_yaml)?;
-
-        black_box(graph);
+        for format in [FileFormat::Yaml, FileFormat::Json] {
+            let serialized = graph.serialize(format);
+            let deserialized = Graph::deserialize(serialized.as_str(), format)?;
+            let serialized_again = deserialized.serialize(format);
+            assert_eq!(serialized_again, serialized);
+            black_box(deserialized);
+        }
 
         Ok(())
     }

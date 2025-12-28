@@ -48,7 +48,7 @@ Recent adjustments:
 
 Implements the data structures for graphs and nodes. Nodes are created from functions defined in a function library.
 Connections between nodes are represented by `Binding::Output` values.
-Data structures like graph and function library can be serialized to YAML files.
+Data structures like graphs, function libraries, and runtime graphs can be serialized to YAML or JSON.
 
 Runtime execution is handled by the `runtime_graph` module which determines which nodes should run each tick.
 Additional modules drive execution and integration:
@@ -88,6 +88,8 @@ Runtime node cache update compacts in-place with swaps and truncation to minimiz
 Runtime node cache compaction includes inline comments describing the swap-and-truncate flow.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 `graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.
+`graph::common::FileFormat` provides YAML/JSON selection and auto-detects file formats by extension for graph/function library loading.
+Runtime graphs now expose YAML/JSON serialization helpers for roundtrip testing.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms

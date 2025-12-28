@@ -4,10 +4,12 @@ use anyhow::Result;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
+use crate::common::FileFormat;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::invoke::InvokeCache;
+use common::normalize_string::NormalizeString;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessingState {
@@ -123,6 +125,26 @@ impl RuntimeGraph {
     }
     pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
         self.r_nodes.iter_mut().find(|node| node.id == node_id)
+    }
+
+    pub fn serialize(&self, format: FileFormat) -> String {
+        match format {
+            FileFormat::Yaml => serde_yml::to_string(&self)
+                .expect("Failed to serialize runtime graph to YAML")
+                .normalize(),
+            FileFormat::Json => serde_json::to_string_pretty(&self)
+                .expect("Failed to serialize runtime graph to JSON")
+                .normalize(),
+        }
+    }
+
+    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
+        let runtime_graph: RuntimeGraph = match format {
+            FileFormat::Yaml => serde_yml::from_str(serialized)?,
+            FileFormat::Json => serde_json::from_str(serialized)?,
+        };
+
+        Ok(runtime_graph)
     }
 
     // Rebuild runtime state from the current graph and function library.
@@ -461,6 +483,7 @@ fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::FileFormat;
     use crate::function::test_func_lib;
     use crate::graph::test_graph;
 
@@ -597,6 +620,36 @@ mod tests {
         );
 
         let _yaml = serde_yml::to_string(&runtime_graph)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn roundtrip_serialization() -> anyhow::Result<()> {
+        let graph = test_graph();
+        let func_lib = test_func_lib();
+
+        let mut runtime_graph = RuntimeGraph::default();
+        runtime_graph.update(&graph, &func_lib);
+
+        for format in [FileFormat::Yaml, FileFormat::Json] {
+            let serialized = runtime_graph.serialize(format);
+            let deserialized = RuntimeGraph::deserialize(serialized.as_str(), format)?;
+            let serialized_again = deserialized.serialize(format);
+
+            match format {
+                FileFormat::Yaml => {
+                    let value_a: serde_yml::Value = serde_yml::from_str(&serialized)?;
+                    let value_b: serde_yml::Value = serde_yml::from_str(&serialized_again)?;
+                    assert_eq!(value_a, value_b);
+                }
+                FileFormat::Json => {
+                    let value_a: serde_json::Value = serde_json::from_str(&serialized)?;
+                    let value_b: serde_json::Value = serde_json::from_str(&serialized_again)?;
+                    assert_eq!(value_a, value_b);
+                }
+            }
+        }
 
         Ok(())
     }

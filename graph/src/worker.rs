@@ -227,7 +227,7 @@ mod tests {
                     .expect("Failed to send a compute callback event");
             });
 
-            let graph = Graph::from_yaml_file("../test_resources/log_frame_no.yaml")
+            let graph = Graph::from_file("../test_resources/log_frame_no.yaml")
                 .expect("Failed to load the log_frame_no.yaml graph");
 
             worker.run_once(graph.clone()).await;
