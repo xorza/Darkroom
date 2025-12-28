@@ -20,7 +20,7 @@ enum ProcessingState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct RuntimePortAddress {
+pub struct PortAddress {
     pub e_node_idx: usize,
     pub port_idx: usize,
 }
@@ -33,20 +33,20 @@ pub enum InputState {
     Missing,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct RuntimeInput {
+pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
-    pub output_address: Option<RuntimePortAddress>,
+    pub output_address: Option<PortAddress>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum RuntimeOutput {
+pub enum ExecutionOutput {
     #[default]
     Unused,
     Used,
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
-pub struct RuntimeNode {
+pub struct ExecutionNode {
     pub id: NodeId,
 
     pub has_missing_inputs: bool,
@@ -56,8 +56,8 @@ pub struct RuntimeNode {
 
     pub node_idx: usize,
     pub func_idx: usize,
-    pub inputs: Vec<RuntimeInput>,
-    pub outputs: Vec<RuntimeOutput>,
+    pub inputs: Vec<ExecutionInput>,
+    pub outputs: Vec<ExecutionOutput>,
 
     processing_state: ProcessingState,
 
@@ -73,24 +73,24 @@ pub struct RuntimeNode {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct RuntimeGraph {
-    pub e_nodes: Vec<RuntimeNode>,
+pub struct ExecutionGraph {
+    pub e_nodes: Vec<ExecutionNode>,
     e_node_idx_by_id: HashMap<NodeId, usize>,
 }
 
-impl RuntimeNode {
+impl ExecutionNode {
     fn reset_from(&mut self, node: &Node) {
         let mut prev_state = take(self);
 
         self.id = node.id;
 
         self.inputs = take(&mut prev_state.inputs);
-        self.inputs.fill(RuntimeInput::default());
+        self.inputs.fill(ExecutionInput::default());
         self.inputs
-            .resize(node.inputs.len(), RuntimeInput::default());
+            .resize(node.inputs.len(), ExecutionInput::default());
 
         self.outputs = take(&mut prev_state.outputs);
-        self.outputs.fill(RuntimeOutput::default());
+        self.outputs.fill(ExecutionOutput::default());
 
         #[cfg(debug_assertions)]
         {
@@ -107,23 +107,23 @@ impl RuntimeNode {
         self.inputs.clear();
         self.inputs.reserve(func.inputs.len());
         for input in &func.inputs {
-            self.inputs.push(RuntimeInput {
+            self.inputs.push(ExecutionInput {
                 required: input.required,
                 ..Default::default()
             });
         }
 
-        self.outputs.fill(RuntimeOutput::Unused);
+        self.outputs.fill(ExecutionOutput::Unused);
         self.outputs
-            .resize(func.outputs.len(), RuntimeOutput::default());
+            .resize(func.outputs.len(), ExecutionOutput::default());
     }
 }
 
-impl RuntimeGraph {
-    pub fn by_id(&self, node_id: NodeId) -> Option<&RuntimeNode> {
+impl ExecutionGraph {
+    pub fn by_id(&self, node_id: NodeId) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.id == node_id)
     }
-    pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut RuntimeNode> {
+    pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut ExecutionNode> {
         self.e_nodes.iter_mut().find(|node| node.id == node_id)
     }
 
@@ -139,7 +139,7 @@ impl RuntimeGraph {
     }
 
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let runtime_graph: RuntimeGraph = match format {
+        let runtime_graph: ExecutionGraph = match format {
             FileFormat::Yaml => serde_yml::from_str(serialized)?,
             FileFormat::Json => serde_json::from_str(serialized)?,
         };
@@ -171,7 +171,7 @@ impl RuntimeGraph {
                 Some(idx) => idx,
                 None => {
                     if write_idx >= self.e_nodes.len() {
-                        self.e_nodes.push(RuntimeNode::default());
+                        self.e_nodes.push(ExecutionNode::default());
                     }
                     write_idx
                 }
@@ -235,7 +235,7 @@ impl RuntimeGraph {
     fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) {
         enum VisitCause {
             Terminal,
-            OutputRequest { output_address: RuntimePortAddress },
+            OutputRequest { output_address: PortAddress },
             Processed,
         }
         struct Visit {
@@ -308,7 +308,7 @@ impl RuntimeGraph {
                 }
 
                 if let Some(output_address) = output_address {
-                    e_node.outputs[output_address.port_idx] = RuntimeOutput::Used;
+                    e_node.outputs[output_address.port_idx] = ExecutionOutput::Used;
                 }
                 e_node.processing_state = ProcessingState::Processing;
                 stack.push(Visit {
@@ -322,15 +322,14 @@ impl RuntimeGraph {
             for (input_idx, input) in graph.nodes[node_idx].inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
                     let output_e_node_idx = self.e_node_idx_by_id[&output_binding.output_node_id];
-                    self.e_nodes[e_node_idx].inputs[input_idx].output_address =
-                        Some(RuntimePortAddress {
-                            e_node_idx: output_e_node_idx,
-                            port_idx: output_binding.output_idx,
-                        });
+                    self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
+                        e_node_idx: output_e_node_idx,
+                        port_idx: output_binding.output_idx,
+                    });
                     stack.push(Visit {
                         e_node_idx: output_e_node_idx,
                         cause: VisitCause::OutputRequest {
-                            output_address: RuntimePortAddress {
+                            output_address: PortAddress {
                                 e_node_idx: output_e_node_idx,
                                 port_idx: output_binding.output_idx,
                             },
@@ -495,7 +494,7 @@ mod tests {
             .expect("Node named \"get_b\" not found")
             .id;
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.e_nodes.len(), 5);
@@ -523,7 +522,7 @@ mod tests {
             .expect("Node named \"get_b\" not found")
             .id;
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.e_nodes.len(), 5);
@@ -563,7 +562,7 @@ mod tests {
             .inputs[0]
             .binding = Binding::None;
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         runtime_graph.update(&graph, &func_lib);
 
         assert_eq!(runtime_graph.e_nodes.len(), 5);
@@ -627,12 +626,12 @@ mod tests {
         let graph = test_graph();
         let func_lib = test_func_lib();
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         runtime_graph.update(&graph, &func_lib);
 
         for format in [FileFormat::Yaml, FileFormat::Json] {
             let serialized = runtime_graph.serialize(format);
-            let deserialized = RuntimeGraph::deserialize(serialized.as_str(), format)?;
+            let deserialized = ExecutionGraph::deserialize(serialized.as_str(), format)?;
             let serialized_again = deserialized.serialize(format);
 
             match format {

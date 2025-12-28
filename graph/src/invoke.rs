@@ -274,9 +274,9 @@ mod tests {
         compute::Compute,
         data::StaticValue,
         elements::{basic_invoker::BasicInvoker, timers_invoker::TimersInvoker},
+        execution_graph::ExecutionGraph,
         function::{test_func_lib, FuncBehavior},
         graph::{test_graph, Binding, Graph},
-        runtime_graph::RuntimeGraph,
     };
 
     use super::*;
@@ -458,7 +458,7 @@ mod tests {
 
         let graph = test_graph();
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -476,7 +476,7 @@ mod tests {
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Impure;
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
             .await?;
@@ -528,7 +528,7 @@ mod tests {
             mult_inputs[1].binding = Binding::Const;
         }
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
 
         Compute::default()
             .run(&graph, &func_lib, &invoker, &mut runtime_graph)
@@ -593,7 +593,7 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .behavior = NodeBehavior::OnInputChange;
 
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
 
         Compute::default()
             .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)

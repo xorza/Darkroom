@@ -2,10 +2,10 @@ use std::fmt::Debug;
 use std::ops::{Index, IndexMut};
 
 use crate::data::{DataType, DynamicValue};
+use crate::execution_graph::ExecutionGraph;
 use crate::function::FuncLib;
 use crate::graph::{Binding, Graph};
 use crate::invoke::Invoker;
-use crate::runtime_graph::RuntimeGraph;
 
 #[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
@@ -19,7 +19,7 @@ impl Compute {
         graph: &Graph,
         func_lib: &FuncLib,
         invoker: &T,
-        runtime_graph: &mut RuntimeGraph,
+        runtime_graph: &mut ExecutionGraph,
     ) -> anyhow::Result<()>
     where
         T: Invoker,

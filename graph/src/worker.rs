@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use crate::compute::Compute;
 use crate::event::EventId;
+use crate::execution_graph::ExecutionGraph;
 use crate::function::FuncLib;
 use crate::graph::Graph;
 use crate::invoke::{Invoker, UberInvoker};
-use crate::runtime_graph::RuntimeGraph;
 use pollster::FutureExt;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -72,7 +72,7 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = RuntimeGraph::default();
+                    let mut runtime_graph = ExecutionGraph::default();
                     Compute::default()
                         .run(&graph, &func_lib, &invoker, &mut runtime_graph)
                         .await
@@ -102,7 +102,7 @@ impl Worker {
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
-        let mut runtime_graph = RuntimeGraph::default();
+        let mut runtime_graph = ExecutionGraph::default();
 
         loop {
             // receive all messages and pick message with the highest priority

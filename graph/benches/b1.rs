@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 
 use graph::function::test_func_lib;
 use graph::graph::Graph;
-use graph::runtime_graph::RuntimeGraph;
+use graph::runtime_graph::ExecutionGraph;
 
 fn bench_foo(c: &mut Criterion) {
     c.bench_function("foo", |b| {
@@ -20,9 +20,9 @@ fn bench_foo(c: &mut Criterion) {
         let func_lib = test_func_lib();
 
         b.iter(|| {
-            let mut runtime_graph = RuntimeGraph::default();
-            runtime_graph.update(&graph, &func_lib);
-            black_box(runtime_graph);
+            let mut execution_graph = ExecutionGraph::default();
+            execution_graph.update(&graph, &func_lib);
+            black_box(execution_graph);
         })
     });
 }
