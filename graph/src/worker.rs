@@ -87,7 +87,6 @@ impl Worker {
         }
     }
 
-    #[allow(unreachable_code)]
     async fn event_subloop(
         graph: Graph,
         func_lib: &FuncLib,
