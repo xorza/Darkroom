@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncBehavior, FuncId, FuncLib, InvokeArgs, InvokeCache};
+use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeId};
 use crate::{data, function};
 
@@ -23,8 +23,8 @@ struct FuncConnections {
 pub struct LuaInvoker {
     lua: Arc<mlua::Lua>,
     output_stream: Arc<Mutex<Option<OutputStream>>>,
-    funcs: Arc<Mutex<HashMap<FuncId, mlua::Function>>>,
     func_lib: FuncLib,
+    funcs: Arc<Mutex<HashMap<FuncId, mlua::Function>>>,
 }
 
 impl Default for LuaInvoker {
@@ -32,8 +32,8 @@ impl Default for LuaInvoker {
         LuaInvoker {
             lua: Arc::new(mlua::Lua::new()),
             output_stream: Arc::new(Mutex::new(None)),
-            funcs: Arc::new(Mutex::new(HashMap::new())),
             func_lib: FuncLib::default(),
+            funcs: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -54,7 +54,6 @@ impl LuaInvoker {
                 let mut output = String::new();
 
                 for arg in args {
-                    #[allow(unreachable_patterns)]
                     match arg {
                         mlua::Value::Nil => {
                             output += "Nil";
@@ -115,30 +114,37 @@ impl LuaInvoker {
 
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: mlua::Table = self.lua.globals().get("functions")?;
+        self.funcs
+            .try_lock()
+            .expect("Lua function map mutex is already locked")
+            .clear();
         while let Ok(function_table) = functions_table.pop() {
             let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
             let func_id = func.id;
+            let lua = self.lua.clone();
+            let func_clone = func.clone();
             self.funcs
                 .try_lock()
                 .expect("Lua function map mutex is already locked")
-                .insert(func_id, lua_func);
+                .insert(func_id, lua_func.clone());
 
-            let funcs = self.funcs.clone();
-            let lua = self.lua.clone();
-            let func_info = func.clone();
-
-            func.set_lambda_result(move |_cache, inputs, outputs| {
-                let funcs_guard = funcs
-                    .try_lock()
-                    .expect("Lua function map mutex is already locked");
-                let lua_func = funcs_guard
-                    .get(&func_id)
-                    .expect("Missing Lua function binding");
-
+            func.lambda = Some(FuncLambda::new(move |_cache, inputs, outputs| {
+                assert_eq!(
+                    inputs.len(),
+                    func_clone.inputs.len(),
+                    "Lua function {} input length mismatch",
+                    func_clone.name
+                );
+                assert_eq!(
+                    outputs.len(),
+                    func_clone.outputs.len(),
+                    "Lua function {} output length mismatch",
+                    func_clone.name
+                );
                 let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                for (index, input_info) in func_info.inputs.iter().enumerate() {
+                for (index, input_info) in func_clone.inputs.iter().enumerate() {
                     let input = &inputs[index];
                     assert_eq!(input_info.data_type, *input.data_type());
 
@@ -147,8 +153,14 @@ impl LuaInvoker {
                 }
 
                 let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
+                assert_eq!(
+                    output_args.len(),
+                    func_clone.outputs.len(),
+                    "Lua function {} returned unexpected output count",
+                    func_clone.name
+                );
 
-                for (index, output_info) in func_info.outputs.iter().enumerate() {
+                for (index, output_info) in func_clone.outputs.iter().enumerate() {
                     let output_arg: &mlua::Value = output_args
                         .get(index)
                         .expect("Missing output value from Lua call");
@@ -159,7 +171,7 @@ impl LuaInvoker {
                 }
 
                 Ok(())
-            });
+            }));
             self.func_lib.add(func);
         }
 

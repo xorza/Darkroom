@@ -258,27 +258,6 @@ impl FuncLib {
         }
     }
 
-    pub fn set_lambda<F>(&mut self, func_id: FuncId, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
-    {
-        self.by_id_mut(func_id)
-            .expect("Func not found while setting lambda")
-            .set_lambda(lambda);
-    }
-
-    pub fn set_lambda_result<F>(&mut self, func_id: FuncId, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.by_id_mut(func_id)
-            .expect("Func not found while setting lambda")
-            .set_lambda_result(lambda);
-    }
-
     pub fn invoke_by_id(
         &self,
         func_id: FuncId,
@@ -344,26 +323,6 @@ impl FromStr for FuncEvent {
 }
 
 impl Func {
-    pub fn set_lambda<F>(&mut self, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
-    {
-        self.lambda = Some(FuncLambda::new(move |cache, inputs, outputs| {
-            lambda(cache, inputs, outputs);
-            Ok(())
-        }));
-    }
-
-    pub fn set_lambda_result<F>(&mut self, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.lambda = Some(FuncLambda::new(lambda));
-    }
-
     pub fn invoke(
         &self,
         cache: &mut InvokeCache,
@@ -599,7 +558,7 @@ mod tests {
 
     #[test]
     fn invoke_by_id_and_index() -> anyhow::Result<()> {
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let func_lib = test_func_lib(TestFuncHooks::default());
         let sum_id = func_lib
             .by_name("sum")
             .expect("Func named \"sum\" not found")
@@ -609,13 +568,6 @@ mod tests {
             .iter()
             .position(|func| func.id == sum_id)
             .expect("Sum func missing from lib");
-
-        func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
-            let a: i64 = inputs[0].as_int();
-            let b: i64 = inputs[1].as_int();
-            ctx.set(a + b);
-            outputs[0] = (a + b).into();
-        });
 
         let mut cache = InvokeCache::default();
         let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];

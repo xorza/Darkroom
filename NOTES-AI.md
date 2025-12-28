@@ -54,6 +54,7 @@ Execution execution is handled by the `execution_graph` module which determines 
 Additional modules drive execution and integration:
 - `compute` runs active nodes through `FuncLib` lambdas and converts values between data types.
 - Function libraries now own lambda invocations directly; `invoke.rs` and the `Invoker`/`UberInvoker` layer were removed.
+- Lua function loading now assigns `Func.lambda` directly via `FuncLambda` and asserts input/output counts during invocation.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.
