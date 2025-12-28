@@ -53,7 +53,7 @@ impl Default for TimersInvoker {
                 },
             ],
             events: vec!["always".into(), "once".into(), "fps".into()],
-            lambda: Some(FuncLambda::new(move |ctx, inputs, outputs| {
+            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();
                 let now = Instant::now();
 
@@ -79,7 +79,7 @@ impl Default for TimersInvoker {
                 outputs[0] = DynamicValue::Float(delta);
                 outputs[1] = DynamicValue::Int(frame_no);
                 Ok(())
-            })),
+            }),
         });
 
         TimersInvoker { func_lib: invoker }

@@ -121,7 +121,7 @@ impl Default for BasicInvoker {
             }],
             outputs: vec![],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, _| {
+            lambda: FuncLambda::new(move |_, inputs, _| {
                 assert_eq!(
                     inputs.len(),
                     1,
@@ -138,7 +138,7 @@ impl Default for BasicInvoker {
                 });
                 info!("{:?}", value);
                 Ok(())
-            })),
+            }),
         });
         // math two argument operation
         func_lib.add(Func {
@@ -175,7 +175,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_cache, inputs, outputs| {
+            lambda: FuncLambda::new(move |_cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
@@ -185,7 +185,7 @@ impl Default for BasicInvoker {
                     .map(|result| outputs[0] = result)
                     .expect("failed to invoke math two argument operation");
                 Ok(())
-            })),
+            }),
             description: None,
         });
         // to string
@@ -208,7 +208,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::String,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(|_, inputs, outputs| {
+            lambda: FuncLambda::new(|_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -217,7 +217,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::String(result);
                 Ok(())
-            })),
+            }),
         });
 
         // random
@@ -249,7 +249,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |cache, inputs, outputs| {
+            lambda: FuncLambda::new(move |cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -262,7 +262,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
-            })),
+            }),
         });
         //add
         func_lib.add(Func {
@@ -293,7 +293,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -303,7 +303,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
-            })),
+            }),
         });
         //subtract
         func_lib.add(Func {
@@ -334,7 +334,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -344,7 +344,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
-            })),
+            }),
         });
         //multiply
         func_lib.add(Func {
@@ -374,7 +374,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -384,7 +384,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
-            })),
+            }),
         });
         //divide
         func_lib.add(Func {
@@ -420,7 +420,7 @@ impl Default for BasicInvoker {
                 },
             ],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -432,7 +432,7 @@ impl Default for BasicInvoker {
                 outputs[0] = DynamicValue::Float(divide);
                 outputs[1] = DynamicValue::Float(modulo);
                 Ok(())
-            })),
+            }),
         });
         // power
         func_lib.add(Func {
@@ -463,7 +463,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -473,7 +473,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(power);
                 Ok(())
-            })),
+            }),
         });
         // sqrt
         func_lib.add(Func {
@@ -495,7 +495,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -504,7 +504,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(sqrt);
                 Ok(())
-            })),
+            }),
         });
         // sin
         func_lib.add(Func {
@@ -526,7 +526,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -535,7 +535,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(sin);
                 Ok(())
-            })),
+            }),
         });
         // cos
         func_lib.add(Func {
@@ -557,7 +557,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -566,7 +566,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(cos);
                 Ok(())
-            })),
+            }),
         });
         // tan
         func_lib.add(Func {
@@ -588,7 +588,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -597,7 +597,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(tan);
                 Ok(())
-            })),
+            }),
         });
         // asin
         func_lib.add(Func {
@@ -619,7 +619,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -628,7 +628,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(asin);
                 Ok(())
-            })),
+            }),
         });
         // acos
         func_lib.add(Func {
@@ -650,7 +650,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -659,7 +659,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(acos);
                 Ok(())
-            })),
+            }),
         });
         // atan
         func_lib.add(Func {
@@ -681,7 +681,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -690,7 +690,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(atan);
                 Ok(())
-            })),
+            }),
         });
         // log
         func_lib.add(Func {
@@ -721,7 +721,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, outputs| {
+            lambda: FuncLambda::new(move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -731,7 +731,7 @@ impl Default for BasicInvoker {
 
                 outputs[0] = DynamicValue::Float(log);
                 Ok(())
-            })),
+            }),
         });
 
         Self {

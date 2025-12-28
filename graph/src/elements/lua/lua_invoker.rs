@@ -130,7 +130,7 @@ impl LuaInvoker {
                 .expect("Lua function map mutex is already locked")
                 .insert(func_id, lua_func.clone());
 
-            func.lambda = Some(FuncLambda::new(move |_cache, inputs, outputs| {
+            func.lambda = FuncLambda::new(move |_cache, inputs, outputs| {
                 assert_eq!(
                     inputs.len(),
                     func_clone.inputs.len(),
@@ -171,7 +171,7 @@ impl LuaInvoker {
                 }
 
                 Ok(())
-            }));
+            });
             self.func_lib.add(func);
         }
 
@@ -189,7 +189,7 @@ impl LuaInvoker {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
-            lambda: None,
+            lambda: FuncLambda::None,
         };
 
         let inputs: mlua::Table = table.get("inputs")?;

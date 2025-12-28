@@ -27,9 +27,11 @@ pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> 
     + Sync
     + 'static;
 
-#[derive(Clone)]
-pub struct FuncLambda {
-    inner: Arc<Lambda>,
+#[derive(Clone, Default)]
+pub enum FuncLambda {
+    #[default]
+    None,
+    Lambda(Arc<Lambda>),
 }
 
 impl FuncLambda {
@@ -40,9 +42,7 @@ impl FuncLambda {
             + Sync
             + 'static,
     {
-        Self {
-            inner: Arc::new(lambda),
-        }
+        Self::Lambda(Arc::new(lambda))
     }
 
     pub fn invoke(
@@ -51,13 +51,21 @@ impl FuncLambda {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        (self.inner)(cache, inputs, outputs)
+        match self {
+            FuncLambda::None => {
+                panic!("Func missing lambda");
+            }
+            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs),
+        }
     }
 }
 
 impl std::fmt::Debug for FuncLambda {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FuncLambda").finish()
+        match self {
+            FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
+            FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
+        }
     }
 }
 
@@ -200,7 +208,7 @@ pub struct Func {
     pub events: Vec<FuncEvent>,
 
     #[serde(skip, default)]
-    pub lambda: Option<FuncLambda>,
+    pub lambda: FuncLambda,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -329,10 +337,7 @@ impl Func {
         inputs: &mut InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
-        self.lambda
-            .as_ref()
-            .expect("Func missing lambda")
-            .invoke(cache, inputs, outputs)
+        self.lambda.invoke(cache, inputs, outputs)
     }
 }
 
@@ -388,7 +393,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |ctx, inputs, outputs| {
+            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
                 assert_eq!(
                     inputs.len(),
                     2,
@@ -406,7 +411,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 outputs[0] = (a * b).into();
                 ctx.set(a * b);
                 Ok(())
-            })),
+            }),
         },
         Func {
             id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")
@@ -421,7 +426,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, _, outputs| {
+            lambda: FuncLambda::new(move |_, _, outputs| {
                 assert_eq!(
                     outputs.len(),
                     1,
@@ -430,7 +435,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 );
                 outputs[0] = (get_a() as f64).into();
                 Ok(())
-            })),
+            }),
         },
         Func {
             id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")
@@ -445,7 +450,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, _, outputs| {
+            lambda: FuncLambda::new(move |_, _, outputs| {
                 assert_eq!(
                     outputs.len(),
                     1,
@@ -454,7 +459,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 );
                 outputs[0] = (get_b() as f64).into();
                 Ok(())
-            })),
+            }),
         },
         Func {
             id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")
@@ -484,7 +489,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |ctx, inputs, outputs| {
+            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
                 assert_eq!(
                     inputs.len(),
                     2,
@@ -502,7 +507,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 ctx.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
-            })),
+            }),
         },
         Func {
             id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")
@@ -520,7 +525,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             outputs: vec![],
             events: vec![],
-            lambda: Some(FuncLambda::new(move |_, inputs, _| {
+            lambda: FuncLambda::new(move |_, inputs, _| {
                 assert_eq!(
                     inputs.len(),
                     1,
@@ -529,7 +534,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 );
                 print(inputs[0].as_int());
                 Ok(())
-            })),
+            }),
         },
     ]
     .into()
