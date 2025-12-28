@@ -87,14 +87,11 @@ impl FuncLib {
         Ok(funcs.into())
     }
     pub fn serialize(&self, format: FileFormat) -> String {
-        let mut funcs = self.funcs.clone();
-        funcs.sort_by_key(|func| func.id);
-
         match format {
-            FileFormat::Yaml => serde_yml::to_string(&funcs)
+            FileFormat::Yaml => serde_yml::to_string(&self.funcs)
                 .expect("Failed to serialize function library to YAML")
                 .normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&funcs)
+            FileFormat::Json => serde_json::to_string_pretty(&self.funcs)
                 .expect("Failed to serialize function library to JSON")
                 .normalize(),
         }

@@ -439,7 +439,7 @@ impl ExecutionGraph {
                 (e_node.processing_state == ProcessingState::Processed).then_some(idx)
             })
             .collect::<Vec<_>>();
-        active_e_node_indices.sort_unstable_by_key(|&idx| self.e_nodes[idx].invocation_order);
+        active_e_node_indices.sort_by_key(|&idx| self.e_nodes[idx].invocation_order);
 
         for e_node_idx in active_e_node_indices {
             let node = {
