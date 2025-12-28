@@ -32,7 +32,7 @@ impl Compute {
                 .e_nodes
                 .iter()
                 .enumerate()
-                .filter_map(|(idx, r_node)| r_node.should_invoke.then_some(idx))
+                .filter_map(|(idx, e_node)| e_node.should_invoke.then_some(idx))
                 .collect::<_>();
 
             active_node_indexes.sort_by_key(|&idx| execution_graph.e_nodes[idx].invocation_order);

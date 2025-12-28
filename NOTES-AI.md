@@ -82,7 +82,7 @@ Execution graph invariant lookups and tests now use `expect` instead of `unwrap_
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
 Compute input value conversion now uses a single loop instead of iterator chains.
 Execution graph update/backward/forward comments now describe traversal intent and invariants.
-Execution graph now rebuilds the `r_node_idx_by_id` cache each update and uses it for node lookups.
+Execution graph now rebuilds the `e_node_idx_by_id` cache each update and uses it for node lookups.
 Execution node cache rebuild now drops execution nodes missing from the current graph.
 Execution node cache update compacts in-place with swaps and truncation to minimize allocations.
 Execution node cache compaction includes inline comments describing the swap-and-truncate flow.
