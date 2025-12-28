@@ -119,10 +119,10 @@ impl Compute {
             e_node.run_time = {
                 let start = std::time::Instant::now();
                 func_lib
-                    .invoke_by_id(
-                        node.func_id,
+                    .invoke_by_index(
+                        e_node.func_idx,
                         &mut e_node.cache,
-                        inputs.as_mut_slice(),
+                        inputs.as_slice(),
                         outputs.as_mut_slice(),
                     )
                     .map_err(|source| ComputeError::Invoke {
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn simple_compute_test() -> Result<(), ComputeError> {
+    async fn simple_compute_test() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -270,30 +270,33 @@ mod tests {
         Compute::default()
             .run(&graph, &func_lib, &mut execution_graph)
             .await?;
-        assert_eq!(test_values.lock().await.result, 35);
+        assert_eq!(test_values.try_lock()?.result, 35);
+
+        // get_b is pure, so changing this should not affect result
+        test_values.try_lock()?.b = 7;
 
         Compute::default()
             .run(&graph, &func_lib, &mut execution_graph)
             .await?;
-        assert_eq!(test_values.lock().await.result, 35);
+        assert_eq!(test_values.try_lock()?.result, 35);
 
-        test_values.lock().await.b = 7;
         func_lib
             .by_name_mut("get_b")
-            .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
+            .expect("Func named \"get_b\" not found")
             .behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         Compute::default()
             .run(&graph, &func_lib, &mut execution_graph)
             .await?;
-        assert_eq!(test_values.lock().await.result, 63);
+
+        assert_eq!(test_values.try_lock()?.result, 63);
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn default_input_value() -> Result<(), ComputeError> {
+    async fn default_input_value() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -338,15 +341,14 @@ mod tests {
         Compute::default()
             .run(&graph, &func_lib, &mut execution_graph)
             .await?;
-        assert_eq!(test_values.lock().await.result, 360);
 
-        drop(graph);
+        assert_eq!(test_values.try_lock()?.result, 360);
 
         Ok(())
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn cached_value() -> Result<(), ComputeError> {
+    async fn cached_value() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,
             b: 5,
@@ -388,13 +390,13 @@ mod tests {
 
         func_lib
             .by_name_mut("get_a")
-            .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
+            .expect("Func named \"get_a\" not found")
             .behavior = FuncBehavior::Impure;
 
         let mut graph = test_graph();
         graph
             .by_name_mut("sum")
-            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .expect("Node named \"sum\" not found")
             .behavior = NodeBehavior::OnInputChange;
 
         let mut execution_graph = ExecutionGraph::default();
@@ -405,7 +407,7 @@ mod tests {
 
         // assert that both nodes were called
         {
-            let guard = test_values.lock().await;
+            let guard = test_values.try_lock()?;
             assert_eq!(guard.a, 3);
             assert_eq!(guard.b, 6);
             assert_eq!(guard.result, 35);
@@ -416,7 +418,7 @@ mod tests {
             .await?;
 
         // assert that node was called again
-        let guard = test_values.lock().await;
+        let guard = test_values.try_lock()?;
         assert_eq!(guard.a, 4);
         // but node b was cached
         assert_eq!(guard.b, 6);
