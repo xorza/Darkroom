@@ -901,4 +901,35 @@ mod tests {
         );
         Ok(())
     }
+
+    #[test]
+    fn cycle_detection_returns_error() {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib();
+
+        let mult_node_id = graph
+            .by_name("mult")
+            .expect("Node named \"mult\" not found")
+            .id;
+
+        let sum_inputs = &mut graph
+            .by_name_mut("sum")
+            .expect("Node named \"sum\" not found")
+            .inputs;
+        sum_inputs[0].binding = Binding::from_output_binding(mult_node_id, 0);
+        sum_inputs[0].const_value = None;
+
+        let mut execution_graph = ExecutionGraph::default();
+        let err = execution_graph
+            .update(&graph, &func_lib)
+            .expect_err("Expected cycle detection error");
+        match err {
+            ExecutionGraphError::CycleDetected { e_node_idx } => {
+                assert!(
+                    e_node_idx < graph.nodes.len(),
+                    "Cycle detection should report a valid execution node index"
+                );
+            }
+        }
+    }
 }
