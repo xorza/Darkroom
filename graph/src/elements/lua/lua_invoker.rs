@@ -95,38 +95,38 @@ impl LuaInvoker {
 
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: mlua::Table = self.lua.globals().get("functions")?;
-        self.funcs
+        let mut funcs_guard = self
+            .funcs
             .try_lock()
-            .expect("Lua function map mutex is already locked")
-            .clear();
+            .expect("Lua function map mutex is already locked");
+        funcs_guard.clear();
         while let Ok(function_table) = functions_table.pop() {
             let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            let func_id = func.id;
             let lua = self.lua.clone();
             let func_clone = func.clone();
-            self.funcs
-                .try_lock()
-                .expect("Lua function map mutex is already locked")
-                .insert(func_id, lua_func.clone());
+            funcs_guard.insert(func.id, lua_func.clone());
 
             func.lambda = FuncLambda::new(move |_cache, inputs, outputs| {
+                let input_len = inputs.len();
+                let expected_input_len = func_clone.inputs.len();
                 assert_eq!(
-                    inputs.len(),
-                    func_clone.inputs.len(),
+                    input_len, expected_input_len,
                     "Lua function {} input length mismatch",
                     func_clone.name
                 );
+
+                let output_len = outputs.len();
+                let expected_output_len = func_clone.outputs.len();
                 assert_eq!(
-                    outputs.len(),
-                    func_clone.outputs.len(),
+                    output_len, expected_output_len,
                     "Lua function {} output length mismatch",
                     func_clone.name
                 );
+
                 let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                for (index, input_info) in func_clone.inputs.iter().enumerate() {
-                    let input = &inputs[index];
+                for (input_info, input) in func_clone.inputs.iter().zip(inputs.iter()) {
                     assert_eq!(input_info.data_type, *input.data_type());
 
                     let invoke_value = to_lua_value(&lua, input)?;
@@ -136,23 +136,25 @@ impl LuaInvoker {
                 let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
                 assert_eq!(
                     output_args.len(),
-                    func_clone.outputs.len(),
+                    expected_output_len,
                     "Lua function {} returned unexpected output count",
                     func_clone.name
                 );
 
-                for (index, output_info) in func_clone.outputs.iter().enumerate() {
-                    let output_arg: &mlua::Value = output_args
-                        .get(index)
-                        .expect("Missing output value from Lua call");
-
-                    let output = data::DynamicValue::from(output_arg);
+                for ((index, output_info), output_arg) in func_clone
+                    .outputs
+                    .iter()
+                    .enumerate()
+                    .zip(output_args.into_iter())
+                {
+                    let output = data::DynamicValue::from(&output_arg);
                     assert_eq!(output_info.data_type, *output.data_type());
                     outputs[index] = output;
                 }
 
                 Ok(())
             });
+
             self.func_lib.add(func);
         }
 

@@ -57,6 +57,7 @@ Additional modules drive execution and integration:
 - Lua function loading now assigns `Func.lambda` directly via `FuncLambda` and asserts input/output counts during invocation.
 - `Func.lambda` now uses a `FuncLambda` enum with explicit `None`/`Lambda` states instead of `Option`.
 - Lua print output now joins multiple arguments with tab separators while preserving type-specific stringification.
+- Lua function loading now holds the function map lock once and iterates inputs/outputs with zip-based loops.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.
