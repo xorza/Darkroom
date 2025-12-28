@@ -8,7 +8,7 @@ The core graph and utilities are written in Rust.
 - **common** – shared utilities used across the workspace
 - **graph** – the main graph library
 - **deprecated_code** – older editors and experimental code
-- **test_resources** – sample assets used by tests
+- **test_resources** – sample graphs and media used by tests
 
 ## Maintenance
 
@@ -49,6 +49,7 @@ Runtime node cache compacts runtime nodes in-place to avoid extra allocations.
 Runtime node cache compaction now has inline comments explaining the swap/truncate flow.
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
+Tests use in-code function library fixtures for the standard sample functions.
 
 ## Benchmarks
 

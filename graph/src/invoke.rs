@@ -274,7 +274,7 @@ mod tests {
         compute::Compute,
         data::StaticValue,
         elements::{basic_invoker::BasicInvoker, timers_invoker::TimersInvoker},
-        function::FuncBehavior,
+        function::{test_func_lib, FuncBehavior},
         graph::{test_graph, Binding, Graph},
         runtime_graph::RuntimeGraph,
     };
@@ -292,13 +292,13 @@ mod tests {
         get_a: GetA,
         get_b: GetB,
         result: SetResult,
-    ) -> anyhow::Result<LambdaInvoker>
+    ) -> LambdaInvoker
     where
         SetResult: Fn(i64) + Send + Sync + 'static,
         GetA: Fn() -> i64 + Send + Sync + 'static,
         GetB: Fn() -> i64 + Send + Sync + 'static,
     {
-        let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
+        let func_lib = test_func_lib();
 
         let mut invoker = LambdaInvoker::default();
 
@@ -309,6 +309,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("Func named \"print\" not found"))
                 .clone(),
             move |_, inputs, _| {
+                assert_eq!(
+                    inputs.len(),
+                    1,
+                    "print expects exactly 1 input but received {}",
+                    inputs.len()
+                );
                 result(inputs[0].as_int());
             },
         );
@@ -319,6 +325,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
                 .clone(),
             move |_, _, outputs| {
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "get_a expects exactly 1 output but received {}",
+                    outputs.len()
+                );
                 outputs[0] = (get_a() as f64).into();
             },
         );
@@ -329,6 +341,12 @@ mod tests {
                 .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
                 .clone(),
             move |_, _, outputs| {
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "get_b expects exactly 1 output but received {}",
+                    outputs.len()
+                );
                 outputs[0] = (get_b() as f64).into();
             },
         );
@@ -339,6 +357,18 @@ mod tests {
                 .unwrap_or_else(|| panic!("Func named \"sum\" not found"))
                 .clone(),
             |ctx, inputs, outputs| {
+                assert_eq!(
+                    inputs.len(),
+                    2,
+                    "sum expects exactly 2 inputs but received {}",
+                    inputs.len()
+                );
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "sum expects exactly 1 output but received {}",
+                    outputs.len()
+                );
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
                 ctx.set(a + b);
@@ -352,6 +382,18 @@ mod tests {
                 .unwrap_or_else(|| panic!("Func named \"mult\" not found"))
                 .clone(),
             |ctx, inputs, outputs| {
+                assert_eq!(
+                    inputs.len(),
+                    2,
+                    "mult expects exactly 2 inputs but received {}",
+                    inputs.len()
+                );
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "mult expects exactly 1 output but received {}",
+                    outputs.len()
+                );
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
                 outputs[0] = (a * b).into();
@@ -359,7 +401,7 @@ mod tests {
             },
         );
 
-        Ok(invoker)
+        invoker
     }
 
     #[test]
@@ -412,7 +454,7 @@ mod tests {
                     .expect("TestValues mutex is already locked")
                     .result = result;
             },
-        )?;
+        );
 
         let graph = test_graph();
 
@@ -461,7 +503,7 @@ mod tests {
                     .expect("TestValues mutex is already locked")
                     .result = result;
             },
-        )?;
+        );
         let func_lib = invoker.get_func_lib();
 
         let mut graph = test_graph();
@@ -537,7 +579,7 @@ mod tests {
                     .expect("TestValues mutex is already locked")
                     .result = result;
             },
-        )?;
+        );
 
         invoker
             .func_lib

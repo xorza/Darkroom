@@ -150,131 +150,179 @@ impl FromStr for FuncEvent {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::data::DataType;
-    use crate::function::{Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput};
-    use common::yaml_format::reformat_yaml;
-    use std::str::FromStr;
-
-    fn create_func_lib() -> FuncLib {
-        [
-            Func {
-                id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc").unwrap(),
-                name: "mult".to_string(),
-                description: None,
-                category: "Debug".to_string(),
-                behavior: FuncBehavior::Pure,
-                inputs: vec![
-                    FuncInput {
-                        name: "A".to_string(),
-                        required: true,
-                        data_type: DataType::Int,
-                        default_value: None,
-                        variants: vec![],
-                    },
-                    FuncInput {
-                        name: "B".to_string(),
-                        required: true,
-                        data_type: DataType::Int,
-                        default_value: None,
-                        variants: vec![],
-                    },
-                ],
-                outputs: vec![FuncOutput {
-                    name: "Prod".to_string(),
-                    data_type: DataType::Int,
-                }],
-                events: vec![],
-            },
-            Func {
-                id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2").unwrap(),
-                name: "get_a".to_string(),
-                description: None,
-                category: "Debug".to_string(),
-                behavior: FuncBehavior::Impure,
-                inputs: vec![],
-                outputs: vec![FuncOutput {
-                    name: "Int32 Value".to_string(),
-                    data_type: DataType::Int,
-                }],
-                events: vec![],
-            },
-            Func {
-                id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b").unwrap(),
-                name: "get_b".to_string(),
-                description: None,
-                category: "Debug".to_string(),
-                behavior: FuncBehavior::Pure,
-                inputs: vec![],
-                outputs: vec![FuncOutput {
-                    name: "Int32 Value".to_string(),
-                    data_type: DataType::Int,
-                }],
-                events: vec![],
-            },
-            Func {
-                id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5").unwrap(),
-                name: "sum".to_string(),
-                description: None,
-                category: "Debug".to_string(),
-                behavior: FuncBehavior::Pure,
-                inputs: vec![
-                    FuncInput {
-                        name: "A".to_string(),
-                        required: true,
-                        data_type: DataType::Int,
-                        default_value: None,
-                        variants: vec![],
-                    },
-                    FuncInput {
-                        name: "B".to_string(),
-                        required: true,
-                        data_type: DataType::Int,
-                        default_value: None,
-                        variants: vec![],
-                    },
-                ],
-                outputs: vec![FuncOutput {
-                    name: "Sum".to_string(),
-                    data_type: DataType::Int,
-                }],
-                events: vec![],
-            },
-            Func {
-                id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a").unwrap(),
-                name: "print".to_string(),
-                description: None,
-                category: "Debug".to_string(),
-                behavior: FuncBehavior::Impure,
-                inputs: vec![FuncInput {
-                    name: "message".to_string(),
+pub fn test_func_lib() -> FuncLib {
+    [
+        Func {
+            id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")
+                .expect("Failed to parse FuncId for mult"),
+            name: "mult".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Pure,
+            inputs: vec![
+                FuncInput {
+                    name: "A".to_string(),
                     required: true,
                     data_type: DataType::Int,
                     default_value: None,
                     variants: vec![],
-                }],
-                outputs: vec![],
-                events: vec![],
-            },
-        ]
-        .into()
-    }
+                },
+                FuncInput {
+                    name: "B".to_string(),
+                    required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: vec![],
+                },
+            ],
+            outputs: vec![FuncOutput {
+                name: "Prod".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+        },
+        Func {
+            id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")
+                .expect("Failed to parse FuncId for get_a"),
+            name: "get_a".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Impure,
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "Int32 Value".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+        },
+        Func {
+            id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")
+                .expect("Failed to parse FuncId for get_b"),
+            name: "get_b".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Pure,
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "Int32 Value".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+        },
+        Func {
+            id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")
+                .expect("Failed to parse FuncId for sum"),
+            name: "sum".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Pure,
+            inputs: vec![
+                FuncInput {
+                    name: "A".to_string(),
+                    required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: vec![],
+                },
+                FuncInput {
+                    name: "B".to_string(),
+                    required: true,
+                    data_type: DataType::Int,
+                    default_value: None,
+                    variants: vec![],
+                },
+            ],
+            outputs: vec![FuncOutput {
+                name: "Sum".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+        },
+        Func {
+            id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")
+                .expect("Failed to parse FuncId for print"),
+            name: "print".to_string(),
+            description: None,
+            category: "Debug".to_string(),
+            behavior: FuncBehavior::Impure,
+            inputs: vec![FuncInput {
+                name: "message".to_string(),
+                required: true,
+                data_type: DataType::Int,
+                default_value: None,
+                variants: vec![],
+            }],
+            outputs: vec![],
+            events: vec![],
+        },
+    ]
+    .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::function::test_func_lib;
+    use common::yaml_format::reformat_yaml;
+
+    const TEST_FUNCS_YAML: &str = r#"- id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5"
+  name: sum
+  category: Debug
+  behavior: Pure
+  inputs:
+    - name: A
+      required: true
+      data_type: Int
+    - name: B
+      required: true
+      data_type: Int
+  outputs:
+    - name: Sum
+      data_type: Int
+- id: "432b9bf1-f478-476c-a9c9-9a6e190124fc"
+  name: mult
+  category: Debug
+  behavior: Pure
+  inputs:
+    - name: A
+      required: true
+      data_type: Int
+    - name: B
+      required: true
+      data_type: Int
+  outputs:
+    - name: Prod
+      data_type: Int
+- id: a937baff-822d-48fd-9154-58751539b59b
+  name: get_b
+  category: Debug
+  behavior: Pure
+  outputs:
+    - name: Int32 Value
+      data_type: Int
+- id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
+  name: get_a
+  category: Debug
+  behavior: Impure
+  outputs:
+    - name: Int32 Value
+      data_type: Int
+- id: f22cd316-1cdf-4a80-b86c-1277acd1408a
+  name: print
+  category: Debug
+  behavior: Impure
+  inputs:
+    - name: message
+      required: true
+      data_type: Int
+"#;
 
     #[test]
-    fn serialization() -> anyhow::Result<()> {
-        let file_yaml: String = {
-            // This trick is used to make yaml formatting consistent
-            let str = std::fs::read_to_string("../test_resources/test_funcs.yml")?;
-            reformat_yaml(str.as_str())?
-        };
-
-        let func_lib = create_func_lib();
+    fn serialization() {
+        let file_yaml = reformat_yaml(TEST_FUNCS_YAML)
+            .expect("Failed to normalize embedded test function YAML");
+        let func_lib = test_func_lib();
         let serialized_yaml = func_lib.to_yaml();
-        // std::fs::write("../test_resources/test_funcs.yml", &serialized_yaml)?;
 
         assert_eq!(file_yaml, serialized_yaml);
-
-        Ok(())
     }
 }

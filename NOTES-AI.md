@@ -10,7 +10,7 @@ Scenarium collects the tooling required to build node based applications. The re
 
 - **common** – shared utilities and helper macros
 - **graph** – Rust library defining graphs, nodes and the runtime
-- **test_resources** – sample graphs, function libraries and media used by tests
+- **test_resources** – sample graphs and media used by tests
 - **test_output** – output folder created by unit tests
 - **deprecated_code** – older .NET and QML editors and experimental code
 
@@ -87,6 +87,7 @@ Runtime node cache rebuild now drops runtime nodes missing from the current grap
 Runtime node cache update compacts in-place with swaps and truncation to minimize allocations.
 Runtime node cache compaction includes inline comments describing the swap-and-truncate flow.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
+`graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms

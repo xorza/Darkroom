@@ -461,12 +461,13 @@ fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::function::test_func_lib;
     use crate::graph::test_graph;
 
     #[test]
     fn simple_run() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
+        let func_lib = test_func_lib();
 
         let _get_b_node_id = graph
             .by_name("get_b")
@@ -494,7 +495,7 @@ mod tests {
     #[test]
     fn empty_run() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
+        let func_lib = test_func_lib();
 
         let _get_b_node_id = graph
             .by_name("get_b")
@@ -516,7 +517,7 @@ mod tests {
     #[test]
     fn missing_input() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
+        let func_lib = test_func_lib();
 
         let get_b_node_id = graph
             .by_name("get_b")
