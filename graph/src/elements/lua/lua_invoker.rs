@@ -241,12 +241,12 @@ impl LuaInvoker {
         // substitute functions
         for func in self.func_lib.funcs.iter() {
             let outputs_len = func.outputs.len();
-            let func_name = func.name.clone();
+
             let new_function = self
                 .lua
                 .create_function({
-                    let connections = Arc::clone(&connections);
-                    let func_name = func_name.clone();
+                    let connections_ref = Arc::clone(&connections);
+                    let func_name = func.name.clone();
                     let outputs_len = outputs_len as u32;
 
                     move |_lua: &mlua::Lua,
@@ -271,7 +271,7 @@ impl LuaInvoker {
                             connection.outputs.push(index);
                         }
 
-                        connections
+                        connections_ref
                             .try_lock()
                             .expect("Connections mutex is already locked")
                             .push(connection);
@@ -310,16 +310,14 @@ impl LuaInvoker {
         Ok(take(&mut *guard))
     }
 
-    fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
-        let mut graph = Graph::default();
-
+    fn create_graph(&self, connections: Vec<FuncConnections>) -> Graph {
         #[derive(Debug)]
         struct OutputAddr {
             idx: usize,
             node_id: NodeId,
         }
         let mut output_ids: HashMap<u32, OutputAddr> = HashMap::new();
-        let mut nodes: Vec<Node> = Vec::new();
+        let mut nodes: Vec<Node> = Vec::with_capacity(connections.len());
 
         for connection in connections.iter() {
             let func = self
@@ -327,18 +325,15 @@ impl LuaInvoker {
                 .by_name(&connection.name)
                 .unwrap_or_else(|| panic!("Func named {:?} not found", connection.name));
 
-            nodes.push(Node::from_function(func));
-            let node = nodes
-                .last_mut()
-                .expect("Missing node while building Lua graph");
+            let node = Node::from_function(func);
 
             assert!(
                 connection.inputs.len() <= node.inputs.len(),
                 "Lua connections exceed function input count for {}",
                 node.name
             );
+            assert!(!node.id.is_nil());
             for (idx, output_id) in connection.outputs.iter().cloned().enumerate() {
-                assert!(!node.id.is_nil());
                 output_ids.insert(
                     output_id,
                     OutputAddr {
@@ -347,11 +342,12 @@ impl LuaInvoker {
                     },
                 );
             }
+
+            nodes.push(node);
         }
 
-        while let Some(connection) = connections.pop() {
-            let mut node = nodes.pop().expect("Missing node while wiring Lua graph");
-
+        let mut graph = Graph::default();
+        for (connection, mut node) in connections.into_iter().rev().zip(nodes.into_iter().rev()) {
             for (input_index, output_id) in connection.inputs.iter().enumerate() {
                 let input = &mut node.inputs[input_index];
                 let output_addr = output_ids
@@ -364,7 +360,9 @@ impl LuaInvoker {
             graph.add(node);
         }
 
-        assert!(graph.validate().is_ok());
+        graph
+            .validate()
+            .expect("Lua graph validation failed after wiring");
 
         graph
     }
