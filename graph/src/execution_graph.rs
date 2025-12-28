@@ -570,7 +570,7 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 mod tests {
     use super::*;
     use crate::common::FileFormat;
-    use crate::data::StaticValue;
+    use crate::data::{DynamicValue, StaticValue};
     use crate::function::test_func_lib;
     use crate::graph::{test_graph, Input};
 
@@ -615,9 +615,31 @@ mod tests {
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
 
+        let invocation_order_before: Vec<usize> = execution_graph
+            .e_nodes
+            .iter()
+            .map(|e_node| e_node.invocation_order)
+            .collect();
+
         execution_graph.update(&graph, &func_lib);
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
+        assert!(
+            execution_graph
+                .e_nodes
+                .iter()
+                .all(|e_node| e_node.processing_state == ProcessingState::Processed),
+            "Execution nodes should be processed after update"
+        );
+        let invocation_order_after: Vec<usize> = execution_graph
+            .e_nodes
+            .iter()
+            .map(|e_node| e_node.invocation_order)
+            .collect();
+        assert_eq!(
+            invocation_order_before, invocation_order_after,
+            "Invocation order should remain stable across updates"
+        );
 
         Ok(())
     }
@@ -704,6 +726,33 @@ mod tests {
                 .has_missing_inputs
         );
 
+        let sum_node = execution_graph
+            .by_id(sum_node_id)
+            .expect("Execution node for sum missing");
+        assert_eq!(
+            sum_node.inputs[0].state,
+            InputState::Missing,
+            "Sum input 0 should be missing"
+        );
+
+        let mult_node = execution_graph
+            .by_id(mult_node_id)
+            .expect("Execution node for mult missing");
+        assert_eq!(
+            mult_node.inputs[0].state,
+            InputState::Missing,
+            "Mult input 0 should be missing due to sum"
+        );
+
+        let print_node = execution_graph
+            .by_id(print_node_id)
+            .expect("Execution node for print missing");
+        assert_eq!(
+            print_node.inputs[0].state,
+            InputState::Missing,
+            "Print input 0 should be missing due to mult"
+        );
+
         Ok(())
     }
 
@@ -742,8 +791,14 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib();
 
-        let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        let get_a_node_id = graph
+            .by_name("get_a")
+            .expect("Node named \"get_a\" not found")
+            .id;
+        let get_b_node_id = graph
+            .by_name("get_b")
+            .expect("Node named \"get_b\" not found")
+            .id;
 
         graph
             .by_name_mut("mult")
@@ -777,9 +832,61 @@ mod tests {
             .id;
         graph.remove_by_id(sum_node_id);
 
+        let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
+        execution_graph.validate_with_graph(&graph);
 
         assert_eq!(graph.nodes.len(), 4);
         assert_eq!(execution_graph.e_nodes.len(), 4);
+
+        let mult_node_id = graph
+            .by_name("mult")
+            .expect("Node named \"mult\" not found")
+            .id;
+        let mult_node = execution_graph
+            .by_id(mult_node_id)
+            .expect("Execution node for mult missing");
+        let mult_input_a = mult_node.inputs[0]
+            .output_address
+            .expect("Mult input A missing output address");
+        let mult_input_b = mult_node.inputs[1]
+            .output_address
+            .expect("Mult input B missing output address");
+        assert_eq!(
+            execution_graph.e_nodes[mult_input_a.e_node_idx].id, get_a_node_id,
+            "Mult input A should be wired to get_a"
+        );
+        assert_eq!(
+            execution_graph.e_nodes[mult_input_b.e_node_idx].id, get_b_node_id,
+            "Mult input B should be wired to get_b"
+        );
+    }
+
+    #[test]
+    fn once_node_with_cached_outputs_skips_invocation() {
+        let graph = test_graph();
+        let func_lib = test_func_lib();
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
+
+        let get_b_node_id = graph
+            .by_name("get_b")
+            .expect("Node named \"get_b\" not found")
+            .id;
+        execution_graph
+            .by_id_mut(get_b_node_id)
+            .expect("Execution node for get_b missing")
+            .output_values = Some(vec![DynamicValue::Int(7)]);
+
+        execution_graph.update(&graph, &func_lib);
+
+        let get_b_node = execution_graph
+            .by_id(get_b_node_id)
+            .expect("Execution node for get_b missing");
+        assert!(
+            !get_b_node.should_invoke,
+            "Once node with cached outputs should not invoke"
+        );
     }
 }
