@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::compute::Compute;
+use crate::compute::{Compute, ComputeResult};
 use crate::event::EventId;
 use crate::execution_graph::ExecutionGraph;
 use crate::function::FuncLib;
@@ -21,7 +21,7 @@ enum WorkerMessage {
     RunLoop(Graph),
 }
 
-type ComputeEvent = dyn Fn() + Send + 'static;
+type ComputeEvent = dyn Fn(ComputeResult<()>) + Send + 'static;
 
 type EventQueue = Arc<Mutex<Vec<EventId>>>;
 
@@ -34,7 +34,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<Callback>(func_lib: FuncLib, compute_callback: Callback) -> Self
     where
-        Callback: Fn() + Send + 'static,
+        Callback: Fn(ComputeResult<()>) + Send + 'static,
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
@@ -74,7 +74,7 @@ impl Worker {
                     let result = Compute::default()
                         .run(&graph, &func_lib, &mut execution_graph)
                         .await;
-                    (*compute_callback.lock().await)();
+                    (*compute_callback.lock().await)(result);
                 }
 
                 WorkerMessage::RunLoop(graph) => {
@@ -122,7 +122,7 @@ impl Worker {
                         .run(&graph, func_lib, &mut execution_graph)
                         .await;
 
-                    (*compute_callback.lock().await)();
+                    (*compute_callback.lock().await)(result);
                 }
             }
         }
@@ -196,7 +196,7 @@ mod tests {
     use crate::worker::Worker;
 
     #[test]
-    fn test_worker() {
+    fn test_worker() -> anyhow::Result<()> {
         tokio::runtime::Runtime::new().unwrap().block_on(async {
             let output_stream = OutputStream::new();
 
@@ -207,26 +207,35 @@ mod tests {
             func_lib.merge(timers_invoker.into_func_lib());
 
             let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
-            let mut worker = Worker::new(func_lib, move || {
+            let mut worker = Worker::new(func_lib, move |result| {
                 compute_finish_tx
-                    .send(())
+                    .send(result)
                     .expect("Failed to send a compute callback event");
             });
 
             let graph = Graph::from_file("../test_resources/log_frame_no.yaml").unwrap();
 
             worker.run_once(graph.clone()).await;
-            compute_finish_rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .unwrap()
+                .expect("Unsuccessful compute");
 
             assert_eq!(output_stream.take().await[0], "1");
 
             worker.run_loop(graph.clone()).await;
 
             worker.event().await;
-            compute_finish_rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .unwrap()
+                .expect("Unsuccessful compute");
 
             worker.event().await;
-            compute_finish_rx.recv().unwrap();
+            compute_finish_rx
+                .recv()
+                .unwrap()
+                .expect("Unsuccessful compute");
 
             let log = output_stream.take().await;
             assert_eq!(log[0], "1");
@@ -234,5 +243,7 @@ mod tests {
 
             worker.exit().await;
         });
+
+        Ok(())
     }
 }

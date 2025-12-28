@@ -25,7 +25,7 @@ pub enum ComputeError {
     },
 }
 
-type ComputeResult<T> = std::result::Result<T, ComputeError>;
+pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
     pub async fn run(
