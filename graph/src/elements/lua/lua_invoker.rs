@@ -238,21 +238,24 @@ impl LuaInvoker {
         let connections: Arc<Mutex<Vec<FuncConnections>>> = Arc::new(Mutex::new(Vec::new()));
         let mut output_index: u32 = 0;
 
-        //substitue functions
+        // substitute functions
         for func in self.func_lib.funcs.iter() {
+            let outputs_len = func.outputs.len();
+            let func_name = func.name.clone();
             let new_function = self
                 .lua
                 .create_function({
                     let connections = Arc::clone(&connections);
-                    let func = func.clone();
+                    let func_name = func_name.clone();
+                    let outputs_len = outputs_len as u32;
 
                     move |_lua: &mlua::Lua,
                           mut inputs: mlua::Variadic<mlua::Value>|
                           -> Result<mlua::Variadic<mlua::Value>, mlua::Error> {
                         let mut connection = FuncConnections {
-                            name: func.name.clone(),
+                            name: func_name.clone(),
                             inputs: Vec::new(),
-                            outputs: Vec::new(),
+                            outputs: Vec::with_capacity(outputs_len as usize),
                         };
 
                         while let Some(input) = inputs.pop() {
@@ -262,8 +265,8 @@ impl LuaInvoker {
                         }
 
                         let mut result: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                        for idx in 0..func.outputs.len() {
-                            let index = output_index + idx as u32;
+                        for idx in 0..outputs_len {
+                            let index = output_index + idx;
                             result.push(mlua::Value::Integer(index as mlua::Integer));
                             connection.outputs.push(index);
                         }
@@ -283,7 +286,7 @@ impl LuaInvoker {
                 .set(func.name.as_str(), new_function)
                 .expect("Failed to bind Lua function");
 
-            output_index += func.outputs.len() as u32;
+            output_index += outputs_len as u32;
         }
 
         let graph_function: mlua::Function = self.lua.globals().get("graph")?;
@@ -301,10 +304,10 @@ impl LuaInvoker {
                 .expect("Failed to restore Lua function");
         }
 
-        let mut connections = connections
+        let mut guard = connections
             .try_lock()
             .expect("Connections mutex is already locked");
-        Ok(take(&mut connections))
+        Ok(take(&mut *guard))
     }
 
     fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
