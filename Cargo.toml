@@ -18,6 +18,7 @@ serde_yml = { version = "*" }
 serde_json =  { version = "*" }
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow =  { version = "*" }
+thiserror = { version = "*" }
 wgpu = { version = "*" }
 bytemuck = { version = "*", features = ["derive"] }
 pollster =  { version = "*" }

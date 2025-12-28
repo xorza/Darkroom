@@ -3,6 +3,7 @@ use std::mem::take;
 use anyhow::Result;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::common::FileFormat;
 use crate::data::DynamicValue;
@@ -19,28 +20,13 @@ enum ProcessingState {
     Processed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ExecutionGraphError {
+    #[error("Cycle detected while building execution graph at node {e_node_idx:?}")]
     CycleDetected { e_node_idx: usize },
 }
 
 type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
-
-impl std::fmt::Display for ExecutionGraphError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExecutionGraphError::CycleDetected { e_node_idx } => {
-                write!(
-                    f,
-                    "Cycle detected while building execution graph at node {:?}",
-                    e_node_idx
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for ExecutionGraphError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PortAddress {
