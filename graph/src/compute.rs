@@ -218,3 +218,221 @@ impl IndexMut<usize> for ArgSet {
         &mut self.0[index]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use tokio::sync::Mutex;
+
+    use crate::compute::{Compute, ComputeError};
+    use crate::data::StaticValue;
+    use crate::execution_graph::ExecutionGraph;
+    use crate::function::FuncBehavior;
+    use crate::graph::{test_graph, Binding, NodeBehavior};
+    use crate::invoke::{create_invoker, Invoker};
+
+    #[derive(Debug)]
+    struct TestValues {
+        a: i64,
+        b: i64,
+        result: i64,
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn simple_compute_test() -> Result<(), ComputeError> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+
+        let test_values_a = test_values.clone();
+        let test_values_b = test_values.clone();
+        let test_values_result = test_values.clone();
+        let invoker = create_invoker(
+            move || {
+                test_values_a
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .a
+            },
+            move || {
+                test_values_b
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .b
+            },
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
+        );
+
+        let graph = test_graph();
+        let mut func_lib = invoker.get_func_lib();
+
+        let mut execution_graph = ExecutionGraph::default();
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+        assert_eq!(test_values.lock().await.result, 35);
+
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+        assert_eq!(test_values.lock().await.result, 35);
+
+        test_values.lock().await.b = 7;
+        func_lib
+            .by_name_mut("get_b")
+            .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
+            .behavior = FuncBehavior::Impure;
+
+        let mut execution_graph = ExecutionGraph::default();
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+        assert_eq!(test_values.lock().await.result, 63);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn default_input_value() -> Result<(), ComputeError> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+        let test_values_result = test_values.clone();
+
+        let invoker = create_invoker(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
+        );
+        let func_lib = invoker.get_func_lib();
+
+        let mut graph = test_graph();
+
+        {
+            let sum_inputs = &mut graph
+                .by_name_mut("sum")
+                .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+                .inputs;
+            sum_inputs[0].const_value = Some(StaticValue::from(29));
+            sum_inputs[0].binding = Binding::Const;
+            sum_inputs[1].const_value = Some(StaticValue::from(11));
+            sum_inputs[1].binding = Binding::Const;
+        }
+
+        {
+            let mult_inputs = &mut graph
+                .by_name_mut("mult")
+                .unwrap_or_else(|| panic!("Node named \"mult\" not found"))
+                .inputs;
+            mult_inputs[1].const_value = Some(StaticValue::from(9));
+            mult_inputs[1].binding = Binding::Const;
+        }
+
+        let mut execution_graph = ExecutionGraph::default();
+
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+        assert_eq!(test_values.lock().await.result, 360);
+
+        drop(graph);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_value() -> Result<(), ComputeError> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+
+        let test_values_a = test_values.clone();
+        let test_values_b = test_values.clone();
+        let test_values_result = test_values.clone();
+        let invoker = create_invoker(
+            move || {
+                let mut guard = test_values_a
+                    .try_lock()
+                    .expect("TestValues mutex is already locked");
+                let a1 = guard.a;
+                guard.a += 1;
+
+                a1
+            },
+            move || {
+                let mut guard = test_values_b
+                    .try_lock()
+                    .expect("TestValues mutex is already locked");
+                let b1 = guard.b;
+                guard.b += 1;
+                if b1 == 6 {
+                    panic!("Unexpected call to get_b");
+                }
+
+                b1
+            },
+            move |result| {
+                test_values_result
+                    .try_lock()
+                    .expect("TestValues mutex is already locked")
+                    .result = result;
+            },
+        );
+
+        let mut func_lib = invoker.get_func_lib();
+        func_lib
+            .by_name_mut("get_a")
+            .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
+            .behavior = FuncBehavior::Impure;
+
+        let mut graph = test_graph();
+        graph
+            .by_name_mut("sum")
+            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
+            .behavior = NodeBehavior::OnInputChange;
+
+        let mut execution_graph = ExecutionGraph::default();
+
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+
+        // assert that both nodes were called
+        {
+            let guard = test_values.lock().await;
+            assert_eq!(guard.a, 3);
+            assert_eq!(guard.b, 6);
+            assert_eq!(guard.result, 35);
+        }
+
+        Compute::default()
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .await?;
+
+        // assert that node was called again
+        let guard = test_values.lock().await;
+        assert_eq!(guard.a, 4);
+        // but node b was cached
+        assert_eq!(guard.b, 6);
+        assert_eq!(guard.result, 40);
+
+        Ok(())
+    }
+}
