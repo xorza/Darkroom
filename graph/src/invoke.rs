@@ -275,7 +275,7 @@ mod tests {
         data::StaticValue,
         elements::{basic_invoker::BasicInvoker, timers_invoker::TimersInvoker},
         function::FuncBehavior,
-        graph::{Binding, Graph},
+        graph::{test_graph, Binding, Graph},
         runtime_graph::RuntimeGraph,
     };
 
@@ -414,7 +414,7 @@ mod tests {
             },
         )?;
 
-        let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let graph = test_graph();
 
         let mut runtime_graph = RuntimeGraph::default();
         Compute::default()
@@ -464,7 +464,7 @@ mod tests {
         )?;
         let func_lib = invoker.get_func_lib();
 
-        let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let mut graph = test_graph();
 
         {
             let sum_inputs = &mut graph
@@ -545,7 +545,7 @@ mod tests {
             .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
             .behavior = FuncBehavior::Impure;
 
-        let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let mut graph = test_graph();
         graph
             .by_name_mut("sum")
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))

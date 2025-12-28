@@ -86,6 +86,7 @@ Runtime graph now rebuilds the `r_node_idx_by_id` cache each update and uses it 
 Runtime node cache rebuild now drops runtime nodes missing from the current graph.
 Runtime node cache update compacts in-place with swaps and truncation to minimize allocations.
 Runtime node cache compaction includes inline comments describing the swap-and-truncate flow.
+`graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 Zed debug config adds a CodeLLDB launch task that sets an LLDB breakpoint on `rust_panic`.
 
 ## Common Terms

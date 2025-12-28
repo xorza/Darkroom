@@ -52,11 +52,12 @@ pub struct RuntimeNode {
     pub should_invoke: bool,
     pub invocation_order: usize,
 
-    processing_state: ProcessingState,
     pub node_idx: usize,
     pub func_idx: usize,
     pub inputs: Vec<RuntimeInput>,
     pub outputs: Vec<RuntimeOutput>,
+
+    processing_state: ProcessingState,
 
     pub run_time: f64,
 
@@ -460,10 +461,11 @@ fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::test_graph;
 
     #[test]
     fn simple_run() -> anyhow::Result<()> {
-        let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let graph = test_graph();
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let _get_b_node_id = graph
@@ -491,7 +493,7 @@ mod tests {
 
     #[test]
     fn empty_run() -> anyhow::Result<()> {
-        let graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let graph = test_graph();
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let _get_b_node_id = graph
@@ -513,7 +515,7 @@ mod tests {
 
     #[test]
     fn missing_input() -> anyhow::Result<()> {
-        let mut graph = Graph::from_yaml_file("../test_resources/test_graph.yml")?;
+        let mut graph = test_graph();
         let func_lib = FuncLib::from_yaml_file("../test_resources/test_funcs.yml")?;
 
         let get_b_node_id = graph

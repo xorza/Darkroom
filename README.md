@@ -48,6 +48,7 @@ Editor debug tasks can be configured per-project.
 Runtime node cache compacts runtime nodes in-place to avoid extra allocations.
 Runtime node cache compaction now has inline comments explaining the swap/truncate flow.
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
+Tests use the in-code `test_graph()` fixture for the standard sample graph.
 
 ## Benchmarks
 
