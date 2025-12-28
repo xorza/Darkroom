@@ -61,7 +61,6 @@ pub struct ExecutionNode {
     pub has_missing_inputs: bool,
     pub has_changed_inputs: bool,
     pub should_invoke: bool,
-    pub invocation_order: usize,
 
     pub node_idx: usize,
     pub func_idx: usize,
@@ -86,6 +85,7 @@ pub struct ExecutionNode {
 pub struct ExecutionGraph {
     pub e_nodes: Vec<ExecutionNode>,
     e_node_idx_by_id: HashMap<NodeId, usize>,
+    pub e_node_execution_order: Vec<usize>,
 }
 
 impl ExecutionNode {
@@ -345,24 +345,16 @@ impl ExecutionGraph {
         }
         let mut stack: Vec<Visit> = Vec::with_capacity(10);
 
-        self.e_nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, e_node)| {
-                if graph.nodes[e_node.node_idx].behavior == NodeBehavior::Terminal {
-                    Some(idx)
-                } else {
-                    None
-                }
-            })
-            .for_each(|idx| {
+        self.e_node_execution_order.clear();
+        for (idx, e_node) in self.e_nodes.iter().enumerate() {
+            if graph.nodes[e_node.node_idx].behavior == NodeBehavior::Terminal {
                 stack.push(Visit {
                     e_node_idx: idx,
                     cause: VisitCause::Terminal,
                 });
-            });
+            }
+        }
 
-        let mut invocation_order: usize = 0;
         while let Some(visit) = stack.pop() {
             let e_node_idx = visit.e_node_idx;
             let node_idx = {
@@ -380,8 +372,7 @@ impl ExecutionGraph {
                     }
                     VisitCause::Processed => {
                         e_node.processing_state = ProcessingState::Processed;
-                        e_node.invocation_order = invocation_order;
-                        invocation_order += 1;
+                        self.e_node_execution_order.push(e_node_idx);
                         continue;
                     }
                 };
@@ -442,17 +433,7 @@ impl ExecutionGraph {
 
     // Propagate input state forward from scheduled nodes to set invoke/missing flags.
     fn forward(&mut self, graph: &Graph) {
-        let mut active_e_node_indices = self
-            .e_nodes
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, e_node)| {
-                (e_node.processing_state == ProcessingState::Processed).then_some(idx)
-            })
-            .collect::<Vec<_>>();
-        active_e_node_indices.sort_by_key(|&idx| self.e_nodes[idx].invocation_order);
-
-        for e_node_idx in active_e_node_indices {
+        for e_node_idx in self.e_node_execution_order.iter().copied() {
             let node = {
                 let e_node = &mut self.e_nodes[e_node_idx];
                 assert_eq!(
@@ -626,11 +607,7 @@ mod tests {
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
 
-        let invocation_order_before: Vec<usize> = execution_graph
-            .e_nodes
-            .iter()
-            .map(|e_node| e_node.invocation_order)
-            .collect();
+        let execution_order_before: Vec<usize> = execution_graph.e_node_execution_order.clone();
 
         execution_graph.update(&graph, &func_lib)?;
 
@@ -642,13 +619,9 @@ mod tests {
                 .all(|e_node| e_node.processing_state == ProcessingState::Processed),
             "Execution nodes should be processed after update"
         );
-        let invocation_order_after: Vec<usize> = execution_graph
-            .e_nodes
-            .iter()
-            .map(|e_node| e_node.invocation_order)
-            .collect();
+        let execution_order_after: Vec<usize> = execution_graph.e_node_execution_order.clone();
         assert_eq!(
-            invocation_order_before, invocation_order_after,
+            execution_order_before, execution_order_after,
             "Invocation order should remain stable across updates"
         );
 

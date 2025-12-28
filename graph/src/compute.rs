@@ -37,22 +37,14 @@ impl Compute {
         execution_graph.update(graph, func_lib)?;
         let mut inputs: ArgSet = ArgSet::default();
 
-        let active_e_node_indexes = {
-            let mut active_node_indexes: Vec<usize> = execution_graph
-                .e_nodes
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, e_node)| e_node.should_invoke.then_some(idx))
-                .collect::<_>();
-
-            active_node_indexes.sort_by_key(|&idx| execution_graph.e_nodes[idx].invocation_order);
-            active_node_indexes
-        };
-
-        for e_node_idx in active_e_node_indexes {
+        for e_node_idx in execution_graph.e_node_execution_order.iter().copied() {
             let (node, func) = {
                 let e_node = &execution_graph.e_nodes[e_node_idx];
                 assert!(!e_node.id.is_nil());
+
+                if !e_node.should_invoke {
+                    continue;
+                }
 
                 let node = &graph.nodes[e_node.node_idx];
                 let func = &func_lib.funcs[e_node.func_idx];
