@@ -42,7 +42,7 @@ Recent adjustments:
 - Removed `*_ref` accessors and standardized on `Option` lookups with explicit `expect` messages at call sites.
 - Replaced parking_lot usage with Tokio mutexes and async/try_lock access patterns (no blocking_lock).
 - OutputStream now uses async drain via Tokio mpsc; sync writers send without blocking.
-- Invoker and Compute are async; worker and tests await compute instead of blocking.
+- Compute is async; worker and tests await compute instead of blocking.
 
 ### graph crate
 
@@ -52,8 +52,8 @@ Data structures like graphs, function libraries, and execution graphs can be ser
 
 Execution execution is handled by the `execution_graph` module which determines which nodes should run each tick.
 Additional modules drive execution and integration:
-- `compute` runs active nodes through an `Invoker` and converts values between data types.
-- `invoke` defines the `Invoker` trait and the `UberInvoker` aggregator which dispatches function calls.
+- `compute` runs active nodes through `FuncLib` lambdas and converts values between data types.
+- Function libraries now own lambda invocations directly; `invoke.rs` and the `Invoker`/`UberInvoker` layer were removed.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.

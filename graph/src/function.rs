@@ -1,4 +1,6 @@
+use std::any::Any;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::common::FileFormat;
 use crate::data::*;
@@ -16,6 +18,138 @@ pub enum FuncBehavior {
     Pure,
     // function designed to be terminal in graph, i.e. save results to io
     Output,
+}
+
+pub type InvokeArgs = [DynamicValue];
+
+pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+    + Send
+    + Sync
+    + 'static;
+
+#[derive(Clone)]
+pub struct FuncLambda {
+    inner: Arc<Lambda>,
+}
+
+impl FuncLambda {
+    pub fn new<F>(lambda: F) -> Self
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self {
+            inner: Arc::new(lambda),
+        }
+    }
+
+    pub fn invoke(
+        &self,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        (self.inner)(cache, inputs, outputs)
+    }
+}
+
+impl std::fmt::Debug for FuncLambda {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FuncLambda").finish()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct InvokeCache {
+    boxed: Option<Box<dyn Any + Send>>,
+}
+
+impl InvokeCache {
+    pub(crate) fn default() -> InvokeCache {
+        InvokeCache { boxed: None }
+    }
+
+    pub fn is_none(&self) -> bool {
+        self.boxed.is_none()
+    }
+
+    pub fn is_some<T>(&self) -> bool
+    where
+        T: Any + Send,
+    {
+        match &self.boxed {
+            None => false,
+            Some(v) => v.is::<T>(),
+        }
+    }
+
+    pub fn get<T>(&self) -> Option<&T>
+    where
+        T: Any + Send,
+    {
+        self.boxed
+            .as_ref()
+            .and_then(|boxed| boxed.downcast_ref::<T>())
+    }
+
+    pub fn get_mut<T>(&mut self) -> Option<&mut T>
+    where
+        T: Any + Send,
+    {
+        self.boxed
+            .as_mut()
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+    }
+
+    pub fn set<T>(&mut self, value: T)
+    where
+        T: Any + Send,
+    {
+        self.boxed = Some(Box::new(value));
+    }
+
+    pub fn get_or_default<T>(&mut self) -> &mut T
+    where
+        T: Any + Send + Default,
+    {
+        let is_some = self.is_some::<T>();
+
+        if is_some {
+            self.boxed
+                .as_mut()
+                .expect("InvokeCache missing value")
+                .downcast_mut::<T>()
+                .expect("InvokeCache has unexpected type")
+        } else {
+            self.boxed
+                .insert(Box::<T>::default())
+                .downcast_mut::<T>()
+                .expect("InvokeCache default insert failed")
+        }
+    }
+
+    pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
+    where
+        T: Any + Send,
+        F: FnOnce() -> T,
+    {
+        let is_some = self.is_some::<T>();
+
+        if is_some {
+            self.boxed
+                .as_mut()
+                .expect("InvokeCache missing value")
+                .downcast_mut::<T>()
+                .expect("InvokeCache has unexpected type")
+        } else {
+            self.boxed
+                .insert(Box::<T>::new(f()))
+                .downcast_mut::<T>()
+                .expect("InvokeCache insert failed")
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +198,9 @@ pub struct Func {
     pub outputs: Vec<FuncOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<FuncEvent>,
+
+    #[serde(skip, default)]
+    pub lambda: Option<FuncLambda>,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -120,6 +257,73 @@ impl FuncLib {
             }
         }
     }
+
+    pub fn add_lambda<F>(&mut self, mut func: Func, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+    {
+        func.set_lambda(lambda);
+        self.add(func);
+    }
+
+    pub fn add_lambda_result<F>(&mut self, mut func: Func, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        func.set_lambda_result(lambda);
+        self.add(func);
+    }
+
+    pub fn set_lambda<F>(&mut self, func_id: FuncId, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+    {
+        self.by_id_mut(func_id)
+            .expect("Func not found while setting lambda")
+            .set_lambda(lambda);
+    }
+
+    pub fn set_lambda_result<F>(&mut self, func_id: FuncId, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.by_id_mut(func_id)
+            .expect("Func not found while setting lambda")
+            .set_lambda_result(lambda);
+    }
+
+    pub fn invoke_by_id(
+        &self,
+        func_id: FuncId,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        let func = self
+            .by_id(func_id)
+            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
+        func.invoke(cache, inputs, outputs)
+    }
+
+    pub fn invoke_by_index(
+        &self,
+        func_idx: usize,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        let func = self
+            .funcs
+            .get(func_idx)
+            .unwrap_or_else(|| panic!("Func index {} out of bounds", func_idx));
+        func.invoke(cache, inputs, outputs)
+    }
     pub fn merge(&mut self, other: FuncLib) {
         for func in other.funcs {
             self.add(func);
@@ -158,6 +362,39 @@ impl FromStr for FuncEvent {
     }
 }
 
+impl Func {
+    pub fn set_lambda<F>(&mut self, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
+    {
+        self.lambda = Some(FuncLambda::new(move |cache, inputs, outputs| {
+            lambda(cache, inputs, outputs);
+            Ok(())
+        }));
+    }
+
+    pub fn set_lambda_result<F>(&mut self, lambda: F)
+    where
+        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.lambda = Some(FuncLambda::new(lambda));
+    }
+
+    pub fn invoke(
+        &self,
+        cache: &mut InvokeCache,
+        inputs: &mut InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> anyhow::Result<()> {
+        self.lambda
+            .as_ref()
+            .expect("Func missing lambda")
+            .invoke(cache, inputs, outputs)
+    }
+}
 pub fn test_func_lib() -> FuncLib {
     [
         Func {
@@ -188,6 +425,7 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            lambda: None,
         },
         Func {
             id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")
@@ -202,6 +440,7 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            lambda: None,
         },
         Func {
             id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")
@@ -216,6 +455,7 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            lambda: None,
         },
         Func {
             id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")
@@ -245,6 +485,7 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            lambda: None,
         },
         Func {
             id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")
@@ -262,6 +503,7 @@ pub fn test_func_lib() -> FuncLib {
             }],
             outputs: vec![],
             events: vec![],
+            lambda: None,
         },
     ]
     .into()
@@ -270,7 +512,8 @@ pub fn test_func_lib() -> FuncLib {
 #[cfg(test)]
 mod tests {
     use crate::common::FileFormat;
-    use crate::function::test_func_lib;
+    use crate::data::DynamicValue;
+    use crate::function::{test_func_lib, InvokeCache};
     use common::yaml_format::reformat_yaml;
 
     #[test]
@@ -283,6 +526,45 @@ mod tests {
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized_again, serialized);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn invoke_by_id_and_index() -> anyhow::Result<()> {
+        let mut func_lib = test_func_lib();
+        let sum_id = func_lib
+            .by_name("sum")
+            .expect("Func named \"sum\" not found")
+            .id;
+        let sum_idx = func_lib
+            .funcs
+            .iter()
+            .position(|func| func.id == sum_id)
+            .expect("Sum func missing from lib");
+
+        func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
+            ctx.set(a + b);
+            outputs[0] = (a + b).into();
+        });
+
+        let mut cache = InvokeCache::default();
+        let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];
+        let mut outputs = vec![DynamicValue::None];
+        func_lib.invoke_by_id(sum_id, &mut cache, &mut inputs, &mut outputs)?;
+        assert_eq!(outputs[0].as_int(), 6);
+        let cached = cache
+            .get::<i64>()
+            .expect("InvokeCache should contain the sum value");
+        assert_eq!(*cached, 6);
+
+        inputs[0] = DynamicValue::Int(3);
+        inputs[1] = DynamicValue::Int(5);
+        outputs[0] = DynamicValue::None;
+        func_lib.invoke_by_index(sum_idx, &mut cache, &mut inputs, &mut outputs)?;
+        assert_eq!(outputs[0].as_int(), 8);
 
         Ok(())
     }

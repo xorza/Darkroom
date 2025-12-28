@@ -7,17 +7,17 @@ use strum_macros::{Display, EnumIter};
 use tokio::sync::Mutex;
 use tracing::info;
 
-use async_trait::async_trait;
 use common::output_stream::OutputStream;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::FuncBehavior;
-use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput, ValueVariant};
-use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
+use crate::function::{
+    Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput, InvokeArgs, InvokeCache,
+    ValueVariant,
+};
 
 #[derive(Debug)]
 pub struct BasicInvoker {
-    lambda_invoker: LambdaInvoker,
+    func_lib: FuncLib,
     output_stream: Arc<Mutex<Option<OutputStream>>>,
 }
 
@@ -89,14 +89,24 @@ impl BasicInvoker {
     }
 }
 
+impl BasicInvoker {
+    pub fn func_lib(&self) -> &FuncLib {
+        &self.func_lib
+    }
+
+    pub fn into_func_lib(self) -> FuncLib {
+        self.func_lib
+    }
+}
+
 impl Default for BasicInvoker {
     fn default() -> Self {
-        let mut lambda_invoker = LambdaInvoker::default();
+        let mut func_lib = FuncLib::default();
         let output_stream = Arc::new(Mutex::new(None::<OutputStream>));
         let output_stream_clone = output_stream.clone();
 
         //print, outputs to output_stream
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789")
                     .expect("Invalid func id"),
@@ -113,6 +123,7 @@ impl Default for BasicInvoker {
                 }],
                 outputs: vec![],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, _| {
                 let value: &str = inputs[0].as_string();
@@ -127,7 +138,7 @@ impl Default for BasicInvoker {
             },
         );
         // math two argument operation
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE")
                     .expect("Invalid func id"),
@@ -163,6 +174,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
                 description: None,
             },
             move |_cache, inputs, outputs| {
@@ -177,7 +189,7 @@ impl Default for BasicInvoker {
             },
         );
         // to string
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65")
                     .expect("Invalid func id"),
@@ -198,6 +210,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::String,
                 }],
                 events: vec![],
+                lambda: None,
             },
             |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -211,7 +224,7 @@ impl Default for BasicInvoker {
         );
 
         // random
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e")
                     .expect("Invalid func id"),
@@ -241,6 +254,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |cache, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -257,7 +271,7 @@ impl Default for BasicInvoker {
             },
         );
         //add
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee")
                     .expect("Invalid func id"),
@@ -287,6 +301,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -300,7 +315,7 @@ impl Default for BasicInvoker {
             },
         );
         //subtract
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2")
                     .expect("Invalid func id"),
@@ -330,6 +345,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -343,7 +359,7 @@ impl Default for BasicInvoker {
             },
         );
         //multiply
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc")
                     .expect("Invalid func id"),
@@ -372,6 +388,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -385,7 +402,7 @@ impl Default for BasicInvoker {
             },
         );
         //divide
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b")
                     .expect("Invalid func id"),
@@ -420,6 +437,7 @@ impl Default for BasicInvoker {
                     },
                 ],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -435,7 +453,7 @@ impl Default for BasicInvoker {
             },
         );
         // power
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264")
                     .expect("Invalid func id"),
@@ -465,6 +483,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -478,7 +497,7 @@ impl Default for BasicInvoker {
             },
         );
         // sqrt
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a")
                     .expect("Invalid func id"),
@@ -499,6 +518,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -511,7 +531,7 @@ impl Default for BasicInvoker {
             },
         );
         // sin
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6")
                     .expect("Invalid func id"),
@@ -532,6 +552,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -544,7 +565,7 @@ impl Default for BasicInvoker {
             },
         );
         // cos
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5")
                     .expect("Invalid func id"),
@@ -565,6 +586,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -577,7 +599,7 @@ impl Default for BasicInvoker {
             },
         );
         // tan
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e")
                     .expect("Invalid func id"),
@@ -598,6 +620,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -610,7 +633,7 @@ impl Default for BasicInvoker {
             },
         );
         // asin
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb")
                     .expect("Invalid func id"),
@@ -631,6 +654,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -643,7 +667,7 @@ impl Default for BasicInvoker {
             },
         );
         // acos
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c")
                     .expect("Invalid func id"),
@@ -664,6 +688,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -676,7 +701,7 @@ impl Default for BasicInvoker {
             },
         );
         // atan
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b")
                     .expect("Invalid func id"),
@@ -697,6 +722,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 1);
@@ -709,7 +735,7 @@ impl Default for BasicInvoker {
             },
         );
         // log
-        lambda_invoker.add_lambda(
+        func_lib.add_lambda(
             Func {
                 id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a")
                     .expect("Invalid func id"),
@@ -739,6 +765,7 @@ impl Default for BasicInvoker {
                     data_type: DataType::Float,
                 }],
                 events: vec![],
+                lambda: None,
             },
             move |_, inputs, outputs| {
                 assert_eq!(inputs.len(), 2);
@@ -753,27 +780,8 @@ impl Default for BasicInvoker {
         );
 
         Self {
-            lambda_invoker,
+            func_lib,
             output_stream,
         }
-    }
-}
-
-#[async_trait]
-impl Invoker for BasicInvoker {
-    fn get_func_lib(&self) -> FuncLib {
-        self.lambda_invoker.get_func_lib()
-    }
-
-    async fn invoke(
-        &self,
-        function_id: FuncId,
-        cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
-        self.lambda_invoker
-            .invoke(function_id, cache, inputs, outputs)
-            .await
     }
 }

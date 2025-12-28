@@ -5,7 +5,6 @@ use crate::data::{DataType, DynamicValue};
 use crate::execution_graph::{ExecutionGraph, ExecutionGraphError};
 use crate::function::{FuncId, FuncLib};
 use crate::graph::{Binding, Graph};
-use crate::invoke::Invoker;
 use thiserror::Error;
 
 #[derive(Debug, Default)]
@@ -18,7 +17,7 @@ pub struct Compute {}
 pub enum ComputeError {
     #[error("Execution graph update failed: {0}")]
     ExecutionGraph(#[from] ExecutionGraphError),
-    #[error("Invoker failed for function {function_id:?}: {source}")]
+    #[error("Function invocation failed for function {function_id:?}: {source}")]
     Invoke {
         function_id: FuncId,
         #[source]
@@ -29,16 +28,12 @@ pub enum ComputeError {
 type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
-    pub async fn run<T>(
+    pub async fn run(
         &self,
         graph: &Graph,
         func_lib: &FuncLib,
-        invoker: &T,
         execution_graph: &mut ExecutionGraph,
-    ) -> ComputeResult<()>
-    where
-        T: Invoker,
-    {
+    ) -> ComputeResult<()> {
         execution_graph.update(graph, func_lib)?;
         let mut inputs: ArgSet = ArgSet::default();
 
@@ -123,14 +118,13 @@ impl Compute {
 
             e_node.run_time = {
                 let start = std::time::Instant::now();
-                invoker
-                    .invoke(
+                func_lib
+                    .invoke_by_id(
                         node.func_id,
                         &mut e_node.cache,
                         inputs.as_mut_slice(),
                         outputs.as_mut_slice(),
                     )
-                    .await
                     .map_err(|source| ComputeError::Invoke {
                         function_id: node.func_id,
                         source,
@@ -228,9 +222,69 @@ mod tests {
     use crate::compute::{Compute, ComputeError};
     use crate::data::StaticValue;
     use crate::execution_graph::ExecutionGraph;
-    use crate::function::FuncBehavior;
+    use crate::function::{test_func_lib, FuncBehavior, FuncLib};
     use crate::graph::{test_graph, Binding, NodeBehavior};
-    use crate::invoke::{create_invoker, Invoker};
+
+    fn create_test_func_lib<GetA, GetB, SetResult>(
+        get_a: GetA,
+        get_b: GetB,
+        result: SetResult,
+    ) -> FuncLib
+    where
+        SetResult: Fn(i64) + Send + Sync + 'static,
+        GetA: Fn() -> i64 + Send + Sync + 'static,
+        GetB: Fn() -> i64 + Send + Sync + 'static,
+    {
+        let mut func_lib = test_func_lib();
+
+        let print_id = func_lib
+            .by_name("print")
+            .expect("Func named \"print\" not found")
+            .id;
+        func_lib.set_lambda(print_id, move |_, inputs, _| {
+            result(inputs[0].as_int());
+        });
+
+        let get_a_id = func_lib
+            .by_name("get_a")
+            .expect("Func named \"get_a\" not found")
+            .id;
+        func_lib.set_lambda(get_a_id, move |_, _, outputs| {
+            outputs[0] = (get_a() as f64).into();
+        });
+
+        let get_b_id = func_lib
+            .by_name("get_b")
+            .expect("Func named \"get_b\" not found")
+            .id;
+        func_lib.set_lambda(get_b_id, move |_, _, outputs| {
+            outputs[0] = (get_b() as f64).into();
+        });
+
+        let sum_id = func_lib
+            .by_name("sum")
+            .expect("Func named \"sum\" not found")
+            .id;
+        func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
+            ctx.set(a + b);
+            outputs[0] = (a + b).into();
+        });
+
+        let mult_id = func_lib
+            .by_name("mult")
+            .expect("Func named \"mult\" not found")
+            .id;
+        func_lib.set_lambda(mult_id, move |ctx, inputs, outputs| {
+            let a: i64 = inputs[0].as_int();
+            let b: i64 = inputs[1].as_int();
+            outputs[0] = (a * b).into();
+            ctx.set(a * b);
+        });
+
+        func_lib
+    }
 
     #[derive(Debug)]
     struct TestValues {
@@ -250,7 +304,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let invoker = create_invoker(
+        let mut func_lib = create_test_func_lib(
             move || {
                 test_values_a
                     .try_lock()
@@ -272,16 +326,15 @@ mod tests {
         );
 
         let graph = test_graph();
-        let mut func_lib = invoker.get_func_lib();
 
         let mut execution_graph = ExecutionGraph::default();
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
@@ -293,7 +346,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 63);
 
@@ -309,7 +362,7 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let invoker = create_invoker(
+        let func_lib = create_test_func_lib(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
             move |result| {
@@ -319,7 +372,6 @@ mod tests {
                     .result = result;
             },
         );
-        let func_lib = invoker.get_func_lib();
 
         let mut graph = test_graph();
 
@@ -346,7 +398,7 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
 
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 360);
 
@@ -366,7 +418,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let invoker = create_invoker(
+        let mut func_lib = create_test_func_lib(
             move || {
                 let mut guard = test_values_a
                     .try_lock()
@@ -396,7 +448,6 @@ mod tests {
             },
         );
 
-        let mut func_lib = invoker.get_func_lib();
         func_lib
             .by_name_mut("get_a")
             .unwrap_or_else(|| panic!("Func named \"get_a\" not found"))
@@ -411,7 +462,7 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
 
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
 
         // assert that both nodes were called
@@ -423,7 +474,7 @@ mod tests {
         }
 
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut execution_graph)
+            .run(&graph, &func_lib, &mut execution_graph)
             .await?;
 
         // assert that node was called again

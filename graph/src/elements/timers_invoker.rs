@@ -2,14 +2,13 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::FuncBehavior;
-use crate::function::{Func, FuncId, FuncInput, FuncLib, FuncOutput};
-use crate::invoke::{InvokeArgs, InvokeCache, Invoker, LambdaInvoker};
-use async_trait::async_trait;
+use crate::function::{
+    Func, FuncBehavior, FuncId, FuncInput, FuncLib, FuncOutput, InvokeArgs, InvokeCache,
+};
 
 #[derive(Debug)]
 pub struct TimersInvoker {
-    lambda_invoker: LambdaInvoker,
+    func_lib: FuncLib,
 }
 
 #[derive(Debug)]
@@ -18,9 +17,19 @@ struct FrameEventContext {
     frame_no: i64,
 }
 
+impl TimersInvoker {
+    pub fn func_lib(&self) -> &FuncLib {
+        &self.func_lib
+    }
+
+    pub fn into_func_lib(self) -> FuncLib {
+        self.func_lib
+    }
+}
+
 impl Default for TimersInvoker {
     fn default() -> TimersInvoker {
-        let mut invoker = LambdaInvoker::default();
+        let mut invoker = FuncLib::default();
 
         invoker.add_lambda(
             Func {
@@ -48,6 +57,7 @@ impl Default for TimersInvoker {
                     },
                 ],
                 events: vec!["always".into(), "once".into(), "fps".into()],
+                lambda: None,
             },
             move |ctx, inputs, outputs| {
                 let frequency = inputs[0].as_float();
@@ -77,27 +87,6 @@ impl Default for TimersInvoker {
             },
         );
 
-        TimersInvoker {
-            lambda_invoker: invoker,
-        }
-    }
-}
-
-#[async_trait]
-impl Invoker for TimersInvoker {
-    fn get_func_lib(&self) -> FuncLib {
-        self.lambda_invoker.get_func_lib()
-    }
-
-    async fn invoke(
-        &self,
-        function_id: FuncId,
-        cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
-        self.lambda_invoker
-            .invoke(function_id, cache, inputs, outputs)
-            .await
+        TimersInvoker { func_lib: invoker }
     }
 }

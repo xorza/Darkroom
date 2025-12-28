@@ -9,5 +9,4 @@ pub mod event;
 pub mod execution_graph;
 pub mod function;
 pub mod graph;
-pub mod invoke;
 pub mod worker;

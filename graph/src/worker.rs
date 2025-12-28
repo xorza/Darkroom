@@ -5,7 +5,6 @@ use crate::event::EventId;
 use crate::execution_graph::ExecutionGraph;
 use crate::function::FuncLib;
 use crate::graph::Graph;
-use crate::invoke::{Invoker, UberInvoker};
 use pollster::FutureExt;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -33,7 +32,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<Callback>(invoker: UberInvoker, compute_callback: Callback) -> Self
+    pub fn new<Callback>(func_lib: FuncLib, compute_callback: Callback) -> Self
     where
         Callback: Fn() + Send + 'static,
     {
@@ -41,7 +40,7 @@ impl Worker {
 
         let (tx, rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(invoker, rx, compute_callback).await;
+            Self::worker_loop(func_lib, rx, compute_callback).await;
         });
 
         Self {
@@ -51,12 +50,11 @@ impl Worker {
     }
 
     async fn worker_loop(
-        invoker: UberInvoker,
+        func_lib: FuncLib,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
-        let func_lib = invoker.get_func_lib();
 
         loop {
             if message.is_none() {
@@ -74,21 +72,16 @@ impl Worker {
                 WorkerMessage::RunOnce(graph) => {
                     let mut execution_graph = ExecutionGraph::default();
                     Compute::default()
-                        .run(&graph, &func_lib, &invoker, &mut execution_graph)
+                        .run(&graph, &func_lib, &mut execution_graph)
                         .await
                         .expect("Failed to run graph");
                     (*compute_callback.lock().await)();
                 }
 
                 WorkerMessage::RunLoop(graph) => {
-                    message = Self::event_subloop(
-                        graph,
-                        &func_lib,
-                        &invoker,
-                        &mut rx,
-                        compute_callback.clone(),
-                    )
-                    .await;
+                    message =
+                        Self::event_subloop(graph, &func_lib, &mut rx, compute_callback.clone())
+                            .await;
                 }
             }
         }
@@ -98,7 +91,6 @@ impl Worker {
     async fn event_subloop(
         graph: Graph,
         func_lib: &FuncLib,
-        invoker: &UberInvoker,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
@@ -129,7 +121,7 @@ impl Worker {
 
                 WorkerMessage::Event => {
                     Compute::default()
-                        .run(&graph, func_lib, invoker, &mut execution_graph)
+                        .run(&graph, func_lib, &mut execution_graph)
                         .await
                         .expect("Failed to run graph");
 
@@ -204,7 +196,6 @@ mod tests {
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
     use crate::graph::Graph;
-    use crate::invoke::{Invoker, UberInvoker};
     use crate::worker::Worker;
 
     #[test]
@@ -215,13 +206,11 @@ mod tests {
             let timers_invoker = TimersInvoker::default();
             let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
 
-            let uber_invoker = UberInvoker::with([
-                Box::new(basic_invoker) as Box<dyn Invoker>,
-                Box::new(timers_invoker) as Box<dyn Invoker>,
-            ]);
+            let mut func_lib = basic_invoker.into_func_lib();
+            func_lib.merge(timers_invoker.into_func_lib());
 
             let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
-            let mut worker = Worker::new(uber_invoker, move || {
+            let mut worker = Worker::new(func_lib, move || {
                 compute_finish_tx
                     .send(())
                     .expect("Failed to send a compute callback event");

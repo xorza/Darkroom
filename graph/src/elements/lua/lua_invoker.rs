@@ -1,19 +1,15 @@
 use anyhow::Error;
+use common::output_stream::OutputStream;
 use hashbrown::HashMap;
 use std::fmt::Debug;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use async_trait::async_trait;
-use common::output_stream::OutputStream;
-
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::FuncBehavior;
-use crate::function::{Func, FuncId, FuncLib};
+use crate::function::{Func, FuncBehavior, FuncId, FuncLib, InvokeArgs, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeId};
-use crate::invoke::{InvokeArgs, InvokeCache, Invoker};
 use crate::{data, function};
 
 #[derive(Clone, Debug)]
@@ -25,35 +21,18 @@ struct FuncConnections {
 
 #[derive(Debug)]
 pub struct LuaInvoker {
-    lua: mlua::Lua,
+    lua: Arc<mlua::Lua>,
     output_stream: Arc<Mutex<Option<OutputStream>>>,
-    funcs: HashMap<FuncId, mlua::Function>,
+    funcs: Arc<Mutex<HashMap<FuncId, mlua::Function>>>,
     func_lib: FuncLib,
-}
-
-#[async_trait]
-impl Invoker for LuaInvoker {
-    fn get_func_lib(&self) -> FuncLib {
-        self.func_lib.clone()
-    }
-
-    async fn invoke(
-        &self,
-        function_id: FuncId,
-        cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
-        self.invoke(function_id, cache, inputs, outputs)
-    }
 }
 
 impl Default for LuaInvoker {
     fn default() -> Self {
         LuaInvoker {
-            lua: mlua::Lua::new(),
+            lua: Arc::new(mlua::Lua::new()),
             output_stream: Arc::new(Mutex::new(None)),
-            funcs: HashMap::new(),
+            funcs: Arc::new(Mutex::new(HashMap::new())),
             func_lib: FuncLib::default(),
         }
     }
@@ -140,9 +119,48 @@ impl LuaInvoker {
             let func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            self.funcs.insert(func.id, lua_func);
+            let func_id = func.id;
+            self.funcs
+                .try_lock()
+                .expect("Lua function map mutex is already locked")
+                .insert(func_id, lua_func);
 
-            self.func_lib.add(func);
+            let funcs = self.funcs.clone();
+            let lua = self.lua.clone();
+            let func_info = func.clone();
+
+            self.func_lib
+                .add_lambda_result(func, move |_cache, inputs, outputs| {
+                    let funcs_guard = funcs
+                        .try_lock()
+                        .expect("Lua function map mutex is already locked");
+                    let lua_func = funcs_guard
+                        .get(&func_id)
+                        .expect("Missing Lua function binding");
+
+                    let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
+                    for (index, input_info) in func_info.inputs.iter().enumerate() {
+                        let input = &inputs[index];
+                        assert_eq!(input_info.data_type, *input.data_type());
+
+                        let invoke_value = to_lua_value(&lua, input)?;
+                        input_args.push(invoke_value);
+                    }
+
+                    let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
+
+                    for (index, output_info) in func_info.outputs.iter().enumerate() {
+                        let output_arg: &mlua::Value = output_args
+                            .get(index)
+                            .expect("Missing output value from Lua call");
+
+                        let output = data::DynamicValue::from(output_arg);
+                        assert_eq!(output_info.data_type, *output.data_type());
+                        outputs[index] = output;
+                    }
+
+                    Ok(())
+                });
         }
 
         Ok(())
@@ -159,6 +177,7 @@ impl LuaInvoker {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            lambda: None,
         };
 
         let inputs: mlua::Table = table.get("inputs")?;
@@ -271,7 +290,11 @@ impl LuaInvoker {
         }
     }
     fn restore_functions(&self) {
-        for (&id, lua_func) in self.funcs.iter() {
+        let funcs = self
+            .funcs
+            .try_lock()
+            .expect("Lua function map mutex is already locked");
+        for (&id, lua_func) in funcs.iter() {
             let func = self
                 .func_lib
                 .by_id(id)
@@ -355,48 +378,8 @@ impl LuaInvoker {
             .replace(output_stream.clone());
     }
 
-    pub(crate) fn get_func_lib(&self) -> &FuncLib {
+    pub(crate) fn func_lib(&self) -> &FuncLib {
         &self.func_lib
-    }
-
-    pub fn invoke(
-        &self,
-        func_id: FuncId,
-        _cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
-        let lua_func = self
-            .funcs
-            .get(&func_id)
-            .expect("Missing Lua function binding");
-        let func = self
-            .func_lib
-            .by_id(func_id)
-            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
-
-        let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-        for (index, input_info) in func.inputs.iter().enumerate() {
-            let input = &inputs[index];
-            assert_eq!(input_info.data_type, *input.data_type());
-
-            let invoke_value = to_lua_value(&self.lua, input)?;
-            input_args.push(invoke_value);
-        }
-
-        let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
-
-        for (index, output_info) in func.outputs.iter().enumerate() {
-            let output_arg: &mlua::Value = output_args
-                .get(index)
-                .expect("Missing output value from Lua call");
-
-            let output = data::DynamicValue::from(output_arg);
-            assert_eq!(output_info.data_type, *output.data_type());
-            outputs[index] = output;
-        }
-
-        Ok(())
     }
 }
 
@@ -440,7 +423,6 @@ mod tests {
     use super::*;
     use crate::compute::ArgSet;
     use crate::function::FuncId;
-    use crate::invoke::Invoker;
 
     #[test]
     fn lua_works() {
@@ -511,7 +493,7 @@ mod tests {
 
         invoker.load_file("../test_resources/test_lua.lua")?;
 
-        let funcs = invoker.get_func_lib();
+        let funcs = invoker.func_lib();
         assert_eq!(funcs.funcs.len(), 5);
 
         let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
@@ -519,14 +501,12 @@ mod tests {
 
         let mut cache = InvokeCache::default();
         // call 'mult' function
-        Invoker::invoke(
-            &invoker,
+        invoker.func_lib().invoke_by_id(
             FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
             &mut cache,
             inputs.as_mut_slice(),
             outputs.as_mut_slice(),
-        )
-        .await?;
+        )?;
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 15);
 

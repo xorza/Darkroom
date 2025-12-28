@@ -7,9 +7,8 @@ use thiserror::Error;
 
 use crate::common::FileFormat;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncLib};
+use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
-use crate::invoke::InvokeCache;
 use common::normalize_string::NormalizeString;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
