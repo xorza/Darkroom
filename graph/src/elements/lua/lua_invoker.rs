@@ -2,6 +2,7 @@ use anyhow::Error;
 use common::output_stream::OutputStream;
 use hashbrown::HashMap;
 use std::fmt::Debug;
+use std::mem::take;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -157,7 +158,7 @@ impl LuaInvoker {
 
         Ok(())
     }
-    
+
     fn function_from_table(table: &mlua::Table) -> anyhow::Result<Func> {
         let id_str: String = table.get("id")?;
         let name: String = table.get("name")?;
@@ -226,40 +227,30 @@ impl LuaInvoker {
     }
 
     pub fn map_graph(&self) -> anyhow::Result<Graph> {
-        let connections: Arc<Mutex<Vec<FuncConnections>>> = Arc::new(Mutex::new(Vec::new()));
+        let connections = self.build_connections()?;
 
-        self.substitute_functions(Arc::clone(&connections));
-
-        let graph_function: mlua::Function = self.lua.globals().get("graph")?;
-        graph_function.call::<()>(())?;
-
-        let connections: Vec<FuncConnections> = std::mem::take(
-            &mut connections
-                .try_lock()
-                .expect("Connections mutex is already locked"),
-        );
         let graph = self.create_graph(connections);
-
-        self.restore_functions();
 
         Ok(graph)
     }
 
-    fn substitute_functions(&self, connections: Arc<Mutex<Vec<FuncConnections>>>) {
+    fn build_connections(&self) -> anyhow::Result<Vec<FuncConnections>> {
+        let connections: Arc<Mutex<Vec<FuncConnections>>> = Arc::new(Mutex::new(Vec::new()));
         let mut output_index: u32 = 0;
 
+        //substitue functions
         for func in self.func_lib.funcs.iter() {
-            let func_clone = func.clone();
-            let connections = Arc::clone(&connections);
-
             let new_function = self
                 .lua
-                .create_function(
+                .create_function({
+                    let connections = Arc::clone(&connections);
+                    let func = func.clone();
+
                     move |_lua: &mlua::Lua,
                           mut inputs: mlua::Variadic<mlua::Value>|
                           -> Result<mlua::Variadic<mlua::Value>, mlua::Error> {
                         let mut connection = FuncConnections {
-                            name: func_clone.name.clone(),
+                            name: func.name.clone(),
                             inputs: Vec::new(),
                             outputs: Vec::new(),
                         };
@@ -271,9 +262,9 @@ impl LuaInvoker {
                         }
 
                         let mut result: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                        for i in 0..func_clone.outputs.len() {
-                            let index = output_index + i as u32;
-                            result.push(mlua::Value::Integer(index as i64));
+                        for idx in 0..func.outputs.len() {
+                            let index = output_index + idx as u32;
+                            result.push(mlua::Value::Integer(index as mlua::Integer));
                             connection.outputs.push(index);
                         }
 
@@ -283,8 +274,8 @@ impl LuaInvoker {
                             .push(connection);
 
                         Ok(result)
-                    },
-                )
+                    }
+                })
                 .expect("Failed to register Lua function");
 
             self.lua
@@ -294,8 +285,11 @@ impl LuaInvoker {
 
             output_index += func.outputs.len() as u32;
         }
-    }
-    fn restore_functions(&self) {
+
+        let graph_function: mlua::Function = self.lua.globals().get("graph")?;
+        graph_function.call::<()>(())?;
+
+        // restore functions
         for (&id, lua_func) in self.lua_funcs.iter() {
             let func = self
                 .func_lib
@@ -306,7 +300,13 @@ impl LuaInvoker {
                 .set(func.name.clone(), lua_func.clone())
                 .expect("Failed to restore Lua function");
         }
+
+        let mut connections = connections
+            .try_lock()
+            .expect("Connections mutex is already locked");
+        Ok(take(&mut connections))
     }
+
     fn create_graph(&self, mut connections: Vec<FuncConnections>) -> Graph {
         let mut graph = Graph::default();
 
