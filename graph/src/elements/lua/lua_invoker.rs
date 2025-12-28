@@ -95,16 +95,18 @@ impl LuaInvoker {
 
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: mlua::Table = self.lua.globals().get("functions")?;
+        self.lua_funcs.clear();
 
         while let Ok(function_table) = functions_table.pop() {
             let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            let lua = self.lua.clone();
+            let lua = Arc::clone(&self.lua);
 
             func.lambda = FuncLambda::new({
                 let func = func.clone();
                 let lua_func = lua_func.clone();
+                let lua = Arc::clone(&lua);
 
                 move |_cache, inputs, outputs| {
                     let input_len = inputs.len();
@@ -375,14 +377,14 @@ impl LuaInvoker {
 fn to_lua_value(lua: &mlua::Lua, value: &DynamicValue) -> anyhow::Result<mlua::Value> {
     match value {
         DynamicValue::Null => Ok(mlua::Value::Nil),
-        DynamicValue::Float(v) => Ok(mlua::Value::Number(*v as mlua::Number)),
-        DynamicValue::Int(v) => Ok(mlua::Value::Integer(*v as mlua::Integer)),
+        DynamicValue::Float(v) => Ok(mlua::Value::Number(*v)),
+        DynamicValue::Int(v) => Ok(mlua::Value::Integer(*v)),
         DynamicValue::Bool(v) => Ok(mlua::Value::Boolean(*v)),
-        DynamicValue::String(v) => {
-            let lua_string = lua.create_string(v)?;
-            Ok(mlua::Value::String(lua_string))
-        }
-        _ => panic!("not supported"),
+        DynamicValue::String(v) => Ok(mlua::Value::String(lua.create_string(v)?)),
+        _ => panic!(
+            "Lua value conversion does not support {:?}",
+            value.data_type()
+        ),
     }
 }
 
@@ -396,9 +398,7 @@ impl From<&mlua::Value> for DynamicValue {
             mlua::Value::String(v) => {
                 DynamicValue::from(v.to_str().expect("Lua string is not valid UTF-8").as_ref())
             }
-            _ => {
-                panic!("not supported")
-            }
+            _ => panic!("Lua value conversion does not support {:?}", value),
         }
     }
 }
