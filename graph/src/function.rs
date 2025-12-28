@@ -258,25 +258,6 @@ impl FuncLib {
         }
     }
 
-    pub fn add_lambda<F>(&mut self, mut func: Func, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,
-    {
-        func.set_lambda(lambda);
-        self.add(func);
-    }
-
-    pub fn add_lambda_result<F>(&mut self, mut func: Func, lambda: F)
-    where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
-            + Send
-            + Sync
-            + 'static,
-    {
-        func.set_lambda_result(lambda);
-        self.add(func);
-    }
-
     pub fn set_lambda<F>(&mut self, func_id: FuncId, lambda: F)
     where
         F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) + Send + Sync + 'static,

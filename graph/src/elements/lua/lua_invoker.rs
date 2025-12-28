@@ -116,7 +116,7 @@ impl LuaInvoker {
     fn read_function_info(&mut self) -> anyhow::Result<()> {
         let functions_table: mlua::Table = self.lua.globals().get("functions")?;
         while let Ok(function_table) = functions_table.pop() {
-            let func = Self::function_from_table(&function_table)?;
+            let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
             let func_id = func.id;
@@ -129,38 +129,38 @@ impl LuaInvoker {
             let lua = self.lua.clone();
             let func_info = func.clone();
 
-            self.func_lib
-                .add_lambda_result(func, move |_cache, inputs, outputs| {
-                    let funcs_guard = funcs
-                        .try_lock()
-                        .expect("Lua function map mutex is already locked");
-                    let lua_func = funcs_guard
-                        .get(&func_id)
-                        .expect("Missing Lua function binding");
+            func.set_lambda_result(move |_cache, inputs, outputs| {
+                let funcs_guard = funcs
+                    .try_lock()
+                    .expect("Lua function map mutex is already locked");
+                let lua_func = funcs_guard
+                    .get(&func_id)
+                    .expect("Missing Lua function binding");
 
-                    let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                    for (index, input_info) in func_info.inputs.iter().enumerate() {
-                        let input = &inputs[index];
-                        assert_eq!(input_info.data_type, *input.data_type());
+                let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
+                for (index, input_info) in func_info.inputs.iter().enumerate() {
+                    let input = &inputs[index];
+                    assert_eq!(input_info.data_type, *input.data_type());
 
-                        let invoke_value = to_lua_value(&lua, input)?;
-                        input_args.push(invoke_value);
-                    }
+                    let invoke_value = to_lua_value(&lua, input)?;
+                    input_args.push(invoke_value);
+                }
 
-                    let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
+                let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
 
-                    for (index, output_info) in func_info.outputs.iter().enumerate() {
-                        let output_arg: &mlua::Value = output_args
-                            .get(index)
-                            .expect("Missing output value from Lua call");
+                for (index, output_info) in func_info.outputs.iter().enumerate() {
+                    let output_arg: &mlua::Value = output_args
+                        .get(index)
+                        .expect("Missing output value from Lua call");
 
-                        let output = data::DynamicValue::from(output_arg);
-                        assert_eq!(output_info.data_type, *output.data_type());
-                        outputs[index] = output;
-                    }
+                    let output = data::DynamicValue::from(output_arg);
+                    assert_eq!(output_info.data_type, *output.data_type());
+                    outputs[index] = output;
+                }
 
-                    Ok(())
-                });
+                Ok(())
+            });
+            self.func_lib.add(func);
         }
 
         Ok(())
