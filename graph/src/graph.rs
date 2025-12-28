@@ -250,6 +250,7 @@ impl Binding {
     }
 }
 
+#[cfg(test)]
 pub fn test_graph() -> Graph {
     let mut graph = Graph::default();
 

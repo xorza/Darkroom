@@ -395,6 +395,8 @@ impl Func {
             .invoke(cache, inputs, outputs)
     }
 }
+
+#[cfg(test)]
 pub fn test_func_lib() -> FuncLib {
     [
         Func {
@@ -507,6 +509,110 @@ pub fn test_func_lib() -> FuncLib {
         },
     ]
     .into()
+}
+
+#[cfg(test)]
+pub(crate) fn test_func_lib_with_lambdas<GetA, GetB, SetResult>(
+    get_a: GetA,
+    get_b: GetB,
+    result: SetResult,
+) -> FuncLib
+where
+    SetResult: Fn(i64) + Send + Sync + 'static,
+    GetA: Fn() -> i64 + Send + Sync + 'static,
+    GetB: Fn() -> i64 + Send + Sync + 'static,
+{
+    let mut func_lib = test_func_lib();
+
+    let print_id = func_lib
+        .by_name("print")
+        .expect("Func named \"print\" not found")
+        .id;
+    func_lib.set_lambda(print_id, move |_, inputs, _| {
+        assert_eq!(
+            inputs.len(),
+            1,
+            "print expects exactly 1 input but received {}",
+            inputs.len()
+        );
+        result(inputs[0].as_int());
+    });
+
+    let get_a_id = func_lib
+        .by_name("get_a")
+        .expect("Func named \"get_a\" not found")
+        .id;
+    func_lib.set_lambda(get_a_id, move |_, _, outputs| {
+        assert_eq!(
+            outputs.len(),
+            1,
+            "get_a expects exactly 1 output but received {}",
+            outputs.len()
+        );
+        outputs[0] = (get_a() as f64).into();
+    });
+
+    let get_b_id = func_lib
+        .by_name("get_b")
+        .expect("Func named \"get_b\" not found")
+        .id;
+    func_lib.set_lambda(get_b_id, move |_, _, outputs| {
+        assert_eq!(
+            outputs.len(),
+            1,
+            "get_b expects exactly 1 output but received {}",
+            outputs.len()
+        );
+        outputs[0] = (get_b() as f64).into();
+    });
+
+    let sum_id = func_lib
+        .by_name("sum")
+        .expect("Func named \"sum\" not found")
+        .id;
+    func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
+        assert_eq!(
+            inputs.len(),
+            2,
+            "sum expects exactly 2 inputs but received {}",
+            inputs.len()
+        );
+        assert_eq!(
+            outputs.len(),
+            1,
+            "sum expects exactly 1 output but received {}",
+            outputs.len()
+        );
+        let a: i64 = inputs[0].as_int();
+        let b: i64 = inputs[1].as_int();
+        ctx.set(a + b);
+        outputs[0] = (a + b).into();
+    });
+
+    let mult_id = func_lib
+        .by_name("mult")
+        .expect("Func named \"mult\" not found")
+        .id;
+    func_lib.set_lambda(mult_id, move |ctx, inputs, outputs| {
+        assert_eq!(
+            inputs.len(),
+            2,
+            "mult expects exactly 2 inputs but received {}",
+            inputs.len()
+        );
+        assert_eq!(
+            outputs.len(),
+            1,
+            "mult expects exactly 1 output but received {}",
+            outputs.len()
+        );
+        let a: i64 = inputs[0].as_int();
+        let b: i64 = inputs[1].as_int();
+        outputs[0] = (a * b).into();
+        ctx.set(a * b);
+    });
+
+    func_lib
 }
 
 #[cfg(test)]

@@ -222,69 +222,8 @@ mod tests {
     use crate::compute::{Compute, ComputeError};
     use crate::data::StaticValue;
     use crate::execution_graph::ExecutionGraph;
-    use crate::function::{test_func_lib, FuncBehavior, FuncLib};
+    use crate::function::{test_func_lib_with_lambdas, FuncBehavior};
     use crate::graph::{test_graph, Binding, NodeBehavior};
-
-    fn create_test_func_lib<GetA, GetB, SetResult>(
-        get_a: GetA,
-        get_b: GetB,
-        result: SetResult,
-    ) -> FuncLib
-    where
-        SetResult: Fn(i64) + Send + Sync + 'static,
-        GetA: Fn() -> i64 + Send + Sync + 'static,
-        GetB: Fn() -> i64 + Send + Sync + 'static,
-    {
-        let mut func_lib = test_func_lib();
-
-        let print_id = func_lib
-            .by_name("print")
-            .expect("Func named \"print\" not found")
-            .id;
-        func_lib.set_lambda(print_id, move |_, inputs, _| {
-            result(inputs[0].as_int());
-        });
-
-        let get_a_id = func_lib
-            .by_name("get_a")
-            .expect("Func named \"get_a\" not found")
-            .id;
-        func_lib.set_lambda(get_a_id, move |_, _, outputs| {
-            outputs[0] = (get_a() as f64).into();
-        });
-
-        let get_b_id = func_lib
-            .by_name("get_b")
-            .expect("Func named \"get_b\" not found")
-            .id;
-        func_lib.set_lambda(get_b_id, move |_, _, outputs| {
-            outputs[0] = (get_b() as f64).into();
-        });
-
-        let sum_id = func_lib
-            .by_name("sum")
-            .expect("Func named \"sum\" not found")
-            .id;
-        func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
-            let a: i64 = inputs[0].as_int();
-            let b: i64 = inputs[1].as_int();
-            ctx.set(a + b);
-            outputs[0] = (a + b).into();
-        });
-
-        let mult_id = func_lib
-            .by_name("mult")
-            .expect("Func named \"mult\" not found")
-            .id;
-        func_lib.set_lambda(mult_id, move |ctx, inputs, outputs| {
-            let a: i64 = inputs[0].as_int();
-            let b: i64 = inputs[1].as_int();
-            outputs[0] = (a * b).into();
-            ctx.set(a * b);
-        });
-
-        func_lib
-    }
 
     #[derive(Debug)]
     struct TestValues {
@@ -304,7 +243,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = create_test_func_lib(
+        let mut func_lib = test_func_lib_with_lambdas(
             move || {
                 test_values_a
                     .try_lock()
@@ -362,7 +301,7 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let func_lib = create_test_func_lib(
+        let func_lib = test_func_lib_with_lambdas(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
             move |result| {
@@ -418,7 +357,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = create_test_func_lib(
+        let mut func_lib = test_func_lib_with_lambdas(
             move || {
                 let mut guard = test_values_a
                     .try_lock()
