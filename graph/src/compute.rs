@@ -222,7 +222,7 @@ mod tests {
     use crate::compute::{Compute, ComputeError};
     use crate::data::StaticValue;
     use crate::execution_graph::ExecutionGraph;
-    use crate::function::{test_func_lib_with_lambdas, FuncBehavior};
+    use crate::function::{test_func_lib, FuncBehavior};
     use crate::graph::{test_graph, Binding, NodeBehavior};
 
     #[derive(Debug)]
@@ -243,7 +243,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib_with_lambdas(
+        let mut func_lib = test_func_lib(
             move || {
                 test_values_a
                     .try_lock()
@@ -301,7 +301,7 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let func_lib = test_func_lib_with_lambdas(
+        let func_lib = test_func_lib(
             || panic!("Unexpected call to get_a"),
             || panic!("Unexpected call to get_b"),
             move |result| {
@@ -357,7 +357,7 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib_with_lambdas(
+        let mut func_lib = test_func_lib(
             move || {
                 let mut guard = test_values_a
                     .try_lock()

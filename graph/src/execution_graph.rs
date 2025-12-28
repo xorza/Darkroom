@@ -586,7 +586,11 @@ mod tests {
     #[test]
     fn simple_run() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let _get_b_node_id = graph
             .by_name("get_b")
@@ -612,7 +616,11 @@ mod tests {
     #[test]
     fn empty_run() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let _get_b_node_id = graph
             .by_name("get_b")
@@ -656,7 +664,11 @@ mod tests {
     #[test]
     fn missing_input() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let get_b_node_id = graph
             .by_name("get_b")
@@ -768,7 +780,11 @@ mod tests {
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
@@ -798,7 +814,11 @@ mod tests {
     #[test]
     fn execution_graph_updates_after_graph_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let get_a_node_id = graph
             .by_name("get_a")
@@ -875,7 +895,11 @@ mod tests {
     #[test]
     fn once_node_with_cached_outputs_skips_invocation() -> anyhow::Result<()> {
         let graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
@@ -904,7 +928,11 @@ mod tests {
     #[test]
     fn cycle_detection_returns_error() {
         let mut graph = test_graph();
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         let mult_node_id = graph
             .by_name("mult")

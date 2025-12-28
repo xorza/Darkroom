@@ -377,8 +377,12 @@ impl Func {
     }
 }
 
-#[cfg(test)]
-pub fn test_func_lib() -> FuncLib {
+pub fn test_func_lib<GetA, GetB, SetResult>(get_a: GetA, get_b: GetB, result: SetResult) -> FuncLib
+where
+    SetResult: Fn(i64) + Send + Sync + 'static,
+    GetA: Fn() -> i64 + Send + Sync + 'static,
+    GetB: Fn() -> i64 + Send + Sync + 'static,
+{
     [
         Func {
             id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")
@@ -408,7 +412,25 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: None,
+            lambda: Some(FuncLambda::new(move |ctx, inputs, outputs| {
+                assert_eq!(
+                    inputs.len(),
+                    2,
+                    "mult expects exactly 2 inputs but received {}",
+                    inputs.len()
+                );
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "mult expects exactly 1 output but received {}",
+                    outputs.len()
+                );
+                let a: i64 = inputs[0].as_int();
+                let b: i64 = inputs[1].as_int();
+                outputs[0] = (a * b).into();
+                ctx.set(a * b);
+                Ok(())
+            })),
         },
         Func {
             id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")
@@ -423,7 +445,16 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: None,
+            lambda: Some(FuncLambda::new(move |_, _, outputs| {
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "get_a expects exactly 1 output but received {}",
+                    outputs.len()
+                );
+                outputs[0] = (get_a() as f64).into();
+                Ok(())
+            })),
         },
         Func {
             id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")
@@ -438,7 +469,16 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: None,
+            lambda: Some(FuncLambda::new(move |_, _, outputs| {
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "get_b expects exactly 1 output but received {}",
+                    outputs.len()
+                );
+                outputs[0] = (get_b() as f64).into();
+                Ok(())
+            })),
         },
         Func {
             id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")
@@ -468,7 +508,25 @@ pub fn test_func_lib() -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: None,
+            lambda: Some(FuncLambda::new(move |ctx, inputs, outputs| {
+                assert_eq!(
+                    inputs.len(),
+                    2,
+                    "sum expects exactly 2 inputs but received {}",
+                    inputs.len()
+                );
+                assert_eq!(
+                    outputs.len(),
+                    1,
+                    "sum expects exactly 1 output but received {}",
+                    outputs.len()
+                );
+                let a: i64 = inputs[0].as_int();
+                let b: i64 = inputs[1].as_int();
+                ctx.set(a + b);
+                outputs[0] = (a + b).into();
+                Ok(())
+            })),
         },
         Func {
             id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")
@@ -486,114 +544,19 @@ pub fn test_func_lib() -> FuncLib {
             }],
             outputs: vec![],
             events: vec![],
-            lambda: None,
+            lambda: Some(FuncLambda::new(move |_, inputs, _| {
+                assert_eq!(
+                    inputs.len(),
+                    1,
+                    "print expects exactly 1 input but received {}",
+                    inputs.len()
+                );
+                result(inputs[0].as_int());
+                Ok(())
+            })),
         },
     ]
     .into()
-}
-
-#[cfg(test)]
-pub(crate) fn test_func_lib_with_lambdas<GetA, GetB, SetResult>(
-    get_a: GetA,
-    get_b: GetB,
-    result: SetResult,
-) -> FuncLib
-where
-    SetResult: Fn(i64) + Send + Sync + 'static,
-    GetA: Fn() -> i64 + Send + Sync + 'static,
-    GetB: Fn() -> i64 + Send + Sync + 'static,
-{
-    let mut func_lib = test_func_lib();
-
-    let print_id = func_lib
-        .by_name("print")
-        .expect("Func named \"print\" not found")
-        .id;
-    func_lib.set_lambda(print_id, move |_, inputs, _| {
-        assert_eq!(
-            inputs.len(),
-            1,
-            "print expects exactly 1 input but received {}",
-            inputs.len()
-        );
-        result(inputs[0].as_int());
-    });
-
-    let get_a_id = func_lib
-        .by_name("get_a")
-        .expect("Func named \"get_a\" not found")
-        .id;
-    func_lib.set_lambda(get_a_id, move |_, _, outputs| {
-        assert_eq!(
-            outputs.len(),
-            1,
-            "get_a expects exactly 1 output but received {}",
-            outputs.len()
-        );
-        outputs[0] = (get_a() as f64).into();
-    });
-
-    let get_b_id = func_lib
-        .by_name("get_b")
-        .expect("Func named \"get_b\" not found")
-        .id;
-    func_lib.set_lambda(get_b_id, move |_, _, outputs| {
-        assert_eq!(
-            outputs.len(),
-            1,
-            "get_b expects exactly 1 output but received {}",
-            outputs.len()
-        );
-        outputs[0] = (get_b() as f64).into();
-    });
-
-    let sum_id = func_lib
-        .by_name("sum")
-        .expect("Func named \"sum\" not found")
-        .id;
-    func_lib.set_lambda(sum_id, move |ctx, inputs, outputs| {
-        assert_eq!(
-            inputs.len(),
-            2,
-            "sum expects exactly 2 inputs but received {}",
-            inputs.len()
-        );
-        assert_eq!(
-            outputs.len(),
-            1,
-            "sum expects exactly 1 output but received {}",
-            outputs.len()
-        );
-        let a: i64 = inputs[0].as_int();
-        let b: i64 = inputs[1].as_int();
-        ctx.set(a + b);
-        outputs[0] = (a + b).into();
-    });
-
-    let mult_id = func_lib
-        .by_name("mult")
-        .expect("Func named \"mult\" not found")
-        .id;
-    func_lib.set_lambda(mult_id, move |ctx, inputs, outputs| {
-        assert_eq!(
-            inputs.len(),
-            2,
-            "mult expects exactly 2 inputs but received {}",
-            inputs.len()
-        );
-        assert_eq!(
-            outputs.len(),
-            1,
-            "mult expects exactly 1 output but received {}",
-            outputs.len()
-        );
-        let a: i64 = inputs[0].as_int();
-        let b: i64 = inputs[1].as_int();
-        outputs[0] = (a * b).into();
-        ctx.set(a * b);
-    });
-
-    func_lib
 }
 
 #[cfg(test)]
@@ -605,7 +568,11 @@ mod tests {
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         for format in [FileFormat::Yaml, FileFormat::Json] {
             let serialized = func_lib.serialize(format);
@@ -619,7 +586,11 @@ mod tests {
 
     #[test]
     fn invoke_by_id_and_index() -> anyhow::Result<()> {
-        let mut func_lib = test_func_lib();
+        let mut func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
         let sum_id = func_lib
             .by_name("sum")
             .expect("Func named \"sum\" not found")

@@ -17,7 +17,11 @@ fn bench_foo(c: &mut Criterion) {
                 .expect("Benchmark graph path is not valid UTF-8"),
         )
         .expect("Failed to load benchmark graph from test_resources");
-        let func_lib = test_func_lib();
+        let func_lib = test_func_lib(
+            || panic!("Unexpected call to get_a"),
+            || panic!("Unexpected call to get_b"),
+            |_| panic!("Unexpected call to print"),
+        );
 
         b.iter(|| {
             let mut execution_graph = ExecutionGraph::default();
