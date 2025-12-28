@@ -22,7 +22,7 @@ pub enum FuncBehavior {
 
 pub type InvokeArgs = [DynamicValue];
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
     + Send
     + Sync
     + 'static;
@@ -37,7 +37,7 @@ pub enum FuncLambda {
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
-        F: Fn(&mut InvokeCache, &mut InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
             + Send
             + Sync
             + 'static,
@@ -48,7 +48,7 @@ impl FuncLambda {
     pub fn invoke(
         &self,
         cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
+        inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
         match self {
@@ -270,27 +270,27 @@ impl FuncLib {
         &self,
         func_id: FuncId,
         cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
+        inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
         let func = self
             .by_id(func_id)
             .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
-        func.invoke(cache, inputs, outputs)
+        func.lambda.invoke(cache, inputs, outputs)
     }
 
     pub fn invoke_by_index(
         &self,
         func_idx: usize,
         cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
+        inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
     ) -> anyhow::Result<()> {
         let func = self
             .funcs
             .get(func_idx)
             .unwrap_or_else(|| panic!("Func index {} out of bounds", func_idx));
-        func.invoke(cache, inputs, outputs)
+        func.lambda.invoke(cache, inputs, outputs)
     }
     pub fn merge(&mut self, other: FuncLib) {
         for func in other.funcs {
@@ -327,17 +327,6 @@ impl FromStr for FuncEvent {
         Ok(FuncEvent {
             name: s.to_string(),
         })
-    }
-}
-
-impl Func {
-    pub fn invoke(
-        &self,
-        cache: &mut InvokeCache,
-        inputs: &mut InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
-        self.lambda.invoke(cache, inputs, outputs)
     }
 }
 
@@ -577,7 +566,7 @@ mod tests {
         let mut cache = InvokeCache::default();
         let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];
         let mut outputs = vec![DynamicValue::None];
-        func_lib.invoke_by_id(sum_id, &mut cache, &mut inputs, &mut outputs)?;
+        func_lib.invoke_by_id(sum_id, &mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 6);
         let cached = cache
             .get::<i64>()
@@ -587,7 +576,7 @@ mod tests {
         inputs[0] = DynamicValue::Int(3);
         inputs[1] = DynamicValue::Int(5);
         outputs[0] = DynamicValue::None;
-        func_lib.invoke_by_index(sum_idx, &mut cache, &mut inputs, &mut outputs)?;
+        func_lib.invoke_by_index(sum_idx, &mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 8);
 
         Ok(())
