@@ -27,25 +27,25 @@ impl Compute {
         runtime_graph.update(graph, func_lib);
         let mut inputs: ArgSet = ArgSet::default();
 
-        let active_r_node_indexes = {
+        let active_e_node_indexes = {
             let mut active_node_indexes: Vec<usize> = runtime_graph
-                .r_nodes
+                .e_nodes
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, r_node)| r_node.should_invoke.then_some(idx))
                 .collect::<_>();
 
-            active_node_indexes.sort_by_key(|&idx| runtime_graph.r_nodes[idx].invocation_order);
+            active_node_indexes.sort_by_key(|&idx| runtime_graph.e_nodes[idx].invocation_order);
             active_node_indexes
         };
 
-        for r_node_idx in active_r_node_indexes {
+        for e_node_idx in active_e_node_indexes {
             let (node, func) = {
-                let r_node = &runtime_graph.r_nodes[r_node_idx];
-                assert!(!r_node.id.is_nil());
+                let e_node = &runtime_graph.e_nodes[e_node_idx];
+                assert!(!e_node.id.is_nil());
 
-                let node = &graph.nodes[r_node.node_idx];
-                let func = &func_lib.funcs[r_node.func_idx];
+                let node = &graph.nodes[e_node.node_idx];
+                let func = &func_lib.funcs[e_node.func_idx];
 
                 assert_eq!(
                     node.func_id, func.id,
@@ -59,13 +59,13 @@ impl Compute {
                     node.id
                 );
                 assert_eq!(
-                    r_node.outputs.len(),
+                    e_node.outputs.len(),
                     func.outputs.len(),
                     "Node {:?} output count mismatch",
                     node.id
                 );
                 assert_eq!(
-                    r_node.inputs.len(),
+                    e_node.inputs.len(),
                     func.inputs.len(),
                     "Node {:?} output count mismatch",
                     node.id
@@ -85,10 +85,10 @@ impl Compute {
                         .into(),
 
                     Binding::Output(output_binding) => {
-                        let output_address = &runtime_graph.r_nodes[r_node_idx].inputs[input_idx]
+                        let output_address = &runtime_graph.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .expect("Output address is not set");
-                        let output_values = runtime_graph.r_nodes[output_address.r_node_idx]
+                        let output_values = runtime_graph.e_nodes[output_address.e_node_idx]
                             .output_values
                             .as_mut()
                             .expect("Output values missing for bound node; check execution order");
@@ -101,17 +101,17 @@ impl Compute {
                 inputs[input_idx] = self.convert_type(&value, data_type);
             }
 
-            let r_node = &mut runtime_graph.r_nodes[r_node_idx];
-            let outputs = r_node
+            let e_node = &mut runtime_graph.e_nodes[e_node_idx];
+            let outputs = e_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
 
-            r_node.run_time = {
+            e_node.run_time = {
                 let start = std::time::Instant::now();
                 invoker
                     .invoke(
                         node.func_id,
-                        &mut r_node.cache,
+                        &mut e_node.cache,
                         inputs.as_mut_slice(),
                         outputs.as_mut_slice(),
                     )
