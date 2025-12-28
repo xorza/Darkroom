@@ -570,8 +570,9 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 mod tests {
     use super::*;
     use crate::common::FileFormat;
+    use crate::data::StaticValue;
     use crate::function::test_func_lib;
-    use crate::graph::test_graph;
+    use crate::graph::{test_graph, Input};
 
     #[test]
     fn simple_run() -> anyhow::Result<()> {
@@ -738,10 +739,47 @@ mod tests {
 
     #[test]
     fn graph_changes_properly_changes_execution_graph() {
-        let graph = test_graph();
+        let mut graph = test_graph();
         let func_lib = test_func_lib();
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
+
+        graph
+            .by_name_mut("mult")
+            .expect("Node named \"mult\" not found")
+            .inputs = vec![
+            Input {
+                binding: Binding::from_output_binding(
+                    graph
+                        .by_name("get_a")
+                        .expect("Node named \"get_a\" not found")
+                        .id,
+                    0,
+                ),
+                const_value: Some(StaticValue::Int(123)),
+            },
+            Input {
+                binding: Binding::from_output_binding(
+                    graph
+                        .by_name("get_b")
+                        .expect("Node named \"get_b\" not found")
+                        .id,
+                    0,
+                ),
+                const_value: Some(StaticValue::Int(12)),
+            },
+        ];
+
+        let sum_node_id = graph
+            .by_name("sum")
+            .expect("Node named \"sum\" not found")
+            .id;
+        graph.remove_by_id(sum_node_id);
+
+        execution_graph.update(&graph, &func_lib);
+
+        assert_eq!(graph.nodes.len(), 4);
+        assert_eq!(execution_graph.e_nodes.len(), 4);
     }
 }
