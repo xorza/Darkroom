@@ -67,6 +67,7 @@ Additional modules drive execution and integration:
 - ComputeError now stores invocation error text as a `String` for clone-friendly errors.
 - Compute invocation now records node errors and returns immediately without cloning the full result.
 - Execution graph terminal-node discovery now uses a direct loop instead of iterator chaining.
+- Execution graph validation now enforces processing/execution order membership and forbids Processing states.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.

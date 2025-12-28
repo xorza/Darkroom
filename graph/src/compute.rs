@@ -41,10 +41,7 @@ impl Compute {
             let (node, func) = {
                 let e_node = &execution_graph.e_nodes[e_node_idx];
                 assert!(!e_node.id.is_nil());
-
-                if !e_node.should_invoke {
-                    continue;
-                }
+                assert!(e_node.should_invoke);
 
                 let node = &graph.nodes[e_node.node_idx];
                 let func = &func_lib.funcs[e_node.func_idx];
