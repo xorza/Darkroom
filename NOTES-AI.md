@@ -65,6 +65,7 @@ Additional modules drive execution and integration:
 - Lua tests now assert ordered multi-value returns and reuse a helper for bound-node names.
 - Lua tests now cover invoking the Lua `mult` function directly via the function library.
 - ComputeError now stores invocation error text as a `String` for clone-friendly errors.
+- Compute invocation now records node errors and returns immediately without cloning the full result.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.

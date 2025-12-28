@@ -117,7 +117,7 @@ impl Compute {
                 .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
 
             let start = std::time::Instant::now();
-            let result = func_lib
+            let invoke_result = func_lib
                 .invoke_by_index(
                     e_node.func_idx,
                     &mut e_node.cache,
@@ -129,9 +129,11 @@ impl Compute {
                     message: source.to_string(),
                 });
             e_node.run_time = start.elapsed().as_secs_f64();
-            e_node.error = result.clone().err();
-
-            result?;
+            if let Err(error) = invoke_result {
+                e_node.error = Some(error.clone());
+                return Err(error);
+            }
+            e_node.error = None;
 
             inputs.clear();
         }
