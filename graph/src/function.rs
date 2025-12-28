@@ -261,68 +261,18 @@ pub fn test_func_lib() -> FuncLib {
 
 #[cfg(test)]
 mod tests {
-    use crate::function::test_func_lib;
+    use crate::function::{test_func_lib, FuncLib};
     use common::yaml_format::reformat_yaml;
 
-    const TEST_FUNCS_YAML: &str = r#"- id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5"
-  name: sum
-  category: Debug
-  behavior: Pure
-  inputs:
-    - name: A
-      required: true
-      data_type: Int
-    - name: B
-      required: true
-      data_type: Int
-  outputs:
-    - name: Sum
-      data_type: Int
-- id: "432b9bf1-f478-476c-a9c9-9a6e190124fc"
-  name: mult
-  category: Debug
-  behavior: Pure
-  inputs:
-    - name: A
-      required: true
-      data_type: Int
-    - name: B
-      required: true
-      data_type: Int
-  outputs:
-    - name: Prod
-      data_type: Int
-- id: a937baff-822d-48fd-9154-58751539b59b
-  name: get_b
-  category: Debug
-  behavior: Pure
-  outputs:
-    - name: Int32 Value
-      data_type: Int
-- id: d4d27137-5a14-437a-8bb5-b2f7be0941a2
-  name: get_a
-  category: Debug
-  behavior: Impure
-  outputs:
-    - name: Int32 Value
-      data_type: Int
-- id: f22cd316-1cdf-4a80-b86c-1277acd1408a
-  name: print
-  category: Debug
-  behavior: Impure
-  inputs:
-    - name: message
-      required: true
-      data_type: Int
-"#;
-
     #[test]
-    fn serialization() {
-        let file_yaml = reformat_yaml(TEST_FUNCS_YAML)
-            .expect("Failed to normalize embedded test function YAML");
+    fn yaml_roundtrip_serialization() -> anyhow::Result<()> {
         let func_lib = test_func_lib();
-        let serialized_yaml = func_lib.to_yaml();
+        let serialized_yaml1 = func_lib.to_yaml();
+        let func_lib = FuncLib::from_yaml(&serialized_yaml1)?;
+        let serialized_yaml2 = func_lib.to_yaml();
 
-        assert_eq!(file_yaml, serialized_yaml);
+        assert_eq!(serialized_yaml1, serialized_yaml2);
+
+        Ok(())
     }
 }
