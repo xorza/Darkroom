@@ -367,8 +367,8 @@ impl LuaInvoker {
         graph
     }
 
-    pub fn run(&self) -> anyhow::Result<()> {
-        let lua_func: mlua::Function = self.lua.globals().get("graph")?;
+    pub fn call(&self, func_name: &str) -> anyhow::Result<()> {
+        let lua_func: mlua::Function = self.lua.globals().get(func_name)?;
         lua_func.call::<()>(())?;
 
         Ok(())
@@ -426,7 +426,7 @@ mod tests {
     use crate::function::FuncId;
 
     #[test]
-    fn lua_works() {
+    fn lua_works() -> anyhow::Result<()> {
         let lua = mlua::Lua::new();
 
         lua.load(
@@ -437,20 +437,16 @@ mod tests {
         end
         "#,
         )
-        .exec()
-        .unwrap();
+        .exec()?;
 
         let var_args = mlua::Variadic::from_iter(vec![
             mlua::Value::Integer(3),
-            mlua::Value::String(lua.create_string("111").unwrap()),
-            mlua::Value::Table(
-                lua.create_table_from(vec![("val0", 11), ("val1", 7)])
-                    .unwrap(),
-            ),
+            mlua::Value::String(lua.create_string("111")?),
+            mlua::Value::Table(lua.create_table_from(vec![("val0", 11), ("val1", 7)])?),
         ]);
 
-        let test_func: mlua::Function = lua.globals().get("test_func").unwrap();
-        let result: mlua::Variadic<mlua::Value> = test_func.call(var_args).unwrap();
+        let test_func: mlua::Function = lua.globals().get("test_func")?;
+        let result: mlua::Variadic<mlua::Value> = test_func.call(var_args)?;
         let mut result = result.into_iter();
         let sum = match result.next().expect("Missing sum result") {
             mlua::Value::Integer(value) => value,
@@ -466,27 +462,25 @@ mod tests {
             other => panic!("Message result must be a string, got {:?}", other),
         };
         assert_eq!(message, "hello world!");
+
+        Ok(())
     }
 
     #[test]
-    fn local_data_test() {
+    fn local_data_test() -> anyhow::Result<()> {
         #[derive(Debug)]
         struct TestStruct {
             a: i32,
             b: i32,
         }
         let lua = mlua::Lua::new();
-
         let data = TestStruct { a: 4, b: 5 };
+        let test_function = lua.create_function(move |_, ()| Ok(data.a + data.b))?;
+        lua.globals().set("test_func", test_function)?;
+        let result: i32 = lua.load("test_func()").eval()?;
+        assert_eq!(result, 9);
 
-        let test_function = lua
-            .create_function(move |_, ()| Ok(data.a + data.b))
-            .unwrap();
-        lua.globals().set("test_func", test_function).unwrap();
-
-        let r: i32 = lua.load("test_func()").eval().unwrap();
-
-        assert_eq!(r, 9);
+        Ok(())
     }
 
     #[tokio::test]
@@ -539,10 +533,31 @@ mod tests {
         assert_eq!(bound_name(0), "sum");
         assert_eq!(bound_name(1), "get_b");
 
-        invoker.run()?;
+        invoker.call("graph")?;
 
         let output = output_stream.take().await;
         assert_eq!(output[0], "117");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn invoke_lua_mult_function() -> anyhow::Result<()> {
+        let mut invoker = LuaInvoker::default();
+        invoker.load(include_str!("../../../../test_resources/test_lua.lua"))?;
+
+        let mut inputs: ArgSet = ArgSet::from_vec(vec![6, 7]);
+        let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
+        let mut cache = InvokeCache::default();
+
+        invoker.func_lib().invoke_by_id(
+            FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+            &mut cache,
+            inputs.as_mut_slice(),
+            outputs.as_mut_slice(),
+        )?;
+        let result: i64 = outputs[0].as_int();
+        assert_eq!(result, 42);
 
         Ok(())
     }
