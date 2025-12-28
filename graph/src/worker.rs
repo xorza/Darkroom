@@ -72,9 +72,9 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    let mut runtime_graph = ExecutionGraph::default();
+                    let mut execution_graph = ExecutionGraph::default();
                     Compute::default()
-                        .run(&graph, &func_lib, &invoker, &mut runtime_graph)
+                        .run(&graph, &func_lib, &invoker, &mut execution_graph)
                         .await
                         .expect("Failed to run graph");
                     (*compute_callback.lock().await)();
@@ -102,7 +102,7 @@ impl Worker {
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
-        let mut runtime_graph = ExecutionGraph::default();
+        let mut execution_graph = ExecutionGraph::default();
 
         loop {
             // receive all messages and pick message with the highest priority
@@ -129,7 +129,7 @@ impl Worker {
 
                 WorkerMessage::Event => {
                     Compute::default()
-                        .run(&graph, func_lib, invoker, &mut runtime_graph)
+                        .run(&graph, func_lib, invoker, &mut execution_graph)
                         .await
                         .expect("Failed to run graph");
 

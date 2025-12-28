@@ -3,9 +3,9 @@ use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
+use graph::execution_graph::ExecutionGraph;
 use graph::function::test_func_lib;
 use graph::graph::Graph;
-use graph::runtime_graph::ExecutionGraph;
 
 fn bench_foo(c: &mut Criterion) {
     c.bench_function("foo", |b| {

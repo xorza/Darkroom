@@ -19,29 +19,29 @@ impl Compute {
         graph: &Graph,
         func_lib: &FuncLib,
         invoker: &T,
-        runtime_graph: &mut ExecutionGraph,
+        execution_graph: &mut ExecutionGraph,
     ) -> anyhow::Result<()>
     where
         T: Invoker,
     {
-        runtime_graph.update(graph, func_lib);
+        execution_graph.update(graph, func_lib);
         let mut inputs: ArgSet = ArgSet::default();
 
         let active_e_node_indexes = {
-            let mut active_node_indexes: Vec<usize> = runtime_graph
+            let mut active_node_indexes: Vec<usize> = execution_graph
                 .e_nodes
                 .iter()
                 .enumerate()
                 .filter_map(|(idx, r_node)| r_node.should_invoke.then_some(idx))
                 .collect::<_>();
 
-            active_node_indexes.sort_by_key(|&idx| runtime_graph.e_nodes[idx].invocation_order);
+            active_node_indexes.sort_by_key(|&idx| execution_graph.e_nodes[idx].invocation_order);
             active_node_indexes
         };
 
         for e_node_idx in active_e_node_indexes {
             let (node, func) = {
-                let e_node = &runtime_graph.e_nodes[e_node_idx];
+                let e_node = &execution_graph.e_nodes[e_node_idx];
                 assert!(!e_node.id.is_nil());
 
                 let node = &graph.nodes[e_node.node_idx];
@@ -85,10 +85,10 @@ impl Compute {
                         .into(),
 
                     Binding::Output(output_binding) => {
-                        let output_address = &runtime_graph.e_nodes[e_node_idx].inputs[input_idx]
+                        let output_address = &execution_graph.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .expect("Output address is not set");
-                        let output_values = runtime_graph.e_nodes[output_address.e_node_idx]
+                        let output_values = execution_graph.e_nodes[output_address.e_node_idx]
                             .output_values
                             .as_mut()
                             .expect("Output values missing for bound node; check execution order");
@@ -101,7 +101,7 @@ impl Compute {
                 inputs[input_idx] = self.convert_type(&value, data_type);
             }
 
-            let e_node = &mut runtime_graph.e_nodes[e_node_idx];
+            let e_node = &mut execution_graph.e_nodes[e_node_idx];
             let outputs = e_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);

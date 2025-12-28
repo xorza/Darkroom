@@ -458,14 +458,14 @@ mod tests {
 
         let graph = test_graph();
 
-        let mut runtime_graph = ExecutionGraph::default();
+        let mut execution_graph = ExecutionGraph::default();
         Compute::default()
-            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &invoker.func_lib, &invoker, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
         Compute::default()
-            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &invoker.func_lib, &invoker, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 35);
 
@@ -476,9 +476,9 @@ mod tests {
             .unwrap_or_else(|| panic!("Func named \"get_b\" not found"))
             .behavior = FuncBehavior::Impure;
 
-        let mut runtime_graph = ExecutionGraph::default();
+        let mut execution_graph = ExecutionGraph::default();
         Compute::default()
-            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &invoker.func_lib, &invoker, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 63);
 
@@ -528,10 +528,10 @@ mod tests {
             mult_inputs[1].binding = Binding::Const;
         }
 
-        let mut runtime_graph = ExecutionGraph::default();
+        let mut execution_graph = ExecutionGraph::default();
 
         Compute::default()
-            .run(&graph, &func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &func_lib, &invoker, &mut execution_graph)
             .await?;
         assert_eq!(test_values.lock().await.result, 360);
 
@@ -593,10 +593,10 @@ mod tests {
             .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
             .behavior = NodeBehavior::OnInputChange;
 
-        let mut runtime_graph = ExecutionGraph::default();
+        let mut execution_graph = ExecutionGraph::default();
 
         Compute::default()
-            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &invoker.func_lib, &invoker, &mut execution_graph)
             .await?;
 
         //assert that both nodes were called
@@ -610,7 +610,7 @@ mod tests {
         println!();
 
         Compute::default()
-            .run(&graph, &invoker.func_lib, &invoker, &mut runtime_graph)
+            .run(&graph, &invoker.func_lib, &invoker, &mut execution_graph)
             .await?;
 
         //assert that node was called again

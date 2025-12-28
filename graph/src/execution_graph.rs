@@ -130,24 +130,24 @@ impl ExecutionGraph {
     pub fn serialize(&self, format: FileFormat) -> String {
         match format {
             FileFormat::Yaml => serde_yml::to_string(&self)
-                .expect("Failed to serialize runtime graph to YAML")
+                .expect("Failed to serialize execution graph to YAML")
                 .normalize(),
             FileFormat::Json => serde_json::to_string_pretty(&self)
-                .expect("Failed to serialize runtime graph to JSON")
+                .expect("Failed to serialize execution graph to JSON")
                 .normalize(),
         }
     }
 
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let runtime_graph: ExecutionGraph = match format {
+        let execution_graph: ExecutionGraph = match format {
             FileFormat::Yaml => serde_yml::from_str(serialized)?,
             FileFormat::Json => serde_json::from_str(serialized)?,
         };
 
-        Ok(runtime_graph)
+        Ok(execution_graph)
     }
 
-    // Rebuild runtime state from the current graph and function library.
+    // Rebuild execution state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.update_node_cache(graph);
         self.backward(graph, func_lib);
@@ -157,7 +157,7 @@ impl ExecutionGraph {
     // Update the node cache with the current graph.
     fn update_node_cache(&mut self, graph: &Graph) {
         // Compact e_nodes in-place to keep only nodes that still exist in graph.
-        // We reuse existing RuntimeNode slots to avoid extra allocations.
+        // We reuse existing ExecutionNode slots to avoid extra allocations.
         let mut write_idx = 0;
         for (node_idx, node) in graph.nodes.iter().enumerate() {
             assert!(
@@ -177,7 +177,7 @@ impl ExecutionGraph {
                 }
             };
 
-            // Move the runtime node we want into the next compacted slot.
+            // Move the execution node we want into the next compacted slot.
             if e_node_idx != write_idx {
                 self.e_nodes.swap(e_node_idx, write_idx);
                 let swapped_id = self.e_nodes[e_node_idx].id;
@@ -187,7 +187,7 @@ impl ExecutionGraph {
                 }
             }
 
-            // Reset the runtime node with the latest graph node data.
+            // Reset the execution node with the latest graph node data.
             let e_node = &mut self.e_nodes[write_idx];
             e_node.reset_from(node);
             e_node.node_idx = node_idx;
@@ -195,7 +195,7 @@ impl ExecutionGraph {
             write_idx += 1;
         }
 
-        // Drop any runtime nodes past the compacted range.
+        // Drop any execution nodes past the compacted range.
         self.e_nodes.truncate(write_idx);
         // Prune stale id->index entries that point past the new length or mismatched ids.
         self.e_node_idx_by_id
@@ -206,26 +206,26 @@ impl ExecutionGraph {
             assert_eq!(
                 self.e_nodes.len(),
                 self.e_node_idx_by_id.len(),
-                "Runtime node count mismatch"
+                "Execution node count mismatch"
             );
             assert_eq!(
                 self.e_nodes.len(),
                 graph.nodes.len(),
-                "Runtime node count mismatch"
+                "Execution node count mismatch"
             );
-            // Check that the runtime graph is in a consistent state.
+            // Check that the execution graph is in a consistent state.
             self.e_nodes.iter().enumerate().for_each(|(idx, e_node)| {
                 assert_eq!(
                     idx, self.e_node_idx_by_id[&e_node.id],
-                    "Runtime node index mismatch"
+                    "Execution node index mismatch"
                 );
                 assert!(
                     e_node.node_idx < graph.nodes.len(),
-                    "Runtime node index out of bounds"
+                    "Execution node index out of bounds"
                 );
                 assert_eq!(
                     graph.nodes[e_node.node_idx].id, e_node.id,
-                    "Runtime node id mismatch"
+                    "Execution node id mismatch"
                 );
             });
         }
@@ -292,7 +292,7 @@ impl ExecutionGraph {
                     ProcessingState::Processing => {
                         // todo replace with result<>
                         panic!(
-                            "Cycle detected while building runtime graph at node {:?}",
+                            "Cycle detected while building execution graph at node {:?}",
                             visit.e_node_idx
                         );
                     }
@@ -358,7 +358,7 @@ impl ExecutionGraph {
                 assert_eq!(
                     e_node.processing_state,
                     ProcessingState::Processed,
-                    "Runtime node must be processed before input propagation"
+                    "Execution node must be processed before input propagation"
                 );
 
                 let node = &graph.nodes[e_node.node_idx];
@@ -383,14 +383,14 @@ impl ExecutionGraph {
                     Binding::Output(output_binding) => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
-                            .expect("Output binding references missing runtime node")
+                            .expect("Output binding references missing execution node")
                             .e_node_idx;
                         let output_e_node = &self.e_nodes[output_e_node_idx];
 
                         assert_eq!(
                             output_e_node.processing_state,
                             ProcessingState::Processed,
-                            "Output runtime node {:?} not processed before input propagation",
+                            "Output execution node {:?} not processed before input propagation",
                             output_binding.output_node_id
                         );
 
@@ -435,7 +435,7 @@ impl ExecutionGraph {
     }
 }
 
-fn validate_runtime_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
     graph.validate()?;
 
     for node in graph.nodes.iter() {
@@ -494,20 +494,20 @@ mod tests {
             .expect("Node named \"get_b\" not found")
             .id;
 
-        let mut runtime_graph = ExecutionGraph::default();
-        runtime_graph.update(&graph, &func_lib);
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
 
-        assert_eq!(runtime_graph.e_nodes.len(), 5);
-        assert!(runtime_graph
+        assert_eq!(execution_graph.e_nodes.len(), 5);
+        assert!(execution_graph
             .e_nodes
             .iter()
             .all(|e_node| e_node.should_invoke));
-        assert!(runtime_graph
+        assert!(execution_graph
             .e_nodes
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
 
-        let _yaml = serde_yml::to_string(&runtime_graph)?;
+        let _yaml = serde_yml::to_string(&execution_graph)?;
 
         Ok(())
     }
@@ -522,14 +522,14 @@ mod tests {
             .expect("Node named \"get_b\" not found")
             .id;
 
-        let mut runtime_graph = ExecutionGraph::default();
-        runtime_graph.update(&graph, &func_lib);
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
 
-        assert_eq!(runtime_graph.e_nodes.len(), 5);
+        assert_eq!(execution_graph.e_nodes.len(), 5);
 
-        runtime_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib);
 
-        assert_eq!(runtime_graph.e_nodes.len(), 5);
+        assert_eq!(execution_graph.e_nodes.len(), 5);
 
         Ok(())
     }
@@ -562,61 +562,61 @@ mod tests {
             .inputs[0]
             .binding = Binding::None;
 
-        let mut runtime_graph = ExecutionGraph::default();
-        runtime_graph.update(&graph, &func_lib);
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
 
-        assert_eq!(runtime_graph.e_nodes.len(), 5);
+        assert_eq!(execution_graph.e_nodes.len(), 5);
         assert!(
-            runtime_graph
+            execution_graph
                 .by_id(get_b_node_id)
-                .expect("Runtime node for get_b missing")
+                .expect("Execution node for get_b missing")
                 .should_invoke
         );
         assert!(
-            !runtime_graph
+            !execution_graph
                 .by_id(sum_node_id)
-                .expect("Runtime node for sum missing")
+                .expect("Execution node for sum missing")
                 .should_invoke
         );
         assert!(
-            !runtime_graph
+            !execution_graph
                 .by_id(mult_node_id)
-                .expect("Runtime node for mult missing")
+                .expect("Execution node for mult missing")
                 .should_invoke
         );
         assert!(
-            !runtime_graph
+            !execution_graph
                 .by_id(print_node_id)
-                .expect("Runtime node for print missing")
+                .expect("Execution node for print missing")
                 .should_invoke
         );
 
         assert!(
-            !runtime_graph
+            !execution_graph
                 .by_id(get_b_node_id)
-                .expect("Runtime node for get_b missing")
+                .expect("Execution node for get_b missing")
                 .has_missing_inputs
         );
         assert!(
-            runtime_graph
+            execution_graph
                 .by_id(sum_node_id)
-                .expect("Runtime node for sum missing")
+                .expect("Execution node for sum missing")
                 .has_missing_inputs
         );
         assert!(
-            runtime_graph
+            execution_graph
                 .by_id(mult_node_id)
-                .expect("Runtime node for mult missing")
+                .expect("Execution node for mult missing")
                 .has_missing_inputs
         );
         assert!(
-            runtime_graph
+            execution_graph
                 .by_id(print_node_id)
-                .expect("Runtime node for print missing")
+                .expect("Execution node for print missing")
                 .has_missing_inputs
         );
 
-        let _yaml = serde_yml::to_string(&runtime_graph)?;
+        let _yaml = serde_yml::to_string(&execution_graph)?;
 
         Ok(())
     }
@@ -626,11 +626,11 @@ mod tests {
         let graph = test_graph();
         let func_lib = test_func_lib();
 
-        let mut runtime_graph = ExecutionGraph::default();
-        runtime_graph.update(&graph, &func_lib);
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
 
         for format in [FileFormat::Yaml, FileFormat::Json] {
-            let serialized = runtime_graph.serialize(format);
+            let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(serialized.as_str(), format)?;
             let serialized_again = deserialized.serialize(format);
 
