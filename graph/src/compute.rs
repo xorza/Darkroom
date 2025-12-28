@@ -24,7 +24,7 @@ impl Compute {
     where
         T: Invoker,
     {
-        execution_graph.update(graph, func_lib);
+        execution_graph.update(graph, func_lib)?;
         let mut inputs: ArgSet = ArgSet::default();
 
         let active_e_node_indexes = {

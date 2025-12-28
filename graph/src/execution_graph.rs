@@ -19,6 +19,29 @@ enum ProcessingState {
     Processed,
 }
 
+#[derive(Debug)]
+pub enum ExecutionGraphError {
+    CycleDetected { e_node_idx: usize },
+}
+
+type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
+
+impl std::fmt::Display for ExecutionGraphError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExecutionGraphError::CycleDetected { e_node_idx } => {
+                write!(
+                    f,
+                    "Cycle detected while building execution graph at node {:?}",
+                    e_node_idx
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ExecutionGraphError {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PortAddress {
     pub e_node_idx: usize,
@@ -234,13 +257,15 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution state from the current graph and function library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.update_node_cache(graph);
-        self.backward(graph, func_lib);
+        self.backward(graph, func_lib)?;
         self.forward(graph);
 
         #[cfg(debug_assertions)]
         self.validate_with_graph(graph);
+
+        Ok(())
     }
 
     // Update the node cache with the current graph.
@@ -321,7 +346,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to mark active nodes and compute invocation order.
-    fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) {
+    fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         enum VisitCause {
             Terminal,
             OutputRequest { output_address: PortAddress },
@@ -379,11 +404,9 @@ impl ExecutionGraph {
                         continue;
                     }
                     ProcessingState::Processing => {
-                        // todo replace with result<>
-                        panic!(
-                            "Cycle detected while building execution graph at node {:?}",
-                            visit.e_node_idx
-                        );
+                        return Err(ExecutionGraphError::CycleDetected {
+                            e_node_idx: visit.e_node_idx,
+                        });
                     }
                     ProcessingState::None => {
                         let func_idx = func_lib
@@ -427,6 +450,7 @@ impl ExecutionGraph {
                 }
             }
         }
+        Ok(())
     }
 
     // Propagate input state forward from scheduled nodes to set invoke/missing flags.
@@ -585,7 +609,7 @@ mod tests {
             .id;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert!(execution_graph
@@ -611,7 +635,7 @@ mod tests {
             .id;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
 
@@ -621,7 +645,7 @@ mod tests {
             .map(|e_node| e_node.invocation_order)
             .collect();
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert!(
@@ -673,7 +697,7 @@ mod tests {
             .binding = Binding::None;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert!(
@@ -762,7 +786,7 @@ mod tests {
         let func_lib = test_func_lib();
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         for format in [FileFormat::Yaml, FileFormat::Json] {
             let serialized = execution_graph.serialize(format);
@@ -787,7 +811,7 @@ mod tests {
     }
 
     #[test]
-    fn execution_graph_updates_after_graph_change() {
+    fn execution_graph_updates_after_graph_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib();
 
@@ -833,7 +857,7 @@ mod tests {
         graph.remove_by_id(sum_node_id);
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
         execution_graph.validate_with_graph(&graph);
 
         assert_eq!(graph.nodes.len(), 4);
@@ -860,15 +884,16 @@ mod tests {
             execution_graph.e_nodes[mult_input_b.e_node_idx].id, get_b_node_id,
             "Mult input B should be wired to get_b"
         );
+        Ok(())
     }
 
     #[test]
-    fn once_node_with_cached_outputs_skips_invocation() {
+    fn once_node_with_cached_outputs_skips_invocation() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib();
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         let get_b_node_id = graph
             .by_name("get_b")
@@ -879,7 +904,7 @@ mod tests {
             .expect("Execution node for get_b missing")
             .output_values = Some(vec![DynamicValue::Int(7)]);
 
-        execution_graph.update(&graph, &func_lib);
+        execution_graph.update(&graph, &func_lib)?;
 
         let get_b_node = execution_graph
             .by_id(get_b_node_id)
@@ -888,5 +913,6 @@ mod tests {
             !get_b_node.should_invoke,
             "Once node with cached outputs should not invoke"
         );
+        Ok(())
     }
 }
