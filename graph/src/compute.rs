@@ -222,7 +222,7 @@ mod tests {
     use crate::compute::{Compute, ComputeError};
     use crate::data::StaticValue;
     use crate::execution_graph::ExecutionGraph;
-    use crate::function::{test_func_lib, FuncBehavior};
+    use crate::function::{test_func_lib, FuncBehavior, TestFuncHooks};
     use crate::graph::{test_graph, Binding, NodeBehavior};
 
     #[derive(Debug)]
@@ -243,26 +243,26 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib(
-            move || {
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Box::new(move || {
                 test_values_a
                     .try_lock()
                     .expect("TestValues mutex is already locked")
                     .a
-            },
-            move || {
+            }),
+            get_b: Box::new(move || {
                 test_values_b
                     .try_lock()
                     .expect("TestValues mutex is already locked")
                     .b
-            },
-            move |result| {
+            }),
+            print: Box::new(move |result| {
                 test_values_result
                     .try_lock()
                     .expect("TestValues mutex is already locked")
                     .result = result;
-            },
-        );
+            }),
+        });
 
         let graph = test_graph();
 
@@ -301,16 +301,15 @@ mod tests {
         }));
         let test_values_result = test_values.clone();
 
-        let func_lib = test_func_lib(
-            || panic!("Unexpected call to get_a"),
-            || panic!("Unexpected call to get_b"),
-            move |result| {
+        let func_lib = test_func_lib(TestFuncHooks {
+            print: Box::new(move |result| {
                 test_values_result
                     .try_lock()
                     .expect("TestValues mutex is already locked")
                     .result = result;
-            },
-        );
+            }),
+            ..TestFuncHooks::default()
+        });
 
         let mut graph = test_graph();
 
@@ -357,8 +356,8 @@ mod tests {
         let test_values_a = test_values.clone();
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib(
-            move || {
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Box::new(move || {
                 let mut guard = test_values_a
                     .try_lock()
                     .expect("TestValues mutex is already locked");
@@ -366,8 +365,8 @@ mod tests {
                 guard.a += 1;
 
                 a1
-            },
-            move || {
+            }),
+            get_b: Box::new(move || {
                 let mut guard = test_values_b
                     .try_lock()
                     .expect("TestValues mutex is already locked");
@@ -378,14 +377,14 @@ mod tests {
                 }
 
                 b1
-            },
-            move |result| {
+            }),
+            print: Box::new(move |result| {
                 test_values_result
                     .try_lock()
                     .expect("TestValues mutex is already locked")
                     .result = result;
-            },
-        );
+            }),
+        });
 
         func_lib
             .by_name_mut("get_a")

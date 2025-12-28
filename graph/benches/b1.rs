@@ -4,7 +4,7 @@ use std::path::Path;
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use graph::execution_graph::ExecutionGraph;
-use graph::function::test_func_lib;
+use graph::function::{test_func_lib, TestFuncHooks};
 use graph::graph::Graph;
 
 fn bench_foo(c: &mut Criterion) {
@@ -17,11 +17,7 @@ fn bench_foo(c: &mut Criterion) {
                 .expect("Benchmark graph path is not valid UTF-8"),
         )
         .expect("Failed to load benchmark graph from test_resources");
-        let func_lib = test_func_lib(
-            || panic!("Unexpected call to get_a"),
-            || panic!("Unexpected call to get_b"),
-            |_| panic!("Unexpected call to print"),
-        );
+        let func_lib = test_func_lib(TestFuncHooks::default());
 
         b.iter(|| {
             let mut execution_graph = ExecutionGraph::default();

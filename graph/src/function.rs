@@ -377,12 +377,29 @@ impl Func {
     }
 }
 
-pub fn test_func_lib<GetA, GetB, SetResult>(get_a: GetA, get_b: GetB, result: SetResult) -> FuncLib
-where
-    SetResult: Fn(i64) + Send + Sync + 'static,
-    GetA: Fn() -> i64 + Send + Sync + 'static,
-    GetB: Fn() -> i64 + Send + Sync + 'static,
-{
+pub struct TestFuncHooks {
+    pub get_a: Box<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub get_b: Box<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub print: Box<dyn Fn(i64) + Send + Sync + 'static>,
+}
+
+impl Default for TestFuncHooks {
+    fn default() -> Self {
+        Self {
+            get_a: Box::new(|| panic!("Unexpected call to get_a")),
+            get_b: Box::new(|| panic!("Unexpected call to get_b")),
+            print: Box::new(|_| panic!("Unexpected call to print")),
+        }
+    }
+}
+
+pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
+    let TestFuncHooks {
+        get_a,
+        get_b,
+        print,
+    } = hooks;
+
     [
         Func {
             id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")
@@ -551,7 +568,7 @@ where
                     "print expects exactly 1 input but received {}",
                     inputs.len()
                 );
-                result(inputs[0].as_int());
+                print(inputs[0].as_int());
                 Ok(())
             })),
         },
@@ -563,16 +580,12 @@ where
 mod tests {
     use crate::common::FileFormat;
     use crate::data::DynamicValue;
-    use crate::function::{test_func_lib, InvokeCache};
+    use crate::function::{test_func_lib, InvokeCache, TestFuncHooks};
     use common::yaml_format::reformat_yaml;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
-        let func_lib = test_func_lib(
-            || panic!("Unexpected call to get_a"),
-            || panic!("Unexpected call to get_b"),
-            |_| panic!("Unexpected call to print"),
-        );
+        let func_lib = test_func_lib(TestFuncHooks::default());
 
         for format in [FileFormat::Yaml, FileFormat::Json] {
             let serialized = func_lib.serialize(format);
@@ -586,11 +599,7 @@ mod tests {
 
     #[test]
     fn invoke_by_id_and_index() -> anyhow::Result<()> {
-        let mut func_lib = test_func_lib(
-            || panic!("Unexpected call to get_a"),
-            || panic!("Unexpected call to get_b"),
-            |_| panic!("Unexpected call to print"),
-        );
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
         let sum_id = func_lib
             .by_name("sum")
             .expect("Func named \"sum\" not found")
