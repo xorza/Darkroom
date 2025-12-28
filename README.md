@@ -50,6 +50,7 @@ Execution node cache compaction now has inline comments explaining the swap/trun
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
 Lua integration updates are tracked in `NOTES-AI.md`.
 Function lambda storage refinements are tracked in `NOTES-AI.md`.
+Lua output formatting updates are tracked in `NOTES-AI.md`.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
 Tests use in-code function library fixtures for the standard sample functions.
 Graph and function library file loaders now auto-detect YAML or JSON based on file extension.

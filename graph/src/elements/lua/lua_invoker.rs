@@ -53,53 +53,34 @@ impl LuaInvoker {
             move |_lua: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
                 let mut output = String::new();
 
-                for arg in args {
-                    match arg {
-                        mlua::Value::Nil => {
-                            output += "Nil";
-                        }
-                        mlua::Value::Boolean(v) => {
-                            output += &v.to_string();
-                        }
-                        mlua::Value::LightUserData(_) => {
-                            output += "LightUserData";
-                        }
-                        mlua::Value::Integer(v) => {
-                            output += &v.to_string();
-                        }
-                        mlua::Value::Number(v) => {
-                            output += &v.to_string();
-                        }
-                        mlua::Value::String(v) => {
-                            output += v.to_str().expect("Lua string is not valid UTF-8").as_ref();
-                        }
-                        mlua::Value::Table(_) => {
-                            output += "Table";
-                        }
-                        mlua::Value::Function(_) => {
-                            output += "Function";
-                        }
-                        mlua::Value::Thread(_) => {
-                            output += "Thread";
-                        }
-                        mlua::Value::UserData(_) => {
-                            output += "UserData";
-                        }
-                        mlua::Value::Error(err) => output += &err.to_string(),
+                for (index, arg) in args.into_iter().enumerate() {
+                    if index > 0 {
+                        output.push('\t');
+                    }
 
-                        _ => {
-                            panic!("not supported");
-                        }
+                    match arg {
+                        mlua::Value::Nil => output.push_str("Nil"),
+                        mlua::Value::Boolean(v) => output.push_str(&v.to_string()),
+                        mlua::Value::LightUserData(_) => output.push_str("LightUserData"),
+                        mlua::Value::Integer(v) => output.push_str(&v.to_string()),
+                        mlua::Value::Number(v) => output.push_str(&v.to_string()),
+                        mlua::Value::String(v) => output
+                            .push_str(v.to_str().expect("Lua string is not valid UTF-8").as_ref()),
+                        mlua::Value::Table(_) => output.push_str("Table"),
+                        mlua::Value::Function(_) => output.push_str("Function"),
+                        mlua::Value::Thread(_) => output.push_str("Thread"),
+                        mlua::Value::UserData(_) => output.push_str("UserData"),
+                        mlua::Value::Error(err) => output.push_str(&err.to_string()),
+                        _ => panic!("not supported"),
                     }
                 }
 
                 let mut guard = output_stream
                     .try_lock()
                     .expect("Output stream mutex is already locked");
-                let _ = guard.as_mut().is_some_and(|stream| {
+                if let Some(stream) = guard.as_mut() {
                     stream.write(output);
-                    true
-                });
+                }
                 Ok(())
             },
         )?;
@@ -240,14 +221,15 @@ impl LuaInvoker {
         let graph_function: mlua::Function = self.lua.globals().get("graph")?;
         graph_function.call::<()>(())?;
 
-        self.restore_functions();
-
         let connections: Vec<FuncConnections> = std::mem::take(
             &mut connections
                 .try_lock()
                 .expect("Connections mutex is already locked"),
         );
         let graph = self.create_graph(connections);
+
+        self.restore_functions();
+
         Ok(graph)
     }
 
