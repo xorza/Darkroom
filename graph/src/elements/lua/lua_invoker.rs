@@ -451,18 +451,21 @@ mod tests {
 
         let test_func: mlua::Function = lua.globals().get("test_func").unwrap();
         let result: mlua::Variadic<mlua::Value> = test_func.call(var_args).unwrap();
+        let mut result = result.into_iter();
+        let sum = match result.next().expect("Missing sum result") {
+            mlua::Value::Integer(value) => value,
+            other => panic!("Sum result must be an integer, got {:?}", other),
+        };
+        assert_eq!(sum, 351);
 
-        for value in result {
-            match value {
-                mlua::Value::Integer(int) => {
-                    assert_eq!(int, 351);
-                }
-                mlua::Value::String(text) => {
-                    assert_eq!(text, "hello world!")
-                }
-                _ => {}
-            }
-        }
+        let message = match result.next().expect("Missing message result") {
+            mlua::Value::String(value) => value
+                .to_str()
+                .expect("Message result must be valid UTF-8")
+                .to_string(),
+            other => panic!("Message result must be a string, got {:?}", other),
+        };
+        assert_eq!(message, "hello world!");
     }
 
     #[test]
@@ -522,23 +525,19 @@ mod tests {
         assert_eq!(mult_node.inputs.len(), 2);
         assert!(mult_node.inputs[0].binding.is_some());
 
-        let binding = mult_node.inputs[0]
-            .binding
-            .as_output_binding()
-            .expect("Missing output binding");
-        let bound_node = graph
-            .by_id(binding.output_node_id)
-            .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
-        assert_eq!(bound_node.name, "sum");
-
-        let binding = mult_node.inputs[1]
-            .binding
-            .as_output_binding()
-            .expect("Missing output binding");
-        let bound_node = graph
-            .by_id(binding.output_node_id)
-            .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id));
-        assert_eq!(bound_node.name, "get_b");
+        let bound_name = |index: usize| -> &str {
+            let binding = mult_node.inputs[index]
+                .binding
+                .as_output_binding()
+                .unwrap_or_else(|| panic!("Missing output binding for input {}", index));
+            graph
+                .by_id(binding.output_node_id)
+                .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id))
+                .name
+                .as_str()
+        };
+        assert_eq!(bound_name(0), "sum");
+        assert_eq!(bound_name(1), "get_b");
 
         invoker.run()?;
 

@@ -62,6 +62,7 @@ Additional modules drive execution and integration:
 - Lua function parsing now caches input/output counts and includes function+index context in data type errors.
 - Lua connection collection now takes and drops the mutex guard in a tighter scope.
 - Lua graph wiring now preallocates node storage and validates the final graph with an explicit expect.
+- Lua tests now assert ordered multi-value returns and reuse a helper for bound-node names.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.
