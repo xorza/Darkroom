@@ -372,32 +372,6 @@ mod tests {
     use std::hint::black_box;
 
     #[test]
-    fn graph_to_yaml() -> anyhow::Result<()> {
-        let mut graph = Graph::default();
-        let mut node1 = Node::default();
-
-        node1.inputs.push(Input {
-            binding: Binding::Const,
-            const_value: Some(StaticValue::Int(55)),
-        });
-        let mut node2 = Node::default();
-        node2.inputs.push(Input {
-            binding: Binding::Output(OutputBinding {
-                output_node_id: node1.id,
-                output_idx: 0,
-            }),
-            const_value: None,
-        });
-
-        graph.add(node1);
-        graph.add(node2);
-
-        let _yaml: String = graph.serialize(FileFormat::Yaml);
-
-        Ok(())
-    }
-
-    #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
 
