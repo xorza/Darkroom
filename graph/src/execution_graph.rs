@@ -147,11 +147,97 @@ impl ExecutionGraph {
         Ok(execution_graph)
     }
 
+    pub fn validate_with_graph(&self, graph: &Graph) {
+        assert_eq!(
+            self.e_nodes.len(),
+            graph.nodes.len(),
+            "Execution node count mismatch"
+        );
+        assert_eq!(
+            self.e_nodes.len(),
+            self.e_node_idx_by_id.len(),
+            "Execution node index map mismatch"
+        );
+
+        let mut seen_node_indices = vec![false; graph.nodes.len()];
+        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
+            assert!(
+                e_node.node_idx < graph.nodes.len(),
+                "Execution node index out of bounds"
+            );
+            let graph_node = &graph.nodes[e_node.node_idx];
+            assert_eq!(
+                graph_node.id, e_node.id,
+                "Execution node id mismatch for graph node {}",
+                e_node.node_idx
+            );
+            assert!(
+                !seen_node_indices[e_node.node_idx],
+                "Duplicate execution node for graph node {}",
+                e_node.node_idx
+            );
+            seen_node_indices[e_node.node_idx] = true;
+
+            let mapped_idx = self
+                .e_node_idx_by_id
+                .get(&e_node.id)
+                .expect("Execution node id missing from index map");
+            assert_eq!(
+                *mapped_idx, e_node_idx,
+                "Execution node index map mismatch for node {:?}",
+                e_node.id
+            );
+
+            assert_eq!(
+                e_node.inputs.len(),
+                graph_node.inputs.len(),
+                "Execution node input count mismatch for node {:?}",
+                e_node.id
+            );
+
+            for (input_idx, input) in graph_node.inputs.iter().enumerate() {
+                match &input.binding {
+                    Binding::Output(output_binding) => {
+                        let address = e_node.inputs[input_idx]
+                            .output_address
+                            .expect("Output binding missing execution output address");
+                        assert!(
+                            address.e_node_idx < self.e_nodes.len(),
+                            "Execution output address node index out of bounds"
+                        );
+                        let output_node = &self.e_nodes[address.e_node_idx];
+                        assert_eq!(
+                            output_node.id, output_binding.output_node_id,
+                            "Execution output address points at wrong node"
+                        );
+                        assert!(
+                            address.port_idx < output_node.outputs.len(),
+                            "Execution output address port index out of bounds"
+                        );
+                    }
+                    Binding::None | Binding::Const => {
+                        assert!(
+                            e_node.inputs[input_idx].output_address.is_none(),
+                            "Non-output binding should not have an execution output address"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            seen_node_indices.iter().all(|seen| *seen),
+            "Execution graph is missing nodes from the source graph"
+        );
+    }
+
     // Rebuild execution state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.update_node_cache(graph);
         self.backward(graph, func_lib);
         self.forward(graph);
+
+        #[cfg(debug_assertions)]
+        self.validate_with_graph(graph);
     }
 
     // Update the node cache with the current graph.
@@ -507,7 +593,7 @@ mod tests {
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
 
-        let _yaml = serde_yml::to_string(&execution_graph)?;
+        execution_graph.validate_with_graph(&graph);
 
         Ok(())
     }
@@ -530,6 +616,8 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
+
+        execution_graph.validate_with_graph(&graph);
 
         Ok(())
     }
@@ -616,7 +704,7 @@ mod tests {
                 .has_missing_inputs
         );
 
-        let _yaml = serde_yml::to_string(&execution_graph)?;
+        execution_graph.validate_with_graph(&graph);
 
         Ok(())
     }
@@ -649,5 +737,16 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn graph_changes_properly_changes_execution_graph() {
+        let graph = test_graph();
+        let func_lib = test_func_lib();
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
+
+        execution_graph.validate_with_graph(&graph);
     }
 }
