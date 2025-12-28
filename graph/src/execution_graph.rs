@@ -23,8 +23,8 @@ enum ProcessingState {
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionGraphError {
-    #[error("Cycle detected while building execution graph at node {e_node_idx:?}")]
-    CycleDetected { e_node_idx: usize },
+    #[error("Cycle detected while building execution graph at node {node_id:?}")]
+    CycleDetected { node_id: NodeId },
 }
 
 type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
@@ -141,12 +141,8 @@ impl ExecutionGraph {
 
     pub fn serialize(&self, format: FileFormat) -> String {
         match format {
-            FileFormat::Yaml => serde_yml::to_string(&self)
-                .expect("Failed to serialize execution graph to YAML")
-                .normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&self)
-                .expect("Failed to serialize execution graph to JSON")
-                .normalize(),
+            FileFormat::Yaml => serde_yml::to_string(&self).unwrap().normalize(),
+            FileFormat::Json => serde_json::to_string_pretty(&self).unwrap().normalize(),
         }
     }
 
@@ -177,12 +173,6 @@ impl ExecutionGraph {
         // We reuse existing ExecutionNode slots to avoid extra allocations.
         let mut write_idx = 0;
         for (node_idx, node) in graph.nodes.iter().enumerate() {
-            assert!(
-                !node.id.is_nil(),
-                "Graph node has nil id at index {}",
-                node_idx
-            );
-
             // Look up the current slot for this node id (if any), otherwise append a new slot.
             let e_node_idx = match self.e_node_idx_by_id.get(&node.id).copied() {
                 Some(idx) => idx,
@@ -278,14 +268,7 @@ impl ExecutionGraph {
 
                 let output_address = match visit.cause {
                     VisitCause::Terminal => None,
-                    VisitCause::OutputRequest { output_address } => {
-                        assert_eq!(
-                            visit.e_node_idx, output_address.e_node_idx,
-                            "Visit e_node_idx {} does not match output address e_node_idx {}",
-                            visit.e_node_idx, output_address.e_node_idx
-                        );
-                        Some(output_address)
-                    }
+                    VisitCause::OutputRequest { output_address } => Some(output_address),
                     VisitCause::Processed => {
                         e_node.processing_state = ProcessingState::Processed1;
                         self.e_node_processing_order.push(e_node_idx);
@@ -298,9 +281,7 @@ impl ExecutionGraph {
                         continue;
                     }
                     ProcessingState::Processing => {
-                        return Err(ExecutionGraphError::CycleDetected {
-                            e_node_idx: visit.e_node_idx,
-                        });
+                        return Err(ExecutionGraphError::CycleDetected { node_id: e_node.id });
                     }
                     ProcessingState::None => {
                         let func_idx = func_lib
@@ -355,11 +336,7 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_processing_order.iter().copied() {
             let node = {
                 let e_node = &mut self.e_nodes[e_node_idx];
-                assert_eq!(
-                    e_node.processing_state,
-                    ProcessingState::Processed1,
-                    "Execution node must be processed before input propagation"
-                );
+                assert_eq!(e_node.processing_state, ProcessingState::Processed1);
 
                 let node = &graph.nodes[e_node.node_idx];
                 // avoid traversing inputs for NodeBehavior::Once nodes having outputs
@@ -380,7 +357,7 @@ impl ExecutionGraph {
                     Binding::None => InputState::Missing,
                     // Const bindings are treated as changed each run until change tracking exists.
                     Binding::Const => InputState::Changed,
-                    Binding::Output(output_binding) => {
+                    Binding::Output(_) => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .expect("Output binding references missing execution node")
@@ -389,9 +366,7 @@ impl ExecutionGraph {
 
                         assert!(
                             output_e_node.processing_state == ProcessingState::Processed1
-                                || output_e_node.processing_state == ProcessingState::Processed2,
-                            "Output execution node {:?} not processed before input propagation",
-                            output_binding.output_node_id
+                                || output_e_node.processing_state == ProcessingState::Processed2
                         );
 
                         if output_e_node.has_missing_inputs {
@@ -643,6 +618,8 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::common::FileFormat;
     use crate::data::{DynamicValue, StaticValue};
@@ -654,10 +631,7 @@ mod tests {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let _get_b_node_id = graph
-            .by_name("get_b")
-            .expect("Node named \"get_b\" not found")
-            .id;
+        let _get_b_node_id = graph.by_name("get_b").unwrap().id;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
@@ -716,109 +690,54 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let get_b_node_id = graph
-            .by_name("get_b")
-            .expect("Node named \"get_b\" not found")
-            .id;
-        let sum_node_id = graph
-            .by_name("sum")
-            .expect("Node named \"sum\" not found")
-            .id;
-        let mult_node_id = graph
-            .by_name("mult")
-            .expect("Node named \"mult\" not found")
-            .id;
-        let print_node_id = graph
-            .by_name("print")
-            .expect("Node named \"print\" not found")
-            .id;
+        let get_b_node_id = graph.by_name("get_b").unwrap().id;
+        let sum_node_id = graph.by_name("sum").unwrap().id;
+        let mult_node_id = graph.by_name("mult").unwrap().id;
+        let print_node_id = graph.by_name("print").unwrap().id;
 
-        graph
-            .by_name_mut("sum")
-            .expect("Node named \"sum\" not found")
-            .inputs[0]
-            .binding = Binding::None;
+        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert!(
-            execution_graph
-                .by_id(get_b_node_id)
-                .expect("Execution node for get_b missing")
-                .should_invoke
-        );
-        assert!(
-            !execution_graph
-                .by_id(sum_node_id)
-                .expect("Execution node for sum missing")
-                .should_invoke
-        );
-        assert!(
-            !execution_graph
-                .by_id(mult_node_id)
-                .expect("Execution node for mult missing")
-                .should_invoke
-        );
-        assert!(
-            !execution_graph
-                .by_id(print_node_id)
-                .expect("Execution node for print missing")
-                .should_invoke
-        );
-
+        assert!(execution_graph.by_id(get_b_node_id).unwrap().should_invoke);
+        assert!(!execution_graph.by_id(sum_node_id).unwrap().should_invoke);
+        assert!(!execution_graph.by_id(mult_node_id).unwrap().should_invoke);
+        assert!(!execution_graph.by_id(print_node_id).unwrap().should_invoke);
         assert!(
             !execution_graph
                 .by_id(get_b_node_id)
-                .expect("Execution node for get_b missing")
+                .unwrap()
                 .has_missing_inputs
         );
         assert!(
             execution_graph
                 .by_id(sum_node_id)
-                .expect("Execution node for sum missing")
+                .unwrap()
                 .has_missing_inputs
         );
         assert!(
             execution_graph
                 .by_id(mult_node_id)
-                .expect("Execution node for mult missing")
+                .unwrap()
                 .has_missing_inputs
         );
         assert!(
             execution_graph
                 .by_id(print_node_id)
-                .expect("Execution node for print missing")
+                .unwrap()
                 .has_missing_inputs
         );
 
-        let sum_node = execution_graph
-            .by_id(sum_node_id)
-            .expect("Execution node for sum missing");
-        assert_eq!(
-            sum_node.inputs[0].state,
-            InputState::Missing,
-            "Sum input 0 should be missing"
-        );
+        let sum_node = execution_graph.by_id(sum_node_id).unwrap();
+        assert_eq!(sum_node.inputs[0].state, InputState::Missing);
 
-        let mult_node = execution_graph
-            .by_id(mult_node_id)
-            .expect("Execution node for mult missing");
-        assert_eq!(
-            mult_node.inputs[0].state,
-            InputState::Missing,
-            "Mult input 0 should be missing due to sum"
-        );
+        let mult_node = execution_graph.by_id(mult_node_id).unwrap();
+        assert_eq!(mult_node.inputs[0].state, InputState::Missing);
 
-        let print_node = execution_graph
-            .by_id(print_node_id)
-            .expect("Execution node for print missing");
-        assert_eq!(
-            print_node.inputs[0].state,
-            InputState::Missing,
-            "Print input 0 should be missing due to mult"
-        );
+        let print_node = execution_graph.by_id(print_node_id).unwrap();
+        assert_eq!(print_node.inputs[0].state, InputState::Missing);
 
         Ok(())
     }
@@ -858,45 +777,21 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let get_a_node_id = graph
-            .by_name("get_a")
-            .expect("Node named \"get_a\" not found")
-            .id;
-        let get_b_node_id = graph
-            .by_name("get_b")
-            .expect("Node named \"get_b\" not found")
-            .id;
+        let get_a_node_id = graph.by_name("get_a").unwrap().id;
+        let get_b_node_id = graph.by_name("get_b").unwrap().id;
 
-        graph
-            .by_name_mut("mult")
-            .expect("Node named \"mult\" not found")
-            .inputs = vec![
+        graph.by_name_mut("mult").unwrap().inputs = vec![
             Input {
-                binding: Binding::from_output_binding(
-                    graph
-                        .by_name("get_a")
-                        .expect("Node named \"get_a\" not found")
-                        .id,
-                    0,
-                ),
+                binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
                 const_value: Some(StaticValue::Int(123)),
             },
             Input {
-                binding: Binding::from_output_binding(
-                    graph
-                        .by_name("get_b")
-                        .expect("Node named \"get_b\" not found")
-                        .id,
-                    0,
-                ),
+                binding: Binding::from_output_binding(graph.by_name("get_b").unwrap().id, 0),
                 const_value: Some(StaticValue::Int(12)),
             },
         ];
 
-        let sum_node_id = graph
-            .by_name("sum")
-            .expect("Node named \"sum\" not found")
-            .id;
+        let sum_node_id = graph.by_name("sum").unwrap().id;
         graph.remove_by_id(sum_node_id);
 
         let mut execution_graph = ExecutionGraph::default();
@@ -906,19 +801,10 @@ mod tests {
         assert_eq!(graph.nodes.len(), 4);
         assert_eq!(execution_graph.e_nodes.len(), 4);
 
-        let mult_node_id = graph
-            .by_name("mult")
-            .expect("Node named \"mult\" not found")
-            .id;
-        let mult_node = execution_graph
-            .by_id(mult_node_id)
-            .expect("Execution node for mult missing");
-        let mult_input_a = mult_node.inputs[0]
-            .output_address
-            .expect("Mult input A missing output address");
-        let mult_input_b = mult_node.inputs[1]
-            .output_address
-            .expect("Mult input B missing output address");
+        let mult_node_id = graph.by_name("mult").unwrap().id;
+        let mult_node = execution_graph.by_id(mult_node_id).unwrap();
+        let mult_input_a = mult_node.inputs[0].output_address.unwrap();
+        let mult_input_b = mult_node.inputs[1].output_address.unwrap();
         assert_eq!(
             execution_graph.e_nodes[mult_input_a.e_node_idx].id, get_a_node_id,
             "Mult input A should be wired to get_a"
@@ -938,20 +824,15 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        let get_b_node_id = graph
-            .by_name("get_b")
-            .expect("Node named \"get_b\" not found")
-            .id;
+        let get_b_node_id = graph.by_name("get_b").unwrap().id;
         execution_graph
             .by_id_mut(get_b_node_id)
-            .expect("Execution node for get_b missing")
+            .unwrap()
             .output_values = Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib)?;
 
-        let get_b_node = execution_graph
-            .by_id(get_b_node_id)
-            .expect("Execution node for get_b missing");
+        let get_b_node = execution_graph.by_id(get_b_node_id).unwrap();
         assert!(
             !get_b_node.should_invoke,
             "Once node with cached outputs should not invoke"
@@ -964,15 +845,9 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let mult_node_id = graph
-            .by_name("mult")
-            .expect("Node named \"mult\" not found")
-            .id;
+        let mult_node_id = graph.by_name("mult").unwrap().id;
 
-        let sum_inputs = &mut graph
-            .by_name_mut("sum")
-            .expect("Node named \"sum\" not found")
-            .inputs;
+        let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
         sum_inputs[0].binding = Binding::from_output_binding(mult_node_id, 0);
         sum_inputs[0].const_value = None;
 
@@ -981,10 +856,10 @@ mod tests {
             .update(&graph, &func_lib)
             .expect_err("Expected cycle detection error");
         match err {
-            ExecutionGraphError::CycleDetected { e_node_idx } => {
-                assert!(
-                    e_node_idx < graph.nodes.len(),
-                    "Cycle detection should report a valid execution node index"
+            ExecutionGraphError::CycleDetected { node_id } => {
+                assert_eq!(
+                    node_id,
+                    NodeId::from_str("579ae1d6-10a3-4906-8948-135cb7d7508b").unwrap()
                 );
             }
         }

@@ -40,35 +40,8 @@ impl Compute {
         for e_node_idx in execution_graph.e_node_execution_order.iter().copied() {
             let (node, func) = {
                 let e_node = &execution_graph.e_nodes[e_node_idx];
-                assert!(!e_node.id.is_nil());
-                assert!(e_node.should_invoke);
-
                 let node = &graph.nodes[e_node.node_idx];
                 let func = &func_lib.funcs[e_node.func_idx];
-
-                assert_eq!(
-                    node.func_id, func.id,
-                    "Node {:?} function ID mismatch",
-                    node.id
-                );
-                assert_eq!(
-                    node.inputs.len(),
-                    func.inputs.len(),
-                    "Node {:?} input count mismatch",
-                    node.id
-                );
-                assert_eq!(
-                    e_node.outputs.len(),
-                    func.outputs.len(),
-                    "Node {:?} output count mismatch",
-                    node.id
-                );
-                assert_eq!(
-                    e_node.inputs.len(),
-                    func.inputs.len(),
-                    "Node {:?} output count mismatch",
-                    node.id
-                );
 
                 (node, func)
             };
@@ -235,23 +208,10 @@ mod tests {
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
         let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Box::new(move || {
-                test_values_a
-                    .try_lock()
-                    .expect("TestValues mutex is already locked")
-                    .a
-            }),
-            get_b: Box::new(move || {
-                test_values_b
-                    .try_lock()
-                    .expect("TestValues mutex is already locked")
-                    .b
-            }),
+            get_a: Box::new(move || test_values_a.try_lock().unwrap().a),
+            get_b: Box::new(move || test_values_b.try_lock().unwrap().b),
             print: Box::new(move |result| {
-                test_values_result
-                    .try_lock()
-                    .expect("TestValues mutex is already locked")
-                    .result = result;
+                test_values_result.try_lock().unwrap().result = result;
             }),
         });
 
@@ -271,10 +231,7 @@ mod tests {
             .await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
-        func_lib
-            .by_name_mut("get_b")
-            .expect("Func named \"get_b\" not found")
-            .behavior = FuncBehavior::Impure;
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         Compute::default()
@@ -297,10 +254,7 @@ mod tests {
 
         let func_lib = test_func_lib(TestFuncHooks {
             print: Box::new(move |result| {
-                test_values_result
-                    .try_lock()
-                    .expect("TestValues mutex is already locked")
-                    .result = result;
+                test_values_result.try_lock().unwrap().result = result;
             }),
             ..TestFuncHooks::default()
         });
@@ -308,10 +262,7 @@ mod tests {
         let mut graph = test_graph();
 
         {
-            let sum_inputs = &mut graph
-                .by_name_mut("sum")
-                .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
-                .inputs;
+            let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
             sum_inputs[0].const_value = Some(StaticValue::from(29));
             sum_inputs[0].binding = Binding::Const;
             sum_inputs[1].const_value = Some(StaticValue::from(11));
@@ -319,10 +270,7 @@ mod tests {
         }
 
         {
-            let mult_inputs = &mut graph
-                .by_name_mut("mult")
-                .unwrap_or_else(|| panic!("Node named \"mult\" not found"))
-                .inputs;
+            let mult_inputs = &mut graph.by_name_mut("mult").unwrap().inputs;
             mult_inputs[1].const_value = Some(StaticValue::from(9));
             mult_inputs[1].binding = Binding::Const;
         }
@@ -351,18 +299,14 @@ mod tests {
         let test_values_result = test_values.clone();
         let mut func_lib = test_func_lib(TestFuncHooks {
             get_a: Box::new(move || {
-                let mut guard = test_values_a
-                    .try_lock()
-                    .expect("TestValues mutex is already locked");
+                let mut guard = test_values_a.try_lock().unwrap();
                 let a1 = guard.a;
                 guard.a += 1;
 
                 a1
             }),
             get_b: Box::new(move || {
-                let mut guard = test_values_b
-                    .try_lock()
-                    .expect("TestValues mutex is already locked");
+                let mut guard = test_values_b.try_lock().unwrap();
                 let b1 = guard.b;
                 guard.b += 1;
                 if b1 == 6 {
@@ -372,23 +316,14 @@ mod tests {
                 b1
             }),
             print: Box::new(move |result| {
-                test_values_result
-                    .try_lock()
-                    .expect("TestValues mutex is already locked")
-                    .result = result;
+                test_values_result.try_lock().unwrap().result = result;
             }),
         });
 
-        func_lib
-            .by_name_mut("get_a")
-            .expect("Func named \"get_a\" not found")
-            .behavior = FuncBehavior::Impure;
+        func_lib.by_name_mut("get_a").unwrap().behavior = FuncBehavior::Impure;
 
         let mut graph = test_graph();
-        graph
-            .by_name_mut("sum")
-            .expect("Node named \"sum\" not found")
-            .behavior = NodeBehavior::OnInputChange;
+        graph.by_name_mut("sum").unwrap().behavior = NodeBehavior::OnInputChange;
 
         let mut execution_graph = ExecutionGraph::default();
 

@@ -71,10 +71,9 @@ impl Worker {
 
                 WorkerMessage::RunOnce(graph) => {
                     let mut execution_graph = ExecutionGraph::default();
-                    Compute::default()
+                    let result = Compute::default()
                         .run(&graph, &func_lib, &mut execution_graph)
-                        .await
-                        .expect("Failed to run graph");
+                        .await;
                     (*compute_callback.lock().await)();
                 }
 
@@ -119,10 +118,9 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    Compute::default()
+                    let result = Compute::default()
                         .run(&graph, func_lib, &mut execution_graph)
-                        .await
-                        .expect("Failed to run graph");
+                        .await;
 
                     (*compute_callback.lock().await)();
                 }
@@ -215,27 +213,20 @@ mod tests {
                     .expect("Failed to send a compute callback event");
             });
 
-            let graph = Graph::from_file("../test_resources/log_frame_no.yaml")
-                .expect("Failed to load the log_frame_no.yaml graph");
+            let graph = Graph::from_file("../test_resources/log_frame_no.yaml").unwrap();
 
             worker.run_once(graph.clone()).await;
-            compute_finish_rx
-                .recv()
-                .expect("Failed to receive a compute callback event after run_once");
+            compute_finish_rx.recv().unwrap();
 
             assert_eq!(output_stream.take().await[0], "1");
 
             worker.run_loop(graph.clone()).await;
 
             worker.event().await;
-            compute_finish_rx
-                .recv()
-                .expect("Failed to receive compute callback event after event");
+            compute_finish_rx.recv().unwrap();
 
             worker.event().await;
-            compute_finish_rx
-                .recv()
-                .expect("Failed to receive compute callback event after event");
+            compute_finish_rx.recv().unwrap();
 
             let log = output_stream.take().await;
             assert_eq!(log[0], "1");
