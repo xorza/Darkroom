@@ -5,6 +5,7 @@ use crate::data::{DataType, DynamicValue};
 use crate::execution_graph::{ExecutionGraph, ExecutionGraphError};
 use crate::function::{FuncId, FuncLib};
 use crate::graph::{Binding, Graph};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Default)]
@@ -13,15 +14,14 @@ pub(crate) struct ArgSet(Vec<DynamicValue>);
 #[derive(Debug, Default)]
 pub struct Compute {}
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ComputeError {
     #[error("Execution graph update failed: {0}")]
     ExecutionGraph(#[from] ExecutionGraphError),
-    #[error("Function invocation failed for function {function_id:?}: {source}")]
+    #[error("Function invocation failed for function {function_id:?}: {message}")]
     Invoke {
         function_id: FuncId,
-        #[source]
-        source: anyhow::Error,
+        message: String,
     },
 }
 
@@ -116,22 +116,22 @@ impl Compute {
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
 
-            e_node.run_time = {
-                let start = std::time::Instant::now();
-                func_lib
-                    .invoke_by_index(
-                        e_node.func_idx,
-                        &mut e_node.cache,
-                        inputs.as_slice(),
-                        outputs.as_mut_slice(),
-                    )
-                    .map_err(|source| ComputeError::Invoke {
-                        function_id: node.func_id,
-                        source,
-                    })?;
+            let start = std::time::Instant::now();
+            let result = func_lib
+                .invoke_by_index(
+                    e_node.func_idx,
+                    &mut e_node.cache,
+                    inputs.as_slice(),
+                    outputs.as_mut_slice(),
+                )
+                .map_err(|source| ComputeError::Invoke {
+                    function_id: node.func_id,
+                    message: source.to_string(),
+                });
+            e_node.run_time = start.elapsed().as_secs_f64();
+            e_node.error = result.clone().err();
 
-                start.elapsed().as_secs_f64()
-            };
+            result?;
 
             inputs.clear();
         }

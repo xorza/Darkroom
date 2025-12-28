@@ -58,6 +58,8 @@ Lua graph connection extraction tweaks are tracked in `NOTES-AI.md`.
 Lua graph wiring refinements are tracked in `NOTES-AI.md`.
 Lua test cleanup notes are tracked in `NOTES-AI.md`.
 Lua test coverage updates are tracked in `NOTES-AI.md`.
+Compute error serialization notes are tracked in `NOTES-AI.md`.
+Compute error source storage updates are tracked in `NOTES-AI.md`.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
 Tests use in-code function library fixtures for the standard sample functions.
 Graph and function library file loaders now auto-detect YAML or JSON based on file extension.

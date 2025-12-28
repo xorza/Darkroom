@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::common::FileFormat;
+use crate::compute::ComputeError;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
@@ -19,7 +20,7 @@ enum ProcessingState {
     Processed,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionGraphError {
     #[error("Cycle detected while building execution graph at node {e_node_idx:?}")]
     CycleDetected { e_node_idx: usize },
@@ -70,6 +71,7 @@ pub struct ExecutionNode {
     processing_state: ProcessingState,
 
     pub run_time: f64,
+    pub error: Option<ComputeError>,
 
     #[serde(skip)]
     pub(crate) cache: InvokeCache,
