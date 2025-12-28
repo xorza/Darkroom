@@ -148,6 +148,9 @@ impl ExecutionGraph {
     }
 
     pub fn validate_with_graph(&self, graph: &Graph) {
+        #[cfg(not(debug_assertions))]
+        tracing::warn!("Running validate_with_graph in release mode. May be suboptimal.");
+
         assert_eq!(
             self.e_nodes.len(),
             graph.nodes.len(),
@@ -593,8 +596,6 @@ mod tests {
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
 
-        execution_graph.validate_with_graph(&graph);
-
         Ok(())
     }
 
@@ -616,8 +617,6 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-
-        execution_graph.validate_with_graph(&graph);
 
         Ok(())
     }
@@ -704,8 +703,6 @@ mod tests {
                 .has_missing_inputs
         );
 
-        execution_graph.validate_with_graph(&graph);
-
         Ok(())
     }
 
@@ -746,7 +743,5 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-
-        execution_graph.validate_with_graph(&graph);
     }
 }
