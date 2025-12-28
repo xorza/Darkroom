@@ -59,6 +59,7 @@ Additional modules drive execution and integration:
 - Lua print output now joins multiple arguments with tab separators while preserving type-specific stringification.
 - Lua function loading now holds the function map lock once and iterates inputs/outputs with zip-based loops.
 - Lua value conversion now panics with the unsupported Lua value details for easier debugging.
+- Lua function parsing now caches input/output counts and includes function+index context in data type errors.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.

@@ -53,6 +53,7 @@ Function lambda storage refinements are tracked in `NOTES-AI.md`.
 Lua output formatting updates are tracked in `NOTES-AI.md`.
 Lua function loading refactors are tracked in `NOTES-AI.md`.
 Lua value conversion refinements are tracked in `NOTES-AI.md`.
+Lua function parsing refinements are tracked in `NOTES-AI.md`.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
 Tests use in-code function library fixtures for the standard sample functions.
 Graph and function library file loaders now auto-detect YAML or JSON based on file extension.

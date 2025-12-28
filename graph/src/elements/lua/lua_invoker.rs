@@ -101,12 +101,10 @@ impl LuaInvoker {
             let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            let lua = Arc::clone(&self.lua);
-
             func.lambda = FuncLambda::new({
                 let func = func.clone();
                 let lua_func = lua_func.clone();
-                let lua = Arc::clone(&lua);
+                let lua = Arc::clone(&self.lua);
 
                 move |_cache, inputs, outputs| {
                     let input_len = inputs.len();
@@ -159,12 +157,14 @@ impl LuaInvoker {
 
         Ok(())
     }
+    
     fn function_from_table(table: &mlua::Table) -> anyhow::Result<Func> {
         let id_str: String = table.get("id")?;
+        let name: String = table.get("name")?;
 
         let mut function_info = Func {
             id: FuncId::from_str(&id_str)?,
-            name: table.get("name")?,
+            name,
             category: "".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
@@ -175,36 +175,47 @@ impl LuaInvoker {
         };
 
         let inputs: mlua::Table = table.get("inputs")?;
-        for i in 1..=inputs.len()? {
+        let input_count = inputs.len()?;
+        for i in 1..=input_count {
             let input: mlua::Table = inputs.get(i)?;
             let name: String = input.get(1)?;
             let data_type_name: String = input.get(2)?;
-            let data_type = data_type_name
-                .parse::<DataType>()
-                .map_err(|_| Error::msg("Error parsing DataType"))?;
+            let data_type = data_type_name.parse::<DataType>().map_err(|_| {
+                Error::msg(format!(
+                    "Error parsing DataType \"{}\" for input {} on function {}",
+                    data_type_name, i, function_info.name
+                ))
+            })?;
 
-            let mut default_value: Option<data::StaticValue> = None;
-            if input.len()? > 2 {
-                default_value = None;
-            }
+            let default_value: Option<data::StaticValue> = None;
 
             function_info.inputs.push(function::FuncInput {
                 name,
                 required: true,
                 data_type,
                 default_value,
-                value_options: vec![],
+                value_options: Vec::new(),
             });
         }
 
         let outputs: mlua::Table = table.get("outputs")?;
-        for i in 1..=outputs.len()? {
-            let output: mlua::Table = outputs.get(i).expect("Missing output entry in Lua table");
-            let name: String = output.get(1).expect("Missing output name in Lua table");
-            let data_type_name: String = output.get(2).expect("Missing output type in Lua table");
-            let data_type = data_type_name
-                .parse::<DataType>()
-                .expect("Invalid data type name in Lua table");
+        let output_count = outputs.len()?;
+        for i in 1..=output_count {
+            let output: mlua::Table = outputs
+                .get(i)
+                .unwrap_or_else(|_| panic!("Missing output entry {} in Lua table", i));
+            let name: String = output
+                .get(1)
+                .unwrap_or_else(|_| panic!("Missing output name for entry {} in Lua table", i));
+            let data_type_name: String = output
+                .get(2)
+                .unwrap_or_else(|_| panic!("Missing output type for entry {} in Lua table", i));
+            let data_type = data_type_name.parse::<DataType>().unwrap_or_else(|_| {
+                panic!(
+                    "Invalid data type name \"{}\" for output {} on function {}",
+                    data_type_name, i, function_info.name
+                )
+            });
 
             function_info
                 .outputs
