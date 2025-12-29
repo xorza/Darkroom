@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::path::Path;
 
 use crate::normalize_string::NormalizeString;
+use crate::serde_lua::SerdeLuaError;
 
 #[macro_use]
 pub mod macros;
@@ -24,6 +25,18 @@ pub enum FileExtensionError {
 }
 
 pub type FileFormatResult<T> = Result<T, FileExtensionError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum SerdeFormatError {
+    #[error("YAML serialization failed")]
+    Yaml(#[from] serde_yml::Error),
+    #[error("JSON serialization failed")]
+    Json(#[from] serde_json::Error),
+    #[error("Lua serialization failed")]
+    Lua(#[from] SerdeLuaError),
+}
+
+pub type SerdeFormatResult<T> = Result<T, SerdeFormatError>;
 
 pub fn get_file_extension(filename: &str) -> Option<&str> {
     Path::new(filename)
@@ -68,10 +81,13 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> String {
     .normalize()
 }
 
-pub fn deserialize<T: DeserializeOwned>(serialized: &str, format: FileFormat) -> anyhow::Result<T> {
+pub fn deserialize<T: DeserializeOwned>(
+    serialized: &str,
+    format: FileFormat,
+) -> SerdeFormatResult<T> {
     match format {
-        FileFormat::Yaml => serde_yml::from_str(serialized).map_err(anyhow::Error::from),
-        FileFormat::Json => serde_json::from_str(serialized).map_err(anyhow::Error::from),
-        FileFormat::Lua => serde_lua::from_str(serialized).map_err(anyhow::Error::from),
+        FileFormat::Yaml => Ok(serde_yml::from_str(serialized)?),
+        FileFormat::Json => Ok(serde_json::from_str(serialized)?),
+        FileFormat::Lua => Ok(serde_lua::from_str(serialized)?),
     }
 }
