@@ -1,11 +1,11 @@
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
-use crate::common::FileFormat;
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
 use common::normalize_string::NormalizeString;
+use common::FileFormat;
 
 id_type!(NodeId);
 
@@ -366,9 +366,9 @@ pub fn test_graph() -> Graph {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::FileFormat;
     use crate::data::StaticValue;
     use crate::graph::{Binding, Graph, Input, Node, OutputBinding};
+    use common::FileFormat;
     use std::hint::black_box;
 
     #[test]

@@ -5,12 +5,12 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::common::FileFormat;
 use crate::compute::ComputeError;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use common::normalize_string::NormalizeString;
+use common::FileFormat;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessingState {
@@ -621,10 +621,10 @@ mod tests {
     use std::str::FromStr;
 
     use super::*;
-    use crate::common::FileFormat;
     use crate::data::{DynamicValue, StaticValue};
     use crate::function::{test_func_lib, TestFuncHooks};
     use crate::graph::{test_graph, Input};
+    use common::FileFormat;
 
     #[test]
     fn simple_run() -> anyhow::Result<()> {

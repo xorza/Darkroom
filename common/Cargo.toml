@@ -10,3 +10,4 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 tokio = { workspace = true }
 serde_yml = { workspace = true }
+thiserror = { workspace = true }

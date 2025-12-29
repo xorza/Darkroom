@@ -2,10 +2,10 @@ use std::any::Any;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::common::FileFormat;
 use crate::data::*;
 use common::id_type;
 use common::normalize_string::NormalizeString;
+use common::FileFormat;
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -502,10 +502,10 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::FileFormat;
     use crate::data::DynamicValue;
     use crate::function::{test_func_lib, InvokeCache, TestFuncHooks};
     use common::yaml_format::reformat_yaml;
+    use common::FileFormat;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
