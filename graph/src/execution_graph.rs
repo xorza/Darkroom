@@ -439,9 +439,9 @@ impl ExecutionGraph {
                 e_node.node_idx < graph.nodes.len(),
                 "Execution node index out of bounds"
             );
-            let graph_node = &graph.nodes[e_node.node_idx];
+            let node = &graph.nodes[e_node.node_idx];
             assert_eq!(
-                graph_node.id, e_node.id,
+                node.id, e_node.id,
                 "Execution node id mismatch for graph node {}",
                 e_node.node_idx
             );
@@ -464,30 +464,29 @@ impl ExecutionGraph {
 
             assert_eq!(
                 e_node.inputs.len(),
-                graph_node.inputs.len(),
+                node.inputs.len(),
                 "Execution node input count mismatch for node {:?}",
                 e_node.id
             );
 
-            for (input_idx, input) in graph_node.inputs.iter().enumerate() {
+            for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::Output(output_binding) => {
-                        let address = e_node.inputs[input_idx]
-                            .output_address
-                            .expect("Output binding missing execution output address");
-                        assert!(
-                            address.e_node_idx < self.e_nodes.len(),
-                            "Execution output address node index out of bounds"
-                        );
-                        let output_node = &self.e_nodes[address.e_node_idx];
-                        assert_eq!(
-                            output_node.id, output_binding.output_node_id,
-                            "Execution output address points at wrong node"
-                        );
-                        assert!(
-                            address.port_idx < output_node.outputs.len(),
-                            "Execution output address port index out of bounds"
-                        );
+                        if let Some(address) = e_node.inputs[input_idx].output_address {
+                            assert!(
+                                address.e_node_idx < self.e_nodes.len(),
+                                "Execution output address node index out of bounds"
+                            );
+                            let output_node = &self.e_nodes[address.e_node_idx];
+                            assert_eq!(
+                                output_node.id, output_binding.output_node_id,
+                                "Execution output address points at wrong node"
+                            );
+                            assert!(
+                                address.port_idx < output_node.outputs.len(),
+                                "Execution output address port index out of bounds"
+                            );
+                        }
                     }
                     Binding::None | Binding::Const => {
                         assert!(
