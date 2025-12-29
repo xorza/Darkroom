@@ -207,10 +207,10 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         }
 
         if ctx.layout.cache_height > 0.0 && cache_response.clicked() {
-            node.behavior = if node.behavior == NodeBehavior::Once {
-                NodeBehavior::Always
+            node.behavior = if node.behavior == NodeBehavior::CacheOutput {
+                NodeBehavior::AsFunction
             } else {
-                NodeBehavior::Once
+                NodeBehavior::CacheOutput
             };
         }
 
@@ -243,7 +243,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         );
 
         if ctx.layout.cache_height > 0.0 {
-            let button_fill = if node.behavior == NodeBehavior::Once {
+            let button_fill = if node.behavior == NodeBehavior::CacheOutput {
                 ctx.style.cache_active_color
             } else if cache_response.is_pointer_button_down_on() {
                 visuals.widgets.active.bg_fill
@@ -262,7 +262,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             );
 
             let button_text = "cache";
-            let button_text_color = if node.behavior == NodeBehavior::Once {
+            let button_text_color = if node.behavior == NodeBehavior::CacheOutput {
                 ctx.style.cache_checked_text_color
             } else {
                 visuals.text_color()

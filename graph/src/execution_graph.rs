@@ -9,6 +9,7 @@ use crate::compute::ComputeError;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
+use crate::prelude::FuncBehavior;
 use common::normalize_string::NormalizeString;
 use common::FileFormat;
 
@@ -62,6 +63,7 @@ pub struct ExecutionNode {
     pub has_missing_inputs: bool,
     pub has_changed_inputs: bool,
     pub should_invoke: bool,
+    pub function_behavior: FuncBehavior,
 
     pub node_idx: usize,
     pub func_idx: usize,
@@ -341,7 +343,7 @@ impl ExecutionGraph {
                 let node = &graph.nodes[e_node.node_idx];
                 // avoid traversing inputs for NodeBehavior::Once nodes having outputs
                 // even if having missing inputs
-                if node.behavior == NodeBehavior::Once && e_node.output_values.is_some() {
+                if node.behavior == NodeBehavior::CacheOutput && e_node.output_values.is_some() {
                     // should_invoke is false
                     continue;
                 }
@@ -391,23 +393,28 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
+
+            let should_invoke = if has_missing_inputs {
+                false
+            } else {
+                match node.behavior {
+                    NodeBehavior::Terminal => true,
+                    NodeBehavior::CacheOutput => {
+                        // has no cached outputs, so should_invoke = true
+                        true
+                    }
+                    NodeBehavior::AsFunction => match e_node.function_behavior {
+                        FuncBehavior::Impure | FuncBehavior::Output => true,
+                        FuncBehavior::Pure => has_changed_inputs,
+                    },
+                }
+            };
+
             e_node.has_missing_inputs = has_missing_inputs;
             e_node.processing_state = ProcessingState::Processed2;
-            if !e_node.has_missing_inputs {
-                match node.behavior {
-                    NodeBehavior::Terminal | NodeBehavior::Always => {
-                        e_node.should_invoke = true;
-                    }
-                    NodeBehavior::Once => {
-                        // has no cached outputs, so should_invoke = true
-                        e_node.should_invoke = true;
-                    }
-                    NodeBehavior::OnInputChange => {
-                        e_node.should_invoke = has_changed_inputs;
-                    }
-                }
-            }
-            if e_node.should_invoke {
+            e_node.should_invoke = should_invoke;
+
+            if should_invoke {
                 self.e_node_execution_order.push(e_node_idx);
             }
         }

@@ -40,7 +40,7 @@ impl Default for NodeView {
             pos: egui::Pos2::ZERO,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            behavior: NodeBehavior::Always,
+            behavior: NodeBehavior::AsFunction,
         }
     }
 }

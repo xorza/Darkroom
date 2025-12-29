@@ -38,9 +38,11 @@ pub struct Event {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum NodeBehavior {
     #[default]
-    Always,
-    Once,
-    OnInputChange,
+    // should execute depending on the function's behavior
+    // will be executed always for impure functions
+    // for pure functions, only on input change
+    AsFunction,
+    CacheOutput,
     Terminal,
 }
 
@@ -170,7 +172,7 @@ impl Default for Node {
             id: NodeId::unique(),
             func_id: FuncId::nil(),
             name: "".to_string(),
-            behavior: NodeBehavior::Always,
+            behavior: NodeBehavior::AsFunction,
             inputs: vec![],
             events: vec![],
         }
@@ -198,8 +200,7 @@ impl Node {
             .collect();
 
         let behavior = match function.behavior {
-            FuncBehavior::Pure => NodeBehavior::OnInputChange,
-            FuncBehavior::Impure => NodeBehavior::Always,
+            FuncBehavior::Pure | FuncBehavior::Impure => NodeBehavior::AsFunction,
             FuncBehavior::Output => NodeBehavior::Terminal,
         };
 
@@ -292,7 +293,7 @@ pub fn test_graph() -> Graph {
         id: mult_node_id,
         func_id: mult_func_id,
         name: "mult".to_string(),
-        behavior: NodeBehavior::OnInputChange,
+        behavior: NodeBehavior::AsFunction,
         inputs: vec![
             Input {
                 binding: Binding::from_output_binding(sum_node_id, 0),
@@ -310,7 +311,7 @@ pub fn test_graph() -> Graph {
         id: get_a_node_id,
         func_id: get_a_func_id,
         name: "get_a".to_string(),
-        behavior: NodeBehavior::Always,
+        behavior: NodeBehavior::AsFunction,
         inputs: vec![],
         events: vec![],
     });
@@ -319,7 +320,7 @@ pub fn test_graph() -> Graph {
         id: get_b_node_id,
         func_id: get_b_func_id,
         name: "get_b".to_string(),
-        behavior: NodeBehavior::Once,
+        behavior: NodeBehavior::CacheOutput,
         inputs: vec![],
         events: vec![],
     });
@@ -328,7 +329,7 @@ pub fn test_graph() -> Graph {
         id: sum_node_id,
         func_id: sum_func_id,
         name: "sum".to_string(),
-        behavior: NodeBehavior::OnInputChange,
+        behavior: NodeBehavior::AsFunction,
         inputs: vec![
             Input {
                 binding: Binding::from_output_binding(get_a_node_id, 0),

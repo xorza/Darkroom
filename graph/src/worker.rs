@@ -214,7 +214,7 @@ mod tests {
             id: frame_event_node_id,
             func_id: frame_event_func_id,
             name: "frame event".to_string(),
-            behavior: NodeBehavior::OnInputChange,
+            behavior: NodeBehavior::AsFunction,
             inputs: vec![Input {
                 binding: Binding::Const,
                 const_value: Some(StaticValue::Float(30.0)),
@@ -226,7 +226,7 @@ mod tests {
             id: float_to_string_node_id,
             func_id: float_to_string_func_id,
             name: "float to string".to_string(),
-            behavior: NodeBehavior::OnInputChange,
+            behavior: NodeBehavior::AsFunction,
             inputs: vec![Input {
                 binding: Binding::from_output_binding(frame_event_node_id, 1),
                 const_value: None,
