@@ -522,7 +522,7 @@ fn collect_ports(
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
-    for node in &graph.nodes {
+    for node in graph.nodes.iter().rev() {
         let node_width = node_widths
             .get(&node.id)
             .copied()
@@ -564,7 +564,7 @@ fn find_port_near(ports: &[PortInfo], pos: egui::Pos2, radius: f32) -> Option<Po
 
     for port in ports {
         let dist = port.center.distance(pos);
-        if dist <= best_dist {
+        if dist < best_dist {
             best_dist = dist;
             best = Some(port.clone());
         }
