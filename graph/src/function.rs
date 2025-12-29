@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::data::*;
 use common::id_type;
-use common::{deserialize_with_format, serialize_with_format, FileFormat};
+use common::{deserialize, serialize, FileFormat};
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -232,12 +232,12 @@ impl FuncLib {
         Self::deserialize(&contents, format)
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let funcs: Vec<Func> = deserialize_with_format(serialized, format)?;
+        let funcs: Vec<Func> = deserialize(serialized, format)?;
 
         Ok(funcs.into())
     }
     pub fn serialize(&self, format: FileFormat) -> String {
-        serialize_with_format(&self.funcs, format).expect("Failed to serialize function library")
+        serialize(&self.funcs, format)
     }
 
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {

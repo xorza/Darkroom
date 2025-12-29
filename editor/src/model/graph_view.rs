@@ -143,7 +143,7 @@ impl GraphView {
     pub fn serialize(&self, format: FileFormat) -> String {
         self.validate()
             .expect("graph view must be valid before serialization");
-        common::serialize_with_format(self, format).expect("failed to serialize graph view")
+        common::serialize(self, format)
     }
 
     pub fn deserialize(format: FileFormat, input: &str) -> Result<Self> {
@@ -151,7 +151,7 @@ impl GraphView {
             bail!("graph input is empty");
         }
 
-        let graph = common::deserialize_with_format::<GraphView>(input, format)?;
+        let graph = common::deserialize::<GraphView>(input, format)?;
         graph.validate()?;
 
         Ok(graph)

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
-use common::{deserialize_with_format, serde_lua, serialize_with_format, FileFormat};
+use common::{deserialize, serde_lua, serialize, FileFormat};
 
 id_type!(NodeId);
 
@@ -111,7 +111,7 @@ impl Graph {
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        serialize_with_format(self, format).expect("Failed to serialize graph")
+        serialize(self, format)
     }
     pub fn from_file(path: &str) -> anyhow::Result<Graph> {
         let format = FileFormat::from_file_name(path)
@@ -120,7 +120,7 @@ impl Graph {
         Self::deserialize(&contents, format)
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Graph> {
-        let graph: Graph = deserialize_with_format(serialized, format)?;
+        let graph: Graph = deserialize(serialized, format)?;
 
         graph.validate()?;
 

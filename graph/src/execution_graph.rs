@@ -11,7 +11,7 @@ use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::FuncBehavior;
-use common::{deserialize_with_format, serialize_with_format, FileFormat};
+use common::{deserialize, serialize, FileFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessingState {
@@ -142,11 +142,11 @@ impl ExecutionGraph {
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        serialize_with_format(self, format).expect("Failed to serialize execution graph")
+        serialize(self, format)
     }
 
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let execution_graph: ExecutionGraph = deserialize_with_format(serialized, format)?;
+        let execution_graph: ExecutionGraph = deserialize(serialized, format)?;
 
         Ok(execution_graph)
     }
