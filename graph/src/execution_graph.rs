@@ -402,7 +402,7 @@ impl ExecutionGraph {
                         FuncBehavior::Impure => true,
                         FuncBehavior::Pure => has_changed_inputs || e_node.output_values.is_none(),
                         FuncBehavior::Output => {
-                            panic!("For Output functions, node should have Terminal behavior")
+                            panic!("For Output functions, node should be terminal")
                         }
                     },
                 }
