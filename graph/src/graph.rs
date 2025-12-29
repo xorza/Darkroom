@@ -113,12 +113,8 @@ impl Graph {
 
     pub fn serialize(&self, format: FileFormat) -> String {
         match format {
-            FileFormat::Yaml => serde_yml::to_string(&self)
-                .expect("Failed to serialize graph to YAML")
-                .normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&self)
-                .expect("Failed to serialize graph to JSON")
-                .normalize(),
+            FileFormat::Yaml => serde_yml::to_string(&self).unwrap().normalize(),
+            FileFormat::Json => serde_json::to_string_pretty(&self).unwrap().normalize(),
             FileFormat::Lua => serde_lua::to_string(&self).unwrap().normalize(),
         }
     }
