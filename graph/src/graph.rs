@@ -240,40 +240,20 @@ impl Binding {
 pub fn test_graph() -> Graph {
     let mut graph = Graph::default();
 
-    let mult_node_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b"
-        .parse()
-        .expect("Invalid test graph mult node id");
-    let mult_func_id: FuncId = "432b9bf1-f478-476c-a9c9-9a6e190124fc"
-        .parse()
-        .expect("Invalid test graph mult func id");
+    let mult_node_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".parse().unwrap();
+    let mult_func_id: FuncId = "432b9bf1-f478-476c-a9c9-9a6e190124fc".parse().unwrap();
 
-    let get_a_node_id: NodeId = "5f110618-8faa-4629-8f5d-473c236de7d1"
-        .parse()
-        .expect("Invalid test graph get_a node id");
-    let get_a_func_id: FuncId = "d4d27137-5a14-437a-8bb5-b2f7be0941a2"
-        .parse()
-        .expect("Invalid test graph get_a func id");
+    let get_a_node_id: NodeId = "5f110618-8faa-4629-8f5d-473c236de7d1".parse().unwrap();
+    let get_a_func_id: FuncId = "d4d27137-5a14-437a-8bb5-b2f7be0941a2".parse().unwrap();
 
-    let get_b_node_id: NodeId = "6fc6b533-c375-451c-ba3a-a14ea217cb30"
-        .parse()
-        .expect("Invalid test graph get_b node id");
-    let get_b_func_id: FuncId = "a937baff-822d-48fd-9154-58751539b59b"
-        .parse()
-        .expect("Invalid test graph get_b func id");
+    let get_b_node_id: NodeId = "6fc6b533-c375-451c-ba3a-a14ea217cb30".parse().unwrap();
+    let get_b_func_id: FuncId = "a937baff-822d-48fd-9154-58751539b59b".parse().unwrap();
 
-    let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c"
-        .parse()
-        .expect("Invalid test graph sum node id");
-    let sum_func_id: FuncId = "2d3b389d-7b58-44d9-b3d1-a595765b21a5"
-        .parse()
-        .expect("Invalid test graph sum func id");
+    let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".parse().unwrap();
+    let sum_func_id: FuncId = "2d3b389d-7b58-44d9-b3d1-a595765b21a5".parse().unwrap();
 
-    let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e"
-        .parse()
-        .expect("Invalid test graph print node id");
-    let print_func_id: FuncId = "f22cd316-1cdf-4a80-b86c-1277acd1408a"
-        .parse()
-        .expect("Invalid test graph print func id");
+    let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".parse().unwrap();
+    let print_func_id: FuncId = "f22cd316-1cdf-4a80-b86c-1277acd1408a".parse().unwrap();
 
     graph.add(Node {
         id: mult_node_id,
@@ -346,11 +326,7 @@ pub fn test_graph() -> Graph {
         events: vec![],
     });
 
-    assert_eq!(
-        graph.nodes.len(),
-        5,
-        "Test graph should contain the expected node count"
-    );
+    assert_eq!(graph.nodes.len(), 5);
     graph.validate().expect("Test graph must be valid");
 
     graph
