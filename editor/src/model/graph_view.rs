@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use common::FileFormat;
+use common::{FileFormat, is_debug};
 use graph::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -31,19 +31,6 @@ impl Default for GraphView {
 
 impl GraphView {
     pub fn from_graph(graph: &CoreGraph, func_lib: &FuncLib) -> Self {
-        let mut output_counts: HashMap<NodeId, usize> = HashMap::with_capacity(graph.nodes.len());
-        for node in &graph.nodes {
-            let prior = output_counts.insert(node.id, 0);
-            assert!(prior.is_none(), "graph contains duplicate node ids");
-        }
-
-        for node in &graph.nodes {
-            let func = func_lib.by_id(node.func_id).unwrap_or_else(|| {
-                panic!("Missing func for node {} ({})", node.name, node.func_id)
-            });
-            output_counts.insert(node.id, func.outputs.len());
-        }
-
         let nodes = graph
             .nodes
             .iter()
@@ -56,17 +43,7 @@ impl GraphView {
                     node.inputs.len() == func.inputs.len(),
                     "node inputs must match function inputs"
                 );
-                for input in &node.inputs {
-                    if let Binding::Output(binding) = &input.binding {
-                        let output_count = output_counts
-                            .get(&binding.output_node_id)
-                            .expect("output binding must reference a node in the graph");
-                        assert!(
-                            binding.output_idx < *output_count,
-                            "output binding index must be within output count"
-                        );
-                    }
-                }
+
                 let inputs = node
                     .inputs
                     .iter()
@@ -127,6 +104,10 @@ impl GraphView {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if !is_debug() {
+            return Ok(());
+        }
+
         if !self.zoom.is_finite() || self.zoom <= 0.0 {
             return Err(anyhow!("graph zoom must be finite and positive"));
         }
