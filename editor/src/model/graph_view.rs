@@ -113,6 +113,7 @@ impl GraphView {
                     node_view.name, node_view.id
                 )
             });
+            let func_id = func.id;
             assert!(
                 node_view.inputs.len() == func.inputs.len(),
                 "node inputs must match function inputs"
@@ -166,7 +167,7 @@ impl GraphView {
             let events = (0..func.events.len()).map(|_| Event::default()).collect();
             let node = Node {
                 id: NodeId::from(node_view.id),
-                func_id: func.id,
+                func_id,
                 name: node_view.name.clone(),
                 behavior: node_view.behavior,
                 terminal: node_view.terminal,
