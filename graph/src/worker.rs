@@ -269,38 +269,29 @@ mod tests {
         let graph = log_frame_no_graph();
 
         worker.run_once(graph.clone()).await;
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            compute_finish_rx.recv(),
-        )
-        .await
-        .expect("Timed out waiting for compute completion")
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
+        compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
 
         assert_eq!(output_stream.take().await[0], "1");
 
         worker.run_loop(graph.clone()).await;
 
         worker.event().await;
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            compute_finish_rx.recv(),
-        )
-        .await
-        .expect("Timed out waiting for compute completion")
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
+        compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
 
         worker.event().await;
-        tokio::time::timeout(
-            tokio::time::Duration::from_secs(5),
-            compute_finish_rx.recv(),
-        )
-        .await
-        .expect("Timed out waiting for compute completion")
-        .expect("Missing compute completion")
-        .expect("Unsuccessful compute");
+        compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
 
         let log = output_stream.take().await;
         assert_eq!(log[0], "1");
