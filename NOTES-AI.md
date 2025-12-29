@@ -134,3 +134,4 @@ Serialization now uses `common::SerdeFormatError` and `SerdeFormatResult` for fo
 The editor includes a Run button beneath the graph view that executes compute on the current graph.
 `GraphView::to_graph` builds a core graph from the view using function names to resolve function IDs and bindings.
 Sample test hooks in the editor now populate compute status output via the `print` hook.
+The editor now uses a Tokio async main and `tokio::sync::Mutex` for compute status updates.

@@ -14,9 +14,10 @@ use pollster::block_on;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     init::init()?;
 
     let app_icon = load_window_icon();
@@ -163,9 +164,7 @@ impl ScenariumApp {
             get_a: Box::new(|| 21),
             get_b: Box::new(|| 2),
             print: Box::new(move |value| {
-                let mut slot = status
-                    .lock()
-                    .expect("compute status lock must be available");
+                let mut slot = status.blocking_lock();
                 *slot = Some(format!("Compute output: {}", value));
             }),
         }
@@ -179,10 +178,7 @@ impl ScenariumApp {
 
         self.graph = self.graph_view.to_graph(&self.func_lib);
         {
-            let mut slot = self
-                .compute_status
-                .lock()
-                .expect("compute status lock must be available");
+            let mut slot = self.compute_status.blocking_lock();
             *slot = None;
         }
 
@@ -191,11 +187,7 @@ impl ScenariumApp {
         let result = block_on(compute.run(&self.graph, &self.func_lib, &mut execution_graph));
         match result {
             Ok(()) => {
-                let status = self
-                    .compute_status
-                    .lock()
-                    .expect("compute status lock must be available")
-                    .clone();
+                let status = self.compute_status.blocking_lock().clone();
                 if let Some(status) = status {
                     self.set_status(status);
                 } else {
