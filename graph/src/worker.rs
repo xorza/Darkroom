@@ -190,59 +190,114 @@ mod tests {
 
     use common::output_stream::OutputStream;
 
+    use crate::data::StaticValue;
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
-    use crate::graph::Graph;
+    use crate::function::FuncId;
+    use crate::graph::NodeId;
+    use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::worker::Worker;
 
-    #[test]
-    fn test_worker() -> anyhow::Result<()> {
-        tokio::runtime::Runtime::new().unwrap().block_on(async {
-            let output_stream = OutputStream::new();
+    fn log_frame_no_graph() -> Graph {
+        let mut graph = Graph::default();
 
-            let timers_invoker = TimersInvoker::default();
-            let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
+        let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830"
+            .parse()
+            .expect("Invalid frame event node id");
+        let frame_event_func_id: FuncId = "01897c92-d605-5f5a-7a21-627ed74824ff"
+            .parse()
+            .expect("Invalid frame event func id");
 
-            let mut func_lib = basic_invoker.into_func_lib();
-            func_lib.merge(timers_invoker.into_func_lib());
+        let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa"
+            .parse()
+            .expect("Invalid float to string node id");
+        let float_to_string_func_id: FuncId = "01896a88-bf15-dead-4a15-5969da5a9e65"
+            .parse()
+            .expect("Invalid float to string func id");
 
-            let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
-            let mut worker = Worker::new(func_lib, move |result| {
-                compute_finish_tx
-                    .send(result)
-                    .expect("Failed to send a compute callback event");
-            });
+        let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3"
+            .parse()
+            .expect("Invalid print node id");
+        let print_func_id: FuncId = "01896910-0790-ad1b-aa12-3f1437196789"
+            .parse()
+            .expect("Invalid print func id");
 
-            let graph = Graph::from_file("../test_resources/log_frame_no.yaml").unwrap();
-
-            worker.run_once(graph.clone()).await;
-            compute_finish_rx
-                .recv()
-                .unwrap()
-                .expect("Unsuccessful compute");
-
-            assert_eq!(output_stream.take().await[0], "1");
-
-            worker.run_loop(graph.clone()).await;
-
-            worker.event().await;
-            compute_finish_rx
-                .recv()
-                .unwrap()
-                .expect("Unsuccessful compute");
-
-            worker.event().await;
-            compute_finish_rx
-                .recv()
-                .unwrap()
-                .expect("Unsuccessful compute");
-
-            let log = output_stream.take().await;
-            assert_eq!(log[0], "1");
-            assert_eq!(log[1], "2");
-
-            worker.exit().await;
+        graph.add(Node {
+            id: frame_event_node_id,
+            func_id: frame_event_func_id,
+            name: "frame event".to_string(),
+            behavior: NodeBehavior::OnInputChange,
+            inputs: vec![Input {
+                binding: Binding::Const,
+                const_value: Some(StaticValue::Float(30.0)),
+            }],
+            events: vec![],
         });
+
+        graph.add(Node {
+            id: float_to_string_node_id,
+            func_id: float_to_string_func_id,
+            name: "float to string".to_string(),
+            behavior: NodeBehavior::OnInputChange,
+            inputs: vec![Input {
+                binding: Binding::from_output_binding(frame_event_node_id, 1),
+                const_value: None,
+            }],
+            events: vec![],
+        });
+
+        graph.add(Node {
+            id: print_node_id,
+            func_id: print_func_id,
+            name: "print".to_string(),
+            behavior: NodeBehavior::Terminal,
+            inputs: vec![Input {
+                binding: Binding::from_output_binding(float_to_string_node_id, 0),
+                const_value: None,
+            }],
+            events: vec![],
+        });
+
+        graph
+    }
+
+    #[tokio::test]
+    async fn test_worker() -> anyhow::Result<()> {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersInvoker::default();
+        let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
+        let mut worker = Worker::new(func_lib, move |result| {
+            compute_finish_tx
+                .send(result)
+                .expect("Failed to send a compute callback event");
+        });
+
+        let graph = log_frame_no_graph();
+
+        worker.run_once(graph.clone()).await;
+        compute_finish_rx.recv()??;
+
+        assert_eq!(output_stream.take().await[0], "1");
+
+        worker.run_loop(graph.clone()).await;
+
+        worker.event().await;
+        compute_finish_rx.recv()??;
+
+        worker.event().await;
+        compute_finish_rx.recv()??;
+
+        let log = output_stream.take().await;
+        assert_eq!(log[0], "1");
+        assert_eq!(log[1], "2");
+
+        worker.exit().await;
 
         Ok(())
     }
