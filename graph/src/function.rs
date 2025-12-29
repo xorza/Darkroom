@@ -8,6 +8,7 @@ use common::id_type;
 use common::normalize_string::NormalizeString;
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -22,7 +23,15 @@ pub enum FuncBehavior {
 
 pub type InvokeArgs = [DynamicValue];
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+#[derive(Debug, Error)]
+pub enum InvokeError {
+    #[error("Invocation failed: {0}")]
+    External(#[from] anyhow::Error),
+}
+
+pub type InvokeResult<T> = Result<T, InvokeError>;
+
+pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> InvokeResult<()>
     + Send
     + Sync
     + 'static;
@@ -37,7 +46,7 @@ pub enum FuncLambda {
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
-        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> anyhow::Result<()>
+        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> InvokeResult<()>
             + Send
             + Sync
             + 'static,
@@ -50,7 +59,7 @@ impl FuncLambda {
         cache: &mut InvokeCache,
         inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
+    ) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
                 panic!("Func missing lambda");
@@ -272,7 +281,7 @@ impl FuncLib {
         cache: &mut InvokeCache,
         inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
+    ) -> InvokeResult<()> {
         let func = self
             .by_id(func_id)
             .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
@@ -285,7 +294,7 @@ impl FuncLib {
         cache: &mut InvokeCache,
         inputs: &InvokeArgs,
         outputs: &mut InvokeArgs,
-    ) -> anyhow::Result<()> {
+    ) -> InvokeResult<()> {
         let func = self
             .funcs
             .get(func_idx)
@@ -355,8 +364,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
     [
         Func {
-            id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")
-                .expect("Failed to parse FuncId for mult"),
+            id: FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc").unwrap(),
             name: "mult".to_string(),
             description: None,
             category: "Debug".to_string(),
@@ -383,28 +391,19 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                assert_eq!(
-                    inputs.len(),
-                    2,
-                    "mult expects exactly 2 inputs but received {}",
-                    inputs.len()
-                );
-                assert_eq!(
-                    outputs.len(),
-                    1,
-                    "mult expects exactly 1 output but received {}",
-                    outputs.len()
-                );
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
+
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
                 outputs[0] = (a * b).into();
                 ctx.set(a * b);
+
                 Ok(())
             }),
         },
         Func {
-            id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2")
-                .expect("Failed to parse FuncId for get_a"),
+            id: FuncId::from_str("d4d27137-5a14-437a-8bb5-b2f7be0941a2").unwrap(),
             name: "get_a".to_string(),
             description: None,
             category: "Debug".to_string(),
@@ -416,19 +415,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |_, _, outputs| {
-                assert_eq!(
-                    outputs.len(),
-                    1,
-                    "get_a expects exactly 1 output but received {}",
-                    outputs.len()
-                );
+                assert_eq!(outputs.len(), 1);
                 outputs[0] = (get_a() as f64).into();
                 Ok(())
             }),
         },
         Func {
-            id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b")
-                .expect("Failed to parse FuncId for get_b"),
+            id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b").unwrap(),
             name: "get_b".to_string(),
             description: None,
             category: "Debug".to_string(),
@@ -440,19 +433,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |_, _, outputs| {
-                assert_eq!(
-                    outputs.len(),
-                    1,
-                    "get_b expects exactly 1 output but received {}",
-                    outputs.len()
-                );
+                assert_eq!(outputs.len(), 1);
                 outputs[0] = (get_b() as f64).into();
                 Ok(())
             }),
         },
         Func {
-            id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5")
-                .expect("Failed to parse FuncId for sum"),
+            id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5").unwrap(),
             name: "sum".to_string(),
             description: None,
             category: "Debug".to_string(),
@@ -479,18 +466,8 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                assert_eq!(
-                    inputs.len(),
-                    2,
-                    "sum expects exactly 2 inputs but received {}",
-                    inputs.len()
-                );
-                assert_eq!(
-                    outputs.len(),
-                    1,
-                    "sum expects exactly 1 output but received {}",
-                    outputs.len()
-                );
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].as_int();
                 let b: i64 = inputs[1].as_int();
                 ctx.set(a + b);
@@ -499,8 +476,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }),
         },
         Func {
-            id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a")
-                .expect("Failed to parse FuncId for print"),
+            id: FuncId::from_str("f22cd316-1cdf-4a80-b86c-1277acd1408a").unwrap(),
             name: "print".to_string(),
             description: None,
             category: "Debug".to_string(),
@@ -515,12 +491,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             outputs: vec![],
             events: vec![],
             lambda: FuncLambda::new(move |_, inputs, _| {
-                assert_eq!(
-                    inputs.len(),
-                    1,
-                    "print expects exactly 1 input but received {}",
-                    inputs.len()
-                );
+                assert_eq!(inputs.len(), 1);
                 print(inputs[0].as_int());
                 Ok(())
             }),
@@ -553,30 +524,22 @@ mod tests {
     #[test]
     fn invoke_by_id_and_index() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
-        let sum_id = func_lib
-            .by_name("sum")
-            .expect("Func named \"sum\" not found")
-            .id;
-        let sum_idx = func_lib
-            .funcs
-            .iter()
-            .position(|func| func.id == sum_id)
-            .expect("Sum func missing from lib");
+        let sum_id = func_lib.by_name("sum").unwrap().id;
 
         let mut cache = InvokeCache::default();
         let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];
         let mut outputs = vec![DynamicValue::None];
         func_lib.invoke_by_id(sum_id, &mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 6);
-        let cached = cache
+        let cached = *cache
             .get::<i64>()
             .expect("InvokeCache should contain the sum value");
-        assert_eq!(*cached, 6);
+        assert_eq!(cached, 6);
 
         inputs[0] = DynamicValue::Int(3);
         inputs[1] = DynamicValue::Int(5);
         outputs[0] = DynamicValue::None;
-        func_lib.invoke_by_index(sum_idx, &mut cache, &inputs, &mut outputs)?;
+        func_lib.invoke_by_id(sum_id, &mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 8);
 
         Ok(())

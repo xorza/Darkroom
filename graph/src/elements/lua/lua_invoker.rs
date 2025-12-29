@@ -132,7 +132,8 @@ impl LuaInvoker {
                         input_args.push(invoke_value);
                     }
 
-                    let output_args: mlua::Variadic<mlua::Value> = lua_func.call(input_args)?;
+                    let output_args: mlua::Variadic<mlua::Value> =
+                        lua_func.call(input_args).map_err(anyhow::Error::from)?;
                     assert_eq!(
                         output_args.len(),
                         expected_output_len,
@@ -499,12 +500,15 @@ mod tests {
 
         let mut cache = InvokeCache::default();
         // call 'mult' function
-        invoker.func_lib().invoke_by_id(
-            FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-            &mut cache,
-            inputs.as_mut_slice(),
-            outputs.as_mut_slice(),
-        )?;
+        invoker
+            .func_lib()
+            .invoke_by_id(
+                FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+                &mut cache,
+                inputs.as_mut_slice(),
+                outputs.as_mut_slice(),
+            )
+            .map_err(anyhow::Error::from)?;
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 15);
 
@@ -550,12 +554,15 @@ mod tests {
         let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
         let mut cache = InvokeCache::default();
 
-        invoker.func_lib().invoke_by_id(
-            FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-            &mut cache,
-            inputs.as_mut_slice(),
-            outputs.as_mut_slice(),
-        )?;
+        invoker
+            .func_lib()
+            .invoke_by_id(
+                FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
+                &mut cache,
+                inputs.as_mut_slice(),
+                outputs.as_mut_slice(),
+            )
+            .map_err(anyhow::Error::from)?;
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 42);
 

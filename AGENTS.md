@@ -1,6 +1,6 @@
 AI coding rules for this project:
 - Avoid using Option<> and Result<> for cases that should not fail.
-- For required values, use `.expect("...")` with a clear, specific message.
+- For required values, use `.expect("...")` with a clear, specific message. Use `.unwrap()` where `.expect` would be too obvious or verbose. 
 - Prefer crashing on logic errors rather than silently swallowing them.
 - Use Result<> only for expected/legitimate failures (e.g., network, I/O, external services, user input).
 - Always add `#[derive(Debug)]` to Rust structs.
