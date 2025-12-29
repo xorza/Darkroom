@@ -764,6 +764,9 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
+        //avoid serialization of e_node_idx_by_id as deserialization order is not guaranteed
+        execution_graph.e_node_idx_by_id.clear();
+
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(serialized.as_str(), format)?;
