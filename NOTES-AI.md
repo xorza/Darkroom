@@ -19,6 +19,8 @@ The root `Cargo.toml` defines the workspace and shared dependencies.
 The graph crate exports a `prelude` module that re-exports common graph, data, function, and execution graph types for easier imports.
 The editor now imports `Graph` via `graph::prelude::Graph`.
 The editor model exposes `Graph::from_graph` to convert a core graph into the editor view with inferred output counts and a simple grid layout.
+Editor view model types are split into `editor/src/model/graph_view.rs` and `editor/src/model/node_view.rs`.
+Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 
 Commit messages are often prompts sent to an AI agent to request a change.
 

@@ -23,6 +23,8 @@ Option-based lookups are preferred with explicit `expect` at call sites.
 The graph crate exposes a public prelude for common types, including execution graph helpers.
 Workspace crates should prefer importing shared graph types via that prelude.
 The editor can build its view graph from core graph data.
+Editor graph view types live under `editor/src/model/` in `graph_view.rs` and `node_view.rs`.
+Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 Synchronization uses Tokio primitives; parking_lot is not used.
 Async contexts use Tokio locks with awaits where possible.
 Blocking helpers are removed in favor of async/await or non-blocking try_lock.
