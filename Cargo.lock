@@ -2608,9 +2608,11 @@ name = "scenarium-editor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "common",
  "dotenv",
  "eframe",
  "egui",
+ "graph",
  "rayon",
  "serde",
  "serde_json",

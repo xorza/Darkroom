@@ -20,6 +20,7 @@ Logging uses the tracing ecosystem.
 Execution validation catches invalid bindings earlier.
 Some tests run on the Tokio async execution.
 Option-based lookups are preferred with explicit `expect` at call sites.
+The graph crate exposes a public prelude for common types, including execution graph helpers.
 Synchronization uses Tokio primitives; parking_lot is not used.
 Async contexts use Tokio locks with awaits where possible.
 Blocking helpers are removed in favor of async/await or non-blocking try_lock.

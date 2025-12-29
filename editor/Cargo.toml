@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+common = { workspace = true }
+graph = { workspace = true }
+
 wgpu = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }

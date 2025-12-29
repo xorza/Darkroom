@@ -66,7 +66,8 @@ fn configure_visuals(ctx: &egui::Context) {
 
 #[derive(Debug)]
 struct ScenariumApp {
-    graph: model::Graph,
+    graph: graph::graph::Graph,
+    graph_view: model::Graph,
     graph_path: PathBuf,
     last_status: Option<String>,
     graph_ui: gui::graph::GraphUi,
@@ -74,14 +75,17 @@ struct ScenariumApp {
 
 impl Default for ScenariumApp {
     fn default() -> Self {
-        let graph = model::Graph::test_graph();
-        graph
+        let graph = graph::graph::Graph::default();
+
+        let graph_view = model::Graph::test_graph();
+        graph_view
             .validate()
             .expect("sample graph should be valid for rendering");
         let graph_path = Self::default_graph_path();
 
         Self {
             graph,
+            graph_view,
             graph_path,
             last_status: None,
             graph_ui: gui::graph::GraphUi::default(),
@@ -107,7 +111,7 @@ impl ScenariumApp {
         graph
             .validate()
             .expect("graph should be valid before storing in app state");
-        self.graph = graph;
+        self.graph_view = graph;
         self.graph_ui.reset();
         self.set_status(status);
     }
@@ -122,7 +126,7 @@ impl ScenariumApp {
             self.graph_path.extension().is_some(),
             "graph save path must include a file extension"
         );
-        match self.graph.serialize_to_file(&self.graph_path) {
+        match self.graph_view.serialize_to_file(&self.graph_path) {
             Ok(()) => self.set_status(format!("Saved graph to {}", self.graph_path.display())),
             Err(err) => self.set_status(format!("Save failed: {err}")),
         }
@@ -198,7 +202,7 @@ impl eframe::App for ScenariumApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.graph_ui.render(ui, &mut self.graph);
+            self.graph_ui.render(ui, &mut self.graph_view);
         });
     }
 }
