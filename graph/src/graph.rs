@@ -5,7 +5,7 @@ use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
 use common::normalize_string::NormalizeString;
-use common::FileFormat;
+use common::{serde_lua, FileFormat};
 
 id_type!(NodeId);
 
@@ -119,6 +119,7 @@ impl Graph {
             FileFormat::Json => serde_json::to_string_pretty(&self)
                 .expect("Failed to serialize graph to JSON")
                 .normalize(),
+            FileFormat::Lua => serde_lua::to_string(&self).unwrap().normalize(),
         }
     }
     pub fn from_file(path: &str) -> anyhow::Result<Graph> {
@@ -131,6 +132,7 @@ impl Graph {
         let graph: Graph = match format {
             FileFormat::Yaml => serde_yml::from_str(serialized)?,
             FileFormat::Json => serde_json::from_str(serialized)?,
+            FileFormat::Lua => serde_lua::from_str(serialized)?,
         };
 
         graph.validate()?;
@@ -378,12 +380,11 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
 
-        for format in [FileFormat::Yaml, FileFormat::Json] {
+        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = graph.serialize(format);
             let deserialized = Graph::deserialize(serialized.as_str(), format)?;
             let serialized_again = deserialized.serialize(format);
-            assert_eq!(serialized_again, serialized);
-            black_box(deserialized);
+            assert_eq!(serialized, serialized_again);
         }
 
         Ok(())

@@ -11,3 +11,6 @@ tracing-appender = { workspace = true }
 tokio = { workspace = true }
 serde_yml = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+mlua = { workspace = true }

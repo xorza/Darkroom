@@ -5,6 +5,7 @@ pub mod macros;
 pub mod normalize_string;
 pub mod output_stream;
 pub mod scoped_ref;
+pub mod serde_lua;
 pub mod toggle;
 pub mod yaml_format;
 
@@ -30,6 +31,7 @@ pub fn get_file_extension(filename: &str) -> Option<&str> {
 pub enum FileFormat {
     Yaml,
     Json,
+    Lua,
 }
 
 impl FileFormat {
@@ -41,6 +43,7 @@ impl FileFormat {
         match extension.as_str() {
             "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
+            "lua" => Ok(Self::Lua),
             _ => Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
             )),

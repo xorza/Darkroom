@@ -236,6 +236,7 @@ impl FuncLib {
         let funcs: Vec<Func> = match format {
             FileFormat::Yaml => serde_yml::from_str(serialized)?,
             FileFormat::Json => serde_json::from_str(serialized)?,
+            FileFormat::Lua => common::serde_lua::from_str(serialized)?,
         };
 
         Ok(funcs.into())
@@ -247,6 +248,9 @@ impl FuncLib {
                 .normalize(),
             FileFormat::Json => serde_json::to_string_pretty(&self.funcs)
                 .expect("Failed to serialize function library to JSON")
+                .normalize(),
+            FileFormat::Lua => common::serde_lua::to_string(&self.funcs)
+                .unwrap()
                 .normalize(),
         }
     }
@@ -511,11 +515,11 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        for format in [FileFormat::Yaml, FileFormat::Json] {
+        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = func_lib.serialize(format);
             let deserialized = super::FuncLib::deserialize(serialized.as_str(), format)?;
             let serialized_again = deserialized.serialize(format);
-            assert_eq!(serialized_again, serialized);
+            assert_eq!(serialized, serialized_again);
         }
 
         Ok(())

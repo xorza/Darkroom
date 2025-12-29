@@ -146,6 +146,7 @@ impl ExecutionGraph {
         match format {
             FileFormat::Yaml => serde_yml::to_string(&self).unwrap().normalize(),
             FileFormat::Json => serde_json::to_string_pretty(&self).unwrap().normalize(),
+            FileFormat::Lua => common::serde_lua::to_string(&self).unwrap().normalize(),
         }
     }
 
@@ -153,6 +154,7 @@ impl ExecutionGraph {
         let execution_graph: ExecutionGraph = match format {
             FileFormat::Yaml => serde_yml::from_str(serialized)?,
             FileFormat::Json => serde_json::from_str(serialized)?,
+            FileFormat::Lua => common::serde_lua::from_str(serialized)?,
         };
 
         Ok(execution_graph)
@@ -762,23 +764,11 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        for format in [FileFormat::Yaml, FileFormat::Json] {
+        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(serialized.as_str(), format)?;
             let serialized_again = deserialized.serialize(format);
-
-            match format {
-                FileFormat::Yaml => {
-                    let value_a: serde_yml::Value = serde_yml::from_str(&serialized)?;
-                    let value_b: serde_yml::Value = serde_yml::from_str(&serialized_again)?;
-                    assert_eq!(value_a, value_b);
-                }
-                FileFormat::Json => {
-                    let value_a: serde_json::Value = serde_json::from_str(&serialized)?;
-                    let value_b: serde_json::Value = serde_json::from_str(&serialized_again)?;
-                    assert_eq!(value_a, value_b);
-                }
-            }
+            assert_eq!(serialized, serialized_again);
         }
 
         Ok(())

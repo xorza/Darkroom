@@ -146,6 +146,7 @@ impl GraphView {
         match format {
             FileFormat::Json => serde_json::to_string_pretty(self).map_err(anyhow::Error::from),
             FileFormat::Yaml => serde_yml::to_string(self).map_err(anyhow::Error::from),
+            FileFormat::Lua => common::serde_lua::to_string(self),
         }
     }
 
@@ -161,6 +162,7 @@ impl GraphView {
             FileFormat::Yaml => {
                 serde_yml::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
             }
+            FileFormat::Lua => common::serde_lua::from_str::<GraphView>(input)?,
         };
         graph.validate()?;
 
@@ -243,9 +245,11 @@ mod tests {
     fn graph_roundtrip() {
         assert_roundtrip(FileFormat::Json);
         assert_roundtrip(FileFormat::Yaml);
+        assert_roundtrip(FileFormat::Lua);
 
         assert_file_roundtrip(FileFormat::Json, "json");
         assert_file_roundtrip(FileFormat::Yaml, "yaml");
+        assert_file_roundtrip(FileFormat::Lua, "lua");
     }
 
     fn build_test_view() -> GraphView {
