@@ -2,7 +2,17 @@ use mlua::{Lua, LuaSerdeExt, Value};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-pub fn from_str<T: DeserializeOwned>(serialized: &str) -> anyhow::Result<T> {
+#[derive(Debug, thiserror::Error)]
+pub enum SerdeLuaError {
+    #[error("Lua evaluation failed")]
+    LuaEval(#[from] mlua::Error),
+    #[error("Serialization failed")]
+    SerdeJson(#[from] serde_json::Error),
+}
+
+pub type SerdeLuaResult<T> = Result<T, SerdeLuaError>;
+
+pub fn from_str<T: DeserializeOwned>(serialized: &str) -> SerdeLuaResult<T> {
     let lua = Lua::new();
     let trimmed = serialized.trim();
     let value = match lua.load(trimmed).eval::<Value>() {
@@ -12,15 +22,13 @@ pub fn from_str<T: DeserializeOwned>(serialized: &str) -> anyhow::Result<T> {
                 return Err(err.into());
             }
             let wrapped = format!("return {}", trimmed);
-            lua.load(wrapped)
-                .eval::<Value>()
-                .map_err(anyhow::Error::from)?
+            lua.load(wrapped).eval::<Value>()?
         }
     };
-    lua.from_value(value).map_err(anyhow::Error::from)
+    Ok(lua.from_value(value)?)
 }
 
-pub fn to_string<T: Serialize>(value: &T) -> anyhow::Result<String> {
+pub fn to_string<T: Serialize>(value: &T) -> SerdeLuaResult<String> {
     let json_value = serde_json::to_value(value)?;
     let mut out = String::new();
     out.push_str("return ");

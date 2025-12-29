@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use common::{FileFormat, is_debug};
+use common::{FileFormat, is_debug, normalize_string::NormalizeString};
 use graph::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -140,13 +140,13 @@ impl GraphView {
         Ok(())
     }
 
-    pub fn serialize(&self, format: FileFormat) -> Result<String> {
-        self.validate()?;
+    pub fn serialize(&self, format: FileFormat) -> String {
+        self.validate().unwrap();
 
         match format {
-            FileFormat::Json => serde_json::to_string_pretty(self).map_err(anyhow::Error::from),
-            FileFormat::Yaml => serde_yml::to_string(self).map_err(anyhow::Error::from),
-            FileFormat::Lua => common::serde_lua::to_string(self),
+            FileFormat::Json => serde_json::to_string_pretty(self).unwrap().normalize(),
+            FileFormat::Yaml => serde_yml::to_string(self).unwrap().normalize(),
+            FileFormat::Lua => common::serde_lua::to_string(self).unwrap().normalize(),
         }
     }
 
@@ -162,7 +162,9 @@ impl GraphView {
             FileFormat::Yaml => {
                 serde_yml::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
             }
-            FileFormat::Lua => common::serde_lua::from_str::<GraphView>(input)?,
+            FileFormat::Lua => {
+                common::serde_lua::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
+            }
         };
         graph.validate()?;
 
@@ -173,7 +175,7 @@ impl GraphView {
         let path = path.as_ref();
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
-        let payload = self.serialize(format)?;
+        let payload = self.serialize(format);
         std::fs::write(path, payload).map_err(anyhow::Error::from)
     }
 
@@ -260,9 +262,7 @@ mod tests {
 
     fn assert_roundtrip(format: FileFormat) {
         let graph = build_test_view();
-        let serialized = graph
-            .serialize(format)
-            .expect("graph serialization should succeed for test graph");
+        let serialized = graph.serialize(format);
         assert!(
             !serialized.trim().is_empty(),
             "serialized graph should not be empty"

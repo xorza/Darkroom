@@ -243,11 +243,9 @@ impl FuncLib {
     }
     pub fn serialize(&self, format: FileFormat) -> String {
         match format {
-            FileFormat::Yaml => serde_yml::to_string(&self.funcs)
-                .expect("Failed to serialize function library to YAML")
-                .normalize(),
+            FileFormat::Yaml => serde_yml::to_string(&self.funcs).unwrap().normalize(),
             FileFormat::Json => serde_json::to_string_pretty(&self.funcs)
-                .expect("Failed to serialize function library to JSON")
+                .unwrap()
                 .normalize(),
             FileFormat::Lua => common::serde_lua::to_string(&self.funcs)
                 .unwrap()
