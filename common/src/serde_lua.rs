@@ -52,7 +52,7 @@ fn write_lua_array(values: &[serde_json::Value], indent: usize, out: &mut String
     }
 
     out.push_str("{\n");
-    let next_indent = indent + 2;
+    let next_indent = indent + 1;
     for (index, value) in values.iter().enumerate() {
         push_indent(next_indent, out);
         write_lua_value(value, next_indent, out);
@@ -76,7 +76,7 @@ fn write_lua_object(
     }
 
     out.push_str("{\n");
-    let next_indent = indent + 2;
+    let next_indent = indent + 1;
     let len = values.len();
     for (index, (key, value)) in values.iter().enumerate() {
         push_indent(next_indent, out);
@@ -138,6 +138,6 @@ fn is_lua_identifier_continue(ch: char) -> bool {
 
 fn push_indent(indent: usize, out: &mut String) {
     for _ in 0..indent {
-        out.push(' ');
+        out.push_str("    ");
     }
 }
