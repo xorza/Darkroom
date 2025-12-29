@@ -69,7 +69,7 @@ impl<'a> RenderContext<'a> {
         ui: &'a egui::Ui,
         painter: &'a egui::Painter,
         rect: egui::Rect,
-        graph: &model::Graph,
+        graph: &model::GraphView,
     ) -> Self {
         assert!(graph.zoom.is_finite(), "graph zoom must be finite");
         assert!(graph.zoom > 0.0, "graph zoom must be positive");
@@ -127,7 +127,7 @@ impl<'a> RenderContext<'a> {
             .expect("node width must be precomputed")
     }
 
-    pub fn node_rect(&self, node: &model::Node) -> egui::Rect {
+    pub fn node_rect(&self, node: &model::NodeView) -> egui::Rect {
         node::node_rect_for_graph(
             self.origin,
             node,
@@ -141,5 +141,5 @@ impl<'a> RenderContext<'a> {
 pub trait WidgetRenderer {
     type Output;
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::Graph) -> Self::Output;
+    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output;
 }

@@ -101,7 +101,7 @@ impl GraphUi {
         self.connection_drag.reset();
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui, graph: &mut model::Graph) {
+    pub fn render(&mut self, ui: &mut egui::Ui, graph: &mut model::GraphView) {
         let breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
 
@@ -378,7 +378,7 @@ struct BackgroundRenderer;
 impl WidgetRenderer for BackgroundRenderer {
     type Output = ();
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::Graph) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
         draw_dotted_background(ctx.painter(), ctx.rect, graph, &ctx.style);
     }
 }
@@ -392,7 +392,7 @@ struct ConnectionRenderer {
 impl ConnectionRenderer {
     fn rebuild(
         &mut self,
-        graph: &model::Graph,
+        graph: &model::GraphView,
         origin: egui::Pos2,
         layout: &node::NodeLayout,
         node_widths: &std::collections::HashMap<Uuid, f32>,
@@ -414,7 +414,7 @@ impl ConnectionRenderer {
 impl WidgetRenderer for ConnectionRenderer {
     type Output = ();
 
-    fn render(&mut self, ctx: &RenderContext, _graph: &mut model::Graph) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext, _graph: &mut model::GraphView) -> Self::Output {
         draw_connections(ctx.painter(), &self.curves, &self.highlighted, &ctx.style);
     }
 }
@@ -425,7 +425,7 @@ struct NodeBodyRenderer;
 impl WidgetRenderer for NodeBodyRenderer {
     type Output = node::NodeInteraction;
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::Graph) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
         node::render_node_bodies(ctx, graph)
     }
 }
@@ -436,7 +436,7 @@ struct PortRenderer;
 impl WidgetRenderer for PortRenderer {
     type Output = ();
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::Graph) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
         node::render_ports(ctx, graph);
     }
 }
@@ -447,7 +447,7 @@ struct NodeLabelRenderer;
 impl WidgetRenderer for NodeLabelRenderer {
     type Output = ();
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::Graph) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
         node::render_node_labels(ctx, graph);
     }
 }
@@ -455,7 +455,7 @@ impl WidgetRenderer for NodeLabelRenderer {
 fn draw_dotted_background(
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &model::Graph,
+    graph: &model::GraphView,
     style: &crate::gui::style::GraphStyle,
 ) {
     let spacing = style.dotted_base_spacing * graph.zoom;
@@ -494,7 +494,7 @@ struct ConnectionCurve {
 }
 
 fn collect_connection_curves(
-    graph: &model::Graph,
+    graph: &model::GraphView,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
     node_widths: &std::collections::HashMap<Uuid, f32>,
@@ -541,7 +541,7 @@ fn collect_connection_curves(
 }
 
 fn collect_ports(
-    graph: &model::Graph,
+    graph: &model::GraphView,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
     node_widths: &std::collections::HashMap<Uuid, f32>,
@@ -635,7 +635,7 @@ fn port_in_activation_range(cursor: &egui::Pos2, port_center: egui::Pos2, radius
     cursor.distance(port_center) <= radius
 }
 
-fn apply_connection(graph: &mut model::Graph, start: PortRef, end: PortRef) {
+fn apply_connection(graph: &mut model::GraphView, start: PortRef, end: PortRef) {
     assert!(start.kind != end.kind, "ports must be of opposite types");
     let (output_port, input_port) = match (start.kind, end.kind) {
         (PortKind::Output, PortKind::Input) => (start, end),
@@ -674,7 +674,7 @@ fn view_selected_node(
     ui: &egui::Ui,
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &mut model::Graph,
+    graph: &mut model::GraphView,
 ) {
     let Some(selected_id) = graph.selected_node_id else {
         return;
@@ -698,7 +698,7 @@ fn fit_all_nodes(
     ui: &egui::Ui,
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &mut model::Graph,
+    graph: &mut model::GraphView,
 ) {
     if graph.nodes.is_empty() {
         graph.zoom = 1.0;
@@ -748,7 +748,7 @@ fn fit_all_nodes(
 fn compute_layout_and_widths(
     ui: &egui::Ui,
     painter: &egui::Painter,
-    graph: &model::Graph,
+    graph: &model::GraphView,
     scale: f32,
 ) -> (node::NodeLayout, std::collections::HashMap<Uuid, f32>) {
     let layout = node::NodeLayout::default().scaled(scale);
@@ -888,7 +888,7 @@ fn on_segment(a: egui::Pos2, b: egui::Pos2, p: egui::Pos2) -> bool {
     p.x >= min_x - 1e-6 && p.x <= max_x + 1e-6 && p.y >= min_y - 1e-6 && p.y <= max_y + 1e-6
 }
 
-fn remove_connections(graph: &mut model::Graph, highlighted: &HashSet<ConnectionKey>) {
+fn remove_connections(graph: &mut model::GraphView, highlighted: &HashSet<ConnectionKey>) {
     if highlighted.is_empty() {
         return;
     }

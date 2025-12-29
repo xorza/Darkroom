@@ -21,6 +21,6 @@ pub mod prelude {
         Func, FuncBehavior, FuncId, FuncLambda, InvokeArgs, InvokeCache, InvokeError, InvokeResult,
     };
     pub use crate::graph::{
-        Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputBinding,
+        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputBinding,
     };
 }

@@ -1,4 +1,5 @@
 use anyhow::{Result, anyhow, bail};
+use graph::prelude::{Binding, Graph as CoreGraph, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -11,16 +12,16 @@ pub enum GraphFormat {
     Json,
 }
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Graph {
+pub struct GraphView {
     pub id: Uuid,
-    pub nodes: Vec<Node>,
+    pub nodes: Vec<NodeView>,
     pub pan: egui::Vec2,
     pub zoom: f32,
     pub selected_node_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Node {
+pub struct NodeView {
     pub id: Uuid,
     pub name: String,
     pub pos: egui::Pos2,
@@ -49,10 +50,10 @@ pub struct Output {
     pub name: String,
 }
 
-impl Default for Node {
+impl Default for NodeView {
     fn default() -> Self {
         let id = Uuid::new_v4();
-        let name = format!("Node {}", id);
+        let name = format!("NodeView {}", id);
 
         Self {
             id,
@@ -67,7 +68,7 @@ impl Default for Node {
     }
 }
 
-impl Default for Graph {
+impl Default for GraphView {
     fn default() -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -79,7 +80,87 @@ impl Default for Graph {
     }
 }
 
-impl Graph {
+impl GraphView {
+    pub fn from_graph(graph: &CoreGraph) -> Self {
+        let mut output_counts: HashMap<NodeId, usize> = HashMap::with_capacity(graph.nodes.len());
+        for node in &graph.nodes {
+            let prior = output_counts.insert(node.id, 0);
+            assert!(prior.is_none(), "graph contains duplicate node ids");
+        }
+
+        for node in &graph.nodes {
+            for input in &node.inputs {
+                if let Binding::Output(binding) = &input.binding {
+                    let output_count = output_counts
+                        .get_mut(&binding.output_node_id)
+                        .expect("output binding must reference a node in the graph");
+                    let required = binding.output_idx + 1;
+                    if *output_count < required {
+                        *output_count = required;
+                    }
+                }
+            }
+        }
+
+        let nodes = graph
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(index, node)| {
+                let output_count = *output_counts
+                    .get(&node.id)
+                    .expect("output count must exist for graph node");
+                let inputs = node
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(input_index, input)| Input {
+                        name: format!("input_{input_index}"),
+                        connection: match &input.binding {
+                            Binding::Output(binding) => Some(Connection {
+                                node_id: binding.output_node_id.as_uuid(),
+                                output_index: binding.output_idx,
+                            }),
+                            Binding::None | Binding::Const => None,
+                        },
+                    })
+                    .collect();
+
+                let outputs = (0..output_count)
+                    .map(|output_index| Output {
+                        name: format!("output_{output_index}"),
+                    })
+                    .collect();
+
+                let column = index % 3;
+                let row = index / 3;
+                let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
+
+                NodeView {
+                    id: node.id.as_uuid(),
+                    name: node.name.clone(),
+                    pos,
+                    inputs,
+                    outputs,
+                    cache_output: false,
+                    has_cached_output: false,
+                    terminal: node.behavior == NodeBehavior::Terminal,
+                }
+            })
+            .collect();
+
+        let graph = Self {
+            id: Uuid::new_v4(),
+            nodes,
+            pan: egui::Vec2::ZERO,
+            zoom: 1.0,
+            selected_node_id: None,
+        };
+        graph
+            .validate()
+            .expect("graph view should be valid after conversion");
+        graph
+    }
     pub fn validate(&self) -> Result<()> {
         if !self.zoom.is_finite() || self.zoom <= 0.0 {
             return Err(anyhow!("graph zoom must be finite and positive"));
@@ -138,12 +219,12 @@ impl Graph {
 
         let graph = match format {
             GraphFormat::Json => {
-                serde_json::from_str::<Graph>(input).map_err(anyhow::Error::from)?
+                serde_json::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
             }
             GraphFormat::Yaml => {
-                serde_yml::from_str::<Graph>(input).map_err(anyhow::Error::from)?
+                serde_yml::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
             }
-            GraphFormat::Toml => toml::from_str::<Graph>(input).map_err(anyhow::Error::from)?,
+            GraphFormat::Toml => toml::from_str::<GraphView>(input).map_err(anyhow::Error::from)?,
         };
         graph.validate()?;
 
@@ -172,7 +253,7 @@ impl Graph {
         let divide_id = Uuid::new_v4();
         let output_id = Uuid::new_v4();
 
-        let value_a = Node {
+        let value_a = NodeView {
             id: value_a_id,
             name: "value_a".to_string(),
             pos: egui::pos2(80.0, 120.0),
@@ -185,7 +266,7 @@ impl Graph {
             terminal: false,
         };
 
-        let value_b = Node {
+        let value_b = NodeView {
             id: value_b_id,
             name: "value_b".to_string(),
             pos: egui::pos2(80.0, 260.0),
@@ -198,7 +279,7 @@ impl Graph {
             terminal: false,
         };
 
-        let sum = Node {
+        let sum = NodeView {
             id: sum_id,
             name: "math(sum)".to_string(),
             pos: egui::pos2(320.0, 180.0),
@@ -226,7 +307,7 @@ impl Graph {
             terminal: false,
         };
 
-        let divide = Node {
+        let divide = NodeView {
             id: divide_id,
             name: "math(divide)".to_string(),
             pos: egui::pos2(560.0, 180.0),
@@ -254,7 +335,7 @@ impl Graph {
             terminal: false,
         };
 
-        let output = Node {
+        let output = NodeView {
             id: output_id,
             name: "output".to_string(),
             pos: egui::pos2(800.0, 180.0),
@@ -346,7 +427,7 @@ impl GraphFormat {
 
 #[test]
 fn test_graph() {
-    let graph = Graph::test_graph();
+    let graph = GraphView::test_graph();
     assert!(graph.validate().is_ok());
 }
 
@@ -362,7 +443,7 @@ fn graph_roundtrip() {
 }
 
 fn assert_roundtrip(format: GraphFormat) {
-    let graph = Graph::test_graph();
+    let graph = GraphView::test_graph();
     let serialized = graph
         .serialize(format)
         .expect("graph serialization should succeed for test graph");
@@ -370,7 +451,7 @@ fn assert_roundtrip(format: GraphFormat) {
         !serialized.trim().is_empty(),
         "serialized graph should not be empty"
     );
-    let deserialized = Graph::deserialize(format, &serialized)
+    let deserialized = GraphView::deserialize(format, &serialized)
         .expect("graph deserialization should succeed for test payload");
     assert!(deserialized.validate().is_ok());
     assert_eq!(
@@ -387,7 +468,7 @@ fn assert_roundtrip(format: GraphFormat) {
 }
 
 fn assert_file_roundtrip(format: GraphFormat, extension: &str) {
-    let graph = Graph::test_graph();
+    let graph = GraphView::test_graph();
     let detected =
         GraphFormat::from_extension(extension).expect("file extension must map to a graph format");
     assert_eq!(
@@ -402,7 +483,7 @@ fn assert_file_roundtrip(format: GraphFormat, extension: &str) {
         .expect("graph serialization to file should succeed");
     assert!(path.exists(), "serialized graph file should exist");
 
-    let deserialized = Graph::deserialize_from_file(&path)
+    let deserialized = GraphView::deserialize_from_file(&path)
         .expect("graph deserialization from file should succeed");
     assert_eq!(
         graph.nodes.len(),

@@ -7,6 +7,7 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
+use graph::prelude::{Graph, test_graph};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,8 +67,8 @@ fn configure_visuals(ctx: &egui::Context) {
 
 #[derive(Debug)]
 struct ScenariumApp {
-    graph: graph::graph::Graph,
-    graph_view: model::Graph,
+    graph: Graph,
+    graph_view: model::GraphView,
     graph_path: PathBuf,
     last_status: Option<String>,
     graph_ui: gui::graph::GraphUi,
@@ -75,9 +76,8 @@ struct ScenariumApp {
 
 impl Default for ScenariumApp {
     fn default() -> Self {
-        let graph = graph::graph::Graph::default();
-
-        let graph_view = model::Graph::test_graph();
+        let graph = test_graph();
+        let graph_view = model::GraphView::from_graph(&graph);
         graph_view
             .validate()
             .expect("sample graph should be valid for rendering");
@@ -107,7 +107,7 @@ impl ScenariumApp {
         self.last_status = Some(message.into());
     }
 
-    fn set_graph(&mut self, graph: model::Graph, status: impl Into<String>) {
+    fn set_graph(&mut self, graph: model::GraphView, status: impl Into<String>) {
         graph
             .validate()
             .expect("graph should be valid before storing in app state");
@@ -117,7 +117,7 @@ impl ScenariumApp {
     }
 
     fn new_graph(&mut self) {
-        let graph = model::Graph::default();
+        let graph = model::GraphView::default();
         self.set_graph(graph, "Created new graph");
     }
 
@@ -137,7 +137,7 @@ impl ScenariumApp {
             self.graph_path.extension().is_some(),
             "graph load path must include a file extension"
         );
-        match model::Graph::deserialize_from_file(&self.graph_path) {
+        match model::GraphView::deserialize_from_file(&self.graph_path) {
             Ok(graph) => self.set_graph(
                 graph,
                 format!("Loaded graph from {}", self.graph_path.display()),
@@ -147,8 +147,10 @@ impl ScenariumApp {
     }
 
     fn test_graph(&mut self) {
-        let graph = model::Graph::test_graph();
-        self.set_graph(graph, "Loaded sample test graph");
+        let graph = test_graph();
+        let graph_view = model::GraphView::from_graph(&graph);
+        self.graph = graph;
+        self.set_graph(graph_view, "Loaded sample test graph");
     }
 }
 

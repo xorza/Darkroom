@@ -69,7 +69,7 @@ impl NodeLayout {
 
 pub fn node_rect_for_graph(
     origin: egui::Pos2,
-    node: &model::Node,
+    node: &model::NodeView,
     scale: f32,
     layout: &NodeLayout,
     node_width: f32,
@@ -90,7 +90,7 @@ pub(crate) fn port_radius_for_scale(scale: f32) -> f32 {
     radius
 }
 
-pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::Graph) -> NodeInteraction {
+pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> NodeInteraction {
     let visuals = ctx.ui().visuals();
     let node_fill = ctx.style.node_fill;
     let node_stroke = ctx.style.node_stroke;
@@ -334,7 +334,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::Graph) -> Node
     interaction
 }
 
-pub fn render_ports(ctx: &RenderContext, graph: &model::Graph) {
+pub fn render_ports(ctx: &RenderContext, graph: &model::GraphView) {
     for node in &graph.nodes {
         let node_width = ctx.node_width(node.id);
 
@@ -371,7 +371,7 @@ pub fn render_ports(ctx: &RenderContext, graph: &model::Graph) {
     }
 }
 
-pub fn render_node_labels(ctx: &RenderContext, graph: &model::Graph) {
+pub fn render_node_labels(ctx: &RenderContext, graph: &model::GraphView) {
     let header_text_offset = ctx.style.header_text_offset;
 
     for node in &graph.nodes {
@@ -424,7 +424,7 @@ pub fn render_node_labels(ctx: &RenderContext, graph: &model::Graph) {
     }
 }
 
-fn node_size(node: &model::Node, layout: &NodeLayout, node_width: f32) -> egui::Vec2 {
+fn node_size(node: &model::NodeView, layout: &NodeLayout, node_width: f32) -> egui::Vec2 {
     assert!(node_width.is_finite(), "node width must be finite");
     assert!(node_width > 0.0, "node width must be positive");
     let row_count = node.inputs.len().max(node.outputs.len()).max(1);
@@ -438,7 +438,7 @@ fn node_size(node: &model::Node, layout: &NodeLayout, node_width: f32) -> egui::
 
 pub(crate) fn node_input_pos(
     origin: egui::Pos2,
-    node: &model::Node,
+    node: &model::NodeView,
     index: usize,
     layout: &NodeLayout,
     scale: f32,
@@ -460,7 +460,7 @@ pub(crate) fn node_input_pos(
 
 pub(crate) fn node_output_pos(
     origin: egui::Pos2,
-    node: &model::Node,
+    node: &model::NodeView,
     index: usize,
     layout: &NodeLayout,
     scale: f32,
@@ -493,7 +493,7 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
 
 pub(crate) fn compute_node_widths(
     painter: &egui::Painter,
-    graph: &model::Graph,
+    graph: &model::GraphView,
     layout: &NodeLayout,
     heading_font: &egui::FontId,
     body_font: &egui::FontId,
