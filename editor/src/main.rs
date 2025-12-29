@@ -96,12 +96,7 @@ impl Default for ScenariumApp {
 
 impl ScenariumApp {
     fn default_graph_path() -> PathBuf {
-        let path = std::env::temp_dir().join("scenarium-graph.yml");
-        assert!(
-            path.extension() == Some(OsStr::new("yml")),
-            "default graph path must use a .yml extension"
-        );
-        path
+        std::env::temp_dir().join("scenarium-graph.lua")
     }
 
     fn set_status(&mut self, message: impl Into<String>) {
