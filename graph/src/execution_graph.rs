@@ -256,7 +256,7 @@ impl ExecutionGraph {
 
         self.e_node_processing_order.clear();
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
-            if graph.nodes[e_node.node_idx].behavior == NodeBehavior::Terminal {
+            if graph.nodes[e_node.node_idx].terminal {
                 stack.push(Visit {
                     e_node_idx: idx,
                     cause: VisitCause::Terminal,
@@ -401,7 +401,6 @@ impl ExecutionGraph {
                 false
             } else {
                 match node.behavior {
-                    NodeBehavior::Terminal => true,
                     NodeBehavior::CacheOutput => {
                         // has no cached outputs, so should_invoke = true
                         true

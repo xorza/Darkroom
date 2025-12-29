@@ -78,6 +78,7 @@ impl GraphView {
                 inputs,
                 outputs,
                 behavior: node.behavior,
+                terminal: node.terminal,
             });
         }
 

@@ -127,7 +127,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         assert!(dot_radius.is_finite(), "status dot radius must be finite");
         assert!(dot_radius >= 0.0, "status dot radius must be non-negative");
         let mut dot_centers = Vec::new();
-        if node.behavior == NodeBehavior::Terminal {
+        if node.terminal {
             let dot_diameter = dot_radius * 2.0;
             let dot_gap = ctx.style.status_item_gap;
             let mut dot_x = close_rect.min.x - ctx.layout.padding - dot_radius;
@@ -192,8 +192,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         let close_response = ctx
             .ui()
             .interact(close_rect, close_id, egui::Sense::click());
-        let cache_enabled =
-            ctx.layout.cache_height > 0.0 && node.behavior != NodeBehavior::Terminal;
+        let cache_enabled = ctx.layout.cache_height > 0.0 && !node.terminal;
         let cache_id = ctx.ui().make_persistent_id(("node_cache", node.id));
         let cache_response = ctx.ui().interact(
             cache_button_rect,

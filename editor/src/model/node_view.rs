@@ -10,6 +10,7 @@ pub struct NodeView {
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
     pub behavior: NodeBehavior,
+    pub terminal: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -41,6 +42,7 @@ impl Default for NodeView {
             inputs: Vec::new(),
             outputs: Vec::new(),
             behavior: NodeBehavior::AsFunction,
+            terminal: false,
         }
     }
 }

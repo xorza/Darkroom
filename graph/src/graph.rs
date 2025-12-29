@@ -43,7 +43,6 @@ pub enum NodeBehavior {
     // for pure functions, only on input change
     AsFunction,
     CacheOutput,
-    Terminal,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,6 +52,7 @@ pub struct Node {
     pub name: String,
 
     pub behavior: NodeBehavior,
+    pub terminal: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
@@ -173,6 +173,7 @@ impl Default for Node {
             func_id: FuncId::nil(),
             name: "".to_string(),
             behavior: NodeBehavior::AsFunction,
+            terminal: false,
             inputs: vec![],
             events: vec![],
         }
@@ -199,16 +200,12 @@ impl Node {
             .map(|_event| Event::default())
             .collect();
 
-        let behavior = match function.behavior {
-            FuncBehavior::Pure | FuncBehavior::Impure => NodeBehavior::AsFunction,
-            FuncBehavior::Output => NodeBehavior::Terminal,
-        };
-
         Node {
             id: NodeId::unique(),
             func_id: function.id,
             name: function.name.clone(),
-            behavior,
+            behavior: NodeBehavior::AsFunction,
+            terminal: function.behavior == FuncBehavior::Output,
             inputs,
             events,
         }
@@ -294,6 +291,7 @@ pub fn test_graph() -> Graph {
         func_id: mult_func_id,
         name: "mult".to_string(),
         behavior: NodeBehavior::AsFunction,
+        terminal: false,
         inputs: vec![
             Input {
                 binding: Binding::from_output_binding(sum_node_id, 0),
@@ -312,6 +310,7 @@ pub fn test_graph() -> Graph {
         func_id: get_a_func_id,
         name: "get_a".to_string(),
         behavior: NodeBehavior::AsFunction,
+        terminal: false,
         inputs: vec![],
         events: vec![],
     });
@@ -321,6 +320,7 @@ pub fn test_graph() -> Graph {
         func_id: get_b_func_id,
         name: "get_b".to_string(),
         behavior: NodeBehavior::CacheOutput,
+        terminal: false,
         inputs: vec![],
         events: vec![],
     });
@@ -330,6 +330,7 @@ pub fn test_graph() -> Graph {
         func_id: sum_func_id,
         name: "sum".to_string(),
         behavior: NodeBehavior::AsFunction,
+        terminal: false,
         inputs: vec![
             Input {
                 binding: Binding::from_output_binding(get_a_node_id, 0),
@@ -347,7 +348,8 @@ pub fn test_graph() -> Graph {
         id: print_node_id,
         func_id: print_func_id,
         name: "print".to_string(),
-        behavior: NodeBehavior::Terminal,
+        behavior: NodeBehavior::AsFunction,
+        terminal: true,
         inputs: vec![Input {
             binding: Binding::from_output_binding(mult_node_id, 0),
             const_value: None,
