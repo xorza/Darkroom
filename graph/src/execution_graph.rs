@@ -292,8 +292,10 @@ impl ExecutionGraph {
                             .iter()
                             .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
                             .expect("FuncLib missing function for graph node func_id");
-                        e_node.reset_ports_from_func(&func_lib.funcs[func_idx]);
+                        let func = &func_lib.funcs[func_idx];
+                        e_node.reset_ports_from_func(func);
                         e_node.func_idx = func_idx;
+                        e_node.function_behavior = func.behavior;
                     }
                     ProcessingState::Processed2 => panic!("Unexpected state"),
                 }
