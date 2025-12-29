@@ -7,7 +7,10 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
+use graph::compute::Compute;
+use graph::execution_graph::ExecutionGraph;
 use graph::prelude::{FuncLib, Graph, TestFuncHooks, test_func_lib, test_graph};
+use pollster::block_on;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -150,6 +153,21 @@ impl ScenariumApp {
         self.func_lib = func_lib;
         self.set_graph(graph_view, "Loaded sample test graph");
     }
+
+    fn run_graph(&mut self) {
+        if self.graph.nodes.is_empty() {
+            self.set_status("Run failed: no compute graph loaded");
+            return;
+        }
+
+        let compute = Compute::default();
+        let mut execution_graph = ExecutionGraph::default();
+        let result = block_on(compute.run(&self.graph, &self.func_lib, &mut execution_graph));
+        match result {
+            Ok(()) => self.set_status("Compute finished"),
+            Err(err) => self.set_status(format!("Compute failed: {err}")),
+        }
+    }
 }
 
 impl eframe::App for ScenariumApp {
@@ -195,14 +213,21 @@ impl eframe::App for ScenariumApp {
             });
         });
 
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.graph_ui.render(ui, &mut self.graph_view);
+        });
+        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Run").clicked() {
+                    self.run_graph();
+                }
+            });
+        });
+
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {
                 ui.label(status);
             }
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.graph_ui.render(ui, &mut self.graph_view);
         });
     }
 }

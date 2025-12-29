@@ -131,3 +131,4 @@ Temporary connection dragging now renders after nodes so it stays above all node
 Lua serialization/deserialization now uses `common::serde_lua` and `FileFormat::Lua` for graph, function library, execution graph, and editor graph view formats.
 File-format serialization and deserialization are centralized in `common::serialize` and `common::deserialize`.
 Serialization now uses `common::SerdeFormatError` and `SerdeFormatResult` for format-specific errors.
+The editor includes a Run button beneath the graph view that executes compute on the current graph.

@@ -2616,6 +2616,7 @@ dependencies = [
  "eframe",
  "egui",
  "graph",
+ "pollster",
  "rayon",
  "serde",
  "serde_json",
