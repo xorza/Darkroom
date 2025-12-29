@@ -127,3 +127,4 @@ Node ports are rendered immediately after each node body to preserve proper z-or
 Node label rendering now happens inside the node body render pass to keep labels ordered with their nodes.
 Selecting a node reorders it to the end of the node list so it renders on top of others.
 Port hit-testing iterates nodes in reverse draw order and uses strict distance checks to prefer front-node ports on overlaps.
+Temporary connection dragging now renders after nodes so it stays above all nodes and connections.

@@ -62,6 +62,7 @@ Editor render ordering adjustments are documented in `NOTES-AI.md`.
 Editor node rendering consolidation is documented in `NOTES-AI.md`.
 Editor node ordering behavior is documented in `NOTES-AI.md`.
 Editor port hit-testing ordering is documented in `NOTES-AI.md`.
+Editor connection drag rendering is documented in `NOTES-AI.md`.
 Lua integration updates are tracked in `NOTES-AI.md`.
 Function lambda storage refinements are tracked in `NOTES-AI.md`.
 Lua output formatting updates are tracked in `NOTES-AI.md`.

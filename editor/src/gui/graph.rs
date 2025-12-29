@@ -320,6 +320,11 @@ impl GraphUi {
             ));
         }
 
+        let interaction = node_bodies.render(&ctx, graph);
+        if let Some(node_id) = interaction.remove_request {
+            graph.remove_node(node_id);
+        }
+
         if connection_drag.active {
             if let Some(pos) = pointer_pos {
                 connection_drag.current_pos = pos;
@@ -336,11 +341,6 @@ impl GraphUi {
                 connection_drag.start_port.kind,
                 &ctx.style,
             );
-        }
-
-        let interaction = node_bodies.render(&ctx, graph);
-        if let Some(node_id) = interaction.remove_request {
-            graph.remove_node(node_id);
         }
 
         if breaker.active && primary_released {
