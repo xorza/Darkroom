@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Scenarium editor
+Exec=scenarium-editor
+Icon=scenarium-editor
+Categories=Utility;

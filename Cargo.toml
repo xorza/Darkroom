@@ -1,7 +1,8 @@
 [workspace]
 members = [
     "common",
-    "graph"
+    "graph",
+    "editor"
 ]
 
 resolver = "2"
@@ -10,6 +11,12 @@ resolver = "2"
 [workspace.dependencies]
 common = { path = "common" }
 graph = { path = "graph" }
+editor = { path = "editor" }
+
+# wgpu version should be in sync with egui
+wgpu = { version = "27.0", features = ["metal", "vulkan", "dx12"] }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "wgpu", "wayland"] }
+egui = { version = "0.33", default-features = false, features = ["default_fonts", "rayon", "serde"] }
 
 imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
@@ -19,7 +26,6 @@ serde_json =  { version = "*" }
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow =  { version = "*" }
 thiserror = { version = "*" }
-wgpu = { version = "*" }
 bytemuck = { version = "*", features = ["derive"] }
 pollster =  { version = "*" }
 num-traits =  { version = "*" }

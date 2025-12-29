@@ -1,0 +1,23 @@
+[package]
+name = "scenarium-editor"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wgpu = { workspace = true }
+egui = { workspace = true }
+eframe = { workspace = true }
+
+
+anyhow = "*"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+serde_yml = "*"
+toml = "*"
+rayon = "*"
+tokio = { version = "*", features = ["rt-multi-thread", "macros", "time"] }
+tracing = "*"
+tracing-subscriber = { version = "*", features = ["fmt", "env-filter"] }
+dotenv = "*"
+tracing-rolling-file = { version = "*", features = ["non-blocking"] }
+uuid = { version = "*", features = ["v4", "serde"] }
