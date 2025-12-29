@@ -15,16 +15,7 @@ pub type SerdeLuaResult<T> = Result<T, SerdeLuaError>;
 pub fn from_str<T: DeserializeOwned>(serialized: &str) -> SerdeLuaResult<T> {
     let lua = Lua::new();
     let trimmed = serialized.trim();
-    let value = match lua.load(trimmed).eval::<Value>() {
-        Ok(value) => value,
-        Err(err) => {
-            if trimmed.starts_with("return") {
-                return Err(err.into());
-            }
-            let wrapped = format!("return {}", trimmed);
-            lua.load(wrapped).eval::<Value>()?
-        }
-    };
+    let value = lua.load(trimmed).eval::<Value>()?;
     Ok(lua.from_value(value)?)
 }
 
