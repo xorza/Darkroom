@@ -23,6 +23,7 @@ Commit messages are often prompts sent to an AI agent to request a change.
 
 As of 2025-12-24, workspace dependencies are set to the latest minor versions with patch versions left open.
 The only version bump needed in this update was `wgpu` to `28.0`; other workspace dependencies were already at their latest minor versions.
+The editor crate now relies on `workspace = true` for shared dependencies, and the workspace dependency list includes `toml`, `rayon`, `dotenv`, and `tracing-rolling-file`.
 
 ## Subprojects
 

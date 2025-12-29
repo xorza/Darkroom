@@ -37,6 +37,10 @@ tokio = { version = "*", features = ["full"] }
 tracing = { version = "*" }
 tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
 tracing-appender =  { version = "*" }
+tracing-rolling-file = { version = "*", features = ["non-blocking"] }
+dotenv = { version = "*" }
+rayon = { version = "*" }
+toml = { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
 bytes = { version = "*" }
 lazy_static =  { version = "*" }

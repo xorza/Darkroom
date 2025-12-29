@@ -7,17 +7,15 @@ edition = "2024"
 wgpu = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }
-
-
-anyhow = "*"
-serde = { version = "*", features = ["derive"] }
-serde_json = "*"
-serde_yml = "*"
-toml = "*"
-rayon = "*"
-tokio = { version = "*", features = ["rt-multi-thread", "macros", "time"] }
-tracing = "*"
-tracing-subscriber = { version = "*", features = ["fmt", "env-filter"] }
-dotenv = "*"
-tracing-rolling-file = { version = "*", features = ["non-blocking"] }
-uuid = { version = "*", features = ["v4", "serde"] }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yml = { workspace = true }
+toml = { workspace = true }
+rayon = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+dotenv = { workspace = true }
+tracing-rolling-file = { workspace = true }
+uuid = { workspace = true }
