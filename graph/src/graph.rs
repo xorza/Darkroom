@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::id_type;
-use common::normalize_string::NormalizeString;
-use common::{serde_lua, FileFormat};
+use common::{deserialize_with_format, serde_lua, serialize_with_format, FileFormat};
 
 id_type!(NodeId);
 
@@ -112,11 +111,7 @@ impl Graph {
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        match format {
-            FileFormat::Yaml => serde_yml::to_string(&self).unwrap().normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&self).unwrap().normalize(),
-            FileFormat::Lua => serde_lua::to_string(&self).unwrap().normalize(),
-        }
+        serialize_with_format(self, format).expect("Failed to serialize graph")
     }
     pub fn from_file(path: &str) -> anyhow::Result<Graph> {
         let format = FileFormat::from_file_name(path)
@@ -125,11 +120,7 @@ impl Graph {
         Self::deserialize(&contents, format)
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Graph> {
-        let graph: Graph = match format {
-            FileFormat::Yaml => serde_yml::from_str(serialized)?,
-            FileFormat::Json => serde_json::from_str(serialized)?,
-            FileFormat::Lua => serde_lua::from_str(serialized)?,
-        };
+        let graph: Graph = deserialize_with_format(serialized, format)?;
 
         graph.validate()?;
 

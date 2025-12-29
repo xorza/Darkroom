@@ -4,8 +4,7 @@ use std::sync::Arc;
 
 use crate::data::*;
 use common::id_type;
-use common::normalize_string::NormalizeString;
-use common::FileFormat;
+use common::{deserialize_with_format, serialize_with_format, FileFormat};
 use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -233,24 +232,12 @@ impl FuncLib {
         Self::deserialize(&contents, format)
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let funcs: Vec<Func> = match format {
-            FileFormat::Yaml => serde_yml::from_str(serialized)?,
-            FileFormat::Json => serde_json::from_str(serialized)?,
-            FileFormat::Lua => common::serde_lua::from_str(serialized)?,
-        };
+        let funcs: Vec<Func> = deserialize_with_format(serialized, format)?;
 
         Ok(funcs.into())
     }
     pub fn serialize(&self, format: FileFormat) -> String {
-        match format {
-            FileFormat::Yaml => serde_yml::to_string(&self.funcs).unwrap().normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&self.funcs)
-                .unwrap()
-                .normalize(),
-            FileFormat::Lua => common::serde_lua::to_string(&self.funcs)
-                .unwrap()
-                .normalize(),
-        }
+        serialize_with_format(&self.funcs, format).expect("Failed to serialize function library")
     }
 
     pub fn by_id(&self, id: FuncId) -> Option<&Func> {

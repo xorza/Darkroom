@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use common::{FileFormat, is_debug, normalize_string::NormalizeString};
+use common::{FileFormat, is_debug};
 use graph::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -141,13 +141,9 @@ impl GraphView {
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        self.validate().unwrap();
-
-        match format {
-            FileFormat::Json => serde_json::to_string_pretty(self).unwrap().normalize(),
-            FileFormat::Yaml => serde_yml::to_string(self).unwrap().normalize(),
-            FileFormat::Lua => common::serde_lua::to_string(self).unwrap().normalize(),
-        }
+        self.validate()
+            .expect("graph view must be valid before serialization");
+        common::serialize_with_format(self, format).expect("failed to serialize graph view")
     }
 
     pub fn deserialize(format: FileFormat, input: &str) -> Result<Self> {
@@ -155,17 +151,7 @@ impl GraphView {
             bail!("graph input is empty");
         }
 
-        let graph = match format {
-            FileFormat::Json => {
-                serde_json::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
-            }
-            FileFormat::Yaml => {
-                serde_yml::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
-            }
-            FileFormat::Lua => {
-                common::serde_lua::from_str::<GraphView>(input).map_err(anyhow::Error::from)?
-            }
-        };
+        let graph = common::deserialize_with_format::<GraphView>(input, format)?;
         graph.validate()?;
 
         Ok(graph)

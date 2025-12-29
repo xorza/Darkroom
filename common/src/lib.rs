@@ -1,4 +1,8 @@
+use serde::de::DeserializeOwned;
+use serde::Serialize;
 use std::path::Path;
+
+use crate::normalize_string::NormalizeString;
 
 #[macro_use]
 pub mod macros;
@@ -53,4 +57,27 @@ impl FileFormat {
 
 pub fn is_debug() -> bool {
     cfg!(debug_assertions)
+}
+
+pub fn serialize_with_format<T: Serialize>(
+    value: &T,
+    format: FileFormat,
+) -> anyhow::Result<String> {
+    match format {
+        FileFormat::Yaml => serde_yml::to_string(value).map_err(anyhow::Error::from),
+        FileFormat::Json => serde_json::to_string_pretty(value).map_err(anyhow::Error::from),
+        FileFormat::Lua => serde_lua::to_string(value).map_err(anyhow::Error::from),
+    }
+    .map(|serialized| serialized.normalize())
+}
+
+pub fn deserialize_with_format<T: DeserializeOwned>(
+    serialized: &str,
+    format: FileFormat,
+) -> anyhow::Result<T> {
+    match format {
+        FileFormat::Yaml => serde_yml::from_str(serialized).map_err(anyhow::Error::from),
+        FileFormat::Json => serde_json::from_str(serialized).map_err(anyhow::Error::from),
+        FileFormat::Lua => serde_lua::from_str(serialized).map_err(anyhow::Error::from),
+    }
 }

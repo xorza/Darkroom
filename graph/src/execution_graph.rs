@@ -11,8 +11,7 @@ use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::FuncBehavior;
-use common::normalize_string::NormalizeString;
-use common::FileFormat;
+use common::{deserialize_with_format, serialize_with_format, FileFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessingState {
@@ -143,19 +142,11 @@ impl ExecutionGraph {
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        match format {
-            FileFormat::Yaml => serde_yml::to_string(&self).unwrap().normalize(),
-            FileFormat::Json => serde_json::to_string_pretty(&self).unwrap().normalize(),
-            FileFormat::Lua => common::serde_lua::to_string(&self).unwrap().normalize(),
-        }
+        serialize_with_format(self, format).expect("Failed to serialize execution graph")
     }
 
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let execution_graph: ExecutionGraph = match format {
-            FileFormat::Yaml => serde_yml::from_str(serialized)?,
-            FileFormat::Json => serde_json::from_str(serialized)?,
-            FileFormat::Lua => common::serde_lua::from_str(serialized)?,
-        };
+        let execution_graph: ExecutionGraph = deserialize_with_format(serialized, format)?;
 
         Ok(execution_graph)
     }
