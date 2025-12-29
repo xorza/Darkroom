@@ -1,27 +1,8 @@
-
+**/.DS_Store
 **/.idea/
-
-**/Cargo.lock
-
-*.qmlproject.qtds
-*.qmlproject.user
-**/xcuserdata/
 
 /test_output/
 **/logs/
 
-**/obj/
-**/bin/
-*.DotSettings.user
-/ScenariumEditor.NET/CoreInterop/core_interop.dll
-/ScenariumEditor.NET/CoreInterop/libcore_interop.dylib
-
 **/target/
-**/cmake-build-*/
-**/build/
-
-**/*.pb.h
-**/*.pb.cc
-/cs_interop/src/proto/*.rs
-
 /patch.diff
