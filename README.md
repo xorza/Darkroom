@@ -67,6 +67,8 @@ Lua file format support is documented in `NOTES-AI.md`.
 Common file format serialization helpers are documented in `NOTES-AI.md`.
 Common serialization error types are documented in `NOTES-AI.md`.
 Editor run controls are documented in `NOTES-AI.md`.
+Editor compute status hooks are documented in `NOTES-AI.md`.
+GraphView to Graph conversion is documented in `NOTES-AI.md`.
 Lua integration updates are tracked in `NOTES-AI.md`.
 Function lambda storage refinements are tracked in `NOTES-AI.md`.
 Lua output formatting updates are tracked in `NOTES-AI.md`.

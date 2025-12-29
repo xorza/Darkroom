@@ -14,6 +14,7 @@ use pollster::block_on;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 fn main() -> Result<()> {
     init::init()?;
@@ -75,6 +76,7 @@ struct ScenariumApp {
     graph_view: model::GraphView,
     graph_path: PathBuf,
     last_status: Option<String>,
+    compute_status: Arc<Mutex<Option<String>>>,
     graph_ui: gui::graph::GraphUi,
 }
 
@@ -88,6 +90,7 @@ impl Default for ScenariumApp {
             graph_view: model::GraphView::default(),
             graph_path,
             last_status: None,
+            compute_status: Arc::new(Mutex::new(None)),
             graph_ui: gui::graph::GraphUi::default(),
         };
 
@@ -147,24 +150,58 @@ impl ScenariumApp {
 
     fn test_graph(&mut self) {
         let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let func_lib = test_func_lib(self.sample_test_hooks());
         let graph_view = model::GraphView::from_graph(&graph, &func_lib);
         self.graph = graph;
         self.func_lib = func_lib;
         self.set_graph(graph_view, "Loaded sample test graph");
     }
 
+    fn sample_test_hooks(&self) -> TestFuncHooks {
+        let status = Arc::clone(&self.compute_status);
+        TestFuncHooks {
+            get_a: Box::new(|| 21),
+            get_b: Box::new(|| 2),
+            print: Box::new(move |value| {
+                let mut slot = status
+                    .lock()
+                    .expect("compute status lock must be available");
+                *slot = Some(format!("Compute output: {}", value));
+            }),
+        }
+    }
+
     fn run_graph(&mut self) {
-        if self.graph.nodes.is_empty() {
+        if self.graph_view.nodes.is_empty() {
             self.set_status("Run failed: no compute graph loaded");
             return;
+        }
+
+        self.graph = self.graph_view.to_graph(&self.func_lib);
+        {
+            let mut slot = self
+                .compute_status
+                .lock()
+                .expect("compute status lock must be available");
+            *slot = None;
         }
 
         let compute = Compute::default();
         let mut execution_graph = ExecutionGraph::default();
         let result = block_on(compute.run(&self.graph, &self.func_lib, &mut execution_graph));
         match result {
-            Ok(()) => self.set_status("Compute finished"),
+            Ok(()) => {
+                let status = self
+                    .compute_status
+                    .lock()
+                    .expect("compute status lock must be available")
+                    .clone();
+                if let Some(status) = status {
+                    self.set_status(status);
+                } else {
+                    self.set_status("Compute finished");
+                }
+            }
             Err(err) => self.set_status(format!("Compute failed: {err}")),
         }
     }
@@ -216,18 +253,18 @@ impl eframe::App for ScenariumApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             self.graph_ui.render(ui, &mut self.graph_view);
         });
+
+        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
+            if let Some(status) = self.last_status.as_deref() {
+                ui.label(status);
+            }
+        });
         egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("Run").clicked() {
                     self.run_graph();
                 }
             });
-        });
-
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            if let Some(status) = self.last_status.as_deref() {
-                ui.label(status);
-            }
         });
     }
 }

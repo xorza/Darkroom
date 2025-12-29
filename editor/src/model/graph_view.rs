@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use common::{FileFormat, is_debug};
-use graph::prelude::{Binding, FuncLib, Graph as CoreGraph, NodeId};
+use graph::prelude::{Binding, Event, FuncLib, Graph as CoreGraph, Node, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -92,6 +92,93 @@ impl GraphView {
         graph
             .validate()
             .expect("graph view should be valid after conversion");
+        graph
+    }
+
+    pub fn to_graph(&self, func_lib: &FuncLib) -> CoreGraph {
+        let mut graph = CoreGraph::default();
+        let mut node_ids = HashMap::new();
+        let mut output_counts = HashMap::new();
+        for node in &self.nodes {
+            let prior = node_ids.insert(node.id, node.name.as_str());
+            assert!(prior.is_none(), "graph view node ids must be unique");
+            let prior = output_counts.insert(node.id, node.outputs.len());
+            assert!(prior.is_none(), "graph view node ids must be unique");
+        }
+
+        for node_view in &self.nodes {
+            let func = func_lib.by_name(&node_view.name).unwrap_or_else(|| {
+                panic!(
+                    "Missing func named {} for node {}",
+                    node_view.name, node_view.id
+                )
+            });
+            assert!(
+                node_view.inputs.len() == func.inputs.len(),
+                "node inputs must match function inputs"
+            );
+            assert!(
+                node_view.outputs.len() == func.outputs.len(),
+                "node outputs must match function outputs"
+            );
+
+            let mut inputs = Vec::with_capacity(func.inputs.len());
+            for (input_index, func_input) in func.inputs.iter().enumerate() {
+                let view_input = node_view
+                    .inputs
+                    .get(input_index)
+                    .expect("graph view inputs must align with function inputs");
+                let (binding, const_value) = match &view_input.connection {
+                    Some(connection) => {
+                        assert!(
+                            node_ids.contains_key(&connection.node_id),
+                            "connection must reference an existing node"
+                        );
+                        let output_count = output_counts
+                            .get(&connection.node_id)
+                            .copied()
+                            .expect("connection must reference an existing node");
+                        assert!(
+                            connection.output_index < output_count,
+                            "connection output index must be in range"
+                        );
+                        (
+                            Binding::from_output_binding(
+                                NodeId::from(connection.node_id),
+                                connection.output_index,
+                            ),
+                            None,
+                        )
+                    }
+                    None => func_input
+                        .default_value
+                        .as_ref()
+                        .map_or((Binding::None, None), |_| {
+                            (Binding::Const, func_input.default_value.clone())
+                        }),
+                };
+                inputs.push(graph::graph::Input {
+                    binding,
+                    const_value,
+                });
+            }
+
+            let events = (0..func.events.len()).map(|_| Event::default()).collect();
+            let node = Node {
+                id: NodeId::from(node_view.id),
+                func_id: func.id,
+                name: node_view.name.clone(),
+                behavior: node_view.behavior,
+                terminal: node_view.terminal,
+                inputs,
+                events,
+            };
+            graph.add(node);
+        }
+
+        graph
+            .validate()
+            .expect("graph must be valid after conversion");
         graph
     }
 
