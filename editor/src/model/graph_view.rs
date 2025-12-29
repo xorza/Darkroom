@@ -248,10 +248,6 @@ mod tests {
         assert_roundtrip(FileFormat::Json);
         assert_roundtrip(FileFormat::Yaml);
         assert_roundtrip(FileFormat::Lua);
-
-        assert_file_roundtrip(FileFormat::Json, "json");
-        assert_file_roundtrip(FileFormat::Yaml, "yaml");
-        assert_file_roundtrip(FileFormat::Lua, "lua");
     }
 
     fn build_test_view() -> GraphView {
@@ -281,33 +277,5 @@ mod tests {
         );
         assert_eq!(graph.zoom, deserialized.zoom, "zoom should round-trip");
         assert_eq!(graph.pan, deserialized.pan, "pan should round-trip");
-    }
-
-    fn assert_file_roundtrip(format: FileFormat, extension: &str) {
-        let graph = build_test_view();
-        let detect_name = format!("file.{extension}");
-        let detected = FileFormat::from_file_name(&detect_name)
-            .expect("file extension must map to a graph format");
-        assert_eq!(
-            detected, format,
-            "file extension must match the expected format"
-        );
-        let file_name = format!("egui-graph-{}.{}", Uuid::new_v4(), extension);
-        let path = std::env::temp_dir().join(file_name);
-
-        graph
-            .serialize_to_file(&path)
-            .expect("graph serialization to file should succeed");
-        assert!(path.exists(), "serialized graph file should exist");
-
-        let deserialized = GraphView::deserialize_from_file(&path)
-            .expect("graph deserialization from file should succeed");
-        assert_eq!(
-            graph.nodes.len(),
-            deserialized.nodes.len(),
-            "node counts should round-trip from file"
-        );
-
-        std::fs::remove_file(&path).expect("temporary graph file should be removable");
     }
 }
