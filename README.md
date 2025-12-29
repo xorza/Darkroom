@@ -57,6 +57,7 @@ Editor debug tasks can be configured per-project.
 Execution node cache compacts execution nodes in-place to avoid extra allocations.
 Execution node cache compaction now has inline comments explaining the swap/truncate flow.
 Internal refactors are documented in `NOTES-AI.md` to keep this README high-level.
+Editor UI behavior tweaks are documented in `NOTES-AI.md`.
 Lua integration updates are tracked in `NOTES-AI.md`.
 Function lambda storage refinements are tracked in `NOTES-AI.md`.
 Lua output formatting updates are tracked in `NOTES-AI.md`.

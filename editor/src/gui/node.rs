@@ -192,10 +192,18 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         let close_response = ctx
             .ui()
             .interact(close_rect, close_id, egui::Sense::click());
+        let cache_enabled =
+            ctx.layout.cache_height > 0.0 && node.behavior != NodeBehavior::Terminal;
         let cache_id = ctx.ui().make_persistent_id(("node_cache", node.id));
-        let cache_response = ctx
-            .ui()
-            .interact(cache_button_rect, cache_id, egui::Sense::click());
+        let cache_response = ctx.ui().interact(
+            cache_button_rect,
+            cache_id,
+            if cache_enabled {
+                egui::Sense::click()
+            } else {
+                egui::Sense::hover()
+            },
+        );
 
         let header_id = ctx.ui().make_persistent_id(("node_header", node.id));
         let response = ctx
@@ -206,7 +214,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             node.pos += response.drag_delta() / ctx.scale;
         }
 
-        if ctx.layout.cache_height > 0.0 && cache_response.clicked() {
+        if cache_enabled && cache_response.clicked() {
             node.behavior = if node.behavior == NodeBehavior::CacheOutput {
                 NodeBehavior::AsFunction
             } else {
@@ -243,7 +251,9 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         );
 
         if ctx.layout.cache_height > 0.0 {
-            let button_fill = if node.behavior == NodeBehavior::CacheOutput {
+            let button_fill = if !cache_enabled {
+                visuals.widgets.noninteractive.bg_fill
+            } else if node.behavior == NodeBehavior::CacheOutput {
                 ctx.style.cache_active_color
             } else if cache_response.is_pointer_button_down_on() {
                 visuals.widgets.active.bg_fill
@@ -262,7 +272,9 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             );
 
             let button_text = "cache";
-            let button_text_color = if node.behavior == NodeBehavior::CacheOutput {
+            let button_text_color = if !cache_enabled {
+                visuals.widgets.noninteractive.fg_stroke.color
+            } else if node.behavior == NodeBehavior::CacheOutput {
                 ctx.style.cache_checked_text_color
             } else {
                 visuals.text_color()

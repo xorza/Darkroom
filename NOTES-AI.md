@@ -122,3 +122,4 @@ Add shared terminology here as the project evolves.
 ## Editor Workflow
 
 Add editor workflow details here as they are defined.
+The node header cache button is disabled for terminal nodes to prevent toggling cache behavior.
