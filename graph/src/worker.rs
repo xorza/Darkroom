@@ -186,8 +186,6 @@ impl WorkerMessage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use common::output_stream::OutputStream;
 
     use crate::data::StaticValue;
@@ -261,27 +259,48 @@ mod tests {
         let mut func_lib = basic_invoker.into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());
 
-        let (compute_finish_tx, compute_finish_rx) = mpsc::channel();
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
         let mut worker = Worker::new(func_lib, move |result| {
             compute_finish_tx
-                .send(result)
+                .try_send(result)
                 .expect("Failed to send a compute callback event");
         });
 
         let graph = log_frame_no_graph();
 
         worker.run_once(graph.clone()).await;
-        compute_finish_rx.recv()??;
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            compute_finish_rx.recv(),
+        )
+        .await
+        .expect("Timed out waiting for compute completion")
+        .expect("Missing compute completion")
+        .expect("Unsuccessful compute");
 
         assert_eq!(output_stream.take().await[0], "1");
 
         worker.run_loop(graph.clone()).await;
 
         worker.event().await;
-        compute_finish_rx.recv()??;
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            compute_finish_rx.recv(),
+        )
+        .await
+        .expect("Timed out waiting for compute completion")
+        .expect("Missing compute completion")
+        .expect("Unsuccessful compute");
 
         worker.event().await;
-        compute_finish_rx.recv()??;
+        tokio::time::timeout(
+            tokio::time::Duration::from_secs(5),
+            compute_finish_rx.recv(),
+        )
+        .await
+        .expect("Timed out waiting for compute completion")
+        .expect("Missing compute completion")
+        .expect("Unsuccessful compute");
 
         let log = output_stream.take().await;
         assert_eq!(log[0], "1");

@@ -157,7 +157,7 @@ mod tests {
                 event_index: 0,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             },
         );
         event_owner.start_node_event_loop(
@@ -167,19 +167,26 @@ mod tests {
                 event_index: 1,
             },
             || async move {
-                tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
             },
         );
 
-        let event = event_rx.recv().await.unwrap();
+        async fn next_event(event_rx: &mut tokio::sync::mpsc::Receiver<EventId>) -> EventId {
+            tokio::time::timeout(tokio::time::Duration::from_millis(500), event_rx.recv())
+                .await
+                .expect("Timed out waiting for event")
+                .expect("Missing event")
+        }
+
+        let event = next_event(&mut event_rx).await;
         assert_eq!(event.event_index, 0);
 
-        let event = event_rx.recv().await.unwrap();
+        let event = next_event(&mut event_rx).await;
         assert_eq!(event.event_index, 1);
 
-        frame_tx.send(()).unwrap();
+        frame_tx.send(()).expect("Failed to send frame signal");
 
-        let event = event_rx.recv().await.unwrap();
+        let event = next_event(&mut event_rx).await;
         assert_eq!(event.event_index, 0);
 
         event_owner.stop_node_events(node_id);
@@ -195,7 +202,7 @@ mod tests {
             },
         );
 
-        let event = event_rx.recv().await.unwrap();
+        let event = next_event(&mut event_rx).await;
         assert_eq!(event.event_index, 2);
     }
 }
