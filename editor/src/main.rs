@@ -13,8 +13,7 @@ use graph::prelude::{FuncLib, Graph, TestFuncHooks, test_func_lib, test_graph};
 use pollster::block_on;
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -95,6 +94,7 @@ impl Default for ScenariumApp {
             graph_ui: gui::graph::GraphUi::default(),
         };
 
+        result.test_graph();
         result.load_graph();
 
         result
@@ -164,7 +164,7 @@ impl ScenariumApp {
             get_a: Box::new(|| 21),
             get_b: Box::new(|| 2),
             print: Box::new(move |value| {
-                let mut slot = status.blocking_lock();
+                let mut slot = status.lock().expect("Compute status mutex poisoned");
                 *slot = Some(format!("Compute output: {}", value));
             }),
         }
@@ -178,7 +178,10 @@ impl ScenariumApp {
 
         self.graph = self.graph_view.to_graph(&self.func_lib);
         {
-            let mut slot = self.compute_status.blocking_lock();
+            let mut slot = self
+                .compute_status
+                .lock()
+                .expect("Compute status mutex poisoned");
             *slot = None;
         }
 
@@ -187,7 +190,11 @@ impl ScenariumApp {
         let result = block_on(compute.run(&self.graph, &self.func_lib, &mut execution_graph));
         match result {
             Ok(()) => {
-                let status = self.compute_status.blocking_lock().clone();
+                let status = self
+                    .compute_status
+                    .lock()
+                    .expect("Compute status mutex poisoned")
+                    .clone();
                 if let Some(status) = status {
                     self.set_status(status);
                 } else {

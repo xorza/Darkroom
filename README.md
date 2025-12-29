@@ -85,6 +85,7 @@ Compute error source storage updates are tracked in `NOTES-AI.md`.
 Compute invocation error handling updates are tracked in `NOTES-AI.md`.
 Execution graph traversal cleanup notes are tracked in `NOTES-AI.md`.
 Execution graph validation invariants are tracked in `NOTES-AI.md`.
+Editor runtime mutex changes are tracked in `NOTES-AI.md`.
 Tests use the in-code `test_graph()` fixture for the standard sample graph.
 Tests use in-code function library fixtures for the standard sample functions.
 Graph and function library file loaders now auto-detect YAML or JSON based on file extension.
