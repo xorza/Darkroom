@@ -88,7 +88,7 @@ impl Default for ScenariumApp {
             graph_ui: gui::graph::GraphUi::default(),
         };
 
-        result.test_graph();
+        result.load_graph();
 
         result
     }
