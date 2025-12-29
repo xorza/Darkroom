@@ -171,15 +171,15 @@ mod tests {
             },
         );
 
-        let event = event_rx.recv().await.expect("Missing event");
+        let event = event_rx.recv().await.unwrap();
         assert_eq!(event.event_index, 0);
 
-        let event = event_rx.recv().await.expect("Missing event");
+        let event = event_rx.recv().await.unwrap();
         assert_eq!(event.event_index, 1);
 
         frame_tx.send(()).unwrap();
 
-        let event = event_rx.recv().await.expect("Missing event");
+        let event = event_rx.recv().await.unwrap();
         assert_eq!(event.event_index, 0);
 
         event_owner.stop_node_events(node_id);
@@ -195,7 +195,7 @@ mod tests {
             },
         );
 
-        let event = event_rx.recv().await.expect("Missing event");
+        let event = event_rx.recv().await.unwrap();
         assert_eq!(event.event_index, 2);
     }
 }
