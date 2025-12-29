@@ -125,3 +125,4 @@ Add editor workflow details here as they are defined.
 The node header cache button is disabled for terminal nodes to prevent toggling cache behavior.
 Node ports are rendered immediately after each node body to preserve proper z-ordering when nodes overlap.
 Node label rendering now happens inside the node body render pass to keep labels ordered with their nodes.
+Selecting a node reorders it to the end of the node list so it renders on top of others.

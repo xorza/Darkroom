@@ -60,6 +60,7 @@ Internal refactors are documented in `NOTES-AI.md` to keep this README high-leve
 Editor UI behavior tweaks are documented in `NOTES-AI.md`.
 Editor render ordering adjustments are documented in `NOTES-AI.md`.
 Editor node rendering consolidation is documented in `NOTES-AI.md`.
+Editor node ordering behavior is documented in `NOTES-AI.md`.
 Lua integration updates are tracked in `NOTES-AI.md`.
 Function lambda storage refinements are tracked in `NOTES-AI.md`.
 Lua output formatting updates are tracked in `NOTES-AI.md`.

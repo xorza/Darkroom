@@ -189,6 +189,15 @@ impl GraphView {
             self.nodes.iter().any(|node| node.id == node_id),
             "selected node must exist in graph"
         );
+        let node_index = self
+            .nodes
+            .iter()
+            .position(|node| node.id == node_id)
+            .expect("selected node must exist in graph");
+        if node_index + 1 != self.nodes.len() {
+            let node = self.nodes.remove(node_index);
+            self.nodes.push(node);
+        }
         self.selected_node_id = Some(node_id);
     }
 
