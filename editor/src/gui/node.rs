@@ -339,98 +339,94 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         let close_stroke = egui::Stroke::new(1.4 * ctx.scale, close_color);
         ctx.painter().line_segment([a, b], close_stroke);
         ctx.painter().line_segment([c, d], close_stroke);
+
+        render_node_ports(ctx, node, node_width);
+        render_node_labels(ctx, node, node_rect, node_width);
     }
 
     interaction
 }
 
-pub fn render_ports(ctx: &RenderContext, graph: &model::GraphView) {
-    for node in &graph.nodes {
-        let node_width = ctx.node_width(node.id);
+fn render_node_ports(ctx: &RenderContext, node: &model::NodeView, node_width: f32) {
+    for (index, _input) in node.inputs.iter().enumerate() {
+        let center = node_input_pos(ctx.origin, node, index, &ctx.layout, ctx.scale);
+        let port_rect = egui::Rect::from_center_size(
+            center,
+            egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
+        );
+        let color = if ctx.ui().rect_contains_pointer(port_rect) {
+            ctx.style.input_hover_color
+        } else {
+            ctx.style.input_port_color
+        };
+        ctx.painter().circle_filled(center, ctx.port_radius, color);
+    }
 
-        for (index, _input) in node.inputs.iter().enumerate() {
-            let center = node_input_pos(ctx.origin, node, index, &ctx.layout, ctx.scale);
-
-            let port_rect = egui::Rect::from_center_size(
-                center,
-                egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
-            );
-            let color = if ctx.ui().rect_contains_pointer(port_rect) {
-                ctx.style.input_hover_color
-            } else {
-                ctx.style.input_port_color
-            };
-            ctx.painter().circle_filled(center, ctx.port_radius, color);
-        }
-
-        for (index, _output) in node.outputs.iter().enumerate() {
-            let center =
-                node_output_pos(ctx.origin, node, index, &ctx.layout, ctx.scale, node_width);
-
-            let port_rect = egui::Rect::from_center_size(
-                center,
-                egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
-            );
-            let color = if ctx.ui().rect_contains_pointer(port_rect) {
-                ctx.style.output_hover_color
-            } else {
-                ctx.style.output_port_color
-            };
-            ctx.painter().circle_filled(center, ctx.port_radius, color);
-        }
+    for (index, _output) in node.outputs.iter().enumerate() {
+        let center = node_output_pos(ctx.origin, node, index, &ctx.layout, ctx.scale, node_width);
+        let port_rect = egui::Rect::from_center_size(
+            center,
+            egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
+        );
+        let color = if ctx.ui().rect_contains_pointer(port_rect) {
+            ctx.style.output_hover_color
+        } else {
+            ctx.style.output_port_color
+        };
+        ctx.painter().circle_filled(center, ctx.port_radius, color);
     }
 }
 
-pub fn render_node_labels(ctx: &RenderContext, graph: &model::GraphView) {
+fn render_node_labels(
+    ctx: &RenderContext,
+    node: &model::NodeView,
+    node_rect: egui::Rect,
+    node_width: f32,
+) {
     let header_text_offset = ctx.style.header_text_offset;
 
-    for node in &graph.nodes {
-        let node_rect = ctx.node_rect(node);
-        let node_width = ctx.node_width(node.id);
+    ctx.painter().text(
+        node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
+        egui::Align2::LEFT_TOP,
+        &node.name,
+        ctx.heading_font.clone(),
+        ctx.text_color,
+    );
 
+    for (index, input) in node.inputs.iter().enumerate() {
+        let text_pos = node_rect.min
+            + egui::vec2(
+                ctx.layout.padding,
+                ctx.layout.header_height
+                    + ctx.layout.cache_height
+                    + ctx.layout.padding
+                    + ctx.layout.row_height * index as f32,
+            );
         ctx.painter().text(
-            node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
+            text_pos,
             egui::Align2::LEFT_TOP,
-            &node.name,
-            ctx.heading_font.clone(),
+            &input.name,
+            ctx.body_font.clone(),
             ctx.text_color,
         );
+    }
 
-        for (index, input) in node.inputs.iter().enumerate() {
-            let text_pos = node_rect.min
-                + egui::vec2(
-                    ctx.layout.padding,
-                    ctx.layout.header_height
-                        + ctx.layout.cache_height
-                        + ctx.layout.padding
-                        + ctx.layout.row_height * index as f32,
-                );
-            ctx.painter().text(
-                text_pos,
-                egui::Align2::LEFT_TOP,
-                &input.name,
-                ctx.body_font.clone(),
-                ctx.text_color,
+    for (index, output) in node.outputs.iter().enumerate() {
+        let text_pos = node_rect.min
+            + egui::vec2(
+                node_width - ctx.layout.padding,
+                ctx.layout.header_height
+                    + ctx.layout.cache_height
+                    + ctx.layout.padding
+                    + ctx.layout.row_height * index as f32,
             );
-        }
-
-        for (index, output) in node.outputs.iter().enumerate() {
-            let text_pos = node_rect.min
-                + egui::vec2(
-                    node_width - ctx.layout.padding,
-                    ctx.layout.header_height
-                        + ctx.layout.cache_height
-                        + ctx.layout.padding
-                        + ctx.layout.row_height * index as f32,
-                );
-            ctx.painter().text(
-                text_pos,
-                egui::Align2::RIGHT_TOP,
-                &output.name,
-                ctx.body_font.clone(),
-                ctx.text_color,
-            );
-        }
+        ctx.painter().text(
+            text_pos,
+            egui::Align2::RIGHT_TOP,
+            &output.name,
+            ctx.body_font.clone(),
+            ctx.text_color,
+        );
     }
 }
 

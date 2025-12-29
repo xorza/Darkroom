@@ -308,8 +308,6 @@ impl GraphUi {
         let mut background = BackgroundRenderer;
         let mut connections = ConnectionRenderer::default();
         let mut node_bodies = NodeBodyRenderer;
-        let mut ports = PortRenderer;
-        let mut labels = NodeLabelRenderer;
 
         background.render(&ctx, graph);
         connections.rebuild(graph, render_origin, &ctx.layout, &ctx.node_widths, breaker);
@@ -344,8 +342,6 @@ impl GraphUi {
         if let Some(node_id) = interaction.remove_request {
             graph.remove_node(node_id);
         }
-        ports.render(&ctx, graph);
-        labels.render(&ctx, graph);
 
         if breaker.active && primary_released {
             remove_connections(graph, connections.highlighted());
@@ -427,28 +423,6 @@ impl WidgetRenderer for NodeBodyRenderer {
 
     fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
         node::render_node_bodies(ctx, graph)
-    }
-}
-
-#[derive(Debug)]
-struct PortRenderer;
-
-impl WidgetRenderer for PortRenderer {
-    type Output = ();
-
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
-        node::render_ports(ctx, graph);
-    }
-}
-
-#[derive(Debug)]
-struct NodeLabelRenderer;
-
-impl WidgetRenderer for NodeLabelRenderer {
-    type Output = ();
-
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output {
-        node::render_node_labels(ctx, graph);
     }
 }
 
