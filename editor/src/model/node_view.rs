@@ -1,3 +1,4 @@
+use graph::prelude::NodeBehavior;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -8,10 +9,7 @@ pub struct NodeView {
     pub pos: egui::Pos2,
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
-    pub cache_output: bool,
-    pub has_cached_output: bool,
-    // node has side effects, besides calculation it's output. e.g. saving re
-    pub terminal: bool,
+    pub behavior: NodeBehavior,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,9 +40,7 @@ impl Default for NodeView {
             pos: egui::Pos2::ZERO,
             inputs: Vec::new(),
             outputs: Vec::new(),
-            cache_output: false,
-            has_cached_output: false,
-            terminal: false,
+            behavior: NodeBehavior::Always,
         }
     }
 }

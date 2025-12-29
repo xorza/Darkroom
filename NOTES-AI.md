@@ -22,6 +22,7 @@ The editor model exposes `Graph::from_graph` to convert a core graph into the ed
 Editor view model types are split into `editor/src/model/graph_view.rs` and `editor/src/model/node_view.rs`.
 Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 The editor loads `test_func_lib` to name view-node inputs/outputs based on core function definitions.
+Editor view tests now derive their graph view from `test_graph` + `test_func_lib` instead of a standalone view fixture.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 

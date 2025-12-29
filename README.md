@@ -26,6 +26,7 @@ The editor can build its view graph from core graph data.
 Editor graph view types live under `editor/src/model/` in `graph_view.rs` and `node_view.rs`.
 Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 The editor loads the core test function library to label node inputs/outputs.
+Editor view tests now build from the core test graph and test function library.
 Synchronization uses Tokio primitives; parking_lot is not used.
 Async contexts use Tokio locks with awaits where possible.
 Blocking helpers are removed in favor of async/await or non-blocking try_lock.

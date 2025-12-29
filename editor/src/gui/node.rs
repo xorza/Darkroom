@@ -1,4 +1,5 @@
 use eframe::egui;
+use graph::prelude::NodeBehavior;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -126,18 +127,12 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         assert!(dot_radius.is_finite(), "status dot radius must be finite");
         assert!(dot_radius >= 0.0, "status dot radius must be non-negative");
         let mut dot_centers = Vec::new();
-        if node.has_cached_output || node.terminal {
+        if node.behavior == NodeBehavior::Terminal {
             let dot_diameter = dot_radius * 2.0;
             let dot_gap = ctx.style.status_item_gap;
             let mut dot_x = close_rect.min.x - ctx.layout.padding - dot_radius;
-            if node.terminal {
-                dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
-                dot_x -= dot_diameter + dot_gap;
-            }
-            if node.has_cached_output {
-                dot_centers.push((dot_x, "cached output", ctx.style.cache_active_color));
-                dot_x -= dot_diameter + dot_gap;
-            }
+            dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
+            dot_x -= dot_diameter + dot_gap;
             header_drag_right = dot_x + dot_gap - ctx.layout.padding;
         }
         let header_drag_rect = egui::Rect::from_min_max(
@@ -190,7 +185,6 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             cache_button_pos,
             egui::vec2(cache_button_width, cache_button_height),
         );
-
         let node_id = ctx.ui().make_persistent_id(("node_body", node.id));
         let body_response = ctx.ui().interact(node_rect, node_id, egui::Sense::click());
 
@@ -213,7 +207,11 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         }
 
         if ctx.layout.cache_height > 0.0 && cache_response.clicked() {
-            node.cache_output = !node.cache_output;
+            node.behavior = if node.behavior == NodeBehavior::Once {
+                NodeBehavior::Always
+            } else {
+                NodeBehavior::Once
+            };
         }
 
         if close_response.hovered() {
@@ -245,7 +243,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         );
 
         if ctx.layout.cache_height > 0.0 {
-            let button_fill = if node.cache_output {
+            let button_fill = if node.behavior == NodeBehavior::Once {
                 ctx.style.cache_active_color
             } else if cache_response.is_pointer_button_down_on() {
                 visuals.widgets.active.bg_fill
@@ -264,7 +262,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             );
 
             let button_text = "cache";
-            let button_text_color = if node.cache_output {
+            let button_text_color = if node.behavior == NodeBehavior::Once {
                 ctx.style.cache_checked_text_color
             } else {
                 visuals.text_color()
