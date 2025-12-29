@@ -18,7 +18,8 @@ pub mod prelude {
         InputState, PortAddress,
     };
     pub use crate::function::{
-        Func, FuncBehavior, FuncId, FuncLambda, InvokeArgs, InvokeCache, InvokeError, InvokeResult,
+        test_func_lib, Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache,
+        InvokeError, InvokeResult, TestFuncHooks,
     };
     pub use crate::graph::{
         test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputBinding,

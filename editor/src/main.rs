@@ -7,7 +7,7 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
-use graph::prelude::{Graph, test_graph};
+use graph::prelude::{FuncLib, Graph, TestFuncHooks, test_func_lib, test_graph};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +68,7 @@ fn configure_visuals(ctx: &egui::Context) {
 #[derive(Debug)]
 struct ScenariumApp {
     graph: Graph,
+    func_lib: FuncLib,
     graph_view: model::GraphView,
     graph_path: PathBuf,
     last_status: Option<String>,
@@ -76,20 +77,20 @@ struct ScenariumApp {
 
 impl Default for ScenariumApp {
     fn default() -> Self {
-        let graph = test_graph();
-        let graph_view = model::GraphView::from_graph(&graph);
-        graph_view
-            .validate()
-            .expect("sample graph should be valid for rendering");
         let graph_path = Self::default_graph_path();
 
-        Self {
-            graph,
-            graph_view,
+        let mut result = Self {
+            graph: Graph::default(),
+            func_lib: FuncLib::default(),
+            graph_view: model::GraphView::default(),
             graph_path,
             last_status: None,
             graph_ui: gui::graph::GraphUi::default(),
-        }
+        };
+
+        result.test_graph();
+
+        result
     }
 }
 
@@ -148,8 +149,10 @@ impl ScenariumApp {
 
     fn test_graph(&mut self) {
         let graph = test_graph();
-        let graph_view = model::GraphView::from_graph(&graph);
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let graph_view = model::GraphView::from_graph(&graph, &func_lib);
         self.graph = graph;
+        self.func_lib = func_lib;
         self.set_graph(graph_view, "Loaded sample test graph");
     }
 }
