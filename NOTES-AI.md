@@ -23,6 +23,7 @@ Editor view model types are split into `editor/src/model/graph_view.rs` and `edi
 Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 The editor loads `test_func_lib` to name view-node inputs/outputs based on core function definitions.
 Editor view tests now derive their graph view from `test_graph` + `test_func_lib` instead of a standalone view fixture.
+Execution graph tests now verify that impure functions execute without input changes, pure functions do not, and Output behaviors panic unless nodes are Terminal.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 

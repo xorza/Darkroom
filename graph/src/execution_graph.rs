@@ -408,7 +408,7 @@ impl ExecutionGraph {
                     }
                     NodeBehavior::AsFunction => match e_node.function_behavior {
                         FuncBehavior::Impure => true,
-                        FuncBehavior::Pure => has_changed_inputs,
+                        FuncBehavior::Pure => has_changed_inputs || e_node.output_values.is_none(),
                         FuncBehavior::Output => {
                             panic!("For Output functions, node should have Terminal behavior")
                         }
@@ -635,8 +635,8 @@ mod tests {
 
     use super::*;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::function::{test_func_lib, TestFuncHooks};
-    use crate::graph::{test_graph, Input};
+    use crate::function::{test_func_lib, FuncBehavior, TestFuncHooks};
+    use crate::graph::{test_graph, Input, NodeBehavior};
     use common::FileFormat;
 
     #[test]
@@ -850,6 +850,42 @@ mod tests {
             !get_b_node.should_invoke,
             "Once node with cached outputs should not invoke"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn func_behavior_controls_execution() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        let get_a_node_id = graph.by_name("get_a").unwrap().id;
+        let get_b_node_id = graph.by_name("get_b").unwrap().id;
+        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert!(
+            execution_graph.by_id(get_a_node_id).unwrap().should_invoke,
+            "Impure functions should execute even without inputs"
+        );
+        assert!(
+            execution_graph.by_id(get_b_node_id).unwrap().should_invoke,
+            "Pure functions should execute on first run without cached outputs"
+        );
+
+        execution_graph
+            .by_id_mut(get_b_node_id)
+            .unwrap()
+            .output_values = Some(vec![DynamicValue::Int(7)]);
+
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert!(
+            !execution_graph.by_id(get_b_node_id).unwrap().should_invoke,
+            "Pure functions without input changes should not execute with cached outputs"
+        );
+
         Ok(())
     }
 
