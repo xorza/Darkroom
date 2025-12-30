@@ -5,7 +5,6 @@ use std::sync::Arc;
 use crate::data::*;
 use common::id_type;
 use common::{deserialize, serialize, FileFormat};
-use hashbrown::hash_map::{Entry, Values};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -469,7 +468,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             name: "print".to_string(),
             description: None,
             category: "Debug".to_string(),
-            behavior: FuncBehavior::Impure,
+            behavior: FuncBehavior::Output,
             inputs: vec![FuncInput {
                 name: "message".to_string(),
                 required: true,
@@ -493,7 +492,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 mod tests {
     use crate::data::DynamicValue;
     use crate::function::{test_func_lib, InvokeCache, TestFuncHooks};
-    use common::yaml_format::reformat_yaml;
     use common::FileFormat;
 
     #[test]

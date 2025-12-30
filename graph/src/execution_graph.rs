@@ -1,5 +1,4 @@
 use std::mem::take;
-use std::thread::panicking;
 
 use anyhow::Result;
 use hashbrown::HashMap;
@@ -399,11 +398,8 @@ impl ExecutionGraph {
                         true
                     }
                     NodeBehavior::AsFunction => match e_node.function_behavior {
-                        FuncBehavior::Impure => true,
+                        FuncBehavior::Impure | FuncBehavior::Output => true,
                         FuncBehavior::Pure => has_changed_inputs || e_node.output_values.is_none(),
-                        FuncBehavior::Output => {
-                            panic!("For Output functions, node should be terminal")
-                        }
                     },
                 }
             };
@@ -626,7 +622,7 @@ mod tests {
 
     use super::*;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::function::{test_func_lib, FuncBehavior, TestFuncHooks};
+    use crate::function::{test_func_lib, TestFuncHooks};
     use crate::graph::{test_graph, Input, NodeBehavior};
     use common::FileFormat;
 
