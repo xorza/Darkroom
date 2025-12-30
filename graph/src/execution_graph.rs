@@ -209,7 +209,7 @@ impl ExecutionGraph {
         self.forward(graph);
         self.backward2(graph);
 
-        self.validate_with_graph(graph);
+        self.validate_with_graph(graph, func_lib);
 
         Ok(())
     }
@@ -511,7 +511,7 @@ impl ExecutionGraph {
         self.stack2 = take(&mut stack);
     }
 
-    pub fn validate_with_graph(&self, graph: &Graph) {
+    pub fn validate_with_graph(&self, graph: &Graph, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
@@ -521,27 +521,37 @@ impl ExecutionGraph {
 
         let mut seen_node_indices = vec![false; graph.nodes.len()];
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
+            assert!(e_node.node_idx < graph.nodes.len());
             assert!(!seen_node_indices[e_node.node_idx]);
             seen_node_indices[e_node.node_idx] = true;
 
-            assert!(e_node.node_idx < graph.nodes.len());
-            assert_ne!(e_node.process_state, ProcessState::None);
-            assert_ne!(e_node.process_state, ProcessState::Processing);
-            assert_ne!(e_node.process_state, ProcessState::Backward1);
+            if self.e_node_execution_order.contains(&e_node_idx) {
+                assert_eq!(e_node.process_state, ProcessState::Backward2);
+            } else {
+                assert!(
+                    e_node.process_state == ProcessState::Forward
+                        || e_node.process_state == ProcessState::Backward2
+                );
+            }
             assert_eq!(e_node_idx, *self.e_node_idx_by_id.get(&e_node.id).unwrap());
 
+            assert!(e_node.func_idx < func_lib.funcs.len());
             let node = &graph.nodes[e_node.node_idx];
+            let func = &func_lib.funcs[e_node.func_idx];
+
             assert_eq!(node.id, e_node.id);
+            assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
+            assert_eq!(e_node.outputs.len(), func.outputs.len());
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::Output(output_binding) => {
-                        if let Some(address) = e_node.inputs[input_idx].output_address {
-                            assert!(address.e_node_idx < self.e_nodes.len());
-                            let output_e_node = &self.e_nodes[address.e_node_idx];
+                        if let Some(output_address) = e_node.inputs[input_idx].output_address {
+                            assert!(output_address.e_node_idx < self.e_nodes.len());
+                            let output_e_node = &self.e_nodes[output_address.e_node_idx];
                             assert_eq!(output_e_node.id, output_binding.output_node_id);
-                            assert!(address.port_idx < output_e_node.outputs.len());
+                            assert!(output_address.port_idx < output_e_node.outputs.len());
                         }
                     }
                     Binding::None | Binding::Const => {
@@ -551,12 +561,22 @@ impl ExecutionGraph {
             }
         }
 
-        let mut in_execution_order = vec![false; self.e_nodes.len()];
-        for &e_node_idx in self.e_node_execution_order.iter() {
+        for idx in 0..self.e_node_execution_order.len() {
+            let e_node_idx = self.e_node_execution_order[idx];
             assert!(e_node_idx < self.e_nodes.len());
-            assert!(!in_execution_order[e_node_idx]);
-            in_execution_order[e_node_idx] = true;
-            assert!(self.e_nodes[e_node_idx].process_state == ProcessState::Backward2);
+            assert!(!self.e_node_execution_order[idx + 1..].contains(&e_node_idx));
+
+            let e_node = &self.e_nodes[e_node_idx];
+            assert!(!e_node.has_missing_inputs);
+            
+            let all_dependencies_in_order = e_node
+                .inputs
+                .iter()
+                .filter_map(|input| input.output_address)
+                .all(|port_address| {
+                    !self.e_node_execution_order[idx..].contains(&port_address.e_node_idx)
+                });
+            assert!(all_dependencies_in_order);
         }
     }
 }
@@ -607,14 +627,6 @@ mod tests {
             .e_nodes
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
-
-        for (e_node_idx, e_node) in execution_graph.e_nodes.iter().enumerate() {
-            if execution_graph.e_node_execution_order.contains(&e_node_idx) {
-                assert_eq!(e_node.process_state, ProcessState::Backward2);
-            } else {
-                assert_eq!(e_node.process_state, ProcessState::Forward);
-            }
-        }
 
         Ok(())
     }
@@ -721,7 +733,6 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.validate_with_graph(&graph);
 
         assert_eq!(graph.nodes.len(), 4);
         assert_eq!(execution_graph.e_nodes.len(), 4);

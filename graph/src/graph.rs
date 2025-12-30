@@ -121,9 +121,7 @@ impl Graph {
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> SerdeFormatResult<Graph> {
         let graph: Graph = deserialize(serialized, format)?;
-
         graph.validate();
-
         Ok(graph)
     }
 
