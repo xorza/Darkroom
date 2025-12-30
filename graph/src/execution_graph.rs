@@ -116,9 +116,9 @@ impl ExecutionNode {
         self.id = node.id;
 
         self.inputs = take(&mut prev_state.inputs);
-        self.inputs.clear();
         self.outputs = take(&mut prev_state.outputs);
-        self.outputs.clear();
+        self.cache = take(&mut prev_state.cache);
+        self.output_values = take(&mut prev_state.output_values);
 
         #[cfg(debug_assertions)]
         {
@@ -126,14 +126,10 @@ impl ExecutionNode {
             self.name.clear();
             self.name.push_str(&node.name);
         }
-
-        self.cache = take(&mut prev_state.cache);
-        self.output_values = take(&mut prev_state.output_values);
     }
 
     fn reset_ports_from_func(&mut self, func: &Func) {
-        assert!(self.inputs.is_empty());
-
+        self.inputs.clear();
         self.inputs.reserve(func.inputs.len());
         for input in &func.inputs {
             self.inputs.push(ExecutionInput {
@@ -142,8 +138,7 @@ impl ExecutionNode {
             });
         }
 
-        assert!(self.outputs.is_empty());
-        self.outputs.fill(ExecutionOutput::Unused);
+        self.outputs.clear();
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::default());
     }
@@ -172,7 +167,7 @@ impl ExecutionGraph {
         self.update_node_cache(graph);
         self.backward1(graph, func_lib)?;
         self.forward(graph);
-        self.backward2(graph, func_lib);
+        self.backward2(graph);
 
         self.validate_with_graph(graph);
 
@@ -294,16 +289,15 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            let func_idx = func_lib
+            e_node.func_idx = func_lib
                 .funcs
                 .iter()
                 .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
                 .expect("FuncLib missing function for graph node func_id");
-            let func = &func_lib.funcs[func_idx];
+            let func = &func_lib.funcs[e_node.func_idx];
             let node = &graph.nodes[e_node.node_idx];
 
             e_node.reset_ports_from_func(func);
-            e_node.func_idx = func_idx;
             e_node.behavior = match node.behavior {
                 NodeBehavior::AsFunction => match func.behavior {
                     FuncBehavior::Pure => ExecutionBehavior::Pure,
@@ -404,7 +398,7 @@ impl ExecutionGraph {
         }
     }
 
-    fn backward2(&mut self, graph: &Graph, _func_lib: &FuncLib) {
+    fn backward2(&mut self, graph: &Graph) {
         self.e_node_execution_order.clear();
 
         let mut stack: Vec<Visit> = Vec::with_capacity(10);
@@ -449,13 +443,13 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            let execute = match e_node.behavior {
+            if match e_node.behavior {
                 ExecutionBehavior::Impure => !e_node.has_missing_inputs,
                 ExecutionBehavior::Pure => e_node.has_changed_inputs && !e_node.has_missing_inputs,
                 ExecutionBehavior::Once => e_node.output_values.is_none(),
-            };
+            } {
+                e_node.execute = true;
 
-            if execute {
                 for input in e_node.inputs.iter() {
                     if match input.state {
                         InputState::Unknown => panic!("Unprocessed input"),
@@ -474,8 +468,6 @@ impl ExecutionGraph {
                     }
                 }
             }
-
-            e_node.execute = execute;
         }
     }
 
