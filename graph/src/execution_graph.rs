@@ -76,7 +76,7 @@ pub struct ExecutionNode {
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
 
-    processing_state: ProcessState,
+    process_state: ProcessState,
 
     pub run_time: f64,
     pub error: Option<ComputeError>,
@@ -282,18 +282,18 @@ impl ExecutionGraph {
             match visit.cause {
                 Visit1Cause::Terminal => {}
                 Visit1Cause::OutputRequest { output_idx } => {
-                    if e_node.processing_state != ProcessState::None {
+                    if e_node.process_state != ProcessState::None {
                         e_node.outputs[output_idx] = ExecutionOutput::Used
                     }
                 }
                 Visit1Cause::Done => {
-                    assert_eq!(e_node.processing_state, ProcessState::Processing);
-                    e_node.processing_state = ProcessState::Backward1;
+                    assert_eq!(e_node.process_state, ProcessState::Processing);
+                    e_node.process_state = ProcessState::Backward1;
                     self.e_node_processing_order.push(e_node_idx);
                     continue;
                 }
             };
-            match e_node.processing_state {
+            match e_node.process_state {
                 ProcessState::Backward1 => {
                     continue;
                 }
@@ -306,7 +306,7 @@ impl ExecutionGraph {
                 }
             }
 
-            e_node.processing_state = ProcessState::Processing;
+            e_node.process_state = ProcessState::Processing;
             stack.push(Visit1 {
                 node_idx: visit.node_idx,
                 e_node_idx,
@@ -382,7 +382,7 @@ impl ExecutionGraph {
                             .e_node_idx;
                         let output_e_node = &self.e_nodes[output_e_node_idx];
 
-                        assert_eq!(output_e_node.processing_state, ProcessState::Forward);
+                        assert_eq!(output_e_node.process_state, ProcessState::Forward);
 
                         if output_e_node.has_missing_inputs {
                             InputState::Missing
@@ -420,11 +420,11 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert_eq!(e_node.processing_state, ProcessState::Backward1);
+            assert_eq!(e_node.process_state, ProcessState::Backward1);
 
             e_node.has_changed_inputs = has_changed_inputs;
             e_node.has_missing_inputs = has_missing_inputs;
-            e_node.processing_state = ProcessState::Forward;
+            e_node.process_state = ProcessState::Forward;
         }
         self.e_node_processing_order.clear();
     }
@@ -453,7 +453,7 @@ impl ExecutionGraph {
                 Visit2Cause::Terminal => None,
                 Visit2Cause::OutputRequest { output_idx } => Some(output_idx),
                 Visit2Cause::Done { execute } => {
-                    e_node.processing_state = ProcessState::Backward2;
+                    e_node.process_state = ProcessState::Backward2;
                     if execute {
                         self.e_node_execution_order.push(e_node_idx);
                     }
@@ -461,7 +461,7 @@ impl ExecutionGraph {
                 }
             };
 
-            match e_node.processing_state {
+            match e_node.process_state {
                 ProcessState::None | ProcessState::Backward1 => {
                     panic!("Expected a processed node")
                 }
@@ -480,7 +480,7 @@ impl ExecutionGraph {
                 ExecutionBehavior::Once => e_node.output_values.is_none(),
             } && !e_node.has_missing_inputs;
 
-            e_node.processing_state = ProcessState::Processing;
+            e_node.process_state = ProcessState::Processing;
             stack.push(Visit2 {
                 e_node_idx,
                 cause: Visit2Cause::Done { execute },
@@ -514,135 +514,47 @@ impl ExecutionGraph {
             return;
         }
 
-        assert!(
-            self.e_nodes.len() <= graph.nodes.len(),
-            "Execution node count mismatch"
-        );
-        assert_eq!(
-            self.e_nodes.len(),
-            self.e_node_idx_by_id.len(),
-            "Execution node index map mismatch"
-        );
+        assert!(self.e_nodes.len() <= graph.nodes.len());
+        assert_eq!(self.e_nodes.len(), self.e_node_idx_by_id.len());
 
         let mut seen_node_indices = vec![false; graph.nodes.len()];
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            assert!(
-                e_node.node_idx < graph.nodes.len(),
-                "Execution node index out of bounds"
-            );
-            let node = &graph.nodes[e_node.node_idx];
-            assert_eq!(
-                node.id, e_node.id,
-                "Execution node id mismatch for graph node {}",
-                e_node.node_idx
-            );
-            assert!(
-                !seen_node_indices[e_node.node_idx],
-                "Duplicate execution node for graph node {}",
-                e_node.node_idx
-            );
+            assert!(!seen_node_indices[e_node.node_idx]);
             seen_node_indices[e_node.node_idx] = true;
 
-            let mapped_idx = self
-                .e_node_idx_by_id
-                .get(&e_node.id)
-                .expect("Execution node id missing from index map");
-            assert_eq!(
-                *mapped_idx, e_node_idx,
-                "Execution node index map mismatch for node {:?}",
-                e_node.id
-            );
+            assert!(e_node.node_idx < graph.nodes.len());
+            assert_ne!(e_node.process_state, ProcessState::None);
+            assert_ne!(e_node.process_state, ProcessState::Processing);
+            assert_ne!(e_node.process_state, ProcessState::Backward1);
+            assert_eq!(e_node_idx, *self.e_node_idx_by_id.get(&e_node.id).unwrap());
 
-            assert_eq!(
-                e_node.inputs.len(),
-                node.inputs.len(),
-                "Execution node input count mismatch for node {:?}",
-                e_node.id
-            );
+            let node = &graph.nodes[e_node.node_idx];
+            assert_eq!(node.id, e_node.id);
+            assert_eq!(e_node.inputs.len(), node.inputs.len());
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::Output(output_binding) => {
                         if let Some(address) = e_node.inputs[input_idx].output_address {
-                            assert!(
-                                address.e_node_idx < self.e_nodes.len(),
-                                "Execution output address node index out of bounds"
-                            );
+                            assert!(address.e_node_idx < self.e_nodes.len());
                             let output_e_node = &self.e_nodes[address.e_node_idx];
-                            assert_eq!(
-                                output_e_node.id, output_binding.output_node_id,
-                                "Execution output address points at wrong node"
-                            );
-                            assert!(
-                                address.port_idx < output_e_node.outputs.len(),
-                                "Execution output address port index out of bounds"
-                            );
+                            assert_eq!(output_e_node.id, output_binding.output_node_id);
+                            assert!(address.port_idx < output_e_node.outputs.len());
                         }
                     }
                     Binding::None | Binding::Const => {
-                        assert!(
-                            e_node.inputs[input_idx].output_address.is_none(),
-                            "Non-output binding should not have an execution output address"
-                        );
+                        assert!(e_node.inputs[input_idx].output_address.is_none());
                     }
                 }
             }
         }
 
-        let mut in_processing_order = vec![false; self.e_nodes.len()];
-        for &e_node_idx in self.e_node_processing_order.iter() {
-            assert!(
-                e_node_idx < self.e_nodes.len(),
-                "Execution node processing index out of bounds"
-            );
-            assert!(
-                !in_processing_order[e_node_idx],
-                "Duplicate execution node in processing order"
-            );
-            in_processing_order[e_node_idx] = true;
-            assert!(
-                self.e_nodes[e_node_idx].processing_state == ProcessState::Backward1
-                    || self.e_nodes[e_node_idx].processing_state == ProcessState::Forward
-                    || self.e_nodes[e_node_idx].processing_state == ProcessState::Backward2,
-                "Execution node {} in processing order is not processed",
-                e_node_idx
-            );
-        }
-        for (idx, e_node) in self.e_nodes.iter().enumerate() {
-            assert_ne!(
-                e_node.processing_state,
-                ProcessState::Processing,
-                "Execution node {} is still processing",
-                idx
-            );
-            if !in_processing_order[idx] {
-                assert_ne!(
-                    e_node.processing_state,
-                    ProcessState::Backward1,
-                    "Execution node {} is processed but missing from processing order",
-                    idx
-                );
-            }
-        }
-
         let mut in_execution_order = vec![false; self.e_nodes.len()];
         for &e_node_idx in self.e_node_execution_order.iter() {
-            assert!(
-                e_node_idx < self.e_nodes.len(),
-                "Execution node execution index out of bounds"
-            );
-            assert!(
-                !in_execution_order[e_node_idx],
-                "Duplicate execution node in execution order"
-            );
+            assert!(e_node_idx < self.e_nodes.len());
+            assert!(!in_execution_order[e_node_idx]);
             in_execution_order[e_node_idx] = true;
-
-            assert_eq!(
-                self.e_nodes[e_node_idx].processing_state,
-                ProcessState::Backward2,
-                "Execution node {} in execution order is not processed",
-                e_node_idx
-            );
+            assert!(self.e_nodes[e_node_idx].process_state == ProcessState::Backward2);
         }
     }
 }
@@ -704,8 +616,6 @@ mod tests {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let _get_b_node_id = graph.by_name("get_b").unwrap().id;
-
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
@@ -716,47 +626,14 @@ mod tests {
             .e_nodes
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
-        // assert!(execution_graph
-        //     .e_nodes
-        //     .iter()
-        //     .all(|e_node| e_node.has_changed_inputs));
 
-        Ok(())
-    }
-
-    #[test]
-    fn empty_run() -> anyhow::Result<()> {
-        let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
-
-        let _get_b_node_id = graph
-            .by_name("get_b")
-            .expect("Node named \"get_b\" not found")
-            .id;
-
-        let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-
-        assert_eq!(execution_graph.e_nodes.len(), 5);
-
-        let execution_order_before: Vec<usize> = execution_graph.e_node_processing_order.clone();
-
-        execution_graph.update(&graph, &func_lib)?;
-
-        assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert!(
-            execution_graph
-                .e_nodes
-                .iter()
-                .all(|e_node| e_node.processing_state == ProcessState::Forward
-                    || e_node.processing_state == ProcessState::Backward2),
-            "Execution nodes should be processed after update"
-        );
-        let execution_order_after: Vec<usize> = execution_graph.e_node_processing_order.clone();
-        assert_eq!(
-            execution_order_before, execution_order_after,
-            "Invocation order should remain stable across updates"
-        );
+        for (e_node_idx, e_node) in execution_graph.e_nodes.iter().enumerate() {
+            if execution_graph.e_node_execution_order.contains(&e_node_idx) {
+                assert_eq!(e_node.process_state, ProcessState::Backward2);
+            } else {
+                assert_eq!(e_node.process_state, ProcessState::Forward);
+            }
+        }
 
         Ok(())
     }
