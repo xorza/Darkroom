@@ -44,6 +44,7 @@ Execution graph propagation panics with function + node IDs when functions are m
 Execution graph assertions include node indices and IDs for easier debugging.
 Execution graph assertions include mismatch context to speed up diagnosis.
 Execution graph maintenance includes small readability cleanups.
+Execution graph input state propagation keeps behavior-specific caching checks explicit.
 Worker event loops terminate when their message channel closes.
 Execution node updates use shared reset logic to keep state consistent.
 Execution nodes own their own reset behavior for update passes.
