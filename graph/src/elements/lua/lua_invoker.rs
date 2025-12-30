@@ -361,9 +361,7 @@ impl LuaInvoker {
             graph.add(node);
         }
 
-        graph
-            .validate()
-            .expect("Lua graph validation failed after wiring");
+        graph.validate();
 
         graph
     }

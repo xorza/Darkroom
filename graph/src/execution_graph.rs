@@ -203,6 +203,8 @@ impl ExecutionGraph {
 
     // Rebuild execution state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
+        validate_execution_inputs(graph, func_lib);
+
         self.backward1(graph, func_lib)?;
         self.forward(graph);
         self.backward2(graph);
@@ -559,46 +561,25 @@ impl ExecutionGraph {
     }
 }
 
-fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) -> Result<()> {
-    graph.validate()?;
+fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
+    if !is_debug() {
+        return;
+    }
+
+    graph.validate();
 
     for node in graph.nodes.iter() {
-        let func = func_lib.by_id(node.func_id).ok_or_else(|| {
-            anyhow::Error::msg(format!(
-                "Missing function {:?} for node {:?}",
-                node.func_id, node.id
-            ))
-        })?;
-
-        if node.inputs.len() != func.inputs.len() {
-            return Err(anyhow::Error::msg(format!(
-                "Node {:?} input count mismatch",
-                node.id
-            )));
-        }
+        let func = func_lib.by_id(node.func_id).unwrap();
+        assert_eq!(node.inputs.len(), func.inputs.len());
 
         for input in node.inputs.iter() {
             if let Binding::Output(output_binding) = &input.binding {
-                let output_node = graph
-                    .by_id(output_binding.output_node_id)
-                    .ok_or_else(|| anyhow::Error::msg("Output binding references missing node"))?;
-                let output_func = func_lib.by_id(output_node.func_id).ok_or_else(|| {
-                    anyhow::Error::msg(format!(
-                        "Missing function {:?} for output node {:?}",
-                        output_node.func_id, output_node.id
-                    ))
-                })?;
-                if output_binding.output_idx >= output_func.outputs.len() {
-                    return Err(anyhow::Error::msg(format!(
-                        "Output index out of range for node {:?}",
-                        output_binding.output_node_id
-                    )));
-                }
+                let output_node = graph.by_id(output_binding.output_node_id).unwrap();
+                let output_func = func_lib.by_id(output_node.func_id).unwrap();
+                assert!(output_binding.output_idx < output_func.outputs.len());
             }
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]

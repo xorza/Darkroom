@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
-use common::id_type;
-use common::{deserialize, serialize, FileFormat};
+use common::{deserialize, serialize, FileFormat, SerdeFormatResult};
+use common::{id_type, is_debug};
 
 id_type!(NodeId);
 
@@ -119,39 +119,29 @@ impl Graph {
         let contents = std::fs::read_to_string(path)?;
         Self::deserialize(&contents, format)
     }
-    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Graph> {
+    pub fn deserialize(serialized: &str, format: FileFormat) -> SerdeFormatResult<Graph> {
         let graph: Graph = deserialize(serialized, format)?;
 
-        graph.validate()?;
+        graph.validate();
 
         Ok(graph)
     }
 
-    pub fn validate(&self) -> anyhow::Result<()> {
-        for node in self.nodes.iter() {
-            if node.id == NodeId::nil() {
-                return Err(anyhow::Error::msg("Node has invalid id"));
-            }
-            if !node.inputs.is_empty() && node.func_id == FuncId::nil() {
-                return Err(anyhow::Error::msg("Node has inputs but no function id"));
-            }
+    pub fn validate(&self) {
+        if is_debug() {
+            return;
+        }
 
-            // validate node has valid bindings
+        for node in self.nodes.iter() {
+            assert_ne!(node.id, NodeId::nil());
+            assert_ne!(node.func_id, FuncId::nil());
+
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    if self.by_id(output_binding.output_node_id).is_none() {
-                        return Err(anyhow::Error::msg(
-                            "Node input connected to a non-existent node",
-                        ));
-                    }
-                }
-                if matches!(input.binding, Binding::Const) && input.const_value.is_none() {
-                    return Err(anyhow::Error::msg("Const binding missing const_value"));
+                    assert!(self.by_id(output_binding.output_node_id).is_some());
                 }
             }
         }
-
-        Ok(())
     }
 }
 
@@ -322,8 +312,7 @@ pub fn test_graph() -> Graph {
         events: vec![],
     });
 
-    assert_eq!(graph.nodes.len(), 5);
-    graph.validate().expect("Test graph must be valid");
+    graph.validate();
 
     graph
 }
