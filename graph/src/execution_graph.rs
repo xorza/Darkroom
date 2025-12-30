@@ -550,9 +550,17 @@ impl ExecutionGraph {
                     Binding::Output(output_binding) => {
                         if let Some(output_address) = &e_node.inputs[input_idx].output_address {
                             assert!(output_address.e_node_idx < self.e_nodes.len());
+
                             let output_e_node = &self.e_nodes[output_address.e_node_idx];
+                            let output_node = &graph.nodes[output_e_node.node_idx];
+
+                            assert_eq!(output_node.id, output_binding.output_node_id);
                             assert_eq!(output_e_node.id, output_binding.output_node_id);
                             assert!(output_address.port_idx < output_e_node.outputs.len());
+                            assert_eq!(
+                                output_e_node.outputs[output_address.port_idx],
+                                ExecutionOutput::Used
+                            );
                         }
                     }
                     Binding::None | Binding::Const => {
@@ -708,18 +716,6 @@ mod tests {
 
         assert_eq!(execution_graph.e_nodes.len(), 4);
 
-        let mult_node = execution_graph.by_name("mult").unwrap();
-        let mult_input_a = mult_node.inputs[0].output_address.clone().unwrap();
-        let mult_input_b = mult_node.inputs[1].output_address.clone().unwrap();
-        assert_eq!(
-            execution_graph.e_nodes[mult_input_a.e_node_idx].id,
-            graph.by_name("get_a").unwrap().id
-        );
-        assert_eq!(
-            execution_graph.e_nodes[mult_input_b.e_node_idx].id,
-            graph.by_name("get_b").unwrap().id
-        );
-
         Ok(())
     }
 
@@ -731,19 +727,23 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        let get_b_node_id = graph.by_name("get_b").unwrap().id;
-        execution_graph
-            .by_id_mut(get_b_node_id)
-            .unwrap()
-            .output_values = Some(vec![DynamicValue::Int(7)]);
+        // get_b in e_node_execution_order
+        assert!(execution_graph
+            .e_node_execution_order
+            .iter()
+            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
+
+        execution_graph.by_name_mut("get_b").unwrap().output_values =
+            Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib)?;
 
-        let _get_b_node = execution_graph.by_id(get_b_node_id).unwrap();
-        // assert!(
-        //     !get_b_node.active,
-        //     "Once node with cached outputs should not invoke"
-        // );
+        // get_b not in e_node_execution_order
+        assert!(execution_graph
+            .e_node_execution_order
+            .iter()
+            .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
+
         Ok(())
     }
 
