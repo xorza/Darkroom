@@ -41,7 +41,7 @@ pub enum NodeBehavior {
     // will be executed always for impure functions
     // for pure functions, only on input change
     AsFunction,
-    CacheOutput,
+    Once,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -288,7 +288,7 @@ pub fn test_graph() -> Graph {
         id: get_b_node_id,
         func_id: get_b_func_id,
         name: "get_b".to_string(),
-        behavior: NodeBehavior::CacheOutput,
+        behavior: NodeBehavior::Once,
         terminal: false,
         inputs: vec![],
         events: vec![],
