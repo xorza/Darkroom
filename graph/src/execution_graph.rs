@@ -217,6 +217,15 @@ impl ExecutionGraph {
         self.e_node_processing_order.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
+        self.node_idx_by_id.clear();
+        self.node_idx_by_id.extend(
+            graph
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(idx, node)| (node.id, idx)),
+        );
+
         // Compact e_nodes in-place to keep only nodes that still exist in graph.
         // We reuse existing ExecutionNode slots to avoid extra allocations.
         let mut write_idx = 0;
@@ -322,12 +331,7 @@ impl ExecutionGraph {
                         e_node_idx: output_e_node_idx,
                         port_idx: output_binding.output_idx,
                     });
-                    //todo optimize
-                    let output_node_idx = graph
-                        .nodes
-                        .iter()
-                        .position(|node| node.id == output_binding.output_node_id)
-                        .unwrap();
+                    let output_node_idx = self.node_idx_by_id[&output_binding.output_node_id];
                     stack.push(Visit1 {
                         node_idx: output_node_idx,
                         e_node_idx: output_e_node_idx,
@@ -339,6 +343,7 @@ impl ExecutionGraph {
             }
         }
 
+        self.node_idx_by_id.clear();
         self.stack1 = take(&mut stack);
         // Drop nodes past the compacted range.
         self.e_nodes.truncate(write_idx);
