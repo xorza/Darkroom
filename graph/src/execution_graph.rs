@@ -212,7 +212,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Update the node cache with the current graph
+    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.e_node_processing_order.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
@@ -362,7 +362,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Propagate input state forward
+    // Propagate input state forward through the processing order.
     fn forward(&mut self, graph: &Graph) {
         for e_node_idx in self.e_node_processing_order.iter().copied() {
             let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
@@ -429,7 +429,7 @@ impl ExecutionGraph {
         self.e_node_processing_order.clear();
     }
 
-    // Walk upstream dependencies to collect nodes for execution
+    // Walk upstream dependencies to collect the execution order.
     fn backward2(&mut self, graph: &Graph) {
         self.e_node_execution_order.clear();
 
