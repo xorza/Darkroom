@@ -170,7 +170,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Update the node cache with the current graph.
+    // Update the node cache with the current graph
     fn update_node_cache(&mut self, graph: &Graph, func_lib: &FuncLib) {
         // Compact e_nodes in-place to keep only nodes that still exist in graph.
         // We reuse existing ExecutionNode slots to avoid extra allocations.
@@ -244,7 +244,7 @@ impl ExecutionGraph {
         }
     }
 
-    // Walk upstream dependencies to mark active nodes and compute invocation order.
+    // Walk upstream dependencies to collect active nodes and compute invocation order
     fn backward1(&mut self, graph: &Graph) -> ExecutionGraphResult<()> {
         self.e_node_processing_order.clear();
 
@@ -320,7 +320,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Propagate input state forward from active changed/missing flags.
+    // Propagate input state forward
     fn forward(&mut self, graph: &Graph) {
         for e_node_idx in self.e_node_processing_order.iter().copied() {
             let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
@@ -386,6 +386,7 @@ impl ExecutionGraph {
         }
     }
 
+    // Walk upstream dependencies to collect nodes for execution
     fn backward2(&mut self, graph: &Graph) {
         self.e_node_execution_order.clear();
 
@@ -676,12 +677,17 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        // assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.active));
-        // assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.execute));
+        assert_eq!(execution_graph.e_node_idx_by_id.len(), 5);
+        assert_eq!(execution_graph.e_node_processing_order.len(), 5);
+        assert_eq!(execution_graph.e_node_execution_order.len(), 5);
         assert!(execution_graph
             .e_nodes
             .iter()
             .all(|e_node| !e_node.has_missing_inputs));
+        // assert!(execution_graph
+        //     .e_nodes
+        //     .iter()
+        //     .all(|e_node| e_node.has_changed_inputs));
 
         Ok(())
     }
