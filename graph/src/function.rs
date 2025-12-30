@@ -15,8 +15,6 @@ pub enum FuncBehavior {
     Impure,
     // always returns the same value for same inputs
     Pure,
-    // function designed to be terminal in graph, i.e. save results to io
-    Output,
 }
 
 pub type InvokeArgs = [DynamicValue];
@@ -223,6 +221,21 @@ pub struct FuncLib {
     pub funcs: Vec<Func>,
 }
 
+impl Func {
+    pub fn terminal(&self) -> bool {
+        self.validate().unwrap();
+        self.outputs.is_empty()
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        assert!(
+            !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
+            "Function with no outputs should be impure"
+        );
+        Ok(())
+    }
+}
+
 impl FuncLib {
     pub fn from_file(file_path: &str) -> anyhow::Result<Self> {
         let format = FileFormat::from_file_name(file_path)
@@ -252,6 +265,8 @@ impl FuncLib {
         self.funcs.iter_mut().find(|func| func.name == name)
     }
     pub fn add(&mut self, func: Func) {
+        func.validate().unwrap();
+
         let entry = self.by_id(func.id);
         match entry {
             Some(_) => {
@@ -468,7 +483,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             name: "print".to_string(),
             description: None,
             category: "Debug".to_string(),
-            behavior: FuncBehavior::Output,
+            behavior: FuncBehavior::Impure,
             inputs: vec![FuncInput {
                 name: "message".to_string(),
                 required: true,

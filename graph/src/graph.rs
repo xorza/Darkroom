@@ -170,8 +170,8 @@ impl Default for Node {
 }
 
 impl Node {
-    pub fn from_function(function: &Func) -> Node {
-        let inputs: Vec<Input> = function
+    pub fn from_function(func: &Func) -> Node {
+        let inputs: Vec<Input> = func
             .inputs
             .iter()
             .map(|func_input| Input {
@@ -183,18 +183,14 @@ impl Node {
             })
             .collect();
 
-        let events: Vec<Event> = function
-            .events
-            .iter()
-            .map(|_event| Event::default())
-            .collect();
+        let events: Vec<Event> = func.events.iter().map(|_event| Event::default()).collect();
 
         Node {
             id: NodeId::unique(),
-            func_id: function.id,
-            name: function.name.clone(),
+            func_id: func.id,
+            name: func.name.clone(),
             behavior: NodeBehavior::AsFunction,
-            terminal: function.behavior == FuncBehavior::Output,
+            terminal: func.terminal(),
             inputs,
             events,
         }

@@ -109,6 +109,7 @@ Execution graph now rebuilds the `e_node_idx_by_id` cache each update and uses i
 Execution node cache rebuild now drops execution nodes missing from the current graph.
 Execution node cache update compacts in-place with swaps and truncation to minimize allocations.
 Execution node cache compaction includes inline comments describing the swap-and-truncate flow.
+Function validation now asserts that no-output functions are impure.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 `graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.
 `graph::common::FileFormat` provides YAML/JSON selection and auto-detects file formats by extension for graph/function library loading.

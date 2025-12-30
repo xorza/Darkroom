@@ -8,19 +8,18 @@ use thiserror::Error;
 
 use crate::compute::ComputeError;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncLib, InvokeCache};
+use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
-use crate::prelude::FuncBehavior;
 use common::{deserialize, is_debug, serialize, FileFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-enum ProcessingState {
+enum ProcessState {
     #[default]
     None,
     Processing,
-    Processed1,
-    Processed2,
-    Processed3,
+    Backward1,
+    Forward,
+    Backward2,
 }
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -79,7 +78,7 @@ pub struct ExecutionNode {
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
 
-    processing_state: ProcessingState,
+    processing_state: ProcessState,
 
     pub run_time: f64,
     pub error: Option<ComputeError>,
@@ -103,7 +102,7 @@ pub struct ExecutionGraph {
 enum VisitCause {
     Terminal,
     OutputRequest { output_address: PortAddress },
-    Processed,
+    Done,
 }
 struct Visit {
     e_node_idx: usize,
@@ -117,12 +116,9 @@ impl ExecutionNode {
         self.id = node.id;
 
         self.inputs = take(&mut prev_state.inputs);
-        self.inputs.fill(ExecutionInput::default());
-        self.inputs
-            .resize(node.inputs.len(), ExecutionInput::default());
-
+        self.inputs.clear();
         self.outputs = take(&mut prev_state.outputs);
-        self.outputs.fill(ExecutionOutput::default());
+        self.outputs.clear();
 
         #[cfg(debug_assertions)]
         {
@@ -136,7 +132,8 @@ impl ExecutionNode {
     }
 
     fn reset_ports_from_func(&mut self, func: &Func) {
-        self.inputs.clear();
+        assert!(self.inputs.is_empty());
+
         self.inputs.reserve(func.inputs.len());
         for input in &func.inputs {
             self.inputs.push(ExecutionInput {
@@ -145,6 +142,7 @@ impl ExecutionNode {
             });
         }
 
+        assert!(self.outputs.is_empty());
         self.outputs.fill(ExecutionOutput::Unused);
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::default());
@@ -267,59 +265,58 @@ impl ExecutionGraph {
 
         while let Some(visit) = stack.pop() {
             let e_node_idx = visit.e_node_idx;
-
             let e_node = &mut self.e_nodes[e_node_idx];
-            let node = &graph.nodes[e_node.node_idx];
 
             let output_address = match visit.cause {
                 VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_address } => Some(output_address),
-                VisitCause::Processed => {
-                    e_node.processing_state = ProcessingState::Processed1;
+                VisitCause::OutputRequest { output_address } => {
+                    assert_eq!(output_address.e_node_idx, e_node_idx);
+                    Some(output_address)
+                }
+                VisitCause::Done => {
+                    e_node.processing_state = ProcessState::Backward1;
                     self.e_node_processing_order.push(e_node_idx);
                     continue;
                 }
             };
-
             match e_node.processing_state {
-                ProcessingState::Processed1 => {
+                ProcessState::Backward1 => {
                     continue;
                 }
-                ProcessingState::Processing => {
+                ProcessState::Processing => {
                     return Err(ExecutionGraphError::CycleDetected { node_id: e_node.id });
                 }
-                ProcessingState::None => {
-                    let func_idx = func_lib
-                        .funcs
-                        .iter()
-                        .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
-                        .expect("FuncLib missing function for graph node func_id");
-                    let func = &func_lib.funcs[func_idx];
-                    e_node.reset_ports_from_func(func);
-                    e_node.func_idx = func_idx;
-                    e_node.behavior = match node.behavior {
-                        NodeBehavior::AsFunction => match func.behavior {
-                            FuncBehavior::Pure => ExecutionBehavior::Pure,
-                            FuncBehavior::Impure | FuncBehavior::Output => {
-                                ExecutionBehavior::Impure
-                            }
-                        },
-                        NodeBehavior::Once => ExecutionBehavior::Once,
-                    }
-                }
-                ProcessingState::Processed2 | ProcessingState::Processed3 => {
+                ProcessState::None => {}
+                ProcessState::Forward | ProcessState::Backward2 => {
                     panic!("Unexpected state")
                 }
             }
+            e_node.processing_state = ProcessState::Processing;
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Done,
+            });
 
+            let func_idx = func_lib
+                .funcs
+                .iter()
+                .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
+                .expect("FuncLib missing function for graph node func_id");
+            let func = &func_lib.funcs[func_idx];
+            let node = &graph.nodes[e_node.node_idx];
+
+            e_node.reset_ports_from_func(func);
+            e_node.func_idx = func_idx;
+            e_node.behavior = match node.behavior {
+                NodeBehavior::AsFunction => match func.behavior {
+                    FuncBehavior::Pure => ExecutionBehavior::Pure,
+                    FuncBehavior::Impure => ExecutionBehavior::Impure,
+                },
+                NodeBehavior::Once => ExecutionBehavior::Once,
+            };
             if let Some(output_address) = output_address {
                 e_node.outputs[output_address.port_idx] = ExecutionOutput::Used;
             }
-            e_node.processing_state = ProcessingState::Processing;
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Processed,
-            });
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
@@ -363,7 +360,7 @@ impl ExecutionGraph {
                             .e_node_idx;
                         let output_e_node = &self.e_nodes[output_e_node_idx];
 
-                        assert!(output_e_node.processing_state == ProcessingState::Processed2);
+                        assert_eq!(output_e_node.processing_state, ProcessState::Forward);
 
                         if output_e_node.has_missing_inputs {
                             InputState::Missing
@@ -374,14 +371,18 @@ impl ExecutionGraph {
                                     if output_e_node.has_changed_inputs {
                                         InputState::Changed
                                     } else {
-                                        InputState::Unchanged
+                                        if output_e_node.output_values.is_some() {
+                                            InputState::Unchanged
+                                        } else {
+                                            InputState::Changed
+                                        }
                                     }
                                 }
                                 ExecutionBehavior::Once => {
                                     if output_e_node.output_values.is_some() {
-                                        InputState::Changed
-                                    } else {
                                         InputState::Unchanged
+                                    } else {
+                                        InputState::Changed
                                     }
                                 }
                             }
@@ -401,11 +402,11 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert_eq!(e_node.processing_state, ProcessingState::Processed1);
+            assert_eq!(e_node.processing_state, ProcessState::Backward1);
 
             e_node.has_changed_inputs = has_changed_inputs;
             e_node.has_missing_inputs = has_missing_inputs;
-            e_node.processing_state = ProcessingState::Processed2;
+            e_node.processing_state = ProcessState::Forward;
         }
     }
 
@@ -426,42 +427,78 @@ impl ExecutionGraph {
             let e_node_idx = visit.e_node_idx;
             let e_node = &mut self.e_nodes[e_node_idx];
 
-            let output_address = match visit.cause {
+            let _output_address = match visit.cause {
                 VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_address } => Some(output_address),
-                VisitCause::Processed => {
-                    e_node.processing_state = ProcessingState::Processed3;
-                    e_node.execute = true;
-                    self.e_node_execution_order.push(e_node_idx);
+                VisitCause::OutputRequest { output_address } => {
+                    assert_eq!(output_address.e_node_idx, e_node_idx);
+                    Some(output_address)
+                }
+                VisitCause::Done => {
+                    e_node.processing_state = ProcessState::Backward2;
+                    if e_node.execute {
+                        self.e_node_execution_order.push(e_node_idx);
+                    }
                     continue;
                 }
             };
 
             match e_node.processing_state {
-                ProcessingState::None | ProcessingState::Processed1 => panic!("todo"),
-                ProcessingState::Processing => panic!(
+                ProcessState::None | ProcessState::Backward1 => {
+                    panic!("Expected a processed node")
+                }
+                ProcessState::Processing => panic!(
                     "Cycle detected too late. Should have been caught earlier in backward1()"
                 ),
-                ProcessingState::Processed2 => {
-                    // let func_idx = func_lib
-                    //     .funcs
-                    //     .iter()
-                    //     .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
-                    //     .expect("FuncLib missing function for graph node func_id");
-                    // let func = &func_lib.funcs[func_idx];
-                    // e_node.reset_ports_from_func(func);
-                    // e_node.func_idx = func_idx;
-                    // e_node.function_behavior = func.behavior;
-                }
-
-                ProcessingState::Processed3 => continue,
+                ProcessState::Forward => {}
+                ProcessState::Backward2 => continue,
             }
-
-            e_node.processing_state = ProcessingState::Processing;
+            e_node.processing_state = ProcessState::Processing;
             stack.push(Visit {
                 e_node_idx,
-                cause: VisitCause::Processed,
+                cause: VisitCause::Done,
             });
+
+            let execute = match e_node.behavior {
+                ExecutionBehavior::Impure => !e_node.has_missing_inputs,
+                ExecutionBehavior::Pure => e_node.has_changed_inputs && !e_node.has_missing_inputs,
+                ExecutionBehavior::Once => e_node.output_values.is_none(),
+            };
+
+            if execute {
+                for input in e_node.inputs.iter() {
+                    let a = match input.state {
+                        InputState::Unknown => panic!("Unprocessed input"),
+                        InputState::Unchanged => false,
+                        InputState::Changed => true,
+                        InputState::Missing => false,
+                    };
+                    if let Some(output_address) = input.output_address {
+                        stack.push(Visit {
+                            e_node_idx: output_address.e_node_idx,
+                            cause: VisitCause::OutputRequest { output_address },
+                        });
+                    }
+                }
+
+                // e_node
+                //     .inputs
+                //     .iter()
+                //     .filter(|input| match input.state {
+                //         InputState::Unknown => panic!("Unknown input state"),
+                //         InputState::Unchanged => false,
+                //         InputState::Changed => true,
+                //         InputState::Missing => false,
+                //     })
+                //     .filter_map(|input| input.output_address)
+                //     .for_each(|output_address| {
+                //         stack.push(Visit {
+                //             e_node_idx: output_address.e_node_idx,
+                //             cause: VisitCause::OutputRequest { output_address },
+                //         });
+                //     });
+            }
+
+            e_node.execute = execute;
         }
     }
 
@@ -562,9 +599,9 @@ impl ExecutionGraph {
             );
             in_processing_order[e_node_idx] = true;
             assert!(
-                self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed1
-                    || self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed2
-                    || self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed3,
+                self.e_nodes[e_node_idx].processing_state == ProcessState::Backward1
+                    || self.e_nodes[e_node_idx].processing_state == ProcessState::Forward
+                    || self.e_nodes[e_node_idx].processing_state == ProcessState::Backward2,
                 "Execution node {} in processing order is not processed",
                 e_node_idx
             );
@@ -572,14 +609,14 @@ impl ExecutionGraph {
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             assert_ne!(
                 e_node.processing_state,
-                ProcessingState::Processing,
+                ProcessState::Processing,
                 "Execution node {} is still processing",
                 idx
             );
             if !in_processing_order[idx] {
                 assert_ne!(
                     e_node.processing_state,
-                    ProcessingState::Processed1,
+                    ProcessState::Backward1,
                     "Execution node {} is processed but missing from processing order",
                     idx
                 );
@@ -600,7 +637,7 @@ impl ExecutionGraph {
 
             assert_eq!(
                 self.e_nodes[e_node_idx].processing_state,
-                ProcessingState::Processed3,
+                ProcessState::Backward2,
                 "Execution node {} in execution order is not processed",
                 e_node_idx
             );
@@ -705,10 +742,8 @@ mod tests {
             execution_graph
                 .e_nodes
                 .iter()
-                .all(
-                    |e_node| e_node.processing_state == ProcessingState::Processed2
-                        || e_node.processing_state == ProcessingState::Processed3
-                ),
+                .all(|e_node| e_node.processing_state == ProcessState::Forward
+                    || e_node.processing_state == ProcessState::Backward2),
             "Execution nodes should be processed after update"
         );
         let execution_order_after: Vec<usize> = execution_graph.e_node_processing_order.clone();
