@@ -466,36 +466,20 @@ impl ExecutionGraph {
 
             if execute {
                 for input in e_node.inputs.iter() {
-                    let a = match input.state {
+                    if match input.state {
                         InputState::Unknown => panic!("Unprocessed input"),
                         InputState::Unchanged => false,
                         InputState::Changed => true,
                         InputState::Missing => false,
-                    };
-                    if let Some(output_address) = input.output_address {
-                        stack.push(Visit {
-                            e_node_idx: output_address.e_node_idx,
-                            cause: VisitCause::OutputRequest { output_address },
-                        });
+                    } {
+                        if let Some(output_address) = input.output_address {
+                            stack.push(Visit {
+                                e_node_idx: output_address.e_node_idx,
+                                cause: VisitCause::OutputRequest { output_address },
+                            });
+                        }
                     }
                 }
-
-                // e_node
-                //     .inputs
-                //     .iter()
-                //     .filter(|input| match input.state {
-                //         InputState::Unknown => panic!("Unknown input state"),
-                //         InputState::Unchanged => false,
-                //         InputState::Changed => true,
-                //         InputState::Missing => false,
-                //     })
-                //     .filter_map(|input| input.output_address)
-                //     .for_each(|output_address| {
-                //         stack.push(Visit {
-                //             e_node_idx: output_address.e_node_idx,
-                //             cause: VisitCause::OutputRequest { output_address },
-                //         });
-                //     });
             }
 
             e_node.execute = execute;
