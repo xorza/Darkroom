@@ -73,6 +73,7 @@ fn configure_visuals(ctx: &egui::Context) {
 struct ScenariumApp {
     graph: Graph,
     func_lib: FuncLib,
+    execution_graph: ExecutionGraph,
     graph_view: model::GraphView,
     graph_path: PathBuf,
     last_status: Option<String>,
@@ -87,6 +88,7 @@ impl Default for ScenariumApp {
         let mut result = Self {
             graph: Graph::default(),
             func_lib: FuncLib::default(),
+            execution_graph: ExecutionGraph::default(),
             graph_view: model::GraphView::default(),
             graph_path,
             last_status: None,
@@ -186,8 +188,8 @@ impl ScenariumApp {
         }
 
         let compute = Compute::default();
-        let mut execution_graph = ExecutionGraph::default();
-        let result = block_on(compute.run(&self.graph, &self.func_lib, &mut execution_graph));
+
+        let result = block_on(compute.run(&self.graph, &self.func_lib, &mut self.execution_graph));
         match result {
             Ok(()) => {
                 let status = self
