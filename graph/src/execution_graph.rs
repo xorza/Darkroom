@@ -1,4 +1,5 @@
 use std::mem::take;
+use std::panic;
 
 use anyhow::Result;
 use hashbrown::HashMap;
@@ -10,7 +11,7 @@ use crate::data::DynamicValue;
 use crate::function::{Func, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::FuncBehavior;
-use common::{deserialize, serialize, FileFormat};
+use common::{deserialize, is_debug, serialize, FileFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessingState {
@@ -19,6 +20,7 @@ enum ProcessingState {
     Processing,
     Processed1,
     Processed2,
+    Processed3,
 }
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -61,8 +63,10 @@ pub struct ExecutionNode {
 
     pub has_missing_inputs: bool,
     pub has_changed_inputs: bool,
-    pub should_invoke: bool,
     pub function_behavior: FuncBehavior,
+
+    active: bool,
+    execute: bool,
 
     pub node_idx: usize,
     pub func_idx: usize,
@@ -89,6 +93,15 @@ pub struct ExecutionGraph {
     e_node_idx_by_id: HashMap<NodeId, usize>,
     pub e_node_processing_order: Vec<usize>,
     pub e_node_execution_order: Vec<usize>,
+}
+enum VisitCause {
+    Terminal,
+    OutputRequest { output_address: PortAddress },
+    Processed,
+}
+struct Visit {
+    e_node_idx: usize,
+    cause: VisitCause,
 }
 
 impl ExecutionNode {
@@ -153,10 +166,10 @@ impl ExecutionGraph {
     // Rebuild execution state from the current graph and function library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.update_node_cache(graph);
-        self.backward(graph, func_lib)?;
+        self.backward1(graph, func_lib)?;
         self.forward(graph);
+        self.backward2(graph, func_lib);
 
-        #[cfg(debug_assertions)]
         self.validate_with_graph(graph);
 
         Ok(())
@@ -203,8 +216,7 @@ impl ExecutionGraph {
         self.e_node_idx_by_id
             .retain(|id, idx| *idx < self.e_nodes.len() && self.e_nodes[*idx].id == *id);
 
-        #[cfg(debug_assertions)]
-        {
+        if is_debug() {
             assert_eq!(
                 self.e_nodes.len(),
                 self.e_node_idx_by_id.len(),
@@ -234,19 +246,10 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to mark active nodes and compute invocation order.
-    fn backward(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
-        enum VisitCause {
-            Terminal,
-            OutputRequest { output_address: PortAddress },
-            Processed,
-        }
-        struct Visit {
-            e_node_idx: usize,
-            cause: VisitCause,
-        }
-        let mut stack: Vec<Visit> = Vec::with_capacity(10);
-
+    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.e_node_processing_order.clear();
+
+        let mut stack: Vec<Visit> = Vec::with_capacity(10);
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
                 stack.push(Visit {
@@ -266,6 +269,7 @@ impl ExecutionGraph {
                     VisitCause::OutputRequest { output_address } => Some(output_address),
                     VisitCause::Processed => {
                         e_node.processing_state = ProcessingState::Processed1;
+                        e_node.active = true;
                         self.e_node_processing_order.push(e_node_idx);
                         continue;
                     }
@@ -289,7 +293,9 @@ impl ExecutionGraph {
                         e_node.func_idx = func_idx;
                         e_node.function_behavior = func.behavior;
                     }
-                    ProcessingState::Processed2 => panic!("Unexpected state"),
+                    ProcessingState::Processed2 | ProcessingState::Processed3 => {
+                        panic!("Unexpected state")
+                    }
                 }
 
                 if let Some(output_address) = output_address {
@@ -326,25 +332,10 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Propagate input state forward from scheduled nodes to set invoke/missing flags.
+    // Propagate input state forward from active changed/missing flags.
     fn forward(&mut self, graph: &Graph) {
-        self.e_node_execution_order.clear();
-
         for e_node_idx in self.e_node_processing_order.iter().copied() {
-            let node = {
-                let e_node = &mut self.e_nodes[e_node_idx];
-                assert_eq!(e_node.processing_state, ProcessingState::Processed1);
-
-                let node = &graph.nodes[e_node.node_idx];
-                // avoid traversing inputs for NodeBehavior::Once nodes having outputs
-                // even if having missing inputs
-                if node.behavior == NodeBehavior::CacheOutput && e_node.output_values.is_some() {
-                    // should_invoke is false
-                    continue;
-                }
-
-                node
-            };
+            let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
 
             let mut has_changed_inputs = false;
             let mut has_missing_inputs = false;
@@ -368,7 +359,7 @@ impl ExecutionGraph {
 
                         if output_e_node.has_missing_inputs {
                             InputState::Missing
-                        } else if output_e_node.should_invoke {
+                        } else if output_e_node.active {
                             InputState::Changed
                         } else {
                             InputState::Unchanged
@@ -388,35 +379,76 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
+            assert!(e_node.active);
+            assert_eq!(e_node.processing_state, ProcessingState::Processed1);
 
-            let should_invoke = if has_missing_inputs {
-                false
-            } else {
-                match node.behavior {
-                    NodeBehavior::CacheOutput => {
-                        // has no cached outputs, so should_invoke = true
-                        true
-                    }
-                    NodeBehavior::AsFunction => match e_node.function_behavior {
-                        FuncBehavior::Impure | FuncBehavior::Output => true,
-                        FuncBehavior::Pure => has_changed_inputs || e_node.output_values.is_none(),
-                    },
+            e_node.has_changed_inputs = has_changed_inputs;
+            e_node.has_missing_inputs = has_missing_inputs;
+            e_node.processing_state = ProcessingState::Processed2;
+        }
+    }
+
+    fn backward2(&mut self, graph: &Graph, _func_lib: &FuncLib) {
+        self.e_node_execution_order.clear();
+
+        let mut stack: Vec<Visit> = Vec::with_capacity(10);
+        for (idx, e_node) in self.e_nodes.iter().enumerate() {
+            if graph.nodes[e_node.node_idx].terminal {
+                stack.push(Visit {
+                    e_node_idx: idx,
+                    cause: VisitCause::Terminal,
+                });
+            }
+        }
+
+        while let Some(visit) = stack.pop() {
+            let e_node_idx = visit.e_node_idx;
+            let e_node = &mut self.e_nodes[e_node_idx];
+            assert!(e_node.active);
+
+            let output_address = match visit.cause {
+                VisitCause::Terminal => None,
+                VisitCause::OutputRequest { output_address } => Some(output_address),
+                VisitCause::Processed => {
+                    e_node.processing_state = ProcessingState::Processed3;
+                    e_node.execute = true;
+                    self.e_node_execution_order.push(e_node_idx);
+                    continue;
                 }
             };
 
-            e_node.has_missing_inputs = has_missing_inputs;
-            e_node.processing_state = ProcessingState::Processed2;
-            e_node.should_invoke = should_invoke;
+            match e_node.processing_state {
+                ProcessingState::None | ProcessingState::Processed1 => panic!("todo"),
+                ProcessingState::Processing => panic!(
+                    "Cycle detected too late. Should have been caught earlier in backward1()"
+                ),
+                ProcessingState::Processed2 => {
+                    // let func_idx = func_lib
+                    //     .funcs
+                    //     .iter()
+                    //     .position(|func| func.id == graph.nodes[e_node.node_idx].func_id)
+                    //     .expect("FuncLib missing function for graph node func_id");
+                    // let func = &func_lib.funcs[func_idx];
+                    // e_node.reset_ports_from_func(func);
+                    // e_node.func_idx = func_idx;
+                    // e_node.function_behavior = func.behavior;
+                }
 
-            if should_invoke {
-                self.e_node_execution_order.push(e_node_idx);
+                ProcessingState::Processed3 => continue,
             }
+
+            e_node.processing_state = ProcessingState::Processing;
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Processed,
+            });
         }
     }
 
     pub fn validate_with_graph(&self, graph: &Graph) {
-        #[cfg(not(debug_assertions))]
-        tracing::warn!("Running validate_with_graph in release mode. May be suboptimal.");
+        if !is_debug() {
+            return;
+        }
 
         assert_eq!(
             self.e_nodes.len(),
@@ -511,7 +543,8 @@ impl ExecutionGraph {
             in_processing_order[e_node_idx] = true;
             assert!(
                 self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed1
-                    || self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed2,
+                    || self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed2
+                    || self.e_nodes[e_node_idx].processing_state == ProcessingState::Processed3,
                 "Execution node {} in processing order is not processed",
                 e_node_idx
             );
@@ -545,25 +578,19 @@ impl ExecutionGraph {
             );
             in_execution_order[e_node_idx] = true;
             assert!(
-                self.e_nodes[e_node_idx].should_invoke,
+                self.e_nodes[e_node_idx].active,
                 "Execution node {} in execution order should_invoke=false",
                 e_node_idx
             );
             assert_eq!(
                 self.e_nodes[e_node_idx].processing_state,
-                ProcessingState::Processed2,
+                ProcessingState::Processed3,
                 "Execution node {} in execution order is not processed",
                 e_node_idx
             );
         }
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
-            if e_node.should_invoke {
-                assert!(
-                    in_execution_order[idx],
-                    "Execution node {} should invoke but is missing from execution order",
-                    idx
-                );
-            } else {
+            if !e_node.active {
                 assert!(
                     !in_execution_order[idx],
                     "Execution node {} should not invoke but is in execution order",
@@ -637,10 +664,8 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert!(execution_graph
-            .e_nodes
-            .iter()
-            .all(|e_node| e_node.should_invoke));
+        assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.active));
+        assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.execute));
         assert!(execution_graph
             .e_nodes
             .iter()
@@ -673,7 +698,10 @@ mod tests {
             execution_graph
                 .e_nodes
                 .iter()
-                .all(|e_node| e_node.processing_state == ProcessingState::Processed2),
+                .all(
+                    |e_node| e_node.processing_state == ProcessingState::Processed2
+                        || e_node.processing_state == ProcessingState::Processed3
+                ),
             "Execution nodes should be processed after update"
         );
         let execution_order_after: Vec<usize> = execution_graph.e_node_processing_order.clone();
@@ -701,10 +729,10 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert!(execution_graph.by_id(get_b_node_id).unwrap().should_invoke);
-        assert!(!execution_graph.by_id(sum_node_id).unwrap().should_invoke);
-        assert!(!execution_graph.by_id(mult_node_id).unwrap().should_invoke);
-        assert!(!execution_graph.by_id(print_node_id).unwrap().should_invoke);
+        assert!(execution_graph.by_id(get_b_node_id).unwrap().active);
+        assert!(!execution_graph.by_id(sum_node_id).unwrap().active);
+        assert!(!execution_graph.by_id(mult_node_id).unwrap().active);
+        assert!(!execution_graph.by_id(print_node_id).unwrap().active);
         assert!(
             !execution_graph
                 .by_id(get_b_node_id)
@@ -825,7 +853,7 @@ mod tests {
 
         let get_b_node = execution_graph.by_id(get_b_node_id).unwrap();
         assert!(
-            !get_b_node.should_invoke,
+            !get_b_node.active,
             "Once node with cached outputs should not invoke"
         );
         Ok(())
@@ -844,11 +872,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert!(
-            execution_graph.by_id(get_a_node_id).unwrap().should_invoke,
+            execution_graph.by_id(get_a_node_id).unwrap().active,
             "Impure functions should execute even without inputs"
         );
         assert!(
-            execution_graph.by_id(get_b_node_id).unwrap().should_invoke,
+            execution_graph.by_id(get_b_node_id).unwrap().active,
             "Pure functions should execute on first run without cached outputs"
         );
 
@@ -860,7 +888,44 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert!(
-            !execution_graph.by_id(get_b_node_id).unwrap().should_invoke,
+            !execution_graph.by_id(get_b_node_id).unwrap().active,
+            "Pure functions without input changes should not execute with cached outputs"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn func_behavior_controls_execution1() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        let get_a_node_id = graph.by_name("get_a").unwrap().id;
+        let get_b_node_id = graph.by_name("get_b").unwrap().id;
+        let mult_node_id = graph.by_name("mult").unwrap().id;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        graph.by_id_mut(mult_node_id).unwrap().behavior = NodeBehavior::CacheOutput;
+
+        execution_graph
+            .by_id_mut(mult_node_id)
+            .unwrap()
+            .output_values = Some(vec![DynamicValue::Int(7)]);
+
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert!(
+            execution_graph.by_id(get_a_node_id).unwrap().active,
+            "As mult node is cached, get_a should not execute"
+        );
+        assert!(
+            execution_graph.by_id(get_b_node_id).unwrap().active,
+            "As mult node is cached, get_b should not execute"
+        );
+        assert!(
+            execution_graph.by_id(mult_node_id).unwrap().active,
             "Pure functions without input changes should not execute with cached outputs"
         );
 
