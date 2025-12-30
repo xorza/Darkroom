@@ -357,12 +357,10 @@ impl ExecutionGraph {
                                 ExecutionBehavior::Pure => {
                                     if output_e_node.has_changed_inputs {
                                         InputState::Changed
+                                    } else if output_e_node.output_values.is_some() {
+                                        InputState::Unchanged
                                     } else {
-                                        if output_e_node.output_values.is_some() {
-                                            InputState::Unchanged
-                                        } else {
-                                            InputState::Changed
-                                        }
+                                        InputState::Changed
                                     }
                                 }
                                 ExecutionBehavior::Once => {
@@ -874,7 +872,7 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let get_a_node_id = graph.by_name("get_a").unwrap().id;
+        let _get_a_node_id = graph.by_name("get_a").unwrap().id;
         let get_b_node_id = graph.by_name("get_b").unwrap().id;
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
 
@@ -910,8 +908,8 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let get_a_node_id = graph.by_name("get_a").unwrap().id;
-        let get_b_node_id = graph.by_name("get_b").unwrap().id;
+        let _get_a_node_id = graph.by_name("get_a").unwrap().id;
+        let _get_b_node_id = graph.by_name("get_b").unwrap().id;
         let mult_node_id = graph.by_name("mult").unwrap().id;
 
         let mut execution_graph = ExecutionGraph::default();
