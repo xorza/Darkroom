@@ -57,8 +57,9 @@ impl Compute {
                         .into(),
 
                     Binding::Output(output_binding) => {
-                        let output_address = &execution_graph.e_nodes[e_node_idx].inputs[input_idx]
+                        let output_address = execution_graph.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
+                            .clone()
                             .expect("Output address is not set");
                         assert_eq!(output_binding.output_idx, output_address.port_idx);
 

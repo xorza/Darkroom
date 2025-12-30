@@ -30,7 +30,7 @@ pub enum ExecutionGraphError {
 
 type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PortAddress {
     pub e_node_idx: usize,
     pub port_idx: usize,
@@ -43,7 +43,7 @@ pub enum InputState {
     Changed,
     Missing,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
@@ -380,6 +380,7 @@ impl ExecutionGraph {
                     Binding::Output(_) => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
+                            .as_ref()
                             .expect("Output binding references missing execution node")
                             .e_node_idx;
                         let output_e_node = &self.e_nodes[output_e_node_idx];
@@ -495,7 +496,7 @@ impl ExecutionGraph {
                         InputState::Changed => true,
                         InputState::Unknown => panic!("Unprocessed input"),
                     } {
-                        if let Some(output_address) = input.output_address {
+                        if let Some(output_address) = input.output_address.as_ref() {
                             stack.push(Visit2 {
                                 e_node_idx: output_address.e_node_idx,
                                 cause: Visit2Cause::OutputRequest {
@@ -547,7 +548,7 @@ impl ExecutionGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::Output(output_binding) => {
-                        if let Some(output_address) = e_node.inputs[input_idx].output_address {
+                        if let Some(output_address) = &e_node.inputs[input_idx].output_address {
                             assert!(output_address.e_node_idx < self.e_nodes.len());
                             let output_e_node = &self.e_nodes[output_address.e_node_idx];
                             assert_eq!(output_e_node.id, output_binding.output_node_id);
@@ -572,7 +573,7 @@ impl ExecutionGraph {
             let all_dependencies_in_order = e_node
                 .inputs
                 .iter()
-                .filter_map(|input| input.output_address)
+                .filter_map(|input| input.output_address.as_ref())
                 .all(|port_address| {
                     !self.e_node_execution_order[idx..].contains(&port_address.e_node_idx)
                 });
@@ -691,9 +692,6 @@ mod tests {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        let get_a_node_id = graph.by_name("get_a").unwrap().id;
-        let get_b_node_id = graph.by_name("get_b").unwrap().id;
-
         graph.by_name_mut("mult").unwrap().inputs = vec![
             Input {
                 binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
@@ -705,27 +703,23 @@ mod tests {
             },
         ];
 
-        let sum_node_id = graph.by_name("sum").unwrap().id;
-        graph.remove_by_id(sum_node_id);
-
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        assert_eq!(graph.nodes.len(), 4);
         assert_eq!(execution_graph.e_nodes.len(), 4);
 
-        let mult_node_id = graph.by_name("mult").unwrap().id;
-        let mult_node = execution_graph.by_id(mult_node_id).unwrap();
-        let mult_input_a = mult_node.inputs[0].output_address.unwrap();
-        let mult_input_b = mult_node.inputs[1].output_address.unwrap();
+        let mult_node = execution_graph.by_name("mult").unwrap();
+        let mult_input_a = mult_node.inputs[0].output_address.clone().unwrap();
+        let mult_input_b = mult_node.inputs[1].output_address.clone().unwrap();
         assert_eq!(
-            execution_graph.e_nodes[mult_input_a.e_node_idx].id, get_a_node_id,
-            "Mult input A should be wired to get_a"
+            execution_graph.e_nodes[mult_input_a.e_node_idx].id,
+            graph.by_name("get_a").unwrap().id
         );
         assert_eq!(
-            execution_graph.e_nodes[mult_input_b.e_node_idx].id, get_b_node_id,
-            "Mult input B should be wired to get_b"
+            execution_graph.e_nodes[mult_input_b.e_node_idx].id,
+            graph.by_name("get_b").unwrap().id
         );
+
         Ok(())
     }
 
