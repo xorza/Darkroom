@@ -117,7 +117,7 @@ impl Graph {
         let format = FileFormat::from_file_name(path)
             .expect("Failed to infer graph file format from file name");
         let contents = std::fs::read_to_string(path)?;
-        Self::deserialize(&contents, format)
+        Ok(Self::deserialize(&contents, format)?)
     }
     pub fn deserialize(serialized: &str, format: FileFormat) -> SerdeFormatResult<Graph> {
         let graph: Graph = deserialize(serialized, format)?;

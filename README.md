@@ -47,9 +47,11 @@ Execution graph maintenance includes small readability cleanups.
 Execution graph input state propagation keeps behavior-specific caching checks explicit.
 Documentation cleanup includes minor comment fixes.
 Execution graph documentation now clarifies propagation and scheduling comments.
+Graph file loading now lifts serde-format errors into anyhow-based call sites.
 Worker event loops terminate when their message channel closes.
 Execution node updates use shared reset logic to keep state consistent.
 Execution nodes own their own reset behavior for update passes.
+Editor graph conversion now calls core validation directly.
 Execution node port resets reuse a helper to keep input/output sizing consistent.
 Execution graph updates handle dynamic graph changes across runs.
 Compute execution follows the execution scheduling order.

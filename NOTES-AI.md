@@ -19,6 +19,7 @@ The root `Cargo.toml` defines the workspace and shared dependencies.
 The graph crate exports a `prelude` module that re-exports common graph, data, function, and execution graph types for easier imports.
 The editor now imports `Graph` via `graph::prelude::Graph`.
 The editor model exposes `Graph::from_graph` to convert a core graph into the editor view with inferred output counts and a simple grid layout.
+GraphView conversion now calls `Graph::validate()` directly after building the graph.
 Editor view model types are split into `editor/src/model/graph_view.rs` and `editor/src/model/node_view.rs`.
 Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 The editor loads `test_func_lib` to name view-node inputs/outputs based on core function definitions.
@@ -80,6 +81,7 @@ Additional modules drive execution and integration:
 - Execution node input resets now preallocate and extend from function inputs with a compact iterator map.
 - Execution graph input-state propagation now caches output-availability once per edge for clarity.
 - `worker` spawns a Tokio thread that executes the graph either once or in a loop and processes events.
+- Graph file loading now uses `?` to lift serde-format errors into anyhow results.
 - `worker` must be shut down via `Worker::exit()`; dropping a running worker triggers a panic to surface logic errors.
 - `worker` event loops return `None` when the message channel closes to signal termination.
 - `event` manages asynchronous event loops that send event IDs back to the worker.

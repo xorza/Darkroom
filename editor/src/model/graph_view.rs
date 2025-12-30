@@ -177,9 +177,7 @@ impl GraphView {
             graph.add(node);
         }
 
-        graph
-            .validate()
-            .expect("graph must be valid after conversion");
+        graph.validate();
         graph
     }
 
