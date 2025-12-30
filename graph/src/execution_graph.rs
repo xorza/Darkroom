@@ -101,7 +101,7 @@ pub struct ExecutionGraph {
 }
 enum VisitCause {
     Terminal,
-    OutputRequest { output_address: PortAddress },
+    OutputRequest { output_idx: usize },
     Done,
 }
 struct Visit {
@@ -267,12 +267,9 @@ impl ExecutionGraph {
             let e_node_idx = visit.e_node_idx;
             let e_node = &mut self.e_nodes[e_node_idx];
 
-            let output_address = match visit.cause {
+            let output_idx = match visit.cause {
                 VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_address } => {
-                    assert_eq!(output_address.e_node_idx, e_node_idx);
-                    Some(output_address)
-                }
+                VisitCause::OutputRequest { output_idx } => Some(output_idx),
                 VisitCause::Done => {
                     e_node.processing_state = ProcessState::Backward1;
                     self.e_node_processing_order.push(e_node_idx);
@@ -314,8 +311,8 @@ impl ExecutionGraph {
                 },
                 NodeBehavior::Once => ExecutionBehavior::Once,
             };
-            if let Some(output_address) = output_address {
-                e_node.outputs[output_address.port_idx] = ExecutionOutput::Used;
+            if let Some(output_idx) = output_idx {
+                e_node.outputs[output_idx] = ExecutionOutput::Used;
             }
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
@@ -328,10 +325,7 @@ impl ExecutionGraph {
                     stack.push(Visit {
                         e_node_idx: output_e_node_idx,
                         cause: VisitCause::OutputRequest {
-                            output_address: PortAddress {
-                                e_node_idx: output_e_node_idx,
-                                port_idx: output_binding.output_idx,
-                            },
+                            output_idx: output_binding.output_idx,
                         },
                     });
                 }
@@ -429,10 +423,7 @@ impl ExecutionGraph {
 
             let _output_address = match visit.cause {
                 VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_address } => {
-                    assert_eq!(output_address.e_node_idx, e_node_idx);
-                    Some(output_address)
-                }
+                VisitCause::OutputRequest { output_idx } => Some(output_idx),
                 VisitCause::Done => {
                     e_node.processing_state = ProcessState::Backward2;
                     if e_node.execute {
@@ -475,7 +466,9 @@ impl ExecutionGraph {
                         if let Some(output_address) = input.output_address {
                             stack.push(Visit {
                                 e_node_idx: output_address.e_node_idx,
-                                cause: VisitCause::OutputRequest { output_address },
+                                cause: VisitCause::OutputRequest {
+                                    output_idx: output_address.port_idx,
+                                },
                             });
                         }
                     }
@@ -546,13 +539,13 @@ impl ExecutionGraph {
                                 address.e_node_idx < self.e_nodes.len(),
                                 "Execution output address node index out of bounds"
                             );
-                            let output_node = &self.e_nodes[address.e_node_idx];
+                            let output_e_node = &self.e_nodes[address.e_node_idx];
                             assert_eq!(
-                                output_node.id, output_binding.output_node_id,
+                                output_e_node.id, output_binding.output_node_id,
                                 "Execution output address points at wrong node"
                             );
                             assert!(
-                                address.port_idx < output_node.outputs.len(),
+                                address.port_idx < output_e_node.outputs.len(),
                                 "Execution output address port index out of bounds"
                             );
                         }

@@ -60,6 +60,8 @@ impl Compute {
                         let output_address = &execution_graph.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .expect("Output address is not set");
+                        assert_eq!(output_binding.output_idx, output_address.port_idx);
+
                         let output_values = execution_graph.e_nodes[output_address.e_node_idx]
                             .output_values
                             .as_mut()
