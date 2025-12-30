@@ -10,7 +10,7 @@ use crate::compute::ComputeError;
 use crate::data::DynamicValue;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
-use common::{deserialize, is_debug, serialize, FileFormat};
+use common::{is_debug, FileFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessState {
@@ -147,13 +147,21 @@ impl ExecutionGraph {
     pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut ExecutionNode> {
         self.e_nodes.iter_mut().find(|node| node.id == node_id)
     }
+    #[cfg(debug_assertions)]
+    pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
+        self.e_nodes.iter().find(|node| node.name == node_name)
+    }
+    #[cfg(debug_assertions)]
+    pub fn by_name_mut(&mut self, node_name: &str) -> Option<&mut ExecutionNode> {
+        self.e_nodes.iter_mut().find(|node| node.name == node_name)
+    }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        serialize(self, format)
+        common::serialize(self, format)
     }
 
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let execution_graph: ExecutionGraph = deserialize(serialized, format)?;
+        let execution_graph: ExecutionGraph = common::deserialize(serialized, format)?;
 
         Ok(execution_graph)
     }
