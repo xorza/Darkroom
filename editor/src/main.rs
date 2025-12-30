@@ -97,7 +97,7 @@ impl Default for ScenariumApp {
         };
 
         result.test_graph();
-        result.load_graph();
+        result.load();
 
         result
     }
@@ -112,21 +112,22 @@ impl ScenariumApp {
         self.last_status = Some(message.into());
     }
 
-    fn set_graph(&mut self, graph: model::GraphView, status: impl Into<String>) {
-        graph
+    fn set_graph_view(&mut self, graph_view: model::GraphView, status: impl Into<String>) {
+        graph_view
             .validate()
             .expect("graph should be valid before storing in app state");
-        self.graph_view = graph;
+        self.graph_view = graph_view;
+        self.execution_graph = ExecutionGraph::default();
         self.graph_ui.reset();
         self.set_status(status);
     }
 
-    fn new_graph(&mut self) {
+    fn new(&mut self) {
         let graph = model::GraphView::default();
-        self.set_graph(graph, "Created new graph");
+        self.set_graph_view(graph, "Created new graph");
     }
 
-    fn save_graph(&mut self) {
+    fn save(&mut self) {
         assert!(
             self.graph_path.extension().is_some(),
             "graph save path must include a file extension"
@@ -137,14 +138,14 @@ impl ScenariumApp {
         }
     }
 
-    fn load_graph(&mut self) {
+    fn load(&mut self) {
         assert!(
             self.graph_path.extension().is_some(),
             "graph load path must include a file extension"
         );
         match model::GraphView::deserialize_from_file(&self.graph_path) {
-            Ok(graph) => self.set_graph(
-                graph,
+            Ok(graph_view) => self.set_graph_view(
+                graph_view,
                 format!("Loaded graph from {}", self.graph_path.display()),
             ),
             Err(err) => self.set_status(format!("Load failed: {err}")),
@@ -157,7 +158,7 @@ impl ScenariumApp {
         let graph_view = model::GraphView::from_graph(&graph, &func_lib);
         self.graph = graph;
         self.func_lib = func_lib;
-        self.set_graph(graph_view, "Loaded sample test graph");
+        self.set_graph_view(graph_view, "Loaded sample test graph");
     }
 
     fn sample_test_hooks(&self) -> TestFuncHooks {
@@ -232,15 +233,15 @@ impl eframe::App for ScenariumApp {
                             .and_modify(|font| font.size = 18.0);
                     }
                     if ui.button("New").clicked() {
-                        self.new_graph();
+                        self.new();
                         ui.close();
                     }
                     if ui.button("Save").clicked() {
-                        self.save_graph();
+                        self.save();
                         ui.close();
                     }
                     if ui.button("Load").clicked() {
-                        self.load_graph();
+                        self.load();
                         ui.close();
                     }
                     if ui.button("Test").clicked() {
