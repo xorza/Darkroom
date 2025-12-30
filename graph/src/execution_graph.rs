@@ -720,14 +720,17 @@ mod tests {
     }
 
     #[test]
-    fn once_node_with_cached_outputs_skips_invocation() -> anyhow::Result<()> {
-        let graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+    fn pure_node_skips_consequent_invokations() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+
+        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        // get_b in e_node_execution_order
+        // pure node invoked if no cache values
         assert!(execution_graph
             .e_node_execution_order
             .iter()
@@ -738,7 +741,7 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
 
-        // get_b not in e_node_execution_order
+        // pure node not invoked if has cached values
         assert!(execution_graph
             .e_node_execution_order
             .iter()
@@ -748,37 +751,24 @@ mod tests {
     }
 
     #[test]
-    fn func_behavior_controls_execution() -> anyhow::Result<()> {
+    fn inpure_node_always_invoked() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
 
-        let _get_a_node_id = graph.by_name("get_a").unwrap().id;
-        let get_b_node_id = graph.by_name("get_b").unwrap().id;
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-
-        // assert!(
-        //     execution_graph.by_id(get_a_node_id).unwrap().active,
-        //     "Impure functions should execute even without inputs"
-        // );
-        // assert!(
-        //     execution_graph.by_id(get_b_node_id).unwrap().active,
-        //     "Pure functions should execute on first run without cached outputs"
-        // );
-
-        execution_graph
-            .by_id_mut(get_b_node_id)
-            .unwrap()
-            .output_values = Some(vec![DynamicValue::Int(7)]);
-
+        execution_graph.by_name_mut("get_b").unwrap().output_values =
+            Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
 
-        // assert!(
-        //     !execution_graph.by_id(get_b_node_id).unwrap().active,
-        //     "Pure functions without input changes should not execute with cached outputs"
-        // );
+        // get_b not in e_node_execution_order
+        assert!(execution_graph
+            .e_node_execution_order
+            .iter()
+            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
 
         Ok(())
     }
@@ -786,36 +776,29 @@ mod tests {
     #[test]
     fn func_behavior_controls_execution1() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
 
-        let _get_a_node_id = graph.by_name("get_a").unwrap().id;
-        let _get_b_node_id = graph.by_name("get_b").unwrap().id;
-        let mult_node_id = graph.by_name("mult").unwrap().id;
+        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::Once;
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        graph.by_id_mut(mult_node_id).unwrap().behavior = NodeBehavior::Once;
+        // once node invoked is has no cached outputs
+        assert!(execution_graph
+            .e_node_execution_order
+            .iter()
+            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
 
-        execution_graph
-            .by_id_mut(mult_node_id)
-            .unwrap()
-            .output_values = Some(vec![DynamicValue::Int(7)]);
-
+        execution_graph.by_name_mut("get_b").unwrap().output_values =
+            Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
 
-        // assert!(
-        //     execution_graph.by_id(get_a_node_id).unwrap().active,
-        //     "As mult node is cached, get_a should not execute"
-        // );
-        // assert!(
-        //     execution_graph.by_id(get_b_node_id).unwrap().active,
-        //     "As mult node is cached, get_b should not execute"
-        // );
-        // assert!(
-        //     execution_graph.by_id(mult_node_id).unwrap().active,
-        //     "Pure functions without input changes should not execute with cached outputs"
-        // );
+        // once node not invoked is has cached outputs
+        assert!(execution_graph
+            .e_node_execution_order
+            .iter()
+            .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
 
         Ok(())
     }
@@ -826,10 +809,8 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mult_node_id = graph.by_name("mult").unwrap().id;
-
         let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
         sum_inputs[0].binding = Binding::from_output_binding(mult_node_id, 0);
-        sum_inputs[0].const_value = None;
 
         let mut execution_graph = ExecutionGraph::default();
         let err = execution_graph
