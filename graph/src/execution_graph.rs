@@ -568,7 +568,7 @@ impl ExecutionGraph {
 
             let e_node = &self.e_nodes[e_node_idx];
             assert!(!e_node.has_missing_inputs);
-            
+
             let all_dependencies_in_order = e_node
                 .inputs
                 .iter()
@@ -635,12 +635,6 @@ mod tests {
     fn missing_input() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
-
-        let get_b_node_id = graph.by_name("get_b").unwrap().id;
-        let sum_node_id = graph.by_name("sum").unwrap().id;
-        let mult_node_id = graph.by_name("mult").unwrap().id;
-        let print_node_id = graph.by_name("print").unwrap().id;
-
         graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
 
         let mut execution_graph = ExecutionGraph::default();
@@ -651,39 +645,20 @@ mod tests {
         // assert!(!execution_graph.by_id(sum_node_id).unwrap().active);
         // assert!(!execution_graph.by_id(mult_node_id).unwrap().active);
         // assert!(!execution_graph.by_id(print_node_id).unwrap().active);
-        assert!(
-            !execution_graph
-                .by_id(get_b_node_id)
-                .unwrap()
-                .has_missing_inputs
-        );
-        assert!(
-            execution_graph
-                .by_id(sum_node_id)
-                .unwrap()
-                .has_missing_inputs
-        );
-        assert!(
-            execution_graph
-                .by_id(mult_node_id)
-                .unwrap()
-                .has_missing_inputs
-        );
-        assert!(
-            execution_graph
-                .by_id(print_node_id)
-                .unwrap()
-                .has_missing_inputs
-        );
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        let sum = execution_graph.by_name("sum").unwrap();
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
 
-        let sum_node = execution_graph.by_id(sum_node_id).unwrap();
-        assert_eq!(sum_node.inputs[0].state, InputState::Missing);
+        assert!(!get_b.has_missing_inputs);
+        assert!(sum.has_missing_inputs);
+        assert!(mult.has_missing_inputs);
+        assert!(print.has_missing_inputs);
 
-        let mult_node = execution_graph.by_id(mult_node_id).unwrap();
-        assert_eq!(mult_node.inputs[0].state, InputState::Missing);
-
-        let print_node = execution_graph.by_id(print_node_id).unwrap();
-        assert_eq!(print_node.inputs[0].state, InputState::Missing);
+        assert!(!get_b.has_changed_inputs);
+        assert_eq!(sum.inputs[0].state, InputState::Missing);
+        assert_eq!(mult.inputs[0].state, InputState::Missing);
+        assert_eq!(print.inputs[0].state, InputState::Missing);
 
         Ok(())
     }
