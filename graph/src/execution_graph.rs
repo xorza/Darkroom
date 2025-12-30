@@ -71,8 +71,6 @@ pub struct ExecutionNode {
     pub has_changed_inputs: bool,
     pub behavior: ExecutionBehavior,
 
-    execute: bool,
-
     pub node_idx: usize,
     pub func_idx: usize,
     pub inputs: Vec<ExecutionInput>,
@@ -98,15 +96,6 @@ pub struct ExecutionGraph {
     e_node_idx_by_id: HashMap<NodeId, usize>,
     pub e_node_processing_order: Vec<usize>,
     pub e_node_execution_order: Vec<usize>,
-}
-enum VisitCause {
-    Terminal,
-    OutputRequest { output_idx: usize },
-    Done,
-}
-struct Visit {
-    e_node_idx: usize,
-    cause: VisitCause,
 }
 
 impl ExecutionNode {
@@ -259,6 +248,16 @@ impl ExecutionGraph {
     fn backward1(&mut self, graph: &Graph) -> ExecutionGraphResult<()> {
         self.e_node_processing_order.clear();
 
+        enum VisitCause {
+            Terminal,
+            OutputRequest { output_idx: usize },
+            Done,
+        }
+        struct Visit {
+            e_node_idx: usize,
+            cause: VisitCause,
+        }
+
         let mut stack: Vec<Visit> = Vec::with_capacity(10);
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
@@ -390,6 +389,16 @@ impl ExecutionGraph {
     fn backward2(&mut self, graph: &Graph) {
         self.e_node_execution_order.clear();
 
+        enum VisitCause {
+            Terminal,
+            OutputRequest { output_idx: usize },
+            Done { execute: bool },
+        }
+        struct Visit {
+            e_node_idx: usize,
+            cause: VisitCause,
+        }
+
         let mut stack: Vec<Visit> = Vec::with_capacity(10);
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
@@ -407,9 +416,9 @@ impl ExecutionGraph {
             let _output_address = match visit.cause {
                 VisitCause::Terminal => None,
                 VisitCause::OutputRequest { output_idx } => Some(output_idx),
-                VisitCause::Done => {
+                VisitCause::Done { execute } => {
                     e_node.processing_state = ProcessState::Backward2;
-                    if e_node.execute {
+                    if execute {
                         self.e_node_execution_order.push(e_node_idx);
                     }
                     continue;
@@ -427,18 +436,19 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
             e_node.processing_state = ProcessState::Processing;
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Done,
-            });
 
-            if match e_node.behavior {
+            let execute = match e_node.behavior {
                 ExecutionBehavior::Impure => !e_node.has_missing_inputs,
                 ExecutionBehavior::Pure => e_node.has_changed_inputs && !e_node.has_missing_inputs,
                 ExecutionBehavior::Once => e_node.output_values.is_none(),
-            } {
-                e_node.execute = true;
+            };
 
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Done { execute },
+            });
+
+            if execute {
                 for input in e_node.inputs.iter() {
                     if match input.state {
                         InputState::Unknown => panic!("Unprocessed input"),
@@ -667,7 +677,7 @@ mod tests {
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
         // assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.active));
-        assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.execute));
+        // assert!(execution_graph.e_nodes.iter().all(|e_node| e_node.execute));
         assert!(execution_graph
             .e_nodes
             .iter()
