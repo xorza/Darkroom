@@ -349,7 +349,8 @@ impl ExecutionGraph {
         self.stack1 = take(&mut stack);
         // Drop nodes past the compacted range.
         self.e_nodes.truncate(write_idx);
-        self.e_node_idx_by_id.retain(|_, idx| *idx < write_idx);
+        self.e_node_idx_by_id
+            .retain(|&id, &mut idx| idx < write_idx && self.e_nodes[idx].id == id);
 
         if is_debug() {
             assert_eq!(self.e_nodes.len(), self.e_node_idx_by_id.len());
@@ -720,6 +721,28 @@ mod tests {
     }
 
     #[test]
+    fn execution_graph_respects_removed_nodes() -> anyhow::Result<()> {
+        // backward1() specifically crashed on this case
+
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        graph.by_name_mut("mult").unwrap().inputs[0] = Input {
+            binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
+            const_value: Some(StaticValue::Int(123)),
+        };
+
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert_eq!(execution_graph.e_nodes.len(), 4);
+
+        Ok(())
+    }
+
+    #[test]
     fn pure_node_skips_consequent_invokations() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
@@ -774,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn func_behavior_controls_execution1() -> anyhow::Result<()> {
+    fn once_node_always_caches() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
 

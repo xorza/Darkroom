@@ -20,6 +20,7 @@ The graph crate exports a `prelude` module that re-exports common graph, data, f
 The editor now imports `Graph` via `graph::prelude::Graph`.
 The editor model exposes `Graph::from_graph` to convert a core graph into the editor view with inferred output counts and a simple grid layout.
 GraphView conversion now calls `Graph::validate()` directly after building the graph.
+Execution graph tests now use descriptive names for removed-node scenarios.
 Editor view model types are split into `editor/src/model/graph_view.rs` and `editor/src/model/node_view.rs`.
 Editor graph serialization now uses `common::FileFormat` (JSON/YAML).
 The editor loads `test_func_lib` to name view-node inputs/outputs based on core function definitions.

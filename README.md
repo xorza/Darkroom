@@ -53,6 +53,7 @@ Execution node updates use shared reset logic to keep state consistent.
 Execution nodes own their own reset behavior for update passes.
 Editor graph conversion now calls core validation directly.
 Execution node port resets reuse a helper to keep input/output sizing consistent.
+Execution graph tests now use descriptive names for removed-node scenarios.
 Execution graph updates handle dynamic graph changes across runs.
 Compute execution follows the execution scheduling order.
 Compute input setup now uses a straight loop to avoid layered iterator chains.
