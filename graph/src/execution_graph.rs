@@ -131,12 +131,11 @@ impl ExecutionNode {
     fn reset_ports_from_func(&mut self, func: &Func) {
         self.inputs.clear();
         self.inputs.reserve(func.inputs.len());
-        for input in &func.inputs {
-            self.inputs.push(ExecutionInput {
+        self.inputs
+            .extend(func.inputs.iter().map(|input| ExecutionInput {
                 required: input.required,
                 ..Default::default()
-            });
-        }
+            }));
 
         self.outputs.clear();
         self.outputs
