@@ -262,7 +262,7 @@ pub fn test_graph() -> Graph {
         id: get_a_node_id,
         func_id: get_a_func_id,
         name: "get_a".to_string(),
-        behavior: NodeBehavior::AsFunction,
+        behavior: NodeBehavior::Once,
         terminal: false,
         inputs: vec![],
         events: vec![],

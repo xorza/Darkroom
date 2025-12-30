@@ -322,10 +322,9 @@ mod tests {
             }),
         });
 
-        func_lib.by_name_mut("get_a").unwrap().behavior = FuncBehavior::Impure;
-
         let mut graph = test_graph();
-        graph.by_name_mut("sum").unwrap().behavior = NodeBehavior::AsFunction;
+        func_lib.by_name_mut("get_a").unwrap().behavior = FuncBehavior::Impure;
+        graph.by_name_mut("get_a").unwrap().behavior = NodeBehavior::AsFunction;
 
         let mut execution_graph = ExecutionGraph::default();
 

@@ -635,16 +635,16 @@ mod tests {
     fn missing_input() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
+
+        // this excludes get_a from graph
         graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 4);
-        // assert!(execution_graph.by_id(get_b_node_id).unwrap().active);
-        // assert!(!execution_graph.by_id(sum_node_id).unwrap().active);
-        // assert!(!execution_graph.by_id(mult_node_id).unwrap().active);
-        // assert!(!execution_graph.by_id(print_node_id).unwrap().active);
+        assert!(execution_graph.by_name("get_a").is_none());
+
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -656,6 +656,8 @@ mod tests {
         assert!(print.has_missing_inputs);
 
         assert!(!get_b.has_changed_inputs);
+        assert!(sum.has_changed_inputs);
+
         assert_eq!(sum.inputs[0].state, InputState::Missing);
         assert_eq!(mult.inputs[0].state, InputState::Missing);
         assert_eq!(print.inputs[0].state, InputState::Missing);
