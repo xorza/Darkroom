@@ -51,16 +51,16 @@ where
         self.items.is_empty()
     }
 
-    pub fn index_of(&self, key: &K) -> Option<usize> {
+    pub fn index_of_key(&self, key: &K) -> Option<usize> {
         self.idx_by_key.get(key).copied()
     }
 
     pub fn by_key(&self, key: &K) -> Option<&V> {
-        self.index_of(key).map(|idx| &self.items[idx])
+        self.index_of_key(key).map(|idx| &self.items[idx])
     }
 
     pub fn by_key_mut(&mut self, key: &K) -> Option<&mut V> {
-        let idx = self.index_of(key)?;
+        let idx = self.index_of_key(key)?;
         Some(&mut self.items[idx])
     }
 
@@ -101,7 +101,7 @@ where
 
         if is_debug() {
             for (idx, v) in self.items.iter().enumerate() {
-                assert_eq!(idx, self.index_of(v.key()).unwrap());
+                assert_eq!(idx, self.index_of_key(v.key()).unwrap());
             }
         }
     }

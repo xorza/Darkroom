@@ -120,8 +120,6 @@ pub struct ExecutionGraph {
     //caches
     #[serde(skip)]
     stack: Vec<Visit>,
-    #[serde(skip)]
-    node_idx_by_id: HashMap<NodeId, usize>,
 }
 
 impl ExecutionNode {
@@ -199,23 +197,12 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.node_idx_by_id.clear();
-        self.node_idx_by_id.extend(
-            graph
-                .nodes
-                .iter()
-                .enumerate()
-                .map(|(idx, node)| (node.id, idx)),
-        );
-
         self.stack.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
         self.backward1(graph, func_lib)?;
         self.forward(graph);
         self.backward2(graph);
-
-        self.node_idx_by_id.clear();
 
         self.validate_with_graph(graph, func_lib);
 
@@ -377,7 +364,10 @@ impl ExecutionGraph {
                         e_node_idx: output_e_node_idx,
                         port_idx: output_binding.output_idx,
                     });
-                    let output_node_idx = self.node_idx_by_id[&output_binding.output_node_id];
+                    let output_node_idx = graph
+                        .nodes
+                        .index_of_key(&output_binding.output_node_id)
+                        .unwrap();
                     stack.push(Visit {
                         node_idx: output_node_idx,
                         e_node_idx: output_e_node_idx,
@@ -640,7 +630,7 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
 
         for input in node.inputs.iter() {
             if let Binding::Output(output_binding) = &input.binding {
-                let output_node = graph.by_id(output_binding.output_node_id).unwrap();
+                let output_node = graph.by_id(&output_binding.output_node_id).unwrap();
                 let output_func = func_lib.by_id(output_node.func_id).unwrap();
                 assert!(output_binding.output_idx < output_func.outputs.len());
             }

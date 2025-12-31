@@ -97,20 +97,21 @@ impl Graph {
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Node> {
+        assert!(!name.is_empty());
         self.nodes.iter().find(|node| node.name == name)
     }
     pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Node> {
+        assert!(!name.is_empty());
         self.nodes.iter_mut().find(|node| node.name == name)
     }
 
-    pub fn by_id(&self, id: NodeId) -> Option<&Node> {
+    pub fn by_id(&self, id: &NodeId) -> Option<&Node> {
         assert!(!id.is_nil());
-        self.nodes.iter().find(|node| node.id == id)
+        self.nodes.by_key(id)
     }
-    pub fn by_id_mut(&mut self, id: NodeId) -> Option<&mut Node> {
+    pub fn by_id_mut(&mut self, id: &NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
-
-        self.nodes.iter_mut().find(|node| node.id == id)
+        self.nodes.by_key_mut(id)
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
@@ -139,7 +140,7 @@ impl Graph {
 
             for input in node.inputs.iter() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    assert!(self.by_id(output_binding.output_node_id).is_some());
+                    assert!(self.by_id(&output_binding.output_node_id).is_some());
                 }
             }
         }
