@@ -214,6 +214,7 @@ impl ExecutionGraph {
                 .map(|(idx, node)| (node.id, idx)),
         );
 
+        self.stack.clear();
         self.e_node_processing_order.clear();
         self.e_node_execution_order.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
@@ -235,7 +236,6 @@ impl ExecutionGraph {
 
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
-        stack.clear();
         stack.reserve(10);
 
         for (node_idx, node) in graph
@@ -413,8 +413,7 @@ impl ExecutionGraph {
             .reserve(self.e_node_processing_order.len());
 
         let mut stack: Vec<Visit> = take(&mut self.stack);
-        stack.clear();
-        stack.reserve(10);
+        assert!(stack.is_empty());
 
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
