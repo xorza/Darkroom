@@ -21,6 +21,8 @@ Keyed vector helpers expose reusable compaction utilities via a key-extracting t
 Keyed vector helpers rebuild runtime index maps after deserialization (details in `NOTES-AI.md`).
 Common utilities include serialization roundtrip coverage for shared containers (details in `NOTES-AI.md`).
 Keyed vector helpers keep index maps consistent on removals (details in `NOTES-AI.md`).
+Keyed vector compaction paths have explicit coverage for swap/append cases (details in `NOTES-AI.md`).
+Keyed vector compaction now uses constructor callbacks for new entries (details in `NOTES-AI.md`).
 Logging uses the tracing ecosystem.
 Execution validation catches invalid bindings earlier.
 Some tests run on the Tokio async execution.

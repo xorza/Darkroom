@@ -70,19 +70,24 @@ where
         Some(&mut self.items[idx])
     }
 
-    pub fn get_or_insert_default(&mut self, key: K) -> usize {
-        if let Some(&idx) = self.idx_by_key.get(&key) {
-            return idx;
-        }
-        let idx = self.items.len();
-        self.items.push(V::default());
-        self.idx_by_key.insert(key, idx);
-        idx
-    }
-
-    pub fn compact_insert_default(&mut self, key: K, write_idx: &mut usize) -> usize {
+    pub fn compact_insert_with(
+        &mut self,
+        key: K,
+        write_idx: &mut usize,
+        create: impl FnOnce() -> V,
+    ) -> usize {
         assert!(*write_idx <= self.items.len());
-        let idx = self.get_or_insert_default(key);
+        let idx = match self.idx_by_key.get(&key).copied() {
+            Some(idx) => idx,
+            None => {
+                let value = create();
+                assert!(*value.key() == key);
+                let idx = self.items.len();
+                self.items.push(value);
+                self.idx_by_key.insert(key, idx);
+                idx
+            }
+        };
         if idx < *write_idx {
             return idx;
         }
@@ -206,5 +211,47 @@ mod tests {
             assert_eq!(item_b.id, 2);
             assert_eq!(item_b.value, 20);
         }
+    }
+
+    #[test]
+    fn compact_insert_with_cases() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.push(TestItem { id: 10, value: 100 });
+        vec.push(TestItem { id: 20, value: 200 });
+        vec.push(TestItem { id: 30, value: 300 });
+
+        let mut write_idx = 0;
+
+        // idx == write_idx
+        let idx = vec.compact_insert_with(10, &mut write_idx, || TestItem { id: 10, value: 0 });
+        assert_eq!(idx, 0);
+        assert_eq!(write_idx, 1);
+        assert_eq!(vec.index_of_key(&10), Some(0));
+
+        // idx > write_idx (swap)
+        let idx = vec.compact_insert_with(30, &mut write_idx, || TestItem { id: 30, value: 0 });
+        assert_eq!(idx, 1);
+        assert_eq!(write_idx, 2);
+        assert_eq!(vec.index_of_key(&30), Some(1));
+        assert_eq!(vec.index_of_key(&20), Some(2));
+
+        // idx < write_idx (already compacted)
+        let idx = vec.compact_insert_with(10, &mut write_idx, || TestItem { id: 10, value: 0 });
+        assert_eq!(idx, 0);
+        assert_eq!(write_idx, 2);
+
+        // new key insert (appends then swaps into write_idx if needed)
+        let idx = vec.compact_insert_with(40, &mut write_idx, || TestItem { id: 40, value: 400 });
+        assert_eq!(idx, 2);
+        assert_eq!(write_idx, 3);
+        assert_eq!(vec.index_of_key(&40), Some(2));
+
+        vec.compact_finish(write_idx);
+        assert_eq!(vec.items.len(), 3);
+        assert_eq!(vec.idx_by_key.len(), 3);
+        assert!(vec.by_key(&20).is_none());
+        assert_eq!(vec.by_key(&10).unwrap().value, 100);
+        assert_eq!(vec.by_key(&30).unwrap().value, 300);
+        assert_eq!(vec.by_key(&40).unwrap().value, 400);
     }
 }

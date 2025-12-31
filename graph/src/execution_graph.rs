@@ -297,7 +297,12 @@ impl ExecutionGraph {
             .enumerate()
             .filter(|&(_, node)| node.terminal)
         {
-            let e_node_idx = self.e_nodes.compact_insert_default(node.id, &mut write_idx);
+            let e_node_idx = self
+                .e_nodes
+                .compact_insert_with(node.id, &mut write_idx, || ExecutionNode {
+                    id: node.id,
+                    ..Default::default()
+                });
 
             stack.push(Visit {
                 node_idx,
@@ -358,9 +363,13 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    let output_e_node_idx = self
-                        .e_nodes
-                        .compact_insert_default(output_binding.output_node_id, &mut write_idx);
+                    let output_id = output_binding.output_node_id;
+                    let output_e_node_idx =
+                        self.e_nodes
+                            .compact_insert_with(output_id, &mut write_idx, || ExecutionNode {
+                                id: output_id,
+                                ..Default::default()
+                            });
                     self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
                         e_node_idx: output_e_node_idx,
                         port_idx: output_binding.output_idx,

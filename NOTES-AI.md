@@ -49,6 +49,8 @@ Recent adjustments:
 - `common/src/key_index_vec.rs` skips serializing `idx_by_key` and rebuilds it from `items` during deserialization, rejecting duplicate keys.
 - `common/src/key_index_vec.rs` includes YAML/JSON/Lua roundtrip tests to ensure deserialization rebuilds index maps correctly.
 - `common/src/key_index_vec.rs` keeps `idx_by_key` in sync when removing items, updating shifted indices after removal.
+- `common/src/key_index_vec.rs` tests cover compact insert and finish behavior for swap, append, and already-compacted paths.
+- `common/src/key_index_vec.rs` compaction now uses a constructor callback for new entries instead of default-only insertion.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
 - Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
 - Execution graph construction now uses a DFS order with cycle detection, input/output binding validation, and ID-to-index maps for faster lookups.
