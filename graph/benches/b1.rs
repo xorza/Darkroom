@@ -1,22 +1,15 @@
 use std::hint::black_box;
-use std::path::Path;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 
-use graph::execution_graph::ExecutionGraph;
-use graph::function::{test_func_lib, TestFuncHooks};
-use graph::graph::Graph;
+use graph::{
+    graph::test_graph,
+    prelude::{test_func_lib, ExecutionGraph, TestFuncHooks},
+};
 
 fn bench_foo(c: &mut Criterion) {
     c.bench_function("foo", |b| {
-        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let graph_path = manifest_dir.join("../test_resources/test_graph.yml");
-        let graph = Graph::from_file(
-            graph_path
-                .to_str()
-                .expect("Benchmark graph path is not valid UTF-8"),
-        )
-        .expect("Failed to load benchmark graph from test_resources");
+        let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         b.iter(|| {

@@ -142,16 +142,8 @@ impl Func {
 }
 
 impl FuncLib {
-    pub fn from_file(file_path: &str) -> anyhow::Result<Self> {
-        let format = FileFormat::from_file_name(file_path)
-            .expect("Failed to infer function library file format from file name");
-        let contents = std::fs::read_to_string(file_path)?;
-        Self::deserialize(&contents, format)
-    }
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let result: Self = deserialize(serialized, format)?;
-
-        Ok(result)
+        Ok(deserialize(serialized, format)?)
     }
     pub fn serialize(&self, format: FileFormat) -> String {
         serialize(&self, format)
@@ -159,11 +151,11 @@ impl FuncLib {
 
     pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
         assert!(!id.is_nil());
-        self.funcs.by_key(&id)
+        self.funcs.by_key(id)
     }
     pub fn by_id_mut(&mut self, id: &FuncId) -> Option<&mut Func> {
         assert!(!id.is_nil());
-        self.funcs.by_key_mut(&id)
+        self.funcs.by_key_mut(id)
     }
     pub fn by_name(&self, name: &str) -> Option<&Func> {
         assert!(!name.is_empty());

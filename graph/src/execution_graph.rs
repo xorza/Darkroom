@@ -189,7 +189,6 @@ impl ExecutionGraph {
     pub fn serialize(&self, format: FileFormat) -> String {
         common::serialize(self, format)
     }
-
     pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
         Ok(common::deserialize(serialized, format)?)
     }

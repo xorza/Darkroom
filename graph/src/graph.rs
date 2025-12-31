@@ -117,12 +117,6 @@ impl Graph {
     pub fn serialize(&self, format: FileFormat) -> String {
         serialize(self, format)
     }
-    pub fn from_file(path: &str) -> anyhow::Result<Graph> {
-        let format = FileFormat::from_file_name(path)
-            .expect("Failed to infer graph file format from file name");
-        let contents = std::fs::read_to_string(path)?;
-        Ok(Self::deserialize(&contents, format)?)
-    }
     pub fn deserialize(serialized: &str, format: FileFormat) -> SerdeFormatResult<Graph> {
         let graph: Self = deserialize(serialized, format)?;
         graph.validate();
@@ -203,6 +197,7 @@ impl Binding {
             _ => None,
         }
     }
+
     pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputBinding> {
         match self {
             Binding::Output(output_binding) => Some(output_binding),
