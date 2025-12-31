@@ -269,7 +269,7 @@ impl ExecutionGraph {
                     message: source.to_string(),
                 });
             e_node.run_time = start.elapsed().as_secs_f64();
-            
+
             if let Err(error) = invoke_result {
                 e_node.error = Some(error.clone());
                 return Err(error);

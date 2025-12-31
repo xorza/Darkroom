@@ -28,9 +28,15 @@ where
     }
 
     pub fn remove_by_key(&mut self, key: &K) -> Option<V> {
-        self.idx_by_key
-            .remove(key)
-            .map(|idx| self.items.remove(idx))
+        let idx = self.idx_by_key.remove(key)?;
+        let removed = self.items.remove(idx);
+        assert!(*removed.key() == *key);
+
+        for (pos, item) in self.items.iter().enumerate().skip(idx) {
+            self.idx_by_key.insert(*item.key(), pos);
+        }
+
+        Some(removed)
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
