@@ -48,6 +48,7 @@ Recent adjustments:
 - `common/src/key_index_vec.rs` includes reusable compaction helpers driven by a `KeyIndexKey` trait to keep the index map in sync.
 - `common/src/key_index_vec.rs` skips serializing `idx_by_key` and rebuilds it from `items` during deserialization, rejecting duplicate keys.
 - `common/src/key_index_vec.rs` includes YAML/JSON/Lua roundtrip tests to ensure deserialization rebuilds index maps correctly.
+- `common/src/key_index_vec.rs` keeps `idx_by_key` in sync when removing items, updating shifted indices after removal.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
 - Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
 - Execution graph construction now uses a DFS order with cycle detection, input/output binding validation, and ID-to-index maps for faster lookups.
@@ -118,6 +119,7 @@ Execution graph now rebuilds the `e_node_idx_by_id` cache each update and uses i
 Execution node cache rebuild now drops execution nodes missing from the current graph.
 Execution node cache update compacts in-place with swaps and truncation to minimize allocations.
 Execution node cache compaction includes inline comments describing the swap-and-truncate flow.
+Graph input binding assignment now uses direct `is_some` checks on `const_value` for clarity.
 Function validation now asserts that no-output functions are impure.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 `graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.

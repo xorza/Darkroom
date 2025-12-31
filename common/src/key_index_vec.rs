@@ -10,7 +10,7 @@ pub trait KeyIndexKey<K> {
     fn key(&self) -> &K;
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default + KeyIndexKey<K>> {
     pub items: Vec<V>,
     #[serde(skip)]
@@ -25,6 +25,12 @@ where
     pub fn push(&mut self, v: V) {
         self.idx_by_key.insert(*v.key(), self.items.len());
         self.items.push(v);
+    }
+
+    pub fn remove_by_key(&mut self, key: &K) -> Option<V> {
+        self.idx_by_key
+            .remove(key)
+            .map(|idx| self.items.remove(idx))
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, V> {

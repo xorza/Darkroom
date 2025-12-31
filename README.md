@@ -20,6 +20,7 @@ Keyed vector helpers support index syntax for key access (details in `NOTES-AI.m
 Keyed vector helpers expose reusable compaction utilities via a key-extracting trait (details in `NOTES-AI.md`).
 Keyed vector helpers rebuild runtime index maps after deserialization (details in `NOTES-AI.md`).
 Common utilities include serialization roundtrip coverage for shared containers (details in `NOTES-AI.md`).
+Keyed vector helpers keep index maps consistent on removals (details in `NOTES-AI.md`).
 Logging uses the tracing ecosystem.
 Execution validation catches invalid bindings earlier.
 Some tests run on the Tokio async execution.
@@ -49,6 +50,7 @@ Execution graph assertions include node indices and IDs for easier debugging.
 Execution graph assertions include mismatch context to speed up diagnosis.
 Execution graph maintenance includes small readability cleanups.
 Execution graph input state propagation keeps behavior-specific caching checks explicit.
+Graph input bindings now use direct `is_some` checks for const binding assignment (details in `NOTES-AI.md`).
 Documentation cleanup includes minor comment fixes.
 Execution graph documentation now clarifies propagation and scheduling comments.
 Graph file loading now lifts serde-format errors into anyhow-based call sites.

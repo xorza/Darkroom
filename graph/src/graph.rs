@@ -1,3 +1,4 @@
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 
@@ -55,10 +56,14 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
 }
-
+impl KeyIndexKey<NodeId> for Node {
+    fn key(&self) -> &NodeId {
+        &self.id
+    }
+}
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
-    pub nodes: Vec<Node>,
+    pub nodes: KeyIndexVec<NodeId, Node>,
 }
 
 impl Graph {
@@ -71,7 +76,7 @@ impl Graph {
     pub fn remove_by_id(&mut self, id: NodeId) {
         assert!(!id.is_nil());
 
-        self.nodes.retain(|node| node.id != id);
+        self.nodes.remove_by_key(&id);
 
         self.nodes
             .iter_mut()
@@ -83,10 +88,11 @@ impl Graph {
                 _ => None,
             })
             .for_each(|input| {
-                input.binding = input
-                    .const_value
-                    .as_ref()
-                    .map_or(Binding::None, |_| Binding::Const);
+                input.binding = if input.const_value.is_some() {
+                    Binding::Const
+                } else {
+                    Binding::None
+                };
             });
     }
 
