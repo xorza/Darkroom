@@ -125,7 +125,7 @@ pub struct ExecutionGraph {
 
     //caches
     #[serde(skip)]
-    stack: Vec<Visit>,
+    stack1: Vec<Visit>,
     #[serde(skip)]
     stack2: Vec<Visit2>,
     #[serde(skip)]
@@ -207,17 +207,6 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.backward1(graph, func_lib)?;
-        self.forward(graph);
-        self.backward2(graph);
-
-        self.validate_with_graph(graph, func_lib);
-
-        Ok(())
-    }
-
-    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
-    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.node_idx_by_id.clear();
         self.node_idx_by_id.extend(
             graph
@@ -228,11 +217,27 @@ impl ExecutionGraph {
         );
 
         self.e_node_processing_order.clear();
-        self.e_node_processing_order.reserve(graph.nodes.len());
+        self.e_node_execution_order.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
+        self.backward1(graph, func_lib)?;
+        self.forward(graph);
+        self.backward2(graph);
+
+        self.node_idx_by_id.clear();
+
+        self.validate_with_graph(graph, func_lib);
+
+        Ok(())
+    }
+
+    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
+    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
+        self.e_node_processing_order.reserve(graph.nodes.len());
+
         let mut write_idx = 0;
-        let mut stack: Vec<Visit> = take(&mut self.stack);
+        let mut stack: Vec<Visit> = take(&mut self.stack1);
+        stack.clear();
         stack.reserve(10);
 
         for (node_idx, node) in graph
@@ -321,9 +326,7 @@ impl ExecutionGraph {
             }
         }
 
-        self.node_idx_by_id.clear();
-        self.stack = take(&mut stack);
-
+        self.stack1 = take(&mut stack);
         self.e_nodes.compact_finish(write_idx);
 
         if is_debug() {
@@ -408,9 +411,11 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect the execution order.
     fn backward2(&mut self, graph: &Graph) {
-        self.e_node_execution_order.clear();
+        self.e_node_processing_order
+            .reserve(self.e_node_processing_order.len());
 
         let mut stack: Vec<Visit2> = take(&mut self.stack2);
+        stack.clear();
         stack.reserve(10);
 
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
