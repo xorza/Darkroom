@@ -13,7 +13,7 @@ pub trait KeyIndexKey<K> {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default + KeyIndexKey<K>> {
     pub items: Vec<V>,
-    #[serde(skip)]
+    #[serde(skip)] // rebuild on deserialization
     pub idx_by_key: HashMap<K, usize>,
 }
 
