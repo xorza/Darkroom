@@ -217,6 +217,7 @@ impl ExecutionGraph {
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
         self.e_node_processing_order.clear();
+        self.e_node_processing_order.reserve(graph.nodes.len());
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
         self.node_idx_by_id.clear();
@@ -430,7 +431,6 @@ impl ExecutionGraph {
             e_node.has_missing_inputs = has_missing_inputs;
             e_node.process_state = ProcessState::Forward;
         }
-        self.e_node_processing_order.clear();
     }
 
     // Walk upstream dependencies to collect the execution order.
