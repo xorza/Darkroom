@@ -226,28 +226,7 @@ impl ExecutionGraph {
                 .map(|(idx, node)| (node.id, idx)),
         );
 
-        // Compact e_nodes in-place to keep only nodes that still exist in graph.
-        // We reuse existing ExecutionNode slots to avoid extra allocations.
         let mut write_idx = 0;
-        // Look up the current slot for this node id (if any), otherwise append a new slot.
-        let mut get_e_node_idx = |this: &mut Self, node_id: &NodeId| {
-            let e_node_idx = this.e_nodes.get_or_insert_default(*node_id);
-            if e_node_idx < write_idx {
-                e_node_idx
-            } else {
-                if e_node_idx > write_idx {
-                    this.e_nodes.items.swap(e_node_idx, write_idx);
-                    this.e_nodes
-                        .idx_by_key
-                        .insert(this.e_nodes[e_node_idx].id, e_node_idx);
-                }
-                this.e_nodes.idx_by_key.insert(*node_id, write_idx);
-
-                write_idx += 1;
-                write_idx - 1
-            }
-        };
-
         let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.reserve(10);
 
@@ -257,7 +236,10 @@ impl ExecutionGraph {
             .enumerate()
             .filter(|&(_, node)| node.terminal)
         {
-            let e_node_idx = get_e_node_idx(self, &node.id);
+            let e_node_idx =
+                self.e_nodes
+                    .compact_insert_default_with(node.id, &mut write_idx, |e_node| e_node.id);
+
             stack.push(Visit {
                 node_idx,
                 e_node_idx,
@@ -317,7 +299,11 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    let output_e_node_idx = get_e_node_idx(self, &output_binding.output_node_id);
+                    let output_e_node_idx = self.e_nodes.compact_insert_default_with(
+                        output_binding.output_node_id,
+                        &mut write_idx,
+                        |e_node| e_node.id,
+                    );
                     self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
                         e_node_idx: output_e_node_idx,
                         port_idx: output_binding.output_idx,
@@ -336,11 +322,9 @@ impl ExecutionGraph {
 
         self.node_idx_by_id.clear();
         self.stack = take(&mut stack);
-        // Drop nodes past the compacted range.
-        self.e_nodes.items.truncate(write_idx);
+
         self.e_nodes
-            .idx_by_key
-            .retain(|&id, &mut idx| idx < write_idx && self.e_nodes.items[idx].id == id);
+            .compact_finish_with(write_idx, |e_node| e_node.id);
 
         if is_debug() {
             assert_eq!(self.e_nodes.len(), self.e_nodes.idx_by_key.len());

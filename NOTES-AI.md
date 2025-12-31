@@ -44,6 +44,8 @@ See `common/src` for implementation details.
 
 Recent adjustments:
 - `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
+- `common/src/key_index_vec.rs` supports key-based index syntax with invariant assertions for missing keys.
+- `common/src/key_index_vec.rs` includes reusable compaction helpers that accept a key extractor to keep the index map in sync.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
 - Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
 - Execution graph construction now uses a DFS order with cycle detection, input/output binding validation, and ID-to-index maps for faster lookups.

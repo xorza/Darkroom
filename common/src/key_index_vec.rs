@@ -54,6 +54,55 @@ where
         self.idx_by_key.insert(key, idx);
         idx
     }
+
+    pub fn compact_insert_default_with<F>(
+        &mut self,
+        key: K,
+        write_idx: &mut usize,
+        mut key_of: F,
+    ) -> usize
+    where
+        F: FnMut(&V) -> K,
+    {
+        assert!(
+            *write_idx <= self.items.len(),
+            "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
+            self.items.len()
+        );
+        let idx = self.get_or_insert_default(key);
+        if idx < *write_idx {
+            return idx;
+        }
+
+        if idx > *write_idx {
+            self.items.swap(idx, *write_idx);
+            let swapped_key = key_of(&self.items[idx]);
+            self.idx_by_key.insert(swapped_key, idx);
+        }
+
+        self.idx_by_key.insert(key, *write_idx);
+        *write_idx += 1;
+        *write_idx - 1
+    }
+
+    pub fn compact_finish_with<F>(&mut self, write_idx: usize, mut key_of: F)
+    where
+        F: FnMut(&V) -> K,
+    {
+        assert!(
+            write_idx <= self.items.len(),
+            "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
+            self.items.len()
+        );
+        self.items.truncate(write_idx);
+        self.idx_by_key
+            .retain(|&id, &mut idx| idx < write_idx && key_of(&self.items[idx]) == id);
+        assert_eq!(
+            self.items.len(),
+            self.idx_by_key.len(),
+            "KeyIndexVec invariant violated: items and idx_by_key length mismatch"
+        );
+    }
 }
 
 impl<K, V> Index<usize> for KeyIndexVec<K, V>
