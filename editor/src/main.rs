@@ -187,8 +187,10 @@ impl ScenariumApp {
             *slot = None;
         }
 
-        let result = self.execution_graph.update(&self.graph, &self.func_lib);
-        let result = self.execution_graph.execute(&self.graph, &self.func_lib);
+        let result = self
+            .execution_graph
+            .update(&self.graph, &self.func_lib)
+            .and_then(|()| self.execution_graph.execute(&self.graph, &self.func_lib));
 
         match result {
             Ok(()) => {

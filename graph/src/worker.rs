@@ -71,8 +71,9 @@ impl Worker {
                 WorkerMessage::RunOnce(graph) => {
                     // todo reuse exe graph
                     let mut execution_graph = ExecutionGraph::default();
-                    let result = execution_graph.update(&graph, &func_lib);
-                    let result = execution_graph.execute(&graph, &func_lib);
+                    let result = execution_graph
+                        .update(&graph, &func_lib)
+                        .and_then(|()| execution_graph.execute(&graph, &func_lib));
 
                     (*compute_callback.lock().await)(result);
                 }
@@ -118,8 +119,9 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    let result = execution_graph.update(&graph, func_lib);
-                    let result = execution_graph.execute(&graph, func_lib);
+                    let result = execution_graph
+                        .update(&graph, func_lib)
+                        .and_then(|()| execution_graph.execute(&graph, func_lib));
 
                     (*compute_callback.lock().await)(result);
                 }
