@@ -72,19 +72,19 @@ where
 
     pub fn compact_insert_with(
         &mut self,
-        key: K,
+        key: &K,
         write_idx: &mut usize,
         create: impl FnOnce() -> V,
     ) -> usize {
         assert!(*write_idx <= self.items.len());
-        let idx = match self.idx_by_key.get(&key).copied() {
+        let idx = match self.idx_by_key.get(key).copied() {
             Some(idx) => idx,
             None => {
                 let value = create();
-                assert!(*value.key() == key);
+                assert!(*value.key() == *key);
                 let idx = self.items.len();
                 self.items.push(value);
-                self.idx_by_key.insert(key, idx);
+                self.idx_by_key.insert(*key, idx);
                 idx
             }
         };
@@ -98,7 +98,7 @@ where
             self.idx_by_key.insert(swapped_key, idx);
         }
 
-        self.idx_by_key.insert(key, *write_idx);
+        self.idx_by_key.insert(*key, *write_idx);
         *write_idx += 1;
         *write_idx - 1
     }
@@ -223,25 +223,25 @@ mod tests {
         let mut write_idx = 0;
 
         // idx == write_idx
-        let idx = vec.compact_insert_with(10, &mut write_idx, || TestItem { id: 10, value: 0 });
+        let idx = vec.compact_insert_with(&10, &mut write_idx, || TestItem { id: 10, value: 0 });
         assert_eq!(idx, 0);
         assert_eq!(write_idx, 1);
         assert_eq!(vec.index_of_key(&10), Some(0));
 
         // idx > write_idx (swap)
-        let idx = vec.compact_insert_with(30, &mut write_idx, || TestItem { id: 30, value: 0 });
+        let idx = vec.compact_insert_with(&30, &mut write_idx, || TestItem { id: 30, value: 0 });
         assert_eq!(idx, 1);
         assert_eq!(write_idx, 2);
         assert_eq!(vec.index_of_key(&30), Some(1));
         assert_eq!(vec.index_of_key(&20), Some(2));
 
         // idx < write_idx (already compacted)
-        let idx = vec.compact_insert_with(10, &mut write_idx, || TestItem { id: 10, value: 0 });
+        let idx = vec.compact_insert_with(&10, &mut write_idx, || TestItem { id: 10, value: 0 });
         assert_eq!(idx, 0);
         assert_eq!(write_idx, 2);
 
         // new key insert (appends then swaps into write_idx if needed)
-        let idx = vec.compact_insert_with(40, &mut write_idx, || TestItem { id: 40, value: 400 });
+        let idx = vec.compact_insert_with(&40, &mut write_idx, || TestItem { id: 40, value: 400 });
         assert_eq!(idx, 2);
         assert_eq!(write_idx, 3);
         assert_eq!(vec.index_of_key(&40), Some(2));
