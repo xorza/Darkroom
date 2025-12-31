@@ -1,26 +1,36 @@
 use std::fmt::Debug;
+use std::mem::take;
 use std::ops::{Index, IndexMut};
 
 use crate::data::{DataType, DynamicValue};
-use crate::execution_graph::{ExecutionGraph, ExecutionGraphError};
+use crate::execution_graph::{ExecutionBehavior, ExecutionGraph, ExecutionGraphError, InputState};
 use crate::function::{FuncId, FuncLib};
 use crate::graph::{Binding, Graph, NodeId};
 use crate::prelude::InvokeCache;
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+enum ProcessState {
+    #[default]
+    None,
+    Processing,
+    Processed,
+}
 #[derive(Debug)]
 enum VisitCause {
     Terminal,
-    OutputRequest { output_idx: usize },
+    OutputRequest,
     Done { execute: bool },
 }
 #[derive(Debug)]
 struct Visit {
     e_node_idx: usize,
+    c_node_idx: usize,
     cause: VisitCause,
 }
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -28,7 +38,7 @@ pub struct ComputeNode {
     pub id: NodeId,
 
     pub e_node_idx: usize,
-
+    process_state: ProcessState,
     pub run_time: f64,
     pub error: Option<ComputeError>,
 
@@ -40,9 +50,16 @@ pub struct ComputeNode {
     #[cfg(debug_assertions)]
     pub name: String,
 }
+impl KeyIndexKey<NodeId> for ComputeNode {
+    fn key(&self) -> NodeId {
+        self.id
+    }
+}
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Compute {
-    c_nodes: Vec<ComputeNode>,
+    pub c_nodes: KeyIndexVec<NodeId, ComputeNode>,
+    pub c_node_execution_order: Vec<usize>,
+
     #[serde(skip)]
     stack: Vec<Visit>,
 }
@@ -58,9 +75,121 @@ pub enum ComputeError {
     },
 }
 
+impl ComputeNode {
+    pub fn reset(&mut self) {
+        self.e_node_idx = 0;
+        self.process_state = ProcessState::None;
+        self.run_time = 0.0;
+        self.error = None;
+    }
+}
+
 pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
+    fn asd(&mut self, graph: &Graph, _func_lib: &FuncLib, execution_graph: &ExecutionGraph) {
+        self.c_node_execution_order.clear();
+        self.c_node_execution_order
+            .reserve(execution_graph.e_nodes.len());
+        self.c_nodes.iter_mut().for_each(|c_node| c_node.reset());
+
+        let mut write_idx = 0;
+        let mut stack: Vec<Visit> = take(&mut self.stack);
+        stack.reserve(10);
+
+        for (e_node_idx, e_node) in execution_graph
+            .e_nodes
+            .iter()
+            .enumerate()
+            .filter(|&(_, e_node)| graph.nodes[e_node.node_idx].terminal)
+        {
+            let c_node_idx = self
+                .c_nodes
+                .compact_insert_default(e_node.id, &mut write_idx);
+
+            stack.push(Visit {
+                e_node_idx,
+                c_node_idx,
+                cause: VisitCause::Terminal,
+            });
+        }
+
+        while let Some(visit) = stack.pop() {
+            let c_node_idx = visit.c_node_idx;
+            let c_node = &mut self.c_nodes[c_node_idx];
+
+            match visit.cause {
+                VisitCause::Terminal => {}
+                VisitCause::OutputRequest => {}
+                VisitCause::Done { execute } => {
+                    c_node.process_state = ProcessState::Processed;
+                    if execute {
+                        self.c_node_execution_order.push(c_node_idx);
+                    }
+                    continue;
+                }
+            };
+
+            match c_node.process_state {
+                ProcessState::None => {}
+                ProcessState::Processing => panic!(
+                    "Cycle detected too late. Should have been caught earlier in backward1()"
+                ),
+                ProcessState::Processed => continue,
+            }
+
+            let e_node = &execution_graph.e_nodes[visit.e_node_idx];
+            c_node.id = e_node.id;
+            c_node.name.clear();
+            c_node.name.push_str(&e_node.name);
+            c_node.e_node_idx = visit.e_node_idx;
+
+            let execute = match e_node.behavior {
+                ExecutionBehavior::Impure => true,
+                ExecutionBehavior::Pure => {
+                    c_node.output_values.is_none() || e_node.has_changed_inputs
+                }
+                ExecutionBehavior::Once => c_node.output_values.is_none(),
+            } && !e_node.has_missing_inputs;
+
+            c_node.process_state = ProcessState::Processing;
+            stack.push(Visit {
+                e_node_idx: visit.e_node_idx,
+                c_node_idx,
+                cause: VisitCause::Done { execute },
+            });
+
+            if execute {
+                let node = &graph.nodes[e_node.node_idx];
+                assert_eq!(e_node.inputs.len(), node.inputs.len());
+                for (e_input, input) in e_node.inputs.iter().zip(node.inputs.iter()) {
+                    if match e_input.state {
+                        InputState::Unchanged | InputState::Missing => false,
+                        InputState::Changed => true,
+                        InputState::Unknown => panic!("Unprocessed input"),
+                    } {
+                        if let Binding::Output(output_binding) = &input.binding {
+                            let c_node_idx = self.c_nodes.compact_insert_default(
+                                output_binding.output_node_id,
+                                &mut write_idx,
+                            );
+                            let output_address = e_input.output_address.as_ref().unwrap();
+
+                            stack.push(Visit {
+                                e_node_idx: output_address.e_node_idx,
+                                c_node_idx,
+                                cause: VisitCause::OutputRequest,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        self.c_nodes.compact_finish(write_idx);
+        self.stack = take(&mut stack);
+    }
+
     pub fn run(
         self,
         graph: &Graph,

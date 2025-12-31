@@ -120,7 +120,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    // e_node_idx_by_id: HashMap<NodeId, usize>,
     e_node_processing_order: Vec<usize>,
     pub e_node_execution_order: Vec<usize>,
 
@@ -424,8 +423,7 @@ impl ExecutionGraph {
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node_idx = visit.e_node_idx;
-            let e_node = &mut self.e_nodes[e_node_idx];
+            let e_node = &mut self.e_nodes[visit.e_node_idx];
 
             let _output_address = match visit.cause {
                 Visit2Cause::Terminal => None,
@@ -433,7 +431,7 @@ impl ExecutionGraph {
                 Visit2Cause::Done { execute } => {
                     e_node.process_state = ProcessState::Backward2;
                     if execute {
-                        self.e_node_execution_order.push(e_node_idx);
+                        self.e_node_execution_order.push(visit.e_node_idx);
                     }
                     continue;
                 }
@@ -460,7 +458,7 @@ impl ExecutionGraph {
 
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit2 {
-                e_node_idx,
+                e_node_idx: visit.e_node_idx,
                 cause: Visit2Cause::Done { execute },
             });
 
