@@ -139,7 +139,7 @@ impl ExecutionNode {
             self.name = take(&mut prev_state.name);
         }
     }
-    fn refresh(&mut self, node: &Node, func: &Func, node_idx: usize, func_idx: usize) {
+    fn refresh(&mut self, node_idx: usize, node: &Node, func_idx: usize, func: &Func) {
         self.id = node.id;
         self.node_idx = node_idx;
         self.func_idx = func_idx;
@@ -354,13 +354,9 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            let func_idx = func_lib
-                .funcs
-                .iter()
-                .position(|func| func.id == node.func_id)
-                .expect("FuncLib missing function for graph node func_id");
+            let func_idx = func_lib.funcs.index_of_key(&node.func_id).unwrap();
             let func = &func_lib.funcs[func_idx];
-            e_node.refresh(node, func, visit.node_idx, func_idx);
+            e_node.refresh(visit.node_idx, node, func_idx, func);
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
             }
