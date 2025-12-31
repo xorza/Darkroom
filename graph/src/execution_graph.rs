@@ -64,7 +64,7 @@ pub enum ExecutionBehavior {
 enum VisitCause {
     Terminal,
     OutputRequest { output_idx: usize },
-    Done { execute: bool },
+    Done,
 }
 #[derive(Debug)]
 struct Visit {
@@ -323,7 +323,7 @@ impl ExecutionGraph {
                         e_node.outputs[output_idx] = ExecutionOutput::Used
                     }
                 }
-                VisitCause::Done { .. } => {
+                VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
                     self.e_node_exe_order.push(e_node_idx);
@@ -347,7 +347,7 @@ impl ExecutionGraph {
             stack.push(Visit {
                 node_idx: visit.node_idx,
                 e_node_idx,
-                cause: VisitCause::Done { execute: false },
+                cause: VisitCause::Done,
             });
 
             let func_idx = func_lib
@@ -487,10 +487,9 @@ impl ExecutionGraph {
 
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
-                VisitCause::Done { execute } => {
-                    if execute {
-                        self.e_node_exe_order.push(visit.e_node_idx);
-                    }
+                VisitCause::Done => {
+                    assert_eq!(e_node.process_state, ProcessState::Processing);
+                    self.e_node_exe_order.push(visit.e_node_idx);
                     e_node.process_state = ProcessState::Backward2;
                     continue;
                 }
@@ -507,16 +506,14 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
 
-            e_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                node_idx: 0,
-                e_node_idx: visit.e_node_idx,
-                cause: VisitCause::Done {
-                    execute: e_node.wants_execute,
-                },
-            });
-
             if e_node.wants_execute {
+                e_node.process_state = ProcessState::Processing;
+                stack.push(Visit {
+                    node_idx: 0,
+                    e_node_idx: visit.e_node_idx,
+                    cause: VisitCause::Done,
+                });
+
                 for input in e_node.inputs.iter() {
                     if match input.state {
                         InputState::Unchanged | InputState::Missing => false,
@@ -532,6 +529,8 @@ impl ExecutionGraph {
                         }
                     }
                 }
+            } else {
+                e_node.process_state = ProcessState::Backward2;
             }
         }
 
