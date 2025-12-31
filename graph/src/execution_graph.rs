@@ -240,7 +240,7 @@ impl ExecutionGraph {
 
                         let output_values = self.e_nodes[output_address.e_node_idx]
                             .output_values
-                            .as_mut()
+                            .as_ref()
                             .expect("Output values missing for bound node; check execution order");
 
                         output_values[output_binding.output_idx].clone()
@@ -248,7 +248,7 @@ impl ExecutionGraph {
                 };
 
                 let data_type = &func.inputs[input_idx].data_type;
-                inputs[input_idx] = convert_type(&value, data_type);
+                inputs[input_idx] = convert_type(value, data_type);
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -269,6 +269,7 @@ impl ExecutionGraph {
                     message: source.to_string(),
                 });
             e_node.run_time = start.elapsed().as_secs_f64();
+            
             if let Err(error) = invoke_result {
                 e_node.error = Some(error.clone());
                 return Err(error);
@@ -623,7 +624,7 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
     }
 }
 
-fn convert_type(src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
+fn convert_type(src_value: DynamicValue, dst_data_type: &DataType) -> DynamicValue {
     let src_data_type = src_value.data_type();
     if *src_data_type == *dst_data_type {
         return src_value.clone();
