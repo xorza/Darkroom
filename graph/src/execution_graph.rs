@@ -16,23 +16,17 @@ use crate::prelude::FuncId;
 use common::{is_debug, FileFormat};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
-pub enum ExecutionGraphError {
-    #[error("Cycle detected while building execution graph at node {node_id:?}")]
-    CycleDetected { node_id: NodeId },
-}
-
-type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
-
-#[derive(Debug, Error, Clone, Serialize, Deserialize)]
-pub enum ComputeError {
+pub enum ExecutionError {
     #[error("Function invocation failed for function {function_id:?}: {message}")]
     Invoke {
         function_id: FuncId,
         message: String,
     },
+    #[error("Cycle detected while building execution graph at node {node_id:?}")]
+    CycleDetected { node_id: NodeId },
 }
 
-pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
+pub type ExecutionResult<T> = std::result::Result<T, ExecutionError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PortAddress {
@@ -103,7 +97,7 @@ pub struct ExecutionNode {
     process_state: ProcessState,
 
     pub run_time: f64,
-    pub error: Option<ComputeError>,
+    pub error: Option<ExecutionError>,
 
     #[serde(skip)]
     pub(crate) cache: InvokeCache,
@@ -113,7 +107,6 @@ pub struct ExecutionNode {
     #[cfg(debug_assertions)]
     pub name: String,
 }
-
 impl KeyIndexKey<NodeId> for ExecutionNode {
     fn key(&self) -> NodeId {
         self.id
@@ -204,7 +197,7 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution state from the current graph and function library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
         self.node_idx_by_id.clear();
@@ -232,7 +225,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub fn run(&mut self, graph: &Graph, func_lib: &FuncLib) -> ComputeResult<()> {
+    pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         let mut inputs: Args = Args::default();
 
         for e_node_idx in self.e_node_execution_order.iter().copied() {
@@ -287,7 +280,7 @@ impl ExecutionGraph {
                     inputs.as_slice(),
                     outputs.as_mut_slice(),
                 )
-                .map_err(|source| ComputeError::Invoke {
+                .map_err(|source| ExecutionError::Invoke {
                     function_id: node.func_id,
                     message: source.to_string(),
                 });
@@ -305,7 +298,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
-    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
+    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         self.e_node_processing_order.reserve(graph.nodes.len());
 
         let mut write_idx = 0;
@@ -351,7 +344,7 @@ impl ExecutionGraph {
                     continue;
                 }
                 ProcessState::Processing => {
-                    return Err(ExecutionGraphError::CycleDetected { node_id: e_node.id });
+                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                 }
                 ProcessState::None => {}
                 ProcessState::Forward | ProcessState::Backward2 => {
@@ -694,12 +687,14 @@ fn convert_type(src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicVa
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use super::*;
     use crate::data::{DynamicValue, StaticValue};
     use crate::function::{test_func_lib, TestFuncHooks};
     use crate::graph::{test_graph, Input, NodeBehavior};
     use common::FileFormat;
+    use tokio::sync::Mutex;
 
     #[test]
     fn simple_run() -> anyhow::Result<()> {
@@ -918,12 +913,169 @@ mod tests {
             .update(&graph, &func_lib)
             .expect_err("Expected cycle detection error");
         match err {
-            ExecutionGraphError::CycleDetected { node_id } => {
+            ExecutionError::CycleDetected { node_id } => {
                 assert_eq!(
                     node_id,
                     NodeId::from_str("579ae1d6-10a3-4906-8948-135cb7d7508b").unwrap()
                 );
             }
+            _ => panic!("Unexpected error"),
         }
+    }
+
+    #[derive(Debug)]
+    struct TestValues {
+        a: i64,
+        b: i64,
+        result: i64,
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn simple_compute_test() -> anyhow::Result<()> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+
+        let test_values_a = test_values.clone();
+        let test_values_b = test_values.clone();
+        let test_values_result = test_values.clone();
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Box::new(move || test_values_a.try_lock().unwrap().a),
+            get_b: Box::new(move || test_values_b.try_lock().unwrap().b),
+            print: Box::new(move |result| {
+                test_values_result.try_lock().unwrap().result = result;
+            }),
+        });
+
+        let graph = test_graph();
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+        assert_eq!(test_values.try_lock()?.result, 35);
+
+        // get_b is pure, so changing this should not affect result
+        test_values.try_lock()?.b = 7;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+        assert_eq!(test_values.try_lock()?.result, 35);
+
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+
+        assert_eq!(test_values.try_lock()?.result, 63);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn default_input_value() -> anyhow::Result<()> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+        let test_values_result = test_values.clone();
+
+        let func_lib = test_func_lib(TestFuncHooks {
+            print: Box::new(move |result| {
+                test_values_result.try_lock().unwrap().result = result;
+            }),
+            ..TestFuncHooks::default()
+        });
+
+        let mut graph = test_graph();
+
+        {
+            let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
+            sum_inputs[0].const_value = Some(StaticValue::from(29));
+            sum_inputs[0].binding = Binding::Const;
+            sum_inputs[1].const_value = Some(StaticValue::from(11));
+            sum_inputs[1].binding = Binding::Const;
+        }
+
+        {
+            let mult_inputs = &mut graph.by_name_mut("mult").unwrap().inputs;
+            mult_inputs[1].const_value = Some(StaticValue::from(9));
+            mult_inputs[1].binding = Binding::Const;
+        }
+
+        let mut execution_graph = ExecutionGraph::default();
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+
+        assert_eq!(test_values.try_lock()?.result, 360);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_value() -> anyhow::Result<()> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+
+        let test_values_a = test_values.clone();
+        let test_values_b = test_values.clone();
+        let test_values_result = test_values.clone();
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Box::new(move || {
+                let mut guard = test_values_a.try_lock().unwrap();
+                let a1 = guard.a;
+                guard.a += 1;
+
+                a1
+            }),
+            get_b: Box::new(move || {
+                let mut guard = test_values_b.try_lock().unwrap();
+                let b1 = guard.b;
+                guard.b += 1;
+                if b1 == 6 {
+                    panic!("Unexpected call to get_b");
+                }
+
+                b1
+            }),
+            print: Box::new(move |result| {
+                test_values_result.try_lock().unwrap().result = result;
+            }),
+        });
+
+        let mut graph = test_graph();
+        func_lib.by_name_mut("get_a").unwrap().behavior = FuncBehavior::Impure;
+        graph.by_name_mut("get_a").unwrap().behavior = NodeBehavior::AsFunction;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+
+        // assert that both nodes were called
+        {
+            let guard = test_values.try_lock()?;
+            assert_eq!(guard.a, 3);
+            assert_eq!(guard.b, 6);
+            assert_eq!(guard.result, 35);
+        }
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute(&graph, &func_lib)?;
+
+        // assert that node was called again
+        let guard = test_values.try_lock()?;
+        assert_eq!(guard.a, 4);
+        // but node b was cached
+        assert_eq!(guard.b, 6);
+        assert_eq!(guard.result, 40);
+
+        Ok(())
     }
 }

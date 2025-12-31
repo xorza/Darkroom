@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::event::EventId;
-use crate::execution_graph::{ComputeResult, ExecutionGraph};
+use crate::execution_graph::{ExecutionGraph, ExecutionResult};
 use crate::function::FuncLib;
 use crate::graph::Graph;
 use pollster::FutureExt;
@@ -20,7 +20,7 @@ enum WorkerMessage {
     RunLoop(Graph),
 }
 
-type ComputeEvent = dyn Fn(ComputeResult<()>) + Send + 'static;
+type ComputeEvent = dyn Fn(ExecutionResult<()>) + Send + 'static;
 
 type EventQueue = Arc<Mutex<Vec<EventId>>>;
 
@@ -33,7 +33,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<Callback>(func_lib: FuncLib, compute_callback: Callback) -> Self
     where
-        Callback: Fn(ComputeResult<()>) + Send + 'static,
+        Callback: Fn(ExecutionResult<()>) + Send + 'static,
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
@@ -71,8 +71,9 @@ impl Worker {
                 WorkerMessage::RunOnce(graph) => {
                     // todo reuse exe graph
                     let mut execution_graph = ExecutionGraph::default();
-                    execution_graph.update(&graph, &func_lib);
-                    let result = execution_graph.run(&graph, &func_lib);
+                    let result = execution_graph.update(&graph, &func_lib);
+                    let result = execution_graph.execute(&graph, &func_lib);
+
                     (*compute_callback.lock().await)(result);
                 }
 
@@ -117,8 +118,8 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    execution_graph.update(&graph, func_lib);
-                    let result = execution_graph.run(&graph, func_lib);
+                    let result = execution_graph.update(&graph, func_lib);
+                    let result = execution_graph.execute(&graph, func_lib);
 
                     (*compute_callback.lock().await)(result);
                 }
