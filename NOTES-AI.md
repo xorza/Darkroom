@@ -123,6 +123,7 @@ Execution node cache update compacts in-place with swaps and truncation to minim
 Execution node cache compaction includes inline comments describing the swap-and-truncate flow.
 Graph input binding assignment now uses direct `is_some` checks on `const_value` for clarity.
 Execution graph input binding traversal now uses a `let-else` early-continue to reduce nesting in backward1.
+Execution graph backward2 traversal uses early-continue and `let-else` to flatten execute-path scheduling.
 Function validation now asserts that no-output functions are impure.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 `graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.

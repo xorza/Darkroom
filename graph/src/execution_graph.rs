@@ -475,7 +475,7 @@ impl ExecutionGraph {
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
                 stack.push(Visit {
-                    node_idx: 0,
+                    node_idx: usize::MAX,
                     e_node_idx: idx,
                     cause: VisitCause::Terminal,
                 });
@@ -506,31 +506,36 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
 
-            if e_node.wants_execute {
-                e_node.process_state = ProcessState::Processing;
-                stack.push(Visit {
-                    node_idx: 0,
-                    e_node_idx: visit.e_node_idx,
-                    cause: VisitCause::Done,
-                });
-
-                for input in e_node.inputs.iter() {
-                    if match input.state {
-                        InputState::Unchanged | InputState::Missing => false,
-                        InputState::Changed => true,
-                        InputState::Unknown => panic!("Unprocessed input"),
-                    } {
-                        if let Some(output_address) = input.output_address.as_ref() {
-                            stack.push(Visit {
-                                node_idx: 0,
-                                e_node_idx: output_address.e_node_idx,
-                                cause: VisitCause::OutputRequest { output_idx: 0 },
-                            });
-                        }
-                    }
-                }
-            } else {
+            if !e_node.wants_execute {
                 e_node.process_state = ProcessState::Backward2;
+                continue;
+            }
+
+            e_node.process_state = ProcessState::Processing;
+            stack.push(Visit {
+                node_idx: usize::MAX,
+                e_node_idx: visit.e_node_idx,
+                cause: VisitCause::Done,
+            });
+
+            for input in e_node.inputs.iter() {
+                match input.state {
+                    InputState::Unknown => panic!("Unprocessed input"),
+                    InputState::Unchanged | InputState::Missing => continue,
+                    InputState::Changed => {}
+                }
+
+                let Some(output_address) = input.output_address.as_ref() else {
+                    continue;
+                };
+
+                stack.push(Visit {
+                    node_idx: usize::MAX,
+                    e_node_idx: output_address.e_node_idx,
+                    cause: VisitCause::OutputRequest {
+                        output_idx: usize::MAX,
+                    },
+                });
             }
         }
 
