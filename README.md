@@ -17,7 +17,7 @@ Workspace crates should declare shared dependencies via `workspace = true`.
 Common utilities receive periodic safety and ergonomics updates.
 Shared utilities favor standard library functionality over custom helpers.
 Keyed vector helpers support index syntax for key access (details in `NOTES-AI.md`).
-Keyed vector helpers expose reusable compaction utilities (details in `NOTES-AI.md`).
+Keyed vector helpers expose reusable compaction utilities via a key-extracting trait (details in `NOTES-AI.md`).
 Logging uses the tracing ecosystem.
 Execution validation catches invalid bindings earlier.
 Some tests run on the Tokio async execution.

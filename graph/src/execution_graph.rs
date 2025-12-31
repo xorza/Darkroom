@@ -2,7 +2,7 @@ use std::mem::take;
 use std::panic;
 
 use anyhow::Result;
-use common::key_index_vec::KeyIndexVec;
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -110,6 +110,12 @@ pub struct ExecutionNode {
 
     #[cfg(debug_assertions)]
     pub name: String,
+}
+
+impl KeyIndexKey<NodeId> for ExecutionNode {
+    fn key(&self) -> NodeId {
+        self.id
+    }
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
@@ -236,9 +242,7 @@ impl ExecutionGraph {
             .enumerate()
             .filter(|&(_, node)| node.terminal)
         {
-            let e_node_idx =
-                self.e_nodes
-                    .compact_insert_default_with(node.id, &mut write_idx, |e_node| e_node.id);
+            let e_node_idx = self.e_nodes.compact_insert_default(node.id, &mut write_idx);
 
             stack.push(Visit {
                 node_idx,
@@ -299,11 +303,9 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 if let Binding::Output(output_binding) = &input.binding {
-                    let output_e_node_idx = self.e_nodes.compact_insert_default_with(
-                        output_binding.output_node_id,
-                        &mut write_idx,
-                        |e_node| e_node.id,
-                    );
+                    let output_e_node_idx = self
+                        .e_nodes
+                        .compact_insert_default(output_binding.output_node_id, &mut write_idx);
                     self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
                         e_node_idx: output_e_node_idx,
                         port_idx: output_binding.output_idx,
@@ -323,8 +325,7 @@ impl ExecutionGraph {
         self.node_idx_by_id.clear();
         self.stack = take(&mut stack);
 
-        self.e_nodes
-            .compact_finish_with(write_idx, |e_node| e_node.id);
+        self.e_nodes.compact_finish(write_idx);
 
         if is_debug() {
             assert_eq!(self.e_nodes.len(), self.e_nodes.idx_by_key.len());

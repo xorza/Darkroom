@@ -3,8 +3,12 @@ use std::{collections::HashMap, ops::Index, ops::IndexMut};
 
 use serde::{Deserialize, Serialize};
 
+pub trait KeyIndexKey<K> {
+    fn key(&self) -> K;
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default> {
+pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default + KeyIndexKey<K>> {
     pub items: Vec<V>,
     pub idx_by_key: HashMap<K, usize>,
 }
@@ -12,7 +16,7 @@ pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default> {
 impl<K, V> KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default,
+    V: Default + KeyIndexKey<K>,
 {
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
         self.items.iter()
@@ -55,15 +59,7 @@ where
         idx
     }
 
-    pub fn compact_insert_default_with<F>(
-        &mut self,
-        key: K,
-        write_idx: &mut usize,
-        mut key_of: F,
-    ) -> usize
-    where
-        F: FnMut(&V) -> K,
-    {
+    pub fn compact_insert_default(&mut self, key: K, write_idx: &mut usize) -> usize {
         assert!(
             *write_idx <= self.items.len(),
             "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
@@ -76,7 +72,7 @@ where
 
         if idx > *write_idx {
             self.items.swap(idx, *write_idx);
-            let swapped_key = key_of(&self.items[idx]);
+            let swapped_key = self.items[idx].key();
             self.idx_by_key.insert(swapped_key, idx);
         }
 
@@ -85,10 +81,7 @@ where
         *write_idx - 1
     }
 
-    pub fn compact_finish_with<F>(&mut self, write_idx: usize, mut key_of: F)
-    where
-        F: FnMut(&V) -> K,
-    {
+    pub fn compact_finish(&mut self, write_idx: usize) {
         assert!(
             write_idx <= self.items.len(),
             "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
@@ -96,7 +89,7 @@ where
         );
         self.items.truncate(write_idx);
         self.idx_by_key
-            .retain(|&id, &mut idx| idx < write_idx && key_of(&self.items[idx]) == id);
+            .retain(|&id, &mut idx| idx < write_idx && self.items[idx].key() == id);
         assert_eq!(
             self.items.len(),
             self.idx_by_key.len(),
@@ -108,7 +101,7 @@ where
 impl<K, V> Index<usize> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default,
+    V: Default + KeyIndexKey<K>,
 {
     type Output = V;
 
@@ -121,7 +114,7 @@ where
 impl<K, V> IndexMut<usize> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default,
+    V: Default + KeyIndexKey<K>,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         assert!(idx < self.items.len());
