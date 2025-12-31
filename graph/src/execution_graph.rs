@@ -121,6 +121,8 @@ pub struct ExecutionGraph {
     //caches
     #[serde(skip)]
     stack: Vec<Visit>,
+    #[serde(skip)]
+    input_args: Args,
 }
 
 impl ExecutionNode {
@@ -210,7 +212,7 @@ impl ExecutionGraph {
     }
 
     pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
-        let mut inputs: Args = Args::default();
+        let mut input_args: Args = take(&mut self.input_args);
 
         for e_node_idx in self.e_node_exe_order.iter().copied() {
             let (node, func) = {
@@ -221,7 +223,7 @@ impl ExecutionGraph {
                 (node, func)
             };
 
-            inputs.resize_and_clear(node.inputs.len());
+            input_args.resize_and_clear(node.inputs.len());
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let value: DynamicValue = match &input.binding {
                     Binding::None => DynamicValue::None,
@@ -248,7 +250,7 @@ impl ExecutionGraph {
                 };
 
                 let data_type = &func.inputs[input_idx].data_type;
-                inputs[input_idx] = convert_type(value, data_type);
+                input_args[input_idx] = convert_type(value, data_type);
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -261,7 +263,7 @@ impl ExecutionGraph {
                 .invoke_by_index(
                     e_node.func_idx,
                     &mut e_node.cache,
-                    inputs.as_slice(),
+                    input_args.as_slice(),
                     outputs.as_mut_slice(),
                 )
                 .map_err(|source| ExecutionError::Invoke {
@@ -276,8 +278,10 @@ impl ExecutionGraph {
             }
             e_node.error = None;
 
-            inputs.clear();
+            input_args.clear();
         }
+
+        self.input_args = take(&mut input_args);
 
         Ok(())
     }
