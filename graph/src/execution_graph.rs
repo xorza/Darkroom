@@ -218,10 +218,6 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionGraphResult<()> {
-        self.e_node_processing_order.clear();
-        self.e_node_processing_order.reserve(graph.nodes.len());
-        self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
-
         self.node_idx_by_id.clear();
         self.node_idx_by_id.extend(
             graph
@@ -230,6 +226,10 @@ impl ExecutionGraph {
                 .enumerate()
                 .map(|(idx, node)| (node.id, idx)),
         );
+
+        self.e_node_processing_order.clear();
+        self.e_node_processing_order.reserve(graph.nodes.len());
+        self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
