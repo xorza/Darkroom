@@ -14,51 +14,8 @@ use thiserror::Error;
 #[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-enum ProcessState {
-    #[default]
-    None,
-    Processing,
-    Processed,
-}
-#[derive(Debug)]
-enum VisitCause {
-    Terminal,
-    OutputRequest,
-    Done { execute: bool },
-}
-#[derive(Debug)]
-struct Visit {
-    e_node_idx: usize,
-    c_node_idx: usize,
-    cause: VisitCause,
-}
-#[derive(Default, Debug, Serialize, Deserialize)]
-pub struct ComputeNode {
-    pub id: NodeId,
-
-    pub e_node_idx: usize,
-    process_state: ProcessState,
-    pub run_time: f64,
-    pub error: Option<ComputeError>,
-
-    #[serde(skip)]
-    pub(crate) cache: InvokeCache,
-    #[serde(skip)]
-    pub(crate) output_values: Option<Vec<DynamicValue>>,
-
-    #[cfg(debug_assertions)]
-    pub name: String,
-}
-impl KeyIndexKey<NodeId> for ComputeNode {
-    fn key(&self) -> NodeId {
-        self.id
-    }
-}
-#[derive(Debug, Default, Serialize, Deserialize)]
-pub struct Compute {
-
-}
+#[derive(Debug, Default)]
+pub struct Compute {}
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ComputeError {
@@ -71,19 +28,9 @@ pub enum ComputeError {
     },
 }
 
-impl ComputeNode {
-    pub fn reset(&mut self) {
-        self.e_node_idx = 0;
-        self.process_state = ProcessState::None;
-        self.run_time = 0.0;
-        self.error = None;
-    }
-}
-
 pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
-
     pub fn run(
         self,
         graph: &Graph,
