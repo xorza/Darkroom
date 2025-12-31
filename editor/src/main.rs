@@ -7,7 +7,6 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
-use graph::compute::Compute;
 use graph::execution_graph::ExecutionGraph;
 use graph::prelude::{FuncLib, Graph, TestFuncHooks, test_func_lib, test_graph};
 use pollster::block_on;
@@ -188,9 +187,9 @@ impl ScenariumApp {
             *slot = None;
         }
 
-        let compute = Compute::default();
+        let result = self.execution_graph.update(&self.graph, &self.func_lib);
+        let result = self.execution_graph.run(&self.graph, &self.func_lib);
 
-        let result = compute.run(&self.graph, &self.func_lib, &mut self.execution_graph);
         match result {
             Ok(()) => {
                 let status = self

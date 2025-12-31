@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use crate::compute::{Compute, ComputeResult};
 use crate::event::EventId;
-use crate::execution_graph::ExecutionGraph;
+use crate::execution_graph::{ComputeResult, ExecutionGraph};
 use crate::function::FuncLib;
 use crate::graph::Graph;
 use pollster::FutureExt;
@@ -70,8 +69,10 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
+                    // todo reuse exe graph
                     let mut execution_graph = ExecutionGraph::default();
-                    let result = Compute::default().run(&graph, &func_lib, &mut execution_graph);
+                    execution_graph.update(&graph, &func_lib);
+                    let result = execution_graph.run(&graph, &func_lib);
                     (*compute_callback.lock().await)(result);
                 }
 
@@ -116,7 +117,8 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    let result = Compute::default().run(&graph, func_lib, &mut execution_graph);
+                    execution_graph.update(&graph, func_lib);
+                    let result = execution_graph.run(&graph, func_lib);
 
                     (*compute_callback.lock().await)(result);
                 }

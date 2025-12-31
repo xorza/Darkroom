@@ -1,4 +1,5 @@
 use std::mem::take;
+use std::ops::{Index, IndexMut};
 use std::panic;
 
 use anyhow::Result;
@@ -7,21 +8,13 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::compute::ComputeError;
-use crate::data::DynamicValue;
+use crate::args::Args;
+use crate::data::{DataType, DynamicValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
+use crate::prelude::FuncId;
 use common::{is_debug, FileFormat};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-enum ProcessState {
-    #[default]
-    None,
-    Processing,
-    Backward1,
-    Forward,
-    Backward2,
-}
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionGraphError {
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
@@ -29,6 +22,17 @@ pub enum ExecutionGraphError {
 }
 
 type ExecutionGraphResult<T> = std::result::Result<T, ExecutionGraphError>;
+
+#[derive(Debug, Error, Clone, Serialize, Deserialize)]
+pub enum ComputeError {
+    #[error("Function invocation failed for function {function_id:?}: {message}")]
+    Invoke {
+        function_id: FuncId,
+        message: String,
+    },
+}
+
+pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PortAddress {
@@ -74,17 +78,15 @@ struct Visit {
     e_node_idx: usize,
     cause: VisitCause,
 }
-// #[derive(Debug)]
-// enum Visit2Cause {
-//     Terminal,
-//     OutputRequest,
-//     Done { execute: bool },
-// }
-// #[derive(Debug)]
-// struct Visit2 {
-//     e_node_idx: usize,
-//     cause: Visit2Cause,
-// }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+enum ProcessState {
+    #[default]
+    None,
+    Processing,
+    Backward1,
+    Forward,
+    Backward2,
+}
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
     pub id: NodeId,
@@ -226,6 +228,78 @@ impl ExecutionGraph {
         self.node_idx_by_id.clear();
 
         self.validate_with_graph(graph, func_lib);
+
+        Ok(())
+    }
+
+    pub fn run(&mut self, graph: &Graph, func_lib: &FuncLib) -> ComputeResult<()> {
+        let mut inputs: Args = Args::default();
+
+        for e_node_idx in self.e_node_execution_order.iter().copied() {
+            let (node, func) = {
+                let e_node = &self.e_nodes[e_node_idx];
+                let node = &graph.nodes[e_node.node_idx];
+                let func = &func_lib.funcs[e_node.func_idx];
+
+                (node, func)
+            };
+
+            inputs.resize_and_clear(node.inputs.len());
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                let value: DynamicValue = match &input.binding {
+                    Binding::None => DynamicValue::None,
+                    Binding::Const => input
+                        .const_value
+                        .as_ref()
+                        .expect("Const value is not set")
+                        .into(),
+
+                    Binding::Output(output_binding) => {
+                        let output_address = self.e_nodes[e_node_idx].inputs[input_idx]
+                            .output_address
+                            .clone()
+                            .expect("Output address is not set");
+                        assert_eq!(output_binding.output_idx, output_address.port_idx);
+
+                        let output_values = self.e_nodes[output_address.e_node_idx]
+                            .output_values
+                            .as_mut()
+                            .expect("Output values missing for bound node; check execution order");
+
+                        output_values[output_binding.output_idx].clone()
+                    }
+                };
+
+                let data_type = &func.inputs[input_idx].data_type;
+                inputs[input_idx] = convert_type(&value, data_type);
+            }
+
+            let e_node = &mut self.e_nodes[e_node_idx];
+            let outputs = e_node
+                .output_values
+                .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
+
+            let start = std::time::Instant::now();
+            let invoke_result = func_lib
+                .invoke_by_index(
+                    e_node.func_idx,
+                    &mut e_node.cache,
+                    inputs.as_slice(),
+                    outputs.as_mut_slice(),
+                )
+                .map_err(|source| ComputeError::Invoke {
+                    function_id: node.func_id,
+                    message: source.to_string(),
+                });
+            e_node.run_time = start.elapsed().as_secs_f64();
+            if let Err(error) = invoke_result {
+                e_node.error = Some(error.clone());
+                return Err(error);
+            }
+            e_node.error = None;
+
+            inputs.clear();
+        }
 
         Ok(())
     }
@@ -580,6 +654,39 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
                 let output_func = func_lib.by_id(output_node.func_id).unwrap();
                 assert!(output_binding.output_idx < output_func.outputs.len());
             }
+        }
+    }
+}
+
+fn convert_type(src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
+    let src_data_type = src_value.data_type();
+    if *src_data_type == *dst_data_type {
+        return src_value.clone();
+    }
+
+    if src_data_type.is_custom() || dst_data_type.is_custom() {
+        panic!("Custom types are not supported yet");
+    }
+
+    match (src_data_type, dst_data_type) {
+        (DataType::Bool, DataType::Int) => DynamicValue::Int(src_value.as_bool() as i64),
+        (DataType::Bool, DataType::Float) => DynamicValue::Float(src_value.as_bool() as i64 as f64),
+        (DataType::Bool, DataType::String) => DynamicValue::String(src_value.as_bool().to_string()),
+
+        (DataType::Int, DataType::Bool) => DynamicValue::Bool(src_value.as_int() != 0),
+        (DataType::Int, DataType::Float) => DynamicValue::Float(src_value.as_int() as f64),
+        (DataType::Int, DataType::String) => DynamicValue::String(src_value.as_int().to_string()),
+
+        (DataType::Float, DataType::Bool) => {
+            DynamicValue::Bool(src_value.as_float().abs() > common::EPSILON)
+        }
+        (DataType::Float, DataType::Int) => DynamicValue::Int(src_value.as_float() as i64),
+        (DataType::Float, DataType::String) => {
+            DynamicValue::String(src_value.as_float().to_string())
+        }
+
+        (src, dst) => {
+            panic!("Unsupported conversion from {:?} to {:?}", src, dst);
         }
     }
 }

@@ -421,8 +421,7 @@ mod tests {
     use common::output_stream::OutputStream;
 
     use super::*;
-    use crate::compute::ArgSet;
-    use crate::function::FuncId;
+    use crate::{args::Args, function::FuncId};
 
     #[test]
     fn lua_works() -> anyhow::Result<()> {
@@ -493,8 +492,8 @@ mod tests {
         let funcs = invoker.func_lib();
         assert_eq!(funcs.funcs.len(), 5);
 
-        let mut inputs: ArgSet = ArgSet::from_vec(vec![3, 5]);
-        let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
+        let mut inputs = Args::from_vec(vec![3, 5]);
+        let mut outputs = Args::from_vec(vec![0]);
 
         let mut cache = InvokeCache::default();
         // call 'mult' function
@@ -548,8 +547,8 @@ mod tests {
         let mut invoker = LuaInvoker::default();
         invoker.load(include_str!("../../../../test_resources/test_lua.lua"))?;
 
-        let mut inputs: ArgSet = ArgSet::from_vec(vec![6, 7]);
-        let mut outputs: ArgSet = ArgSet::from_vec(vec![0]);
+        let mut inputs = Args::from_vec(vec![6, 7]);
+        let mut outputs = Args::from_vec(vec![0]);
         let mut cache = InvokeCache::default();
 
         invoker
