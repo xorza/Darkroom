@@ -115,8 +115,7 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    e_node_processing_order: Vec<usize>,
-    pub e_node_execution_order: Vec<usize>,
+    pub e_node_order: Vec<usize>,
 
     //caches
     #[serde(skip)]
@@ -210,8 +209,6 @@ impl ExecutionGraph {
         );
 
         self.stack.clear();
-        self.e_node_processing_order.clear();
-        self.e_node_execution_order.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
         self.backward1(graph, func_lib)?;
@@ -228,7 +225,7 @@ impl ExecutionGraph {
     pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         let mut inputs: Args = Args::default();
 
-        for e_node_idx in self.e_node_execution_order.iter().copied() {
+        for e_node_idx in self.e_node_order.iter().copied() {
             let (node, func) = {
                 let e_node = &self.e_nodes[e_node_idx];
                 let node = &graph.nodes[e_node.node_idx];
@@ -299,7 +296,8 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
-        self.e_node_processing_order.reserve(graph.nodes.len());
+        self.e_node_order.reserve(graph.nodes.len());
+        self.e_node_order.clear();
 
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
@@ -335,7 +333,7 @@ impl ExecutionGraph {
                 VisitCause::Done { .. } => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
-                    self.e_node_processing_order.push(e_node_idx);
+                    self.e_node_order.push(e_node_idx);
                     continue;
                 }
             };
@@ -409,7 +407,7 @@ impl ExecutionGraph {
 
     // Propagate input state forward through the processing order.
     fn forward(&mut self, graph: &Graph) {
-        for e_node_idx in self.e_node_processing_order.iter().copied() {
+        for e_node_idx in self.e_node_order.iter().copied() {
             let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
 
             let mut has_changed_inputs = false;
@@ -476,8 +474,7 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect the execution order.
     fn backward2(&mut self, graph: &Graph) {
-        self.e_node_processing_order
-            .reserve(self.e_node_processing_order.len());
+        self.e_node_order.clear();
 
         let mut stack: Vec<Visit> = take(&mut self.stack);
         assert!(stack.is_empty());
@@ -500,7 +497,7 @@ impl ExecutionGraph {
                 VisitCause::Done { execute } => {
                     e_node.process_state = ProcessState::Backward2;
                     if execute {
-                        self.e_node_execution_order.push(visit.e_node_idx);
+                        self.e_node_order.push(visit.e_node_idx);
                     }
                     continue;
                 }
@@ -567,7 +564,7 @@ impl ExecutionGraph {
             assert!(!seen_node_indices[e_node.node_idx]);
             seen_node_indices[e_node.node_idx] = true;
 
-            if self.e_node_execution_order.contains(&e_node_idx) {
+            if self.e_node_order.contains(&e_node_idx) {
                 assert_eq!(e_node.process_state, ProcessState::Backward2);
             } else {
                 assert!(
@@ -610,10 +607,10 @@ impl ExecutionGraph {
             }
         }
 
-        for idx in 0..self.e_node_execution_order.len() {
-            let e_node_idx = self.e_node_execution_order[idx];
+        for idx in 0..self.e_node_order.len() {
+            let e_node_idx = self.e_node_order[idx];
             assert!(e_node_idx < self.e_nodes.len());
-            assert!(!self.e_node_execution_order[idx + 1..].contains(&e_node_idx));
+            assert!(!self.e_node_order[idx + 1..].contains(&e_node_idx));
 
             let e_node = &self.e_nodes[e_node_idx];
             assert!(!e_node.has_missing_inputs);
@@ -622,9 +619,7 @@ impl ExecutionGraph {
                 .inputs
                 .iter()
                 .filter_map(|input| input.output_address.as_ref())
-                .all(|port_address| {
-                    !self.e_node_execution_order[idx..].contains(&port_address.e_node_idx)
-                });
+                .all(|port_address| !self.e_node_order[idx..].contains(&port_address.e_node_idx));
             assert!(all_dependencies_in_order);
         }
     }
@@ -705,7 +700,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert_eq!(execution_graph.e_node_execution_order.len(), 5);
+        assert_eq!(execution_graph.e_node_order.len(), 5);
         assert!(execution_graph
             .e_nodes
             .iter()
@@ -828,7 +823,7 @@ mod tests {
 
         // pure node invoked if no cache values
         assert!(execution_graph
-            .e_node_execution_order
+            .e_node_order
             .iter()
             .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
 
@@ -839,7 +834,7 @@ mod tests {
 
         // pure node not invoked if has cached values
         assert!(execution_graph
-            .e_node_execution_order
+            .e_node_order
             .iter()
             .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
 
@@ -862,7 +857,7 @@ mod tests {
 
         // get_b not in e_node_execution_order
         assert!(execution_graph
-            .e_node_execution_order
+            .e_node_order
             .iter()
             .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
 
@@ -882,7 +877,7 @@ mod tests {
 
         // once node invoked is has no cached outputs
         assert!(execution_graph
-            .e_node_execution_order
+            .e_node_order
             .iter()
             .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
 
@@ -892,7 +887,7 @@ mod tests {
 
         // once node not invoked is has cached outputs
         assert!(execution_graph
-            .e_node_execution_order
+            .e_node_order
             .iter()
             .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
 
