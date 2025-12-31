@@ -77,7 +77,7 @@ struct Visit {
 #[derive(Debug)]
 enum Visit2Cause {
     Terminal,
-    OutputRequest { output_idx: usize },
+    OutputRequest,
     Done { execute: bool },
 }
 #[derive(Debug)]
@@ -425,9 +425,8 @@ impl ExecutionGraph {
         while let Some(visit) = stack.pop() {
             let e_node = &mut self.e_nodes[visit.e_node_idx];
 
-            let _output_address = match visit.cause {
-                Visit2Cause::Terminal => None,
-                Visit2Cause::OutputRequest { output_idx } => Some(output_idx),
+            match visit.cause {
+                Visit2Cause::Terminal | Visit2Cause::OutputRequest => {}
                 Visit2Cause::Done { execute } => {
                     e_node.process_state = ProcessState::Backward2;
                     if execute {
@@ -472,9 +471,7 @@ impl ExecutionGraph {
                         if let Some(output_address) = input.output_address.as_ref() {
                             stack.push(Visit2 {
                                 e_node_idx: output_address.e_node_idx,
-                                cause: Visit2Cause::OutputRequest {
-                                    output_idx: output_address.port_idx,
-                                },
+                                cause: Visit2Cause::OutputRequest,
                             });
                         }
                     }

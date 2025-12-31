@@ -57,11 +57,7 @@ impl KeyIndexKey<NodeId> for ComputeNode {
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Compute {
-    pub c_nodes: KeyIndexVec<NodeId, ComputeNode>,
-    pub c_node_execution_order: Vec<usize>,
 
-    #[serde(skip)]
-    stack: Vec<Visit>,
 }
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -87,108 +83,6 @@ impl ComputeNode {
 pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
-    fn asd(&mut self, graph: &Graph, _func_lib: &FuncLib, execution_graph: &ExecutionGraph) {
-        self.c_node_execution_order.clear();
-        self.c_node_execution_order
-            .reserve(execution_graph.e_nodes.len());
-        self.c_nodes.iter_mut().for_each(|c_node| c_node.reset());
-
-        let mut write_idx = 0;
-        let mut stack: Vec<Visit> = take(&mut self.stack);
-        stack.reserve(10);
-
-        for (e_node_idx, e_node) in execution_graph
-            .e_nodes
-            .iter()
-            .enumerate()
-            .filter(|&(_, e_node)| graph.nodes[e_node.node_idx].terminal)
-        {
-            let c_node_idx = self
-                .c_nodes
-                .compact_insert_default(e_node.id, &mut write_idx);
-
-            stack.push(Visit {
-                e_node_idx,
-                c_node_idx,
-                cause: VisitCause::Terminal,
-            });
-        }
-
-        while let Some(visit) = stack.pop() {
-            let c_node_idx = visit.c_node_idx;
-            let c_node = &mut self.c_nodes[c_node_idx];
-
-            match visit.cause {
-                VisitCause::Terminal => {}
-                VisitCause::OutputRequest => {}
-                VisitCause::Done { execute } => {
-                    c_node.process_state = ProcessState::Processed;
-                    if execute {
-                        self.c_node_execution_order.push(c_node_idx);
-                    }
-                    continue;
-                }
-            };
-
-            match c_node.process_state {
-                ProcessState::None => {}
-                ProcessState::Processing => panic!(
-                    "Cycle detected too late. Should have been caught earlier in backward1()"
-                ),
-                ProcessState::Processed => continue,
-            }
-
-            let e_node = &execution_graph.e_nodes[visit.e_node_idx];
-            c_node.id = e_node.id;
-            c_node.name.clear();
-            c_node.name.push_str(&e_node.name);
-            c_node.e_node_idx = visit.e_node_idx;
-
-            let execute = match e_node.behavior {
-                ExecutionBehavior::Impure => true,
-                ExecutionBehavior::Pure => {
-                    c_node.output_values.is_none() || e_node.has_changed_inputs
-                }
-                ExecutionBehavior::Once => c_node.output_values.is_none(),
-            } && !e_node.has_missing_inputs;
-
-            c_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                e_node_idx: visit.e_node_idx,
-                c_node_idx,
-                cause: VisitCause::Done { execute },
-            });
-
-            if execute {
-                let node = &graph.nodes[e_node.node_idx];
-                assert_eq!(e_node.inputs.len(), node.inputs.len());
-                for (e_input, input) in e_node.inputs.iter().zip(node.inputs.iter()) {
-                    if match e_input.state {
-                        InputState::Unchanged | InputState::Missing => false,
-                        InputState::Changed => true,
-                        InputState::Unknown => panic!("Unprocessed input"),
-                    } {
-                        if let Binding::Output(output_binding) = &input.binding {
-                            let c_node_idx = self.c_nodes.compact_insert_default(
-                                output_binding.output_node_id,
-                                &mut write_idx,
-                            );
-                            let output_address = e_input.output_address.as_ref().unwrap();
-
-                            stack.push(Visit {
-                                e_node_idx: output_address.e_node_idx,
-                                c_node_idx,
-                                cause: VisitCause::OutputRequest,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        self.c_nodes.compact_finish(write_idx);
-        self.stack = take(&mut stack);
-    }
 
     pub fn run(
         self,

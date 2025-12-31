@@ -122,7 +122,7 @@ impl ScenariumApp {
         self.set_status(status);
     }
 
-    fn new(&mut self) {
+    fn empty(&mut self) {
         let graph = model::GraphView::default();
         self.set_graph_view(graph, "Created new graph");
     }
@@ -233,7 +233,7 @@ impl eframe::App for ScenariumApp {
                             .and_modify(|font| font.size = 18.0);
                     }
                     if ui.button("New").clicked() {
-                        self.new();
+                        self.empty();
                         ui.close();
                     }
                     if ui.button("Save").clicked() {
