@@ -53,6 +53,7 @@ Execution graph assertions include mismatch context to speed up diagnosis.
 Execution graph maintenance includes small readability cleanups.
 Execution graph input state propagation keeps behavior-specific caching checks explicit.
 Graph input bindings now use direct `is_some` checks for const binding assignment (details in `NOTES-AI.md`).
+Execution graph input binding traversal uses early-continue to reduce nesting (details in `NOTES-AI.md`).
 Documentation cleanup includes minor comment fixes.
 Execution graph documentation now clarifies propagation and scheduling comments.
 Graph file loading now lifts serde-format errors into anyhow-based call sites.

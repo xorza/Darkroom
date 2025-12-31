@@ -362,32 +362,32 @@ impl ExecutionGraph {
             }
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                if let Binding::Output(output_binding) = &input.binding {
-                    let output_node_id = output_binding.output_node_id;
-                    let output_e_node_idx =
-                        self.e_nodes
-                            .compact_insert_with(&output_node_id, &mut write_idx, || {
-                                ExecutionNode {
-                                    id: output_node_id,
-                                    ..Default::default()
-                                }
-                            });
-                    self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
-                        e_node_idx: output_e_node_idx,
-                        port_idx: output_binding.output_idx,
-                    });
-                    let output_node_idx = graph
-                        .nodes
-                        .index_of_key(&output_binding.output_node_id)
-                        .unwrap();
-                    stack.push(Visit {
-                        node_idx: output_node_idx,
-                        e_node_idx: output_e_node_idx,
-                        cause: VisitCause::OutputRequest {
-                            output_idx: output_binding.output_idx,
-                        },
-                    });
-                }
+                let Binding::Output(output_binding) = &input.binding else {
+                    continue;
+                };
+
+                let output_node_id = output_binding.output_node_id;
+                let output_e_node_idx =
+                    self.e_nodes
+                        .compact_insert_with(&output_node_id, &mut write_idx, || ExecutionNode {
+                            id: output_node_id,
+                            ..Default::default()
+                        });
+                self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
+                    e_node_idx: output_e_node_idx,
+                    port_idx: output_binding.output_idx,
+                });
+                let output_node_idx = graph
+                    .nodes
+                    .index_of_key(&output_binding.output_node_id)
+                    .unwrap();
+                stack.push(Visit {
+                    node_idx: output_node_idx,
+                    e_node_idx: output_e_node_idx,
+                    cause: VisitCause::OutputRequest {
+                        output_idx: output_binding.output_idx,
+                    },
+                });
             }
         }
 
@@ -568,6 +568,9 @@ impl ExecutionGraph {
             assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
+
+            // it cannot be missing_required_inputs and wants_execute
+            assert!(!(e_node.wants_execute && e_node.missing_required_inputs));
 
             let missing_required_inputs = e_node
                 .inputs
