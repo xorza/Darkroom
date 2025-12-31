@@ -13,8 +13,8 @@ impl Args {
         Args(vec.into_iter().map(|v| v.into()).collect())
     }
     pub(crate) fn resize_and_clear(&mut self, size: usize) {
-        self.0.resize(size, DynamicValue::None);
         self.clear();
+        self.0.resize(size, DynamicValue::None);
     }
     pub(crate) fn clear(&mut self) {
         self.0.fill(DynamicValue::None);
