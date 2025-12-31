@@ -7,6 +7,7 @@ use crate::serde_lua::SerdeLuaError;
 
 #[macro_use]
 pub mod macros;
+pub mod key_index_vec;
 pub mod normalize_string;
 pub mod output_stream;
 pub mod scoped_ref;
