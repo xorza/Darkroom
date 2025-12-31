@@ -2,6 +2,7 @@ use std::mem::take;
 use std::panic;
 
 use anyhow::Result;
+use common::key_index_vec::KeyIndexVec;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -112,8 +113,8 @@ pub struct ExecutionNode {
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
-    pub e_nodes: Vec<ExecutionNode>,
-    e_node_idx_by_id: HashMap<NodeId, usize>,
+    pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
+    // e_node_idx_by_id: HashMap<NodeId, usize>,
     e_node_processing_order: Vec<usize>,
     pub e_node_execution_order: Vec<usize>,
 
@@ -230,26 +231,17 @@ impl ExecutionGraph {
         let mut write_idx = 0;
         // Look up the current slot for this node id (if any), otherwise append a new slot.
         let mut get_e_node_idx = |this: &mut Self, node_id: &NodeId| {
-            let e_node_idx = match this.e_node_idx_by_id.get(node_id).copied() {
-                Some(idx) => idx,
-                None => {
-                    assert!(write_idx <= this.e_nodes.len());
-                    if write_idx == this.e_nodes.len() {
-                        this.e_nodes.push(ExecutionNode::default());
-                    }
-
-                    write_idx
-                }
-            };
+            let e_node_idx = this.e_nodes.get_or_insert_default(*node_id);
             if e_node_idx < write_idx {
                 e_node_idx
             } else {
                 if e_node_idx > write_idx {
-                    this.e_nodes.swap(e_node_idx, write_idx);
-                    this.e_node_idx_by_id
+                    this.e_nodes.items.swap(e_node_idx, write_idx);
+                    this.e_nodes
+                        .idx_by_key
                         .insert(this.e_nodes[e_node_idx].id, e_node_idx);
                 }
-                this.e_node_idx_by_id.insert(*node_id, write_idx);
+                this.e_nodes.idx_by_key.insert(*node_id, write_idx);
 
                 write_idx += 1;
                 write_idx - 1
@@ -345,17 +337,18 @@ impl ExecutionGraph {
         self.node_idx_by_id.clear();
         self.stack = take(&mut stack);
         // Drop nodes past the compacted range.
-        self.e_nodes.truncate(write_idx);
-        self.e_node_idx_by_id
-            .retain(|&id, &mut idx| idx < write_idx && self.e_nodes[idx].id == id);
+        self.e_nodes.items.truncate(write_idx);
+        self.e_nodes
+            .idx_by_key
+            .retain(|&id, &mut idx| idx < write_idx && self.e_nodes.items[idx].id == id);
 
         if is_debug() {
-            assert_eq!(self.e_nodes.len(), self.e_node_idx_by_id.len());
+            assert_eq!(self.e_nodes.len(), self.e_nodes.idx_by_key.len());
             assert!(self.e_nodes.len() <= graph.nodes.len());
             self.e_nodes.iter().enumerate().for_each(|(idx, e_node)| {
                 assert!(e_node.node_idx < graph.nodes.len());
                 assert_eq!(graph.nodes[e_node.node_idx].id, e_node.id);
-                assert_eq!(idx, self.e_node_idx_by_id[&e_node.id]);
+                assert_eq!(idx, self.e_nodes.idx_by_key[&e_node.id]);
             });
         }
 
@@ -515,7 +508,6 @@ impl ExecutionGraph {
         }
 
         assert!(self.e_nodes.len() <= graph.nodes.len());
-        assert_eq!(self.e_nodes.len(), self.e_node_idx_by_id.len());
 
         let mut seen_node_indices = vec![false; graph.nodes.len()];
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
@@ -531,7 +523,6 @@ impl ExecutionGraph {
                         || e_node.process_state == ProcessState::Backward2
                 );
             }
-            assert_eq!(e_node_idx, *self.e_node_idx_by_id.get(&e_node.id).unwrap());
 
             assert!(e_node.func_idx < func_lib.funcs.len());
             let node = &graph.nodes[e_node.node_idx];
@@ -627,7 +618,6 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
-        assert_eq!(execution_graph.e_node_idx_by_id.len(), 5);
         assert_eq!(execution_graph.e_node_execution_order.len(), 5);
         assert!(execution_graph
             .e_nodes
@@ -680,7 +670,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         //avoid serialization of e_node_idx_by_id as deserialization order is not guaranteed
-        execution_graph.e_node_idx_by_id.clear();
+        execution_graph.e_nodes.idx_by_key.clear();
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
