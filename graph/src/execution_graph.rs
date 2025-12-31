@@ -412,8 +412,8 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_exe_order.iter().copied() {
             let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
 
-            let mut has_changed_inputs = false;
-            let mut has_missing_inputs = false;
+            let mut changed_inputs = false;
+            let mut missing_required_inputs = false;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let input_state = match &input.binding {
@@ -445,8 +445,8 @@ impl ExecutionGraph {
                 e_node_input.state = input_state;
                 match input_state {
                     InputState::Unchanged => {}
-                    InputState::Changed => has_changed_inputs = true,
-                    InputState::Missing => has_missing_inputs |= e_node_input.required,
+                    InputState::Changed => changed_inputs = true,
+                    InputState::Missing => missing_required_inputs |= e_node_input.required,
                     InputState::Unknown => panic!("unprocessed input"),
                 }
             }
@@ -455,13 +455,13 @@ impl ExecutionGraph {
             assert_eq!(e_node.process_state, ProcessState::Backward1);
 
             e_node.process_state = ProcessState::Forward;
-            e_node.changed_inputs = has_changed_inputs;
-            e_node.missing_required_inputs = has_missing_inputs;
+            e_node.changed_inputs = changed_inputs;
+            e_node.missing_required_inputs = missing_required_inputs;
             e_node.wants_execute = match e_node.behavior {
                 ExecutionBehavior::Impure => true,
-                ExecutionBehavior::Pure => e_node.output_values.is_none() || has_changed_inputs,
+                ExecutionBehavior::Pure => e_node.output_values.is_none() || changed_inputs,
                 ExecutionBehavior::Once => e_node.output_values.is_none(),
-            } && !has_missing_inputs;
+            } && !missing_required_inputs;
         }
     }
 
