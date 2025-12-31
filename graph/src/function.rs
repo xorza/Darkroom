@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::data::*;
 use common::id_type;
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{deserialize, serialize, FileFormat};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -62,6 +63,180 @@ impl FuncLambda {
             }
             FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValueOption {
+    pub name: String,
+    pub value: StaticValue,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FuncInput {
+    pub name: String,
+    pub required: bool,
+    pub data_type: DataType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_value: Option<StaticValue>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub value_options: Vec<ValueOption>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FuncOutput {
+    pub name: String,
+    pub data_type: DataType,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FuncEvent {
+    pub name: String,
+}
+
+id_type!(FuncId);
+
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct Func {
+    pub id: FuncId,
+    pub name: String,
+    pub category: String,
+
+    pub behavior: FuncBehavior,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inputs: Vec<FuncInput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outputs: Vec<FuncOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<FuncEvent>,
+
+    #[serde(skip, default)]
+    pub lambda: FuncLambda,
+}
+impl KeyIndexKey<FuncId> for Func {
+    fn key(&self) -> &FuncId {
+        &self.id
+    }
+}
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct FuncLib {
+    pub funcs: KeyIndexVec<FuncId, Func>,
+}
+
+impl Func {
+    pub fn terminal(&self) -> bool {
+        self.validate().unwrap();
+        self.outputs.is_empty()
+    }
+
+    fn validate(&self) -> anyhow::Result<()> {
+        assert!(
+            !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
+            "Function with no outputs should be impure"
+        );
+        Ok(())
+    }
+}
+
+impl FuncLib {
+    pub fn from_file(file_path: &str) -> anyhow::Result<Self> {
+        let format = FileFormat::from_file_name(file_path)
+            .expect("Failed to infer function library file format from file name");
+        let contents = std::fs::read_to_string(file_path)?;
+        Self::deserialize(&contents, format)
+    }
+    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
+        let result: Self = deserialize(serialized, format)?;
+
+        Ok(result)
+    }
+    pub fn serialize(&self, format: FileFormat) -> String {
+        serialize(&self, format)
+    }
+
+    pub fn by_id(&self, id: &FuncId) -> Option<&Func> {
+        assert!(!id.is_nil());
+        self.funcs.by_key(&id)
+    }
+    pub fn by_id_mut(&mut self, id: &FuncId) -> Option<&mut Func> {
+        assert!(!id.is_nil());
+        self.funcs.by_key_mut(&id)
+    }
+    pub fn by_name(&self, name: &str) -> Option<&Func> {
+        assert!(!name.is_empty());
+        self.funcs.iter().find(|func| func.name == name)
+    }
+    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
+        assert!(!name.is_empty());
+        self.funcs.iter_mut().find(|func| func.name == name)
+    }
+    pub fn add(&mut self, func: Func) {
+        func.validate().unwrap();
+
+        self.funcs.push(func);
+    }
+
+    pub fn invoke_by_id(
+        &self,
+        func_id: FuncId,
+        cache: &mut InvokeCache,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> InvokeResult<()> {
+        let func = self
+            .by_id(&func_id)
+            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
+        func.lambda.invoke(cache, inputs, outputs)
+    }
+
+    pub fn invoke_by_index(
+        &self,
+        func_idx: usize,
+        cache: &mut InvokeCache,
+        inputs: &InvokeArgs,
+        outputs: &mut InvokeArgs,
+    ) -> InvokeResult<()> {
+        let func = &self.funcs[func_idx];
+        func.lambda.invoke(cache, inputs, outputs)
+    }
+    pub fn merge(&mut self, other: FuncLib) {
+        for func in other.funcs.items {
+            self.add(func);
+        }
+    }
+}
+
+impl From<&str> for FuncEvent {
+    fn from(s: &str) -> Self {
+        FuncEvent {
+            name: s.to_string(),
+        }
+    }
+}
+
+impl<It> From<It> for FuncLib
+where
+    It: IntoIterator<Item = Func>,
+{
+    fn from(iter: It) -> Self {
+        let mut func_lib = FuncLib::default();
+        for func in iter {
+            func_lib.add(func);
+        }
+        func_lib
+    }
+}
+
+impl FromStr for FuncEvent {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(FuncEvent {
+            name: s.to_string(),
+        })
     }
 }
 
@@ -162,183 +337,6 @@ impl InvokeCache {
                 .downcast_mut::<T>()
                 .expect("InvokeCache insert failed")
         }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ValueOption {
-    pub name: String,
-    pub value: StaticValue,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FuncInput {
-    pub name: String,
-    pub required: bool,
-    pub data_type: DataType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<StaticValue>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub value_options: Vec<ValueOption>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FuncOutput {
-    pub name: String,
-    pub data_type: DataType,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FuncEvent {
-    pub name: String,
-}
-
-id_type!(FuncId);
-
-#[derive(Default, Clone, Debug, Serialize, Deserialize)]
-pub struct Func {
-    pub id: FuncId,
-    pub name: String,
-    pub category: String,
-
-    pub behavior: FuncBehavior,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inputs: Vec<FuncInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub outputs: Vec<FuncOutput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub events: Vec<FuncEvent>,
-
-    #[serde(skip, default)]
-    pub lambda: FuncLambda,
-}
-
-#[derive(Default, Debug, Clone, Serialize, Deserialize)]
-pub struct FuncLib {
-    pub funcs: Vec<Func>,
-}
-
-impl Func {
-    pub fn terminal(&self) -> bool {
-        self.validate().unwrap();
-        self.outputs.is_empty()
-    }
-
-    fn validate(&self) -> anyhow::Result<()> {
-        assert!(
-            !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
-            "Function with no outputs should be impure"
-        );
-        Ok(())
-    }
-}
-
-impl FuncLib {
-    pub fn from_file(file_path: &str) -> anyhow::Result<Self> {
-        let format = FileFormat::from_file_name(file_path)
-            .expect("Failed to infer function library file format from file name");
-        let contents = std::fs::read_to_string(file_path)?;
-        Self::deserialize(&contents, format)
-    }
-    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
-        let funcs: Vec<Func> = deserialize(serialized, format)?;
-
-        Ok(funcs.into())
-    }
-    pub fn serialize(&self, format: FileFormat) -> String {
-        serialize(&self.funcs, format)
-    }
-
-    pub fn by_id(&self, id: FuncId) -> Option<&Func> {
-        self.funcs.iter().find(|func| func.id == id)
-    }
-    pub fn by_id_mut(&mut self, id: FuncId) -> Option<&mut Func> {
-        self.funcs.iter_mut().find(|func| func.id == id)
-    }
-    pub fn by_name(&self, name: &str) -> Option<&Func> {
-        self.funcs.iter().find(|func| func.name == name)
-    }
-    pub fn by_name_mut(&mut self, name: &str) -> Option<&mut Func> {
-        self.funcs.iter_mut().find(|func| func.name == name)
-    }
-    pub fn add(&mut self, func: Func) {
-        func.validate().unwrap();
-
-        let entry = self.by_id(func.id);
-        match entry {
-            Some(_) => {
-                panic!("Func already exists");
-            }
-            None => {
-                self.funcs.push(func);
-            }
-        }
-    }
-
-    pub fn invoke_by_id(
-        &self,
-        func_id: FuncId,
-        cache: &mut InvokeCache,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> InvokeResult<()> {
-        let func = self
-            .by_id(func_id)
-            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
-        func.lambda.invoke(cache, inputs, outputs)
-    }
-
-    pub fn invoke_by_index(
-        &self,
-        func_idx: usize,
-        cache: &mut InvokeCache,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> InvokeResult<()> {
-        let func = self
-            .funcs
-            .get(func_idx)
-            .unwrap_or_else(|| panic!("Func index {} out of bounds", func_idx));
-        func.lambda.invoke(cache, inputs, outputs)
-    }
-    pub fn merge(&mut self, other: FuncLib) {
-        for func in other.funcs {
-            self.add(func);
-        }
-    }
-}
-
-impl From<&str> for FuncEvent {
-    fn from(s: &str) -> Self {
-        FuncEvent {
-            name: s.to_string(),
-        }
-    }
-}
-
-impl<It> From<It> for FuncLib
-where
-    It: IntoIterator<Item = Func>,
-{
-    fn from(iter: It) -> Self {
-        let mut func_lib = FuncLib::default();
-        for func in iter {
-            func_lib.add(func);
-        }
-        func_lib
-    }
-}
-
-impl FromStr for FuncEvent {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(FuncEvent {
-            name: s.to_string(),
-        })
     }
 }
 

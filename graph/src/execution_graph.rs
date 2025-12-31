@@ -95,6 +95,7 @@ pub struct ExecutionNode {
     pub outputs: Vec<ExecutionOutput>,
 
     process_state: ProcessState,
+    wants_execute: bool,
 
     pub run_time: f64,
     pub error: Option<ExecutionError>,
@@ -419,26 +420,12 @@ impl ExecutionGraph {
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
 
                         if output_e_node.has_missing_inputs {
+                            assert!(!output_e_node.wants_execute);
                             InputState::Missing
+                        } else if output_e_node.wants_execute {
+                            InputState::Changed
                         } else {
-                            let output_cached = output_e_node.output_values.is_some();
-                            match output_e_node.behavior {
-                                ExecutionBehavior::Impure => InputState::Changed,
-                                ExecutionBehavior::Pure => {
-                                    if output_e_node.has_changed_inputs || !output_cached {
-                                        InputState::Changed
-                                    } else {
-                                        InputState::Unchanged
-                                    }
-                                }
-                                ExecutionBehavior::Once => {
-                                    if output_cached {
-                                        InputState::Unchanged
-                                    } else {
-                                        InputState::Changed
-                                    }
-                                }
-                            }
+                            InputState::Unchanged
                         }
                     }
                 };
@@ -456,9 +443,14 @@ impl ExecutionGraph {
             let e_node = &mut self.e_nodes[e_node_idx];
             assert_eq!(e_node.process_state, ProcessState::Backward1);
 
+            e_node.process_state = ProcessState::Forward;
             e_node.has_changed_inputs = has_changed_inputs;
             e_node.has_missing_inputs = has_missing_inputs;
-            e_node.process_state = ProcessState::Forward;
+            e_node.wants_execute = match e_node.behavior {
+                ExecutionBehavior::Impure => true,
+                ExecutionBehavior::Pure => e_node.output_values.is_none() || has_changed_inputs,
+                ExecutionBehavior::Once => e_node.output_values.is_none(),
+            } && !has_missing_inputs;
         }
     }
 
@@ -485,10 +477,10 @@ impl ExecutionGraph {
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done { execute } => {
-                    e_node.process_state = ProcessState::Backward2;
                     if execute {
                         self.e_node_exe_order.push(visit.e_node_idx);
                     }
+                    e_node.process_state = ProcessState::Backward2;
                     continue;
                 }
             };
@@ -504,22 +496,16 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
 
-            let execute = match e_node.behavior {
-                ExecutionBehavior::Impure => true,
-                ExecutionBehavior::Pure => {
-                    e_node.output_values.is_none() || e_node.has_changed_inputs
-                }
-                ExecutionBehavior::Once => e_node.output_values.is_none(),
-            } && !e_node.has_missing_inputs;
-
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit {
                 node_idx: 0,
                 e_node_idx: visit.e_node_idx,
-                cause: VisitCause::Done { execute },
+                cause: VisitCause::Done {
+                    execute: e_node.wants_execute,
+                },
             });
 
-            if execute {
+            if e_node.wants_execute {
                 for input in e_node.inputs.iter() {
                     if match input.state {
                         InputState::Unchanged | InputState::Missing => false,
@@ -625,13 +611,13 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
     graph.validate();
 
     for node in graph.nodes.iter() {
-        let func = func_lib.by_id(node.func_id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
         assert_eq!(node.inputs.len(), func.inputs.len());
 
         for input in node.inputs.iter() {
             if let Binding::Output(output_binding) = &input.binding {
                 let output_node = graph.by_id(&output_binding.output_node_id).unwrap();
-                let output_func = func_lib.by_id(output_node.func_id).unwrap();
+                let output_func = func_lib.by_id(&output_node.func_id).unwrap();
                 assert!(output_binding.output_idx < output_func.outputs.len());
             }
         }

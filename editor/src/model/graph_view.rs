@@ -33,7 +33,7 @@ impl GraphView {
     pub fn from_graph(graph: &CoreGraph, func_lib: &FuncLib) -> Self {
         let mut nodes = Vec::with_capacity(graph.nodes.len());
         for (index, node) in graph.nodes.iter().enumerate() {
-            let func = func_lib.by_id(node.func_id).unwrap_or_else(|| {
+            let func = func_lib.by_id(&node.func_id).unwrap_or_else(|| {
                 panic!("Missing func for node {} ({})", node.name, node.func_id)
             });
             assert!(

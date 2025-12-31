@@ -297,7 +297,7 @@ impl LuaInvoker {
         for (&id, lua_func) in self.lua_funcs.iter() {
             let func = self
                 .func_lib
-                .by_id(id)
+                .by_id(&id)
                 .unwrap_or_else(|| panic!("Func with id {:?} not found", id));
             self.lua
                 .globals()
