@@ -331,13 +331,13 @@ impl ExecutionGraph {
                 }
             };
             match e_node.process_state {
-                ProcessState::Backward1 => {
-                    continue;
-                }
+                ProcessState::None => {}
                 ProcessState::Processing => {
                     return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                 }
-                ProcessState::None => {}
+                ProcessState::Backward1 => {
+                    continue;
+                }
                 ProcessState::Forward | ProcessState::Backward2 => {
                     panic!("Invalid processing state")
                 }
