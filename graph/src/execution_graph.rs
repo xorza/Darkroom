@@ -66,7 +66,7 @@ pub enum ExecutionBehavior {
 enum VisitCause {
     Terminal,
     OutputRequest { output_idx: usize },
-    Done,
+    Done { execute: bool },
 }
 #[derive(Debug)]
 struct Visit {
@@ -74,17 +74,17 @@ struct Visit {
     e_node_idx: usize,
     cause: VisitCause,
 }
-#[derive(Debug)]
-enum Visit2Cause {
-    Terminal,
-    OutputRequest,
-    Done { execute: bool },
-}
-#[derive(Debug)]
-struct Visit2 {
-    e_node_idx: usize,
-    cause: Visit2Cause,
-}
+// #[derive(Debug)]
+// enum Visit2Cause {
+//     Terminal,
+//     OutputRequest,
+//     Done { execute: bool },
+// }
+// #[derive(Debug)]
+// struct Visit2 {
+//     e_node_idx: usize,
+//     cause: Visit2Cause,
+// }
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
     pub id: NodeId,
@@ -125,9 +125,7 @@ pub struct ExecutionGraph {
 
     //caches
     #[serde(skip)]
-    stack1: Vec<Visit>,
-    #[serde(skip)]
-    stack2: Vec<Visit2>,
+    stack: Vec<Visit>,
     #[serde(skip)]
     node_idx_by_id: HashMap<NodeId, usize>,
 }
@@ -236,7 +234,7 @@ impl ExecutionGraph {
         self.e_node_processing_order.reserve(graph.nodes.len());
 
         let mut write_idx = 0;
-        let mut stack: Vec<Visit> = take(&mut self.stack1);
+        let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.clear();
         stack.reserve(10);
 
@@ -267,7 +265,7 @@ impl ExecutionGraph {
                         e_node.outputs[output_idx] = ExecutionOutput::Used
                     }
                 }
-                VisitCause::Done => {
+                VisitCause::Done { .. } => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
                     self.e_node_processing_order.push(e_node_idx);
@@ -291,7 +289,7 @@ impl ExecutionGraph {
             stack.push(Visit {
                 node_idx: visit.node_idx,
                 e_node_idx,
-                cause: VisitCause::Done,
+                cause: VisitCause::Done { execute: false },
             });
 
             let func_idx = func_lib
@@ -326,7 +324,7 @@ impl ExecutionGraph {
             }
         }
 
-        self.stack1 = take(&mut stack);
+        self.stack = take(&mut stack);
         self.e_nodes.compact_finish(write_idx);
 
         if is_debug() {
@@ -414,15 +412,16 @@ impl ExecutionGraph {
         self.e_node_processing_order
             .reserve(self.e_node_processing_order.len());
 
-        let mut stack: Vec<Visit2> = take(&mut self.stack2);
+        let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.clear();
         stack.reserve(10);
 
         for (idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.nodes[e_node.node_idx].terminal {
-                stack.push(Visit2 {
+                stack.push(Visit {
+                    node_idx: 0,
                     e_node_idx: idx,
-                    cause: Visit2Cause::Terminal,
+                    cause: VisitCause::Terminal,
                 });
             }
         }
@@ -431,8 +430,8 @@ impl ExecutionGraph {
             let e_node = &mut self.e_nodes[visit.e_node_idx];
 
             match visit.cause {
-                Visit2Cause::Terminal | Visit2Cause::OutputRequest => {}
-                Visit2Cause::Done { execute } => {
+                VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
+                VisitCause::Done { execute } => {
                     e_node.process_state = ProcessState::Backward2;
                     if execute {
                         self.e_node_execution_order.push(visit.e_node_idx);
@@ -461,9 +460,10 @@ impl ExecutionGraph {
             } && !e_node.has_missing_inputs;
 
             e_node.process_state = ProcessState::Processing;
-            stack.push(Visit2 {
+            stack.push(Visit {
+                node_idx: 0,
                 e_node_idx: visit.e_node_idx,
-                cause: Visit2Cause::Done { execute },
+                cause: VisitCause::Done { execute },
             });
 
             if execute {
@@ -474,9 +474,10 @@ impl ExecutionGraph {
                         InputState::Unknown => panic!("Unprocessed input"),
                     } {
                         if let Some(output_address) = input.output_address.as_ref() {
-                            stack.push(Visit2 {
+                            stack.push(Visit {
+                                node_idx: 0,
                                 e_node_idx: output_address.e_node_idx,
-                                cause: Visit2Cause::OutputRequest,
+                                cause: VisitCause::OutputRequest { output_idx: 0 },
                             });
                         }
                     }
@@ -484,7 +485,7 @@ impl ExecutionGraph {
             }
         }
 
-        self.stack2 = take(&mut stack);
+        self.stack = take(&mut stack);
     }
 
     pub fn validate_with_graph(&self, graph: &Graph, func_lib: &FuncLib) {
