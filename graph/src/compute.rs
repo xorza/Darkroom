@@ -4,15 +4,48 @@ use std::ops::{Index, IndexMut};
 use crate::data::{DataType, DynamicValue};
 use crate::execution_graph::{ExecutionGraph, ExecutionGraphError};
 use crate::function::{FuncId, FuncLib};
-use crate::graph::{Binding, Graph};
+use crate::graph::{Binding, Graph, NodeId};
+use crate::prelude::InvokeCache;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Default)]
 pub(crate) struct ArgSet(Vec<DynamicValue>);
 
-#[derive(Debug, Default)]
-pub struct Compute {}
+#[derive(Debug)]
+enum VisitCause {
+    Terminal,
+    OutputRequest { output_idx: usize },
+    Done { execute: bool },
+}
+#[derive(Debug)]
+struct Visit {
+    e_node_idx: usize,
+    cause: VisitCause,
+}
+#[derive(Default, Debug, Serialize, Deserialize)]
+pub struct ComputeNode {
+    pub id: NodeId,
+
+    pub e_node_idx: usize,
+
+    pub run_time: f64,
+    pub error: Option<ComputeError>,
+
+    #[serde(skip)]
+    pub(crate) cache: InvokeCache,
+    #[serde(skip)]
+    pub(crate) output_values: Option<Vec<DynamicValue>>,
+
+    #[cfg(debug_assertions)]
+    pub name: String,
+}
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Compute {
+    c_nodes: Vec<ComputeNode>,
+    #[serde(skip)]
+    stack: Vec<Visit>,
+}
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ComputeError {

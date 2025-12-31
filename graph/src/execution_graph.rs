@@ -21,7 +21,6 @@ enum ProcessState {
     Forward,
     Backward2,
 }
-
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionGraphError {
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
@@ -62,7 +61,29 @@ pub enum ExecutionBehavior {
     Pure,
     Once,
 }
-
+#[derive(Debug)]
+enum VisitCause {
+    Terminal,
+    OutputRequest { output_idx: usize },
+    Done,
+}
+#[derive(Debug)]
+struct Visit {
+    node_idx: usize,
+    e_node_idx: usize,
+    cause: VisitCause,
+}
+#[derive(Debug)]
+enum Visit2Cause {
+    Terminal,
+    OutputRequest { output_idx: usize },
+    Done { execute: bool },
+}
+#[derive(Debug)]
+struct Visit2 {
+    e_node_idx: usize,
+    cause: Visit2Cause,
+}
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
     pub id: NodeId,
@@ -89,31 +110,6 @@ pub struct ExecutionNode {
     #[cfg(debug_assertions)]
     pub name: String,
 }
-
-#[derive(Debug)]
-enum Visit1Cause {
-    Terminal,
-    OutputRequest { output_idx: usize },
-    Done,
-}
-#[derive(Debug)]
-struct Visit1 {
-    node_idx: usize,
-    e_node_idx: usize,
-    cause: Visit1Cause,
-}
-#[derive(Debug)]
-enum Visit2Cause {
-    Terminal,
-    OutputRequest { output_idx: usize },
-    Done { execute: bool },
-}
-#[derive(Debug)]
-struct Visit2 {
-    e_node_idx: usize,
-    cause: Visit2Cause,
-}
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: Vec<ExecutionNode>,
@@ -123,7 +119,7 @@ pub struct ExecutionGraph {
 
     //caches
     #[serde(skip)]
-    stack1: Vec<Visit1>,
+    stack: Vec<Visit>,
     #[serde(skip)]
     stack2: Vec<Visit2>,
     #[serde(skip)]
@@ -260,7 +256,7 @@ impl ExecutionGraph {
             }
         };
 
-        let mut stack: Vec<Visit1> = take(&mut self.stack1);
+        let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.reserve(10);
 
         for (node_idx, node) in graph
@@ -270,10 +266,10 @@ impl ExecutionGraph {
             .filter(|&(_, node)| node.terminal)
         {
             let e_node_idx = get_e_node_idx(self, &node.id);
-            stack.push(Visit1 {
+            stack.push(Visit {
                 node_idx,
                 e_node_idx,
-                cause: Visit1Cause::Terminal,
+                cause: VisitCause::Terminal,
             });
         }
 
@@ -283,13 +279,13 @@ impl ExecutionGraph {
 
             let e_node = &mut self.e_nodes[e_node_idx];
             match visit.cause {
-                Visit1Cause::Terminal => {}
-                Visit1Cause::OutputRequest { output_idx } => {
+                VisitCause::Terminal => {}
+                VisitCause::OutputRequest { output_idx } => {
                     if e_node.process_state != ProcessState::None {
                         e_node.outputs[output_idx] = ExecutionOutput::Used
                     }
                 }
-                Visit1Cause::Done => {
+                VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
                     self.e_node_processing_order.push(e_node_idx);
@@ -310,10 +306,10 @@ impl ExecutionGraph {
             }
 
             e_node.process_state = ProcessState::Processing;
-            stack.push(Visit1 {
+            stack.push(Visit {
                 node_idx: visit.node_idx,
                 e_node_idx,
-                cause: Visit1Cause::Done,
+                cause: VisitCause::Done,
             });
 
             let func_idx = func_lib
@@ -323,7 +319,7 @@ impl ExecutionGraph {
                 .expect("FuncLib missing function for graph node func_id");
             let func = &func_lib.funcs[func_idx];
             e_node.refresh(node, func, visit.node_idx, func_idx);
-            if let Visit1Cause::OutputRequest { output_idx } = visit.cause {
+            if let VisitCause::OutputRequest { output_idx } = visit.cause {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
             }
 
@@ -335,10 +331,10 @@ impl ExecutionGraph {
                         port_idx: output_binding.output_idx,
                     });
                     let output_node_idx = self.node_idx_by_id[&output_binding.output_node_id];
-                    stack.push(Visit1 {
+                    stack.push(Visit {
                         node_idx: output_node_idx,
                         e_node_idx: output_e_node_idx,
-                        cause: Visit1Cause::OutputRequest {
+                        cause: VisitCause::OutputRequest {
                             output_idx: output_binding.output_idx,
                         },
                     });
@@ -347,7 +343,7 @@ impl ExecutionGraph {
         }
 
         self.node_idx_by_id.clear();
-        self.stack1 = take(&mut stack);
+        self.stack = take(&mut stack);
         // Drop nodes past the compacted range.
         self.e_nodes.truncate(write_idx);
         self.e_node_idx_by_id
