@@ -457,11 +457,12 @@ impl ExecutionGraph {
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
             e_node.missing_required_inputs = missing_required_inputs;
-            e_node.wants_execute = match e_node.behavior {
-                ExecutionBehavior::Impure => true,
-                ExecutionBehavior::Pure => e_node.output_values.is_none() || changed_inputs,
-                ExecutionBehavior::Once => e_node.output_values.is_none(),
-            } && !missing_required_inputs;
+            e_node.wants_execute = !missing_required_inputs
+                && match e_node.behavior {
+                    ExecutionBehavior::Impure => true,
+                    ExecutionBehavior::Pure => e_node.output_values.is_none() || changed_inputs,
+                    ExecutionBehavior::Once => e_node.output_values.is_none(),
+                };
         }
     }
 
