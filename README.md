@@ -23,6 +23,7 @@ Common utilities include serialization roundtrip coverage for shared containers 
 Keyed vector helpers keep index maps consistent on removals (details in `NOTES-AI.md`).
 Keyed vector compaction paths have explicit coverage for swap/append cases (details in `NOTES-AI.md`).
 Keyed vector compaction now uses constructor callbacks for new entries (details in `NOTES-AI.md`).
+Keyed vectors now serialize as a flat array instead of a wrapper object (details in `NOTES-AI.md`).
 Logging uses the tracing ecosystem.
 Execution validation catches invalid bindings earlier.
 Some tests run on the Tokio async execution.

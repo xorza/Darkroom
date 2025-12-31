@@ -10,10 +10,9 @@ pub trait KeyIndexKey<K> {
     fn key(&self) -> &K;
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default)]
 pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default + KeyIndexKey<K>> {
     pub items: Vec<V>,
-    #[serde(skip)] // rebuild on deserialization
     pub idx_by_key: HashMap<K, usize>,
 }
 
@@ -142,6 +141,18 @@ where
     }
 }
 
+impl<K, V> Serialize for KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: Default + KeyIndexKey<K> + Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        self.items.serialize(serializer)
+    }
+}
 impl<'de, K, V> Deserialize<'de> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash + Deserialize<'de>,
@@ -151,24 +162,16 @@ where
     where
         D: serde::Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct Helper<V> {
-            items: Vec<V>,
-        }
-
-        let helper: Helper<V> = Helper::deserialize(deserializer)?;
-        let mut idx_by_key = HashMap::with_capacity(helper.items.len());
-        for (idx, item) in helper.items.iter().enumerate() {
+        let items: Vec<V> = Vec::deserialize(deserializer)?;
+        let mut idx_by_key = HashMap::with_capacity(items.len());
+        for (idx, item) in items.iter().enumerate() {
             let key = *item.key();
             if idx_by_key.insert(key, idx).is_some() {
                 return Err(SerdeError::custom("Duplicate key in KeyIndexVec"));
             }
         }
 
-        Ok(Self {
-            items: helper.items,
-            idx_by_key,
-        })
+        Ok(Self { items, idx_by_key })
     }
 }
 
