@@ -37,9 +37,6 @@ pub struct Event {
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum NodeBehavior {
     #[default]
-    // should execute depending on the function's behavior
-    // will be executed always for impure functions
-    // for pure functions, only on input change
     AsFunction,
     Once,
 }

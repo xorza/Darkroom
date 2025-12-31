@@ -3,8 +3,10 @@ use std::{collections::HashMap, ops::Index, ops::IndexMut};
 
 use serde::{Deserialize, Serialize};
 
+use crate::is_debug;
+
 pub trait KeyIndexKey<K> {
-    fn key(&self) -> K;
+    fn key(&self) -> &K;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -60,11 +62,7 @@ where
     }
 
     pub fn compact_insert_default(&mut self, key: K, write_idx: &mut usize) -> usize {
-        assert!(
-            *write_idx <= self.items.len(),
-            "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
-            self.items.len()
-        );
+        assert!(*write_idx <= self.items.len());
         let idx = self.get_or_insert_default(key);
         if idx < *write_idx {
             return idx;
@@ -72,7 +70,7 @@ where
 
         if idx > *write_idx {
             self.items.swap(idx, *write_idx);
-            let swapped_key = self.items[idx].key();
+            let swapped_key = *self.items[idx].key();
             self.idx_by_key.insert(swapped_key, idx);
         }
 
@@ -82,19 +80,17 @@ where
     }
 
     pub fn compact_finish(&mut self, write_idx: usize) {
-        assert!(
-            write_idx <= self.items.len(),
-            "KeyIndexVec compact write index out of bounds: {write_idx} > {}",
-            self.items.len()
-        );
+        assert!(write_idx <= self.items.len());
         self.items.truncate(write_idx);
         self.idx_by_key
-            .retain(|&id, &mut idx| idx < write_idx && self.items[idx].key() == id);
-        assert_eq!(
-            self.items.len(),
-            self.idx_by_key.len(),
-            "KeyIndexVec invariant violated: items and idx_by_key length mismatch"
-        );
+            .retain(|&id, &mut idx| idx < write_idx && *self.items[idx].key() == id);
+        assert_eq!(self.items.len(), self.idx_by_key.len());
+
+        if is_debug() {
+            for (idx, v) in self.items.iter().enumerate() {
+                assert_eq!(idx, self.index_of(v.key()).unwrap());
+            }
+        }
     }
 }
 

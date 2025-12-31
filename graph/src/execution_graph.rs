@@ -108,8 +108,8 @@ pub struct ExecutionNode {
     pub name: String,
 }
 impl KeyIndexKey<NodeId> for ExecutionNode {
-    fn key(&self) -> NodeId {
-        self.id
+    fn key(&self) -> &NodeId {
+        &self.id
     }
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
