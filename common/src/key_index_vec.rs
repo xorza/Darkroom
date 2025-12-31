@@ -181,16 +181,16 @@ mod tests {
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = serialize(&vec, format);
             let deserialized: KeyIndexVec<u32, TestItem> =
-                deserialize(&serialized, format).expect("Failed to deserialize KeyIndexVec");
+                deserialize(&serialized, format).unwrap();
 
             assert_eq!(deserialized.items.len(), 2);
             assert_eq!(deserialized.idx_by_key.len(), 2);
 
-            let item_a = deserialized.by_key(&1).expect("Missing item for key 1");
+            let item_a = deserialized.by_key(&1).unwrap();
             assert_eq!(item_a.id, 1);
             assert_eq!(item_a.value, 10);
 
-            let item_b = deserialized.by_key(&2).expect("Missing item for key 2");
+            let item_b = deserialized.by_key(&2).unwrap();
             assert_eq!(item_b.id, 2);
             assert_eq!(item_b.value, 20);
         }
