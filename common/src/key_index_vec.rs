@@ -22,6 +22,11 @@ where
     K: Copy + Eq + Hash,
     V: Default + KeyIndexKey<K>,
 {
+    pub fn push(&mut self, v: V) {
+        self.idx_by_key.insert(*v.key(), self.items.len());
+        self.items.push(v);
+    }
+
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
         self.items.iter()
     }
@@ -147,5 +152,47 @@ where
             items: helper.items,
             idx_by_key,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{deserialize, serialize, FileFormat};
+
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    struct TestItem {
+        id: u32,
+        value: i32,
+    }
+
+    impl KeyIndexKey<u32> for TestItem {
+        fn key(&self) -> &u32 {
+            &self.id
+        }
+    }
+
+    #[test]
+    fn key_index_vec_roundtrip_formats() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.push(TestItem { id: 1, value: 10 });
+        vec.push(TestItem { id: 2, value: 20 });
+
+        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
+            let serialized = serialize(&vec, format);
+            let deserialized: KeyIndexVec<u32, TestItem> =
+                deserialize(&serialized, format).expect("Failed to deserialize KeyIndexVec");
+
+            assert_eq!(deserialized.items.len(), 2);
+            assert_eq!(deserialized.idx_by_key.len(), 2);
+
+            let item_a = deserialized.by_key(&1).expect("Missing item for key 1");
+            assert_eq!(item_a.id, 1);
+            assert_eq!(item_a.value, 10);
+
+            let item_b = deserialized.by_key(&2).expect("Missing item for key 2");
+            assert_eq!(item_b.id, 2);
+            assert_eq!(item_b.value, 20);
+        }
     }
 }
