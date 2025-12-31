@@ -190,7 +190,7 @@ impl ScenariumApp {
 
         let compute = Compute::default();
 
-        let result = block_on(compute.run(&self.graph, &self.func_lib, &mut self.execution_graph));
+        let result = compute.run(&self.graph, &self.func_lib, &mut self.execution_graph);
         match result {
             Ok(()) => {
                 let status = self

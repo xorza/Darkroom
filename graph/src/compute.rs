@@ -61,8 +61,8 @@ pub enum ComputeError {
 pub type ComputeResult<T> = std::result::Result<T, ComputeError>;
 
 impl Compute {
-    pub async fn run(
-        &self,
+    pub fn run(
+        self,
         graph: &Graph,
         func_lib: &FuncLib,
         execution_graph: &mut ExecutionGraph,
@@ -106,7 +106,7 @@ impl Compute {
                 };
 
                 let data_type = &func.inputs[input_idx].data_type;
-                inputs[input_idx] = self.convert_type(&value, data_type);
+                inputs[input_idx] = convert_type(&value, data_type);
             }
 
             let e_node = &mut execution_graph.e_nodes[e_node_idx];
@@ -138,43 +138,37 @@ impl Compute {
 
         Ok(())
     }
+}
 
-    fn convert_type(&self, src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
-        let src_data_type = src_value.data_type();
-        if *src_data_type == *dst_data_type {
-            return src_value.clone();
+fn convert_type(src_value: &DynamicValue, dst_data_type: &DataType) -> DynamicValue {
+    let src_data_type = src_value.data_type();
+    if *src_data_type == *dst_data_type {
+        return src_value.clone();
+    }
+
+    if src_data_type.is_custom() || dst_data_type.is_custom() {
+        panic!("Custom types are not supported yet");
+    }
+
+    match (src_data_type, dst_data_type) {
+        (DataType::Bool, DataType::Int) => DynamicValue::Int(src_value.as_bool() as i64),
+        (DataType::Bool, DataType::Float) => DynamicValue::Float(src_value.as_bool() as i64 as f64),
+        (DataType::Bool, DataType::String) => DynamicValue::String(src_value.as_bool().to_string()),
+
+        (DataType::Int, DataType::Bool) => DynamicValue::Bool(src_value.as_int() != 0),
+        (DataType::Int, DataType::Float) => DynamicValue::Float(src_value.as_int() as f64),
+        (DataType::Int, DataType::String) => DynamicValue::String(src_value.as_int().to_string()),
+
+        (DataType::Float, DataType::Bool) => {
+            DynamicValue::Bool(src_value.as_float().abs() > common::EPSILON)
+        }
+        (DataType::Float, DataType::Int) => DynamicValue::Int(src_value.as_float() as i64),
+        (DataType::Float, DataType::String) => {
+            DynamicValue::String(src_value.as_float().to_string())
         }
 
-        if src_data_type.is_custom() || dst_data_type.is_custom() {
-            panic!("Custom types are not supported yet");
-        }
-
-        match (src_data_type, dst_data_type) {
-            (DataType::Bool, DataType::Int) => DynamicValue::Int(src_value.as_bool() as i64),
-            (DataType::Bool, DataType::Float) => {
-                DynamicValue::Float(src_value.as_bool() as i64 as f64)
-            }
-            (DataType::Bool, DataType::String) => {
-                DynamicValue::String(src_value.as_bool().to_string())
-            }
-
-            (DataType::Int, DataType::Bool) => DynamicValue::Bool(src_value.as_int() != 0),
-            (DataType::Int, DataType::Float) => DynamicValue::Float(src_value.as_int() as f64),
-            (DataType::Int, DataType::String) => {
-                DynamicValue::String(src_value.as_int().to_string())
-            }
-
-            (DataType::Float, DataType::Bool) => {
-                DynamicValue::Bool(src_value.as_float().abs() > common::EPSILON)
-            }
-            (DataType::Float, DataType::Int) => DynamicValue::Int(src_value.as_float() as i64),
-            (DataType::Float, DataType::String) => {
-                DynamicValue::String(src_value.as_float().to_string())
-            }
-
-            (src, dst) => {
-                panic!("Unsupported conversion from {:?} to {:?}", src, dst);
-            }
+        (src, dst) => {
+            panic!("Unsupported conversion from {:?} to {:?}", src, dst);
         }
     }
 }
@@ -254,25 +248,19 @@ mod tests {
         let graph = test_graph();
 
         let mut execution_graph = ExecutionGraph::default();
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // get_b is pure, so changing this should not affect result
         test_values.try_lock()?.b = 7;
 
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
 
         assert_eq!(test_values.try_lock()?.result, 63);
 
@@ -313,9 +301,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
 
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
 
         assert_eq!(test_values.try_lock()?.result, 360);
 
@@ -362,9 +348,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
 
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
 
         // assert that both nodes were called
         {
@@ -374,9 +358,7 @@ mod tests {
             assert_eq!(guard.result, 35);
         }
 
-        Compute::default()
-            .run(&graph, &func_lib, &mut execution_graph)
-            .await?;
+        Compute::default().run(&graph, &func_lib, &mut execution_graph)?;
 
         // assert that node was called again
         let guard = test_values.try_lock()?;

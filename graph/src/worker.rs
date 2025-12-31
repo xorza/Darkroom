@@ -71,9 +71,7 @@ impl Worker {
 
                 WorkerMessage::RunOnce(graph) => {
                     let mut execution_graph = ExecutionGraph::default();
-                    let result = Compute::default()
-                        .run(&graph, &func_lib, &mut execution_graph)
-                        .await;
+                    let result = Compute::default().run(&graph, &func_lib, &mut execution_graph);
                     (*compute_callback.lock().await)(result);
                 }
 
@@ -118,9 +116,7 @@ impl Worker {
                 }
 
                 WorkerMessage::Event => {
-                    let result = Compute::default()
-                        .run(&graph, func_lib, &mut execution_graph)
-                        .await;
+                    let result = Compute::default().run(&graph, func_lib, &mut execution_graph);
 
                     (*compute_callback.lock().await)(result);
                 }
