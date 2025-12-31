@@ -85,8 +85,8 @@ enum ProcessState {
 pub struct ExecutionNode {
     pub id: NodeId,
 
-    pub has_missing_inputs: bool,
-    pub has_changed_inputs: bool,
+    pub missing_required_inputs: bool,
+    pub changed_inputs: bool,
     pub behavior: ExecutionBehavior,
 
     pub node_idx: usize,
@@ -430,7 +430,7 @@ impl ExecutionGraph {
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
 
-                        if output_e_node.has_missing_inputs {
+                        if output_e_node.missing_required_inputs {
                             assert!(!output_e_node.wants_execute);
                             InputState::Missing
                         } else if output_e_node.wants_execute {
@@ -455,8 +455,8 @@ impl ExecutionGraph {
             assert_eq!(e_node.process_state, ProcessState::Backward1);
 
             e_node.process_state = ProcessState::Forward;
-            e_node.has_changed_inputs = has_changed_inputs;
-            e_node.has_missing_inputs = has_missing_inputs;
+            e_node.changed_inputs = has_changed_inputs;
+            e_node.missing_required_inputs = has_missing_inputs;
             e_node.wants_execute = match e_node.behavior {
                 ExecutionBehavior::Impure => true,
                 ExecutionBehavior::Pure => e_node.output_values.is_none() || has_changed_inputs,
@@ -569,6 +569,17 @@ impl ExecutionGraph {
             assert_eq!(e_node.inputs.len(), node.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
 
+            let missing_required_inputs = e_node
+                .inputs
+                .iter()
+                .any(|input| input.required && input.state == InputState::Missing);
+            assert_eq!(missing_required_inputs, e_node.missing_required_inputs);
+            let changed_inputs = e_node
+                .inputs
+                .iter()
+                .any(|input| input.state == InputState::Changed);
+            assert_eq!(changed_inputs, e_node.changed_inputs);
+
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::Output(output_binding) => {
@@ -600,7 +611,7 @@ impl ExecutionGraph {
             assert!(!self.e_node_exe_order[idx + 1..].contains(&e_node_idx));
 
             let e_node = &self.e_nodes[e_node_idx];
-            assert!(!e_node.has_missing_inputs);
+            assert!(!e_node.missing_required_inputs);
 
             let all_dependencies_in_order = e_node
                 .inputs
@@ -693,7 +704,7 @@ mod tests {
         assert!(execution_graph
             .e_nodes
             .iter()
-            .all(|e_node| !e_node.has_missing_inputs));
+            .all(|e_node| !e_node.missing_required_inputs));
 
         Ok(())
     }
@@ -717,13 +728,13 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert!(!get_b.has_missing_inputs);
-        assert!(sum.has_missing_inputs);
-        assert!(mult.has_missing_inputs);
-        assert!(print.has_missing_inputs);
+        assert!(!get_b.missing_required_inputs);
+        assert!(sum.missing_required_inputs);
+        assert!(mult.missing_required_inputs);
+        assert!(print.missing_required_inputs);
 
-        assert!(!get_b.has_changed_inputs);
-        assert!(sum.has_changed_inputs);
+        assert!(!get_b.changed_inputs);
+        assert!(sum.changed_inputs);
 
         assert_eq!(sum.inputs[0].state, InputState::Missing);
         assert_eq!(mult.inputs[0].state, InputState::Missing);
