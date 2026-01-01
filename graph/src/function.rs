@@ -73,12 +73,6 @@ pub struct ValueOption {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct FuncInput {
-    pub name: String,
-    pub required: bool,
-    pub data_type: DataType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<StaticValue>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub value_options: Vec<ValueOption>,
 }
@@ -363,18 +357,10 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
             inputs: vec![
-                FuncInput {
-                    name: "A".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "B".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
                     value_options: vec![],
                 },
             ],
@@ -438,18 +424,10 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
             inputs: vec![
-                FuncInput {
-                    name: "A".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "B".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: None,
                     value_options: vec![],
                 },
             ],
@@ -474,11 +452,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Impure,
-            inputs: vec![FuncInput {
-                name: "message".to_string(),
-                required: true,
-                data_type: DataType::Int,
-                default_value: None,
                 value_options: vec![],
             }],
             outputs: vec![],

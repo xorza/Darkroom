@@ -223,29 +223,18 @@ impl ExecutionGraph {
                 (node, func)
             };
 
-            input_args.resize_and_clear(node.inputs.len());
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let value: DynamicValue = match &input.binding {
-                    Binding::None => DynamicValue::None,
-                    Binding::Const => input
-                        .const_value
-                        .as_ref()
-                        .expect("Const value is not set")
-                        .into(),
 
-                    Binding::Output(output_binding) => {
+                    Binding::Output { output_idx, .. } => {
                         let output_address = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .clone()
                             .expect("Output address is not set");
-                        assert_eq!(output_binding.output_idx, output_address.port_idx);
+                        assert_eq!(*output_idx, output_address.port_idx);
 
                         let output_values = self.e_nodes[output_address.e_node_idx]
                             .output_values
                             .as_ref()
-                            .expect("Output values missing for bound node; check execution order");
-
-                        output_values[output_binding.output_idx].clone()
+                        output_values[*output_idx].clone()
                     }
                 };
 
@@ -358,34 +347,30 @@ impl ExecutionGraph {
             let func = &func_lib.funcs[func_idx];
             e_node.refresh(visit.node_idx, node, func_idx, func);
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
-                e_node.outputs[output_idx] = ExecutionOutput::Used
-            }
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Output(output_binding) = &input.binding else {
+                let Binding::Output {
+                    output_node_id,
+                    output_idx,
+                } = &input.binding
+                else {
                     continue;
                 };
 
-                let output_node_id = output_binding.output_node_id;
                 let output_e_node_idx =
                     self.e_nodes
                         .compact_insert_with(&output_node_id, &mut write_idx, || ExecutionNode {
-                            id: output_node_id,
+                            id: *output_node_id,
                             ..Default::default()
                         });
                 self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
                     e_node_idx: output_e_node_idx,
-                    port_idx: output_binding.output_idx,
+                    port_idx: *output_idx,
                 });
-                let output_node_idx = graph
-                    .nodes
-                    .index_of_key(&output_binding.output_node_id)
-                    .unwrap();
+                let output_node_idx = graph.nodes.index_of_key(output_node_id).unwrap();
                 stack.push(Visit {
                     node_idx: output_node_idx,
                     e_node_idx: output_e_node_idx,
                     cause: VisitCause::OutputRequest {
-                        output_idx: output_binding.output_idx,
+                        output_idx: *output_idx,
                     },
                 });
             }
@@ -414,13 +399,7 @@ impl ExecutionGraph {
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let input_state = match &input.binding {
-                    Binding::None => InputState::Missing,
-                    // todo Const bindings are treated as changed each run until change tracking exists.
-                    Binding::Const => InputState::Changed,
-                    Binding::Output(_) => {
+                    Binding::Output { .. } => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .as_ref()
@@ -586,27 +565,19 @@ impl ExecutionGraph {
                 .inputs
                 .iter()
                 .any(|input| input.state == InputState::Changed);
-            assert_eq!(changed_inputs, e_node.changed_inputs);
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                match &input.binding {
-                    Binding::Output(output_binding) => {
+                    Binding::Output { output_node_id, .. } => {
                         if let Some(output_address) = &e_node.inputs[input_idx].output_address {
                             assert!(output_address.e_node_idx < self.e_nodes.len());
 
                             let output_e_node = &self.e_nodes[output_address.e_node_idx];
-                            let output_node = &graph.nodes[output_e_node.node_idx];
-
-                            assert_eq!(output_node.id, output_binding.output_node_id);
-                            assert_eq!(output_e_node.id, output_binding.output_node_id);
+                            assert_eq!(output_node.id, *output_node_id);
+                            assert_eq!(output_e_node.id, *output_node_id);
                             assert!(output_address.port_idx < output_e_node.outputs.len());
                             assert_eq!(
                                 output_e_node.outputs[output_address.port_idx],
                                 ExecutionOutput::Used
                             );
-                        }
-                    }
-                    Binding::None | Binding::Const => {
+                    Binding::None => {
                         assert!(e_node.inputs[input_idx].output_address.is_none());
                     }
                 }
@@ -641,20 +612,22 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
     graph.validate();
 
     for node in graph.nodes.iter() {
-        let func = func_lib.by_id(&node.func_id).unwrap();
-        assert_eq!(node.inputs.len(), func.inputs.len());
-
-        for input in node.inputs.iter() {
-            if let Binding::Output(output_binding) = &input.binding {
-                let output_node = graph.by_id(&output_binding.output_node_id).unwrap();
+            if let Binding::Output {
+                output_node_id,
+                output_idx,
+            } = &input.binding
+            {
+                let output_node = graph.by_id(output_node_id).unwrap();
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
-                assert!(output_binding.output_idx < output_func.outputs.len());
+                assert!(*output_idx < output_func.outputs.len());
             }
         }
     }
 }
+    if matches!(src_value, DynamicValue::None) {
+        return DynamicValue::None;
+    }
 
-fn convert_type(src_value: DynamicValue, dst_data_type: &DataType) -> DynamicValue {
     let src_data_type = src_value.data_type();
     if *src_data_type == *dst_data_type {
         return src_value.clone();
@@ -776,15 +749,9 @@ mod tests {
     fn execution_graph_updates_after_graph_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
-
-        graph.by_name_mut("mult").unwrap().inputs = vec![
-            Input {
-                binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
-                const_value: Some(StaticValue::Int(123)),
             },
             Input {
                 binding: Binding::from_output_binding(graph.by_name("get_b").unwrap().id, 0),
-                const_value: Some(StaticValue::Int(12)),
             },
         ];
 
@@ -804,11 +771,6 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-
-        graph.by_name_mut("mult").unwrap().inputs[0] = Input {
-            binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
-            const_value: Some(StaticValue::Int(123)),
         };
 
         execution_graph.update(&graph, &func_lib)?;
@@ -974,52 +936,6 @@ mod tests {
 
         assert_eq!(test_values.try_lock()?.result, 63);
 
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn default_input_value() -> anyhow::Result<()> {
-        let test_values = Arc::new(Mutex::new(TestValues {
-            a: 2,
-            b: 5,
-            result: 0,
-        }));
-        let test_values_result = test_values.clone();
-
-        let func_lib = test_func_lib(TestFuncHooks {
-            print: Box::new(move |result| {
-                test_values_result.try_lock().unwrap().result = result;
-            }),
-            ..TestFuncHooks::default()
-        });
-
-        let mut graph = test_graph();
-
-        {
-            let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
-            sum_inputs[0].const_value = Some(StaticValue::from(29));
-            sum_inputs[0].binding = Binding::Const;
-            sum_inputs[1].const_value = Some(StaticValue::from(11));
-            sum_inputs[1].binding = Binding::Const;
-        }
-
-        {
-            let mult_inputs = &mut graph.by_name_mut("mult").unwrap().inputs;
-            mult_inputs[1].const_value = Some(StaticValue::from(9));
-            mult_inputs[1].binding = Binding::Const;
-        }
-
-        let mut execution_graph = ExecutionGraph::default();
-
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
-
-        assert_eq!(test_values.try_lock()?.result, 360);
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn cached_value() -> anyhow::Result<()> {
         let test_values = Arc::new(Mutex::new(TestValues {
             a: 2,

@@ -10,11 +10,7 @@ use super::{Connection, Input, NodeView, Output};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphView {
-    pub id: Uuid,
-    pub nodes: Vec<NodeView>,
-    pub pan: egui::Vec2,
-    pub zoom: f32,
-    pub selected_node_id: Option<Uuid>,
+    pub selected_node_id: Option<NodeId>,
 }
 
 impl Default for GraphView {
@@ -44,15 +40,14 @@ impl GraphView {
             let mut inputs = Vec::with_capacity(node.inputs.len());
             for (input_index, input) in node.inputs.iter().enumerate() {
                 let func_input = func
-                    .inputs
-                    .get(input_index)
-                    .expect("func inputs must align with node inputs");
-                let connection = match &input.binding {
-                    Binding::Output(binding) => Some(Connection {
-                        node_id: binding.output_node_id.as_uuid(),
-                        output_index: binding.output_idx,
+                    Binding::Output {
+                        output_node_id,
+                        output_idx,
+                    } => Some(Connection {
+                        node_id: *output_node_id,
+                        output_index: *output_idx,
                     }),
-                    Binding::None | Binding::Const => None,
+                    Binding::None => None,
                 };
                 inputs.push(Input {
                     name: func_input.name.clone(),
@@ -68,11 +63,7 @@ impl GraphView {
             }
 
             let column = index % 3;
-            let row = index / 3;
-            let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
-
-            nodes.push(NodeView {
-                id: node.id.as_uuid(),
+                id: node.id,
                 name: node.name.clone(),
                 pos,
                 inputs,
@@ -120,16 +111,12 @@ impl GraphView {
             );
             assert!(
                 node_view.outputs.len() == func.outputs.len(),
-                "node outputs must match function outputs"
-            );
-
-            let mut inputs = Vec::with_capacity(func.inputs.len());
-            for (input_index, func_input) in func.inputs.iter().enumerate() {
+            for input_idx in 0..func.inputs.len() {
                 let view_input = node_view
                     .inputs
-                    .get(input_index)
+                    .get(input_idx)
                     .expect("graph view inputs must align with function inputs");
-                let (binding, const_value) = match &view_input.connection {
+                let binding = match &view_input.connection {
                     Some(connection) => {
                         assert!(
                             node_ids.contains_key(&connection.node_id),
@@ -139,29 +126,15 @@ impl GraphView {
                             .get(&connection.node_id)
                             .copied()
                             .expect("connection must reference an existing node");
-                        assert!(
-                            connection.output_index < output_count,
-                            "connection output index must be in range"
-                        );
-                        (
-                            Binding::from_output_binding(
-                                NodeId::from(connection.node_id),
-                                connection.output_index,
-                            ),
-                            None,
+
+                        Binding::from_output_binding(
+                            NodeId::from(connection.node_id),
+                            connection.output_index,
                         )
                     }
-                    None => func_input
-                        .default_value
-                        .as_ref()
-                        .map_or((Binding::None, None), |_| {
-                            (Binding::Const, func_input.default_value.clone())
-                        }),
+                    None => Binding::None,
                 };
-                inputs.push(graph::graph::Input {
-                    binding,
-                    const_value,
-                });
+                inputs.push(graph::graph::Input { binding });
             }
 
             let events = (0..func.events.len()).map(|_| Event::default()).collect();
@@ -256,11 +229,7 @@ impl GraphView {
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
         let payload = std::fs::read_to_string(path).map_err(anyhow::Error::from)?;
-
-        Self::deserialize(format, &payload)
-    }
-
-    pub fn select_node(&mut self, node_id: Uuid) {
+    pub fn select_node(&mut self, node_id: NodeId) {
         assert!(
             self.nodes.iter().any(|node| node.id == node_id),
             "selected node must exist in graph"
@@ -273,11 +242,7 @@ impl GraphView {
         if node_index + 1 != self.nodes.len() {
             let node = self.nodes.remove(node_index);
             self.nodes.push(node);
-        }
-        self.selected_node_id = Some(node_id);
-    }
-
-    pub fn remove_node(&mut self, node_id: Uuid) {
+    pub fn remove_node(&mut self, node_id: NodeId) {
         assert!(
             self.nodes.iter().any(|node| node.id == node_id),
             "node must exist to be removed"

@@ -5,29 +5,19 @@ use serde::{Deserialize, Serialize};
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
 use common::{deserialize, serialize, FileFormat, SerdeFormatResult};
-use common::{id_type, is_debug};
-
-id_type!(NodeId);
-
-#[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct OutputBinding {
-    pub output_node_id: NodeId,
-    pub output_idx: usize,
-}
-
 #[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
 pub enum Binding {
     #[default]
     None,
-    Const,
-    Output(OutputBinding),
+    Output {
+        output_node_id: NodeId,
+        output_idx: usize,
+    },
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Input {
     pub binding: Binding,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub const_value: Option<StaticValue>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -74,25 +64,16 @@ impl Graph {
         }
     }
     pub fn remove_by_id(&mut self, id: NodeId) {
-        assert!(!id.is_nil());
-
-        self.nodes.remove_by_key(&id);
-
+        // todo simplify
         self.nodes
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Output(output_binding) if output_binding.output_node_id == id => {
-                    Some(input)
-                }
+                Binding::Output { output_node_id, .. } if *output_node_id == id => Some(input),
                 _ => None,
             })
             .for_each(|input| {
-                input.binding = if input.const_value.is_some() {
-                    Binding::Const
-                } else {
-                    Binding::None
-                };
+                input.binding = Binding::None;
             });
     }
 
@@ -129,12 +110,8 @@ impl Graph {
         }
 
         for node in self.nodes.iter() {
-            assert_ne!(node.id, NodeId::nil());
-            assert_ne!(node.func_id, FuncId::nil());
-
-            for input in node.inputs.iter() {
-                if let Binding::Output(output_binding) = &input.binding {
-                    assert!(self.by_id(&output_binding.output_node_id).is_some());
+                if let Binding::Output { output_node_id, .. } = &input.binding {
+                    assert!(self.by_id(output_node_id).is_some());
                 }
             }
         }
@@ -153,21 +130,7 @@ impl Default for Node {
             events: vec![],
         }
     }
-}
-
-impl Node {
-    pub fn from_function(func: &Func) -> Node {
-        let inputs: Vec<Input> = func
-            .inputs
-            .iter()
-            .map(|func_input| Input {
-                binding: func_input
-                    .default_value
-                    .as_ref()
-                    .map_or(Binding::None, |_| Binding::Const),
-                const_value: func_input.default_value.clone(),
-            })
-            .collect();
+        let inputs: Vec<Input> = vec![Input::default(); func.inputs.len()];
 
         let events: Vec<Event> = func.events.iter().map(|_event| Event::default()).collect();
 
@@ -181,41 +144,36 @@ impl Node {
             events,
         }
     }
-}
-
-impl Binding {
-    pub fn from_output_binding(output_node_id: NodeId, output_idx: usize) -> Binding {
-        Binding::Output(OutputBinding {
+        Binding::Output {
             output_node_id,
             output_idx,
-        })
+        }
     }
 
-    pub fn as_output_binding(&self) -> Option<&OutputBinding> {
+    pub fn as_output_binding(&self) -> Option<(&NodeId, usize)> {
         match self {
-            Binding::Output(output_binding) => Some(output_binding),
+            Binding::Output {
+                output_node_id,
+                output_idx,
+            } => Some((output_node_id, *output_idx)),
             _ => None,
         }
     }
 
-    pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputBinding> {
+    pub fn as_output_binding_mut(&mut self) -> Option<(&mut NodeId, &mut usize)> {
         match self {
-            Binding::Output(output_binding) => Some(output_binding),
+            Binding::Output {
+                output_node_id,
+                output_idx,
+            } => Some((output_node_id, output_idx)),
             _ => None,
         }
-    }
-
-    pub fn is_output_binding(&self) -> bool {
-        self.as_output_binding().is_some()
-    }
-    pub fn is_const(&self) -> bool {
-        *self == Binding::Const
     }
 
     pub fn is_some(&self) -> bool {
         match self {
             Binding::None => false,
-            Binding::Const | Binding::Output(_) => true,
+            Binding::Output { .. } => true,
         }
     }
 }
@@ -243,15 +201,9 @@ pub fn test_graph() -> Graph {
         func_id: mult_func_id,
         name: "mult".to_string(),
         behavior: NodeBehavior::AsFunction,
-        terminal: false,
-        inputs: vec![
-            Input {
-                binding: Binding::from_output_binding(sum_node_id, 0),
-                const_value: None,
             },
             Input {
                 binding: Binding::from_output_binding(get_b_node_id, 0),
-                const_value: Some(StaticValue::Int(55)),
             },
         ],
         events: vec![],
@@ -282,15 +234,9 @@ pub fn test_graph() -> Graph {
         func_id: sum_func_id,
         name: "sum".to_string(),
         behavior: NodeBehavior::AsFunction,
-        terminal: false,
-        inputs: vec![
-            Input {
-                binding: Binding::from_output_binding(get_a_node_id, 0),
-                const_value: Some(StaticValue::Int(123)),
             },
             Input {
                 binding: Binding::from_output_binding(get_b_node_id, 0),
-                const_value: Some(StaticValue::Int(12)),
             },
         ],
         events: vec![],
@@ -300,11 +246,6 @@ pub fn test_graph() -> Graph {
         id: print_node_id,
         func_id: print_func_id,
         name: "print".to_string(),
-        behavior: NodeBehavior::AsFunction,
-        terminal: true,
-        inputs: vec![Input {
-            binding: Binding::from_output_binding(mult_node_id, 0),
-            const_value: None,
         }],
         events: vec![],
     });
@@ -313,11 +254,7 @@ pub fn test_graph() -> Graph {
 
     graph
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::data::StaticValue;
-    use crate::graph::{Binding, Graph, Input, Node, OutputBinding};
+    use crate::graph::{Binding, Graph, Input, Node};
     use common::FileFormat;
     use std::hint::black_box;
 
@@ -345,12 +282,8 @@ mod tests {
             .id;
         graph.remove_by_id(node_id);
 
-        assert!(graph.by_name("sum").is_none());
-        assert_eq!(graph.nodes.len(), 4);
-
-        for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {
-            if let Some(binding) = input.binding.as_output_binding() {
-                assert_ne!(binding.output_node_id, node_id);
+            if let Some((output_node_id, _)) = input.binding.as_output_binding() {
+                assert_ne!(*output_node_id, node_id);
             }
         }
 

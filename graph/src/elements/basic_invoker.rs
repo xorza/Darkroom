@@ -112,11 +112,6 @@ impl Default for BasicInvoker {
             description: None,
             behavior: FuncBehavior::Impure,
             category: "math".to_string(),
-            inputs: vec![FuncInput {
-                name: "value".to_string(),
-                required: true,
-                data_type: DataType::String,
-                default_value: None,
                 value_options: vec![],
             }],
             outputs: vec![],
@@ -143,25 +138,14 @@ impl Default for BasicInvoker {
 
             category: "math".to_string(),
             inputs: vec![
-                FuncInput {
-                    name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: None,
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: None,
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "op".to_string(),
-                    required: true,
-                    data_type: DataType::Int,
-                    default_value: Some(StaticValue::from(Math2ArgOp::Add)),
                     value_options: Math2ArgOp::list_variants(),
                 },
             ],
@@ -185,17 +169,11 @@ impl Default for BasicInvoker {
         });
         // to string
         func_lib.add(Func {
-            id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
-            name: "float to string".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "value".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: None,
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -217,25 +195,14 @@ impl Default for BasicInvoker {
 
         // random
         func_lib.add(Func {
-            id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
-            name: "random".to_string(),
-            description: None,
-            behavior: FuncBehavior::Impure,
-
             category: "math".to_string(),
             inputs: vec![
                 FuncInput {
                     name: "min".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "max".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -268,18 +235,10 @@ impl Default for BasicInvoker {
 
             category: "math".to_string(),
             inputs: vec![
-                FuncInput {
-                    name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -309,18 +268,10 @@ impl Default for BasicInvoker {
 
             category: "math".to_string(),
             inputs: vec![
-                FuncInput {
-                    name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -349,18 +300,10 @@ impl Default for BasicInvoker {
             behavior: FuncBehavior::Pure,
             category: "math".to_string(),
             inputs: vec![
-                FuncInput {
-                    name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -389,18 +332,10 @@ impl Default for BasicInvoker {
             behavior: FuncBehavior::Pure,
             category: "math".to_string(),
             inputs: vec![
-                FuncInput {
-                    name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -431,25 +366,14 @@ impl Default for BasicInvoker {
         });
         // power
         func_lib.add(Func {
-            id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
-            name: "power".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![
                 FuncInput {
                     name: "a".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(0.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "b".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
             ],
@@ -472,17 +396,11 @@ impl Default for BasicInvoker {
         });
         // sqrt
         func_lib.add(Func {
-            id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
-            name: "sqrt".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "a".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -503,17 +421,11 @@ impl Default for BasicInvoker {
         });
         // sin
         func_lib.add(Func {
-            id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
-            name: "sin".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "a".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -534,17 +446,11 @@ impl Default for BasicInvoker {
         });
         // cos
         func_lib.add(Func {
-            id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
-            name: "cos".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "a".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -565,17 +471,11 @@ impl Default for BasicInvoker {
         });
         // tan
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
-            name: "tan".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "a".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -596,17 +496,11 @@ impl Default for BasicInvoker {
         });
         // asin
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
-            name: "asin".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "sin".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -627,17 +521,11 @@ impl Default for BasicInvoker {
         });
         // acos
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
-            name: "acos".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "cos".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(1.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -658,17 +546,11 @@ impl Default for BasicInvoker {
         });
         // atan
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
-            name: "atan".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![FuncInput {
                 name: "tan".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(0.0)),
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
@@ -689,25 +571,14 @@ impl Default for BasicInvoker {
         });
         // log
         func_lib.add(Func {
-            id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
-            name: "log".to_string(),
-            description: None,
-            behavior: FuncBehavior::Pure,
-
             category: "math".to_string(),
             inputs: vec![
                 FuncInput {
                     name: "value".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(1.0)),
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "base".to_string(),
-                    required: true,
-                    data_type: DataType::Float,
-                    default_value: Some(StaticValue::Float(10.0)),
                     value_options: vec![],
                 },
             ],
