@@ -258,7 +258,7 @@ impl eframe::App for ScenariumApp {
         });
 
         self.execution_graph
-            .invalidate_recurisevly(graph_interaction.affected_nodes.iter().copied().collect());
+            .invalidate_recurisevly(graph_interaction.affected_nodes.into());
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {
