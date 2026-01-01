@@ -1,6 +1,6 @@
 use eframe::egui;
 use graph::graph::NodeId;
-use graph::prelude::{Func, FuncLib, NodeBehavior};
+use graph::prelude::{Func, FuncBehavior, FuncLib, NodeBehavior};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -153,12 +153,20 @@ pub fn render_node_bodies(
         assert!(dot_radius.is_finite(), "status dot radius must be finite");
         assert!(dot_radius >= 0.0, "status dot radius must be non-negative");
         let mut dot_centers = Vec::new();
-        if node.terminal {
+        let has_terminal = node.terminal;
+        let has_impure = func.behavior == FuncBehavior::Impure;
+        if has_terminal || has_impure {
             let dot_diameter = dot_radius * 2.0;
             let dot_gap = ctx.style.status_item_gap;
             let mut dot_x = close_rect.min.x - ctx.layout.padding - dot_radius;
-            dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
-            dot_x -= dot_diameter + dot_gap;
+            if has_terminal {
+                dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
+                dot_x -= dot_diameter + dot_gap;
+            }
+            if has_impure {
+                dot_centers.push((dot_x, "impure", egui::Color32::from_rgb(255, 150, 70)));
+                dot_x -= dot_diameter + dot_gap;
+            }
             header_drag_right = dot_x + dot_gap - ctx.layout.padding;
         }
         let header_drag_rect = egui::Rect::from_min_max(

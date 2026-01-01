@@ -163,3 +163,4 @@ Editor graph views now store a core `graph::Graph` alongside per-node positions;
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).
 Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).
+Node headers now show an impure-function status dot for impure funcs.
