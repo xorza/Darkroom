@@ -408,7 +408,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             name: "get_b".to_string(),
             description: None,
             category: "Debug".to_string(),
-            behavior: FuncBehavior::Pure,
+            behavior: FuncBehavior::Impure,
             inputs: vec![],
             outputs: vec![FuncOutput {
                 name: "Int32 Value".to_string(),
