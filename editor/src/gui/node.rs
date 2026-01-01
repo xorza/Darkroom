@@ -72,7 +72,7 @@ impl NodeLayout {
 
 pub fn node_rect_for_graph(
     origin: egui::Pos2,
-    node: &model::NodeView,
+    view_node: &model::ViewNode,
     input_count: usize,
     output_count: usize,
     scale: f32,
@@ -83,7 +83,7 @@ pub fn node_rect_for_graph(
     assert!(scale.is_finite(), "graph scale must be finite");
     layout.assert_valid();
     let node_size = node_size(input_count, output_count, layout, node_width);
-    egui::Rect::from_min_size(origin + node.pos.to_vec2() * scale, node_size)
+    egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
 }
 
 pub(crate) fn port_radius_for_scale(scale: f32) -> f32 {
@@ -97,7 +97,7 @@ pub(crate) fn port_radius_for_scale(scale: f32) -> f32 {
 
 pub fn render_node_bodies(
     ctx: &RenderContext,
-    graph: &mut model::GraphView,
+    view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
 ) -> NodeInteraction {
     let visuals = ctx.ui().visuals();
@@ -106,8 +106,8 @@ pub fn render_node_bodies(
     let selected_stroke = ctx.style.selected_stroke;
     let mut interaction = NodeInteraction::default();
 
-    for node_view in &mut graph.nodes {
-        let node = graph
+    for node_view in &mut view_graph.view_nodes {
+        let node = view_graph
             .graph
             .by_id_mut(&node_view.id)
             .expect("node view id must exist in graph data");
@@ -258,7 +258,9 @@ pub fn render_node_bodies(
             interaction.selection_request = Some(node_view.id);
         }
 
-        let selected_id = interaction.selection_request.or(graph.selected_node_id);
+        let selected_id = interaction
+            .selection_request
+            .or(view_graph.selected_node_id);
         let is_selected = selected_id.is_some_and(|id| id == node_view.id);
 
         ctx.painter().rect(
@@ -372,13 +374,20 @@ pub fn render_node_bodies(
 
 fn render_node_ports(
     ctx: &RenderContext,
-    node: &model::NodeView,
+    view_node: &model::ViewNode,
     input_count: usize,
     output_count: usize,
     node_width: f32,
 ) {
     for index in 0..input_count {
-        let center = node_input_pos(ctx.origin, node, index, input_count, &ctx.layout, ctx.scale);
+        let center = node_input_pos(
+            ctx.origin,
+            view_node,
+            index,
+            input_count,
+            &ctx.layout,
+            ctx.scale,
+        );
         let port_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
@@ -394,7 +403,7 @@ fn render_node_ports(
     for index in 0..output_count {
         let center = node_output_pos(
             ctx.origin,
-            node,
+            view_node,
             index,
             output_count,
             &ctx.layout,
@@ -487,7 +496,7 @@ fn node_size(
 
 pub(crate) fn node_input_pos(
     origin: egui::Pos2,
-    node: &model::NodeView,
+    view_node: &model::ViewNode,
     index: usize,
     input_count: usize,
     layout: &NodeLayout,
@@ -499,18 +508,18 @@ pub(crate) fn node_input_pos(
     );
     assert!(scale > 0.0, "graph scale must be positive");
     let y = origin.y
-        + node.pos.y * scale
+        + view_node.pos.y * scale
         + layout.header_height
         + layout.cache_height
         + layout.padding
         + layout.row_height * index as f32
         + layout.row_height * 0.5;
-    egui::pos2(origin.x + node.pos.x * scale, y)
+    egui::pos2(origin.x + view_node.pos.x * scale, y)
 }
 
 pub(crate) fn node_output_pos(
     origin: egui::Pos2,
-    node: &model::NodeView,
+    view_node: &model::ViewNode,
     index: usize,
     output_count: usize,
     layout: &NodeLayout,
@@ -525,13 +534,13 @@ pub(crate) fn node_output_pos(
     assert!(node_width.is_finite(), "node width must be finite");
     assert!(node_width > 0.0, "node width must be positive");
     let y = origin.y
-        + node.pos.y * scale
+        + view_node.pos.y * scale
         + layout.header_height
         + layout.cache_height
         + layout.padding
         + layout.row_height * index as f32
         + layout.row_height * 0.5;
-    egui::pos2(origin.x + node.pos.x * scale + node_width, y)
+    egui::pos2(origin.x + view_node.pos.x * scale + node_width, y)
 }
 
 pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
@@ -553,7 +562,7 @@ pub(crate) struct NodeWidthContext<'a> {
 
 pub(crate) fn compute_node_widths(
     painter: &egui::Painter,
-    graph: &model::GraphView,
+    view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     ctx: &NodeWidthContext<'_>,
 ) -> HashMap<NodeId, f32> {
@@ -561,10 +570,10 @@ pub(crate) fn compute_node_widths(
     let scale_guess = ctx.layout.row_height / 18.0;
     assert!(scale_guess.is_finite(), "layout scale guess must be finite");
     assert!(scale_guess > 0.0, "layout scale guess must be positive");
-    let mut widths = HashMap::with_capacity(graph.nodes.len());
+    let mut widths = HashMap::with_capacity(view_graph.view_nodes.len());
 
-    for node_view in &graph.nodes {
-        let node = graph
+    for node_view in &view_graph.view_nodes {
+        let node = view_graph
             .graph
             .by_id(&node_view.id)
             .expect("node view id must exist in graph data");

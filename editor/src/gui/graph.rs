@@ -110,7 +110,7 @@ impl GraphUi {
     pub fn render(
         &mut self,
         ui: &mut egui::Ui,
-        graph: &mut model::GraphView,
+        view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
     ) -> GraphUiInteraction {
         let mut interaction = GraphUiInteraction::default();
@@ -128,19 +128,19 @@ impl GraphUi {
 
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter_at(rect);
-        let input_ctx = RenderContext::new(ui, &painter, rect, graph, func_lib);
+        let input_ctx = RenderContext::new(ui, &painter, rect, view_graph, func_lib);
 
         if reset_view {
-            graph.zoom = 1.0;
-            graph.pan = egui::Vec2::ZERO;
+            view_graph.zoom = 1.0;
+            view_graph.pan = egui::Vec2::ZERO;
         }
 
         if view_selected {
-            view_selected_node(ui, &painter, rect, graph, func_lib);
+            view_selected_node(ui, &painter, rect, view_graph, func_lib);
         }
 
         if fit_all {
-            fit_all_nodes(ui, &painter, rect, graph, func_lib);
+            fit_all_nodes(ui, &painter, rect, view_graph, func_lib);
         }
 
         let pointer_pos = ui.input(|input| input.pointer.hover_pos());
@@ -152,7 +152,7 @@ impl GraphUi {
         let pointer_delta = ui.input(|input| input.pointer.delta());
         let port_activation = (input_ctx.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
-            graph,
+            view_graph,
             func_lib,
             input_ctx.origin,
             &input_ctx.layout,
@@ -165,8 +165,8 @@ impl GraphUi {
         let pointer_over_node = pointer_pos
             .filter(|pos| input_ctx.rect.contains(*pos))
             .is_some_and(|pos| {
-                graph.nodes.iter().any(|node_view| {
-                    let node = graph
+                view_graph.view_nodes.iter().any(|node_view| {
+                    let node = view_graph
                         .graph
                         .by_id(&node_view.id)
                         .expect("node view id must exist in graph data");
@@ -198,7 +198,7 @@ impl GraphUi {
             && !breaker.active
             && !connection_drag.active
         {
-            graph.pan += pan_response.drag_delta();
+            view_graph.pan += pan_response.drag_delta();
         }
         if middle_down && pointer_in_rect && !breaker.active && !connection_drag.active {
             assert!(
@@ -209,7 +209,7 @@ impl GraphUi {
                 pointer_delta.y.is_finite(),
                 "pointer delta y must be finite"
             );
-            graph.pan += pointer_delta;
+            view_graph.pan += pointer_delta;
         }
 
         let primary_pressed = ui.input(|input| input.pointer.primary_pressed());
@@ -223,7 +223,7 @@ impl GraphUi {
             && !pointer_over_node
             && hovered_port.is_none()
         {
-            graph.selected_node_id = None;
+            view_graph.selected_node_id = None;
             breaker.active = true;
             breaker.points.clear();
             if let Some(pos) = pointer_pos {
@@ -304,42 +304,42 @@ impl GraphUi {
             }
 
             if (zoom_delta - 1.0).abs() > f32::EPSILON {
-                let clamped_zoom = (graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+                let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
                 assert!(clamped_zoom.is_finite(), "clamped zoom must be finite");
 
-                if (clamped_zoom - graph.zoom).abs() > f32::EPSILON {
+                if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
                     let cursor = cursor_pos.expect("cursor position must exist while zooming");
                     assert!(
                         input_ctx.rect.contains(cursor),
                         "cursor must be inside graph rect while zooming"
                     );
                     let origin = input_ctx.rect.min;
-                    let graph_pos = (cursor - origin - graph.pan) / graph.zoom;
+                    let graph_pos = (cursor - origin - view_graph.pan) / view_graph.zoom;
 
-                    graph.zoom = clamped_zoom;
-                    graph.pan = cursor - origin - graph_pos * graph.zoom;
+                    view_graph.zoom = clamped_zoom;
+                    view_graph.pan = cursor - origin - graph_pos * view_graph.zoom;
                 }
             } else if !wheel_scroll && scroll_delta.length_sq() > f32::EPSILON {
-                graph.pan += scroll_delta;
+                view_graph.pan += scroll_delta;
             }
         }
 
-        let ctx = RenderContext::new(ui, &painter, rect, graph, func_lib);
-        let render_origin = ctx.rect.min + graph.pan;
+        let ctx = RenderContext::new(ui, &painter, rect, view_graph, func_lib);
+        let render_origin = ctx.rect.min + view_graph.pan;
         let mut background = BackgroundRenderer;
         let mut connections = ConnectionRenderer::default();
         let mut node_bodies = NodeBodyRenderer;
 
-        background.render(&ctx, graph, func_lib);
+        background.render(&ctx, view_graph, func_lib);
         connections.rebuild(
-            graph,
+            view_graph,
             func_lib,
             render_origin,
             &ctx.layout,
             &ctx.node_widths,
             breaker,
         );
-        connections.render(&ctx, graph, func_lib);
+        connections.render(&ctx, view_graph, func_lib);
 
         if breaker.active && breaker.points.len() > 1 {
             ctx.painter().add(egui::Shape::line(
@@ -348,12 +348,12 @@ impl GraphUi {
             ));
         }
 
-        let node_interaction = node_bodies.render(&ctx, graph, func_lib);
+        let node_interaction = node_bodies.render(&ctx, view_graph, func_lib);
         interaction
             .affected_nodes
             .extend(node_interaction.changed_nodes);
         if let Some(node_id) = node_interaction.remove_request {
-            graph.remove_node(node_id);
+            view_graph.remove_node(node_id);
             interaction.affected_nodes.insert(node_id);
         }
 
@@ -367,7 +367,7 @@ impl GraphUi {
                 .unwrap_or(connection_drag.current_pos);
             draw_temporary_connection(
                 ctx.painter(),
-                graph.zoom,
+                view_graph.zoom,
                 connection_drag.start_pos,
                 end_pos,
                 connection_drag.start_port.kind,
@@ -376,7 +376,7 @@ impl GraphUi {
         }
 
         if breaker.active && primary_released {
-            let removed = remove_connections(graph, connections.highlighted());
+            let removed = remove_connections(view_graph, connections.highlighted());
             interaction.affected_nodes.extend(removed);
             breaker.reset();
         }
@@ -389,8 +389,12 @@ impl GraphUi {
                     target.center,
                     port_activation,
                 )
-                && let Some(node_id) =
-                    apply_connection(graph, func_lib, connection_drag.start_port, target.port)
+                && let Some(node_id) = apply_connection(
+                    view_graph,
+                    func_lib,
+                    connection_drag.start_port,
+                    target.port,
+                )
             {
                 interaction.affected_nodes.insert(node_id);
             }
@@ -398,7 +402,7 @@ impl GraphUi {
         }
 
         if let Some(selected_id) = node_interaction.selection_request {
-            graph.select_node(selected_id);
+            view_graph.select_node(selected_id);
         }
 
         interaction
@@ -414,10 +418,10 @@ impl WidgetRenderer for BackgroundRenderer {
     fn render(
         &mut self,
         ctx: &RenderContext,
-        graph: &mut model::GraphView,
+        view_graph: &mut model::ViewGraph,
         _func_lib: &FuncLib,
     ) -> Self::Output {
-        draw_dotted_background(ctx.painter(), ctx.rect, graph, &ctx.style);
+        draw_dotted_background(ctx.painter(), ctx.rect, view_graph, &ctx.style);
     }
 }
 
@@ -430,14 +434,14 @@ struct ConnectionRenderer {
 impl ConnectionRenderer {
     fn rebuild(
         &mut self,
-        graph: &model::GraphView,
+        view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
         origin: egui::Pos2,
         layout: &node::NodeLayout,
         node_widths: &std::collections::HashMap<NodeId, f32>,
         breaker: &ConnectionBreaker,
     ) {
-        self.curves = collect_connection_curves(graph, func_lib, origin, layout, node_widths);
+        self.curves = collect_connection_curves(view_graph, func_lib, origin, layout, node_widths);
         self.highlighted = if breaker.active && breaker.points.len() > 1 {
             connection_hits(&self.curves, &breaker.points)
         } else {
@@ -456,7 +460,7 @@ impl WidgetRenderer for ConnectionRenderer {
     fn render(
         &mut self,
         ctx: &RenderContext,
-        _graph: &mut model::GraphView,
+        _view_graph: &mut model::ViewGraph,
         _func_lib: &FuncLib,
     ) -> Self::Output {
         draw_connections(ctx.painter(), &self.curves, &self.highlighted, &ctx.style);
@@ -472,21 +476,21 @@ impl WidgetRenderer for NodeBodyRenderer {
     fn render(
         &mut self,
         ctx: &RenderContext,
-        graph: &mut model::GraphView,
+        view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
     ) -> Self::Output {
-        node::render_node_bodies(ctx, graph, func_lib)
+        node::render_node_bodies(ctx, view_graph, func_lib)
     }
 }
 
 fn draw_dotted_background(
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &model::GraphView,
+    view_graph: &model::ViewGraph,
     style: &crate::gui::style::GraphStyle,
 ) {
-    let spacing = style.dotted_base_spacing * graph.zoom;
-    let radius = (style.dotted_radius_base * graph.zoom)
+    let spacing = style.dotted_base_spacing * view_graph.zoom;
+    let radius = (style.dotted_radius_base * view_graph.zoom)
         .clamp(style.dotted_radius_min, style.dotted_radius_max);
     let color = style.dotted_color;
 
@@ -495,7 +499,7 @@ fn draw_dotted_background(
     assert!(radius.is_finite(), "dot radius must be finite");
     assert!(radius > 0.0, "dot radius must be positive");
 
-    let origin = rect.min + graph.pan;
+    let origin = rect.min + view_graph.pan;
     let offset_x = (rect.left() - origin.x).rem_euclid(spacing);
     let offset_y = (rect.top() - origin.y).rem_euclid(spacing);
     let start_x = rect.left() - offset_x - spacing;
@@ -521,18 +525,21 @@ struct ConnectionCurve {
 }
 
 fn collect_connection_curves(
-    graph: &model::GraphView,
+    view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
     node_widths: &std::collections::HashMap<NodeId, f32>,
 ) -> Vec<ConnectionCurve> {
-    let node_lookup: std::collections::HashMap<_, _> =
-        graph.nodes.iter().map(|node| (node.id, node)).collect();
+    let node_lookup: std::collections::HashMap<_, _> = view_graph
+        .view_nodes
+        .iter()
+        .map(|node| (node.id, node))
+        .collect();
     let mut curves = Vec::new();
 
-    for node_view in &graph.nodes {
-        let node = graph
+    for node_view in &view_graph.view_nodes {
+        let node = view_graph
             .graph
             .by_id(&node_view.id)
             .expect("node view id must exist in graph data");
@@ -550,7 +557,7 @@ fn collect_connection_curves(
             let source_view = node_lookup
                 .get(&binding.output_node_id)
                 .expect("graph validation must guarantee source nodes exist");
-            let source_node = graph
+            let source_node = view_graph
                 .graph
                 .by_id(&binding.output_node_id)
                 .expect("graph validation must guarantee source nodes exist");
@@ -574,7 +581,7 @@ fn collect_connection_curves(
                 binding.output_idx,
                 source_func.outputs.len(),
                 layout,
-                graph.zoom,
+                view_graph.zoom,
                 source_width,
             );
             let end = node::node_input_pos(
@@ -583,9 +590,9 @@ fn collect_connection_curves(
                 input_index,
                 func.inputs.len(),
                 layout,
-                graph.zoom,
+                view_graph.zoom,
             );
-            let control_offset = node::bezier_control_offset(start, end, graph.zoom);
+            let control_offset = node::bezier_control_offset(start, end, view_graph.zoom);
             curves.push(ConnectionCurve {
                 key: ConnectionKey {
                     target_node_id: node.id,
@@ -602,7 +609,7 @@ fn collect_connection_curves(
 }
 
 fn collect_ports(
-    graph: &model::GraphView,
+    view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
@@ -610,8 +617,8 @@ fn collect_ports(
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
-    for node_view in graph.nodes.iter().rev() {
-        let node = graph
+    for node_view in view_graph.view_nodes.iter().rev() {
+        let node = view_graph
             .graph
             .by_id(&node_view.id)
             .expect("node view id must exist in graph data");
@@ -629,7 +636,7 @@ fn collect_ports(
                 index,
                 func.inputs.len(),
                 layout,
-                graph.zoom,
+                view_graph.zoom,
             );
 
             ports.push(PortInfo {
@@ -648,7 +655,7 @@ fn collect_ports(
                 index,
                 func.outputs.len(),
                 layout,
-                graph.zoom,
+                view_graph.zoom,
                 node_width,
             );
 
@@ -720,7 +727,7 @@ fn port_in_activation_range(cursor: &egui::Pos2, port_center: egui::Pos2, radius
 }
 
 fn apply_connection(
-    graph: &mut model::GraphView,
+    view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
     start: PortRef,
     end: PortRef,
@@ -734,7 +741,7 @@ fn apply_connection(
         }
     };
 
-    let output_node = graph
+    let output_node = view_graph
         .graph
         .by_id(&output_port.node_id)
         .expect("output node must exist");
@@ -749,7 +756,7 @@ fn apply_connection(
         "output index must be valid for output node"
     );
 
-    let input_node = graph
+    let input_node = view_graph
         .graph
         .by_id_mut(&input_port.node_id)
         .expect("input node must exist");
@@ -774,17 +781,21 @@ fn view_selected_node(
     ui: &egui::Ui,
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &mut model::GraphView,
+    view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
 ) {
-    let Some(selected_id) = graph.selected_node_id else {
+    let Some(selected_id) = view_graph.selected_node_id else {
         return;
     };
-    let Some(node_view) = graph.nodes.iter().find(|node| node.id == selected_id) else {
+    let Some(node_view) = view_graph
+        .view_nodes
+        .iter()
+        .find(|node| node.id == selected_id)
+    else {
         return;
     };
 
-    let node = graph
+    let node = view_graph
         .graph
         .by_id(&node_view.id)
         .expect("node view id must exist in graph data");
@@ -792,7 +803,7 @@ fn view_selected_node(
         .by_id(&node.func_id)
         .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-    let (layout, node_widths) = compute_layout_and_widths(ui, painter, graph, func_lib, 1.0);
+    let (layout, node_widths) = compute_layout_and_widths(ui, painter, view_graph, func_lib, 1.0);
     let node_width = node_widths
         .get(&node.id)
         .copied()
@@ -808,29 +819,29 @@ fn view_selected_node(
     )
     .size();
     let center = node_view.pos.to_vec2() + size * 0.5;
-    graph.zoom = 1.0;
-    graph.pan = rect.center() - rect.min - center;
+    view_graph.zoom = 1.0;
+    view_graph.pan = rect.center() - rect.min - center;
 }
 
 fn fit_all_nodes(
     ui: &egui::Ui,
     painter: &egui::Painter,
     rect: egui::Rect,
-    graph: &mut model::GraphView,
+    view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
 ) {
-    if graph.nodes.is_empty() {
-        graph.zoom = 1.0;
-        graph.pan = egui::Vec2::ZERO;
+    if view_graph.view_nodes.is_empty() {
+        view_graph.zoom = 1.0;
+        view_graph.pan = egui::Vec2::ZERO;
         return;
     }
 
-    let (layout, node_widths) = compute_layout_and_widths(ui, painter, graph, func_lib, 1.0);
+    let (layout, node_widths) = compute_layout_and_widths(ui, painter, view_graph, func_lib, 1.0);
     let mut min = egui::pos2(f32::INFINITY, f32::INFINITY);
     let mut max = egui::pos2(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
-    for node_view in &graph.nodes {
-        let node = graph
+    for node_view in &view_graph.view_nodes {
+        let node = view_graph
             .graph
             .by_id(&node_view.id)
             .expect("node view id must exist in graph data");
@@ -873,16 +884,16 @@ fn fit_all_nodes(
         1.0
     };
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
-    graph.zoom = target_zoom;
+    view_graph.zoom = target_zoom;
 
     let bounds_center = (min.to_vec2() + max.to_vec2()) * 0.5;
-    graph.pan = rect.center() - rect.min - bounds_center * graph.zoom;
+    view_graph.pan = rect.center() - rect.min - bounds_center * view_graph.zoom;
 }
 
 fn compute_layout_and_widths(
     ui: &egui::Ui,
     painter: &egui::Painter,
-    graph: &model::GraphView,
+    view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     scale: f32,
 ) -> (node::NodeLayout, std::collections::HashMap<NodeId, f32>) {
@@ -900,7 +911,7 @@ fn compute_layout_and_widths(
         text_color,
         style: &style,
     };
-    let widths = node::compute_node_widths(painter, graph, func_lib, &width_ctx);
+    let widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
     (layout, widths)
 }
 fn draw_connections(
@@ -1023,14 +1034,14 @@ fn on_segment(a: egui::Pos2, b: egui::Pos2, p: egui::Pos2) -> bool {
 }
 
 fn remove_connections(
-    graph: &mut model::GraphView,
+    view_graph: &mut model::ViewGraph,
     highlighted: &HashSet<ConnectionKey>,
 ) -> HashSet<NodeId> {
     let mut affected = HashSet::new();
     if highlighted.is_empty() {
         return affected;
     }
-    for node in graph.graph.nodes.iter_mut() {
+    for node in view_graph.graph.nodes.iter_mut() {
         for (input_index, input) in node.inputs.iter_mut().enumerate() {
             let key = ConnectionKey {
                 target_node_id: node.id,

@@ -70,21 +70,21 @@ impl<'a> RenderContext<'a> {
         ui: &'a egui::Ui,
         painter: &'a egui::Painter,
         rect: egui::Rect,
-        graph: &model::GraphView,
+        view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
     ) -> Self {
-        assert!(graph.zoom.is_finite(), "graph zoom must be finite");
-        assert!(graph.zoom > 0.0, "graph zoom must be positive");
-        assert!(graph.pan.x.is_finite(), "graph pan x must be finite");
-        assert!(graph.pan.y.is_finite(), "graph pan y must be finite");
+        assert!(view_graph.zoom.is_finite(), "graph zoom must be finite");
+        assert!(view_graph.zoom > 0.0, "graph zoom must be positive");
+        assert!(view_graph.pan.x.is_finite(), "graph pan x must be finite");
+        assert!(view_graph.pan.y.is_finite(), "graph pan y must be finite");
 
-        let layout = node::NodeLayout::default().scaled(graph.zoom);
+        let layout = node::NodeLayout::default().scaled(view_graph.zoom);
         layout.assert_valid();
 
-        let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, graph.zoom);
-        let body_font = node::scaled_font(ui, egui::TextStyle::Body, graph.zoom);
+        let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, view_graph.zoom);
+        let body_font = node::scaled_font(ui, egui::TextStyle::Body, view_graph.zoom);
         let text_color = ui.visuals().text_color();
-        let style = GraphStyle::new(ui, graph.zoom);
+        let style = GraphStyle::new(ui, view_graph.zoom);
         style.validate();
         let width_ctx = node::NodeWidthContext {
             layout: &layout,
@@ -93,9 +93,9 @@ impl<'a> RenderContext<'a> {
             text_color,
             style: &style,
         };
-        let node_widths = node::compute_node_widths(painter, graph, func_lib, &width_ctx);
-        let origin = rect.min + graph.pan;
-        let port_radius = node::port_radius_for_scale(graph.zoom);
+        let node_widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
+        let origin = rect.min + view_graph.pan;
+        let port_radius = node::port_radius_for_scale(view_graph.zoom);
 
         Self {
             ui: UiRef::new(ui),
@@ -109,7 +109,7 @@ impl<'a> RenderContext<'a> {
             style,
             node_widths,
             port_radius,
-            scale: graph.zoom,
+            scale: view_graph.zoom,
         }
     }
 
@@ -130,18 +130,18 @@ impl<'a> RenderContext<'a> {
 
     pub fn node_rect(
         &self,
-        node: &model::NodeView,
+        view_node: &model::ViewNode,
         input_count: usize,
         output_count: usize,
     ) -> egui::Rect {
         node::node_rect_for_graph(
             self.origin,
-            node,
+            view_node,
             input_count,
             output_count,
             self.scale,
             &self.layout,
-            self.node_width(node.id),
+            self.node_width(view_node.id),
         )
     }
 }
@@ -152,7 +152,7 @@ pub trait WidgetRenderer {
     fn render(
         &mut self,
         ctx: &RenderContext,
-        graph: &mut model::GraphView,
+        view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
     ) -> Self::Output;
 }

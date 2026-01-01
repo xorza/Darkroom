@@ -5,22 +5,22 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 
-use super::NodeView;
+use super::ViewNode;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct GraphView {
+pub struct ViewGraph {
     pub graph: CoreGraph,
-    pub nodes: Vec<NodeView>,
+    pub view_nodes: Vec<ViewNode>,
     pub pan: egui::Vec2,
     pub zoom: f32,
     pub selected_node_id: Option<NodeId>,
 }
 
-impl Default for GraphView {
+impl Default for ViewGraph {
     fn default() -> Self {
         Self {
             graph: CoreGraph::default(),
-            nodes: Vec::new(),
+            view_nodes: Vec::new(),
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
             selected_node_id: None,
@@ -28,7 +28,7 @@ impl Default for GraphView {
     }
 }
 
-impl GraphView {
+impl ViewGraph {
     pub fn from_graph(graph: &CoreGraph) -> Self {
         let mut nodes = Vec::with_capacity(graph.nodes.len());
         for (index, node) in graph.nodes.iter().enumerate() {
@@ -36,20 +36,20 @@ impl GraphView {
             let row = index / 3;
             let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
 
-            nodes.push(NodeView { id: node.id, pos });
+            nodes.push(ViewNode { id: node.id, pos });
         }
 
-        let graph = Self {
+        let view_graph = Self {
             graph: graph.clone(),
-            nodes,
+            view_nodes: nodes,
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
             selected_node_id: None,
         };
-        graph
+        view_graph
             .validate()
             .expect("graph view should be valid after conversion");
-        graph
+        view_graph
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -67,7 +67,7 @@ impl GraphView {
         }
 
         let mut view_nodes = HashMap::new();
-        for node in &self.nodes {
+        for node in &self.view_nodes {
             if !node.pos.x.is_finite() || !node.pos.y.is_finite() {
                 return Err(anyhow!("node position must be finite"));
             }
@@ -114,10 +114,10 @@ impl GraphView {
             bail!("graph input is empty");
         }
 
-        let graph = common::deserialize::<GraphView>(input, format)?;
-        graph.validate()?;
+        let view_graph = common::deserialize::<ViewGraph>(input, format)?;
+        view_graph.validate()?;
 
-        Ok(graph)
+        Ok(view_graph)
     }
 
     pub fn serialize_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -139,7 +139,7 @@ impl GraphView {
 
     pub fn select_node(&mut self, node_id: NodeId) {
         assert!(
-            self.nodes.iter().any(|node| node.id == node_id),
+            self.view_nodes.iter().any(|node| node.id == node_id),
             "selected node view must exist in graph"
         );
         assert!(
@@ -147,20 +147,20 @@ impl GraphView {
             "selected node must exist in graph data"
         );
         let node_index = self
-            .nodes
+            .view_nodes
             .iter()
             .position(|node| node.id == node_id)
             .expect("selected node view must exist in graph");
-        if node_index + 1 != self.nodes.len() {
-            let node = self.nodes.remove(node_index);
-            self.nodes.push(node);
+        if node_index + 1 != self.view_nodes.len() {
+            let node = self.view_nodes.remove(node_index);
+            self.view_nodes.push(node);
         }
         self.selected_node_id = Some(node_id);
     }
 
     pub fn remove_node(&mut self, node_id: NodeId) {
         assert!(
-            self.nodes.iter().any(|node| node.id == node_id),
+            self.view_nodes.iter().any(|node| node.id == node_id),
             "node must exist to be removed"
         );
         assert!(
@@ -168,7 +168,7 @@ impl GraphView {
             "node must exist in graph data to be removed"
         );
 
-        self.nodes.retain(|node| node.id != node_id);
+        self.view_nodes.retain(|node| node.id != node_id);
         self.graph.remove_by_id(node_id);
 
         if self
@@ -198,9 +198,9 @@ mod tests {
         assert_roundtrip(FileFormat::Lua);
     }
 
-    fn build_test_view() -> GraphView {
-        let graph = core_test_graph();
-        GraphView::from_graph(&graph)
+    fn build_test_view() -> ViewGraph {
+        let view_graph = core_test_graph();
+        ViewGraph::from_graph(&view_graph)
     }
 
     fn assert_roundtrip(format: FileFormat) {
@@ -210,16 +210,16 @@ mod tests {
             !serialized.trim().is_empty(),
             "serialized graph should not be empty"
         );
-        let deserialized = GraphView::deserialize(format, &serialized)
+        let deserialized = ViewGraph::deserialize(format, &serialized)
             .expect("graph deserialization should succeed for test payload");
         assert!(deserialized.validate().is_ok());
         assert_eq!(
-            graph.nodes.len(),
-            deserialized.nodes.len(),
+            graph.view_nodes.len(),
+            deserialized.view_nodes.len(),
             "node view counts should round-trip"
         );
         assert_eq!(
-            graph.nodes[0].id, deserialized.nodes[0].id,
+            graph.view_nodes[0].id, deserialized.view_nodes[0].id,
             "node view ids should round-trip"
         );
         assert_eq!(

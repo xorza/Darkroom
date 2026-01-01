@@ -72,7 +72,7 @@ fn configure_visuals(ctx: &egui::Context) {
 struct ScenariumApp {
     func_lib: FuncLib,
     execution_graph: ExecutionGraph,
-    graph_view: model::GraphView,
+    view_graph: model::ViewGraph,
     graph_path: PathBuf,
     last_status: Option<String>,
     compute_status: Arc<Mutex<Option<String>>>,
@@ -86,7 +86,7 @@ impl Default for ScenariumApp {
         let mut result = Self {
             func_lib: FuncLib::default(),
             execution_graph: ExecutionGraph::default(),
-            graph_view: model::GraphView::default(),
+            view_graph: model::ViewGraph::default(),
             graph_path,
             last_status: None,
             compute_status: Arc::new(Mutex::new(None)),
@@ -109,19 +109,19 @@ impl ScenariumApp {
         self.last_status = Some(message.into());
     }
 
-    fn set_graph_view(&mut self, graph_view: model::GraphView, status: impl Into<String>) {
-        graph_view
+    fn set_graph_view(&mut self, view_graph: model::ViewGraph, status: impl Into<String>) {
+        view_graph
             .validate()
             .expect("graph should be valid before storing in app state");
-        self.graph_view = graph_view;
+        self.view_graph = view_graph;
         self.execution_graph.clear();
         self.graph_ui.reset();
         self.set_status(status);
     }
 
     fn empty(&mut self) {
-        let graph = model::GraphView::default();
-        self.set_graph_view(graph, "Created new graph");
+        let view_graph = model::ViewGraph::default();
+        self.set_graph_view(view_graph, "Created new graph");
     }
 
     fn save(&mut self) {
@@ -129,7 +129,7 @@ impl ScenariumApp {
             self.graph_path.extension().is_some(),
             "graph save path must include a file extension"
         );
-        match self.graph_view.serialize_to_file(&self.graph_path) {
+        match self.view_graph.serialize_to_file(&self.graph_path) {
             Ok(()) => self.set_status(format!("Saved graph to {}", self.graph_path.display())),
             Err(err) => self.set_status(format!("Save failed: {err}")),
         }
@@ -140,7 +140,7 @@ impl ScenariumApp {
             self.graph_path.extension().is_some(),
             "graph load path must include a file extension"
         );
-        match model::GraphView::deserialize_from_file(&self.graph_path) {
+        match model::ViewGraph::deserialize_from_file(&self.graph_path) {
             Ok(graph_view) => self.set_graph_view(
                 graph_view,
                 format!("Loaded graph from {}", self.graph_path.display()),
@@ -152,7 +152,7 @@ impl ScenariumApp {
     fn test_graph(&mut self) {
         let graph = test_graph();
         let func_lib = test_func_lib(self.sample_test_hooks());
-        let graph_view = model::GraphView::from_graph(&graph);
+        let graph_view = model::ViewGraph::from_graph(&graph);
         self.func_lib = func_lib;
         self.set_graph_view(graph_view, "Loaded sample test graph");
     }
@@ -170,7 +170,7 @@ impl ScenariumApp {
     }
 
     fn run_graph(&mut self) {
-        if self.graph_view.graph.nodes.is_empty() {
+        if self.view_graph.graph.nodes.is_empty() {
             self.set_status("Run failed: no compute graph loaded");
             return;
         }
@@ -185,7 +185,7 @@ impl ScenariumApp {
 
         let result = self
             .execution_graph
-            .update(&self.graph_view.graph, &self.func_lib)
+            .update(&self.view_graph.graph, &self.func_lib)
             .and_then(|execution_graph| execution_graph.execute());
 
         match result {
@@ -253,7 +253,7 @@ impl eframe::App for ScenariumApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             graph_interaction = self
                 .graph_ui
-                .render(ui, &mut self.graph_view, &self.func_lib);
+                .render(ui, &mut self.view_graph, &self.func_lib);
         });
         for node_id in graph_interaction.affected_nodes {
             // self.graph

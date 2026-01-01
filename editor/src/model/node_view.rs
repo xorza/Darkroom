@@ -2,12 +2,12 @@ use graph::graph::NodeId;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NodeView {
+pub struct ViewNode {
     pub id: NodeId,
     pub pos: egui::Pos2,
 }
 
-impl Default for NodeView {
+impl Default for ViewNode {
     fn default() -> Self {
         let id = NodeId::unique();
 
