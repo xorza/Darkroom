@@ -220,8 +220,11 @@ impl ExecutionGraph {
     }
 
     // todo make it accept iter of NodeId
-    pub fn invalidate_recurisevly(&mut self, node_ids: Vec<NodeId>) {
-        let mut stack = node_ids;
+    pub fn invalidate_recurisevly<I>(&mut self, node_ids: I)
+    where
+        I: IntoIterator<Item = NodeId>,
+    {
+        let mut stack: Vec<NodeId> = node_ids.into_iter().collect();
         let mut seen = HashSet::new();
 
         while let Some(current_node_id) = stack.pop() {
