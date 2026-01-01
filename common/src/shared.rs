@@ -58,3 +58,12 @@ impl<T> From<Arc<Mutex<T>>> for Shared<T> {
         Self { inner }
     }
 }
+
+impl<T> Default for Shared<T>
+where
+    T: Default,
+{
+    fn default() -> Self {
+        Self::new(T::default())
+    }
+}
