@@ -751,6 +751,36 @@ mod tests {
     }
 
     #[test]
+    fn const_binding() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        // this excludes get_a from graph
+        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(3));
+        graph.by_name_mut("mult").unwrap().inputs[1].binding = Binding::Const(StaticValue::Int(5));
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert_eq!(execution_graph.e_nodes.len(), 2);
+
+        assert!(execution_graph.by_name("get_a").is_none());
+        assert!(execution_graph.by_name("get_b").is_none());
+        assert!(execution_graph.by_name("sum").is_none());
+
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+
+        assert!(!mult.missing_required_inputs);
+        assert!(!print.missing_required_inputs);
+
+        assert!(mult.changed_inputs);
+        assert!(print.changed_inputs);
+
+        Ok(())
+    }
+
+    #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
