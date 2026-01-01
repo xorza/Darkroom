@@ -44,6 +44,8 @@ See `common/src` for implementation details.
 
 Recent adjustments:
 - `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
+- `common/src/shared.rs` defines `Shared<T>` as a `Debug` newtype wrapper around `Arc<Mutex<T>>` with convenience `lock`, `lock_owned`, `try_lock`, `get_mut`, and `arc` helpers plus `Deref` to the inner `Arc`.
+- `common/src/lib.rs` now re-exports helpers from module files (`constants`, `debug`, `file_format`, `serde_format`, `shared`) to keep the crate root minimal.
 - `common/src/key_index_vec.rs` supports key-based index syntax with invariant assertions for missing keys.
 - `common/src/key_index_vec.rs` includes reusable compaction helpers driven by a `KeyIndexKey` trait to keep the index map in sync.
 - `common/src/key_index_vec.rs` skips serializing `idx_by_key` and rebuilds it from `items` during deserialization, rejecting duplicate keys.
