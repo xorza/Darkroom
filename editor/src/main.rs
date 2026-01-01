@@ -257,8 +257,8 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
-        self.execution_graph
-            .invalidate_recurisevly(graph_interaction.affected_nodes.into());
+        let affected: Vec<_> = graph_interaction.affected_nodes.into_iter().collect();
+        self.execution_graph.invalidate_recurisevly(affected);
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {

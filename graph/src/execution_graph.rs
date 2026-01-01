@@ -1004,6 +1004,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn invalidate_recurisevly_marks_dependents() -> anyhow::Result<()> {
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        let get_a = graph.by_name("get_a").unwrap().id;
+        let get_b = graph.by_name("get_b").unwrap().id;
+        let sum = graph.by_name("sum").unwrap().id;
+        let mult = graph.by_name("mult").unwrap().id;
+        let print = graph.by_name("print").unwrap().id;
+
+        execution_graph.invalidate_recurisevly(vec![sum]);
+
+        assert!(execution_graph.by_id(&get_a).unwrap().inited);
+        assert!(execution_graph.by_id(&get_b).unwrap().inited);
+        assert!(!execution_graph.by_id(&sum).unwrap().inited);
+        assert!(!execution_graph.by_id(&mult).unwrap().inited);
+        assert!(!execution_graph.by_id(&print).unwrap().inited);
+
+        Ok(())
+    }
+
     #[derive(Debug)]
     struct TestValues {
         a: i64,
