@@ -181,7 +181,7 @@ impl ScenariumApp {
         let result = self
             .execution_graph
             .update(&self.view_graph.graph, &self.func_lib)
-            .and_then(|execution_graph| execution_graph.execute());
+            .and_then(|()| self.execution_graph.execute());
 
         match result {
             Ok(stats) => {

@@ -278,7 +278,7 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution state from the current graph and function library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<&mut Self> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
         self.stack.clear();
@@ -290,7 +290,7 @@ impl ExecutionGraph {
 
         self.validate_with_graph(graph, func_lib);
 
-        Ok(self)
+        Ok(())
     }
 
     pub fn execute(&mut self) -> ExecutionResult<ExecutionStats> {

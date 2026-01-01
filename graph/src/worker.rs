@@ -17,8 +17,8 @@ enum WorkerMessage {
     Exit,
     Stop,
     Event,
-    RunOnce(ArcMutex<Graph>),
-    RunLoop(ArcMutex<Graph>),
+    RunOnce(ArcMutex<ExecutionGraph>),
+    RunLoop(ArcMutex<ExecutionGraph>),
 }
 
 type ComputeEvent = dyn Fn(ExecutionResult<ExecutionStats>) + Send + 'static;
@@ -32,11 +32,7 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<Callback>(
-        func_lib: ArcMutex<FuncLib>,
-        execution_graph: ArcMutex<ExecutionGraph>,
-        compute_callback: Callback,
-    ) -> Self
+    pub fn new<Callback>(compute_callback: Callback) -> Self
     where
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
@@ -44,7 +40,7 @@ impl Worker {
 
         let (tx, rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(func_lib, Arc::clone(&execution_graph), rx, compute_callback).await;
+            Self::worker_loop(rx, compute_callback).await;
         });
 
         Self {
@@ -54,8 +50,6 @@ impl Worker {
     }
 
     async fn worker_loop(
-        func_lib: ArcMutex<FuncLib>,
-        execution_graph: ArcMutex<ExecutionGraph>,
         mut rx: Receiver<WorkerMessage>,
         compute_callback: ArcMutex<ComputeEvent>,
     ) {
@@ -74,21 +68,13 @@ impl Worker {
 
                 WorkerMessage::Exit => break,
 
-                WorkerMessage::RunOnce(graph) => {
-                    let graph = graph.lock().await;
-                    let func_lib = func_lib.lock().await;
-                    let mut execution_graph = execution_graph.lock().await;
-                    let result = execution_graph
-                        .update(&graph, &func_lib)
-                        .and_then(|execution_graph| execution_graph.execute());
-
+                WorkerMessage::RunOnce(execution_graph) => {
+                    let result = { execution_graph.lock().await.execute() };
                     (*compute_callback.lock().await)(result);
                 }
 
-                WorkerMessage::RunLoop(graph) => {
+                WorkerMessage::RunLoop(execution_graph) => {
                     message = Self::event_subloop(
-                        Arc::clone(&graph),
-                        Arc::clone(&func_lib),
                         Arc::clone(&execution_graph),
                         &mut rx,
                         compute_callback.clone(),
@@ -100,8 +86,6 @@ impl Worker {
     }
 
     async fn event_subloop(
-        graph: ArcMutex<Graph>,
-        func_lib: ArcMutex<FuncLib>,
         execution_graph: ArcMutex<ExecutionGraph>,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
@@ -128,28 +112,22 @@ impl Worker {
                     break Some(msg);
                 }
                 WorkerMessage::Event => {
-                    let graph = graph.lock().await;
-                    let func_lib = func_lib.lock().await;
-                    let mut execution_graph = execution_graph.lock().await;
-                    let result = execution_graph
-                        .update(&graph, &func_lib)
-                        .and_then(|execution_graph| execution_graph.execute());
-
+                    let result = { execution_graph.lock().await.execute() };
                     (*compute_callback.lock().await)(result);
                 }
             }
         }
     }
 
-    pub async fn run_once(&mut self, graph: ArcMutex<Graph>) {
+    pub async fn run_once(&mut self, execution_graph: ArcMutex<ExecutionGraph>) {
         self.tx
-            .send(WorkerMessage::RunOnce(graph))
+            .send(WorkerMessage::RunOnce(execution_graph))
             .await
             .expect("Failed to send run_once message");
     }
-    pub async fn run_loop(&mut self, graph: ArcMutex<Graph>) {
+    pub async fn run_loop(&mut self, execution_graph: ArcMutex<ExecutionGraph>) {
         self.tx
-            .send(WorkerMessage::RunLoop(graph))
+            .send(WorkerMessage::RunLoop(execution_graph))
             .await
             .expect("Failed to send run_loop message");
     }
@@ -277,19 +255,23 @@ mod tests {
 
         let mut func_lib = basic_invoker.into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());
-        let func_lib = Arc::new(Mutex::new(func_lib));
 
-        let graph = Arc::new(Mutex::new(log_frame_no_graph()));
+        let graph = log_frame_no_graph();
         let execution_graph = Arc::new(Mutex::new(ExecutionGraph::default()));
 
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
-        let mut worker = Worker::new(func_lib, execution_graph, move |result| {
+        let mut worker = Worker::new(move |result| {
             compute_finish_tx
                 .try_send(result)
                 .expect("Failed to send a compute callback event");
         });
 
-        worker.run_once(graph.clone()).await;
+        execution_graph
+            .lock()
+            .await
+            .update(&graph, &func_lib)
+            .unwrap();
+        worker.run_once(Arc::clone(&execution_graph)).await;
         let executed = compute_finish_rx
             .recv()
             .await
@@ -299,7 +281,12 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        worker.run_loop(graph.clone()).await;
+        execution_graph
+            .lock()
+            .await
+            .update(&graph, &func_lib)
+            .unwrap();
+        worker.run_loop(Arc::clone(&execution_graph)).await;
         worker.event().await;
 
         let executed = compute_finish_rx
