@@ -51,7 +51,7 @@ Execution graph propagation asserts when output bindings point at missing execut
 Execution graph propagation panics with function + node IDs when functions are missing.
 Execution graph assertions include node indices and IDs for easier debugging.
 Execution graph assertions include mismatch context to speed up diagnosis.
-Execution graph maintenance includes small readability cleanups.
+Execution graph maintenance includes minor readability cleanups, with details tracked in `NOTES-AI.md`.
 Execution graph input state propagation keeps behavior-specific caching checks explicit.
 Graph input bindings now use direct `is_some` checks for const binding assignment (details in `NOTES-AI.md`).
 Execution graph input binding traversal uses early-continue to reduce nesting (details in `NOTES-AI.md`).

@@ -81,9 +81,7 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Bind(output_binding) if output_binding.output_node_id == id => {
-                    Some(input)
-                }
+                Binding::Bind(output_binding) if output_binding.output_node_id == id => Some(input),
                 _ => None,
             })
             .for_each(|input| {

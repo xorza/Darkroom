@@ -47,6 +47,19 @@ pub enum ExecutionBinding {
     Const(StaticValue),
     Bind(PortAddress),
 }
+impl ExecutionBinding {
+    fn expect_bind(&self, context: &str) -> &PortAddress {
+        match self {
+            ExecutionBinding::Bind(port_address) => port_address,
+            ExecutionBinding::None => {
+                panic!("{context}: expected ExecutionBinding::Bind, got None")
+            }
+            ExecutionBinding::Const(_) => {
+                panic!("{context}: expected ExecutionBinding::Bind, got Const")
+            }
+        }
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub state: InputState,
@@ -430,11 +443,9 @@ impl ExecutionGraph {
                     // todo implement Unchanged for const bindings
                     Binding::Const(_) => InputState::Changed,
                     Binding::Bind(_) => {
-                        let ExecutionBinding::Bind(port_address) =
-                            &self.e_nodes[e_node_idx].inputs[input_idx].binding
-                        else {
-                            panic!("Unexpected binding type");
-                        };
+                        let port_address = self.e_nodes[e_node_idx].inputs[input_idx]
+                            .binding
+                            .expect_bind("forward input binding");
                         let output_e_node = &self.e_nodes[port_address.e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
@@ -609,11 +620,9 @@ impl ExecutionGraph {
                         assert!(matches!(binding, ExecutionBinding::Const(_)));
                     }
                     Binding::Bind(output_binding) => {
-                        let ExecutionBinding::Bind(port_address) =
-                            &e_node.inputs[input_idx].binding
-                        else {
-                            panic!("Unexpected binding type");
-                        };
+                        let port_address = e_node.inputs[input_idx]
+                            .binding
+                            .expect_bind("validation input binding");
 
                         assert!(port_address.e_node_idx < self.e_nodes.len());
 

@@ -115,6 +115,7 @@ Execution graph propagation panics with function and node IDs on missing functio
 Execution graph debug assertions include node indices and IDs to speed up diagnosis.
 Execution graph visit/output assertions now include index mismatch context for faster debugging.
 Execution graph invariant lookups and tests now use `expect` instead of `unwrap_or_else`.
+Execution graph binding access now uses a shared expect helper in forward/validation paths.
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
 Compute input value conversion now uses a single loop instead of iterator chains.
 Execution graph update/backward/forward comments now describe traversal intent and invariants.
