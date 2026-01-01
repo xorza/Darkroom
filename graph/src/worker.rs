@@ -1,8 +1,11 @@
+use std::collections::VecDeque;
+
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::Shared;
+use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::Mutex;
@@ -12,10 +15,8 @@ use tracing::error;
 #[derive(Debug)]
 enum WorkerMessage {
     Exit,
-    Stop,
     Event,
-    RunOnce { graph: Graph, func_lib: FuncLib },
-    RunLoop { graph: Graph, func_lib: FuncLib },
+    Update { graph: Graph, func_lib: FuncLib },
     InvalidateCaches(Vec<NodeId>),
 }
 
@@ -52,92 +53,51 @@ impl Worker {
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
         let mut execution_graph = ExecutionGraph::default();
-        let mut message: Option<WorkerMessage> = None;
+        let mut msgs: Vec<WorkerMessage> = Vec::default();
+        let mut context: Option<(Graph, FuncLib)> = None;
+        let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
 
-        loop {
-            if message.is_none() {
-                message = rx.recv().await;
+        'worker: loop {
+            if msgs.is_empty() {
+                let msg = rx.recv().await;
+                let Some(msg) = msg else { break };
+                msgs.push(msg);
             }
-            if message.is_none() {
-                break;
-            }
-
-            match message.take().unwrap() {
-                WorkerMessage::Stop | WorkerMessage::Event => panic!("Unexpected event message"),
-
-                WorkerMessage::Exit => break,
-
-                WorkerMessage::InvalidateCaches(node_ids) => {
-                    execution_graph.invalidate_recurisevly(node_ids);
-                }
-
-                WorkerMessage::RunOnce { graph, func_lib } => {
-                    if let Err(err) = execution_graph.update(&graph, &func_lib) {
-                        (compute_callback.lock().await)(Err(err));
-                        continue;
-                    }
-
-                    let result = execution_graph.execute().await;
-                    (compute_callback.lock().await)(result);
-                }
-
-                WorkerMessage::RunLoop { graph, func_lib } => {
-                    if let Err(err) = execution_graph.update(&graph, &func_lib) {
-                        (compute_callback.lock().await)(Err(err));
-                        continue;
-                    }
-
-                    message = Self::event_subloop(
-                        &mut execution_graph,
-                        &mut rx,
-                        compute_callback.clone(),
-                    )
-                    .await;
-                }
-            }
-        }
-    }
-
-    async fn event_subloop<Callback>(
-        execution_graph: &mut ExecutionGraph,
-        worker_rx: &mut Receiver<WorkerMessage>,
-        compute_callback: Shared<Callback>,
-    ) -> Option<WorkerMessage>
-    where
-        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
-    {
-        loop {
-            // receive all messages and pick message with the highest priority
-            // todo build stack of messages and remove unneded
-            let mut msg = worker_rx.recv().await?;
             loop {
-                match worker_rx.try_recv() {
-                    Ok(another_msg) => {
-                        // latest message has higher priority
-                        if another_msg.priority() >= msg.priority() {
-                            msg = another_msg;
-                        }
-                    }
+                match rx.try_recv() {
+                    Ok(msg) => msgs.push(msg),
                     Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return None,
+                    Err(TryRecvError::Disconnected) => break 'worker,
+                }
+            }
+            assert!(!msgs.is_empty());
+
+            msgs.sort_by_key(|msg| std::cmp::Reverse(msg.priority()));
+
+            while let Some(msg) = msgs.pop() {
+                match msg {
+                    WorkerMessage::Exit => break 'worker,
+                    WorkerMessage::Event => {}
+                    WorkerMessage::Update { graph, func_lib } => context = Some((graph, func_lib)),
+                    WorkerMessage::InvalidateCaches(node_ids) => {
+                        invalidate_node_ids.extend(node_ids)
+                    }
                 }
             }
 
-            match msg {
-                WorkerMessage::Stop => break None,
-                WorkerMessage::Exit
-                | WorkerMessage::RunOnce { .. }
-                | WorkerMessage::RunLoop { .. } => {
-                    break Some(msg);
-                }
-                WorkerMessage::InvalidateCaches(node_ids) => {
-                    execution_graph.invalidate_recurisevly(node_ids);
-                }
-                WorkerMessage::Event => {
-                    let result = execution_graph.execute().await;
-                    (compute_callback.lock().await)(result);
+            if !invalidate_node_ids.is_empty() {
+                execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
+                assert!(invalidate_node_ids.is_empty());
+            }
+
+            if let Some((graph, func_lib)) = context.take() {
+                if let Err(err) = execution_graph.update(&graph, &func_lib) {
+                    (compute_callback.lock().await)(Err(err));
                 }
             }
+
+            let result = execution_graph.execute().await;
+            (compute_callback.lock().await)(result);
         }
     }
 
@@ -154,22 +114,11 @@ impl Worker {
     }
     pub async fn run_once(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
-            .send(WorkerMessage::RunOnce { graph, func_lib })
+            .send(WorkerMessage::Update { graph, func_lib })
             .await
             .expect("Failed to send run_once message");
     }
-    pub async fn run_loop(&mut self, graph: Graph, func_lib: FuncLib) {
-        self.tx
-            .send(WorkerMessage::RunLoop { graph, func_lib })
-            .await
-            .expect("Failed to send run_loop message");
-    }
-    pub async fn stop(&mut self) {
-        self.tx
-            .send(WorkerMessage::Stop)
-            .await
-            .expect("Failed to send stop message");
-    }
+
     pub async fn exit(&mut self) {
         self.tx
             .send(WorkerMessage::Exit)
@@ -200,9 +149,8 @@ impl WorkerMessage {
     fn priority(&self) -> u8 {
         match self {
             WorkerMessage::Exit => 255,
-            WorkerMessage::Stop => 128,
-            WorkerMessage::InvalidateCaches(_) => 96,
-            WorkerMessage::RunOnce { .. } | WorkerMessage::RunLoop { .. } => 64,
+            WorkerMessage::InvalidateCaches(_) => 192,
+            WorkerMessage::Update { .. } => 96,
             WorkerMessage::Event => 0,
         }
     }
@@ -308,7 +256,6 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        worker.run_loop(graph.clone(), func_lib.clone()).await;
         worker.event().await;
 
         let executed = compute_finish_rx
