@@ -72,7 +72,7 @@ impl Worker {
                 WorkerMessage::RunOnce(graph) => {
                     let result = execution_graph
                         .update(&graph, &func_lib)
-                        .and_then(|()| execution_graph.execute(&graph, &func_lib));
+                        .and_then(|()| execution_graph.execute());
 
                     (*compute_callback.lock().await)(result);
                 }
@@ -124,7 +124,7 @@ impl Worker {
                 WorkerMessage::Event => {
                     let result = execution_graph
                         .update(&graph, func_lib)
-                        .and_then(|()| execution_graph.execute(&graph, func_lib));
+                        .and_then(|()| execution_graph.execute());
 
                     (*compute_callback.lock().await)(result);
                 }

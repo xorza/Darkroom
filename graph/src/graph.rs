@@ -10,7 +10,7 @@ use common::{id_type, is_debug};
 id_type!(NodeId);
 
 #[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct OutputBinding {
+pub struct OutputAddress {
     pub output_node_id: NodeId,
     pub output_idx: usize,
 }
@@ -20,7 +20,7 @@ pub enum Binding {
     #[default]
     None,
     Const(StaticValue),
-    Output(OutputBinding),
+    Bind(OutputAddress),
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -81,7 +81,7 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Output(output_binding) if output_binding.output_node_id == id => {
+                Binding::Bind(output_binding) if output_binding.output_node_id == id => {
                     Some(input)
                 }
                 _ => None,
@@ -128,7 +128,7 @@ impl Graph {
             assert_ne!(node.func_id, FuncId::nil());
 
             for input in node.inputs.iter() {
-                if let Binding::Output(output_binding) = &input.binding {
+                if let Binding::Bind(output_binding) = &input.binding {
                     assert!(self.by_id(&output_binding.output_node_id).is_some());
                 }
             }
@@ -176,15 +176,15 @@ impl Node {
 }
 
 impl Binding {
-    pub fn as_output_binding(&self) -> Option<&OutputBinding> {
+    pub fn as_output_binding(&self) -> Option<&OutputAddress> {
         match self {
-            Binding::Output(output_binding) => Some(output_binding),
+            Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
         }
     }
-    pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputBinding> {
+    pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputAddress> {
         match self {
-            Binding::Output(output_binding) => Some(output_binding),
+            Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
         }
     }
@@ -202,7 +202,7 @@ impl Binding {
     }
 
     pub fn is_output_binding(&self) -> bool {
-        matches!(self, Binding::Output(_))
+        matches!(self, Binding::Bind(_))
     }
     pub fn is_const(&self) -> bool {
         matches!(self, Binding::Const(_))
@@ -215,14 +215,14 @@ impl Binding {
     }
 }
 
-impl From<OutputBinding> for Binding {
-    fn from(value: OutputBinding) -> Self {
-        Binding::Output(value)
+impl From<OutputAddress> for Binding {
+    fn from(value: OutputAddress) -> Self {
+        Binding::Bind(value)
     }
 }
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::Output(OutputBinding {
+        Binding::Bind(OutputAddress {
             output_node_id,
             output_idx,
         })
@@ -331,7 +331,7 @@ pub fn test_graph() -> Graph {
 #[cfg(test)]
 mod tests {
     use crate::data::StaticValue;
-    use crate::graph::{Binding, Graph, Input, Node, OutputBinding};
+    use crate::graph::{Binding, Graph, Input, Node, OutputAddress};
     use common::FileFormat;
     use std::hint::black_box;
 

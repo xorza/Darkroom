@@ -47,7 +47,7 @@ impl GraphView {
                     .expect("func inputs must align with node inputs");
                 let connection = match &input.binding {
                     Binding::None | Binding::Const(_) => None,
-                    Binding::Output(binding) => Some(Connection {
+                    Binding::Bind(binding) => Some(Connection {
                         node_id: binding.output_node_id,
                         output_index: binding.output_idx,
                     }),

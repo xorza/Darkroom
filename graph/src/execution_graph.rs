@@ -9,10 +9,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::args::Args;
-use crate::data::{DataType, DynamicValue};
+use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
-use crate::prelude::FuncId;
+use crate::prelude::{FuncId, FuncLambda};
 use common::{is_debug, FileFormat};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -28,7 +28,7 @@ pub enum ExecutionError {
 
 pub type ExecutionResult<T> = std::result::Result<T, ExecutionError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PortAddress {
     pub e_node_idx: usize,
     pub port_idx: usize,
@@ -41,11 +41,20 @@ pub enum InputState {
     Changed,
     Missing,
 }
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExecutionBinding {
+    None,
+    Const(StaticValue),
+    Bind(PortAddress),
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
     pub output_address: Option<PortAddress>,
+
+    pub binding: ExecutionBinding,
+    pub data_type: DataType,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionOutput {
@@ -90,10 +99,10 @@ pub struct ExecutionNode {
     pub behavior: ExecutionBehavior,
 
     pub node_idx: usize,
-    pub func_idx: usize,
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
 
+    func_id: FuncId,
     process_state: ProcessState,
     wants_execute: bool,
 
@@ -104,6 +113,9 @@ pub struct ExecutionNode {
     pub(crate) cache: InvokeCache,
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
+
+    #[serde(skip, default)]
+    pub lambda: FuncLambda,
 
     #[cfg(debug_assertions)]
     pub name: String,
@@ -139,10 +151,11 @@ impl ExecutionNode {
             self.name = take(&mut prev_state.name);
         }
     }
-    fn refresh(&mut self, node_idx: usize, node: &Node, func_idx: usize, func: &Func) {
+    fn refresh(&mut self, node_idx: usize, node: &Node, func: &Func) {
         self.id = node.id;
         self.node_idx = node_idx;
-        self.func_idx = func_idx;
+        self.func_id = func.id;
+        self.lambda = func.lambda.clone();
 
         self.behavior = match node.behavior {
             NodeBehavior::AsFunction => match func.behavior {
@@ -154,11 +167,21 @@ impl ExecutionNode {
 
         self.inputs.clear();
         self.inputs.reserve(func.inputs.len());
-        self.inputs
-            .extend(func.inputs.iter().map(|input| ExecutionInput {
-                required: input.required,
-                ..Default::default()
-            }));
+
+        assert_eq!(node.inputs.len(), func.inputs.len());
+        for (node_input, func_input) in node.inputs.iter().zip(func.inputs.iter()) {
+            self.inputs.push(ExecutionInput {
+                state: InputState::Unknown,
+                required: func_input.required,
+                output_address: None,
+                binding: match &node_input.binding {
+                    Binding::None => ExecutionBinding::None,
+                    Binding::Const(static_value) => ExecutionBinding::Const(static_value.clone()),
+                    Binding::Bind(_) => ExecutionBinding::None,
+                },
+                data_type: func_input.data_type.clone(),
+            });
+        }
 
         self.outputs.clear();
         self.outputs
@@ -211,60 +234,48 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<usize> {
+    pub fn execute(&mut self) -> ExecutionResult<usize> {
         let mut input_args: Args = take(&mut self.input_args);
 
         for e_node_idx in self.e_node_exe_order.iter().copied() {
-            let (node, func) = {
-                let e_node = &self.e_nodes[e_node_idx];
-                let node = &graph.nodes[e_node.node_idx];
-                let func = &func_lib.funcs[e_node.func_idx];
+            let e_node = &self.e_nodes[e_node_idx];
+            input_args.resize_and_clear(e_node.inputs.len());
 
-                (node, func)
-            };
-
-            input_args.resize_and_clear(node.inputs.len());
-            for (input_idx, input) in node.inputs.iter().enumerate() {
+            for (input_idx, input) in e_node.inputs.iter().enumerate() {
                 let value: DynamicValue = match &input.binding {
-                    Binding::None => DynamicValue::None,
-                    Binding::Const(value) => value.into(),
-                    Binding::Output(output_binding) => {
-                        let output_address = self.e_nodes[e_node_idx].inputs[input_idx]
-                            .output_address
-                            .clone()
-                            .expect("Output address is not set");
-                        assert_eq!(output_binding.output_idx, output_address.port_idx);
-
-                        let output_values = self.e_nodes[output_address.e_node_idx]
+                    ExecutionBinding::None => DynamicValue::None,
+                    ExecutionBinding::Const(value) => value.into(),
+                    ExecutionBinding::Bind(port_address) => {
+                        let output_values = self.e_nodes[port_address.e_node_idx]
                             .output_values
                             .as_ref()
                             .expect("Output values missing for bound node; check execution order");
 
-                        output_values[output_binding.output_idx].clone()
+                        output_values[port_address.port_idx].clone()
                     }
                 };
 
-                let data_type = &func.inputs[input_idx].data_type;
-                input_args[input_idx] = convert_type(value, data_type);
+                input_args[input_idx] = convert_type(value, &input.data_type);
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
             let outputs = e_node
                 .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; func.outputs.len()]);
+                .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
 
             let start = std::time::Instant::now();
-            let invoke_result = func_lib
-                .invoke_by_index(
-                    e_node.func_idx,
+            let invoke_result = e_node
+                .lambda
+                .invoke(
                     &mut e_node.cache,
                     input_args.as_slice(),
                     outputs.as_mut_slice(),
                 )
                 .map_err(|source| ExecutionError::Invoke {
-                    function_id: node.func_id,
+                    function_id: e_node.func_id,
                     message: source.to_string(),
                 });
+
             e_node.run_time = start.elapsed().as_secs_f64();
 
             if let Err(error) = invoke_result {
@@ -349,15 +360,14 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            let func_idx = func_lib.funcs.index_of_key(&node.func_id).unwrap();
-            let func = &func_lib.funcs[func_idx];
-            e_node.refresh(visit.node_idx, node, func_idx, func);
+            let func = &func_lib.by_id(&node.func_id).unwrap();
+            e_node.refresh(visit.node_idx, node, func);
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
             }
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Output(output_binding) = &input.binding else {
+                let Binding::Bind(output_binding) = &input.binding else {
                     continue;
                 };
 
@@ -372,6 +382,11 @@ impl ExecutionGraph {
                     e_node_idx: output_e_node_idx,
                     port_idx: output_binding.output_idx,
                 });
+                self.e_nodes[e_node_idx].inputs[input_idx].binding =
+                    ExecutionBinding::Bind(PortAddress {
+                        e_node_idx: output_e_node_idx,
+                        port_idx: output_binding.output_idx,
+                    });
                 let output_node_idx = graph
                     .nodes
                     .index_of_key(&output_binding.output_node_id)
@@ -415,7 +430,7 @@ impl ExecutionGraph {
                     Binding::None => InputState::Missing,
                     // todo implement Unchanged for const bindings
                     Binding::Const(_) => InputState::Changed,
-                    Binding::Output(_) => {
+                    Binding::Bind(_) => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
                             .as_ref()
@@ -560,10 +575,10 @@ impl ExecutionGraph {
                 );
             }
 
-            assert!(e_node.func_idx < func_lib.funcs.len());
             let node = &graph.nodes[e_node.node_idx];
-            let func = &func_lib.funcs[e_node.func_idx];
+            let func = &func_lib.by_id(&e_node.func_id).expect("Function not found");
 
+            assert_eq!(e_node.func_id, node.func_id);
             assert_eq!(node.id, e_node.id);
             assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
@@ -588,7 +603,7 @@ impl ExecutionGraph {
                     Binding::None | Binding::Const(_) => {
                         assert!(e_node.inputs[input_idx].output_address.is_none());
                     }
-                    Binding::Output(output_binding) => {
+                    Binding::Bind(output_binding) => {
                         if let Some(output_address) = &e_node.inputs[input_idx].output_address {
                             assert!(output_address.e_node_idx < self.e_nodes.len());
 
@@ -640,7 +655,7 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
         assert_eq!(node.inputs.len(), func.inputs.len());
 
         for input in node.inputs.iter() {
-            if let Binding::Output(output_binding) = &input.binding {
+            if let Binding::Bind(output_binding) = &input.binding {
                 let output_node = graph.by_id(&output_binding.output_node_id).unwrap();
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
                 assert!(output_binding.output_idx < output_func.outputs.len());
@@ -985,21 +1000,21 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
+        execution_graph.execute()?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // get_b is pure, so changing this should not affect result
         test_values.try_lock()?.b = 7;
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
+        execution_graph.execute()?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
+        execution_graph.execute()?;
 
         assert_eq!(test_values.try_lock()?.result, 63);
 
@@ -1046,7 +1061,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
+        execution_graph.execute()?;
 
         // assert that both nodes were called
         {
@@ -1057,7 +1072,7 @@ mod tests {
         }
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute(&graph, &func_lib)?;
+        execution_graph.execute()?;
 
         // assert that node was called again
         let guard = test_values.try_lock()?;

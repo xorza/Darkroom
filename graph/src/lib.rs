@@ -21,6 +21,6 @@ pub mod prelude {
         InvokeError, InvokeResult, TestFuncHooks,
     };
     pub use crate::graph::{
-        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputBinding,
+        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputAddress,
     };
 }

@@ -184,16 +184,6 @@ impl FuncLib {
         func.lambda.invoke(cache, inputs, outputs)
     }
 
-    pub fn invoke_by_index(
-        &self,
-        func_idx: usize,
-        cache: &mut InvokeCache,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> InvokeResult<()> {
-        let func = &self.funcs[func_idx];
-        func.lambda.invoke(cache, inputs, outputs)
-    }
     pub fn merge(&mut self, other: FuncLib) {
         for func in other.funcs.items {
             self.add(func);
