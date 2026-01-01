@@ -51,8 +51,6 @@ pub enum ExecutionBinding {
 pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
-    pub output_address: Option<PortAddress>,
-
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
@@ -173,7 +171,6 @@ impl ExecutionNode {
             self.inputs.push(ExecutionInput {
                 state: InputState::Unknown,
                 required: func_input.required,
-                output_address: None,
                 binding: match &node_input.binding {
                     Binding::None => ExecutionBinding::None,
                     Binding::Const(static_value) => ExecutionBinding::Const(static_value.clone()),
@@ -378,10 +375,6 @@ impl ExecutionGraph {
                             id: output_node_id,
                             ..Default::default()
                         });
-                self.e_nodes[e_node_idx].inputs[input_idx].output_address = Some(PortAddress {
-                    e_node_idx: output_e_node_idx,
-                    port_idx: output_binding.output_idx,
-                });
                 self.e_nodes[e_node_idx].inputs[input_idx].binding =
                     ExecutionBinding::Bind(PortAddress {
                         e_node_idx: output_e_node_idx,
@@ -431,13 +424,12 @@ impl ExecutionGraph {
                     // todo implement Unchanged for const bindings
                     Binding::Const(_) => InputState::Changed,
                     Binding::Bind(_) => {
-                        let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
-                            .output_address
-                            .as_ref()
-                            .expect("Output binding references missing execution node")
-                            .e_node_idx;
-                        let output_e_node = &self.e_nodes[output_e_node_idx];
-
+                        let ExecutionBinding::Bind(port_address) =
+                            &self.e_nodes[e_node_idx].inputs[input_idx].binding
+                        else {
+                            panic!("Unexpected binding type");
+                        };
+                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
 
                         if output_e_node.missing_required_inputs {
@@ -536,13 +528,13 @@ impl ExecutionGraph {
                     InputState::Changed => {}
                 }
 
-                let Some(output_address) = input.output_address.as_ref() else {
+                let ExecutionBinding::Bind(port_address) = &input.binding else {
                     continue;
                 };
 
                 stack.push(Visit {
                     node_idx: usize::MAX,
-                    e_node_idx: output_address.e_node_idx,
+                    e_node_idx: port_address.e_node_idx,
                     cause: VisitCause::OutputRequest {
                         output_idx: usize::MAX,
                     },
@@ -601,23 +593,27 @@ impl ExecutionGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
                     Binding::None | Binding::Const(_) => {
-                        assert!(e_node.inputs[input_idx].output_address.is_none());
+                        assert!(e_node.inputs[input_idx].binding.is_none());
                     }
                     Binding::Bind(output_binding) => {
-                        if let Some(output_address) = &e_node.inputs[input_idx].output_address {
-                            assert!(output_address.e_node_idx < self.e_nodes.len());
+                        let ExecutionBinding::Bind(port_address) =
+                            &e_node.inputs[input_idx].binding
+                        else {
+                            panic!("Unexpected binding type");
+                        };
 
-                            let output_e_node = &self.e_nodes[output_address.e_node_idx];
-                            let output_node = &graph.nodes[output_e_node.node_idx];
+                        assert!(port_address.e_node_idx < self.e_nodes.len());
 
-                            assert_eq!(output_node.id, output_binding.output_node_id);
-                            assert_eq!(output_e_node.id, output_binding.output_node_id);
-                            assert!(output_address.port_idx < output_e_node.outputs.len());
-                            assert_eq!(
-                                output_e_node.outputs[output_address.port_idx],
-                                ExecutionOutput::Used
-                            );
-                        }
+                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
+                        let output_node = &graph.nodes[output_e_node.node_idx];
+
+                        assert_eq!(output_node.id, output_binding.output_node_id);
+                        assert_eq!(output_e_node.id, output_binding.output_node_id);
+                        assert!(port_address.port_idx < output_e_node.outputs.len());
+                        assert_eq!(
+                            output_e_node.outputs[port_address.port_idx],
+                            ExecutionOutput::Used
+                        );
                     }
                 }
             }
