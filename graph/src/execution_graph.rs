@@ -335,6 +335,7 @@ impl ExecutionGraph {
                     input_args.as_slice(),
                     outputs.as_mut_slice(),
                 )
+                .await
                 .map_err(|source| ExecutionError::Invoke {
                     function_id: e_node.func_id,
                     message: source.to_string(),
@@ -1068,9 +1069,9 @@ mod tests {
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
         let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Box::new(move || test_values_a.try_lock().unwrap().a),
-            get_b: Box::new(move || test_values_b.try_lock().unwrap().b),
-            print: Box::new(move |result| {
+            get_a: Arc::new(move || test_values_a.try_lock().unwrap().a),
+            get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
+            print: Arc::new(move |result| {
                 test_values_result.try_lock().unwrap().result = result;
             }),
         });
@@ -1112,14 +1113,14 @@ mod tests {
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
         let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Box::new(move || {
+            get_a: Arc::new(move || {
                 let mut guard = test_values_a.try_lock().unwrap();
                 let a1 = guard.a;
                 guard.a += 1;
 
                 a1
             }),
-            get_b: Box::new(move || {
+            get_b: Arc::new(move || {
                 let mut guard = test_values_b.try_lock().unwrap();
                 let b1 = guard.b;
                 guard.b += 1;
@@ -1129,7 +1130,7 @@ mod tests {
 
                 b1
             }),
-            print: Box::new(move |result| {
+            print: Arc::new(move |result| {
                 test_values_result.try_lock().unwrap().result = result;
             }),
         });

@@ -1,4 +1,6 @@
 use std::any::Any;
+use std::future::Future;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -6,7 +8,6 @@ use crate::data::*;
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{deserialize, serialize, FileFormat};
-use pollster::FutureExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -29,7 +30,11 @@ pub enum InvokeError {
 
 pub type InvokeResult<T> = Result<T, InvokeError>;
 
-pub type Lambda = dyn Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> InvokeResult<()>
+pub type Lambda = dyn for<'a> Fn(
+        &'a mut InvokeCache,
+        &'a InvokeArgs,
+        &'a mut InvokeArgs,
+    ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
     + Send
     + Sync
     + 'static;
@@ -44,7 +49,11 @@ pub enum FuncLambda {
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
-        F: Fn(&mut InvokeCache, &InvokeArgs, &mut InvokeArgs) -> InvokeResult<()>
+        F: for<'a> Fn(
+                &'a mut InvokeCache,
+                &'a InvokeArgs,
+                &'a mut InvokeArgs,
+            ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
             + Send
             + Sync
             + 'static,
@@ -52,7 +61,7 @@ impl FuncLambda {
         Self::Lambda(Arc::new(lambda))
     }
 
-    pub fn invoke(
+    pub async fn invoke(
         &self,
         cache: &mut InvokeCache,
         inputs: &InvokeArgs,
@@ -62,7 +71,7 @@ impl FuncLambda {
             FuncLambda::None => {
                 panic!("Func missing lambda");
             }
-            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs),
+            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs).await,
         }
     }
 }
@@ -311,17 +320,17 @@ impl InvokeCache {
 }
 
 pub struct TestFuncHooks {
-    pub get_a: Box<dyn Fn() -> i64 + Send + Sync + 'static>,
-    pub get_b: Box<dyn Fn() -> i64 + Send + Sync + 'static>,
-    pub print: Box<dyn Fn(i64) + Send + Sync + 'static>,
+    pub get_a: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
 }
 
 impl Default for TestFuncHooks {
     fn default() -> Self {
         Self {
-            get_a: Box::new(|| panic!("Unexpected call to get_a")),
-            get_b: Box::new(|| panic!("Unexpected call to get_b")),
-            print: Box::new(|_| panic!("Unexpected call to print")),
+            get_a: Arc::new(|| panic!("Unexpected call to get_a")),
+            get_b: Arc::new(|| panic!("Unexpected call to get_b")),
+            print: Arc::new(|_| panic!("Unexpected call to print")),
         }
     }
 }
@@ -362,15 +371,17 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 2);
+                    assert_eq!(outputs.len(), 1);
 
-                let a: i64 = inputs[0].as_int();
-                let b: i64 = inputs[1].as_int();
-                outputs[0] = (a * b).into();
-                ctx.set(a * b);
+                    let a: i64 = inputs[0].as_int();
+                    let b: i64 = inputs[1].as_int();
+                    outputs[0] = (a * b).into();
+                    ctx.set(a * b);
 
-                Ok(())
+                    Ok(())
+                })
             }),
         },
         Func {
@@ -386,9 +397,12 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |_, _, outputs| {
-                assert_eq!(outputs.len(), 1);
-                outputs[0] = (get_a() as f64).into();
-                Ok(())
+                let get_a = Arc::clone(&get_a);
+                Box::pin(async move {
+                    assert_eq!(outputs.len(), 1);
+                    outputs[0] = (get_a() as f64).into();
+                    Ok(())
+                })
             }),
         },
         Func {
@@ -404,9 +418,12 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |_, _, outputs| {
-                assert_eq!(outputs.len(), 1);
-                outputs[0] = (get_b() as f64).into();
-                Ok(())
+                let get_b = Arc::clone(&get_b);
+                Box::pin(async move {
+                    assert_eq!(outputs.len(), 1);
+                    outputs[0] = (get_b() as f64).into();
+                    Ok(())
+                })
             }),
         },
         Func {
@@ -437,13 +454,15 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                assert_eq!(inputs.len(), 2);
-                assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].as_int();
-                let b: i64 = inputs[1].as_int();
-                ctx.set(a + b);
-                outputs[0] = (a + b).into();
-                Ok(())
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 2);
+                    assert_eq!(outputs.len(), 1);
+                    let a: i64 = inputs[0].as_int();
+                    let b: i64 = inputs[1].as_int();
+                    ctx.set(a + b);
+                    outputs[0] = (a + b).into();
+                    Ok(())
+                })
             }),
         },
         Func {
@@ -462,9 +481,12 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             outputs: vec![],
             events: vec![],
             lambda: FuncLambda::new(move |_, inputs, _| {
-                assert_eq!(inputs.len(), 1);
-                print(inputs[0].as_int());
-                Ok(())
+                let print = Arc::clone(&print);
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 1);
+                    print(inputs[0].as_int());
+                    Ok(())
+                })
             }),
         },
     ]
@@ -491,8 +513,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn invoke_by_id_and_index() -> anyhow::Result<()> {
+    #[tokio::test]
+    async fn invoke_by_id_and_index() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
@@ -503,7 +525,8 @@ mod tests {
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &mut outputs)?;
+            .invoke(&mut cache, &inputs, &mut outputs)
+            .await?;
         assert_eq!(outputs[0].as_int(), 6);
         let cached = *cache
             .get::<i64>()
@@ -517,7 +540,8 @@ mod tests {
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &mut outputs)?;
+            .invoke(&mut cache, &inputs, &mut outputs)
+            .await?;
         assert_eq!(outputs[0].as_int(), 8);
 
         Ok(())

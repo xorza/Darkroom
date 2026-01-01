@@ -54,7 +54,7 @@ pub enum DynamicValue {
     // Array(Vec<DynamicValue>),
     Custom {
         data_type: DataType,
-        data: Box<dyn Any + Send>,
+        data: Box<dyn Any + Send + Sync>,
     },
 }
 
@@ -149,7 +149,7 @@ impl DynamicValue {
             }
         }
     }
-    pub fn as_custom(&self) -> &Box<dyn Any + Send> {
+    pub fn as_custom(&self) -> &Box<dyn Any + Send + Sync> {
         match self {
             DynamicValue::Custom { data, .. } => data,
             _ => {

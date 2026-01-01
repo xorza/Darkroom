@@ -17,4 +17,4 @@ pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{get_file_extension, FileExtensionError, FileFormat, FileFormatResult};
 pub use serde::{deserialize, serialize, SerdeFormatError, SerdeFormatResult};
-pub use shared::{ Shared};
+pub use shared::Shared;

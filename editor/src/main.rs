@@ -164,9 +164,9 @@ impl ScenariumApp {
     fn sample_test_hooks(&self) -> TestFuncHooks {
         let status = self.compute_status.clone();
         TestFuncHooks {
-            get_a: Box::new(|| 21),
-            get_b: Box::new(|| 2),
-            print: Box::new(move |value| {
+            get_a: Arc::new(|| 21),
+            get_b: Arc::new(|| 2),
+            print: Arc::new(move |value| {
                 let mut slot = status.lock().block_on();
                 *slot = Some(format!("Compute output: {}", value));
             }),

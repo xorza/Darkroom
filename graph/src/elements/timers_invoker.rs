@@ -54,35 +54,38 @@ impl Default for TimersInvoker {
             ],
             events: vec!["always".into(), "once".into(), "fps".into()],
             lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                let now = Instant::now();
+                Box::pin(async move {
+                    let now = Instant::now();
 
-                let (delta, frame_no) = {
-                    if let Some(frame_event_ctx) = ctx.get_mut::<FrameEventContext>() {
-                        let delta = now.duration_since(frame_event_ctx.last_frame).as_secs_f64();
-                        let frame_no = frame_event_ctx.frame_no;
+                    let (delta, frame_no) = {
+                        if let Some(frame_event_ctx) = ctx.get_mut::<FrameEventContext>() {
+                            let delta =
+                                now.duration_since(frame_event_ctx.last_frame).as_secs_f64();
+                            let frame_no = frame_event_ctx.frame_no;
 
-                        frame_event_ctx.last_frame = now;
-                        frame_event_ctx.frame_no += 1;
+                            frame_event_ctx.last_frame = now;
+                            frame_event_ctx.frame_no += 1;
 
-                        (delta, frame_no)
-                    } else {
-                        ctx.set(FrameEventContext {
-                            last_frame: now,
-                            frame_no: 2,
-                        });
-
-                        let frequency = if inputs[0].is_none() {
-                            30.0
+                            (delta, frame_no)
                         } else {
-                            inputs[0].as_float()
-                        };
-                        (1.0 / frequency, 1)
-                    }
-                };
+                            ctx.set(FrameEventContext {
+                                last_frame: now,
+                                frame_no: 2,
+                            });
 
-                outputs[0] = DynamicValue::Float(delta);
-                outputs[1] = DynamicValue::Int(frame_no);
-                Ok(())
+                            let frequency = if inputs[0].is_none() {
+                                30.0
+                            } else {
+                                inputs[0].as_float()
+                            };
+                            (1.0 / frequency, 1)
+                        }
+                    };
+
+                    outputs[0] = DynamicValue::Float(delta);
+                    outputs[1] = DynamicValue::Int(frame_no);
+                    Ok(())
+                })
             }),
         });
 
