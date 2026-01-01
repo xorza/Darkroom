@@ -1,6 +1,8 @@
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::normalize_string::NormalizeString;
 use crate::serde_lua::SerdeLuaError;
@@ -16,6 +18,8 @@ pub mod toggle;
 pub mod yaml_format;
 
 pub const EPSILON: f64 = 1e-6;
+
+pub type ArcMutex<T> = Arc<Mutex<T>>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FileExtensionError {
