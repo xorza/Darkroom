@@ -14,7 +14,8 @@ pub mod worker;
 pub mod prelude {
     pub use crate::data::{DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
-        ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, InputState, PortAddress,
+        ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,
+        PortAddress,
     };
     pub use crate::function::{
         test_func_lib, Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache,

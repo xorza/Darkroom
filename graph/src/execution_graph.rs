@@ -28,6 +28,12 @@ pub enum ExecutionError {
 
 pub type ExecutionResult<T> = std::result::Result<T, ExecutionError>;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ExecutionStats {
+    pub elapsed_secs: f64,
+    pub executed_nodes: usize,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PortAddress {
     pub e_node_idx: usize,
@@ -278,7 +284,7 @@ impl ExecutionGraph {
         Ok(self)
     }
 
-    pub fn execute(&mut self) -> ExecutionResult<usize> {
+    pub fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
         let start = std::time::Instant::now();
 
         let mut input_args: Args = take(&mut self.input_args);
@@ -338,7 +344,10 @@ impl ExecutionGraph {
 
         self.input_args = take(&mut input_args);
 
-        Ok(self.e_node_invoke_order.len())
+        Ok(ExecutionStats {
+            elapsed_secs: start.elapsed().as_secs_f64(),
+            executed_nodes: self.e_node_invoke_order.len(),
+        })
     }
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.

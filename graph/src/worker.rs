@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::event::EventId;
-use crate::execution_graph::{ExecutionGraph, ExecutionResult};
+use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
 use crate::function::FuncLib;
 use crate::graph::Graph;
 use pollster::FutureExt;
@@ -20,7 +20,7 @@ enum WorkerMessage {
     RunLoop(Graph),
 }
 
-type ComputeEvent = dyn Fn(ExecutionResult<usize>) + Send + 'static;
+type ComputeEvent = dyn Fn(ExecutionResult<ExecutionStats>) + Send + 'static;
 
 type EventQueue = Arc<Mutex<Vec<EventId>>>;
 
@@ -33,7 +33,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<Callback>(func_lib: FuncLib, compute_callback: Callback) -> Self
     where
-        Callback: Fn(ExecutionResult<usize>) + Send + 'static,
+        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
@@ -276,35 +276,35 @@ mod tests {
         });
 
         worker.run_once(graph.clone()).await;
-        let executed_nodes_count = compute_finish_rx
+        let executed = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed_nodes_count, 3);
+        assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
         worker.run_loop(graph.clone()).await;
         worker.event().await;
 
-        let executed_nodes_count = compute_finish_rx
+        let executed = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed_nodes_count, 3);
+        assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["2"]);
 
         worker.event().await;
-        let executed_nodes_count = compute_finish_rx
+        let executed = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed_nodes_count, 3);
+        assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["3"]);
 
         // worker.exit().await;

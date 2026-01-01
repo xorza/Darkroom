@@ -118,6 +118,7 @@ Execution graph invariant lookups and tests now use `expect` instead of `unwrap_
 Execution graph binding access now uses a shared expect helper in forward/validation paths.
 Execution graph invalidation now walks downstream execution-node bindings to clear init state.
 Execution graph invalidation now has unit coverage for dependent node invalidation.
+Execution graph execution now returns `ExecutionStats` (elapsed seconds + executed node count).
 Graph now exposes a `dependent_nodes` traversal to gather downstream nodes from a starting node id.
 Graph tests now cover `dependent_nodes` traversal ordering and reachability.
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
