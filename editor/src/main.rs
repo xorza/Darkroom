@@ -253,9 +253,13 @@ impl eframe::App for ScenariumApp {
             });
         });
 
+        let mut graph_interaction = gui::graph::GraphUiInteraction::default();
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.graph_ui.render(ui, &mut self.graph_view);
+            graph_interaction = self.graph_ui.render(ui, &mut self.graph_view);
         });
+        for node_id in graph_interaction.affected_nodes {
+            self.execution_graph.remove(&node_id);
+        }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {

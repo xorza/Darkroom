@@ -1,6 +1,7 @@
 use eframe::egui;
 use graph::{graph::NodeId, prelude::NodeBehavior};
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::{gui::render::RenderContext, model};
 
@@ -8,6 +9,7 @@ use crate::{gui::render::RenderContext, model};
 pub struct NodeInteraction {
     pub selection_request: Option<NodeId>,
     pub remove_request: Option<NodeId>,
+    pub changed_nodes: HashSet<NodeId>,
 }
 
 #[derive(Debug)]
@@ -188,7 +190,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         let body_response = ctx.ui().interact(node_rect, node_id, egui::Sense::click());
 
         let close_id = ctx.ui().make_persistent_id(("node_close", node.id));
-        let close_response = ctx
+        let remove_response = ctx
             .ui()
             .interact(close_rect, close_id, egui::Sense::click());
         let cache_enabled = ctx.layout.cache_height > 0.0 && !node.terminal;
@@ -218,14 +220,16 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             } else {
                 NodeBehavior::Once
             };
+            interaction.changed_nodes.insert(node.id);
         }
 
-        if close_response.hovered() {
-            close_response.show_tooltip_text("Remove node");
+        if remove_response.hovered() {
+            remove_response.show_tooltip_text("Remove node");
         }
 
-        if close_response.clicked() {
+        if remove_response.clicked() {
             interaction.remove_request = Some(node.id);
+            interaction.changed_nodes.insert(node.id);
             continue;
         }
 
@@ -301,9 +305,9 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             }
         }
 
-        let close_fill = if close_response.is_pointer_button_down_on() {
+        let close_fill = if remove_response.is_pointer_button_down_on() {
             visuals.widgets.active.bg_fill
-        } else if close_response.hovered() {
+        } else if remove_response.hovered() {
             visuals.widgets.hovered.bg_fill
         } else {
             visuals.widgets.inactive.bg_fill

@@ -95,13 +95,23 @@ pub struct GraphUi {
     connection_drag: ConnectionDrag,
 }
 
+#[derive(Debug, Default)]
+pub struct GraphUiInteraction {
+    pub affected_nodes: HashSet<NodeId>,
+}
+
 impl GraphUi {
     pub fn reset(&mut self) {
         self.connection_breaker.reset();
         self.connection_drag.reset();
     }
 
-    pub fn render(&mut self, ui: &mut egui::Ui, graph: &mut model::GraphView) {
+    pub fn render(
+        &mut self,
+        ui: &mut egui::Ui,
+        graph: &mut model::GraphView,
+    ) -> GraphUiInteraction {
+        let mut interaction = GraphUiInteraction::default();
         let breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
 
@@ -320,9 +330,13 @@ impl GraphUi {
             ));
         }
 
-        let interaction = node_bodies.render(&ctx, graph);
-        if let Some(node_id) = interaction.remove_request {
+        let node_interaction = node_bodies.render(&ctx, graph);
+        interaction
+            .affected_nodes
+            .extend(node_interaction.changed_nodes);
+        if let Some(node_id) = node_interaction.remove_request {
             graph.remove_node(node_id);
+            interaction.affected_nodes.insert(node_id);
         }
 
         if connection_drag.active {
@@ -344,7 +358,8 @@ impl GraphUi {
         }
 
         if breaker.active && primary_released {
-            remove_connections(graph, connections.highlighted());
+            let removed = remove_connections(graph, connections.highlighted());
+            interaction.affected_nodes.extend(removed);
             breaker.reset();
         }
 
@@ -356,15 +371,19 @@ impl GraphUi {
                     target.center,
                     port_activation,
                 )
+                && let Some(node_id) =
+                    apply_connection(graph, connection_drag.start_port, target.port)
             {
-                apply_connection(graph, connection_drag.start_port, target.port);
+                interaction.affected_nodes.insert(node_id);
             }
             connection_drag.reset();
         }
 
-        if let Some(selected_id) = interaction.selection_request {
+        if let Some(selected_id) = node_interaction.selection_request {
             graph.select_node(selected_id);
         }
+
+        interaction
     }
 }
 
@@ -609,13 +628,13 @@ fn port_in_activation_range(cursor: &egui::Pos2, port_center: egui::Pos2, radius
     cursor.distance(port_center) <= radius
 }
 
-fn apply_connection(graph: &mut model::GraphView, start: PortRef, end: PortRef) {
+fn apply_connection(graph: &mut model::GraphView, start: PortRef, end: PortRef) -> Option<NodeId> {
     assert!(start.kind != end.kind, "ports must be of opposite types");
     let (output_port, input_port) = match (start.kind, end.kind) {
         (PortKind::Output, PortKind::Input) => (start, end),
         (PortKind::Input, PortKind::Output) => (end, start),
         _ => {
-            return;
+            return None;
         }
     };
 
@@ -642,6 +661,7 @@ fn apply_connection(graph: &mut model::GraphView, start: PortRef, end: PortRef) 
         node_id: output_port.node_id,
         output_index: output_port.index,
     });
+    Some(input_node.id)
 }
 
 fn view_selected_node(
@@ -862,9 +882,13 @@ fn on_segment(a: egui::Pos2, b: egui::Pos2, p: egui::Pos2) -> bool {
     p.x >= min_x - 1e-6 && p.x <= max_x + 1e-6 && p.y >= min_y - 1e-6 && p.y <= max_y + 1e-6
 }
 
-fn remove_connections(graph: &mut model::GraphView, highlighted: &HashSet<ConnectionKey>) {
+fn remove_connections(
+    graph: &mut model::GraphView,
+    highlighted: &HashSet<ConnectionKey>,
+) -> HashSet<NodeId> {
+    let mut affected = HashSet::new();
     if highlighted.is_empty() {
-        return;
+        return affected;
     }
     for node in &mut graph.nodes {
         for (input_index, input) in node.inputs.iter_mut().enumerate() {
@@ -874,9 +898,11 @@ fn remove_connections(graph: &mut model::GraphView, highlighted: &HashSet<Connec
             };
             if highlighted.contains(&key) {
                 input.connection = None;
+                affected.insert(node.id);
             }
         }
     }
+    affected
 }
 
 fn breaker_path_length(points: &[egui::Pos2]) -> f32 {
