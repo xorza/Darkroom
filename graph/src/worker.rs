@@ -14,8 +14,8 @@ enum WorkerMessage {
     Exit,
     Stop,
     Event,
-    RunOnce(Shared<ExecutionGraph>),
-    RunLoop(Shared<ExecutionGraph>),
+    RunOnce { graph: Graph, func_lib: FuncLib },
+    RunLoop { graph: Graph, func_lib: FuncLib },
 }
 
 type EventQueue = Shared<Vec<EventId>>;
@@ -50,6 +50,7 @@ impl Worker {
     ) where
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
+        let mut execution_graph = ExecutionGraph::default();
         let mut message: Option<WorkerMessage> = None;
 
         loop {
@@ -65,14 +66,24 @@ impl Worker {
 
                 WorkerMessage::Exit => break,
 
-                WorkerMessage::RunOnce(execution_graph) => {
-                    let result = { execution_graph.lock().await.execute().await };
+                WorkerMessage::RunOnce { graph, func_lib } => {
+                    if let Err(err) = execution_graph.update(&graph, &func_lib) {
+                        (compute_callback.lock().await)(Err(err));
+                        continue;
+                    }
+
+                    let result = execution_graph.execute().await;
                     (compute_callback.lock().await)(result);
                 }
 
-                WorkerMessage::RunLoop(execution_graph) => {
+                WorkerMessage::RunLoop { graph, func_lib } => {
+                    if let Err(err) = execution_graph.update(&graph, &func_lib) {
+                        (compute_callback.lock().await)(Err(err));
+                        continue;
+                    }
+
                     message = Self::event_subloop(
-                        execution_graph.clone(),
+                        &mut execution_graph,
                         &mut rx,
                         compute_callback.clone(),
                     )
@@ -83,7 +94,7 @@ impl Worker {
     }
 
     async fn event_subloop<Callback>(
-        execution_graph: Shared<ExecutionGraph>,
+        execution_graph: &mut ExecutionGraph,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Shared<Callback>,
     ) -> Option<WorkerMessage>
@@ -108,26 +119,28 @@ impl Worker {
 
             match msg {
                 WorkerMessage::Stop => break None,
-                WorkerMessage::Exit | WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => {
+                WorkerMessage::Exit
+                | WorkerMessage::RunOnce { .. }
+                | WorkerMessage::RunLoop { .. } => {
                     break Some(msg);
                 }
                 WorkerMessage::Event => {
-                    let result = { execution_graph.lock().await.execute().await };
+                    let result = execution_graph.execute().await;
                     (compute_callback.lock().await)(result);
                 }
             }
         }
     }
 
-    pub async fn run_once(&mut self, execution_graph: Shared<ExecutionGraph>) {
+    pub async fn run_once(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
-            .send(WorkerMessage::RunOnce(execution_graph))
+            .send(WorkerMessage::RunOnce { graph, func_lib })
             .await
             .expect("Failed to send run_once message");
     }
-    pub async fn run_loop(&mut self, execution_graph: Shared<ExecutionGraph>) {
+    pub async fn run_loop(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
-            .send(WorkerMessage::RunLoop(execution_graph))
+            .send(WorkerMessage::RunLoop { graph, func_lib })
             .await
             .expect("Failed to send run_loop message");
     }
@@ -168,7 +181,7 @@ impl WorkerMessage {
         match self {
             WorkerMessage::Exit => 255,
             WorkerMessage::Stop => 127,
-            WorkerMessage::RunOnce(_) | WorkerMessage::RunLoop(_) => 64,
+            WorkerMessage::RunOnce { .. } | WorkerMessage::RunLoop { .. } => 64,
             WorkerMessage::Event => 0,
         }
     }
@@ -256,7 +269,6 @@ mod tests {
         func_lib.merge(timers_invoker.into_func_lib());
 
         let graph = log_frame_no_graph();
-        let execution_graph: Shared<ExecutionGraph> = Shared::default();
 
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
         let mut worker = Worker::new(move |result| {
@@ -265,12 +277,7 @@ mod tests {
                 .expect("Failed to send a compute callback event");
         });
 
-        execution_graph
-            .try_lock()
-            .unwrap()
-            .update(&graph, &func_lib)
-            .unwrap();
-        worker.run_once(execution_graph.clone()).await;
+        worker.run_once(graph.clone(), func_lib.clone()).await;
         let executed = compute_finish_rx
             .recv()
             .await
@@ -280,12 +287,7 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        execution_graph
-            .try_lock()
-            .unwrap()
-            .update(&graph, &func_lib)
-            .unwrap();
-        worker.run_loop(execution_graph.clone()).await;
+        worker.run_loop(graph.clone(), func_lib.clone()).await;
         worker.event().await;
 
         let executed = compute_finish_rx
