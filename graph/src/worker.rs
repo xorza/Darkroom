@@ -34,10 +34,9 @@ impl Worker {
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
         let compute_callback: Shared<Callback> = Shared::new(compute_callback);
-
         let (tx, rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(rx, compute_callback.clone()).await;
+            Self::worker_loop(rx, compute_callback).await;
         });
 
         Self {
@@ -56,13 +55,13 @@ impl Worker {
         let mut msgs: Vec<WorkerMessage> = Vec::default();
         let mut context: Option<(Graph, FuncLib)> = None;
         let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
+        let mut events: Vec<u8> = Vec::default();
 
         'worker: loop {
-            if msgs.is_empty() {
-                let msg = rx.recv().await;
-                let Some(msg) = msg else { break };
-                msgs.push(msg);
-            }
+            let msg = rx.recv().await;
+            let Some(msg) = msg else { break };
+            msgs.push(msg);
+
             loop {
                 match rx.try_recv() {
                     Ok(msg) => msgs.push(msg),
@@ -72,18 +71,20 @@ impl Worker {
             }
             assert!(!msgs.is_empty());
 
-            msgs.sort_by_key(|msg| std::cmp::Reverse(msg.priority()));
-
-            while let Some(msg) = msgs.pop() {
+            for msg in msgs.drain(..) {
                 match msg {
                     WorkerMessage::Exit => break 'worker,
-                    WorkerMessage::Event => {}
-                    WorkerMessage::Update { graph, func_lib } => context = Some((graph, func_lib)),
+                    WorkerMessage::Event => events.push(0),
+                    WorkerMessage::Update { graph, func_lib } => {
+                        events.clear();
+                        context = Some((graph, func_lib));
+                    }
                     WorkerMessage::InvalidateCaches(node_ids) => {
                         invalidate_node_ids.extend(node_ids)
                     }
                 }
             }
+            assert!(msgs.is_empty());
 
             if !invalidate_node_ids.is_empty() {
                 execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
