@@ -114,7 +114,7 @@ pub struct ExecutionNode {
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
-    #[serde(skip, default)]
+    #[serde(skip)]
     pub lambda: FuncLambda,
 
     #[cfg(debug_assertions)]
