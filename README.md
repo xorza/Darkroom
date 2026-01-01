@@ -7,7 +7,7 @@ The core graph and utilities are written in Rust.
 
 - **common** – shared utilities used across the workspace
 - **graph** – the main graph library
-- **editor** – visual editor for building executing graphs
+- **editor** – visual editor for building executing graphs using core graph data
 - **test_resources** – sample graphs and media used by tests
 
 Implementation details and recent editor behavior changes are documented in `NOTES-AI.md`.

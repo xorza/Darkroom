@@ -1,5 +1,6 @@
 use eframe::egui;
 use graph::graph::NodeId;
+use graph::prelude::FuncLib;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
@@ -70,6 +71,7 @@ impl<'a> RenderContext<'a> {
         painter: &'a egui::Painter,
         rect: egui::Rect,
         graph: &model::GraphView,
+        func_lib: &FuncLib,
     ) -> Self {
         assert!(graph.zoom.is_finite(), "graph zoom must be finite");
         assert!(graph.zoom > 0.0, "graph zoom must be positive");
@@ -84,15 +86,14 @@ impl<'a> RenderContext<'a> {
         let text_color = ui.visuals().text_color();
         let style = GraphStyle::new(ui, graph.zoom);
         style.validate();
-        let node_widths = node::compute_node_widths(
-            painter,
-            graph,
-            &layout,
-            &heading_font,
-            &body_font,
+        let width_ctx = node::NodeWidthContext {
+            layout: &layout,
+            heading_font: &heading_font,
+            body_font: &body_font,
             text_color,
-            &style,
-        );
+            style: &style,
+        };
+        let node_widths = node::compute_node_widths(painter, graph, func_lib, &width_ctx);
         let origin = rect.min + graph.pan;
         let port_radius = node::port_radius_for_scale(graph.zoom);
 
@@ -127,10 +128,17 @@ impl<'a> RenderContext<'a> {
             .expect("node width must be precomputed")
     }
 
-    pub fn node_rect(&self, node: &model::NodeView) -> egui::Rect {
+    pub fn node_rect(
+        &self,
+        node: &model::NodeView,
+        input_count: usize,
+        output_count: usize,
+    ) -> egui::Rect {
         node::node_rect_for_graph(
             self.origin,
             node,
+            input_count,
+            output_count,
             self.scale,
             &self.layout,
             self.node_width(node.id),
@@ -141,5 +149,10 @@ impl<'a> RenderContext<'a> {
 pub trait WidgetRenderer {
     type Output;
 
-    fn render(&mut self, ctx: &RenderContext, graph: &mut model::GraphView) -> Self::Output;
+    fn render(
+        &mut self,
+        ctx: &RenderContext,
+        graph: &mut model::GraphView,
+        func_lib: &FuncLib,
+    ) -> Self::Output;
 }

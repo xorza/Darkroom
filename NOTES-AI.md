@@ -150,7 +150,7 @@ Lua serialization/deserialization now uses `common::serde_lua` and `FileFormat::
 File-format serialization and deserialization are centralized in `common::serialize` and `common::deserialize`.
 Serialization now uses `common::SerdeFormatError` and `SerdeFormatResult` for format-specific errors.
 The editor includes a Run button beneath the graph view that executes compute on the current graph.
-`GraphView::to_graph` builds a core graph from the view using function names to resolve function IDs and bindings.
 Sample test hooks in the editor now populate compute status output via the `print` hook.
 The editor now uses a Tokio async main and `std::sync::Mutex` for compute status updates.
 Editor UI edits (connection changes, cache toggles, node removals) now invalidate execution nodes immediately.
+Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.

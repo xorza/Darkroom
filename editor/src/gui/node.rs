@@ -1,5 +1,6 @@
 use eframe::egui;
-use graph::{graph::NodeId, prelude::NodeBehavior};
+use graph::graph::NodeId;
+use graph::prelude::{Func, FuncLib, NodeBehavior};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -72,6 +73,8 @@ impl NodeLayout {
 pub fn node_rect_for_graph(
     origin: egui::Pos2,
     node: &model::NodeView,
+    input_count: usize,
+    output_count: usize,
     scale: f32,
     layout: &NodeLayout,
     node_width: f32,
@@ -79,7 +82,7 @@ pub fn node_rect_for_graph(
     assert!(scale > 0.0, "graph scale must be positive");
     assert!(scale.is_finite(), "graph scale must be finite");
     layout.assert_valid();
-    let node_size = node_size(node, layout, node_width);
+    let node_size = node_size(input_count, output_count, layout, node_width);
     egui::Rect::from_min_size(origin + node.pos.to_vec2() * scale, node_size)
 }
 
@@ -92,18 +95,36 @@ pub(crate) fn port_radius_for_scale(scale: f32) -> f32 {
     radius
 }
 
-pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> NodeInteraction {
+pub fn render_node_bodies(
+    ctx: &RenderContext,
+    graph: &mut model::GraphView,
+    func_lib: &FuncLib,
+) -> NodeInteraction {
     let visuals = ctx.ui().visuals();
     let node_fill = ctx.style.node_fill;
     let node_stroke = ctx.style.node_stroke;
     let selected_stroke = ctx.style.selected_stroke;
     let mut interaction = NodeInteraction::default();
 
-    for node in &mut graph.nodes {
+    for node_view in &mut graph.nodes {
+        let node = graph
+            .graph
+            .by_id_mut(&node_view.id)
+            .expect("node view id must exist in graph data");
+        let func = func_lib
+            .by_id(&node.func_id)
+            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+        assert!(
+            node.inputs.len() == func.inputs.len(),
+            "node inputs must match function inputs"
+        );
+
+        let input_count = func.inputs.len();
+        let output_count = func.outputs.len();
         let node_width = ctx.node_width(node.id);
-        let node_size = node_size(node, &ctx.layout, node_width);
+        let node_size = node_size(input_count, output_count, &ctx.layout, node_width);
         let node_rect =
-            egui::Rect::from_min_size(ctx.origin + node.pos.to_vec2() * ctx.scale, node_size);
+            egui::Rect::from_min_size(ctx.origin + node_view.pos.to_vec2() * ctx.scale, node_size);
         let header_rect = egui::Rect::from_min_size(
             node_rect.min,
             egui::vec2(node_size.x, ctx.layout.header_height),
@@ -211,7 +232,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             .interact(header_drag_rect, header_id, egui::Sense::drag());
 
         if response.dragged() {
-            node.pos += response.drag_delta() / ctx.scale;
+            node_view.pos += response.drag_delta() / ctx.scale;
         }
 
         if cache_enabled && cache_response.clicked() {
@@ -220,7 +241,7 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
             } else {
                 NodeBehavior::Once
             };
-            interaction.changed_nodes.insert(node.id);
+            interaction.changed_nodes.insert(node_view.id);
         }
 
         if remove_response.hovered() {
@@ -228,17 +249,17 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         }
 
         if remove_response.clicked() {
-            interaction.remove_request = Some(node.id);
-            interaction.changed_nodes.insert(node.id);
+            interaction.remove_request = Some(node_view.id);
+            interaction.changed_nodes.insert(node_view.id);
             continue;
         }
 
         if response.clicked() || response.dragged() || body_response.clicked() {
-            interaction.selection_request = Some(node.id);
+            interaction.selection_request = Some(node_view.id);
         }
 
         let selected_id = interaction.selection_request.or(graph.selected_node_id);
-        let is_selected = selected_id.is_some_and(|id| id == node.id);
+        let is_selected = selected_id.is_some_and(|id| id == node_view.id);
 
         ctx.painter().rect(
             node_rect,
@@ -342,16 +363,22 @@ pub fn render_node_bodies(ctx: &RenderContext, graph: &mut model::GraphView) -> 
         ctx.painter().line_segment([a, b], close_stroke);
         ctx.painter().line_segment([c, d], close_stroke);
 
-        render_node_ports(ctx, node, node_width);
-        render_node_labels(ctx, node, node_rect, node_width);
+        render_node_ports(ctx, node_view, input_count, output_count, node_width);
+        render_node_labels(ctx, &node.name, func, node_rect, node_width);
     }
 
     interaction
 }
 
-fn render_node_ports(ctx: &RenderContext, node: &model::NodeView, node_width: f32) {
-    for (index, _input) in node.inputs.iter().enumerate() {
-        let center = node_input_pos(ctx.origin, node, index, &ctx.layout, ctx.scale);
+fn render_node_ports(
+    ctx: &RenderContext,
+    node: &model::NodeView,
+    input_count: usize,
+    output_count: usize,
+    node_width: f32,
+) {
+    for index in 0..input_count {
+        let center = node_input_pos(ctx.origin, node, index, input_count, &ctx.layout, ctx.scale);
         let port_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
@@ -364,8 +391,16 @@ fn render_node_ports(ctx: &RenderContext, node: &model::NodeView, node_width: f3
         ctx.painter().circle_filled(center, ctx.port_radius, color);
     }
 
-    for (index, _output) in node.outputs.iter().enumerate() {
-        let center = node_output_pos(ctx.origin, node, index, &ctx.layout, ctx.scale, node_width);
+    for index in 0..output_count {
+        let center = node_output_pos(
+            ctx.origin,
+            node,
+            index,
+            output_count,
+            &ctx.layout,
+            ctx.scale,
+            node_width,
+        );
         let port_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
@@ -381,7 +416,8 @@ fn render_node_ports(ctx: &RenderContext, node: &model::NodeView, node_width: f3
 
 fn render_node_labels(
     ctx: &RenderContext,
-    node: &model::NodeView,
+    node_name: &str,
+    func: &Func,
     node_rect: egui::Rect,
     node_width: f32,
 ) {
@@ -390,12 +426,12 @@ fn render_node_labels(
     ctx.painter().text(
         node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
-        &node.name,
+        node_name,
         ctx.heading_font.clone(),
         ctx.text_color,
     );
 
-    for (index, input) in node.inputs.iter().enumerate() {
+    for (index, input) in func.inputs.iter().enumerate() {
         let text_pos = node_rect.min
             + egui::vec2(
                 ctx.layout.padding,
@@ -413,7 +449,7 @@ fn render_node_labels(
         );
     }
 
-    for (index, output) in node.outputs.iter().enumerate() {
+    for (index, output) in func.outputs.iter().enumerate() {
         let text_pos = node_rect.min
             + egui::vec2(
                 node_width - ctx.layout.padding,
@@ -432,10 +468,15 @@ fn render_node_labels(
     }
 }
 
-fn node_size(node: &model::NodeView, layout: &NodeLayout, node_width: f32) -> egui::Vec2 {
+fn node_size(
+    input_count: usize,
+    output_count: usize,
+    layout: &NodeLayout,
+    node_width: f32,
+) -> egui::Vec2 {
     assert!(node_width.is_finite(), "node width must be finite");
     assert!(node_width > 0.0, "node width must be positive");
-    let row_count = node.inputs.len().max(node.outputs.len()).max(1);
+    let row_count = input_count.max(output_count).max(1);
     let height = layout.header_height
         + layout.cache_height
         + layout.padding
@@ -448,11 +489,12 @@ pub(crate) fn node_input_pos(
     origin: egui::Pos2,
     node: &model::NodeView,
     index: usize,
+    input_count: usize,
     layout: &NodeLayout,
     scale: f32,
 ) -> egui::Pos2 {
     assert!(
-        index < node.inputs.len(),
+        index < input_count,
         "input index must be within node inputs"
     );
     assert!(scale > 0.0, "graph scale must be positive");
@@ -470,12 +512,13 @@ pub(crate) fn node_output_pos(
     origin: egui::Pos2,
     node: &model::NodeView,
     index: usize,
+    output_count: usize,
     layout: &NodeLayout,
     scale: f32,
     node_width: f32,
 ) -> egui::Pos2 {
     assert!(
-        index < node.outputs.len(),
+        index < output_count,
         "output index must be within node outputs"
     );
     assert!(scale > 0.0, "graph scale must be positive");
@@ -499,72 +542,88 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
     offset
 }
 
+#[derive(Debug)]
+pub(crate) struct NodeWidthContext<'a> {
+    pub layout: &'a NodeLayout,
+    pub heading_font: &'a egui::FontId,
+    pub body_font: &'a egui::FontId,
+    pub text_color: egui::Color32,
+    pub style: &'a crate::gui::style::GraphStyle,
+}
+
 pub(crate) fn compute_node_widths(
     painter: &egui::Painter,
     graph: &model::GraphView,
-    layout: &NodeLayout,
-    heading_font: &egui::FontId,
-    body_font: &egui::FontId,
-    text_color: egui::Color32,
-    style: &crate::gui::style::GraphStyle,
+    func_lib: &FuncLib,
+    ctx: &NodeWidthContext<'_>,
 ) -> HashMap<NodeId, f32> {
-    layout.assert_valid();
-    let scale_guess = layout.row_height / 18.0;
+    ctx.layout.assert_valid();
+    let scale_guess = ctx.layout.row_height / 18.0;
     assert!(scale_guess.is_finite(), "layout scale guess must be finite");
     assert!(scale_guess > 0.0, "layout scale guess must be positive");
     let mut widths = HashMap::with_capacity(graph.nodes.len());
 
-    for node in &graph.nodes {
-        let header_width =
-            text_width(painter, heading_font, &node.name, text_color) + layout.padding * 2.0;
-        let vertical_padding = layout.padding * style.cache_button_vertical_pad_factor;
-        let cache_button_height = (layout.cache_height - vertical_padding * 2.0)
+    for node_view in &graph.nodes {
+        let node = graph
+            .graph
+            .by_id(&node_view.id)
+            .expect("node view id must exist in graph data");
+        let func = func_lib
+            .by_id(&node.func_id)
+            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+        let header_width = text_width(painter, ctx.heading_font, &node.name, ctx.text_color)
+            + ctx.layout.padding * 2.0;
+        let vertical_padding = ctx.layout.padding * ctx.style.cache_button_vertical_pad_factor;
+        let cache_button_height = (ctx.layout.cache_height - vertical_padding * 2.0)
             .max(10.0 * scale_guess)
-            .min(layout.cache_height);
-        let cache_text_width = text_width(painter, body_font, "cached", text_color)
-            .max(text_width(painter, body_font, "cache", text_color));
-        let cache_button_width = (cache_button_height * style.cache_button_width_factor)
+            .min(ctx.layout.cache_height);
+        let cache_text_width = text_width(painter, ctx.body_font, "cached", ctx.text_color)
+            .max(text_width(painter, ctx.body_font, "cache", ctx.text_color));
+        let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
             .max(cache_button_height)
-            .max(cache_text_width + layout.padding * style.cache_button_text_pad_factor * 2.0);
-        let cache_row_width = if layout.cache_height > 0.0 {
-            layout.padding + cache_button_width + layout.padding
+            .max(
+                cache_text_width
+                    + ctx.layout.padding * ctx.style.cache_button_text_pad_factor * 2.0,
+            );
+        let cache_row_width = if ctx.layout.cache_height > 0.0 {
+            ctx.layout.padding + cache_button_width + ctx.layout.padding
         } else {
             0.0
         };
         let status_row_width = {
-            let dot_diameter = style.status_dot_radius * 2.0;
+            let dot_diameter = ctx.style.status_dot_radius * 2.0;
             let count = 2usize;
             let gaps = (count - 1) as f32;
-            let total = count as f32 * dot_diameter + gaps * style.status_item_gap;
-            layout.padding + total + layout.padding
+            let total = count as f32 * dot_diameter + gaps * ctx.style.status_item_gap;
+            ctx.layout.padding + total + ctx.layout.padding
         };
 
-        let input_widths: Vec<f32> = node
+        let input_widths: Vec<f32> = func
             .inputs
             .iter()
-            .map(|input| text_width(painter, body_font, &input.name, text_color))
+            .map(|input| text_width(painter, ctx.body_font, &input.name, ctx.text_color))
             .collect();
-        let output_widths: Vec<f32> = node
+        let output_widths: Vec<f32> = func
             .outputs
             .iter()
-            .map(|output| text_width(painter, body_font, &output.name, text_color))
+            .map(|output| text_width(painter, ctx.body_font, &output.name, ctx.text_color))
             .collect();
 
-        let row_count = node.inputs.len().max(node.outputs.len()).max(1);
+        let row_count = func.inputs.len().max(func.outputs.len()).max(1);
         let mut max_row_width: f32 = 0.0;
 
         let inter_side_padding = 0.0;
         for row in 0..row_count {
             let left = input_widths.get(row).copied().unwrap_or(0.0);
             let right = output_widths.get(row).copied().unwrap_or(0.0);
-            let mut row_width = layout.padding * 2.0 + left + right;
+            let mut row_width = ctx.layout.padding * 2.0 + left + right;
             if left > 0.0 && right > 0.0 {
                 row_width += inter_side_padding;
             }
             max_row_width = max_row_width.max(row_width);
         }
 
-        let computed = layout.node_width.max(
+        let computed = ctx.layout.node_width.max(
             header_width
                 .max(max_row_width)
                 .max(cache_row_width)

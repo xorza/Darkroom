@@ -1,15 +1,15 @@
 use anyhow::{Result, anyhow, bail};
 use common::{FileFormat, is_debug};
-use graph::prelude::{Binding, Event, FuncLib, Graph as CoreGraph, Node, NodeId};
+use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use uuid::Uuid;
 
-use super::{Connection, Input, NodeView, Output};
+use super::NodeView;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphView {
+    pub graph: CoreGraph,
     pub nodes: Vec<NodeView>,
     pub pan: egui::Vec2,
     pub zoom: f32,
@@ -19,6 +19,7 @@ pub struct GraphView {
 impl Default for GraphView {
     fn default() -> Self {
         Self {
+            graph: CoreGraph::default(),
             nodes: Vec::new(),
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
@@ -28,60 +29,18 @@ impl Default for GraphView {
 }
 
 impl GraphView {
-    pub fn from_graph(graph: &CoreGraph, func_lib: &FuncLib) -> Self {
+    pub fn from_graph(graph: &CoreGraph) -> Self {
         let mut nodes = Vec::with_capacity(graph.nodes.len());
         for (index, node) in graph.nodes.iter().enumerate() {
-            let func = func_lib.by_id(&node.func_id).unwrap_or_else(|| {
-                panic!("Missing func for node {} ({})", node.name, node.func_id)
-            });
-            assert!(
-                node.inputs.len() == func.inputs.len(),
-                "node inputs must match function inputs"
-            );
-
-            let mut inputs = Vec::with_capacity(node.inputs.len());
-            for (input_index, input) in node.inputs.iter().enumerate() {
-                let func_input = func
-                    .inputs
-                    .get(input_index)
-                    .expect("func inputs must align with node inputs");
-                let connection = match &input.binding {
-                    Binding::None | Binding::Const(_) => None,
-                    Binding::Bind(binding) => Some(Connection {
-                        node_id: binding.output_node_id,
-                        output_index: binding.output_idx,
-                    }),
-                };
-                inputs.push(Input {
-                    name: func_input.name.clone(),
-                    connection,
-                });
-            }
-
-            let mut outputs = Vec::with_capacity(func.outputs.len());
-            for output in &func.outputs {
-                outputs.push(Output {
-                    name: output.name.clone(),
-                });
-            }
-
             let column = index % 3;
             let row = index / 3;
             let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
 
-            nodes.push(NodeView {
-                id: node.id,
-                func_id: node.func_id,
-                name: node.name.clone(),
-                pos,
-                inputs,
-                outputs,
-                behavior: node.behavior,
-                terminal: node.terminal,
-            });
+            nodes.push(NodeView { id: node.id, pos });
         }
 
         let graph = Self {
+            graph: graph.clone(),
             nodes,
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
@@ -93,76 +52,12 @@ impl GraphView {
         graph
     }
 
-    pub fn to_graph(&self, func_lib: &FuncLib) -> CoreGraph {
-        let mut graph = CoreGraph::default();
-        let mut node_ids = HashMap::new();
-        let mut output_counts = HashMap::new();
-
-        for node in &self.nodes {
-            let prior = node_ids.insert(node.id, node.name.as_str());
-            assert!(prior.is_none(), "graph view node ids must be unique");
-            let prior = output_counts.insert(node.id, node.outputs.len());
-            assert!(prior.is_none(), "graph view node ids must be unique");
-        }
-
-        for node_view in &self.nodes {
-            let func = func_lib.by_id(&node_view.func_id).unwrap();
-            let func_id = func.id;
-            assert!(node_view.inputs.len() == func.inputs.len());
-            assert!(node_view.outputs.len() == func.outputs.len());
-
-            let mut inputs = Vec::with_capacity(func.inputs.len());
-            for (input_index, func_input) in func.inputs.iter().enumerate() {
-                let view_input = node_view
-                    .inputs
-                    .get(input_index)
-                    .expect("graph view inputs must align with function inputs");
-                let binding = match &view_input.connection {
-                    Some(connection) => {
-                        assert!(
-                            node_ids.contains_key(&connection.node_id),
-                            "connection must reference an existing node"
-                        );
-                        let output_count = output_counts
-                            .get(&connection.node_id)
-                            .copied()
-                            .expect("connection must reference an existing node");
-                        assert!(
-                            connection.output_index < output_count,
-                            "connection output index must be in range"
-                        );
-
-                        (connection.node_id, connection.output_index).into()
-                    }
-                    None => Binding::None,
-                };
-                inputs.push(graph::graph::Input {
-                    binding,
-                    default_value: func_input.default_value.clone(),
-                });
-            }
-
-            let events = (0..func.events.len()).map(|_| Event::default()).collect();
-            let node = Node {
-                id: node_view.id,
-                func_id,
-                name: node_view.name.clone(),
-                behavior: node_view.behavior,
-                terminal: node_view.terminal,
-                inputs,
-                events,
-            };
-            graph.add(node);
-        }
-
-        graph.validate();
-        graph
-    }
-
     pub fn validate(&self) -> Result<()> {
         if !is_debug() {
             return Ok(());
         }
+
+        self.graph.validate();
 
         if !self.zoom.is_finite() || self.zoom <= 0.0 {
             return Err(anyhow!("graph zoom must be finite and positive"));
@@ -171,33 +66,37 @@ impl GraphView {
             return Err(anyhow!("graph pan must be finite"));
         }
 
-        let mut output_counts = HashMap::new();
+        let mut view_nodes = HashMap::new();
         for node in &self.nodes {
             if !node.pos.x.is_finite() || !node.pos.y.is_finite() {
                 return Err(anyhow!("node position must be finite"));
             }
-            let prior = output_counts.insert(node.id, node.outputs.len());
+            let prior = view_nodes.insert(node.id, ());
             if prior.is_some() {
                 return Err(anyhow!("duplicate node id detected"));
             }
         }
 
         if let Some(selected_node_id) = self.selected_node_id
-            && !output_counts.contains_key(&selected_node_id)
+            && !view_nodes.contains_key(&selected_node_id)
         {
             return Err(anyhow!("selected node id must exist in graph"));
         }
 
-        for node in &self.nodes {
-            for input in &node.inputs {
-                if let Some(connection) = &input.connection {
-                    let output_count = output_counts
-                        .get(&connection.node_id)
-                        .ok_or_else(|| anyhow!("connection references a missing node"))?;
-                    if connection.output_index >= *output_count {
-                        return Err(anyhow!("connection output index out of range"));
-                    }
-                }
+        let mut graph_nodes = HashMap::new();
+        for node in self.graph.nodes.iter() {
+            let prior = graph_nodes.insert(node.id, ());
+            if prior.is_some() {
+                return Err(anyhow!("duplicate node id detected in graph"));
+            }
+        }
+
+        if view_nodes.len() != graph_nodes.len() {
+            return Err(anyhow!("graph view node list must match graph nodes"));
+        }
+        for node_id in graph_nodes.keys() {
+            if !view_nodes.contains_key(node_id) {
+                return Err(anyhow!("graph view missing node position"));
             }
         }
 
@@ -241,13 +140,17 @@ impl GraphView {
     pub fn select_node(&mut self, node_id: NodeId) {
         assert!(
             self.nodes.iter().any(|node| node.id == node_id),
-            "selected node must exist in graph"
+            "selected node view must exist in graph"
+        );
+        assert!(
+            self.graph.by_id(&node_id).is_some(),
+            "selected node must exist in graph data"
         );
         let node_index = self
             .nodes
             .iter()
             .position(|node| node.id == node_id)
-            .expect("selected node must exist in graph");
+            .expect("selected node view must exist in graph");
         if node_index + 1 != self.nodes.len() {
             let node = self.nodes.remove(node_index);
             self.nodes.push(node);
@@ -260,8 +163,13 @@ impl GraphView {
             self.nodes.iter().any(|node| node.id == node_id),
             "node must exist to be removed"
         );
+        assert!(
+            self.graph.by_id(&node_id).is_some(),
+            "node must exist in graph data to be removed"
+        );
 
         self.nodes.retain(|node| node.id != node_id);
+        self.graph.remove_by_id(node_id);
 
         if self
             .selected_node_id
@@ -269,23 +177,13 @@ impl GraphView {
         {
             self.selected_node_id = None;
         }
-
-        for node in &mut self.nodes {
-            for input in &mut node.inputs {
-                if let Some(connection) = &input.connection
-                    && connection.node_id == node_id
-                {
-                    input.connection = None;
-                }
-            }
-        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use graph::prelude::{TestFuncHooks, test_func_lib, test_graph as core_test_graph};
+    use graph::prelude::test_graph as core_test_graph;
 
     #[test]
     fn graph_view_test() {
@@ -302,8 +200,7 @@ mod tests {
 
     fn build_test_view() -> GraphView {
         let graph = core_test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
-        GraphView::from_graph(&graph, &func_lib)
+        GraphView::from_graph(&graph)
     }
 
     fn assert_roundtrip(format: FileFormat) {
@@ -319,11 +216,16 @@ mod tests {
         assert_eq!(
             graph.nodes.len(),
             deserialized.nodes.len(),
-            "node counts should round-trip"
+            "node view counts should round-trip"
         );
         assert_eq!(
             graph.nodes[0].id, deserialized.nodes[0].id,
-            "node ids should round-trip"
+            "node view ids should round-trip"
+        );
+        assert_eq!(
+            graph.graph.nodes.len(),
+            deserialized.graph.nodes.len(),
+            "graph nodes should round-trip"
         );
         assert_eq!(graph.zoom, deserialized.zoom, "zoom should round-trip");
         assert_eq!(graph.pan, deserialized.pan, "pan should round-trip");

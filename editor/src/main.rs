@@ -8,7 +8,7 @@ mod model;
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
-use graph::prelude::{FuncLib, Graph, TestFuncHooks, test_func_lib, test_graph};
+use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
 use pollster::block_on;
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -70,7 +70,6 @@ fn configure_visuals(ctx: &egui::Context) {
 
 #[derive(Debug)]
 struct ScenariumApp {
-    graph: Graph,
     func_lib: FuncLib,
     execution_graph: ExecutionGraph,
     graph_view: model::GraphView,
@@ -85,7 +84,6 @@ impl Default for ScenariumApp {
         let graph_path = Self::default_path();
 
         let mut result = Self {
-            graph: Graph::default(),
             func_lib: FuncLib::default(),
             execution_graph: ExecutionGraph::default(),
             graph_view: model::GraphView::default(),
@@ -154,8 +152,7 @@ impl ScenariumApp {
     fn test_graph(&mut self) {
         let graph = test_graph();
         let func_lib = test_func_lib(self.sample_test_hooks());
-        let graph_view = model::GraphView::from_graph(&graph, &func_lib);
-        self.graph = graph;
+        let graph_view = model::GraphView::from_graph(&graph);
         self.func_lib = func_lib;
         self.set_graph_view(graph_view, "Loaded sample test graph");
     }
@@ -173,12 +170,11 @@ impl ScenariumApp {
     }
 
     fn run_graph(&mut self) {
-        if self.graph_view.nodes.is_empty() {
+        if self.graph_view.graph.nodes.is_empty() {
             self.set_status("Run failed: no compute graph loaded");
             return;
         }
 
-        self.graph = self.graph_view.to_graph(&self.func_lib);
         {
             let mut slot = self
                 .compute_status
@@ -189,7 +185,7 @@ impl ScenariumApp {
 
         let result = self
             .execution_graph
-            .update(&self.graph, &self.func_lib)
+            .update(&self.graph_view.graph, &self.func_lib)
             .and_then(|execution_graph| execution_graph.execute());
 
         match result {
@@ -255,11 +251,20 @@ impl eframe::App for ScenariumApp {
 
         let mut graph_interaction = gui::graph::GraphUiInteraction::default();
         egui::CentralPanel::default().show(ctx, |ui| {
-            graph_interaction = self.graph_ui.render(ui, &mut self.graph_view);
+            graph_interaction = self
+                .graph_ui
+                .render(ui, &mut self.graph_view, &self.func_lib);
         });
         for node_id in graph_interaction.affected_nodes {
+            // self.graph
+            //     .dependent_nodes(&node_id)
+            //     .iter()
+            //     .for_each(|dep_node_id| {
+            //         self.execution_graph.invalidate(dep_node_id);
+            //     });
             self.execution_graph.invalidate(&node_id);
-            // todo propagate changes to other dependent nodes
+
+            todo!("propagate changes to other dependent nodes")
         }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
