@@ -165,10 +165,10 @@ impl ExecutionNode {
         self.run_time = 0.0;
         self.error = None;
     }
-    fn init(&mut self, node: &Node, func: &Func) {
+    fn update(&mut self, node_idx: usize, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
 
-        self.inited = true;
+        self.node_idx = node_idx;
         self.func_id = func.id;
         self.lambda = func.lambda.clone();
 
@@ -180,28 +180,34 @@ impl ExecutionNode {
             NodeBehavior::Once => ExecutionBehavior::Once,
         };
 
-        self.inputs.clear();
-        self.inputs.reserve(func.inputs.len());
+        if !self.inited {
+            self.inited = true;
 
-        assert_eq!(node.inputs.len(), func.inputs.len());
-        for (node_input, func_input) in node.inputs.iter().zip(func.inputs.iter()) {
-            self.inputs.push(ExecutionInput {
-                state: InputState::Unknown,
-                required: func_input.required,
-                binding: match &node_input.binding {
-                    Binding::None => ExecutionBinding::None,
-                    Binding::Const(static_value) => ExecutionBinding::Const(static_value.clone()),
-                    Binding::Bind(_) => ExecutionBinding::None,
-                },
-                data_type: func_input.data_type.clone(),
-            });
+            self.inputs.clear();
+            self.inputs.reserve(func.inputs.len());
+
+            assert_eq!(node.inputs.len(), func.inputs.len());
+            for (node_input, func_input) in node.inputs.iter().zip(func.inputs.iter()) {
+                self.inputs.push(ExecutionInput {
+                    state: InputState::Unknown,
+                    required: func_input.required,
+                    binding: match &node_input.binding {
+                        Binding::None => ExecutionBinding::None,
+                        Binding::Const(static_value) => {
+                            ExecutionBinding::Const(static_value.clone())
+                        }
+                        Binding::Bind(_) => ExecutionBinding::None,
+                    },
+                    data_type: func_input.data_type.clone(),
+                });
+            }
+
+            self.outputs.clear();
+            self.outputs
+                .resize(func.outputs.len(), ExecutionOutput::Unused);
+
+            self.output_values = None;
         }
-
-        self.outputs.clear();
-        self.outputs
-            .resize(func.outputs.len(), ExecutionOutput::Unused);
-
-        self.output_values = None;
 
         #[cfg(debug_assertions)]
         {
@@ -421,11 +427,9 @@ impl ExecutionGraph {
             });
 
             let node = &graph.nodes[visit.node_idx];
-            e_node.node_idx = visit.node_idx;
-            if !e_node.inited {
-                let func = func_lib.by_id(&node.func_id).unwrap();
-                e_node.init(node, func);
-            }
+            let func = func_lib.by_id(&node.func_id).unwrap();
+            e_node.update(visit.node_idx, node, func);
+
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
             }
