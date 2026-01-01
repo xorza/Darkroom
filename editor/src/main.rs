@@ -274,17 +274,17 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
-        // todo send worker notification
-        // let node_ids_to_invalidate =
-        //     graph_interaction
-        //         .actions
-        //         .iter()
-        //         .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
-        //             GraphUiAction::CacheToggled => None,
-        //             GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
-        //         });
-        // self.execution_graph
-        //     .invalidate_recurisevly(node_ids_to_invalidate);
+        let node_ids_to_invalidate =
+            graph_interaction
+                .actions
+                .iter()
+                .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+                    GraphUiAction::CacheToggled => None,
+                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
+                });
+        self.worker
+            .invalidate_caches(node_ids_to_invalidate)
+            .block_on();
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             ui.label(&self.status);

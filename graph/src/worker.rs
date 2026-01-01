@@ -1,7 +1,7 @@
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
 use crate::function::FuncLib;
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeId};
 use common::Shared;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -16,6 +16,7 @@ enum WorkerMessage {
     Event,
     RunOnce { graph: Graph, func_lib: FuncLib },
     RunLoop { graph: Graph, func_lib: FuncLib },
+    InvalidateCaches(Vec<NodeId>),
 }
 
 type EventQueue = Shared<Vec<EventId>>;
@@ -66,6 +67,10 @@ impl Worker {
 
                 WorkerMessage::Exit => break,
 
+                WorkerMessage::InvalidateCaches(node_ids) => {
+                    execution_graph.invalidate_recurisevly(node_ids);
+                }
+
                 WorkerMessage::RunOnce { graph, func_lib } => {
                     if let Err(err) = execution_graph.update(&graph, &func_lib) {
                         (compute_callback.lock().await)(Err(err));
@@ -103,6 +108,7 @@ impl Worker {
     {
         loop {
             // receive all messages and pick message with the highest priority
+            // todo build stack of messages and remove unneded
             let mut msg = worker_rx.recv().await?;
             loop {
                 match worker_rx.try_recv() {
@@ -124,6 +130,9 @@ impl Worker {
                 | WorkerMessage::RunLoop { .. } => {
                     break Some(msg);
                 }
+                WorkerMessage::InvalidateCaches(node_ids) => {
+                    execution_graph.invalidate_recurisevly(node_ids);
+                }
                 WorkerMessage::Event => {
                     let result = execution_graph.execute().await;
                     (compute_callback.lock().await)(result);
@@ -132,6 +141,17 @@ impl Worker {
         }
     }
 
+    pub async fn invalidate_caches<I>(&mut self, node_ids: I)
+    where
+        I: IntoIterator<Item = NodeId>,
+    {
+        self.tx
+            .send(WorkerMessage::InvalidateCaches(
+                node_ids.into_iter().collect(),
+            ))
+            .await
+            .expect("Failed to send invalidate_caches message");
+    }
     pub async fn run_once(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
             .send(WorkerMessage::RunOnce { graph, func_lib })
@@ -180,7 +200,8 @@ impl WorkerMessage {
     fn priority(&self) -> u8 {
         match self {
             WorkerMessage::Exit => 255,
-            WorkerMessage::Stop => 127,
+            WorkerMessage::Stop => 128,
+            WorkerMessage::InvalidateCaches(_) => 96,
             WorkerMessage::RunOnce { .. } | WorkerMessage::RunLoop { .. } => 64,
             WorkerMessage::Event => 0,
         }
