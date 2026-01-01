@@ -6,6 +6,7 @@ use crate::data::*;
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{deserialize, serialize, FileFormat};
+use pollster::FutureExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 

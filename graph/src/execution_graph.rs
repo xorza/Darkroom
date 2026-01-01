@@ -293,7 +293,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
+    pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
         let start = std::time::Instant::now();
 
         let mut input_args: Args = take(&mut self.input_args);
@@ -1079,21 +1079,21 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute()?;
+        execution_graph.execute().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // get_b is pure, so changing this should not affect result
         test_values.try_lock()?.b = 7;
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute()?;
+        execution_graph.execute().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute()?;
+        execution_graph.execute().await?;
 
         assert_eq!(test_values.try_lock()?.result, 63);
 
@@ -1140,7 +1140,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute()?;
+        execution_graph.execute().await?;
 
         // assert that both nodes were called
         {
@@ -1151,7 +1151,7 @@ mod tests {
         }
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute()?;
+        execution_graph.execute().await?;
 
         // assert that node was called again
         let guard = test_values.try_lock()?;

@@ -67,8 +67,8 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(execution_graph) => {
-                    let result = { execution_graph.lock().await.execute() };
-                    (*compute_callback.lock().await)(result);
+                    let result = { execution_graph.lock().await.execute().await };
+                    (compute_callback.lock().await)(result);
                 }
 
                 WorkerMessage::RunLoop(execution_graph) => {
@@ -113,8 +113,8 @@ impl Worker {
                     break Some(msg);
                 }
                 WorkerMessage::Event => {
-                    let result = { execution_graph.lock().await.execute() };
-                    (*compute_callback.lock().await)(result);
+                    let result = { execution_graph.lock().await.execute().await };
+                    (compute_callback.lock().await)(result);
                 }
             }
         }
