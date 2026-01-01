@@ -1,1 +1,2 @@
-move compute time values and caches out of executionNode
+
+execution graph.run returns number of nodes executed

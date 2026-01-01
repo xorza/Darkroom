@@ -1,4 +1,5 @@
 use eframe::egui;
+use graph::graph::NodeId;
 
 use crate::{
     gui::{
@@ -8,7 +9,6 @@ use crate::{
     model,
 };
 use std::collections::HashSet;
-use uuid::Uuid;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
@@ -16,7 +16,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ConnectionKey {
-    target_node_id: Uuid,
+    target_node_id: NodeId,
     input_index: usize,
 }
 
@@ -41,7 +41,7 @@ enum PortKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PortRef {
-    node_id: Uuid,
+    node_id: NodeId,
     index: usize,
     kind: PortKind,
 }
@@ -63,7 +63,7 @@ struct ConnectionDrag {
 impl Default for ConnectionDrag {
     fn default() -> Self {
         let placeholder = PortRef {
-            node_id: Uuid::nil(),
+            node_id: NodeId::nil(),
             index: 0,
             kind: PortKind::Output,
         };
@@ -391,7 +391,7 @@ impl ConnectionRenderer {
         graph: &model::GraphView,
         origin: egui::Pos2,
         layout: &node::NodeLayout,
-        node_widths: &std::collections::HashMap<Uuid, f32>,
+        node_widths: &std::collections::HashMap<NodeId, f32>,
         breaker: &ConnectionBreaker,
     ) {
         self.curves = collect_connection_curves(graph, origin, layout, node_widths);
@@ -471,7 +471,7 @@ fn collect_connection_curves(
     graph: &model::GraphView,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
-    node_widths: &std::collections::HashMap<Uuid, f32>,
+    node_widths: &std::collections::HashMap<NodeId, f32>,
 ) -> Vec<ConnectionCurve> {
     let node_lookup: std::collections::HashMap<_, _> =
         graph.nodes.iter().map(|node| (node.id, node)).collect();
@@ -518,7 +518,7 @@ fn collect_ports(
     graph: &model::GraphView,
     origin: egui::Pos2,
     layout: &node::NodeLayout,
-    node_widths: &std::collections::HashMap<Uuid, f32>,
+    node_widths: &std::collections::HashMap<NodeId, f32>,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
@@ -724,7 +724,7 @@ fn compute_layout_and_widths(
     painter: &egui::Painter,
     graph: &model::GraphView,
     scale: f32,
-) -> (node::NodeLayout, std::collections::HashMap<Uuid, f32>) {
+) -> (node::NodeLayout, std::collections::HashMap<NodeId, f32>) {
     let layout = node::NodeLayout::default().scaled(scale);
     layout.assert_valid();
     let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, scale);

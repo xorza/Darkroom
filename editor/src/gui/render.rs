@@ -1,7 +1,7 @@
 use eframe::egui;
+use graph::graph::NodeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use uuid::Uuid;
 
 use crate::{
     gui::{node, style::GraphStyle},
@@ -59,7 +59,7 @@ pub struct RenderContext<'a> {
     pub body_font: egui::FontId,
     pub text_color: egui::Color32,
     pub style: GraphStyle,
-    pub node_widths: HashMap<Uuid, f32>,
+    pub node_widths: HashMap<NodeId, f32>,
     pub port_radius: f32,
     pub scale: f32,
 }
@@ -120,7 +120,7 @@ impl<'a> RenderContext<'a> {
         self.painter.get()
     }
 
-    pub fn node_width(&self, node_id: Uuid) -> f32 {
+    pub fn node_width(&self, node_id: NodeId) -> f32 {
         self.node_widths
             .get(&node_id)
             .copied()

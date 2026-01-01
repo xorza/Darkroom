@@ -10,17 +10,15 @@ use super::{Connection, Input, NodeView, Output};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GraphView {
-    pub id: Uuid,
     pub nodes: Vec<NodeView>,
     pub pan: egui::Vec2,
     pub zoom: f32,
-    pub selected_node_id: Option<Uuid>,
+    pub selected_node_id: Option<NodeId>,
 }
 
 impl Default for GraphView {
     fn default() -> Self {
         Self {
-            id: Uuid::new_v4(),
             nodes: Vec::new(),
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
@@ -49,7 +47,7 @@ impl GraphView {
                     .expect("func inputs must align with node inputs");
                 let connection = match &input.binding {
                     Binding::Output(binding) => Some(Connection {
-                        node_id: binding.output_node_id.as_uuid(),
+                        node_id: binding.output_node_id,
                         output_index: binding.output_idx,
                     }),
                     Binding::None => None,
@@ -72,7 +70,7 @@ impl GraphView {
             let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
 
             nodes.push(NodeView {
-                id: node.id.as_uuid(),
+                id: node.id,
                 name: node.name.clone(),
                 pos,
                 inputs,
@@ -83,7 +81,6 @@ impl GraphView {
         }
 
         let graph = Self {
-            id: Uuid::new_v4(),
             nodes,
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
@@ -144,10 +141,7 @@ impl GraphView {
                             "connection output index must be in range"
                         );
 
-                        Binding::from_output_binding(
-                            NodeId::from(connection.node_id),
-                            connection.output_index,
-                        )
+                        Binding::from_output_binding(connection.node_id, connection.output_index)
                     }
                     None => Binding::None,
                 };
@@ -156,7 +150,7 @@ impl GraphView {
 
             let events = (0..func.events.len()).map(|_| Event::default()).collect();
             let node = Node {
-                id: NodeId::from(node_view.id),
+                id: node_view.id,
                 func_id,
                 name: node_view.name.clone(),
                 behavior: node_view.behavior,
@@ -250,7 +244,7 @@ impl GraphView {
         Self::deserialize(format, &payload)
     }
 
-    pub fn select_node(&mut self, node_id: Uuid) {
+    pub fn select_node(&mut self, node_id: NodeId) {
         assert!(
             self.nodes.iter().any(|node| node.id == node_id),
             "selected node must exist in graph"
@@ -267,7 +261,7 @@ impl GraphView {
         self.selected_node_id = Some(node_id);
     }
 
-    pub fn remove_node(&mut self, node_id: Uuid) {
+    pub fn remove_node(&mut self, node_id: NodeId) {
         assert!(
             self.nodes.iter().any(|node| node.id == node_id),
             "node must exist to be removed"
