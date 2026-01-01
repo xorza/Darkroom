@@ -319,9 +319,8 @@ impl ExecutionGraph {
 
         while let Some(visit) = stack.pop() {
             let e_node_idx = visit.e_node_idx;
-            let node = &graph.nodes[visit.node_idx];
-
             let e_node = &mut self.e_nodes[e_node_idx];
+
             match visit.cause {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_idx } => {
@@ -356,6 +355,7 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
+            let node = &graph.nodes[visit.node_idx];
             e_node.node_idx = visit.node_idx;
             if !e_node.inited {
                 let func = func_lib.by_id(&node.func_id).unwrap();
@@ -382,11 +382,12 @@ impl ExecutionGraph {
                         ..Default::default()
                     },
                 );
-                self.e_nodes[e_node_idx].inputs[input_idx].binding =
-                    ExecutionBinding::Bind(PortAddress {
-                        e_node_idx: output_e_node_idx,
-                        port_idx: output_binding.output_idx,
-                    });
+
+                let e_node = &mut self.e_nodes[e_node_idx];
+                e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
+                    e_node_idx: output_e_node_idx,
+                    port_idx: output_binding.output_idx,
+                });
 
                 stack.push(Visit {
                     node_idx: output_node_idx,
