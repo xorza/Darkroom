@@ -108,7 +108,7 @@ impl Default for ScenariumApp {
                         stats.executed_nodes, stats.elapsed_secs
                     );
                     let message = if let Some(print_output) = print_output {
-                        format!("{print_output} {summary}")
+                        format!("Compute output: {print_output} {summary}")
                     } else {
                         format!("Compute finished {summary}")
                     };
@@ -219,8 +219,6 @@ impl ScenariumApp {
             print: Arc::new(move |value| {
                 let mut slot = print_output.lock().block_on();
                 *slot = Some(value.to_string());
-
-                println!("Printed value: {}", value);
             }),
         }
     }
