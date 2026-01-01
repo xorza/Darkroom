@@ -10,8 +10,6 @@ The core graph and utilities are written in Rust.
 - **editor** – visual editor for building executing graphs using core graph data
 - **test_resources** – sample graphs and media used by tests
 
-Core graph utilities include downstream dependency traversal for node updates.
-Graph utility test coverage is tracked in `NOTES-AI.md`.
 Implementation details and recent editor behavior changes are documented in `NOTES-AI.md`.
 
 ## License

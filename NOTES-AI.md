@@ -116,6 +116,7 @@ Execution graph debug assertions include node indices and IDs to speed up diagno
 Execution graph visit/output assertions now include index mismatch context for faster debugging.
 Execution graph invariant lookups and tests now use `expect` instead of `unwrap_or_else`.
 Execution graph binding access now uses a shared expect helper in forward/validation paths.
+Execution graph invalidation now walks downstream execution-node bindings to clear init state.
 Graph now exposes a `dependent_nodes` traversal to gather downstream nodes from a starting node id.
 Graph tests now cover `dependent_nodes` traversal ordering and reachability.
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
@@ -156,3 +157,4 @@ Sample test hooks in the editor now populate compute status output via the `prin
 The editor now uses a Tokio async main and `std::sync::Mutex` for compute status updates.
 Editor UI edits (connection changes, cache toggles, node removals) now invalidate execution nodes immediately.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
+Editor execution invalidation now batches affected node IDs before recursive invalidation.

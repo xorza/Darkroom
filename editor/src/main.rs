@@ -8,6 +8,7 @@ mod model;
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
+use graph::graph::NodeId;
 use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
 use pollster::block_on;
 use std::ffi::OsStr;
@@ -255,17 +256,9 @@ impl eframe::App for ScenariumApp {
                 .graph_ui
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
-        for node_id in graph_interaction.affected_nodes {
-            self.view_graph
-                .graph
-                .dependent_nodes(&node_id)
-                .iter()
-                .for_each(|dep_node_id| {
-                    self.execution_graph.invalidate(dep_node_id);
-                    println!("Invalidated node: {}", dep_node_id);
-                });
-            self.execution_graph.invalidate(&node_id);
-        }
+
+        self.execution_graph
+            .invalidate_recurisevly(graph_interaction.affected_nodes.iter().copied().collect());
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {

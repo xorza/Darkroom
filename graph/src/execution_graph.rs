@@ -4,7 +4,7 @@ use std::panic;
 
 use anyhow::Result;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -212,8 +212,33 @@ impl ExecutionGraph {
     pub fn by_id_mut(&mut self, node_id: &NodeId) -> Option<&mut ExecutionNode> {
         self.e_nodes.by_key_mut(node_id)
     }
-    pub fn invalidate(&mut self, node_id: &NodeId) {
-        self.by_id_mut(node_id).unwrap().inited = false;
+    pub fn invalidate_recurisevly(&mut self, node_ids: Vec<NodeId>) {
+        let mut stack = node_ids;
+        let mut seen = HashSet::new();
+
+        while let Some(current_node_id) = stack.pop() {
+            if !seen.insert(current_node_id) {
+                continue;
+            }
+
+            let Some(current_idx) = self.e_nodes.index_of_key(&current_node_id) else {
+                continue;
+            };
+            let e_node = self.by_id_mut(&current_node_id).unwrap();
+            e_node.inited = false;
+
+            for node in self.e_nodes.iter() {
+                let depends = node.inputs.iter().any(|input| {
+                    matches!(
+                        &input.binding,
+                        ExecutionBinding::Bind(port_address) if port_address.e_node_idx == current_idx
+                    )
+                });
+                if depends {
+                    stack.push(node.id);
+                }
+            }
+        }
     }
     pub fn clear(&mut self) {
         self.e_nodes.clear();
