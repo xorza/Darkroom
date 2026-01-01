@@ -82,7 +82,7 @@ struct ScenariumApp {
 
 impl Default for ScenariumApp {
     fn default() -> Self {
-        let graph_path = Self::default_graph_path();
+        let graph_path = Self::default_path();
 
         let mut result = Self {
             graph: Graph::default(),
@@ -103,7 +103,7 @@ impl Default for ScenariumApp {
 }
 
 impl ScenariumApp {
-    fn default_graph_path() -> PathBuf {
+    fn default_path() -> PathBuf {
         std::env::temp_dir().join("scenarium-graph.lua")
     }
 
@@ -116,7 +116,7 @@ impl ScenariumApp {
             .validate()
             .expect("graph should be valid before storing in app state");
         self.graph_view = graph_view;
-        self.execution_graph = ExecutionGraph::default();
+        self.execution_graph.clear();
         self.graph_ui.reset();
         self.set_status(status);
     }
@@ -190,7 +190,7 @@ impl ScenariumApp {
         let result = self
             .execution_graph
             .update(&self.graph, &self.func_lib)
-            .and_then(|()| self.execution_graph.execute());
+            .and_then(|execution_graph| execution_graph.execute());
 
         match result {
             Ok(_) => {

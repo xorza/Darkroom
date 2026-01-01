@@ -214,6 +214,10 @@ impl ExecutionGraph {
     pub fn remove(&mut self, node_id: &NodeId) {
         self.e_nodes.remove_by_key(node_id);
     }
+    pub fn clear(&mut self) {
+        self.e_nodes.clear();
+        self.e_node_exe_order.clear();
+    }
     #[cfg(debug_assertions)]
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.name == node_name)
@@ -231,7 +235,7 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution state from the current graph and function library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<&mut Self> {
         validate_execution_inputs(graph, func_lib);
 
         self.stack.clear();
@@ -243,7 +247,7 @@ impl ExecutionGraph {
 
         self.validate_with_graph(graph, func_lib);
 
-        Ok(())
+        Ok(self)
     }
 
     pub fn execute(&mut self) -> ExecutionResult<usize> {

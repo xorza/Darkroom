@@ -38,6 +38,11 @@ where
         Some(removed)
     }
 
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.idx_by_key.clear();
+    }
+
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
         self.items.iter()
     }
