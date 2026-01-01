@@ -167,6 +167,7 @@ The editor includes a Run button beneath the graph view that executes compute on
 Sample test hooks in the editor now populate compute status output via the `print` hook.
 The editor now uses a Tokio async main and `std::sync::Mutex` for compute status updates.
 Editor UI edits no longer invalidate execution nodes immediately; execution now relies on the worker's fresh graph/func-lib run.
+Editor print output now uses `arc-swap` to store the latest string without locking.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).

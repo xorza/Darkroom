@@ -6,6 +6,7 @@ mod init;
 mod model;
 
 use anyhow::Result;
+use arc_swap::ArcSwapOption;
 use common::Shared;
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
@@ -81,8 +82,8 @@ struct ScenariumApp {
     graph_path: PathBuf,
     graph_ui: gui::graph::GraphUi,
 
-    print_output: Shared<Option<String>>,
-    updated_status: Shared<Option<String>>,
+    print_output: Arc<ArcSwapOption<String>>,
+    updated_status: Arc<ArcSwapOption<String>>,
     status: String,
 }
 
@@ -90,19 +91,16 @@ impl Default for ScenariumApp {
     fn default() -> Self {
         let graph_path = Self::default_path();
 
-        let updated_status: Shared<Option<String>> = Shared::default();
-        let print_output: Shared<Option<String>> = Shared::default();
+        let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
+        let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
 
         let worker = Worker::new({
-            let updated_status = updated_status.clone();
-            let print_output = print_output.clone();
+            let updated_status = Arc::clone(&updated_status);
+            let print_output = Arc::clone(&print_output);
 
             move |result| match result {
                 Ok(stats) => {
-                    let print_output = print_output
-                        .try_lock()
-                        .expect("Failed to lock compute status")
-                        .take();
+                    let print_output = print_output.swap(None);
                     let summary = format!(
                         "({} nodes, {:.0}s)",
                         stats.executed_nodes, stats.elapsed_secs
@@ -112,15 +110,10 @@ impl Default for ScenariumApp {
                     } else {
                         format!("Compute finished {summary}")
                     };
-                    *updated_status
-                        .try_lock()
-                        .expect("Failed to lock compute status") = Some(message);
+                    updated_status.store(Some(Arc::new(message)));
                 }
                 Err(err) => {
-                    *updated_status
-                        .try_lock()
-                        .expect("Failed to lock compute status") =
-                        Some(format!("Compute failed: {err}"));
+                    updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
                 }
             }
         });
@@ -154,13 +147,9 @@ impl ScenariumApp {
     }
 
     fn poll_compute_status(&mut self) {
-        let updated_status = self
-            .updated_status
-            .try_lock()
-            .expect("Failed to lock compute status")
-            .take();
+        let updated_status = self.updated_status.swap(None);
         if let Some(updated_status) = updated_status {
-            self.set_status(updated_status);
+            self.set_status(updated_status.as_ref());
         }
     }
 
@@ -212,13 +201,12 @@ impl ScenariumApp {
     }
 
     fn sample_test_hooks(&self) -> TestFuncHooks {
-        let print_output = self.print_output.clone();
+        let print_output = Arc::clone(&self.print_output);
         TestFuncHooks {
             get_a: Arc::new(|| 21),
             get_b: Arc::new(|| 2),
             print: Arc::new(move |value| {
-                let mut slot = print_output.lock().block_on();
-                *slot = Some(value.to_string());
+                print_output.store(Some(Arc::new(value.to_string())));
             }),
         }
     }
