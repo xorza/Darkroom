@@ -79,9 +79,9 @@ where
         let idx = match self.idx_by_key.get(key).copied() {
             Some(idx) => idx,
             None => {
+                let idx = self.items.len();
                 let value = create();
                 assert!(*value.key() == *key);
-                let idx = self.items.len();
                 self.items.push(value);
                 self.idx_by_key.insert(*key, idx);
                 idx
