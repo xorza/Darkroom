@@ -500,12 +500,10 @@ mod tests {
         // call 'mult' function
         invoker
             .func_lib()
-            .invoke_by_id(
-                FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-                &mut cache,
-                inputs.as_mut_slice(),
-                outputs.as_mut_slice(),
-            )
+            .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
+            .unwrap()
+            .lambda
+            .invoke(&mut cache, inputs.as_mut_slice(), outputs.as_mut_slice())
             .map_err(anyhow::Error::from)?;
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 15);
@@ -554,13 +552,12 @@ mod tests {
 
         invoker
             .func_lib()
-            .invoke_by_id(
-                FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?,
-                &mut cache,
-                inputs.as_mut_slice(),
-                outputs.as_mut_slice(),
-            )
+            .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
+            .unwrap()
+            .lambda
+            .invoke(&mut cache, inputs.as_mut_slice(), outputs.as_mut_slice())
             .map_err(anyhow::Error::from)?;
+
         let result: i64 = outputs[0].as_int();
         assert_eq!(result, 42);
 

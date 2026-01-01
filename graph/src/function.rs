@@ -171,19 +171,6 @@ impl FuncLib {
         self.funcs.push(func);
     }
 
-    pub fn invoke_by_id(
-        &self,
-        func_id: FuncId,
-        cache: &mut InvokeCache,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
-    ) -> InvokeResult<()> {
-        let func = self
-            .by_id(&func_id)
-            .unwrap_or_else(|| panic!("Func with id {:?} not found", func_id));
-        func.lambda.invoke(cache, inputs, outputs)
-    }
-
     pub fn merge(&mut self, other: FuncLib) {
         for func in other.funcs.items {
             self.add(func);
@@ -511,7 +498,11 @@ mod tests {
         let mut cache = InvokeCache::default();
         let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];
         let mut outputs = vec![DynamicValue::None];
-        func_lib.invoke_by_id(sum_id, &mut cache, &inputs, &mut outputs)?;
+        func_lib
+            .by_id(&sum_id)
+            .unwrap()
+            .lambda
+            .invoke(&mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 6);
         let cached = *cache
             .get::<i64>()
@@ -521,7 +512,11 @@ mod tests {
         inputs[0] = DynamicValue::Int(3);
         inputs[1] = DynamicValue::Int(5);
         outputs[0] = DynamicValue::None;
-        func_lib.invoke_by_id(sum_id, &mut cache, &inputs, &mut outputs)?;
+        func_lib
+            .by_id(&sum_id)
+            .unwrap()
+            .lambda
+            .invoke(&mut cache, &inputs, &mut outputs)?;
         assert_eq!(outputs[0].as_int(), 8);
 
         Ok(())
