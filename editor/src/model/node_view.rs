@@ -1,10 +1,14 @@
-use graph::{graph::NodeId, prelude::NodeBehavior};
+use graph::{
+    graph::NodeId,
+    prelude::{FuncId, NodeBehavior},
+};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeView {
     pub id: NodeId,
+    pub func_id: FuncId,
     pub name: String,
     pub pos: egui::Pos2,
     pub inputs: Vec<Input>,
@@ -37,6 +41,7 @@ impl Default for NodeView {
 
         Self {
             id,
+            func_id: FuncId::nil(),
             name,
             pos: egui::Pos2::ZERO,
             inputs: Vec::new(),

@@ -71,6 +71,7 @@ impl GraphView {
 
             nodes.push(NodeView {
                 id: node.id,
+                func_id: node.func_id,
                 name: node.name.clone(),
                 pos,
                 inputs,
@@ -96,6 +97,7 @@ impl GraphView {
         let mut graph = CoreGraph::default();
         let mut node_ids = HashMap::new();
         let mut output_counts = HashMap::new();
+
         for node in &self.nodes {
             let prior = node_ids.insert(node.id, node.name.as_str());
             assert!(prior.is_none(), "graph view node ids must be unique");
@@ -104,22 +106,10 @@ impl GraphView {
         }
 
         for node_view in &self.nodes {
-            // todo by func_id
-            let func = func_lib.by_name(&node_view.name).unwrap_or_else(|| {
-                panic!(
-                    "Missing func named {} for node {}",
-                    node_view.name, node_view.id
-                )
-            });
+            let func = func_lib.by_id(&node_view.func_id).unwrap();
             let func_id = func.id;
-            assert!(
-                node_view.inputs.len() == func.inputs.len(),
-                "node inputs must match function inputs"
-            );
-            assert!(
-                node_view.outputs.len() == func.outputs.len(),
-                "node outputs must match function outputs"
-            );
+            assert!(node_view.inputs.len() == func.inputs.len());
+            assert!(node_view.outputs.len() == func.outputs.len());
 
             let mut inputs = Vec::with_capacity(func.inputs.len());
             for (input_index, func_input) in func.inputs.iter().enumerate() {
