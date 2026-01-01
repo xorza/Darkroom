@@ -190,12 +190,12 @@ impl ScenariumApp {
             .and_then(|execution_graph| execution_graph.execute());
 
         match result {
-            Ok(_) => {
+            Ok(_stats) => {
                 let status = self
                     .compute_status
-                    .lock()
-                    .expect("Compute status mutex poisoned")
-                    .clone();
+                    .try_lock()
+                    .expect("Failed to lock compute status")
+                    .take();
                 if let Some(status) = status {
                     self.set_status(status);
                 } else {
