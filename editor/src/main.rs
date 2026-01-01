@@ -176,14 +176,6 @@ impl ScenariumApp {
             return;
         }
 
-        {
-            let mut slot = self
-                .compute_status
-                .lock()
-                .expect("Compute status mutex poisoned");
-            *slot = None;
-        }
-
         let result = self
             .execution_graph
             .update(&self.view_graph.graph, &self.func_lib)
