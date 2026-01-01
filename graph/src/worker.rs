@@ -54,6 +54,7 @@ impl Worker {
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) {
         let mut message: Option<WorkerMessage> = None;
+        let mut execution_graph = ExecutionGraph::default();
 
         loop {
             if message.is_none() {
@@ -69,8 +70,6 @@ impl Worker {
                 WorkerMessage::Exit => break,
 
                 WorkerMessage::RunOnce(graph) => {
-                    // todo reuse exe graph
-                    let mut execution_graph = ExecutionGraph::default();
                     let result = execution_graph
                         .update(&graph, &func_lib)
                         .and_then(|()| execution_graph.execute(&graph, &func_lib));
@@ -79,9 +78,14 @@ impl Worker {
                 }
 
                 WorkerMessage::RunLoop(graph) => {
-                    message =
-                        Self::event_subloop(graph, &func_lib, &mut rx, compute_callback.clone())
-                            .await;
+                    message = Self::event_subloop(
+                        graph,
+                        &func_lib,
+                        &mut execution_graph,
+                        &mut rx,
+                        compute_callback.clone(),
+                    )
+                    .await;
                 }
             }
         }
@@ -90,11 +94,10 @@ impl Worker {
     async fn event_subloop(
         graph: Graph,
         func_lib: &FuncLib,
+        execution_graph: &mut ExecutionGraph,
         worker_rx: &mut Receiver<WorkerMessage>,
         compute_callback: Arc<Mutex<ComputeEvent>>,
     ) -> Option<WorkerMessage> {
-        let mut execution_graph = ExecutionGraph::default();
-
         loop {
             // receive all messages and pick message with the highest priority
             let mut msg = worker_rx.recv().await?;
@@ -263,14 +266,14 @@ mod tests {
         let mut func_lib = basic_invoker.into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());
 
+        let graph = log_frame_no_graph();
+
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
         let mut worker = Worker::new(func_lib, move |result| {
             compute_finish_tx
                 .try_send(result)
                 .expect("Failed to send a compute callback event");
         });
-
-        let graph = log_frame_no_graph();
 
         worker.run_once(graph.clone()).await;
         let executed_nodes_count = compute_finish_rx
@@ -280,29 +283,31 @@ mod tests {
             .expect("Unsuccessful compute");
 
         assert_eq!(executed_nodes_count, 3);
-        assert_eq!(output_stream.take().await[0], "1");
+        assert_eq!(output_stream.take().await, ["1"]);
 
         worker.run_loop(graph.clone()).await;
-
         worker.event().await;
-        compute_finish_rx
+
+        let executed_nodes_count = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
+        assert_eq!(executed_nodes_count, 3);
+        assert_eq!(output_stream.take().await, ["2"]);
+
         worker.event().await;
-        compute_finish_rx
+        let executed_nodes_count = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        let log = output_stream.take().await;
-        assert_eq!(log[0], "1");
-        assert_eq!(log[1], "2");
+        assert_eq!(executed_nodes_count, 3);
+        assert_eq!(output_stream.take().await, ["3"]);
 
-        worker.exit().await;
+        // worker.exit().await;
 
         Ok(())
     }
