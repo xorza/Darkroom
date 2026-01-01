@@ -9,6 +9,7 @@ use tracing::info;
 
 use common::output_stream::OutputStream;
 
+use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{
     Func, FuncBehavior, FuncId, FuncInput, FuncLambda, FuncLib, FuncOutput, InvokeArgs,
@@ -121,9 +122,8 @@ impl Default for BasicInvoker {
             }],
             outputs: vec![],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, _| {
-                let output_stream = output_stream_clone.clone();
-                Box::pin(async move {
+            lambda: async_lambda!(
+                move |_, inputs, _| { output_stream = output_stream_clone.clone() } => {
                     assert_eq!(inputs.len(), 1);
                     let value: &str = inputs[0].as_string();
                     let mut guard = output_stream
@@ -135,8 +135,8 @@ impl Default for BasicInvoker {
                     });
                     info!("{:?}", value);
                     Ok(())
-                })
-            }),
+                }
+            ),
         });
         // math two argument operation
         func_lib.add(Func {
@@ -173,18 +173,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_cache, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 3);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_cache, inputs, outputs| {
+                assert_eq!(inputs.len(), 3);
+                assert_eq!(outputs.len(), 1);
 
-                    let op: Math2ArgOp = inputs[2].as_int().into();
+                let op: Math2ArgOp = inputs[2].as_int().into();
 
-                    op.invoke(&inputs[0..2])
-                        .map(|result| outputs[0] = result)
-                        .expect("failed to invoke math two argument operation");
-                    Ok(())
-                })
+                op.invoke(&inputs[0..2])
+                    .map(|result| outputs[0] = result)
+                    .expect("failed to invoke math two argument operation");
+                Ok(())
             }),
             description: None,
         });
@@ -208,17 +206,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::String,
             }],
             events: vec![],
-            lambda: FuncLambda::new(|_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(|_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let value: f64 = inputs[0].as_float();
-                    let result = format!("{}", value);
+                let value: f64 = inputs[0].as_float();
+                let result = format!("{}", value);
 
-                    outputs[0] = DynamicValue::String(result);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::String(result);
+                Ok(())
             }),
         });
 
@@ -251,21 +247,19 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |cache, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |cache, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
+                let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
 
-                    let min: f64 = inputs[0].as_float();
-                    let max: f64 = inputs[1].as_float();
-                    let random = rng.random::<f64>();
-                    let result = min + (max - min) * random;
+                let min: f64 = inputs[0].as_float();
+                let max: f64 = inputs[1].as_float();
+                let random = rng.random::<f64>();
+                let result = min + (max - min) * random;
 
-                    outputs[0] = DynamicValue::Float(result);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(result);
+                Ok(())
             }),
         });
         //add
@@ -297,18 +291,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let b: f64 = inputs[1].as_float();
-                    let result = a + b;
+                let a: f64 = inputs[0].as_float();
+                let b: f64 = inputs[1].as_float();
+                let result = a + b;
 
-                    outputs[0] = DynamicValue::Float(result);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(result);
+                Ok(())
             }),
         });
         //subtract
@@ -340,18 +332,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let b: f64 = inputs[1].as_float();
-                    let result = a - b;
+                let a: f64 = inputs[0].as_float();
+                let b: f64 = inputs[1].as_float();
+                let result = a - b;
 
-                    outputs[0] = DynamicValue::Float(result);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(result);
+                Ok(())
             }),
         });
         //multiply
@@ -382,18 +372,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let b: f64 = inputs[1].as_float();
-                    let result = a * b;
+                let a: f64 = inputs[0].as_float();
+                let b: f64 = inputs[1].as_float();
+                let result = a * b;
 
-                    outputs[0] = DynamicValue::Float(result);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(result);
+                Ok(())
             }),
         });
         //divide
@@ -430,20 +418,18 @@ impl Default for BasicInvoker {
                 },
             ],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let b: f64 = inputs[1].as_float();
-                    let divide = a / b;
-                    let modulo = a % b;
+                let a: f64 = inputs[0].as_float();
+                let b: f64 = inputs[1].as_float();
+                let divide = a / b;
+                let modulo = a % b;
 
-                    outputs[0] = DynamicValue::Float(divide);
-                    outputs[1] = DynamicValue::Float(modulo);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(divide);
+                outputs[1] = DynamicValue::Float(modulo);
+                Ok(())
             }),
         });
         // power
@@ -475,18 +461,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let b: f64 = inputs[1].as_float();
-                    let power = a.powf(b);
+                let a: f64 = inputs[0].as_float();
+                let b: f64 = inputs[1].as_float();
+                let power = a.powf(b);
 
-                    outputs[0] = DynamicValue::Float(power);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(power);
+                Ok(())
             }),
         });
         // sqrt
@@ -509,17 +493,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let sqrt = a.sqrt();
+                let a: f64 = inputs[0].as_float();
+                let sqrt = a.sqrt();
 
-                    outputs[0] = DynamicValue::Float(sqrt);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(sqrt);
+                Ok(())
             }),
         });
         // sin
@@ -542,17 +524,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let sin = a.sin();
+                let a: f64 = inputs[0].as_float();
+                let sin = a.sin();
 
-                    outputs[0] = DynamicValue::Float(sin);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(sin);
+                Ok(())
             }),
         });
         // cos
@@ -575,17 +555,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let cos = a.cos();
+                let a: f64 = inputs[0].as_float();
+                let cos = a.cos();
 
-                    outputs[0] = DynamicValue::Float(cos);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(cos);
+                Ok(())
             }),
         });
         // tan
@@ -608,17 +586,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: f64 = inputs[0].as_float();
-                    let tan = a.tan();
+                let a: f64 = inputs[0].as_float();
+                let tan = a.tan();
 
-                    outputs[0] = DynamicValue::Float(tan);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(tan);
+                Ok(())
             }),
         });
         // asin
@@ -641,17 +617,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let sin: f64 = inputs[0].as_float();
-                    let asin = sin.asin();
+                let sin: f64 = inputs[0].as_float();
+                let asin = sin.asin();
 
-                    outputs[0] = DynamicValue::Float(asin);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(asin);
+                Ok(())
             }),
         });
         // acos
@@ -674,17 +648,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let cos: f64 = inputs[0].as_float();
-                    let acos = cos.acos();
+                let cos: f64 = inputs[0].as_float();
+                let acos = cos.acos();
 
-                    outputs[0] = DynamicValue::Float(acos);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(acos);
+                Ok(())
             }),
         });
         // atan
@@ -707,17 +679,15 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(outputs.len(), 1);
 
-                    let tan: f64 = inputs[0].as_float();
-                    let atan = tan.atan();
+                let tan: f64 = inputs[0].as_float();
+                let atan = tan.atan();
 
-                    outputs[0] = DynamicValue::Float(atan);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(atan);
+                Ok(())
             }),
         });
         // log
@@ -749,18 +719,16 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |_, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let value: f64 = inputs[0].as_float();
-                    let base: f64 = inputs[1].as_float();
-                    let log = value.log(base);
+                let value: f64 = inputs[0].as_float();
+                let base: f64 = inputs[1].as_float();
+                let log = value.log(base);
 
-                    outputs[0] = DynamicValue::Float(log);
-                    Ok(())
-                })
+                outputs[0] = DynamicValue::Float(log);
+                Ok(())
             }),
         });
 

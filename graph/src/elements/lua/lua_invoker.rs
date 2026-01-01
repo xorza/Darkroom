@@ -103,61 +103,59 @@ impl LuaInvoker {
             let mut func = Self::function_from_table(&function_table)?;
             let lua_func: mlua::Function = self.lua.globals().get(func.name.as_str())?;
 
-            func.lambda = FuncLambda::new({
-                let func = func.clone();
-                let lua_func = lua_func.clone();
-                let lua = Arc::clone(&self.lua);
-
+            let func_template = func.clone();
+            let lua_func_template = lua_func.clone();
+            let lua = Arc::clone(&self.lua);
+            func.lambda = crate::async_lambda!(
                 move |_cache, inputs, outputs| {
-                    let func = func.clone();
-                    let lua = Arc::clone(&lua);
-                    let lua_func = lua_func.clone();
-                    Box::pin(async move {
-                        let input_len = inputs.len();
-                        let expected_input_len = func.inputs.len();
-                        assert_eq!(
-                            input_len, expected_input_len,
-                            "Lua function {} input length mismatch",
-                            func.name
-                        );
+                    func = func_template.clone(),
+                    lua_func = lua_func_template.clone(),
+                    lua = Arc::clone(&lua)
+                } => {
+                    let input_len = inputs.len();
+                    let expected_input_len = func.inputs.len();
+                    assert_eq!(
+                        input_len, expected_input_len,
+                        "Lua function {} input length mismatch",
+                        func.name
+                    );
 
-                        let output_len = outputs.len();
-                        let expected_output_len = func.outputs.len();
-                        assert_eq!(
-                            output_len, expected_output_len,
-                            "Lua function {} output length mismatch",
-                            func.name
-                        );
+                    let output_len = outputs.len();
+                    let expected_output_len = func.outputs.len();
+                    assert_eq!(
+                        output_len, expected_output_len,
+                        "Lua function {} output length mismatch",
+                        func.name
+                    );
 
-                        let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                        for (input_info, input) in func.inputs.iter().zip(inputs.iter()) {
-                            assert_eq!(input_info.data_type, *input.data_type());
+                    let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
+                    for (input_info, input) in func.inputs.iter().zip(inputs.iter()) {
+                        assert_eq!(input_info.data_type, *input.data_type());
 
-                            let invoke_value = to_lua_value(&lua, input)?;
-                            input_args.push(invoke_value);
-                        }
+                        let invoke_value = to_lua_value(&lua, input)?;
+                        input_args.push(invoke_value);
+                    }
 
-                        let output_args: mlua::Variadic<mlua::Value> =
-                            lua_func.call(input_args).map_err(anyhow::Error::from)?;
-                        assert_eq!(
-                            output_args.len(),
-                            expected_output_len,
-                            "Lua function {} returned unexpected output count",
-                            func.name
-                        );
+                    let output_args: mlua::Variadic<mlua::Value> =
+                        lua_func.call(input_args).map_err(anyhow::Error::from)?;
+                    assert_eq!(
+                        output_args.len(),
+                        expected_output_len,
+                        "Lua function {} returned unexpected output count",
+                        func.name
+                    );
 
-                        for ((index, output_info), output_arg) in
-                            func.outputs.iter().enumerate().zip(output_args.into_iter())
-                        {
-                            let output = data::DynamicValue::from(&output_arg);
-                            assert_eq!(output_info.data_type, *output.data_type());
-                            outputs[index] = output;
-                        }
+                    for ((index, output_info), output_arg) in
+                        func.outputs.iter().enumerate().zip(output_args.into_iter())
+                    {
+                        let output = data::DynamicValue::from(&output_arg);
+                        assert_eq!(output_info.data_type, *output.data_type());
+                        outputs[index] = output;
+                    }
 
-                        Ok(())
-                    })
+                    Ok(())
                 }
-            });
+            );
 
             self.lua_funcs.insert(func.id, lua_func);
             self.func_lib.add(func);

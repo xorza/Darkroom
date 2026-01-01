@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::data::*;
+use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{deserialize, serialize, FileFormat};
@@ -30,7 +30,7 @@ pub enum InvokeError {
 
 pub type InvokeResult<T> = Result<T, InvokeError>;
 
-pub type Lambda = dyn for<'a> Fn(
+pub type AsyncLambda = dyn for<'a> Fn(
         &'a mut InvokeCache,
         &'a InvokeArgs,
         &'a mut InvokeArgs,
@@ -43,7 +43,7 @@ pub type Lambda = dyn for<'a> Fn(
 pub enum FuncLambda {
     #[default]
     None,
-    Lambda(Arc<Lambda>),
+    Lambda(Arc<AsyncLambda>),
 }
 
 impl FuncLambda {
@@ -370,18 +370,16 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
+            lambda: async_lambda!(move |ctx, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
 
-                    let a: i64 = inputs[0].as_int();
-                    let b: i64 = inputs[1].as_int();
-                    outputs[0] = (a * b).into();
-                    ctx.set(a * b);
+                let a: i64 = inputs[0].as_int();
+                let b: i64 = inputs[1].as_int();
+                outputs[0] = (a * b).into();
+                ctx.set(a * b);
 
-                    Ok(())
-                })
+                Ok(())
             }),
         },
         Func {
@@ -396,14 +394,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, _, outputs| {
-                let get_a = Arc::clone(&get_a);
-                Box::pin(async move {
+            lambda: async_lambda!(
+                move |_, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a() as f64).into();
                     Ok(())
-                })
-            }),
+                }
+            ),
         },
         Func {
             id: FuncId::from_str("a937baff-822d-48fd-9154-58751539b59b").unwrap(),
@@ -417,14 +414,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |_, _, outputs| {
-                let get_b = Arc::clone(&get_b);
-                Box::pin(async move {
+            lambda: async_lambda!(
+                move |_, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
-                })
-            }),
+                }
+            ),
         },
         Func {
             id: FuncId::from_str("2d3b389d-7b58-44d9-b3d1-a595765b21a5").unwrap(),
@@ -453,16 +449,14 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
-                Box::pin(async move {
-                    assert_eq!(inputs.len(), 2);
-                    assert_eq!(outputs.len(), 1);
-                    let a: i64 = inputs[0].as_int();
-                    let b: i64 = inputs[1].as_int();
-                    ctx.set(a + b);
-                    outputs[0] = (a + b).into();
-                    Ok(())
-                })
+            lambda: async_lambda!(move |ctx, inputs, outputs| {
+                assert_eq!(inputs.len(), 2);
+                assert_eq!(outputs.len(), 1);
+                let a: i64 = inputs[0].as_int();
+                let b: i64 = inputs[1].as_int();
+                ctx.set(a + b);
+                outputs[0] = (a + b).into();
+                Ok(())
             }),
         },
         Func {
@@ -480,14 +474,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             outputs: vec![],
             events: vec![],
-            lambda: FuncLambda::new(move |_, inputs, _| {
-                let print = Arc::clone(&print);
-                Box::pin(async move {
+            lambda: async_lambda!(
+                move |_, inputs, _| { print = Arc::clone(&print) } => {
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].as_int());
                     Ok(())
-                })
-            }),
+                }
+            ),
         },
     ]
     .into()

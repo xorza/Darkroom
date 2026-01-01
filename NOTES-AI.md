@@ -48,9 +48,10 @@ Recent adjustments:
 - `common/src/lib.rs` now re-exports helpers from module files (`constants`, `debug`, `file_format`, `serde_format`, `shared`) to keep the crate root minimal.
 - Worker execution now skips `execute()` when `ExecutionGraph::update` fails, forwarding the update error directly to the compute callback.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
-- Function lambdas are now async: `FuncLambda` stores closures returning boxed futures, and all built-in invokers wrap their bodies in `Box::pin(async move { ... })`.
+- Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in invokers use async closures wrapped in `Box::pin(async move { ... })`.
 - `DynamicValue::Custom` now requires `Any + Send + Sync` to keep async lambda futures `Send` when borrowing inputs.
 - `TestFuncHooks` uses `Arc<dyn Fn...>` so async lambdas can clone hooks into futures without moving them out of the closure.
+- `graph/src/macros.rs` adds `async_lambda!` to reduce boilerplate for async lambdas, including a binding-list form for per-call setup.
 - `common/src/key_index_vec.rs` supports key-based index syntax with invariant assertions for missing keys.
 - `common/src/key_index_vec.rs` includes reusable compaction helpers driven by a `KeyIndexKey` trait to keep the index map in sync.
 - `common/src/key_index_vec.rs` skips serializing `idx_by_key` and rebuilds it from `items` during deserialization, rejecting duplicate keys.

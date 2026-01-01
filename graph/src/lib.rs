@@ -9,6 +9,7 @@ pub mod event;
 pub mod execution_graph;
 pub mod function;
 pub mod graph;
+pub mod macros;
 pub mod worker;
 
 pub mod prelude {
