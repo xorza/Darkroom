@@ -4,13 +4,17 @@ use graph::prelude::{Func, FuncLib, NodeBehavior};
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use crate::{gui::render::RenderContext, model};
+use crate::{
+    gui::{graph::GraphUiAction, render::RenderContext},
+    model,
+};
 
 #[derive(Debug, Default)]
 pub struct NodeInteraction {
     pub selection_request: Option<NodeId>,
     pub remove_request: Option<NodeId>,
     pub changed_nodes: HashSet<NodeId>,
+    pub actions: Vec<(NodeId, GraphUiAction)>,
 }
 
 #[derive(Debug)]
@@ -242,6 +246,9 @@ pub fn render_node_bodies(
                 NodeBehavior::Once
             };
             interaction.changed_nodes.insert(node_view.id);
+            interaction
+                .actions
+                .push((node_view.id, GraphUiAction::CacheToggled));
         }
 
         if remove_response.hovered() {
@@ -251,6 +258,9 @@ pub fn render_node_bodies(
         if remove_response.clicked() {
             interaction.remove_request = Some(node_view.id);
             interaction.changed_nodes.insert(node_view.id);
+            interaction
+                .actions
+                .push((node_view.id, GraphUiAction::NodeRemoved));
             continue;
         }
 

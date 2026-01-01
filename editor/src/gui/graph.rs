@@ -99,6 +99,14 @@ pub struct GraphUi {
 #[derive(Debug, Default)]
 pub struct GraphUiInteraction {
     pub affected_nodes: HashSet<NodeId>,
+    pub actions: Vec<(NodeId, GraphUiAction)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GraphUiAction {
+    CacheToggled,
+    InputChanged,
+    NodeRemoved,
 }
 
 impl GraphUi {
@@ -352,6 +360,7 @@ impl GraphUi {
         interaction
             .affected_nodes
             .extend(node_interaction.changed_nodes);
+        interaction.actions.extend(node_interaction.actions);
         if let Some(node_id) = node_interaction.remove_request {
             view_graph.remove_node(node_id);
             interaction.affected_nodes.insert(node_id);
@@ -377,7 +386,12 @@ impl GraphUi {
 
         if breaker.active && primary_released {
             let removed = remove_connections(view_graph, connections.highlighted());
-            interaction.affected_nodes.extend(removed);
+            for node_id in removed {
+                interaction.affected_nodes.insert(node_id);
+                interaction
+                    .actions
+                    .push((node_id, GraphUiAction::InputChanged));
+            }
             breaker.reset();
         }
 
@@ -397,6 +411,9 @@ impl GraphUi {
                 )
             {
                 interaction.affected_nodes.insert(node_id);
+                interaction
+                    .actions
+                    .push((node_id, GraphUiAction::InputChanged));
             }
             connection_drag.reset();
         }

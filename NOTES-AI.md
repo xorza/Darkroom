@@ -162,3 +162,4 @@ Editor UI edits (connection changes, cache toggles, node removals) now invalidat
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).
+Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).
