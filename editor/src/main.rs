@@ -6,14 +6,15 @@ mod init;
 mod model;
 
 use anyhow::Result;
+use common::Shared;
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
 use graph::graph::NodeId;
 use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
-use pollster::block_on;
+use pollster::{FutureExt, block_on};
 use std::ffi::OsStr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::gui::graph::GraphUiAction;
 
@@ -78,7 +79,7 @@ struct ScenariumApp {
     view_graph: model::ViewGraph,
     graph_path: PathBuf,
     last_status: Option<String>,
-    compute_status: Arc<Mutex<Option<String>>>,
+    compute_status: Shared<Option<String>>,
     graph_ui: gui::graph::GraphUi,
 }
 
@@ -92,7 +93,7 @@ impl Default for ScenariumApp {
             view_graph: model::ViewGraph::default(),
             graph_path,
             last_status: None,
-            compute_status: Arc::new(Mutex::new(None)),
+            compute_status: Shared::default(),
             graph_ui: gui::graph::GraphUi::default(),
         };
 
@@ -161,12 +162,12 @@ impl ScenariumApp {
     }
 
     fn sample_test_hooks(&self) -> TestFuncHooks {
-        let status = Arc::clone(&self.compute_status);
+        let status = self.compute_status.clone();
         TestFuncHooks {
             get_a: Box::new(|| 21),
             get_b: Box::new(|| 2),
             print: Box::new(move |value| {
-                let mut slot = status.lock().expect("Compute status mutex poisoned");
+                let mut slot = status.lock().block_on();
                 *slot = Some(format!("Compute output: {}", value));
             }),
         }

@@ -1,5 +1,6 @@
 use anyhow::Error;
 use common::output_stream::OutputStream;
+use common::Shared;
 use hashbrown::HashMap;
 use std::fmt::Debug;
 use std::mem::take;
@@ -23,7 +24,7 @@ struct FuncConnections {
 #[derive(Debug)]
 pub struct LuaInvoker {
     lua: Arc<mlua::Lua>,
-    output_stream: Arc<Mutex<Option<OutputStream>>>,
+    output_stream: Shared<Option<OutputStream>>,
     func_lib: FuncLib,
     lua_funcs: HashMap<FuncId, mlua::Function>,
 }
@@ -32,7 +33,7 @@ impl Default for LuaInvoker {
     fn default() -> Self {
         LuaInvoker {
             lua: Arc::new(mlua::Lua::new()),
-            output_stream: Arc::new(Mutex::new(None)),
+            output_stream: Shared::new(None),
             func_lib: FuncLib::default(),
             lua_funcs: HashMap::new(),
         }
@@ -236,7 +237,7 @@ impl LuaInvoker {
     }
 
     fn build_connections(&self) -> anyhow::Result<Vec<FuncConnections>> {
-        let connections: Arc<Mutex<Vec<FuncConnections>>> = Arc::new(Mutex::new(Vec::new()));
+        let connections: Shared<Vec<FuncConnections>> = Shared::default();
         let mut output_index: u32 = 0;
 
         // substitute functions

@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use common::Shared;
 use rand::{Rng, SeedableRng};
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter};
@@ -18,7 +19,7 @@ use crate::function::{
 #[derive(Debug)]
 pub struct BasicInvoker {
     func_lib: FuncLib,
-    output_stream: Arc<Mutex<Option<OutputStream>>>,
+    output_stream: Shared<Option<OutputStream>>,
 }
 
 #[repr(u32)]
@@ -102,7 +103,7 @@ impl BasicInvoker {
 impl Default for BasicInvoker {
     fn default() -> Self {
         let mut func_lib = FuncLib::default();
-        let output_stream = Arc::new(Mutex::new(None::<OutputStream>));
+        let output_stream = Shared::new(None::<OutputStream>);
         let output_stream_clone = output_stream.clone();
 
         //print, outputs to output_stream

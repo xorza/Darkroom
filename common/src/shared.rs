@@ -2,8 +2,6 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 
-pub type ArcMutex<T> = Arc<Mutex<T>>;
-
 #[derive(Debug)]
 pub struct Shared<T> {
     inner: Arc<Mutex<T>>,

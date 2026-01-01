@@ -1,3 +1,4 @@
+use common::Shared;
 use mlua::FromLuaMulti;
 use std::sync::Arc;
 
@@ -5,13 +6,13 @@ use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 struct LuaCtx {
-    inner: Arc<Mutex<mlua::Lua>>,
+    inner: Shared<mlua::Lua>,
 }
 
 impl Default for LuaCtx {
     fn default() -> Self {
         LuaCtx {
-            inner: Arc::new(Mutex::new(mlua::Lua::new())),
+            inner: Shared::new(mlua::Lua::new()),
         }
     }
 }
