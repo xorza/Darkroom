@@ -19,12 +19,14 @@ pub struct OutputBinding {
 pub enum Binding {
     #[default]
     None,
+    Const(StaticValue),
     Output(OutputBinding),
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Input {
     pub binding: Binding,
+    pub default_value: Option<StaticValue>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -150,12 +152,14 @@ impl Default for Node {
 
 impl Node {
     pub fn from_function(func: &Func) -> Node {
-        let inputs: Vec<Input> = vec![
-            Input {
+        let inputs: Vec<Input> = func
+            .inputs
+            .iter()
+            .map(|input| Input {
                 binding: Binding::None,
-            };
-            func.inputs.len()
-        ];
+                default_value: input.default_value.clone(),
+            })
+            .collect();
 
         let events: Vec<Event> = func.events.iter().map(|_event| Event::default()).collect();
 
@@ -172,36 +176,61 @@ impl Node {
 }
 
 impl Binding {
-    pub fn from_output_binding(output_node_id: NodeId, output_idx: usize) -> Binding {
-        Binding::Output(OutputBinding {
-            output_node_id,
-            output_idx,
-        })
-    }
-
     pub fn as_output_binding(&self) -> Option<&OutputBinding> {
         match self {
             Binding::Output(output_binding) => Some(output_binding),
             _ => None,
         }
     }
-
     pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputBinding> {
         match self {
             Binding::Output(output_binding) => Some(output_binding),
             _ => None,
         }
     }
-
-    pub fn is_output_binding(&self) -> bool {
-        self.as_output_binding().is_some()
+    pub fn as_const(&self) -> Option<&StaticValue> {
+        match self {
+            Binding::Const(static_value) => Some(static_value),
+            _ => None,
+        }
+    }
+    pub fn as_const_mut(&mut self) -> Option<&mut StaticValue> {
+        match self {
+            Binding::Const(static_value) => Some(static_value),
+            _ => None,
+        }
     }
 
+    pub fn is_output_binding(&self) -> bool {
+        matches!(self, Binding::Output(_))
+    }
+    pub fn is_const(&self) -> bool {
+        matches!(self, Binding::Const(_))
+    }
     pub fn is_some(&self) -> bool {
-        match self {
-            Binding::None => false,
-            Binding::Output(_) => true,
-        }
+        !self.is_none()
+    }
+    pub fn is_none(&self) -> bool {
+        matches!(self, Binding::None)
+    }
+}
+
+impl From<OutputBinding> for Binding {
+    fn from(value: OutputBinding) -> Self {
+        Binding::Output(value)
+    }
+}
+impl From<(NodeId, usize)> for Binding {
+    fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
+        Binding::Output(OutputBinding {
+            output_node_id,
+            output_idx,
+        })
+    }
+}
+impl From<StaticValue> for Binding {
+    fn from(value: StaticValue) -> Self {
+        Binding::Const(value)
     }
 }
 
@@ -231,10 +260,12 @@ pub fn test_graph() -> Graph {
         terminal: false,
         inputs: vec![
             Input {
-                binding: Binding::from_output_binding(sum_node_id, 0),
+                binding: (sum_node_id, 0).into(),
+                default_value: None,
             },
             Input {
-                binding: Binding::from_output_binding(get_b_node_id, 0),
+                binding: (get_b_node_id, 0).into(),
+                default_value: None,
             },
         ],
         events: vec![],
@@ -268,10 +299,12 @@ pub fn test_graph() -> Graph {
         terminal: false,
         inputs: vec![
             Input {
-                binding: Binding::from_output_binding(get_a_node_id, 0),
+                binding: (get_a_node_id, 0).into(),
+                default_value: None,
             },
             Input {
-                binding: Binding::from_output_binding(get_b_node_id, 0),
+                binding: (get_b_node_id, 0).into(),
+                default_value: None,
             },
         ],
         events: vec![],
@@ -284,7 +317,8 @@ pub fn test_graph() -> Graph {
         behavior: NodeBehavior::AsFunction,
         terminal: true,
         inputs: vec![Input {
-            binding: Binding::from_output_binding(mult_node_id, 0),
+            binding: (mult_node_id, 0).into(),
+            default_value: None,
         }],
         events: vec![],
     });

@@ -227,7 +227,7 @@ impl ExecutionGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let value: DynamicValue = match &input.binding {
                     Binding::None => DynamicValue::None,
-
+                    Binding::Const(value) => value.into(),
                     Binding::Output(output_binding) => {
                         let output_address = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
@@ -413,6 +413,8 @@ impl ExecutionGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
+                    // todo implement Unchanged for const bindings
+                    Binding::Const(_) => InputState::Changed,
                     Binding::Output(_) => {
                         let output_e_node_idx = self.e_nodes[e_node_idx].inputs[input_idx]
                             .output_address
@@ -583,6 +585,9 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 match &input.binding {
+                    Binding::None | Binding::Const(_) => {
+                        assert!(e_node.inputs[input_idx].output_address.is_none());
+                    }
                     Binding::Output(output_binding) => {
                         if let Some(output_address) = &e_node.inputs[input_idx].output_address {
                             assert!(output_address.e_node_idx < self.e_nodes.len());
@@ -598,9 +603,6 @@ impl ExecutionGraph {
                                 ExecutionOutput::Used
                             );
                         }
-                    }
-                    Binding::None => {
-                        assert!(e_node.inputs[input_idx].output_address.is_none());
                     }
                 }
             }
@@ -776,10 +778,12 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs = vec![
             Input {
-                binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
+                binding: (graph.by_name("get_a").unwrap().id, 0).into(),
+                default_value: None,
             },
             Input {
-                binding: Binding::from_output_binding(graph.by_name("get_b").unwrap().id, 0),
+                binding: (graph.by_name("get_b").unwrap().id, 0).into(),
+                default_value: None,
             },
         ];
 
@@ -802,7 +806,8 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         graph.by_name_mut("mult").unwrap().inputs[0] = Input {
-            binding: Binding::from_output_binding(graph.by_name("get_a").unwrap().id, 0),
+            binding: (graph.by_name("get_a").unwrap().id, 0).into(),
+            default_value: None,
         };
 
         execution_graph.update(&graph, &func_lib)?;
@@ -903,7 +908,7 @@ mod tests {
 
         let mult_node_id = graph.by_name("mult").unwrap().id;
         let sum_inputs = &mut graph.by_name_mut("sum").unwrap().inputs;
-        sum_inputs[0].binding = Binding::from_output_binding(mult_node_id, 0);
+        sum_inputs[0].binding = (mult_node_id, 0).into();
 
         let mut execution_graph = ExecutionGraph::default();
         let err = execution_graph

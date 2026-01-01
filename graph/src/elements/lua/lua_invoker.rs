@@ -355,7 +355,7 @@ impl LuaInvoker {
                     .get(output_id)
                     .expect("Missing output address for Lua graph");
 
-                input.binding = Binding::from_output_binding(output_addr.node_id, output_addr.idx)
+                input.binding = (output_addr.node_id, output_addr.idx).into()
             }
 
             graph.add(node);

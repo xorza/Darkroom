@@ -46,11 +46,11 @@ impl GraphView {
                     .get(input_index)
                     .expect("func inputs must align with node inputs");
                 let connection = match &input.binding {
+                    Binding::None | Binding::Const(_) => None,
                     Binding::Output(binding) => Some(Connection {
                         node_id: binding.output_node_id,
                         output_index: binding.output_idx,
                     }),
-                    Binding::None => None,
                 };
                 inputs.push(Input {
                     name: func_input.name.clone(),
@@ -104,6 +104,7 @@ impl GraphView {
         }
 
         for node_view in &self.nodes {
+            // todo by func_id
             let func = func_lib.by_name(&node_view.name).unwrap_or_else(|| {
                 panic!(
                     "Missing func named {} for node {}",
@@ -121,7 +122,7 @@ impl GraphView {
             );
 
             let mut inputs = Vec::with_capacity(func.inputs.len());
-            for (input_index, _func_input) in func.inputs.iter().enumerate() {
+            for (input_index, func_input) in func.inputs.iter().enumerate() {
                 let view_input = node_view
                     .inputs
                     .get(input_index)
@@ -141,11 +142,14 @@ impl GraphView {
                             "connection output index must be in range"
                         );
 
-                        Binding::from_output_binding(connection.node_id, connection.output_index)
+                        (connection.node_id, connection.output_index).into()
                     }
                     None => Binding::None,
                 };
-                inputs.push(graph::graph::Input { binding });
+                inputs.push(graph::graph::Input {
+                    binding,
+                    default_value: func_input.default_value.clone(),
+                });
             }
 
             let events = (0..func.events.len()).map(|_| Event::default()).collect();
