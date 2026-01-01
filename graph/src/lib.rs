@@ -16,5 +16,11 @@ pub mod prelude {
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, InputState, PortAddress,
     };
-    pub use crate::graph::{test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId};
+    pub use crate::function::{
+        test_func_lib, Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache,
+        InvokeError, InvokeResult, TestFuncHooks,
+    };
+    pub use crate::graph::{
+        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputBinding,
+    };
 }

@@ -33,8 +33,13 @@ impl Default for TimersInvoker {
             id: FuncId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
             name: "frame event".to_string(),
             description: None,
+            behavior: FuncBehavior::Impure,
+            category: "Timers".to_string(),
+            inputs: vec![FuncInput {
+                name: "frequency".to_string(),
                 required: false,
                 data_type: DataType::Float,
+                default_value: Some(StaticValue::Float(30.0)),
                 value_options: vec![],
             }],
             outputs: vec![
@@ -45,6 +50,10 @@ impl Default for TimersInvoker {
                 FuncOutput {
                     name: "frame no".to_string(),
                     data_type: DataType::Int,
+                },
+            ],
+            events: vec!["always".into(), "once".into(), "fps".into()],
+            lambda: FuncLambda::new(move |ctx, inputs, outputs| {
                 let now = Instant::now();
 
                 let (delta, frame_no) = {
@@ -58,6 +67,10 @@ impl Default for TimersInvoker {
                         (delta, frame_no)
                     } else {
                         ctx.set(FrameEventContext {
+                            last_frame: now,
+                            frame_no: 2,
+                        });
+
                         let frequency = if inputs[0].is_none() {
                             30.0
                         } else {

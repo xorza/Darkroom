@@ -1,17 +1,21 @@
-use graph::{graph::NodeId, prelude::NodeBehavior};
+use graph::prelude::NodeBehavior;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NodeView {
-    pub id: NodeId,
+    pub id: Uuid,
     pub name: String,
     pub pos: egui::Pos2,
     pub inputs: Vec<Input>,
     pub outputs: Vec<Output>,
     pub behavior: NodeBehavior,
     pub terminal: bool,
-    pub node_id: NodeId,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Connection {
+    pub node_id: Uuid,
     pub output_index: usize,
 }
 
@@ -24,7 +28,11 @@ pub struct Input {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Output {
     pub name: String,
-        let id = NodeId::unique();
+}
+
+impl Default for NodeView {
+    fn default() -> Self {
+        let id = Uuid::new_v4();
         let name = format!("NodeView {}", id);
 
         Self {

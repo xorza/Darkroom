@@ -1,11 +1,14 @@
-use graph::{graph::NodeId, prelude::NodeBehavior};
+use eframe::egui;
+use graph::prelude::NodeBehavior;
 use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::{gui::render::RenderContext, model};
 
-    pub selection_request: Option<NodeId>,
-    pub remove_request: Option<NodeId>,
+#[derive(Debug, Default)]
+pub struct NodeInteraction {
+    pub selection_request: Option<Uuid>,
+    pub remove_request: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -497,7 +500,11 @@ pub(crate) fn compute_node_widths(
     painter: &egui::Painter,
     graph: &model::GraphView,
     layout: &NodeLayout,
-) -> HashMap<NodeId, f32> {
+    heading_font: &egui::FontId,
+    body_font: &egui::FontId,
+    text_color: egui::Color32,
+    style: &crate::gui::style::GraphStyle,
+) -> HashMap<Uuid, f32> {
     layout.assert_valid();
     let scale_guess = layout.row_height / 18.0;
     assert!(scale_guess.is_finite(), "layout scale guess must be finite");

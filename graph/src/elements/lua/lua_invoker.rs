@@ -185,10 +185,17 @@ impl LuaInvoker {
             let data_type = data_type_name.parse::<DataType>().map_err(|_| {
                 Error::msg(format!(
                     "Error parsing DataType \"{}\" for input {} on function {}",
+                    data_type_name, i, function_info.name
+                ))
+            })?;
+
+            let default_value: Option<data::StaticValue> = None;
+
             function_info.inputs.push(function::FuncInput {
                 name,
                 required: true,
                 data_type,
+                default_value,
                 value_options: Vec::new(),
             });
         }
@@ -510,8 +517,19 @@ mod tests {
             .iter()
             .find(|node| node.name == "mult")
             .expect("Missing mult node");
-            let (output_node_id, ..) = mult_node.inputs[index].binding.as_output_binding().unwrap();
-            graph.by_id(output_node_id).unwrap().name.as_str()
+        assert_eq!(mult_node.inputs.len(), 2);
+        assert!(mult_node.inputs[0].binding.is_some());
+
+        let bound_name = |index: usize| -> &str {
+            let binding = mult_node.inputs[index]
+                .binding
+                .as_output_binding()
+                .unwrap_or_else(|| panic!("Missing output binding for input {}", index));
+            graph
+                .by_id(&binding.output_node_id)
+                .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.output_node_id))
+                .name
+                .as_str()
         };
         assert_eq!(bound_name(0), "sum");
         assert_eq!(bound_name(1), "get_b");

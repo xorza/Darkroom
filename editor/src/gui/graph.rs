@@ -1,3 +1,4 @@
+use eframe::egui;
 
 use crate::{
     gui::{
@@ -11,7 +12,11 @@ use uuid::Uuid;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
-    target_node_id: NodeId,
+const MAX_BREAKER_LENGTH: f32 = 900.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ConnectionKey {
+    target_node_id: Uuid,
     input_index: usize,
 }
 
@@ -32,7 +37,11 @@ impl ConnectionBreaker {
 enum PortKind {
     Input,
     Output,
-    node_id: NodeId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PortRef {
+    node_id: Uuid,
     index: usize,
     kind: PortKind,
 }
@@ -50,7 +59,11 @@ struct ConnectionDrag {
     start_pos: egui::Pos2,
     current_pos: egui::Pos2,
 }
-            node_id: NodeId::nil(),
+
+impl Default for ConnectionDrag {
+    fn default() -> Self {
+        let placeholder = PortRef {
+            node_id: Uuid::nil(),
             index: 0,
             kind: PortKind::Output,
         };
@@ -374,7 +387,11 @@ struct ConnectionRenderer {
 
 impl ConnectionRenderer {
     fn rebuild(
-        node_widths: &std::collections::HashMap<NodeId, f32>,
+        &mut self,
+        graph: &model::GraphView,
+        origin: egui::Pos2,
+        layout: &node::NodeLayout,
+        node_widths: &std::collections::HashMap<Uuid, f32>,
         breaker: &ConnectionBreaker,
     ) {
         self.curves = collect_connection_curves(graph, origin, layout, node_widths);
@@ -450,7 +467,11 @@ struct ConnectionCurve {
     control_offset: f32,
 }
 
-    node_widths: &std::collections::HashMap<NodeId, f32>,
+fn collect_connection_curves(
+    graph: &model::GraphView,
+    origin: egui::Pos2,
+    layout: &node::NodeLayout,
+    node_widths: &std::collections::HashMap<Uuid, f32>,
 ) -> Vec<ConnectionCurve> {
     let node_lookup: std::collections::HashMap<_, _> =
         graph.nodes.iter().map(|node| (node.id, node)).collect();
@@ -493,7 +514,11 @@ struct ConnectionCurve {
     curves
 }
 
-    node_widths: &std::collections::HashMap<NodeId, f32>,
+fn collect_ports(
+    graph: &model::GraphView,
+    origin: egui::Pos2,
+    layout: &node::NodeLayout,
+    node_widths: &std::collections::HashMap<Uuid, f32>,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
@@ -695,7 +720,11 @@ fn fit_all_nodes(
 }
 
 fn compute_layout_and_widths(
-) -> (node::NodeLayout, std::collections::HashMap<NodeId, f32>) {
+    ui: &egui::Ui,
+    painter: &egui::Painter,
+    graph: &model::GraphView,
+    scale: f32,
+) -> (node::NodeLayout, std::collections::HashMap<Uuid, f32>) {
     let layout = node::NodeLayout::default().scaled(scale);
     layout.assert_valid();
     let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, scale);

@@ -214,6 +214,10 @@ mod tests {
         graph.add(Node {
             id: frame_event_node_id,
             func_id: frame_event_func_id,
+            name: "frame event".to_string(),
+            behavior: NodeBehavior::AsFunction,
+            terminal: false,
+            inputs: vec![Input {
                 binding: Binding::None,
             }],
             events: vec![],
@@ -223,6 +227,10 @@ mod tests {
             id: float_to_string_node_id,
             func_id: float_to_string_func_id,
             name: "float to string".to_string(),
+            behavior: NodeBehavior::AsFunction,
+            terminal: false,
+            inputs: vec![Input {
+                binding: Binding::from_output_binding(frame_event_node_id, 1),
             }],
             events: vec![],
         });
@@ -233,7 +241,11 @@ mod tests {
             name: "print".to_string(),
             behavior: NodeBehavior::AsFunction,
             terminal: true,
-
+            inputs: vec![Input {
+                binding: Binding::from_output_binding(float_to_string_node_id, 0),
+            }],
+            events: vec![],
+        });
 
         graph
     }
