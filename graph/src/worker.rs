@@ -267,8 +267,8 @@ mod tests {
         });
 
         execution_graph
-            .lock()
-            .await
+            .try_lock()
+            .unwrap()
             .update(&graph, &func_lib)
             .unwrap();
         worker.run_once(Arc::clone(&execution_graph)).await;
@@ -282,8 +282,8 @@ mod tests {
         assert_eq!(output_stream.take().await, ["1"]);
 
         execution_graph
-            .lock()
-            .await
+            .try_lock()
+            .unwrap()
             .update(&graph, &func_lib)
             .unwrap();
         worker.run_loop(Arc::clone(&execution_graph)).await;
