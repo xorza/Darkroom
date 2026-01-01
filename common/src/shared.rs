@@ -18,22 +18,8 @@ impl<T> Shared<T> {
         Arc::clone(&self.inner)
     }
 
-    pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, T> {
-        self.inner.lock().await
-    }
-
-    pub async fn lock_owned(&self) -> tokio::sync::OwnedMutexGuard<T> {
-        self.inner.clone().lock_owned().await
-    }
-
-    pub fn try_lock(&self) -> Result<tokio::sync::MutexGuard<'_, T>, tokio::sync::TryLockError> {
-        self.inner.try_lock()
-    }
-
-    pub fn get_mut(&mut self) -> &mut T {
-        Arc::get_mut(&mut self.inner)
-            .expect("Shared::get_mut requires unique ownership of the inner Arc")
-            .get_mut()
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        Arc::get_mut(&mut self.inner).map(|mutex| mutex.get_mut())
     }
 }
 

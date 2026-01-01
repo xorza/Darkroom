@@ -166,7 +166,7 @@ Serialization now uses `common::SerdeFormatError` and `SerdeFormatResult` for fo
 The editor includes a Run button beneath the graph view that executes compute on the current graph.
 Sample test hooks in the editor now populate compute status output via the `print` hook.
 The editor now uses a Tokio async main and `std::sync::Mutex` for compute status updates.
-Editor UI edits (connection changes, cache toggles, node removals) now invalidate execution nodes immediately.
+Editor UI edits no longer invalidate execution nodes immediately; execution now relies on the worker's fresh graph/func-lib run.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).

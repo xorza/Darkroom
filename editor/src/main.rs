@@ -11,6 +11,7 @@ use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
 use graph::graph::NodeId;
 use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
+use graph::worker::Worker;
 use pollster::{FutureExt, block_on};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -74,27 +75,66 @@ fn configure_visuals(ctx: &egui::Context) {
 
 #[derive(Debug)]
 struct ScenariumApp {
+    worker: Worker,
     func_lib: FuncLib,
-    execution_graph: ExecutionGraph,
     view_graph: model::ViewGraph,
     graph_path: PathBuf,
-    last_status: Option<String>,
-    compute_status: Shared<Option<String>>,
     graph_ui: gui::graph::GraphUi,
+
+    print_output: Shared<Option<String>>,
+    updated_status: Shared<Option<String>>,
+    status: String,
 }
 
 impl Default for ScenariumApp {
     fn default() -> Self {
         let graph_path = Self::default_path();
 
+        let updated_status: Shared<Option<String>> = Shared::default();
+        let print_output: Shared<Option<String>> = Shared::default();
+
+        let worker = Worker::new({
+            let updated_status = updated_status.clone();
+            let print_output = print_output.clone();
+
+            move |result| match result {
+                Ok(stats) => {
+                    let print_output = print_output
+                        .try_lock()
+                        .expect("Failed to lock compute status")
+                        .take();
+                    let summary = format!(
+                        "({} nodes, {:.0}s)",
+                        stats.executed_nodes, stats.elapsed_secs
+                    );
+                    let message = if let Some(print_output) = print_output {
+                        format!("{print_output} {summary}")
+                    } else {
+                        format!("Compute finished {summary}")
+                    };
+                    *updated_status
+                        .try_lock()
+                        .expect("Failed to lock compute status") = Some(message);
+                }
+                Err(err) => {
+                    *updated_status
+                        .try_lock()
+                        .expect("Failed to lock compute status") =
+                        Some(format!("Compute failed: {err}"));
+                }
+            }
+        });
+
         let mut result = Self {
+            worker,
             func_lib: FuncLib::default(),
-            execution_graph: ExecutionGraph::default(),
             view_graph: model::ViewGraph::default(),
             graph_path,
-            last_status: None,
-            compute_status: Shared::default(),
             graph_ui: gui::graph::GraphUi::default(),
+
+            print_output,
+            updated_status,
+            status: "".to_string(),
         };
 
         result.test_graph();
@@ -110,7 +150,18 @@ impl ScenariumApp {
     }
 
     fn set_status(&mut self, message: impl Into<String>) {
-        self.last_status = Some(message.into());
+        self.status = message.into();
+    }
+
+    fn poll_compute_status(&mut self) {
+        let updated_status = self
+            .updated_status
+            .try_lock()
+            .expect("Failed to lock compute status")
+            .take();
+        if let Some(updated_status) = updated_status {
+            self.set_status(updated_status);
+        }
     }
 
     fn set_graph_view(&mut self, view_graph: model::ViewGraph, status: impl Into<String>) {
@@ -118,7 +169,6 @@ impl ScenariumApp {
             .validate()
             .expect("graph should be valid before storing in app state");
         self.view_graph = view_graph;
-        self.execution_graph.clear();
         self.graph_ui.reset();
         self.set_status(status);
     }
@@ -162,13 +212,15 @@ impl ScenariumApp {
     }
 
     fn sample_test_hooks(&self) -> TestFuncHooks {
-        let status = self.compute_status.clone();
+        let print_output = self.print_output.clone();
         TestFuncHooks {
             get_a: Arc::new(|| 21),
             get_b: Arc::new(|| 2),
             print: Arc::new(move |value| {
-                let mut slot = status.lock().block_on();
-                *slot = Some(format!("Compute output: {}", value));
+                let mut slot = print_output.lock().block_on();
+                *slot = Some(value.to_string());
+
+                println!("Printed value: {}", value);
             }),
         }
     }
@@ -179,35 +231,15 @@ impl ScenariumApp {
             return;
         }
 
-        let result = self
-            .execution_graph
-            .update(&self.view_graph.graph, &self.func_lib)
-            .and_then(|()| self.execution_graph.execute().block_on());
-
-        match result {
-            Ok(stats) => {
-                let status = self
-                    .compute_status
-                    .try_lock()
-                    .expect("Failed to lock compute status")
-                    .take();
-                let summary = format!(
-                    "({} nodes, {:.0}s)",
-                    stats.executed_nodes, stats.elapsed_secs
-                );
-                if let Some(status) = status {
-                    self.set_status(format!("{status} {summary}"));
-                } else {
-                    self.set_status(format!("Compute finished {summary}"));
-                }
-            }
-            Err(err) => self.set_status(format!("Compute failed: {err}")),
-        }
+        self.worker
+            .run_once(self.view_graph.graph.clone(), self.func_lib.clone())
+            .block_on();
     }
 }
 
 impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_compute_status();
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 {
@@ -256,21 +288,20 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
-        let node_ids_to_invalidate =
-            graph_interaction
-                .actions
-                .iter()
-                .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
-                    GraphUiAction::CacheToggled => None,
-                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
-                });
-        self.execution_graph
-            .invalidate_recurisevly(node_ids_to_invalidate);
+        // todo send worker notification
+        // let node_ids_to_invalidate =
+        //     graph_interaction
+        //         .actions
+        //         .iter()
+        //         .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+        //             GraphUiAction::CacheToggled => None,
+        //             GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
+        //         });
+        // self.execution_graph
+        //     .invalidate_recurisevly(node_ids_to_invalidate);
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            if let Some(status) = self.last_status.as_deref() {
-                ui.label(status);
-            }
+            ui.label(&self.status);
         });
         egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
