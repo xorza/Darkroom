@@ -92,7 +92,8 @@ enum ProcessState {
 pub struct ExecutionNode {
     pub id: NodeId,
 
-    pub inited: bool,
+    inited: bool,
+    process_state: ProcessState,
 
     pub missing_required_inputs: bool,
     pub changed_inputs: bool,
@@ -102,9 +103,8 @@ pub struct ExecutionNode {
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
 
-    func_id: FuncId,
-    process_state: ProcessState,
-    wants_execute: bool,
+    pub func_id: FuncId,
+    pub wants_execute: bool,
 
     pub run_time: f64,
     pub error: Option<ExecutionError>,
@@ -236,6 +236,7 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_exe_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             input_args.resize_and_clear(e_node.inputs.len());
+            assert!(e_node.inited);
 
             for (input_idx, input) in e_node.inputs.iter().enumerate() {
                 let value: DynamicValue = match &input.binding {
@@ -436,6 +437,7 @@ impl ExecutionGraph {
                         };
                         let output_e_node = &self.e_nodes[port_address.e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
+                        assert!(output_e_node.inited);
 
                         if output_e_node.missing_required_inputs {
                             assert!(!output_e_node.wants_execute);
@@ -460,6 +462,7 @@ impl ExecutionGraph {
 
             let e_node = &mut self.e_nodes[e_node_idx];
             assert_eq!(e_node.process_state, ProcessState::Backward1);
+            assert!(e_node.inited);
 
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
@@ -559,6 +562,7 @@ impl ExecutionGraph {
 
         let mut seen_node_indices = vec![false; graph.nodes.len()];
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
+            assert!(e_node.inited);
             assert!(e_node.node_idx < graph.nodes.len());
             assert!(!seen_node_indices[e_node.node_idx]);
             seen_node_indices[e_node.node_idx] = true;
