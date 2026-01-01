@@ -1,5 +1,5 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
@@ -105,6 +105,39 @@ impl Graph {
     pub fn by_id_mut(&mut self, id: &NodeId) -> Option<&mut Node> {
         assert!(!id.is_nil());
         self.nodes.by_key_mut(id)
+    }
+
+    pub fn dependent_nodes(&self, node_id: &NodeId) -> Vec<NodeId> {
+        assert!(!node_id.is_nil());
+        assert!(
+            self.by_id(node_id).is_some(),
+            "node must exist to find dependents"
+        );
+
+        let mut seen = HashSet::new();
+        let mut stack = vec![*node_id];
+
+        while let Some(current) = stack.pop() {
+            for node in self.nodes.iter() {
+                let depends = node.inputs.iter().any(|input| {
+                    matches!(
+                        &input.binding,
+                        Binding::Bind(binding) if binding.output_node_id == current
+                    )
+                });
+                if depends && seen.insert(node.id) {
+                    stack.push(node.id);
+                }
+            }
+        }
+
+        let mut ordered = Vec::with_capacity(seen.len());
+        for node in self.nodes.iter() {
+            if seen.contains(&node.id) {
+                ordered.push(node.id);
+            }
+        }
+        ordered
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
@@ -367,5 +400,29 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn dependent_nodes() {
+        let graph = super::test_graph();
+
+        let get_id = |name: &str| {
+            graph
+                .by_name(name)
+                .unwrap_or_else(|| panic!("Node named \"{name}\" not found"))
+                .id
+        };
+
+        let get_a = get_id("get_a");
+        let get_b = get_id("get_b");
+        let sum = get_id("sum");
+        let mult = get_id("mult");
+        let print = get_id("print");
+
+        assert_eq!(graph.dependent_nodes(&get_a), vec![mult, sum, print]);
+        assert_eq!(graph.dependent_nodes(&get_b), vec![mult, sum, print]);
+        assert_eq!(graph.dependent_nodes(&sum), vec![mult, print]);
+        assert_eq!(graph.dependent_nodes(&mult), vec![print]);
+        assert!(graph.dependent_nodes(&print).is_empty());
     }
 }

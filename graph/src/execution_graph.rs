@@ -195,6 +195,8 @@ impl ExecutionNode {
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::Unused);
 
+        self.output_values = None;
+
         #[cfg(debug_assertions)]
         {
             self.name.clear();
@@ -262,11 +264,13 @@ impl ExecutionGraph {
                     ExecutionBinding::None => DynamicValue::None,
                     ExecutionBinding::Const(value) => value.into(),
                     ExecutionBinding::Bind(port_address) => {
-                        let output_values = self.e_nodes[port_address.e_node_idx]
+                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
+                        let output_values = output_e_node
                             .output_values
                             .as_ref()
                             .expect("Output values missing for bound node; check execution order");
 
+                        assert_eq!(output_values.len(), output_e_node.outputs.len());
                         output_values[port_address.port_idx].clone()
                     }
                 };

@@ -256,15 +256,16 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
         for node_id in graph_interaction.affected_nodes {
-            // self.graph
-            //     .dependent_nodes(&node_id)
-            //     .iter()
-            //     .for_each(|dep_node_id| {
-            //         self.execution_graph.invalidate(dep_node_id);
-            //     });
+            self.view_graph
+                .graph
+                .dependent_nodes(&node_id)
+                .iter()
+                .for_each(|dep_node_id| {
+                    self.execution_graph.invalidate(dep_node_id);
+                    println!("Invalidated node: {}", dep_node_id);
+                });
             self.execution_graph.invalidate(&node_id);
-
-            todo!("propagate changes to other dependent nodes")
+            println!("Invalidated node: {}", &node_id);
         }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
