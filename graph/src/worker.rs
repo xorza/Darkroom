@@ -7,7 +7,9 @@ use crate::graph::{Graph, NodeId};
 use common::Shared;
 use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{
+    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::error;
@@ -25,7 +27,7 @@ type EventQueue = Shared<Vec<EventId>>;
 #[derive(Debug)]
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
-    tx: Sender<WorkerMessage>,
+    tx: UnboundedSender<WorkerMessage>,
 }
 
 impl Worker {
@@ -34,7 +36,7 @@ impl Worker {
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
         let compute_callback: Shared<Callback> = Shared::new(compute_callback);
-        let (tx, rx) = channel::<WorkerMessage>(10);
+        let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
             Self::worker_loop(rx, compute_callback).await;
         });
@@ -46,7 +48,7 @@ impl Worker {
     }
 
     async fn worker_loop<Callback>(
-        mut rx: Receiver<WorkerMessage>,
+        mut rx: UnboundedReceiver<WorkerMessage>,
         compute_callback: Shared<Callback>,
     ) where
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
@@ -69,7 +71,6 @@ impl Worker {
                     Err(TryRecvError::Disconnected) => break 'worker,
                 }
             }
-            assert!(!msgs.is_empty());
 
             for msg in msgs.drain(..) {
                 match msg {
@@ -84,7 +85,6 @@ impl Worker {
                     }
                 }
             }
-            assert!(msgs.is_empty());
 
             if !invalidate_node_ids.is_empty() {
                 execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
@@ -107,30 +107,26 @@ impl Worker {
         I: IntoIterator<Item = NodeId>,
     {
         self.tx
-            .try_send(WorkerMessage::InvalidateCaches(
+            .send(WorkerMessage::InvalidateCaches(
                 node_ids.into_iter().collect(),
             ))
-            .expect("Failed to send invalidate_caches message");
+            .unwrap();
     }
     pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
-            .try_send(WorkerMessage::Update { graph, func_lib })
-            .expect("Failed to send run_once message");
+            .send(WorkerMessage::Update { graph, func_lib })
+            .unwrap();
     }
 
     pub fn exit(&mut self) {
-        self.tx
-            .try_send(WorkerMessage::Exit)
-            .expect("Failed to send exit message");
+        self.tx.send(WorkerMessage::Exit).unwrap();
 
         if let Some(_thread_handle) = self.thread_handle.take() {
             // thread_handle.await.expect("Worker thread failed to join");
         }
     }
     pub fn event(&mut self) {
-        self.tx
-            .try_send(WorkerMessage::Event)
-            .expect("Failed to send event message");
+        self.tx.send(WorkerMessage::Event).unwrap();
     }
 }
 
@@ -138,17 +134,6 @@ impl Drop for Worker {
     fn drop(&mut self) {
         if self.thread_handle.is_some() {
             error!("Worker dropped while the thread is still running; call Worker::exit() first");
-        }
-    }
-}
-
-impl WorkerMessage {
-    fn priority(&self) -> u8 {
-        match self {
-            WorkerMessage::Exit => 255,
-            WorkerMessage::InvalidateCaches(_) => 192,
-            WorkerMessage::Update { .. } => 96,
-            WorkerMessage::Event => 0,
         }
     }
 }
