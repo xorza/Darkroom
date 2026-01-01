@@ -161,3 +161,4 @@ The editor now uses a Tokio async main and `std::sync::Mutex` for compute status
 Editor UI edits (connection changes, cache toggles, node removals) now invalidate execution nodes immediately.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
+Editor run status now appends execution stats (node count + elapsed seconds).

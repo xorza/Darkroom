@@ -182,16 +182,20 @@ impl ScenariumApp {
             .and_then(|execution_graph| execution_graph.execute());
 
         match result {
-            Ok(_stats) => {
+            Ok(stats) => {
                 let status = self
                     .compute_status
                     .try_lock()
                     .expect("Failed to lock compute status")
                     .take();
+                let summary = format!(
+                    "({} nodes, {:.0}s)",
+                    stats.executed_nodes, stats.elapsed_secs
+                );
                 if let Some(status) = status {
-                    self.set_status(status);
+                    self.set_status(format!("{status} {summary}"));
                 } else {
-                    self.set_status("Compute finished");
+                    self.set_status(format!("Compute finished {summary}"));
                 }
             }
             Err(err) => self.set_status(format!("Compute failed: {err}")),
