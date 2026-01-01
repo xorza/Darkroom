@@ -102,38 +102,34 @@ impl Worker {
         }
     }
 
-    pub async fn invalidate_caches<I>(&mut self, node_ids: I)
+    pub fn invalidate_caches<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = NodeId>,
     {
         self.tx
-            .send(WorkerMessage::InvalidateCaches(
+            .try_send(WorkerMessage::InvalidateCaches(
                 node_ids.into_iter().collect(),
             ))
-            .await
             .expect("Failed to send invalidate_caches message");
     }
-    pub async fn run_once(&mut self, graph: Graph, func_lib: FuncLib) {
+    pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
-            .send(WorkerMessage::Update { graph, func_lib })
-            .await
+            .try_send(WorkerMessage::Update { graph, func_lib })
             .expect("Failed to send run_once message");
     }
 
-    pub async fn exit(&mut self) {
+    pub fn exit(&mut self) {
         self.tx
-            .send(WorkerMessage::Exit)
-            .await
+            .try_send(WorkerMessage::Exit)
             .expect("Failed to send exit message");
 
-        if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle.await.expect("Worker thread failed to join");
+        if let Some(_thread_handle) = self.thread_handle.take() {
+            // thread_handle.await.expect("Worker thread failed to join");
         }
     }
-    pub async fn event(&mut self) {
+    pub fn event(&mut self) {
         self.tx
-            .send(WorkerMessage::Event)
-            .await
+            .try_send(WorkerMessage::Event)
             .expect("Failed to send event message");
     }
 }
@@ -247,7 +243,7 @@ mod tests {
                 .expect("Failed to send a compute callback event");
         });
 
-        worker.run_once(graph.clone(), func_lib.clone()).await;
+        worker.update(graph.clone(), func_lib.clone());
         let executed = compute_finish_rx
             .recv()
             .await
@@ -257,7 +253,7 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        worker.event().await;
+        worker.event();
 
         let executed = compute_finish_rx
             .recv()
@@ -268,7 +264,7 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["2"]);
 
-        worker.event().await;
+        worker.event();
         let executed = compute_finish_rx
             .recv()
             .await

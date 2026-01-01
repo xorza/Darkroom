@@ -218,8 +218,7 @@ impl ScenariumApp {
         }
 
         self.worker
-            .run_once(self.view_graph.graph.clone(), self.func_lib.clone())
-            .block_on();
+            .update(self.view_graph.graph.clone(), self.func_lib.clone());
     }
 }
 
@@ -282,9 +281,7 @@ impl eframe::App for ScenariumApp {
                     GraphUiAction::CacheToggled => None,
                     GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
                 });
-        self.worker
-            .invalidate_caches(node_ids_to_invalidate)
-            .block_on();
+        self.worker.invalidate_caches(node_ids_to_invalidate);
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             ui.label(&self.status);
