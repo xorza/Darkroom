@@ -99,6 +99,8 @@ impl Worker {
 
             let result = execution_graph.execute().await;
             (compute_callback.lock().await)(result);
+
+            events.clear();
         }
     }
 
@@ -106,11 +108,12 @@ impl Worker {
     where
         I: IntoIterator<Item = NodeId>,
     {
-        self.tx
-            .send(WorkerMessage::InvalidateCaches(
-                node_ids.into_iter().collect(),
-            ))
-            .unwrap();
+        let node_ids: Vec<NodeId> = node_ids.into_iter().collect();
+        if !node_ids.is_empty() {
+            self.tx
+                .send(WorkerMessage::InvalidateCaches(node_ids))
+                .unwrap();
+        }
     }
     pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx

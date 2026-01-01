@@ -81,6 +81,7 @@ struct ScenariumApp {
     view_graph: model::ViewGraph,
     graph_path: PathBuf,
     graph_ui: gui::graph::GraphUi,
+    graph_updated: bool,
 
     print_output: Arc<ArcSwapOption<String>>,
     updated_status: Arc<ArcSwapOption<String>>,
@@ -94,29 +95,7 @@ impl Default for ScenariumApp {
         let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
 
-        let worker = Worker::new({
-            let updated_status = Arc::clone(&updated_status);
-            let print_output = Arc::clone(&print_output);
-
-            move |result| match result {
-                Ok(stats) => {
-                    let print_output = print_output.swap(None);
-                    let summary = format!(
-                        "({} nodes, {:.0}s)",
-                        stats.executed_nodes, stats.elapsed_secs
-                    );
-                    let message = if let Some(print_output) = print_output {
-                        format!("Compute output: {print_output} {summary}")
-                    } else {
-                        format!("Compute finished {summary}")
-                    };
-                    updated_status.store(Some(Arc::new(message)));
-                }
-                Err(err) => {
-                    updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
-                }
-            }
-        });
+        let worker = Self::create_worker(&updated_status, &print_output);
 
         let mut result = Self {
             worker,
@@ -124,6 +103,7 @@ impl Default for ScenariumApp {
             view_graph: model::ViewGraph::default(),
             graph_path,
             graph_ui: gui::graph::GraphUi::default(),
+            graph_updated: false,
 
             print_output,
             updated_status,
@@ -138,6 +118,33 @@ impl Default for ScenariumApp {
 }
 
 impl ScenariumApp {
+    fn create_worker(
+        updated_status: &Arc<ArcSwapOption<String>>,
+        print_output: &Arc<ArcSwapOption<String>>,
+    ) -> Worker {
+        let updated_status = Arc::clone(updated_status);
+        let print_output = Arc::clone(print_output);
+
+        Worker::new(move |result| match result {
+            Ok(stats) => {
+                let print_output = print_output.swap(None);
+                let summary = format!(
+                    "({} nodes, {:.0}s)",
+                    stats.executed_nodes, stats.elapsed_secs
+                );
+                let message = if let Some(print_output) = print_output {
+                    format!("Compute output: {print_output} {summary}")
+                } else {
+                    format!("Compute finished {summary}")
+                };
+                updated_status.store(Some(Arc::new(message)));
+            }
+            Err(err) => {
+                updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
+            }
+        })
+    }
+
     fn default_path() -> PathBuf {
         std::env::temp_dir().join("scenarium-graph.lua")
     }
@@ -217,8 +224,12 @@ impl ScenariumApp {
             return;
         }
 
-        self.worker
-            .update(self.view_graph.graph.clone(), self.func_lib.clone());
+        if self.graph_updated {
+            self.worker
+                .update(self.view_graph.graph.clone(), self.func_lib.clone());
+        } else {
+            self.worker.event();
+        }
     }
 }
 
@@ -273,15 +284,20 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
-        let node_ids_to_invalidate =
-            graph_interaction
-                .actions
-                .iter()
-                .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
-                    GraphUiAction::CacheToggled => None,
-                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
-                });
-        self.worker.invalidate_caches(node_ids_to_invalidate);
+        if !graph_interaction.actions.is_empty() {
+            let node_ids_to_invalidate =
+                graph_interaction
+                    .actions
+                    .iter()
+                    .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+                        GraphUiAction::CacheToggled => None,
+                        GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
+                            self.graph_updated = true;
+                            Some(*node_id)
+                        }
+                    });
+            self.worker.invalidate_caches(node_ids_to_invalidate);
+        }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             ui.label(&self.status);
