@@ -1,10 +1,8 @@
-use std::sync::Arc;
-
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
 use crate::function::FuncLib;
 use crate::graph::Graph;
-use common::ArcMutex;
+use common::Shared;
 use pollster::FutureExt;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
@@ -17,13 +15,11 @@ enum WorkerMessage {
     Exit,
     Stop,
     Event,
-    RunOnce(ArcMutex<ExecutionGraph>),
-    RunLoop(ArcMutex<ExecutionGraph>),
+    RunOnce(Shared<ExecutionGraph>),
+    RunLoop(Shared<ExecutionGraph>),
 }
 
-type ComputeEvent = dyn Fn(ExecutionResult<ExecutionStats>) + Send + 'static;
-
-type EventQueue = ArcMutex<Vec<EventId>>;
+type EventQueue = Shared<Vec<EventId>>;
 
 #[derive(Debug)]
 pub struct Worker {
@@ -36,11 +32,11 @@ impl Worker {
     where
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
-        let compute_callback: ArcMutex<ComputeEvent> = Arc::new(Mutex::new(compute_callback));
+        let compute_callback: Shared<Callback> = Shared::new(compute_callback);
 
         let (tx, rx) = channel::<WorkerMessage>(10);
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(rx, compute_callback).await;
+            Self::worker_loop(rx, compute_callback.clone()).await;
         });
 
         Self {
@@ -49,10 +45,12 @@ impl Worker {
         }
     }
 
-    async fn worker_loop(
+    async fn worker_loop<Callback>(
         mut rx: Receiver<WorkerMessage>,
-        compute_callback: ArcMutex<ComputeEvent>,
-    ) {
+        compute_callback: Shared<Callback>,
+    ) where
+        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
+    {
         let mut message: Option<WorkerMessage> = None;
 
         loop {
@@ -75,7 +73,7 @@ impl Worker {
 
                 WorkerMessage::RunLoop(execution_graph) => {
                     message = Self::event_subloop(
-                        Arc::clone(&execution_graph),
+                        execution_graph.clone(),
                         &mut rx,
                         compute_callback.clone(),
                     )
@@ -85,11 +83,14 @@ impl Worker {
         }
     }
 
-    async fn event_subloop(
-        execution_graph: ArcMutex<ExecutionGraph>,
+    async fn event_subloop<Callback>(
+        execution_graph: Shared<ExecutionGraph>,
         worker_rx: &mut Receiver<WorkerMessage>,
-        compute_callback: Arc<Mutex<ComputeEvent>>,
-    ) -> Option<WorkerMessage> {
+        compute_callback: Shared<Callback>,
+    ) -> Option<WorkerMessage>
+    where
+        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
+    {
         loop {
             // receive all messages and pick message with the highest priority
             let mut msg = worker_rx.recv().await?;
@@ -119,13 +120,13 @@ impl Worker {
         }
     }
 
-    pub async fn run_once(&mut self, execution_graph: ArcMutex<ExecutionGraph>) {
+    pub async fn run_once(&mut self, execution_graph: Shared<ExecutionGraph>) {
         self.tx
             .send(WorkerMessage::RunOnce(execution_graph))
             .await
             .expect("Failed to send run_once message");
     }
-    pub async fn run_loop(&mut self, execution_graph: ArcMutex<ExecutionGraph>) {
+    pub async fn run_loop(&mut self, execution_graph: Shared<ExecutionGraph>) {
         self.tx
             .send(WorkerMessage::RunLoop(execution_graph))
             .await
@@ -176,9 +177,8 @@ impl WorkerMessage {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use common::output_stream::OutputStream;
+    use common::Shared;
     use tokio::sync::Mutex;
 
     use crate::data::StaticValue;
@@ -257,7 +257,7 @@ mod tests {
         func_lib.merge(timers_invoker.into_func_lib());
 
         let graph = log_frame_no_graph();
-        let execution_graph = Arc::new(Mutex::new(ExecutionGraph::default()));
+        let execution_graph: Shared<ExecutionGraph> = Shared::default();
 
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
         let mut worker = Worker::new(move |result| {
@@ -271,7 +271,7 @@ mod tests {
             .unwrap()
             .update(&graph, &func_lib)
             .unwrap();
-        worker.run_once(Arc::clone(&execution_graph)).await;
+        worker.run_once(execution_graph.clone()).await;
         let executed = compute_finish_rx
             .recv()
             .await
@@ -286,7 +286,7 @@ mod tests {
             .unwrap()
             .update(&graph, &func_lib)
             .unwrap();
-        worker.run_loop(Arc::clone(&execution_graph)).await;
+        worker.run_loop(execution_graph.clone()).await;
         worker.event().await;
 
         let executed = compute_finish_rx

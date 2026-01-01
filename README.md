@@ -5,7 +5,7 @@ The core graph and utilities are written in Rust.
 
 ## Repository Layout
 
-- **common** – shared utilities used across the workspace, including concurrency and serialization helpers
+- **common** – shared utilities used across the workspace, including concurrency helpers like the shared wrapper (supports trait objects) and serialization helpers
 - **graph** – the main graph library
 - **editor** – visual editor for building executing graphs using core graph data
 - **test_resources** – sample graphs and media used by tests

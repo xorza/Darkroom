@@ -4,7 +4,7 @@ use tokio::sync::Mutex;
 
 pub type ArcMutex<T> = Arc<Mutex<T>>;
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Shared<T> {
     inner: Arc<Mutex<T>>,
 }
@@ -14,6 +14,10 @@ impl<T> Shared<T> {
         Self {
             inner: Arc::new(Mutex::new(value)),
         }
+    }
+
+    pub fn arc(&self) -> Arc<Mutex<T>> {
+        Arc::clone(&self.inner)
     }
 
     pub async fn lock(&self) -> tokio::sync::MutexGuard<'_, T> {
@@ -32,10 +36,6 @@ impl<T> Shared<T> {
         Arc::get_mut(&mut self.inner)
             .expect("Shared::get_mut requires unique ownership of the inner Arc")
             .get_mut()
-    }
-
-    pub fn arc(&self) -> Arc<Mutex<T>> {
-        Arc::clone(&self.inner)
     }
 }
 
@@ -65,5 +65,13 @@ where
 {
     fn default() -> Self {
         Self::new(T::default())
+    }
+}
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
