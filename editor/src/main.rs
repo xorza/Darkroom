@@ -258,7 +258,8 @@ impl eframe::App for ScenariumApp {
             graph_interaction = self.graph_ui.render(ui, &mut self.graph_view);
         });
         for node_id in graph_interaction.affected_nodes {
-            self.execution_graph.remove(&node_id);
+            self.execution_graph.invalidate(&node_id);
+            // todo propagate changes to other dependent nodes
         }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {

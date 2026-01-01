@@ -67,9 +67,8 @@ pub struct ExecutionInput {
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionOutput {
-    #[default]
     Unused,
     Used,
 }
@@ -194,7 +193,7 @@ impl ExecutionNode {
 
         self.outputs.clear();
         self.outputs
-            .resize(func.outputs.len(), ExecutionOutput::default());
+            .resize(func.outputs.len(), ExecutionOutput::Unused);
 
         #[cfg(debug_assertions)]
         {
@@ -205,14 +204,14 @@ impl ExecutionNode {
 }
 
 impl ExecutionGraph {
-    pub fn by_id(&self, node_id: NodeId) -> Option<&ExecutionNode> {
-        self.e_nodes.iter().find(|node| node.id == node_id)
+    pub fn by_id(&self, node_id: &NodeId) -> Option<&ExecutionNode> {
+        self.e_nodes.by_key(node_id)
     }
-    pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut ExecutionNode> {
-        self.e_nodes.iter_mut().find(|node| node.id == node_id)
+    pub fn by_id_mut(&mut self, node_id: &NodeId) -> Option<&mut ExecutionNode> {
+        self.e_nodes.by_key_mut(node_id)
     }
-    pub fn remove(&mut self, node_id: &NodeId) {
-        self.e_nodes.remove_by_key(node_id);
+    pub fn invalidate(&mut self, node_id: &NodeId) {
+        self.by_id_mut(node_id).unwrap().inited = false;
     }
     pub fn clear(&mut self) {
         self.e_nodes.clear();
