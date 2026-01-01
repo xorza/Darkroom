@@ -15,6 +15,8 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use crate::gui::graph::GraphUiAction;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init::init()?;
@@ -253,8 +255,16 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
+        let node_ids_to_invalidate =
+            graph_interaction
+                .actions
+                .iter()
+                .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+                    GraphUiAction::CacheToggled => None,
+                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => Some(*node_id),
+                });
         self.execution_graph
-            .invalidate_recurisevly(graph_interaction.affected_nodes);
+            .invalidate_recurisevly(node_ids_to_invalidate);
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             if let Some(status) = self.last_status.as_deref() {
