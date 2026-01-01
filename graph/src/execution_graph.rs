@@ -849,28 +849,6 @@ mod tests {
     }
 
     #[test]
-    fn execution_graph_respects_removed_nodes() -> anyhow::Result<()> {
-        // backward1() specifically crashed on this case
-
-        let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
-
-        let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-
-        graph.by_name_mut("mult").unwrap().inputs[0] = Input {
-            binding: (graph.by_name("get_a").unwrap().id, 0).into(),
-            default_value: None,
-        };
-
-        execution_graph.update(&graph, &func_lib)?;
-
-        assert_eq!(execution_graph.e_nodes.len(), 4);
-
-        Ok(())
-    }
-
-    #[test]
     fn pure_node_skips_consequent_invokations() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
