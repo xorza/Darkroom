@@ -211,6 +211,9 @@ impl ExecutionGraph {
     pub fn by_id_mut(&mut self, node_id: NodeId) -> Option<&mut ExecutionNode> {
         self.e_nodes.iter_mut().find(|node| node.id == node_id)
     }
+    pub fn remove(&mut self, node_id: &NodeId) {
+        self.e_nodes.remove_by_key(node_id);
+    }
     #[cfg(debug_assertions)]
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.name == node_name)
