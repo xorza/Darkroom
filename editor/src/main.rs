@@ -265,7 +265,6 @@ impl eframe::App for ScenariumApp {
                     println!("Invalidated node: {}", dep_node_id);
                 });
             self.execution_graph.invalidate(&node_id);
-            println!("Invalidated node: {}", &node_id);
         }
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
