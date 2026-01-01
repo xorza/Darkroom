@@ -193,7 +193,7 @@ impl ScenariumApp {
             .and_then(|()| self.execution_graph.execute(&self.graph, &self.func_lib));
 
         match result {
-            Ok(()) => {
+            Ok(_) => {
                 let status = self
                     .compute_status
                     .lock()

@@ -20,7 +20,7 @@ enum WorkerMessage {
     RunLoop(Graph),
 }
 
-type ComputeEvent = dyn Fn(ExecutionResult<()>) + Send + 'static;
+type ComputeEvent = dyn Fn(ExecutionResult<usize>) + Send + 'static;
 
 type EventQueue = Arc<Mutex<Vec<EventId>>>;
 
@@ -33,7 +33,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<Callback>(func_lib: FuncLib, compute_callback: Callback) -> Self
     where
-        Callback: Fn(ExecutionResult<()>) + Send + 'static,
+        Callback: Fn(ExecutionResult<usize>) + Send + 'static,
     {
         let compute_callback: Arc<Mutex<ComputeEvent>> = Arc::new(Mutex::new(compute_callback));
 
@@ -270,12 +270,13 @@ mod tests {
         let graph = log_frame_no_graph();
 
         worker.run_once(graph.clone()).await;
-        compute_finish_rx
+        let executed_nodes_count = compute_finish_rx
             .recv()
             .await
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
+        assert_eq!(executed_nodes_count, 3);
         assert_eq!(output_stream.take().await[0], "1");
 
         worker.run_loop(graph.clone()).await;

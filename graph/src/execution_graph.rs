@@ -211,7 +211,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
+    pub fn execute(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<usize> {
         let mut input_args: Args = take(&mut self.input_args);
 
         for e_node_idx in self.e_node_exe_order.iter().copied() {
@@ -278,7 +278,7 @@ impl ExecutionGraph {
 
         self.input_args = take(&mut input_args);
 
-        Ok(())
+        Ok(self.e_node_exe_order.len())
     }
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
