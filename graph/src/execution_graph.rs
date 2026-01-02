@@ -284,8 +284,8 @@ impl ExecutionGraph {
 
         let mut input_args: Args = take(&mut self.input_args);
 
-        for node_id in self.e_node_invoke_order.iter().copied() {
-            let e_node = self.e_nodes.by_key(&node_id).unwrap();
+        for node_id in self.e_node_invoke_order.iter() {
+            let e_node = self.e_nodes.by_key(node_id).unwrap();
             input_args.resize_and_clear(e_node.inputs.len());
             assert!(e_node.inited);
 
@@ -308,7 +308,7 @@ impl ExecutionGraph {
                 input_args[input_idx] = convert_type(value, &input.data_type);
             }
 
-            let e_node = self.e_nodes.by_key_mut(&node_id).unwrap();
+            let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
             let outputs = e_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
@@ -455,8 +455,8 @@ impl ExecutionGraph {
 
     // Propagate input state forward through the processing order.
     fn forward(&mut self, graph: &Graph) {
-        for node_id in self.e_node_invoke_order.iter().copied() {
-            let node = graph.by_id(&node_id).unwrap();
+        for node_id in self.e_node_invoke_order.iter() {
+            let node = graph.by_id(node_id).unwrap();
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
@@ -467,7 +467,7 @@ impl ExecutionGraph {
                     // todo implement Unchanged for const bindings
                     Binding::Const(_) => InputState::Changed,
                     Binding::Bind(_) => {
-                        let port_address = self.by_id(&node_id).unwrap().inputs[input_idx]
+                        let port_address = self.by_id(node_id).unwrap().inputs[input_idx]
                             .binding
                             .unwrap_bind();
                         let output_e_node = self.by_id(&port_address.id).unwrap();
@@ -485,8 +485,7 @@ impl ExecutionGraph {
                     }
                 };
 
-                let e_node_input =
-                    &mut self.e_nodes.by_key_mut(&node_id).unwrap().inputs[input_idx];
+                let e_node_input = &mut self.e_nodes.by_key_mut(node_id).unwrap().inputs[input_idx];
                 e_node_input.state = input_state;
                 match input_state {
                     InputState::Unchanged => {}
@@ -496,7 +495,7 @@ impl ExecutionGraph {
                 }
             }
 
-            let e_node = self.e_nodes.by_key_mut(&node_id).unwrap();
+            let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
             assert_eq!(e_node.process_state, ProcessState::Backward1);
             assert!(e_node.inited);
 
