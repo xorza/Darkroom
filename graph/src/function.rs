@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::context::ContextType;
+use crate::context::{ContextManager, ContextType};
 use crate::execution_graph::OutputUsage;
 use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
@@ -41,6 +41,7 @@ type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Sen
 
 pub trait AsyncLambdaFn:
     for<'a> Fn(
+        &'a mut ContextManager,
         &'a mut InvokeCache,
         &'a [InvokeInput],
         &'a [OutputUsage],
@@ -54,6 +55,7 @@ pub trait AsyncLambdaFn:
 
 impl<T> AsyncLambdaFn for T where
     T: for<'a> Fn(
+            &'a mut ContextManager,
             &'a mut InvokeCache,
             &'a [InvokeInput],
             &'a [OutputUsage],
@@ -84,16 +86,19 @@ impl FuncLambda {
 
     pub async fn invoke(
         &self,
+        ctx_manager: &mut ContextManager,
         cache: &mut InvokeCache,
         inputs: &[InvokeInput],
-        outputs_meta: &[OutputUsage],
+        output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],
     ) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
                 panic!("Func missing lambda");
             }
-            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs_meta, outputs).await,
+            FuncLambda::Lambda(inner) => {
+                (inner)(ctx_manager, cache, inputs, output_usage, outputs).await
+            }
         }
     }
 }
@@ -387,14 +392,14 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
+            lambda: async_lambda!(move |_ctx, cache, inputs, _output_usage, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
                 let a: i64 = inputs[0].value.as_int();
                 let b: i64 = inputs[1].value.as_int();
                 outputs[0] = (a * b).into();
-                ctx.set(a * b);
+                cache.set(a * b);
 
                 Ok(())
             }),
@@ -413,7 +418,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
+                move |_ctx, _cache, _inputs, _output_usage, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a() as f64).into();
                     Ok(())
@@ -434,7 +439,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
+                move |_ctx, _cache, _inputs, _output_usage, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
@@ -469,12 +474,12 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
+            lambda: async_lambda!(move |_ctx_manager, cache, inputs, _output_usage, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_int();
                 let b: i64 = inputs[1].value.as_int();
-                ctx.set(a + b);
+                cache.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
             }),
@@ -496,7 +501,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, inputs, _, _| { print = Arc::clone(&print) } => {
+                move |_ctx_manager, _cache, inputs, _output_usage, _outputs| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].value.as_int());
@@ -510,6 +515,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
 #[cfg(test)]
 mod tests {
+    use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::{InputState, OutputUsage};
     use crate::function::{test_func_lib, InvokeCache, InvokeInput, TestFuncHooks};
@@ -534,6 +540,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
+        let mut ctx_manager = ContextManager::default();
         let mut cache = InvokeCache::default();
         let mut inputs = vec![
             InvokeInput {
@@ -551,7 +558,13 @@ mod tests {
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &outputs_meta, &mut outputs)
+            .invoke(
+                &mut ctx_manager,
+                &mut cache,
+                &inputs,
+                &outputs_meta,
+                &mut outputs,
+            )
             .await?;
         assert_eq!(outputs[0].as_int(), 6);
         let cached = *cache
@@ -566,7 +579,13 @@ mod tests {
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &outputs_meta, &mut outputs)
+            .invoke(
+                &mut ctx_manager,
+                &mut cache,
+                &inputs,
+                &outputs_meta,
+                &mut outputs,
+            )
             .await?;
         assert_eq!(outputs[0].as_int(), 8);
 

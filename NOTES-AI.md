@@ -194,3 +194,4 @@ Invoke cache `get_or_default` now resets the stored value to the requested defau
 Context meta constructors now share a `ContextCtor` type alias to avoid repeating the boxed Any factory signature.
 `graph/src/context.rs` includes a test that verifies custom contexts are created once and reused via `ContextManager::get`.
 `ContextMeta::new_default` creates a custom context meta for `T: Default` without needing an explicit constructor.
+`FuncLambda::invoke` now takes a `ContextManager` so lambdas can access shared invocation contexts; async lambda macros insert the extra parameter.

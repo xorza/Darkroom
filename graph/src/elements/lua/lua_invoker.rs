@@ -108,7 +108,7 @@ impl LuaInvoker {
             let lua_func_template = lua_func.clone();
             let lua = Arc::clone(&self.lua);
             func.lambda = crate::async_lambda!(
-                move |_cache, inputs, _,outputs| {
+                move |_context_manager, _cache, inputs, _output_usage, outputs| {
                     func = func_template.clone(),
                     lua_func = lua_func_template.clone(),
                     lua = Arc::clone(&lua)
@@ -427,6 +427,7 @@ mod tests {
     use common::output_stream::OutputStream;
 
     use super::*;
+    use crate::context::ContextManager;
     use crate::function::FuncId;
 
     #[test]
@@ -511,6 +512,7 @@ mod tests {
         let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
 
+        let mut ctx_manager = ContextManager::default();
         let mut cache = InvokeCache::default();
         // call 'mult' function
         invoker
@@ -519,6 +521,7 @@ mod tests {
             .unwrap()
             .lambda
             .invoke(
+                &mut ctx_manager,
                 &mut cache,
                 inputs.as_slice(),
                 &outputs_meta,
@@ -579,6 +582,7 @@ mod tests {
         ];
         let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
+        let mut ctx_manager = ContextManager::default();
         let mut cache = InvokeCache::default();
 
         invoker
@@ -587,6 +591,7 @@ mod tests {
             .unwrap()
             .lambda
             .invoke(
+                &mut ctx_manager,
                 &mut cache,
                 inputs.as_slice(),
                 &outputs_meta,

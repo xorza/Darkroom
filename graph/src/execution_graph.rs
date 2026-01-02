@@ -138,7 +138,7 @@ pub struct ExecutionGraph {
     pub e_node_invoke_order: Vec<usize>,
 
     #[serde(skip)]
-    context_manager: ContextManager,
+    ctx_manager: ContextManager,
 
     //caches
     #[serde(skip)]
@@ -294,7 +294,7 @@ impl ExecutionGraph {
         let start = std::time::Instant::now();
 
         let mut inputs: Vec<InvokeInput> = Vec::default();
-        let mut output_meta: Vec<OutputUsage> = Vec::default();
+        let mut output_usage: Vec<OutputUsage> = Vec::default();
         let mut error: Option<ExecutionError> = None;
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
@@ -326,8 +326,8 @@ impl ExecutionGraph {
                 });
             }
 
-            output_meta.clear();
-            output_meta.extend(e_node.outputs.iter().map(|output| {
+            output_usage.clear();
+            output_usage.extend(e_node.outputs.iter().map(|output| {
                 if output.usage_count == 0 {
                     OutputUsage::Skip
                 } else {
@@ -346,9 +346,10 @@ impl ExecutionGraph {
             let invoke_result = e_node
                 .lambda
                 .invoke(
+                    &mut self.ctx_manager,
                     &mut e_node.cache,
                     inputs.as_slice(),
-                    output_meta.as_slice(),
+                    output_usage.as_slice(),
                     outputs.as_mut_slice(),
                 )
                 .await

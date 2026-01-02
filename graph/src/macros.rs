@@ -1,25 +1,24 @@
 #[macro_export]
 macro_rules! async_lambda {
-
-    (move |$cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| { $($name:ident = $init:expr),* $(,)? } => $body:block) => {
-        $crate::function::FuncLambda::new(move |$cache, $inputs, $outputs_meta, $outputs| {
+    (move |$ctx_manager:pat_param, $cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| { $($name:ident = $init:expr),* $(,)? } => $body:block) => {
+        $crate::function::FuncLambda::new(move |$ctx_manager, $cache, $inputs, $outputs_meta, $outputs| {
             $(let $name = $init;)*
             Box::pin(async move $body)
         })
     };
-    (|$cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| { $($name:ident = $init:expr),* $(,)? } => $body:block) => {
-        $crate::function::FuncLambda::new(|$cache, $inputs, $outputs_meta, $outputs| {
+    (|$ctx_manager:pat_param, $cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| { $($name:ident = $init:expr),* $(,)? } => $body:block) => {
+        $crate::function::FuncLambda::new(|$ctx_manager, $cache, $inputs, $outputs_meta, $outputs| {
             $(let $name = $init;)*
             Box::pin(async move $body)
         })
     };
-    (move |$cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| $body:block) => {
-        $crate::function::FuncLambda::new(move |$cache, $inputs, $outputs_meta, $outputs| {
+    (move |$ctx_manager:pat_param, $cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| $body:block) => {
+        $crate::function::FuncLambda::new(move |$ctx_manager, $cache, $inputs, $outputs_meta, $outputs| {
             Box::pin(async move $body)
         })
     };
-    (|$cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| $body:block) => {
-        $crate::function::FuncLambda::new(|$cache, $inputs, $outputs_meta, $outputs| {
+    (|$ctx_manager:pat_param, $cache:pat_param, $inputs:pat_param, $outputs_meta:pat_param, $outputs:pat_param| $body:block) => {
+        $crate::function::FuncLambda::new(|$ctx_manager, $cache, $inputs, $outputs_meta, $outputs| {
             Box::pin(async move $body)
         })
     };

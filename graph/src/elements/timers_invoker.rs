@@ -11,7 +11,7 @@ pub struct TimersInvoker {
 }
 
 #[derive(Debug)]
-struct FrameEventContext {
+struct FrameEventCache {
     last_frame: Instant,
     frame_no: i64,
 }
@@ -55,20 +55,26 @@ impl Default for TimersInvoker {
             ],
             events: vec!["always".into(), "once".into(), "fps".into()],
             required_contexts: vec![],
-            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
+            lambda: async_lambda!(move |_context_manager,
+                                        cache,
+                                        inputs,
+                                        _output_usage,
+                                        outputs| {
                 let now = Instant::now();
 
                 let (delta, frame_no) = {
-                    if let Some(frame_event_ctx) = ctx.get_mut::<FrameEventContext>() {
-                        let delta = now.duration_since(frame_event_ctx.last_frame).as_secs_f64();
-                        let frame_no = frame_event_ctx.frame_no;
+                    if let Some(frame_event_cache) = cache.get_mut::<FrameEventCache>() {
+                        let delta = now
+                            .duration_since(frame_event_cache.last_frame)
+                            .as_secs_f64();
+                        let frame_no = frame_event_cache.frame_no;
 
-                        frame_event_ctx.last_frame = now;
-                        frame_event_ctx.frame_no += 1;
+                        frame_event_cache.last_frame = now;
+                        frame_event_cache.frame_no += 1;
 
                         (delta, frame_no)
                     } else {
-                        ctx.set(FrameEventContext {
+                        cache.set(FrameEventCache {
                             last_frame: now,
                             frame_no: 2,
                         });
