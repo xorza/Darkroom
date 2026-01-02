@@ -466,17 +466,12 @@ impl ExecutionGraph {
                         Some(ExecutionBinding::Const(value.clone())),
                     ),
                     (Binding::Bind(port_address), existing_binding) => {
-                        let output_e_node_idx = self
-                            .e_nodes
-                            .index_of_key(&port_address.target_id)
-                            .expect("Execution graph missing bound node for input binding");
+                        let output_e_node_idx =
+                            self.e_nodes.index_of_key(&port_address.target_id).unwrap();
                         let output_e_node = &self.e_nodes[output_e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
-                        assert!(
-                            port_address.port_idx < output_e_node.outputs.len(),
-                            "Input binding references output index beyond target outputs"
-                        );
+                        assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
                             target_idx: output_e_node_idx,
