@@ -39,7 +39,7 @@ async fn main() -> Result<()> {
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
             configure_visuals(&cc.egui_ctx);
-            Ok(Box::new(ScenariumApp::default()))
+            Ok(Box::new(ScenariumApp::new(&cc.egui_ctx)))
         }),
     )?;
 
@@ -85,17 +85,18 @@ struct ScenariumApp {
 
     print_output: Arc<ArcSwapOption<String>>,
     updated_status: Arc<ArcSwapOption<String>>,
+    ui_context: egui::Context,
     status: String,
 }
 
-impl Default for ScenariumApp {
-    fn default() -> Self {
+impl ScenariumApp {
+    fn new(ui_context: &egui::Context) -> Self {
         let graph_path = Self::default_path();
 
         let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
 
-        let worker = Self::create_worker(&updated_status, &print_output);
+        let worker = Self::create_worker(&updated_status, &print_output, ui_context.clone());
 
         let mut result = Self {
             worker,
@@ -107,6 +108,7 @@ impl Default for ScenariumApp {
 
             print_output,
             updated_status,
+            ui_context: ui_context.clone(),
             status: "".to_string(),
         };
 
@@ -115,33 +117,36 @@ impl Default for ScenariumApp {
 
         result
     }
-}
 
-impl ScenariumApp {
     fn create_worker(
         updated_status: &Arc<ArcSwapOption<String>>,
         print_output: &Arc<ArcSwapOption<String>>,
+        ui_context: egui::Context,
     ) -> Worker {
         let updated_status = Arc::clone(updated_status);
         let print_output = Arc::clone(print_output);
 
-        Worker::new(move |result| match result {
-            Ok(stats) => {
-                let print_output = print_output.swap(None);
-                let summary = format!(
-                    "({} nodes, {:.0}s)",
-                    stats.executed_nodes, stats.elapsed_secs
-                );
-                let message = if let Some(print_output) = print_output {
-                    format!("Compute output: {print_output} {summary}")
-                } else {
-                    format!("Compute finished {summary}")
-                };
-                updated_status.store(Some(Arc::new(message)));
+        Worker::new(move |result| {
+            match result {
+                Ok(stats) => {
+                    let print_output = print_output.swap(None);
+                    let summary = format!(
+                        "({} nodes, {:.0}s)",
+                        stats.executed_nodes, stats.elapsed_secs
+                    );
+                    let message = if let Some(print_output) = print_output {
+                        format!("Compute output: {print_output} {summary}")
+                    } else {
+                        format!("Compute finished {summary}")
+                    };
+                    updated_status.store(Some(Arc::new(message)));
+                }
+                Err(err) => {
+                    updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
+                }
             }
-            Err(err) => {
-                updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
-            }
+
+            ui_context.request_repaint();
         })
     }
 
