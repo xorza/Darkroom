@@ -11,7 +11,7 @@ id_type!(NodeId);
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PortAddress {
-    pub id: NodeId,
+    pub target_id: NodeId,
     pub port_idx: usize,
 }
 
@@ -81,7 +81,7 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Bind(output_binding) if output_binding.id == id => Some(input),
+                Binding::Bind(output_binding) if output_binding.target_id == id => Some(input),
                 _ => None,
             })
             .for_each(|input| {
@@ -122,7 +122,7 @@ impl Graph {
                 let depends = node.inputs.iter().any(|input| {
                     matches!(
                         &input.binding,
-                        Binding::Bind(binding) if binding.id == current
+                        Binding::Bind(binding) if binding.target_id == current
                     )
                 });
                 if depends && seen.insert(node.id) {
@@ -160,7 +160,7 @@ impl Graph {
 
             for input in node.inputs.iter() {
                 if let Binding::Bind(output_binding) = &input.binding {
-                    assert!(self.by_id(&output_binding.id).is_some());
+                    assert!(self.by_id(&output_binding.target_id).is_some());
                 }
             }
         }
@@ -276,7 +276,7 @@ impl From<PortAddress> for Binding {
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
         Binding::Bind(PortAddress {
-            id: output_node_id,
+            target_id: output_node_id,
             port_idx: output_idx,
         })
     }
@@ -417,7 +417,7 @@ mod tests {
 
         for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_output_binding() {
-                assert_ne!(binding.id, node_id);
+                assert_ne!(binding.target_id, node_id);
             }
         }
 

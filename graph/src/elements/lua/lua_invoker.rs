@@ -529,8 +529,8 @@ mod tests {
                 .as_output_binding()
                 .unwrap_or_else(|| panic!("Missing output binding for input {}", index));
             graph
-                .by_id(&binding.id)
-                .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.id))
+                .by_id(&binding.target_id)
+                .unwrap_or_else(|| panic!("Node with id {:?} not found", binding.target_id))
                 .name
                 .as_str()
         };

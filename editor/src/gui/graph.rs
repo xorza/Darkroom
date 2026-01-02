@@ -572,11 +572,11 @@ fn collect_connection_curves(
                 continue;
             };
             let source_view = node_lookup
-                .get(&binding.id)
+                .get(&binding.target_id)
                 .expect("graph validation must guarantee source nodes exist");
             let source_node = view_graph
                 .graph
-                .by_id(&binding.id)
+                .by_id(&binding.target_id)
                 .expect("graph validation must guarantee source nodes exist");
             let source_func = func_lib.by_id(&source_node.func_id).unwrap_or_else(|| {
                 panic!(
@@ -589,7 +589,7 @@ fn collect_connection_curves(
                 "output index must be within source outputs"
             );
             let source_width = node_widths
-                .get(&binding.id)
+                .get(&binding.target_id)
                 .copied()
                 .expect("node width must be precomputed");
             let start = node::node_output_pos(
@@ -788,7 +788,7 @@ fn apply_connection(
         "input index must be valid for input node"
     );
     input_node.inputs[input_port.port_idx].binding = Binding::Bind(PortAddress {
-        id: output_port.node_id,
+        target_id: output_port.node_id,
         port_idx: output_port.port_idx,
     });
     Some(input_node.id)

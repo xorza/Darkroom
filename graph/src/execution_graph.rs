@@ -213,7 +213,7 @@ impl ExecutionGraph {
                 let depends = node.inputs.iter().any(|input| {
                     matches!(
                         &input.binding,
-                        Binding::Bind(port_address) if port_address.id == current_node_id
+                        Binding::Bind(port_address) if port_address.target_id == current_node_id
                     )
                 });
                 if depends {
@@ -222,6 +222,7 @@ impl ExecutionGraph {
             }
         }
     }
+
     pub fn clear(&mut self) {
         self.e_nodes.clear();
         self.e_node_invoke_order.clear();
@@ -275,7 +276,7 @@ impl ExecutionGraph {
                     Binding::None => DynamicValue::None,
                     Binding::Const(value) => value.into(),
                     Binding::Bind(port_address) => {
-                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
+                        let output_e_node = self.e_nodes.by_key(&port_address.target_id).unwrap();
                         let output_values = output_e_node
                             .output_values
                             .as_ref()
@@ -354,66 +355,66 @@ impl ExecutionGraph {
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = self.e_nodes.by_key_mut(&visit.id).unwrap();
+            let e_node_idx = self.e_nodes.index_of_key(&visit.id).unwrap();
 
-            match visit.cause {
-                VisitCause::Terminal => {}
-                VisitCause::OutputRequest { output_idx } => {
-                    if e_node.process_state != ProcessState::None {
-                        e_node.outputs[output_idx].usage_count += 1;
-                    }
-                }
+            let output_request = match visit.cause {
+                VisitCause::Terminal => None,
+                VisitCause::OutputRequest { output_idx } => Some(output_idx),
                 VisitCause::Done => {
+                    let e_node = &mut self.e_nodes[e_node_idx];
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
                     self.e_node_invoke_order.push(visit.id);
                     continue;
                 }
             };
-            match e_node.process_state {
-                ProcessState::None => {}
+
+            let already_processed = match self.e_nodes[e_node_idx].process_state {
+                ProcessState::None => false,
                 ProcessState::Processing => {
-                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
+                    return Err(ExecutionError::CycleDetected { node_id: visit.id });
                 }
-                ProcessState::Backward1 => {
-                    continue;
-                }
-                ProcessState::Forward | ProcessState::Backward2 => {
-                    panic!("Invalid processing state")
-                }
-            }
+                ProcessState::Backward1 => true,
+                ProcessState::Forward | ProcessState::Backward2 => unreachable!(),
+            };
 
-            e_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                id: visit.id,
-                cause: VisitCause::Done,
-            });
-
-            let node = graph.by_id(&visit.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
-            e_node.update(node, func);
-
-            if let VisitCause::OutputRequest { output_idx } = visit.cause {
-                e_node.outputs[output_idx].usage_count += 1;
-            }
-
-            for input in node.inputs.iter() {
-                let Binding::Bind(port_address) = &input.binding else {
-                    continue;
-                };
-
-                self.e_nodes
-                    .compact_insert_with(&port_address.id, &mut write_idx, || ExecutionNode {
-                        id: port_address.id,
-                        ..Default::default()
-                    });
-
+            if !already_processed {
+                let e_node = &mut self.e_nodes[e_node_idx];
+                let node = graph.by_id(&visit.id).unwrap();
+                let func = func_lib.by_id(&node.func_id).unwrap();
+                e_node.update(node, func);
+                e_node.process_state = ProcessState::Processing;
                 stack.push(Visit {
-                    id: port_address.id,
-                    cause: VisitCause::OutputRequest {
-                        output_idx: port_address.port_idx,
-                    },
+                    id: e_node.id,
+                    cause: VisitCause::Done,
                 });
+
+                for input in node.inputs.iter() {
+                    let Binding::Bind(port_address) = &input.binding else {
+                        continue;
+                    };
+
+                    self.e_nodes.compact_insert_with(
+                        &port_address.target_id,
+                        &mut write_idx,
+                        || ExecutionNode {
+                            id: port_address.target_id,
+                            ..Default::default()
+                        },
+                    );
+
+                    stack.push(Visit {
+                        id: port_address.target_id,
+                        cause: VisitCause::OutputRequest {
+                            output_idx: port_address.port_idx,
+                        },
+                    });
+                }
+            }
+
+            if let Some(output_idx) = output_request {
+                let e_node = &mut self.e_nodes[e_node_idx];
+                e_node.outputs[output_idx].usage_count += 1;
             }
         }
 
@@ -436,7 +437,8 @@ impl ExecutionGraph {
     fn forward(&mut self, graph: &Graph) {
         for node_id in self.e_node_invoke_order.iter() {
             let node = graph.by_id(node_id).unwrap();
-
+            let e_inputs = self.e_nodes.by_key(node_id).unwrap().inputs.clone();
+            let mut input_states = Vec::with_capacity(node.inputs.len());
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
@@ -444,7 +446,7 @@ impl ExecutionGraph {
                 let input_state = match &input.binding {
                     Binding::None => InputState::None,
                     Binding::Const(_) => {
-                        let e_input = &self.e_nodes.by_key(node_id).unwrap().inputs[input_idx];
+                        let e_input = &e_inputs[input_idx];
                         if input.binding == e_input.binding {
                             InputState::Unchanged
                         } else {
@@ -452,7 +454,7 @@ impl ExecutionGraph {
                         }
                     }
                     Binding::Bind(port_address) => {
-                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
+                        let output_e_node = self.e_nodes.by_key(&port_address.target_id).unwrap();
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
 
@@ -467,21 +469,26 @@ impl ExecutionGraph {
                     }
                 };
 
-                let e_input = &mut self.e_nodes.by_key_mut(node_id).unwrap().inputs[input_idx];
-                if e_input.binding != input.binding {
-                    e_input.binding = input.binding.clone();
-                }
-                e_input.state = input_state;
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
-                    InputState::None => missing_required_inputs |= e_input.required,
+                    InputState::None => missing_required_inputs |= e_inputs[input_idx].required,
                 }
+
+                input_states.push(input_state);
             }
 
             let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
             assert_eq!(e_node.process_state, ProcessState::Backward1);
             assert!(e_node.inited);
+
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                let e_input = &mut e_node.inputs[input_idx];
+                if e_input.binding != input.binding {
+                    e_input.binding = input.binding.clone();
+                }
+                e_input.state = input_states[input_idx];
+            }
 
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
@@ -557,7 +564,7 @@ impl ExecutionGraph {
                 };
 
                 stack.push(Visit {
-                    id: port_address.id,
+                    id: port_address.target_id,
                     cause: VisitCause::OutputRequest {
                         output_idx: port_address.port_idx,
                     },
@@ -620,22 +627,7 @@ impl ExecutionGraph {
             for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
                 let binding = &input.binding;
                 let e_binding = &e_input.binding;
-                match binding {
-                    Binding::None => {
-                        assert!(matches!(e_binding, Binding::None));
-                    }
-                    Binding::Const(_) => {
-                        assert!(matches!(e_binding, Binding::Const(_)));
-                    }
-                    Binding::Bind(port_address) => {
-                        assert!(matches!(e_binding, Binding::Bind(_)));
-
-                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
-                        let e_node_port_address = e_binding.unwrap_bind();
-                        assert_eq!(*port_address, *e_node_port_address);
-                        assert!(port_address.port_idx < output_e_node.outputs.len());
-                    }
-                }
+                assert_eq!(binding, e_binding);
             }
         }
 
@@ -653,7 +645,9 @@ impl ExecutionGraph {
                     Binding::Bind(port_address) => Some(port_address),
                     Binding::None | Binding::Const(_) => None,
                 })
-                .all(|port_address| !self.e_node_invoke_order[idx..].contains(&port_address.id));
+                .all(|port_address| {
+                    !self.e_node_invoke_order[idx..].contains(&port_address.target_id)
+                });
             assert!(all_dependencies_in_order);
         }
     }
@@ -672,7 +666,7 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
 
         for input in node.inputs.iter() {
             if let Binding::Bind(port_address) = &input.binding {
-                let output_node = graph.by_id(&port_address.id).unwrap();
+                let output_node = graph.by_id(&port_address.target_id).unwrap();
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
                 assert!(port_address.port_idx < output_func.outputs.len());
             }
