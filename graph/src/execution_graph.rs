@@ -277,7 +277,7 @@ impl ExecutionGraph {
         self.forward(graph);
         self.backward2(graph);
 
-        self.validate_with_graph(graph, func_lib);
+        self.validate_with(graph, func_lib);
 
         Ok(())
     }
@@ -587,7 +587,7 @@ impl ExecutionGraph {
         self.stack = take(&mut stack);
     }
 
-    pub fn validate_with_graph(&self, graph: &Graph, func_lib: &FuncLib) {
+    pub fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
@@ -599,6 +599,10 @@ impl ExecutionGraph {
             assert!(e_node.inited);
             assert!(!seen_node_ids.contains(&e_node.id));
             seen_node_ids.insert(e_node.id);
+
+            if let Some(output_values) = e_node.output_values.as_ref() {
+                assert_eq!(output_values.len(), e_node.outputs.len());
+            }
 
             if self.e_node_invoke_order.contains(&e_node.id) {
                 assert_eq!(e_node.process_state, ProcessState::Backward2);
@@ -644,12 +648,9 @@ impl ExecutionGraph {
                     Binding::Bind(port_address) => {
                         assert!(matches!(binding, ExecutionBinding::Bind(_)));
 
-                        let output_e_node = self.by_id(&port_address.id).unwrap();
-
-                        {
-                            let e_node_port_address = e_input.binding.unwrap_bind();
-                            assert_eq!(*port_address, *e_node_port_address);
-                        }
+                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
+                        let e_node_port_address = e_input.binding.unwrap_bind();
+                        assert_eq!(*port_address, *e_node_port_address);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
                     }
                 }

@@ -177,3 +177,4 @@ Graph UI interaction state now records per-node action types (cache toggle, inpu
 Node headers now show an impure-function status dot for impure funcs.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 DynamicValue now owns the type-conversion helper previously in execution_graph.
+Execution graph validation now asserts output value cache length and ensures all bound output nodes exist in the execution node set.
