@@ -451,7 +451,7 @@ fn render_node_const_bindings(
     input_count: usize,
 ) {
     let badge_padding = 4.0 * ctx.scale;
-    let badge_height = (ctx.layout.row_height * 0.65).max(10.0 * ctx.scale);
+    let badge_height = (ctx.layout.row_height * 1.2).max(10.0 * ctx.scale);
     let badge_radius = 6.0 * ctx.scale;
     let badge_gap = 6.0 * ctx.scale;
 
@@ -480,9 +480,8 @@ fn render_node_const_bindings(
             egui::pos2(badge_right, center.y + badge_height * 0.5),
         );
 
-        let base = ctx.style.input_port_color;
-        let fill = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 200);
-        let stroke = egui::Stroke::new(1.0 * ctx.scale, base);
+        let fill = ctx.style.node_fill;
+        let stroke = egui::Stroke::new(1.0 * ctx.scale, ctx.style.input_port_color);
         ctx.painter().rect(
             badge_rect,
             badge_radius,
