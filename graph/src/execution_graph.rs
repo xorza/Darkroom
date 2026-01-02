@@ -86,7 +86,7 @@ enum VisitCause {
 }
 #[derive(Debug)]
 struct Visit {
-    node_id: NodeId,
+    id: NodeId,
     cause: VisitCause,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -367,13 +367,13 @@ impl ExecutionGraph {
                 });
 
             stack.push(Visit {
-                node_id: node.id,
+                id: node.id,
                 cause: VisitCause::Terminal,
             });
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = self.by_id_mut(&visit.node_id).unwrap();
+            let e_node = self.by_id_mut(&visit.id).unwrap();
 
             match visit.cause {
                 VisitCause::Terminal => {}
@@ -385,7 +385,7 @@ impl ExecutionGraph {
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
-                    self.e_node_invoke_order.push(visit.node_id);
+                    self.e_node_invoke_order.push(visit.id);
                     continue;
                 }
             };
@@ -404,11 +404,11 @@ impl ExecutionGraph {
 
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit {
-                node_id: visit.node_id,
+                id: visit.id,
                 cause: VisitCause::Done,
             });
 
-            let node = graph.by_id(&visit.node_id).unwrap();
+            let node = graph.by_id(&visit.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.update(node, func);
 
@@ -417,26 +417,26 @@ impl ExecutionGraph {
             }
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Bind(output_binding) = &input.binding else {
+                let Binding::Bind(port_address) = &input.binding else {
                     continue;
                 };
 
                 self.e_nodes
-                    .compact_insert_with(&output_binding.id, &mut write_idx, || ExecutionNode {
-                        id: output_binding.id,
+                    .compact_insert_with(&port_address.id, &mut write_idx, || ExecutionNode {
+                        id: port_address.id,
                         ..Default::default()
                     });
 
-                let e_node = self.by_id_mut(&visit.node_id).unwrap();
+                let e_node = self.by_id_mut(&visit.id).unwrap();
                 e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
-                    id: output_binding.id,
-                    port_idx: output_binding.port_idx,
+                    id: port_address.id,
+                    port_idx: port_address.port_idx,
                 });
 
                 stack.push(Visit {
-                    node_id: output_binding.id,
+                    id: port_address.id,
                     cause: VisitCause::OutputRequest {
-                        output_idx: output_binding.port_idx,
+                        output_idx: port_address.port_idx,
                     },
                 });
             }
@@ -525,20 +525,20 @@ impl ExecutionGraph {
         for e_node in self.e_nodes.iter() {
             if graph.by_id(&e_node.id).unwrap().terminal {
                 stack.push(Visit {
-                    node_id: e_node.id,
+                    id: e_node.id,
                     cause: VisitCause::Terminal,
                 });
             }
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = &mut self.e_nodes.by_key_mut(&visit.node_id).unwrap();
+            let e_node = &mut self.e_nodes.by_key_mut(&visit.id).unwrap();
 
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
-                    self.e_node_invoke_order.push(visit.node_id);
+                    self.e_node_invoke_order.push(visit.id);
                     e_node.process_state = ProcessState::Backward2;
                     continue;
                 }
@@ -562,7 +562,7 @@ impl ExecutionGraph {
 
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit {
-                node_id: visit.node_id,
+                id: visit.id,
                 cause: VisitCause::Done,
             });
 
@@ -578,7 +578,7 @@ impl ExecutionGraph {
                 };
 
                 stack.push(Visit {
-                    node_id: port_address.id,
+                    id: port_address.id,
                     cause: VisitCause::OutputRequest {
                         output_idx: usize::MAX,
                     },
