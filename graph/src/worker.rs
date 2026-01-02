@@ -15,10 +15,11 @@ use tokio::task::JoinHandle;
 use tracing::error;
 
 #[derive(Debug)]
-enum WorkerMessage {
+pub enum WorkerMessage {
     Exit,
     Event,
     Update { graph: Graph, func_lib: FuncLib },
+    Clear,
     InvalidateCaches(Vec<NodeId>),
 }
 
@@ -83,6 +84,12 @@ impl Worker {
                     WorkerMessage::InvalidateCaches(node_ids) => {
                         invalidate_node_ids.extend(node_ids)
                     }
+                    WorkerMessage::Clear => {
+                        execution_graph.clear();
+                        events.clear();
+                        context = None;
+                        invalidate_node_ids.clear();
+                    }
                 }
             }
 
@@ -97,11 +104,16 @@ impl Worker {
                 }
             }
 
-            let result = execution_graph.execute().await;
-            (compute_callback.lock().await)(result);
-
-            events.clear();
+            if !events.is_empty() {
+                let result = execution_graph.execute().await;
+                (compute_callback.lock().await)(result);
+                events.clear();
+            }
         }
+    }
+
+    pub fn send(&mut self, msg: WorkerMessage) {
+        self.tx.send(msg).unwrap();
     }
 
     pub fn invalidate_caches<I>(&mut self, node_ids: I)
@@ -232,6 +244,8 @@ mod tests {
         });
 
         worker.update(graph.clone(), func_lib.clone());
+        worker.event();
+
         let executed = compute_finish_rx
             .recv()
             .await
@@ -253,6 +267,7 @@ mod tests {
         assert_eq!(output_stream.take().await, ["2"]);
 
         worker.event();
+
         let executed = compute_finish_rx
             .recv()
             .await
@@ -262,7 +277,7 @@ mod tests {
         assert_eq!(executed.executed_nodes, 3);
         assert_eq!(output_stream.take().await, ["3"]);
 
-        // worker.exit().await;
+        worker.exit();
 
         Ok(())
     }

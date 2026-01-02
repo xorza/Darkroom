@@ -12,7 +12,7 @@ use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
 use graph::graph::NodeId;
 use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
-use graph::worker::Worker;
+use graph::worker::{Worker, WorkerMessage};
 use pollster::{FutureExt, block_on};
 use std::ffi::OsStr;
 use std::path::PathBuf;
@@ -167,6 +167,8 @@ impl ScenariumApp {
         self.view_graph = view_graph;
         self.graph_ui.reset();
         self.set_status(status);
+        self.worker.send(WorkerMessage::Clear);
+        self.graph_updated = true;
     }
 
     fn empty(&mut self) {
@@ -227,9 +229,8 @@ impl ScenariumApp {
         if self.graph_updated {
             self.worker
                 .update(self.view_graph.graph.clone(), self.func_lib.clone());
-        } else {
-            self.worker.event();
         }
+        self.worker.event();
     }
 }
 
