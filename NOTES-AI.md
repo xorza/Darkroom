@@ -201,3 +201,4 @@ Context meta constructors now share a `ContextCtor` type alias to avoid repeatin
 Editor node rendering now shows const input bindings as small badges to the left of input ports.
 Const-binding badges now use a dedicated stroke color in the graph style.
 Graph UI style defaults now use named constants for all fixed values in `GraphStyle::new`.
+Graph render context now pulls fonts, text color, and port radius from the shared GUI style.

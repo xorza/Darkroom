@@ -56,12 +56,8 @@ pub struct RenderContext<'a> {
     pub rect: egui::Rect,
     pub origin: egui::Pos2,
     pub layout: node::NodeLayout,
-    pub heading_font: egui::FontId,
-    pub body_font: egui::FontId,
-    pub text_color: egui::Color32,
     pub style: Style,
     pub node_widths: HashMap<NodeId, f32>,
-    pub port_radius: f32,
     pub scale: f32,
 }
 
@@ -79,23 +75,16 @@ impl<'a> RenderContext<'a> {
         assert!(view_graph.pan.y.is_finite(), "graph pan y must be finite");
 
         let layout = node::NodeLayout::default().scaled(view_graph.zoom);
-        layout.assert_valid();
 
-        let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, view_graph.zoom);
-        let body_font = node::scaled_font(ui, egui::TextStyle::Body, view_graph.zoom);
-        let text_color = ui.visuals().text_color();
-        let style = Style::new();
+        let style = Style::new(ui, view_graph.zoom);
 
         let width_ctx = node::NodeWidthContext {
             layout: &layout,
-            heading_font: &heading_font,
-            body_font: &body_font,
-            text_color,
             style: &style,
+            scale: view_graph.zoom,
         };
         let node_widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
         let origin = rect.min + view_graph.pan;
-        let port_radius = node::port_radius_for_scale(view_graph.zoom);
 
         Self {
             ui: UiRef::new(ui),
@@ -103,12 +92,8 @@ impl<'a> RenderContext<'a> {
             rect,
             origin,
             layout,
-            heading_font,
-            body_font,
-            text_color,
             style,
             node_widths,
-            port_radius,
             scale: view_graph.zoom,
         }
     }

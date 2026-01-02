@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+mod common;
 mod gui;
 mod init;
 mod model;
 
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
-use common::Shared;
+
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
 use graph::graph::{Binding, NodeId};

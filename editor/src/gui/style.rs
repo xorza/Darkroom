@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, Stroke};
+use egui::{Color32, FontId, Stroke, TextStyle};
 
 const STROKE_WIDTH: f32 = 1.0;
 const HEADER_TEXT_OFFSET: f32 = 4.0;
@@ -28,9 +28,15 @@ const DOTTED_RADIUS_BASE: f32 = 1.2;
 const DOTTED_RADIUS_MIN: f32 = 0.6;
 const DOTTED_RADIUS_MAX: f32 = 2.4;
 const CONST_STROKE_GAMMA: f32 = 0.7;
+const PORT_RADIUS: f32 = 5.5;
+const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
 
 #[derive(Debug, Clone)]
 pub struct Style {
+    pub heading_font: egui::FontId,
+    pub body_font: egui::FontId,
+    pub text_color: Color32,
+    pub port_radius: f32,
     pub header_text_offset: f32,
     pub cache_button_width_factor: f32,
     pub cache_button_vertical_pad_factor: f32,
@@ -59,8 +65,18 @@ pub struct Style {
 }
 
 impl Style {
-    pub fn new() -> Self {
+    pub fn new(_ui: &egui::Ui, _scale: f32) -> Self {
         Self {
+            heading_font: FontId {
+                size: 18.0,
+                family: egui::FontFamily::Proportional,
+            },
+            body_font: FontId {
+                size: 13.0,
+                family: egui::FontFamily::Proportional,
+            },
+            text_color: TEXT_COLOR,
+            port_radius: PORT_RADIUS,
             header_text_offset: HEADER_TEXT_OFFSET,
             cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
             cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,

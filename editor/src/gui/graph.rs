@@ -158,7 +158,7 @@ impl GraphUi {
             .unwrap_or(false);
         let middle_down = ui.input(|input| input.pointer.middle_down());
         let pointer_delta = ui.input(|input| input.pointer.delta());
-        let port_activation = (ctx.port_radius * 1.6).max(10.0);
+        let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
             view_graph,
             func_lib,
@@ -913,18 +913,13 @@ fn compute_layout_and_widths(
     scale: f32,
 ) -> (node::NodeLayout, std::collections::HashMap<NodeId, f32>) {
     let layout = node::NodeLayout::default().scaled(scale);
-    layout.assert_valid();
-    let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, scale);
-    let body_font = node::scaled_font(ui, egui::TextStyle::Body, scale);
-    let text_color = ui.visuals().text_color();
-    let style = crate::gui::style::Style::new();
+
+    let style = crate::gui::style::Style::new(ui, scale);
 
     let width_ctx = node::NodeWidthContext {
         layout: &layout,
-        heading_font: &heading_font,
-        body_font: &body_font,
-        text_color,
         style: &style,
+        scale,
     };
     let widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
     (layout, widths)

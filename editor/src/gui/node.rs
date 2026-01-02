@@ -1,3 +1,4 @@
+use crate::common::font::ScaledFontId;
 use eframe::egui;
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
@@ -42,24 +43,6 @@ impl Default for NodeLayout {
 }
 
 impl NodeLayout {
-    pub(crate) fn assert_valid(&self) {
-        assert!(self.node_width > 0.0, "node width must be positive");
-        assert!(
-            self.header_height >= 0.0,
-            "header height must be non-negative"
-        );
-        assert!(
-            self.cache_height >= 0.0,
-            "cache height must be non-negative"
-        );
-        assert!(self.row_height > 0.0, "row height must be positive");
-        assert!(self.padding >= 0.0, "padding must be non-negative");
-        assert!(
-            self.corner_radius >= 0.0,
-            "corner radius must be non-negative"
-        );
-    }
-
     pub(crate) fn scaled(&self, scale: f32) -> Self {
         assert!(scale > 0.0, "layout scale must be positive");
         assert!(scale.is_finite(), "layout scale must be finite");
@@ -84,20 +67,8 @@ pub fn node_rect_for_graph(
     layout: &NodeLayout,
     node_width: f32,
 ) -> egui::Rect {
-    assert!(scale > 0.0, "graph scale must be positive");
-    assert!(scale.is_finite(), "graph scale must be finite");
-    layout.assert_valid();
     let node_size = node_size(input_count, output_count, layout, node_width);
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
-}
-
-pub(crate) fn port_radius_for_scale(scale: f32) -> f32 {
-    assert!(scale.is_finite(), "port scale must be finite");
-    assert!(scale > 0.0, "port scale must be positive");
-    let radius = (5.5 * scale).clamp(3.0, 7.5);
-    assert!(radius.is_finite(), "port radius must be finite");
-    assert!(radius > 0.0, "port radius must be positive");
-    radius
 }
 
 pub fn render_node_bodies(
@@ -195,8 +166,18 @@ pub fn render_node_bodies(
             "cache button padding must be non-negative"
         );
         let cache_text_width = if ctx.layout.cache_height > 0.0 {
-            let cached_width = text_width(ctx.painter(), &ctx.body_font, "cached", ctx.text_color);
-            let cache_width = text_width(ctx.painter(), &ctx.body_font, "cache", ctx.text_color);
+            let cached_width = text_width(
+                ctx.painter(),
+                &ctx.style.body_font.scaled(ctx.scale),
+                "cached",
+                ctx.style.text_color,
+            );
+            let cache_width = text_width(
+                ctx.painter(),
+                &ctx.style.body_font.scaled(ctx.scale),
+                "cache",
+                ctx.style.text_color,
+            );
             cached_width.max(cache_width)
         } else {
             0.0
@@ -327,7 +308,7 @@ pub fn render_node_bodies(
                 cache_button_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 button_text,
-                ctx.body_font.clone(),
+                ctx.style.body_font.scaled(ctx.scale),
                 button_text_color,
             );
         }
@@ -410,14 +391,18 @@ fn render_node_ports(
         );
         let port_rect = egui::Rect::from_center_size(
             center,
-            egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
+            egui::vec2(
+                ctx.scale * ctx.style.port_radius * 2.0,
+                ctx.scale * ctx.style.port_radius * 2.0,
+            ),
         );
         let color = if ctx.ui().rect_contains_pointer(port_rect) {
             ctx.style.input_hover_color
         } else {
             ctx.style.input_port_color
         };
-        ctx.painter().circle_filled(center, ctx.port_radius, color);
+        ctx.painter()
+            .circle_filled(center, ctx.scale * ctx.style.port_radius, color);
     }
 
     for index in 0..output_count {
@@ -432,14 +417,18 @@ fn render_node_ports(
         );
         let port_rect = egui::Rect::from_center_size(
             center,
-            egui::vec2(ctx.port_radius * 2.0, ctx.port_radius * 2.0),
+            egui::vec2(
+                ctx.scale * ctx.style.port_radius * 2.0,
+                ctx.scale * ctx.style.port_radius * 2.0,
+            ),
         );
         let color = if ctx.ui().rect_contains_pointer(port_rect) {
             ctx.style.output_hover_color
         } else {
             ctx.style.output_port_color
         };
-        ctx.painter().circle_filled(center, ctx.port_radius, color);
+        ctx.painter()
+            .circle_filled(center, ctx.scale * ctx.style.port_radius, color);
     }
 }
 
@@ -464,7 +453,12 @@ fn render_node_const_bindings(
         };
 
         let label = static_value_label(value);
-        let label_width = text_width(ctx.painter(), &ctx.body_font, &label, ctx.text_color);
+        let label_width = text_width(
+            ctx.painter(),
+            &ctx.style.body_font,
+            &label,
+            ctx.style.text_color,
+        );
         let badge_width = label_width + badge_padding * 2.0;
         let center = node_input_pos(
             ctx.origin,
@@ -474,14 +468,14 @@ fn render_node_const_bindings(
             &ctx.layout,
             ctx.scale,
         );
-        let badge_right = center.x - ctx.port_radius - badge_gap;
+        let badge_right = center.x - ctx.scale * ctx.style.port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
             egui::pos2(badge_right, center.y + badge_height * 0.5),
         );
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
-        let link_end = egui::pos2(center.x - ctx.port_radius * 0.6, center.y);
+        let link_end = egui::pos2(center.x - ctx.scale * ctx.style.port_radius * 0.6, center.y);
         ctx.painter()
             .line_segment([link_start, link_end], ctx.style.connection_stroke);
         ctx.painter().rect(
@@ -495,8 +489,8 @@ fn render_node_const_bindings(
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            ctx.body_font.clone(),
-            ctx.text_color,
+            ctx.style.body_font.scaled(ctx.scale),
+            ctx.style.text_color,
         );
     }
 }
@@ -538,8 +532,8 @@ fn render_node_labels(
         node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
         node_name,
-        ctx.heading_font.clone(),
-        ctx.text_color,
+        ctx.style.heading_font.scaled(ctx.scale),
+        ctx.style.text_color,
     );
 
     for (index, input) in func.inputs.iter().enumerate() {
@@ -555,8 +549,8 @@ fn render_node_labels(
             text_pos,
             egui::Align2::LEFT_TOP,
             &input.name,
-            ctx.body_font.clone(),
-            ctx.text_color,
+            ctx.style.body_font.scaled(ctx.scale),
+            ctx.style.text_color,
         );
     }
 
@@ -573,8 +567,8 @@ fn render_node_labels(
             text_pos,
             egui::Align2::RIGHT_TOP,
             &output.name,
-            ctx.body_font.clone(),
-            ctx.text_color,
+            ctx.style.body_font.scaled(ctx.scale),
+            ctx.style.text_color,
         );
     }
 }
@@ -656,10 +650,8 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
 #[derive(Debug)]
 pub(crate) struct NodeWidthContext<'a> {
     pub layout: &'a NodeLayout,
-    pub heading_font: &'a egui::FontId,
-    pub body_font: &'a egui::FontId,
-    pub text_color: egui::Color32,
     pub style: &'a crate::gui::style::Style,
+    pub scale: f32,
 }
 
 pub(crate) fn compute_node_widths(
@@ -668,7 +660,6 @@ pub(crate) fn compute_node_widths(
     func_lib: &FuncLib,
     ctx: &NodeWidthContext<'_>,
 ) -> HashMap<NodeId, f32> {
-    ctx.layout.assert_valid();
     let scale_guess = ctx.layout.row_height / 18.0;
     assert!(scale_guess.is_finite(), "layout scale guess must be finite");
     assert!(scale_guess > 0.0, "layout scale guess must be positive");
@@ -682,14 +673,28 @@ pub(crate) fn compute_node_widths(
         let func = func_lib
             .by_id(&node.func_id)
             .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
-        let header_width = text_width(painter, ctx.heading_font, &node.name, ctx.text_color)
-            + ctx.layout.padding * 2.0;
+        let header_width = text_width(
+            painter,
+            &ctx.style.heading_font.scaled(ctx.scale),
+            &node.name,
+            ctx.style.text_color,
+        ) + ctx.layout.padding * 2.0;
         let vertical_padding = ctx.layout.padding * ctx.style.cache_button_vertical_pad_factor;
         let cache_button_height = (ctx.layout.cache_height - vertical_padding * 2.0)
             .max(10.0 * scale_guess)
             .min(ctx.layout.cache_height);
-        let cache_text_width = text_width(painter, ctx.body_font, "cached", ctx.text_color)
-            .max(text_width(painter, ctx.body_font, "cache", ctx.text_color));
+        let cache_text_width = text_width(
+            painter,
+            &ctx.style.body_font.scaled(ctx.scale),
+            "cached",
+            ctx.style.text_color,
+        )
+        .max(text_width(
+            painter,
+            &ctx.style.body_font.scaled(ctx.scale),
+            "cache",
+            ctx.style.text_color,
+        ));
         let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
             .max(cache_button_height)
             .max(
@@ -712,12 +717,26 @@ pub(crate) fn compute_node_widths(
         let input_widths: Vec<f32> = func
             .inputs
             .iter()
-            .map(|input| text_width(painter, ctx.body_font, &input.name, ctx.text_color))
+            .map(|input| {
+                text_width(
+                    painter,
+                    &ctx.style.body_font.scaled(ctx.scale),
+                    &input.name,
+                    ctx.style.text_color,
+                )
+            })
             .collect();
         let output_widths: Vec<f32> = func
             .outputs
             .iter()
-            .map(|output| text_width(painter, ctx.body_font, &output.name, ctx.text_color))
+            .map(|output| {
+                text_width(
+                    painter,
+                    &ctx.style.body_font.scaled(ctx.scale),
+                    &output.name,
+                    ctx.style.text_color,
+                )
+            })
             .collect();
 
         let row_count = func.inputs.len().max(func.outputs.len()).max(1);
@@ -750,16 +769,6 @@ pub(crate) fn compute_node_widths(
     }
 
     widths
-}
-
-pub(crate) fn scaled_font(ui: &egui::Ui, style: egui::TextStyle, scale: f32) -> egui::FontId {
-    assert!(scale.is_finite(), "font scale must be finite");
-    assert!(scale > 0.0, "font scale must be positive");
-    let base = style.resolve(ui.style());
-    egui::FontId {
-        size: base.size * scale,
-        family: base.family.clone(),
-    }
 }
 
 fn text_width(
