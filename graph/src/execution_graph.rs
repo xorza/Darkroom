@@ -452,7 +452,17 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let (input_state, e_binding) = match &input.binding {
-                    Binding::None => (InputState::None, Some(ExecutionBinding::None)),
+                    Binding::None => {
+                        let e_binding = &self.e_nodes[e_node_idx].inputs[input_idx].binding;
+                        (
+                            InputState::None,
+                            if e_binding.is_none() {
+                                None
+                            } else {
+                                Some(ExecutionBinding::None)
+                            },
+                        )
+                    }
                     Binding::Const(value) => {
                         let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                         if Some(value) == e_input.binding.as_const() {
@@ -719,6 +729,9 @@ impl ExecutionBinding {
             ExecutionBinding::Bind(port_address) => Some(port_address),
             _ => None,
         }
+    }
+    pub fn is_none(&self) -> bool {
+        matches!(self, ExecutionBinding::None)
     }
 }
 
