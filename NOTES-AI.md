@@ -128,6 +128,7 @@ Execution graph binding access now uses a shared expect helper in forward/valida
 Execution graph invalidation now walks downstream execution-node bindings to clear init state.
 Execution graph invalidation now has unit coverage for dependent node invalidation.
 Execution graph invalidation now accepts any iterator of node IDs for batching.
+Execution graph invalidation is now exposed as `invalidate_recursively` (typo fixed), with a deprecated alias kept for callers.
 Execution graph execution now returns `ExecutionStats` (elapsed seconds + executed node count).
 Graph now exposes a `dependent_nodes` traversal to gather downstream nodes from a starting node id.
 Graph tests now cover `dependent_nodes` traversal ordering and reachability.
@@ -140,6 +141,7 @@ Execution node cache update compacts in-place with swaps and truncation to minim
 Execution node cache compaction includes inline comments describing the swap-and-truncate flow.
 Graph input binding assignment now uses direct `is_some` checks on `const_value` for clarity.
 Execution graph input binding traversal now uses a `let-else` early-continue to reduce nesting in backward1.
+Execution graph backward1 now increments output usage counts in one place per visit, while still handling already-processed nodes.
 Execution graph backward2 traversal uses early-continue and `let-else` to flatten execute-path scheduling.
 Function validation now asserts that no-output functions are impure.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
@@ -179,3 +181,4 @@ Node headers now show an impure-function status dot for impure funcs.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 DynamicValue now owns the type-conversion helper previously in execution_graph.
 Execution graph validation now asserts output value cache length and ensures all bound output nodes exist in the execution node set.
+Execution graph forward propagation now computes input states before mutating execution nodes to reduce repeated lookups.

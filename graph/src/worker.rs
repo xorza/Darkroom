@@ -131,7 +131,7 @@ where
         }
 
         if !invalidate_node_ids.is_empty() {
-            execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
+            execution_graph.invalidate_recursively(invalidate_node_ids.drain());
             assert!(invalidate_node_ids.is_empty());
         }
 

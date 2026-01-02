@@ -194,7 +194,7 @@ impl ExecutionGraph {
         self.e_nodes.by_key_mut(node_id)
     }
 
-    pub fn invalidate_recurisevly<I>(&mut self, node_ids: I)
+    pub fn invalidate_recursively<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = NodeId>,
     {
@@ -982,7 +982,7 @@ mod tests {
     }
 
     #[test]
-    fn invalidate_recurisevly_marks_dependents() -> anyhow::Result<()> {
+    fn invalidate_recursively_marks_dependents() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
@@ -995,7 +995,7 @@ mod tests {
         let mult = graph.by_name("mult").unwrap().id;
         let print = graph.by_name("print").unwrap().id;
 
-        execution_graph.invalidate_recurisevly(vec![sum]);
+        execution_graph.invalidate_recursively(vec![sum]);
 
         assert!(execution_graph.by_id(&get_a).unwrap().inited);
         assert!(execution_graph.by_id(&get_b).unwrap().inited);
