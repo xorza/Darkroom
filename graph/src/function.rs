@@ -302,20 +302,16 @@ impl InvokeCache {
     where
         T: Any + Send + Default,
     {
-        let is_some = self.is_some::<T>();
-
-        if is_some {
-            self.boxed
-                .as_mut()
-                .expect("InvokeCache missing value")
-                .downcast_mut::<T>()
-                .expect("InvokeCache has unexpected type")
-        } else {
-            self.boxed
-                .insert(Box::<T>::default())
-                .downcast_mut::<T>()
-                .expect("InvokeCache default insert failed")
+        if self
+            .boxed
+            .as_mut()
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+            .is_none()
+        {
+            self.boxed = Some(Box::<T>::default());
         }
+
+        self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
     }
 
     pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
@@ -323,20 +319,16 @@ impl InvokeCache {
         T: Any + Send,
         F: FnOnce() -> T,
     {
-        let is_some = self.is_some::<T>();
-
-        if is_some {
-            self.boxed
-                .as_mut()
-                .expect("InvokeCache missing value")
-                .downcast_mut::<T>()
-                .expect("InvokeCache has unexpected type")
-        } else {
-            self.boxed
-                .insert(Box::<T>::new(f()))
-                .downcast_mut::<T>()
-                .expect("InvokeCache insert failed")
+        if self
+            .boxed
+            .as_mut()
+            .and_then(|boxed| boxed.downcast_mut::<T>())
+            .is_none()
+        {
+            self.boxed = Some(Box::<T>::new(f()));
         }
+
+        self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
     }
 }
 
