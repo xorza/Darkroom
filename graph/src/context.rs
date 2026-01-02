@@ -48,11 +48,17 @@ impl Hash for ContextMeta {
 }
 
 impl ContextMeta {
-    pub fn new<T: 'static + Send + Sync>(
-        ctx_id: CtxId,
-        ctor: Arc<dyn Fn() -> T + Send + Sync>,
-    ) -> Self {
+    pub fn new<T: 'static + Send + Sync, F>(ctx_id: CtxId, ctor: F) -> Self
+    where
+        F: Fn() -> T + Send + Sync + 'static,
+    {
         let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
+
+        ContextMeta { ctx_id, ctor }
+    }
+
+    pub fn new_default<T: 'static + Send + Sync + Default>(ctx_id: CtxId) -> Self {
+        let ctor: Arc<ContextCtor> = Arc::new(|| Box::new(T::default()) as Box<dyn Any>);
 
         ContextMeta { ctx_id, ctor }
     }
@@ -79,5 +85,48 @@ impl ContextManager {
         boxed
             .downcast_mut::<T>()
             .expect("ContextManager has unexpected type")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ContextManager, ContextMeta, ContextType, CtxId};
+    use std::str::FromStr;
+    use std::sync::Arc;
+
+    #[derive(Debug, Default)]
+    struct TestCtx {
+        value: i32,
+    }
+
+    #[test]
+    fn custom_default_context_is_created_and_reused() {
+        let meta =
+            ContextMeta::new_default::<TestCtx>("5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into());
+        let ctx_type = ContextType::Custom(meta);
+
+        let mut manager = ContextManager::default();
+        let ctx = manager.get::<TestCtx>(&ctx_type);
+        assert_eq!(ctx.value, 0);
+        ctx.value = 42;
+
+        let ctx_again = manager.get::<TestCtx>(&ctx_type);
+        assert_eq!(ctx_again.value, 42);
+    }
+    #[test]
+    fn custom_context_is_created_and_reused() {
+        let meta = ContextMeta::new::<TestCtx, _>(
+            "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
+            TestCtx::default,
+        );
+        let ctx_type = ContextType::Custom(meta);
+
+        let mut manager = ContextManager::default();
+        let ctx = manager.get::<TestCtx>(&ctx_type);
+        assert_eq!(ctx.value, 0);
+        ctx.value = 42;
+
+        let ctx_again = manager.get::<TestCtx>(&ctx_type);
+        assert_eq!(ctx_again.value, 42);
     }
 }

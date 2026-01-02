@@ -192,3 +192,5 @@ Invocation inputs now use `InvokeInput { state, value }`, and output usage is tr
 Invoke cache `get_or_default` now resets the stored value to the requested default type if a downcast fails.
 `graph/src/context.rs` defines `ContextKind` (built-ins plus `Custom(TypeId)`), `Context`/`ContextFactory`, a `ContextRegistry` for builders, and `InvokeContext` storage; `Func` now records `required_contexts` (runtime-only, skipped in serialization).
 Context meta constructors now share a `ContextCtor` type alias to avoid repeating the boxed Any factory signature.
+`graph/src/context.rs` includes a test that verifies custom contexts are created once and reused via `ContextManager::get`.
+`ContextMeta::new_default` creates a custom context meta for `T: Default` without needing an explicit constructor.
