@@ -4,8 +4,7 @@ use std::panic;
 
 use anyhow::Result;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::{HashMap, HashSet};
-use serde::{Deserialize, Serialize};
+use serde_yml::modules::error::new;
 use thiserror::Error;
 
 use crate::args::Args;
@@ -34,9 +33,7 @@ pub struct ExecutionStats {
     pub executed_nodes: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PortAddress {
-    pub e_node_idx: usize,
+    pub id: NodeId,
     pub port_idx: usize,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -52,16 +49,14 @@ pub enum ExecutionBinding {
     None,
     Const(StaticValue),
     Bind(PortAddress),
-}
-impl ExecutionBinding {
-    fn expect_bind(&self, context: &str) -> &PortAddress {
+    fn unwrap_bind(&self) -> &PortAddress {
         match self {
             ExecutionBinding::Bind(port_address) => port_address,
             ExecutionBinding::None => {
-                panic!("{context}: expected ExecutionBinding::Bind, got None")
+                panic!("expected ExecutionBinding::Bind, got None")
             }
             ExecutionBinding::Const(_) => {
-                panic!("{context}: expected ExecutionBinding::Bind, got Const")
+                panic!("expected ExecutionBinding::Bind, got Const")
             }
         }
     }
@@ -91,10 +86,7 @@ enum VisitCause {
     OutputRequest { output_idx: usize },
     Done,
 }
-#[derive(Debug)]
-struct Visit {
-    node_idx: usize,
-    e_node_idx: usize,
+    node_id: NodeId,
     cause: VisitCause,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -115,9 +107,6 @@ pub struct ExecutionNode {
 
     pub missing_required_inputs: bool,
     pub changed_inputs: bool,
-    pub behavior: ExecutionBehavior,
-
-    pub node_idx: usize,
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
 
@@ -144,9 +133,7 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
     }
 }
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub struct ExecutionGraph {
-    pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    pub e_node_invoke_order: Vec<usize>,
+    pub e_node_invoke_order: Vec<NodeId>,
 
     //caches
     #[serde(skip)]
@@ -157,18 +144,14 @@ pub struct ExecutionGraph {
 
 impl ExecutionNode {
     fn reset(&mut self) {
-        self.missing_required_inputs = false;
-        self.changed_inputs = false;
-        self.node_idx = usize::MAX;
         self.process_state = ProcessState::None;
         self.wants_execute = false;
         self.run_time = 0.0;
         self.error = None;
     }
-    fn update(&mut self, node_idx: usize, node: &Node, func: &Func) {
+    fn update(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
 
-        self.node_idx = node_idx;
         self.func_id = func.id;
         self.lambda = func.lambda.clone();
 
@@ -236,19 +219,12 @@ impl ExecutionGraph {
         while let Some(current_node_id) = stack.pop() {
             if !seen.insert(current_node_id) {
                 continue;
-            }
-
-            let Some(current_idx) = self.e_nodes.index_of_key(&current_node_id) else {
-                continue;
-            };
             let e_node = self.by_id_mut(&current_node_id).unwrap();
             e_node.inited = false;
 
             for node in self.e_nodes.iter() {
                 let depends = node.inputs.iter().any(|input| {
-                    matches!(
-                        &input.binding,
-                        ExecutionBinding::Bind(port_address) if port_address.e_node_idx == current_idx
+                        ExecutionBinding::Bind(port_address) if port_address.id == current_node_id
                     )
                 });
                 if depends {
@@ -296,19 +272,15 @@ impl ExecutionGraph {
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
         let start = std::time::Instant::now();
 
-        let mut input_args: Args = take(&mut self.input_args);
-
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
+        for node_id in self.e_node_invoke_order.iter().copied() {
+            let e_node = self.e_nodes.by_key(&node_id).unwrap();
             input_args.resize_and_clear(e_node.inputs.len());
             assert!(e_node.inited);
 
             for (input_idx, input) in e_node.inputs.iter().enumerate() {
                 let value: DynamicValue = match &input.binding {
                     ExecutionBinding::None => DynamicValue::None,
-                    ExecutionBinding::Const(value) => value.into(),
-                    ExecutionBinding::Bind(port_address) => {
-                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
+                        let output_e_node = self.by_id(&port_address.id).unwrap();
                         let output_values = output_e_node
                             .output_values
                             .as_ref()
@@ -320,9 +292,7 @@ impl ExecutionGraph {
                 };
 
                 input_args[input_idx] = convert_type(value, &input.data_type);
-            }
-
-            let e_node = &mut self.e_nodes[e_node_idx];
+            let e_node = self.e_nodes.by_key_mut(&node_id).unwrap();
             let outputs = e_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
@@ -367,31 +337,19 @@ impl ExecutionGraph {
 
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
-        stack.reserve(10);
-
-        for (node_idx, node) in graph
-            .nodes
-            .iter()
-            .enumerate()
-            .filter(|&(_, node)| node.terminal)
-        {
-            let e_node_idx = self
-                .e_nodes
+        for node in graph.nodes.iter().filter(|&node| node.terminal) {
+            self.e_nodes
                 .compact_insert_with(&node.id, &mut write_idx, || ExecutionNode {
                     id: node.id,
                     ..Default::default()
                 });
-
-            stack.push(Visit {
-                node_idx,
-                e_node_idx,
+                node_id: node.id,
                 cause: VisitCause::Terminal,
             });
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node_idx = visit.e_node_idx;
-            let e_node = &mut self.e_nodes[e_node_idx];
+            let e_node = self.by_id_mut(&visit.node_id).unwrap();
 
             match visit.cause {
                 VisitCause::Terminal => {}
@@ -401,9 +359,7 @@ impl ExecutionGraph {
                     }
                 }
                 VisitCause::Done => {
-                    assert_eq!(e_node.process_state, ProcessState::Processing);
-                    e_node.process_state = ProcessState::Backward1;
-                    self.e_node_invoke_order.push(e_node_idx);
+                    self.e_node_invoke_order.push(visit.node_id);
                     continue;
                 }
             };
@@ -420,16 +376,13 @@ impl ExecutionGraph {
                 }
             }
 
-            e_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                node_idx: visit.node_idx,
-                e_node_idx,
+                node_id: visit.node_id,
                 cause: VisitCause::Done,
             });
 
-            let node = &graph.nodes[visit.node_idx];
+            let node = &graph.by_id(&visit.node_id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
-            e_node.update(visit.node_idx, node, func);
+            e_node.update(node, func);
 
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
@@ -438,30 +391,21 @@ impl ExecutionGraph {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(output_binding) = &input.binding else {
                     continue;
-                };
-
-                let output_node_idx = graph
-                    .nodes
-                    .index_of_key(&output_binding.output_node_id)
-                    .unwrap();
-                let output_e_node_idx = self.e_nodes.compact_insert_with(
+                self.e_nodes.compact_insert_with(
                     &output_binding.output_node_id,
                     &mut write_idx,
                     || ExecutionNode {
                         id: output_binding.output_node_id,
                         ..Default::default()
                     },
-                );
-
-                let e_node = &mut self.e_nodes[e_node_idx];
+                let e_node = self.by_id_mut(&visit.node_id).unwrap();
                 e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
-                    e_node_idx: output_e_node_idx,
+                    id: output_binding.output_node_id,
                     port_idx: output_binding.output_idx,
                 });
 
                 stack.push(Visit {
-                    node_idx: output_node_idx,
-                    e_node_idx: output_e_node_idx,
+                    node_id: output_binding.output_node_id,
                     cause: VisitCause::OutputRequest {
                         output_idx: output_binding.output_idx,
                     },
@@ -474,10 +418,7 @@ impl ExecutionGraph {
 
         if is_debug() {
             assert_eq!(self.e_nodes.len(), self.e_nodes.idx_by_key.len());
-            assert!(self.e_nodes.len() <= graph.nodes.len());
-            self.e_nodes.iter().enumerate().for_each(|(idx, e_node)| {
-                assert!(e_node.node_idx < graph.nodes.len());
-                assert_eq!(graph.nodes[e_node.node_idx].id, e_node.id);
+                assert_eq!(graph.by_id(&e_node.id).unwrap().id, e_node.id);
                 assert_eq!(idx, self.e_nodes.idx_by_key[&e_node.id]);
             });
         }
@@ -485,10 +426,8 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    // Propagate input state forward through the processing order.
-    fn forward(&mut self, graph: &Graph) {
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
-            let node = &graph.nodes[self.e_nodes[e_node_idx].node_idx];
+        for node_id in self.e_node_invoke_order.iter().copied() {
+            let node = graph.by_id(&node_id).unwrap();
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
@@ -497,12 +436,10 @@ impl ExecutionGraph {
                 let input_state = match &input.binding {
                     Binding::None => InputState::Missing,
                     // todo implement Unchanged for const bindings
-                    Binding::Const(_) => InputState::Changed,
-                    Binding::Bind(_) => {
-                        let port_address = self.e_nodes[e_node_idx].inputs[input_idx]
+                        let port_address = self.by_id(&node_id).unwrap().inputs[input_idx]
                             .binding
-                            .expect_bind("forward input binding");
-                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
+                            .unwrap_bind();
+                        let output_e_node = self.by_id(&port_address.id).unwrap();
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
 
@@ -515,9 +452,8 @@ impl ExecutionGraph {
                             InputState::Unchanged
                         }
                     }
-                };
-
-                let e_node_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                let e_node_input =
+                    &mut self.e_nodes.by_key_mut(&node_id).unwrap().inputs[input_idx];
                 e_node_input.state = input_state;
                 match input_state {
                     InputState::Unchanged => {}
@@ -525,9 +461,7 @@ impl ExecutionGraph {
                     InputState::Missing => missing_required_inputs |= e_node_input.required,
                     InputState::Unknown => panic!("unprocessed input"),
                 }
-            }
-
-            let e_node = &mut self.e_nodes[e_node_idx];
+            let e_node = self.e_nodes.by_key_mut(&node_id).unwrap();
             assert_eq!(e_node.process_state, ProcessState::Backward1);
             assert!(e_node.inited);
 
@@ -548,26 +482,21 @@ impl ExecutionGraph {
         self.e_node_invoke_order.clear();
 
         let mut stack: Vec<Visit> = take(&mut self.stack);
-        assert!(stack.is_empty());
-
-        for (idx, e_node) in self.e_nodes.iter().enumerate() {
-            if graph.nodes[e_node.node_idx].terminal {
+        for e_node in self.e_nodes.iter() {
+            if graph.by_id(&e_node.id).unwrap().terminal {
                 stack.push(Visit {
-                    node_idx: usize::MAX,
-                    e_node_idx: idx,
+                    node_id: e_node.id,
                     cause: VisitCause::Terminal,
                 });
             }
         }
-
-        while let Some(visit) = stack.pop() {
-            let e_node = &mut self.e_nodes[visit.e_node_idx];
+            let e_node = &mut self.e_nodes.by_key_mut(&visit.node_id).unwrap();
 
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
-                    self.e_node_invoke_order.push(visit.e_node_idx);
+                    self.e_node_invoke_order.push(visit.node_id);
                     e_node.process_state = ProcessState::Backward2;
                     continue;
                 }
@@ -589,10 +518,7 @@ impl ExecutionGraph {
                 continue;
             }
 
-            e_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                node_idx: usize::MAX,
-                e_node_idx: visit.e_node_idx,
+                node_id: visit.node_id,
                 cause: VisitCause::Done,
             });
 
@@ -606,10 +532,7 @@ impl ExecutionGraph {
                 let ExecutionBinding::Bind(port_address) = &input.binding else {
                     continue;
                 };
-
-                stack.push(Visit {
-                    node_idx: usize::MAX,
-                    e_node_idx: port_address.e_node_idx,
+                    node_id: port_address.id,
                     cause: VisitCause::OutputRequest {
                         output_idx: usize::MAX,
                     },
@@ -625,26 +548,21 @@ impl ExecutionGraph {
             return;
         }
 
-        assert!(self.e_nodes.len() <= graph.nodes.len());
-
-        let mut seen_node_indices = vec![false; graph.nodes.len()];
-        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
+        let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
+        for e_node in self.e_nodes.iter() {
             assert!(e_node.inited);
-            assert!(e_node.node_idx < graph.nodes.len());
-            assert!(!seen_node_indices[e_node.node_idx]);
-            seen_node_indices[e_node.node_idx] = true;
+            assert!(!seen_node_ids.contains(&e_node.id));
+            seen_node_ids.insert(e_node.id);
 
-            if self.e_node_invoke_order.contains(&e_node_idx) {
+            if self.e_node_invoke_order.contains(&e_node.id) {
                 assert_eq!(e_node.process_state, ProcessState::Backward2);
             } else {
                 assert!(
                     e_node.process_state == ProcessState::Forward
                         || e_node.process_state == ProcessState::Backward2
                 );
-            }
-
-            let node = &graph.nodes[e_node.node_idx];
-            let func = &func_lib.by_id(&e_node.func_id).expect("Function not found");
+            let node = graph.by_id(&e_node.id).unwrap();
+            let func = func_lib.by_id(&e_node.func_id).unwrap();
 
             assert_eq!(e_node.func_id, node.func_id);
             assert_eq!(node.id, e_node.id);
@@ -674,16 +592,9 @@ impl ExecutionGraph {
                     }
                     Binding::Const(_) => {
                         assert!(matches!(binding, ExecutionBinding::Const(_)));
-                    }
-                    Binding::Bind(output_binding) => {
-                        let port_address = e_node.inputs[input_idx]
-                            .binding
-                            .expect_bind("validation input binding");
-
-                        assert!(port_address.e_node_idx < self.e_nodes.len());
-
-                        let output_e_node = &self.e_nodes[port_address.e_node_idx];
-                        let output_node = &graph.nodes[output_e_node.node_idx];
+                        let port_address = e_node.inputs[input_idx].binding.unwrap_bind();
+                        let output_e_node = self.by_id(&port_address.id).unwrap();
+                        let output_node = graph.by_id(&output_e_node.id).unwrap();
 
                         assert_eq!(output_node.id, output_binding.output_node_id);
                         assert_eq!(output_e_node.id, output_binding.output_node_id);
@@ -696,13 +607,10 @@ impl ExecutionGraph {
                 }
             }
         }
+            let id = self.e_node_invoke_order[idx];
+            assert!(!self.e_node_invoke_order[idx + 1..].contains(&id));
 
-        for idx in 0..self.e_node_invoke_order.len() {
-            let e_node_idx = self.e_node_invoke_order[idx];
-            assert!(e_node_idx < self.e_nodes.len());
-            assert!(!self.e_node_invoke_order[idx + 1..].contains(&e_node_idx));
-
-            let e_node = &self.e_nodes[e_node_idx];
+            let e_node = self.by_id(&id).unwrap();
             assert!(!e_node.missing_required_inputs);
 
             let all_dependencies_in_order = e_node
@@ -710,11 +618,7 @@ impl ExecutionGraph {
                 .iter()
                 .filter_map(|input| match &input.binding {
                     ExecutionBinding::Bind(port_address) => Some(port_address),
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => None,
-                })
-                .all(|port_address| {
-                    !self.e_node_invoke_order[idx..].contains(&port_address.e_node_idx)
-                });
+                .all(|port_address| !self.e_node_invoke_order[idx..].contains(&port_address.id));
             assert!(all_dependencies_in_order);
         }
     }
@@ -930,9 +834,7 @@ mod tests {
 
         // pure node invoked if no cache values
         assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
+            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -941,9 +843,7 @@ mod tests {
 
         // pure node not invoked if has cached values
         assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
+            .all(|id| execution_graph.by_id(id).unwrap().name != "get_b"));
 
         Ok(())
     }
@@ -964,9 +864,7 @@ mod tests {
 
         // get_b not in e_node_execution_order
         assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
+            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
 
         Ok(())
     }
@@ -984,9 +882,7 @@ mod tests {
 
         // once node invoked is has no cached outputs
         assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|&idx| execution_graph.e_nodes[idx].name == "get_b"));
+            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -994,9 +890,7 @@ mod tests {
 
         // once node not invoked is has cached outputs
         assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .all(|&idx| execution_graph.e_nodes[idx].name != "get_b"));
+            .all(|id| execution_graph.by_id(id).unwrap().name != "get_b"));
 
         Ok(())
     }
