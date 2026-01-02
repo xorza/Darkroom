@@ -309,7 +309,7 @@ impl ExecutionGraph {
                     }
                 };
 
-                input_args[input_idx] = convert_type(value, &input.data_type);
+                input_args[input_idx] = value.convert_type(&input.data_type);
             }
 
             let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
@@ -693,43 +693,6 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
                 assert!(port_address.port_idx < output_func.outputs.len());
             }
-        }
-    }
-}
-
-fn convert_type(src_value: DynamicValue, dst_data_type: &DataType) -> DynamicValue {
-    if matches!(src_value, DynamicValue::None) {
-        return DynamicValue::None;
-    }
-
-    let src_data_type = src_value.data_type();
-    if *src_data_type == *dst_data_type {
-        return src_value.clone();
-    }
-
-    if src_data_type.is_custom() || dst_data_type.is_custom() {
-        panic!("Custom types are not supported yet");
-    }
-
-    match (src_data_type, dst_data_type) {
-        (DataType::Bool, DataType::Int) => DynamicValue::Int(src_value.as_bool() as i64),
-        (DataType::Bool, DataType::Float) => DynamicValue::Float(src_value.as_bool() as i64 as f64),
-        (DataType::Bool, DataType::String) => DynamicValue::String(src_value.as_bool().to_string()),
-
-        (DataType::Int, DataType::Bool) => DynamicValue::Bool(src_value.as_int() != 0),
-        (DataType::Int, DataType::Float) => DynamicValue::Float(src_value.as_int() as f64),
-        (DataType::Int, DataType::String) => DynamicValue::String(src_value.as_int().to_string()),
-
-        (DataType::Float, DataType::Bool) => {
-            DynamicValue::Bool(src_value.as_float().abs() > common::EPSILON)
-        }
-        (DataType::Float, DataType::Int) => DynamicValue::Int(src_value.as_float() as i64),
-        (DataType::Float, DataType::String) => {
-            DynamicValue::String(src_value.as_float().to_string())
-        }
-
-        (src, dst) => {
-            panic!("Unsupported conversion from {:?} to {:?}", src, dst);
         }
     }
 }
