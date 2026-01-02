@@ -58,5 +58,5 @@ strip = "none"
 split-debuginfo = "unpacked"
 
 [profile.release]
-# lto = true
-# strip = "symbols"
+lto = true
+strip = "symbols"

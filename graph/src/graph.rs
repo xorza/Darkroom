@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncBehavior, FuncId};
-use common::{deserialize, serialize, FileFormat, SerdeFormatResult};
+use common::{deserialize, is_false, serialize, FileFormat, SerdeFormatResult};
 use common::{id_type, is_debug};
 
 id_type!(NodeId);
@@ -25,7 +25,9 @@ pub enum Binding {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Input {
+    #[serde(default, skip_serializing_if = "Binding::is_none")]
     pub binding: Binding,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_value: Option<StaticValue>,
 }
 
@@ -47,7 +49,10 @@ pub struct Node {
     pub func_id: FuncId,
     pub name: String,
 
+    #[serde(default, skip_serializing_if = "NodeBehavior::is_default")]
     pub behavior: NodeBehavior,
+
+    #[serde(default, skip_serializing_if = "is_false")]
     pub terminal: bool,
 
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -55,11 +60,7 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
 }
-impl KeyIndexKey<NodeId> for Node {
-    fn key(&self) -> &NodeId {
-        &self.id
-    }
-}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Graph {
     pub nodes: KeyIndexVec<NodeId, Node>,
@@ -268,6 +269,18 @@ impl Binding {
     }
 }
 
+impl NodeBehavior {
+    pub fn is_default(value: &Self) -> bool {
+        matches!(value, NodeBehavior::AsFunction)
+    }
+}
+
+impl KeyIndexKey<NodeId> for Node {
+    fn key(&self) -> &NodeId {
+        &self.id
+    }
+}
+
 impl From<PortAddress> for Binding {
     fn from(value: PortAddress) -> Self {
         Binding::Bind(value)
@@ -406,10 +419,7 @@ mod tests {
     fn node_remove_test() -> anyhow::Result<()> {
         let mut graph = super::test_graph();
 
-        let node_id = graph
-            .by_name("sum")
-            .unwrap_or_else(|| panic!("Node named \"sum\" not found"))
-            .id;
+        let node_id = graph.by_name("sum").unwrap().id;
         graph.remove_by_id(node_id);
 
         assert!(graph.by_name("sum").is_none());

@@ -195,3 +195,6 @@ Context meta constructors now share a `ContextCtor` type alias to avoid repeatin
 `graph/src/context.rs` includes a test that verifies custom contexts are created once and reused via `ContextManager::get`.
 `ContextMeta::new_default` creates a custom context meta for `T: Default` without needing an explicit constructor.
 `FuncLambda::invoke` now takes a `ContextManager` so lambdas can access shared invocation contexts; async lambda macros insert the extra parameter.
+`common::is_false` is a shared serde helper for `skip_serializing_if` bool flags (used by `graph::Node.terminal`).
+`graph::Input.binding` now skips serialization when `Binding::None`, and `Input.default_value` skips when `None`.
+`graph::Node.behavior` now skips serialization when `NodeBehavior::AsFunction` via `NodeBehavior::is_default`.

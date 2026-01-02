@@ -10,7 +10,7 @@ use arc_swap::ArcSwapOption;
 use common::Shared;
 use eframe::{NativeOptions, egui};
 use graph::execution_graph::ExecutionGraph;
-use graph::graph::NodeId;
+use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::{Worker, WorkerMessage};
 use pollster::{FutureExt, block_on};
@@ -149,7 +149,7 @@ impl ScenariumApp {
     }
 
     fn default_path() -> PathBuf {
-        std::env::temp_dir().join("scenarium-graph.lua")
+        std::env::temp_dir().join("scenarium-graph.json")
     }
 
     fn set_status(&mut self, message: impl Into<String>) {
@@ -205,7 +205,9 @@ impl ScenariumApp {
     }
 
     fn test_graph(&mut self) {
-        let graph = test_graph();
+        let mut graph = test_graph();
+        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
+
         let func_lib = test_func_lib(self.sample_test_hooks());
         let graph_view = model::ViewGraph::from_graph(&graph);
         self.func_lib = func_lib;

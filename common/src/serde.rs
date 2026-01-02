@@ -6,6 +6,10 @@ use crate::normalize_string::NormalizeString;
 use crate::serde_lua;
 use crate::serde_lua::SerdeLuaError;
 
+pub fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeFormatError {
     #[error("YAML serialization failed")]
