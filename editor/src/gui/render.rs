@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::{
-    gui::{node, style::GraphStyle},
+    gui::{node, style::Style},
     model,
 };
 
@@ -59,7 +59,7 @@ pub struct RenderContext<'a> {
     pub heading_font: egui::FontId,
     pub body_font: egui::FontId,
     pub text_color: egui::Color32,
-    pub style: GraphStyle,
+    pub style: Style,
     pub node_widths: HashMap<NodeId, f32>,
     pub port_radius: f32,
     pub scale: f32,
@@ -84,7 +84,7 @@ impl<'a> RenderContext<'a> {
         let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, view_graph.zoom);
         let body_font = node::scaled_font(ui, egui::TextStyle::Body, view_graph.zoom);
         let text_color = ui.visuals().text_color();
-        let style = GraphStyle::new(view_graph.zoom);
+        let style = Style::new();
 
         let width_ctx = node::NodeWidthContext {
             layout: &layout,

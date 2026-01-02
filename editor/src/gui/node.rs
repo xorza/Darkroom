@@ -150,7 +150,7 @@ pub fn render_node_bodies(
         let close_rect =
             egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
         let mut header_drag_right = close_rect.min.x - ctx.layout.padding;
-        let dot_radius = ctx.style.scale * ctx.style.status_dot_radius;
+        let dot_radius = ctx.scale * ctx.style.status_dot_radius;
         assert!(dot_radius.is_finite(), "status dot radius must be finite");
         assert!(dot_radius >= 0.0, "status dot radius must be non-negative");
         let mut dot_centers = Vec::new();
@@ -158,7 +158,7 @@ pub fn render_node_bodies(
         let has_impure = func.behavior == FuncBehavior::Impure;
         if has_terminal || has_impure {
             let dot_diameter = dot_radius * 2.0;
-            let dot_gap = ctx.style.scale * ctx.style.status_item_gap;
+            let dot_gap = ctx.scale * ctx.style.status_item_gap;
             let mut dot_x = close_rect.min.x - ctx.layout.padding - dot_radius;
             if has_terminal {
                 dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
@@ -532,7 +532,7 @@ fn render_node_labels(
     node_rect: egui::Rect,
     node_width: f32,
 ) {
-    let header_text_offset = ctx.style.scale * ctx.style.header_text_offset;
+    let header_text_offset = ctx.scale * ctx.style.header_text_offset;
 
     ctx.painter().text(
         node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
@@ -659,7 +659,7 @@ pub(crate) struct NodeWidthContext<'a> {
     pub heading_font: &'a egui::FontId,
     pub body_font: &'a egui::FontId,
     pub text_color: egui::Color32,
-    pub style: &'a crate::gui::style::GraphStyle,
+    pub style: &'a crate::gui::style::Style,
 }
 
 pub(crate) fn compute_node_widths(

@@ -30,8 +30,7 @@ const DOTTED_RADIUS_MAX: f32 = 2.4;
 const CONST_STROKE_GAMMA: f32 = 0.7;
 
 #[derive(Debug, Clone)]
-pub struct GraphStyle {
-    pub scale: f32,
+pub struct Style {
     pub header_text_offset: f32,
     pub cache_button_width_factor: f32,
     pub cache_button_vertical_pad_factor: f32,
@@ -59,13 +58,9 @@ pub struct GraphStyle {
     pub selected_stroke: Stroke,
 }
 
-impl GraphStyle {
-    pub fn new(scale: f32) -> Self {
-        assert!(scale.is_finite(), "style scale must be finite");
-        assert!(scale > 0.0, "style scale must be positive");
-
+impl Style {
+    pub fn new() -> Self {
         Self {
-            scale,
             header_text_offset: HEADER_TEXT_OFFSET,
             cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
             cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,

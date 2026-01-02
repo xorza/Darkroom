@@ -136,7 +136,7 @@ impl GraphUi {
 
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter_at(rect);
-        let input_ctx = RenderContext::new(ui, &painter, rect, view_graph, func_lib);
+        let ctx = RenderContext::new(ui, &painter, rect, view_graph, func_lib);
 
         if reset_view {
             view_graph.zoom = 1.0;
@@ -154,24 +154,24 @@ impl GraphUi {
         let pointer_pos = ui.input(|input| input.pointer.hover_pos());
         let cursor_pos = ui.ctx().pointer_latest_pos().or(pointer_pos);
         let pointer_in_rect = pointer_pos
-            .map(|pos| input_ctx.rect.contains(pos))
+            .map(|pos| ctx.rect.contains(pos))
             .unwrap_or(false);
         let middle_down = ui.input(|input| input.pointer.middle_down());
         let pointer_delta = ui.input(|input| input.pointer.delta());
-        let port_activation = (input_ctx.port_radius * 1.6).max(10.0);
+        let port_activation = (ctx.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
             view_graph,
             func_lib,
-            input_ctx.origin,
-            &input_ctx.layout,
-            &input_ctx.node_widths,
+            ctx.origin,
+            &ctx.layout,
+            &ctx.node_widths,
         );
         let hovered_port = pointer_pos
-            .filter(|pos| input_ctx.rect.contains(*pos))
+            .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&ports, pos, port_activation));
         let hovered_port_ref = hovered_port.as_ref();
         let pointer_over_node = pointer_pos
-            .filter(|pos| input_ctx.rect.contains(*pos))
+            .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
                 view_graph.view_nodes.iter().any(|node_view| {
                     let node = view_graph
@@ -181,14 +181,13 @@ impl GraphUi {
                     let func = func_lib.by_id(&node.func_id).unwrap_or_else(|| {
                         panic!("Missing func for node {} ({})", node.name, node.func_id)
                     });
-                    let node_rect =
-                        input_ctx.node_rect(node_view, func.inputs.len(), func.outputs.len());
+                    let node_rect = ctx.node_rect(node_view, func.inputs.len(), func.outputs.len());
                     node_rect.contains(pos)
                 })
             });
         let pan_id = ui.make_persistent_id("graph_pan");
         let pan_response = ui.interact(
-            input_ctx.rect,
+            ctx.rect,
             pan_id,
             if breaker.active
                 || connection_drag.active
@@ -276,7 +275,7 @@ impl GraphUi {
             }
         }
 
-        let zoom_active = cursor_pos.is_some_and(|pos| input_ctx.rect.contains(pos));
+        let zoom_active = cursor_pos.is_some_and(|pos| ctx.rect.contains(pos));
 
         if zoom_active {
             let modifiers = ui.input(|input| input.modifiers);
@@ -318,10 +317,10 @@ impl GraphUi {
                 if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
                     let cursor = cursor_pos.expect("cursor position must exist while zooming");
                     assert!(
-                        input_ctx.rect.contains(cursor),
+                        ctx.rect.contains(cursor),
                         "cursor must be inside graph rect while zooming"
                     );
-                    let origin = input_ctx.rect.min;
+                    let origin = ctx.rect.min;
                     let graph_pos = (cursor - origin - view_graph.pan) / view_graph.zoom;
 
                     view_graph.zoom = clamped_zoom;
@@ -332,7 +331,6 @@ impl GraphUi {
             }
         }
 
-        let ctx = RenderContext::new(ui, &painter, rect, view_graph, func_lib);
         let render_origin = ctx.rect.min + view_graph.pan;
         let mut background = BackgroundRenderer;
         let mut connections = ConnectionRenderer::default();
@@ -504,7 +502,7 @@ fn draw_dotted_background(
     painter: &egui::Painter,
     rect: egui::Rect,
     view_graph: &model::ViewGraph,
-    style: &crate::gui::style::GraphStyle,
+    style: &crate::gui::style::Style,
 ) {
     let spacing = style.dotted_base_spacing * view_graph.zoom;
     let radius = (style.dotted_radius_base * view_graph.zoom)
@@ -713,7 +711,7 @@ fn draw_temporary_connection(
     start: egui::Pos2,
     end: egui::Pos2,
     start_kind: PortKind,
-    style: &crate::gui::style::GraphStyle,
+    style: &crate::gui::style::Style,
 ) {
     assert!(scale.is_finite(), "connection scale must be finite");
     assert!(scale > 0.0, "connection scale must be positive");
@@ -919,7 +917,7 @@ fn compute_layout_and_widths(
     let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, scale);
     let body_font = node::scaled_font(ui, egui::TextStyle::Body, scale);
     let text_color = ui.visuals().text_color();
-    let style = crate::gui::style::GraphStyle::new(scale);
+    let style = crate::gui::style::Style::new();
 
     let width_ctx = node::NodeWidthContext {
         layout: &layout,
@@ -935,7 +933,7 @@ fn draw_connections(
     painter: &egui::Painter,
     curves: &[ConnectionCurve],
     highlighted: &HashSet<ConnectionKey>,
-    style: &crate::gui::style::GraphStyle,
+    style: &crate::gui::style::Style,
 ) {
     for curve in curves {
         let stroke = if highlighted.contains(&curve.key) {
