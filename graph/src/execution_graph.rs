@@ -286,6 +286,7 @@ impl ExecutionGraph {
         let start = std::time::Instant::now();
 
         let mut input_args: Args = take(&mut self.input_args);
+        let mut error: Option<ExecutionError> = None;
 
         for node_id in self.e_node_invoke_order.iter() {
             let e_node = self.e_nodes.by_key(node_id).unwrap();
@@ -312,6 +313,8 @@ impl ExecutionGraph {
             }
 
             let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
+            assert!(e_node.error.is_none());
+
             let outputs = e_node
                 .output_values
                 .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
@@ -332,21 +335,24 @@ impl ExecutionGraph {
 
             e_node.run_time = start.elapsed().as_secs_f64();
 
-            if let Err(error) = invoke_result {
-                e_node.error = Some(error.clone());
-                return Err(error);
+            if let Err(err) = invoke_result {
+                e_node.error = Some(err.clone());
+                error = Some(err);
+                break;
             }
-            e_node.error = None;
 
             input_args.clear();
         }
 
         self.input_args = take(&mut input_args);
 
-        Ok(ExecutionStats {
-            elapsed_secs: start.elapsed().as_secs_f64(),
-            executed_nodes: self.e_node_invoke_order.len(),
-        })
+        match error {
+            Some(err) => Err(err),
+            None => Ok(ExecutionStats {
+                elapsed_secs: start.elapsed().as_secs_f64(),
+                executed_nodes: self.e_node_invoke_order.len(),
+            }),
+        }
     }
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
