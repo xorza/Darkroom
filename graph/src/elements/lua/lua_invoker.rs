@@ -426,7 +426,7 @@ mod tests {
     use common::output_stream::OutputStream;
 
     use super::*;
-    use crate::{args::Args, function::FuncId};
+    use crate::function::FuncId;
 
     #[test]
     fn lua_works() -> anyhow::Result<()> {
@@ -507,7 +507,7 @@ mod tests {
                 value: DynamicValue::Int(5),
             },
         ];
-        let mut outputs = Args::from_vec(vec![0]);
+        let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
 
         let mut cache = InvokeCache::default();
@@ -576,7 +576,7 @@ mod tests {
                 value: DynamicValue::Int(7),
             },
         ];
-        let mut outputs = Args::from_vec(vec![0]);
+        let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut cache = InvokeCache::default();
 
