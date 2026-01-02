@@ -130,6 +130,7 @@ Execution graph invalidation now walks downstream execution-node bindings to cle
 Execution graph invalidation now has unit coverage for dependent node invalidation.
 Execution graph invalidation now accepts any iterator of node IDs for batching.
 Execution graph invalidation is now exposed as `invalidate_recursively` (typo fixed), with a deprecated alias kept for callers.
+Execution graph invalidation now uses a `Vec<bool>` visited map instead of a `HashSet` for faster dense traversals.
 Execution graph execution now returns `ExecutionStats` (elapsed seconds + executed node count).
 Graph now exposes a `dependent_nodes` traversal to gather downstream nodes from a starting node id.
 Graph tests now cover `dependent_nodes` traversal ordering and reachability.

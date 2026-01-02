@@ -215,12 +215,13 @@ impl ExecutionGraph {
             .into_iter()
             .filter_map(|id| self.e_nodes.index_of_key(&id))
             .collect();
-        let mut seen: HashSet<usize> = HashSet::new();
+        let mut seen = vec![false; self.e_nodes.len()];
 
         while let Some(e_node_idx) = stack.pop() {
-            if !seen.insert(e_node_idx) {
+            if seen[e_node_idx] {
                 continue;
             }
+            seen[e_node_idx] = true;
 
             let e_node = &mut self.e_nodes[e_node_idx];
             e_node.inited = false;
