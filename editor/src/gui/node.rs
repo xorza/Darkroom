@@ -44,9 +44,6 @@ impl Default for NodeLayout {
 
 impl NodeLayout {
     pub(crate) fn scaled(&self, scale: f32) -> Self {
-        assert!(scale > 0.0, "layout scale must be positive");
-        assert!(scale.is_finite(), "layout scale must be finite");
-
         Self {
             node_width: self.node_width * scale,
             header_height: self.header_height * scale,
@@ -83,17 +80,8 @@ pub fn render_node_bodies(
     let mut interaction = NodeInteraction::default();
 
     for node_view in &mut view_graph.view_nodes {
-        let node = view_graph
-            .graph
-            .by_id_mut(&node_view.id)
-            .expect("node view id must exist in graph data");
-        let func = func_lib
-            .by_id(&node.func_id)
-            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
-        assert!(
-            node.inputs.len() == func.inputs.len(),
-            "node inputs must match function inputs"
-        );
+        let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
 
         let input_count = func.inputs.len();
         let output_count = func.outputs.len();
@@ -112,8 +100,6 @@ pub fn render_node_bodies(
         let button_size = (ctx.layout.header_height - ctx.layout.padding)
             .max(12.0 * ctx.scale)
             .min(ctx.layout.header_height);
-        assert!(button_size.is_finite(), "close button size must be finite");
-        assert!(button_size > 0.0, "close button size must be positive");
         let button_pos = egui::pos2(
             node_rect.max.x - ctx.layout.padding - button_size,
             node_rect.min.y + (ctx.layout.header_height - button_size) * 0.5,
@@ -122,8 +108,6 @@ pub fn render_node_bodies(
             egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
         let mut header_drag_right = close_rect.min.x - ctx.layout.padding;
         let dot_radius = ctx.scale * ctx.style.status_dot_radius;
-        assert!(dot_radius.is_finite(), "status dot radius must be finite");
-        assert!(dot_radius >= 0.0, "status dot radius must be non-negative");
         let mut dot_centers = Vec::new();
         let has_terminal = node.terminal;
         let has_impure = func.behavior == FuncBehavior::Impure;
@@ -150,21 +134,13 @@ pub fn render_node_bodies(
             let size = (ctx.layout.cache_height - vertical_padding * 2.0)
                 .max(10.0 * ctx.scale)
                 .min(ctx.layout.cache_height);
-            assert!(size.is_finite(), "cache button height must be finite");
-            assert!(size > 0.0, "cache button height must be positive");
+
             size
         } else {
             0.0
         };
         let cache_button_padding = ctx.layout.padding * ctx.style.cache_button_text_pad_factor;
-        assert!(
-            cache_button_padding.is_finite(),
-            "cache button padding must be finite"
-        );
-        assert!(
-            cache_button_padding >= 0.0,
-            "cache button padding must be non-negative"
-        );
+
         let cache_text_width = if ctx.layout.cache_height > 0.0 {
             let cached_width = text_width(
                 ctx.painter(),
@@ -185,14 +161,7 @@ pub fn render_node_bodies(
         let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
             .max(cache_button_height)
             .max(cache_text_width + cache_button_padding * 2.0);
-        assert!(
-            cache_button_width.is_finite(),
-            "cache button width must be finite"
-        );
-        assert!(
-            cache_button_width > 0.0,
-            "cache button width must be positive"
-        );
+
         let cache_button_pos = egui::pos2(
             cache_rect.min.x + ctx.layout.padding,
             cache_rect.min.y + (ctx.layout.cache_height - cache_button_height) * 0.5,
@@ -410,7 +379,6 @@ fn render_node_ports(
             ctx.origin,
             view_node,
             index,
-            output_count,
             &ctx.layout,
             ctx.scale,
             node_width,
@@ -579,8 +547,6 @@ fn node_size(
     layout: &NodeLayout,
     node_width: f32,
 ) -> egui::Vec2 {
-    assert!(node_width.is_finite(), "node width must be finite");
-    assert!(node_width > 0.0, "node width must be positive");
     let row_count = input_count.max(output_count).max(1);
     let height = layout.header_height
         + layout.cache_height
@@ -617,18 +583,10 @@ pub(crate) fn node_output_pos(
     origin: egui::Pos2,
     view_node: &model::ViewNode,
     index: usize,
-    output_count: usize,
     layout: &NodeLayout,
     scale: f32,
     node_width: f32,
 ) -> egui::Pos2 {
-    assert!(
-        index < output_count,
-        "output index must be within node outputs"
-    );
-    assert!(scale > 0.0, "graph scale must be positive");
-    assert!(node_width.is_finite(), "node width must be finite");
-    assert!(node_width > 0.0, "node width must be positive");
     let y = origin.y
         + view_node.pos.y * scale
         + layout.header_height
@@ -640,10 +598,8 @@ pub(crate) fn node_output_pos(
 }
 
 pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
-    assert!(scale > 0.0, "graph scale must be positive");
     let dx = (end.x - start.x).abs();
     let offset = (dx * 0.5).max(40.0 * scale);
-    assert!(offset.is_finite(), "bezier control offset must be finite");
     offset
 }
 
@@ -661,18 +617,11 @@ pub(crate) fn compute_node_widths(
     ctx: &NodeWidthContext<'_>,
 ) -> HashMap<NodeId, f32> {
     let scale_guess = ctx.layout.row_height / 18.0;
-    assert!(scale_guess.is_finite(), "layout scale guess must be finite");
-    assert!(scale_guess > 0.0, "layout scale guess must be positive");
     let mut widths = HashMap::with_capacity(view_graph.view_nodes.len());
 
     for node_view in &view_graph.view_nodes {
-        let node = view_graph
-            .graph
-            .by_id(&node_view.id)
-            .expect("node view id must exist in graph data");
-        let func = func_lib
-            .by_id(&node.func_id)
-            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
         let header_width = text_width(
             painter,
             &ctx.style.heading_font.scaled(ctx.scale),
@@ -759,13 +708,7 @@ pub(crate) fn compute_node_widths(
                 .max(cache_row_width)
                 .max(status_row_width),
         );
-        assert!(computed.is_finite(), "node width must be finite");
-        assert!(computed > 0.0, "node width must be positive");
-        let prior = widths.insert(node.id, computed);
-        assert!(
-            prior.is_none(),
-            "node width map must not contain duplicate ids"
-        );
+        widths.insert(node.id, computed);
     }
 
     widths
@@ -779,7 +722,5 @@ fn text_width(
 ) -> f32 {
     let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
     let width = galley.size().x;
-    assert!(width.is_finite(), "text width must be finite");
-    assert!(width >= 0.0, "text width must be non-negative");
     width
 }

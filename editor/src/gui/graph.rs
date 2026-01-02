@@ -174,13 +174,8 @@ impl GraphUi {
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
                 view_graph.view_nodes.iter().any(|node_view| {
-                    let node = view_graph
-                        .graph
-                        .by_id(&node_view.id)
-                        .expect("node view id must exist in graph data");
-                    let func = func_lib.by_id(&node.func_id).unwrap_or_else(|| {
-                        panic!("Missing func for node {} ({})", node.name, node.func_id)
-                    });
+                    let node = view_graph.graph.by_id(&node_view.id).unwrap();
+                    let func = func_lib.by_id(&node.func_id).unwrap();
                     let node_rect = ctx.node_rect(node_view, func.inputs.len(), func.outputs.len());
                     node_rect.contains(pos)
                 })
@@ -208,14 +203,6 @@ impl GraphUi {
             view_graph.pan += pan_response.drag_delta();
         }
         if middle_down && pointer_in_rect && !breaker.active && !connection_drag.active {
-            assert!(
-                pointer_delta.x.is_finite(),
-                "pointer delta x must be finite"
-            );
-            assert!(
-                pointer_delta.y.is_finite(),
-                "pointer delta y must be finite"
-            );
             view_graph.pan += pointer_delta;
         }
 
@@ -295,31 +282,21 @@ impl GraphUi {
                     })
             });
             let wheel_scroll = wheel_delta.length_sq() > f32::EPSILON;
-            assert!(scroll_delta.x.is_finite(), "scroll delta x must be finite");
-            assert!(scroll_delta.y.is_finite(), "scroll delta y must be finite");
-            assert!(wheel_delta.x.is_finite(), "wheel delta x must be finite");
-            assert!(wheel_delta.y.is_finite(), "wheel delta y must be finite");
 
             if wheel_scroll && wheel_delta.y.abs() > f32::EPSILON {
                 let wheel_zoom = (wheel_delta.y * 0.06).exp();
-                assert!(wheel_zoom.is_finite(), "wheel zoom factor must be finite");
                 zoom_delta *= wheel_zoom;
             } else if (modifiers.command || modifiers.ctrl) && scroll_delta.y.abs() > f32::EPSILON {
                 let scroll_zoom = (scroll_delta.y * 0.003).exp();
-                assert!(scroll_zoom.is_finite(), "scroll zoom factor must be finite");
                 zoom_delta *= scroll_zoom;
             }
 
             if (zoom_delta - 1.0).abs() > f32::EPSILON {
                 let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-                assert!(clamped_zoom.is_finite(), "clamped zoom must be finite");
 
                 if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
-                    let cursor = cursor_pos.expect("cursor position must exist while zooming");
-                    assert!(
-                        ctx.rect.contains(cursor),
-                        "cursor must be inside graph rect while zooming"
-                    );
+                    let cursor = cursor_pos.unwrap();
+
                     let origin = ctx.rect.min;
                     let graph_pos = (cursor - origin - view_graph.pan) / view_graph.zoom;
 
@@ -508,12 +485,6 @@ fn draw_dotted_background(
     let radius = (style.dotted_radius_base * view_graph.zoom)
         .clamp(style.dotted_radius_min, style.dotted_radius_max);
     let color = style.dotted_color;
-
-    assert!(spacing.is_finite(), "dot spacing must be finite");
-    assert!(spacing > 0.0, "dot spacing must be positive");
-    assert!(radius.is_finite(), "dot radius must be finite");
-    assert!(radius > 0.0, "dot radius must be positive");
-
     let origin = rect.min + view_graph.pan;
     let offset_x = (rect.left() - origin.x).rem_euclid(spacing);
     let offset_y = (rect.top() - origin.y).rem_euclid(spacing);
@@ -554,47 +525,19 @@ fn collect_connection_curves(
     let mut curves = Vec::new();
 
     for node_view in &view_graph.view_nodes {
-        let node = view_graph
-            .graph
-            .by_id(&node_view.id)
-            .expect("node view id must exist in graph data");
-        let func = func_lib
-            .by_id(&node.func_id)
-            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
-        assert!(
-            node.inputs.len() == func.inputs.len(),
-            "node inputs must match function inputs"
-        );
+        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
+
         for (input_index, input) in node.inputs.iter().enumerate() {
             let Binding::Bind(binding) = &input.binding else {
                 continue;
             };
-            let source_view = node_lookup
-                .get(&binding.target_id)
-                .expect("graph validation must guarantee source nodes exist");
-            let source_node = view_graph
-                .graph
-                .by_id(&binding.target_id)
-                .expect("graph validation must guarantee source nodes exist");
-            let source_func = func_lib.by_id(&source_node.func_id).unwrap_or_else(|| {
-                panic!(
-                    "Missing func for node {} ({})",
-                    source_node.name, source_node.func_id
-                )
-            });
-            assert!(
-                binding.port_idx < source_func.outputs.len(),
-                "output index must be within source outputs"
-            );
-            let source_width = node_widths
-                .get(&binding.target_id)
-                .copied()
-                .expect("node width must be precomputed");
+            let source_view = node_lookup.get(&binding.target_id).unwrap();
+            let source_width = node_widths.get(&binding.target_id).copied().unwrap();
             let start = node::node_output_pos(
                 origin,
                 source_view,
                 binding.port_idx,
-                source_func.outputs.len(),
                 layout,
                 view_graph.zoom,
                 source_width,
@@ -668,7 +611,6 @@ fn collect_ports(
                 origin,
                 node_view,
                 index,
-                func.outputs.len(),
                 layout,
                 view_graph.zoom,
                 node_width,
