@@ -429,6 +429,7 @@ impl ExecutionGraph {
     fn forward(&mut self, graph: &Graph) {
         for node_id in self.e_node_invoke_order.iter() {
             let node = graph.by_id(node_id).unwrap();
+            let e_node_idx = self.e_nodes.index_of_key(node_id).unwrap();
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
@@ -437,7 +438,7 @@ impl ExecutionGraph {
                 let input_state = match &input.binding {
                     Binding::None => InputState::None,
                     Binding::Const(_) => {
-                        let e_input = &self.e_nodes.by_key(node_id).unwrap().inputs[input_idx];
+                        let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                         if input.binding == e_input.binding {
                             InputState::Unchanged
                         } else {
@@ -460,7 +461,7 @@ impl ExecutionGraph {
                     }
                 };
 
-                let e_input = &mut self.e_nodes.by_key_mut(node_id).unwrap().inputs[input_idx];
+                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
                 if e_input.binding != input.binding {
                     e_input.binding = input.binding.clone();
                 }
@@ -472,7 +473,7 @@ impl ExecutionGraph {
                 }
             }
 
-            let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
+            let e_node = &mut self.e_nodes[e_node_idx];
             assert_eq!(e_node.process_state, ProcessState::Backward1);
             assert!(e_node.inited);
 
