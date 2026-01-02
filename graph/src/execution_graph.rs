@@ -756,6 +756,23 @@ mod tests {
             .iter()
             .all(|e_node| !e_node.missing_required_inputs));
 
+        let get_a = execution_graph.by_name("get_a").unwrap();
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        let sum = execution_graph.by_name("sum").unwrap();
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+
+        assert_eq!(get_a.outputs.len(), 1);
+        assert_eq!(get_b.outputs.len(), 1);
+        assert_eq!(sum.outputs.len(), 1);
+        assert_eq!(mult.outputs.len(), 1);
+        assert!(print.outputs.is_empty());
+
+        assert_eq!(get_a.outputs[0].usage_count, 1);
+        assert_eq!(get_b.outputs[0].usage_count, 2);
+        assert_eq!(sum.outputs[0].usage_count, 1);
+        assert_eq!(mult.outputs[0].usage_count, 1);
+
         Ok(())
     }
 
@@ -789,6 +806,15 @@ mod tests {
         assert_eq!(sum.inputs[0].state, InputState::Missing);
         assert_eq!(mult.inputs[0].state, InputState::Missing);
         assert_eq!(print.inputs[0].state, InputState::Missing);
+
+        assert_eq!(get_b.outputs.len(), 1);
+        assert_eq!(sum.outputs.len(), 1);
+        assert_eq!(mult.outputs.len(), 1);
+        assert!(print.outputs.is_empty());
+
+        assert_eq!(get_b.outputs[0].usage_count, 2);
+        assert_eq!(sum.outputs[0].usage_count, 1);
+        assert_eq!(mult.outputs[0].usage_count, 1);
 
         Ok(())
     }
@@ -864,6 +890,20 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 4);
+
+        let get_a = execution_graph.by_name("get_a").unwrap();
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+
+        assert_eq!(get_a.outputs.len(), 1);
+        assert_eq!(get_b.outputs.len(), 1);
+        assert_eq!(mult.outputs.len(), 1);
+        assert!(print.outputs.is_empty());
+
+        assert_eq!(get_a.outputs[0].usage_count, 1);
+        assert_eq!(get_b.outputs[0].usage_count, 1);
+        assert_eq!(mult.outputs[0].usage_count, 1);
 
         Ok(())
     }

@@ -175,3 +175,4 @@ Editor execution invalidation now batches affected node IDs before recursive inv
 Editor run status now appends execution stats (node count + elapsed seconds).
 Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).
 Node headers now show an impure-function status dot for impure funcs.
+Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
