@@ -43,7 +43,7 @@ enum PortKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PortRef {
     node_id: NodeId,
-    index: usize,
+    port_idx: usize,
     kind: PortKind,
 }
 
@@ -65,7 +65,7 @@ impl Default for ConnectionDrag {
     fn default() -> Self {
         let placeholder = PortRef {
             node_id: NodeId::nil(),
-            index: 0,
+            port_idx: 0,
             kind: PortKind::Output,
         };
         Self {
@@ -659,7 +659,7 @@ fn collect_ports(
             ports.push(PortInfo {
                 port: PortRef {
                     node_id: node.id,
-                    index,
+                    port_idx: index,
                     kind: PortKind::Input,
                 },
                 center,
@@ -679,7 +679,7 @@ fn collect_ports(
             ports.push(PortInfo {
                 port: PortRef {
                     node_id: node.id,
-                    index,
+                    port_idx: index,
                     kind: PortKind::Output,
                 },
                 center,
@@ -769,7 +769,7 @@ fn apply_connection(
         )
     });
     assert!(
-        output_port.index < output_func.outputs.len(),
+        output_port.port_idx < output_func.outputs.len(),
         "output index must be valid for output node"
     );
 
@@ -784,12 +784,12 @@ fn apply_connection(
         )
     });
     assert!(
-        input_port.index < input_func.inputs.len(),
+        input_port.port_idx < input_func.inputs.len(),
         "input index must be valid for input node"
     );
-    input_node.inputs[input_port.index].binding = Binding::Bind(PortAddress {
+    input_node.inputs[input_port.port_idx].binding = Binding::Bind(PortAddress {
         id: output_port.node_id,
-        port_idx: output_port.index,
+        port_idx: output_port.port_idx,
     });
     Some(input_node.id)
 }

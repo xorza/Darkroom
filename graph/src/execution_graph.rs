@@ -185,7 +185,7 @@ impl ExecutionNode {
                         Binding::Const(static_value) => {
                             ExecutionBinding::Const(static_value.clone())
                         }
-                        Binding::Bind(_) => ExecutionBinding::None,
+                        Binding::Bind(port_address) => ExecutionBinding::Bind(port_address.clone()),
                     },
                     data_type: func_input.data_type.clone(),
                 });
@@ -416,7 +416,7 @@ impl ExecutionGraph {
                 e_node.outputs[output_idx] = ExecutionOutput::Used
             }
 
-            for (input_idx, input) in node.inputs.iter().enumerate() {
+            for input in node.inputs.iter() {
                 let Binding::Bind(port_address) = &input.binding else {
                     continue;
                 };
@@ -426,12 +426,6 @@ impl ExecutionGraph {
                         id: port_address.id,
                         ..Default::default()
                     });
-
-                let e_node = self.e_nodes.by_key_mut(&visit.id).unwrap();
-                e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
-                    id: port_address.id,
-                    port_idx: port_address.port_idx,
-                });
 
                 stack.push(Visit {
                     id: port_address.id,
@@ -643,13 +637,15 @@ impl ExecutionGraph {
                     Binding::Const(_) => {
                         assert!(matches!(binding, ExecutionBinding::Const(_)));
                     }
-                    Binding::Bind(output_binding) => {
-                        let port_address = e_node.inputs[input_idx].binding.unwrap_bind();
+                    Binding::Bind(port_address) => {
                         let output_e_node = self.by_id(&port_address.id).unwrap();
-                        let output_node = graph.by_id(&output_e_node.id).unwrap();
 
-                        assert_eq!(output_node.id, output_binding.id);
-                        assert_eq!(output_e_node.id, output_binding.id);
+                        {
+                            let e_node_port_address =
+                                e_node.inputs[input_idx].binding.unwrap_bind();
+                            assert_eq!(output_e_node.id, e_node_port_address.id);
+                            assert_eq!(port_address.port_idx, e_node_port_address.port_idx);
+                        }
                         assert!(port_address.port_idx < output_e_node.outputs.len());
                         assert_eq!(
                             output_e_node.outputs[port_address.port_idx],
@@ -692,10 +688,10 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
         assert_eq!(node.inputs.len(), func.inputs.len());
 
         for input in node.inputs.iter() {
-            if let Binding::Bind(output_binding) = &input.binding {
-                let output_node = graph.by_id(&output_binding.id).unwrap();
+            if let Binding::Bind(port_address) = &input.binding {
+                let output_node = graph.by_id(&port_address.id).unwrap();
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
-                assert!(output_binding.port_idx < output_func.outputs.len());
+                assert!(port_address.port_idx < output_func.outputs.len());
             }
         }
     }
