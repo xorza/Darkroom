@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::context::ContextKind;
+use crate::context::ContextType;
 use crate::execution_graph::OutputUsage;
 use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
@@ -145,7 +145,7 @@ pub struct Func {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<FuncEvent>,
     #[serde(skip, default)]
-    pub required_contexts: Vec<ContextKind>,
+    pub required_contexts: Vec<ContextType>,
 
     #[serde(skip, default)]
     pub lambda: FuncLambda,

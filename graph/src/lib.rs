@@ -13,7 +13,7 @@ pub mod macros;
 pub mod worker;
 
 pub mod prelude {
-    pub use crate::context::ContextKind;
+    pub use crate::context::ContextType;
     pub use crate::data::{DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,
