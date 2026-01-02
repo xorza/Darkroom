@@ -451,7 +451,7 @@ impl ExecutionGraph {
             let mut missing_required_inputs = false;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                let (input_state, e_binding) = match &input.binding {
+                let (input_state, new_e_binding) = match &input.binding {
                     Binding::None => {
                         let e_binding = &self.e_nodes[e_node_idx].inputs[input_idx].binding;
                         (
@@ -506,8 +506,8 @@ impl ExecutionGraph {
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
 
                 e_input.state = input_state;
-                if let Some(e_binding) = e_binding {
-                    e_input.binding = e_binding;
+                if let Some(new_e_binding) = new_e_binding {
+                    e_input.binding = new_e_binding;
                 }
                 match input_state {
                     InputState::Unchanged => {}
