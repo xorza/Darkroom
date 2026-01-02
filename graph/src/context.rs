@@ -12,7 +12,7 @@ id_type!(CtxId);
 #[derive(Clone)]
 pub struct ContextMeta {
     pub ctx_id: CtxId,
-    pub ctor: Arc<ContextCtor>,
+    ctor: Arc<ContextCtor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
