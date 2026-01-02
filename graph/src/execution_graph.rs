@@ -559,7 +559,7 @@ impl ExecutionGraph {
                 stack.push(Visit {
                     id: port_address.id,
                     cause: VisitCause::OutputRequest {
-                        output_idx: usize::MAX,
+                        output_idx: port_address.port_idx,
                     },
                 });
             }
