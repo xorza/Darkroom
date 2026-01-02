@@ -451,45 +451,40 @@ impl ExecutionGraph {
             let mut missing_required_inputs = false;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                let (input_state, new_e_binding) = match &input.binding {
-                    Binding::None => {
-                        let e_binding = &self.e_nodes[e_node_idx].inputs[input_idx].binding;
-                        (
-                            InputState::None,
-                            if e_binding.is_none() {
-                                None
-                            } else {
-                                Some(ExecutionBinding::None)
-                            },
-                        )
+                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                let (input_state, new_e_binding) = match (&input.binding, &e_input.binding) {
+                    (Binding::None, ExecutionBinding::None) => (InputState::None, None),
+                    (Binding::None, _) => (InputState::None, Some(ExecutionBinding::None)),
+                    (Binding::Const(value), ExecutionBinding::Const(existing))
+                        if value == existing =>
+                    {
+                        (InputState::Unchanged, None)
                     }
-                    Binding::Const(value) => {
-                        let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                        if Some(value) == e_input.binding.as_const() {
-                            (InputState::Unchanged, None)
-                        } else {
-                            (
-                                InputState::Changed,
-                                Some(ExecutionBinding::Const(value.clone())),
-                            )
-                        }
-                    }
-                    Binding::Bind(port_address) => {
-                        let output_e_node_idx =
-                            self.e_nodes.index_of_key(&port_address.target_id).unwrap();
+                    (Binding::Const(value), _) => (
+                        InputState::Changed,
+                        Some(ExecutionBinding::Const(value.clone())),
+                    ),
+                    (Binding::Bind(port_address), existing_binding) => {
+                        let output_e_node_idx = self
+                            .e_nodes
+                            .index_of_key(&port_address.target_id)
+                            .expect("Execution graph missing bound node for input binding");
                         let output_e_node = &self.e_nodes[output_e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
-                        assert!(port_address.port_idx < output_e_node.outputs.len());
+                        assert!(
+                            port_address.port_idx < output_e_node.outputs.len(),
+                            "Input binding references output index beyond target outputs"
+                        );
 
-                        let new_binding = ExecutionPortAddress {
+                        let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
                             target_idx: output_e_node_idx,
                             port_idx: port_address.port_idx,
-                        };
-                        let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                        let new_binding = match e_input.binding.as_bind() {
-                            Some(existing) if *existing == new_binding => None,
-                            _ => Some(ExecutionBinding::Bind(new_binding)),
+                        });
+                        let new_binding = if *existing_binding == desired_binding {
+                            None
+                        } else {
+                            Some(desired_binding)
                         };
 
                         if output_e_node.missing_required_inputs {
