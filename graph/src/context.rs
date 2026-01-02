@@ -6,7 +6,7 @@ use std::sync::Arc;
 use common::id_type;
 use hashbrown::HashMap;
 
-type ContextCtor = dyn Fn() -> Box<dyn Any> + Send + Sync;
+type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
 id_type!(CtxId);
 
 #[derive(Clone)]
@@ -24,7 +24,7 @@ pub enum ContextType {
 
 #[derive(Debug, Default)]
 pub struct ContextManager {
-    pub store: HashMap<ContextType, Box<dyn Any>>,
+    pub store: HashMap<ContextType, Box<dyn Any + Send>>,
 }
 
 impl Debug for ContextMeta {
@@ -53,7 +53,7 @@ impl ContextMeta {
     where
         F: Fn() -> T + Send + Sync + 'static,
     {
-        let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
+        let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any + Send>);
 
         ContextMeta {
             ctx_id,
@@ -63,7 +63,7 @@ impl ContextMeta {
     }
 
     pub fn new_default<T: 'static + Send + Sync + Default>(ctx_id: CtxId) -> Self {
-        let ctor: Arc<ContextCtor> = Arc::new(|| Box::new(T::default()) as Box<dyn Any>);
+        let ctor: Arc<ContextCtor> = Arc::new(|| Box::new(T::default()) as Box<dyn Any + Send>);
 
         ContextMeta {
             ctx_id,

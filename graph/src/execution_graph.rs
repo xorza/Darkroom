@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_yml::modules::error::new;
 use thiserror::Error;
 
+use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
@@ -135,6 +136,9 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
     pub e_node_invoke_order: Vec<usize>,
+
+    #[serde(skip)]
+    context_manager: ContextManager,
 
     //caches
     #[serde(skip)]
