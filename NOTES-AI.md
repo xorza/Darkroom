@@ -144,6 +144,7 @@ Graph input binding assignment now uses direct `is_some` checks on `const_value`
 Execution graph input binding traversal now uses a `let-else` early-continue to reduce nesting in backward1.
 Execution graph backward1 now increments output usage counts in one place per visit, while still handling already-processed nodes.
 Execution graph backward2 traversal uses early-continue and `let-else` to flatten execute-path scheduling.
+Execution graph forward now expects bound nodes to exist with a clearer message and asserts bound output indices are in range.
 Function validation now asserts that no-output functions are impure.
 `graph::test_graph()` constructs the standard sample graph (fixed IDs, bindings, const inputs) and validates it; tests now use it directly instead of deserializing a YAML fixture.
 `graph::function::test_func_lib()` constructs the standard sample function library in code; tests and benchmarks use it instead of a YAML fixture.

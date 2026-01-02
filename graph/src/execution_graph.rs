@@ -467,6 +467,7 @@ impl ExecutionGraph {
                         let output_e_node = &self.e_nodes[output_e_node_idx];
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
+                        assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         let e_binding = ExecutionBinding::Bind(ExecutionPortAddress {
                             target_idx: output_e_node_idx,
@@ -485,10 +486,12 @@ impl ExecutionGraph {
                 };
 
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+
+                e_input.state = input_state;
+                //todo try skip
+                // if e_input.binding != e_binding {
                 e_input.binding = e_binding;
-                if e_input.state != input_state {
-                    e_input.state = input_state;
-                }
+                // }
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
@@ -567,7 +570,7 @@ impl ExecutionGraph {
                     InputState::Changed => {}
                 }
 
-                let ExecutionBinding::Bind(port_address) = &input.binding else {
+                let Some(port_address) = input.binding.as_bind() else {
                     continue;
                 };
 
@@ -700,6 +703,13 @@ impl ExecutionBinding {
     pub fn as_const(&self) -> Option<&StaticValue> {
         match self {
             ExecutionBinding::Const(static_value) => Some(static_value),
+            _ => None,
+        }
+    }
+
+    pub fn as_bind(&self) -> Option<&ExecutionPortAddress> {
+        match self {
+            ExecutionBinding::Bind(port_address) => Some(port_address),
             _ => None,
         }
     }
