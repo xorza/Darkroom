@@ -476,6 +476,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             lambda: async_lambda!(
                 move |_, inputs, _| { print = Arc::clone(&print) } => {
+                    // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].as_int());
                     Ok(())
