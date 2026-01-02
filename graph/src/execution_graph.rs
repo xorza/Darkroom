@@ -229,7 +229,7 @@ impl ExecutionGraph {
                 continue;
             }
 
-            let e_node = self.by_id_mut(&current_node_id).unwrap();
+            let e_node = self.e_nodes.by_key_mut(&current_node_id).unwrap();
             e_node.inited = false;
 
             for node in self.e_nodes.iter() {
@@ -377,7 +377,7 @@ impl ExecutionGraph {
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = self.by_id_mut(&visit.id).unwrap();
+            let e_node = self.e_nodes.by_key_mut(&visit.id).unwrap();
 
             match visit.cause {
                 VisitCause::Terminal => {}
@@ -469,10 +469,10 @@ impl ExecutionGraph {
                     // todo implement Unchanged for const bindings
                     Binding::Const(_) => InputState::Changed,
                     Binding::Bind(_) => {
-                        let port_address = self.by_id(node_id).unwrap().inputs[input_idx]
+                        let port_address = self.e_nodes.by_key(node_id).unwrap().inputs[input_idx]
                             .binding
                             .unwrap_bind();
-                        let output_e_node = self.by_id(&port_address.id).unwrap();
+                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
 
@@ -662,7 +662,7 @@ impl ExecutionGraph {
             let id = self.e_node_invoke_order[idx];
             assert!(!self.e_node_invoke_order[idx + 1..].contains(&id));
 
-            let e_node = self.by_id(&id).unwrap();
+            let e_node = self.e_nodes.by_key(&id).unwrap();
             assert!(!e_node.missing_required_inputs);
 
             let all_dependencies_in_order = e_node
