@@ -517,7 +517,7 @@ mod tests {
         // call 'mult' function
         invoker
             .func_lib()
-            .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
+            .by_id(&"432b9bf1-f478-476c-a9c9-9a6e190124fc".into())
             .unwrap()
             .lambda
             .invoke(
@@ -587,7 +587,7 @@ mod tests {
 
         invoker
             .func_lib()
-            .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
+            .by_id(&"432b9bf1-f478-476c-a9c9-9a6e190124fc".into())
             .unwrap()
             .lambda
             .invoke(

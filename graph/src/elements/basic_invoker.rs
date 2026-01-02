@@ -108,7 +108,7 @@ impl Default for BasicInvoker {
 
         //print, outputs to output_stream
         func_lib.add(Func {
-            id: FuncId::from_str("01896910-0790-AD1B-AA12-3F1437196789").unwrap(),
+            id: "01896910-0790-AD1B-AA12-3F1437196789".into(),
             name: "print".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
@@ -141,7 +141,7 @@ impl Default for BasicInvoker {
         });
         // math two argument operation
         func_lib.add(Func {
-            id: FuncId::from_str("01896910-4BC9-77AA-6973-64CC1C56B9CE").unwrap(),
+            id: "01896910-4BC9-77AA-6973-64CC1C56B9CE".into(),
             name: "2 arg math".to_string(),
             behavior: FuncBehavior::Pure,
 
@@ -190,7 +190,7 @@ impl Default for BasicInvoker {
         });
         // to string
         func_lib.add(Func {
-            id: FuncId::from_str("01896a88-bf15-dead-4a15-5969da5a9e65").unwrap(),
+            id: "01896a88-bf15-dead-4a15-5969da5a9e65".into(),
             name: "float to string".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -223,7 +223,7 @@ impl Default for BasicInvoker {
 
         // random
         func_lib.add(Func {
-            id: FuncId::from_str("01897928-66cd-52cb-abeb-a5bfd7f3763e").unwrap(),
+            id: "01897928-66cd-52cb-abeb-a5bfd7f3763e".into(),
             name: "random".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
@@ -268,7 +268,7 @@ impl Default for BasicInvoker {
         });
         //add
         func_lib.add(Func {
-            id: FuncId::from_str("01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee").unwrap(),
+            id: "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee".into(),
             name: "add".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -310,7 +310,7 @@ impl Default for BasicInvoker {
         });
         //subtract
         func_lib.add(Func {
-            id: FuncId::from_str("01897c50-229e-f5e4-1c60-7f1e14531da2").unwrap(),
+            id: "01897c50-229e-f5e4-1c60-7f1e14531da2".into(),
             name: "subtract".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -352,7 +352,7 @@ impl Default for BasicInvoker {
         });
         //multiply
         func_lib.add(Func {
-            id: FuncId::from_str("01897c50-d510-55bf-8cb9-545a62cc76cc").unwrap(),
+            id: "01897c50-d510-55bf-8cb9-545a62cc76cc".into(),
             name: "multiply".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -393,7 +393,7 @@ impl Default for BasicInvoker {
         });
         //divide
         func_lib.add(Func {
-            id: FuncId::from_str("01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b").unwrap(),
+            id: "01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b".into(),
             name: "divide".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -442,7 +442,7 @@ impl Default for BasicInvoker {
         });
         // power
         func_lib.add(Func {
-            id: FuncId::from_str("01897c52-ac50-733e-aeeb-7018fd84c264").unwrap(),
+            id: "01897c52-ac50-733e-aeeb-7018fd84c264".into(),
             name: "power".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -484,7 +484,7 @@ impl Default for BasicInvoker {
         });
         // sqrt
         func_lib.add(Func {
-            id: FuncId::from_str("01897c53-a3d7-e716-b80a-0ba98661413a").unwrap(),
+            id: "01897c53-a3d7-e716-b80a-0ba98661413a".into(),
             name: "sqrt".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -516,7 +516,7 @@ impl Default for BasicInvoker {
         });
         // sin
         func_lib.add(Func {
-            id: FuncId::from_str("01897c54-8671-5d7c-db4c-aca72865a5a6").unwrap(),
+            id: "01897c54-8671-5d7c-db4c-aca72865a5a6".into(),
             name: "sin".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -548,7 +548,7 @@ impl Default for BasicInvoker {
         });
         // cos
         func_lib.add(Func {
-            id: FuncId::from_str("01897c54-ceb5-e603-ebde-c6904a8ef6e5").unwrap(),
+            id: "01897c54-ceb5-e603-ebde-c6904a8ef6e5".into(),
             name: "cos".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -580,7 +580,7 @@ impl Default for BasicInvoker {
         });
         // tan
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-1fda-2837-f4bd-75bea812a70e").unwrap(),
+            id: "01897c55-1fda-2837-f4bd-75bea812a70e".into(),
             name: "tan".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -612,7 +612,7 @@ impl Default for BasicInvoker {
         });
         // asin
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-6920-1641-593c-5a1d91c033cb").unwrap(),
+            id: "01897c55-6920-1641-593c-5a1d91c033cb".into(),
             name: "asin".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -644,7 +644,7 @@ impl Default for BasicInvoker {
         });
         // acos
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-a3ef-681e-6fbb-5133c96f720c").unwrap(),
+            id: "01897c55-a3ef-681e-6fbb-5133c96f720c".into(),
             name: "acos".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -676,7 +676,7 @@ impl Default for BasicInvoker {
         });
         // atan
         func_lib.add(Func {
-            id: FuncId::from_str("01897c55-e6f4-726c-5d4e-a2f90c4fc43b").unwrap(),
+            id: "01897c55-e6f4-726c-5d4e-a2f90c4fc43b".into(),
             name: "atan".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,
@@ -708,7 +708,7 @@ impl Default for BasicInvoker {
         });
         // log
         func_lib.add(Func {
-            id: FuncId::from_str("01897c56-8dde-c5f3-a389-f326fdf81b3a").unwrap(),
+            id: "01897c56-8dde-c5f3-a389-f326fdf81b3a".into(),
             name: "log".to_string(),
             description: None,
             behavior: FuncBehavior::Pure,

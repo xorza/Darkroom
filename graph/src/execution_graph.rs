@@ -1045,10 +1045,7 @@ mod tests {
             .expect_err("Expected cycle detection error");
         match err {
             ExecutionError::CycleDetected { node_id } => {
-                assert_eq!(
-                    node_id,
-                    NodeId::from_str("579ae1d6-10a3-4906-8948-135cb7d7508b").unwrap()
-                );
+                assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
             }
             _ => panic!("Unexpected error"),
         }

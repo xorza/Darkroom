@@ -31,7 +31,7 @@ impl Default for TimersInvoker {
         let mut invoker = FuncLib::default();
 
         invoker.add(Func {
-            id: FuncId::from_str("01897c92-d605-5f5a-7a21-627ed74824ff").unwrap(),
+            id: "01897c92-d605-5f5a-7a21-627ed74824ff".into(),
             name: "frame event".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
