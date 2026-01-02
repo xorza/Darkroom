@@ -427,7 +427,7 @@ impl ExecutionGraph {
                         ..Default::default()
                     });
 
-                let e_node = self.by_id_mut(&visit.id).unwrap();
+                let e_node = self.e_nodes.by_key_mut(&visit.id).unwrap();
                 e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
                     id: port_address.id,
                     port_idx: port_address.port_idx,
