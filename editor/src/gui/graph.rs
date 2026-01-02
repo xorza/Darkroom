@@ -1,6 +1,6 @@
 use eframe::egui;
 use graph::graph::NodeId;
-use graph::prelude::{Binding, FuncLib, OutputAddress};
+use graph::prelude::{Binding, FuncLib, PortAddress};
 
 use crate::{
     gui::{
@@ -572,11 +572,11 @@ fn collect_connection_curves(
                 continue;
             };
             let source_view = node_lookup
-                .get(&binding.output_node_id)
+                .get(&binding.id)
                 .expect("graph validation must guarantee source nodes exist");
             let source_node = view_graph
                 .graph
-                .by_id(&binding.output_node_id)
+                .by_id(&binding.id)
                 .expect("graph validation must guarantee source nodes exist");
             let source_func = func_lib.by_id(&source_node.func_id).unwrap_or_else(|| {
                 panic!(
@@ -585,17 +585,17 @@ fn collect_connection_curves(
                 )
             });
             assert!(
-                binding.output_idx < source_func.outputs.len(),
+                binding.port_idx < source_func.outputs.len(),
                 "output index must be within source outputs"
             );
             let source_width = node_widths
-                .get(&binding.output_node_id)
+                .get(&binding.id)
                 .copied()
                 .expect("node width must be precomputed");
             let start = node::node_output_pos(
                 origin,
                 source_view,
-                binding.output_idx,
+                binding.port_idx,
                 source_func.outputs.len(),
                 layout,
                 view_graph.zoom,
@@ -787,9 +787,9 @@ fn apply_connection(
         input_port.index < input_func.inputs.len(),
         "input index must be valid for input node"
     );
-    input_node.inputs[input_port.index].binding = Binding::Bind(OutputAddress {
-        output_node_id: output_port.node_id,
-        output_idx: output_port.index,
+    input_node.inputs[input_port.index].binding = Binding::Bind(PortAddress {
+        id: output_port.node_id,
+        port_idx: output_port.index,
     });
     Some(input_node.id)
 }

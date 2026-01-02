@@ -16,13 +16,12 @@ pub mod prelude {
     pub use crate::data::{DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,
-        PortAddress,
     };
     pub use crate::function::{
         test_func_lib, Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache,
         InvokeError, InvokeResult, TestFuncHooks,
     };
     pub use crate::graph::{
-        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, OutputAddress,
+        test_graph, Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, PortAddress,
     };
 }

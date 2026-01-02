@@ -9,18 +9,21 @@ use common::{id_type, is_debug};
 
 id_type!(NodeId);
 
-#[derive(Clone, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
-pub struct OutputAddress {
-    pub output_node_id: NodeId,
-    pub output_idx: usize,
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct PortAddress {
+    pub id: NodeId,
+    pub port_idx: usize,
 }
 
-#[derive(Clone, Default, PartialEq, Debug, Serialize, Deserialize)]
+// pub id: NodeId,
+// pub port_idx: usize,
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum Binding {
     #[default]
     None,
     Const(StaticValue),
-    Bind(OutputAddress),
+    Bind(PortAddress),
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -81,7 +84,7 @@ impl Graph {
             .iter_mut()
             .flat_map(|node| node.inputs.iter_mut())
             .filter_map(|input| match &input.binding {
-                Binding::Bind(output_binding) if output_binding.output_node_id == id => Some(input),
+                Binding::Bind(output_binding) if output_binding.id == id => Some(input),
                 _ => None,
             })
             .for_each(|input| {
@@ -122,7 +125,7 @@ impl Graph {
                 let depends = node.inputs.iter().any(|input| {
                     matches!(
                         &input.binding,
-                        Binding::Bind(binding) if binding.output_node_id == current
+                        Binding::Bind(binding) if binding.id == current
                     )
                 });
                 if depends && seen.insert(node.id) {
@@ -160,7 +163,7 @@ impl Graph {
 
             for input in node.inputs.iter() {
                 if let Binding::Bind(output_binding) = &input.binding {
-                    assert!(self.by_id(&output_binding.output_node_id).is_some());
+                    assert!(self.by_id(&output_binding.id).is_some());
                 }
             }
         }
@@ -207,13 +210,13 @@ impl Node {
 }
 
 impl Binding {
-    pub fn as_output_binding(&self) -> Option<&OutputAddress> {
+    pub fn as_output_binding(&self) -> Option<&PortAddress> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
         }
     }
-    pub fn as_output_binding_mut(&mut self) -> Option<&mut OutputAddress> {
+    pub fn as_output_binding_mut(&mut self) -> Option<&mut PortAddress> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
             _ => None,
@@ -246,16 +249,16 @@ impl Binding {
     }
 }
 
-impl From<OutputAddress> for Binding {
-    fn from(value: OutputAddress) -> Self {
+impl From<PortAddress> for Binding {
+    fn from(value: PortAddress) -> Self {
         Binding::Bind(value)
     }
 }
 impl From<(NodeId, usize)> for Binding {
     fn from((output_node_id, output_idx): (NodeId, usize)) -> Self {
-        Binding::Bind(OutputAddress {
-            output_node_id,
-            output_idx,
+        Binding::Bind(PortAddress {
+            id: output_node_id,
+            port_idx: output_idx,
         })
     }
 }
@@ -362,7 +365,7 @@ pub fn test_graph() -> Graph {
 #[cfg(test)]
 mod tests {
     use crate::data::StaticValue;
-    use crate::graph::{Binding, Graph, Input, Node, OutputAddress};
+    use crate::graph::{Binding, Graph, Input, Node, PortAddress};
     use common::FileFormat;
     use std::hint::black_box;
 
@@ -395,7 +398,7 @@ mod tests {
 
         for input in graph.nodes.iter().flat_map(|node| node.inputs.iter()) {
             if let Some(binding) = input.binding.as_output_binding() {
-                assert_ne!(binding.output_node_id, node_id);
+                assert_ne!(binding.id, node_id);
             }
         }
 

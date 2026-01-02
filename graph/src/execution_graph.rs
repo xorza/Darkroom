@@ -12,7 +12,7 @@ use thiserror::Error;
 use crate::args::Args;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
-use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
+use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{FuncId, FuncLambda};
 use common::{is_debug, FileFormat};
 
@@ -35,11 +35,6 @@ pub struct ExecutionStats {
     pub executed_nodes: usize,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PortAddress {
-    pub id: NodeId,
-    pub port_idx: usize,
-}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum InputState {
     #[default]
@@ -425,25 +420,22 @@ impl ExecutionGraph {
                     continue;
                 };
 
-                self.e_nodes.compact_insert_with(
-                    &output_binding.output_node_id,
-                    &mut write_idx,
-                    || ExecutionNode {
-                        id: output_binding.output_node_id,
+                self.e_nodes
+                    .compact_insert_with(&output_binding.id, &mut write_idx, || ExecutionNode {
+                        id: output_binding.id,
                         ..Default::default()
-                    },
-                );
+                    });
 
                 let e_node = self.by_id_mut(&visit.node_id).unwrap();
                 e_node.inputs[input_idx].binding = ExecutionBinding::Bind(PortAddress {
-                    id: output_binding.output_node_id,
-                    port_idx: output_binding.output_idx,
+                    id: output_binding.id,
+                    port_idx: output_binding.port_idx,
                 });
 
                 stack.push(Visit {
-                    node_id: output_binding.output_node_id,
+                    node_id: output_binding.id,
                     cause: VisitCause::OutputRequest {
-                        output_idx: output_binding.output_idx,
+                        output_idx: output_binding.port_idx,
                     },
                 });
             }
@@ -656,8 +648,8 @@ impl ExecutionGraph {
                         let output_e_node = self.by_id(&port_address.id).unwrap();
                         let output_node = graph.by_id(&output_e_node.id).unwrap();
 
-                        assert_eq!(output_node.id, output_binding.output_node_id);
-                        assert_eq!(output_e_node.id, output_binding.output_node_id);
+                        assert_eq!(output_node.id, output_binding.id);
+                        assert_eq!(output_e_node.id, output_binding.id);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
                         assert_eq!(
                             output_e_node.outputs[port_address.port_idx],
@@ -701,9 +693,9 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
 
         for input in node.inputs.iter() {
             if let Binding::Bind(output_binding) = &input.binding {
-                let output_node = graph.by_id(&output_binding.output_node_id).unwrap();
+                let output_node = graph.by_id(&output_binding.id).unwrap();
                 let output_func = func_lib.by_id(&output_node.func_id).unwrap();
-                assert!(output_binding.output_idx < output_func.outputs.len());
+                assert!(output_binding.port_idx < output_func.outputs.len());
             }
         }
     }
