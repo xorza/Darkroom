@@ -66,7 +66,7 @@ enum VisitCause {
 }
 #[derive(Debug)]
 struct Visit {
-    id: NodeId,
+    e_node_idx: usize,
     cause: VisitCause,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -117,7 +117,7 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    pub e_node_invoke_order: Vec<NodeId>,
+    pub e_node_invoke_order: Vec<usize>,
 
     //caches
     #[serde(skip)]
@@ -266,8 +266,8 @@ impl ExecutionGraph {
         let mut input_args: Args = take(&mut self.input_args);
         let mut error: Option<ExecutionError> = None;
 
-        for node_id in self.e_node_invoke_order.iter() {
-            let e_node = self.e_nodes.by_key(node_id).unwrap();
+        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
             input_args.resize_and_clear(e_node.inputs.len());
             assert!(e_node.inited);
 
@@ -290,7 +290,7 @@ impl ExecutionGraph {
                 input_args[input_idx] = value.convert_type(&input.data_type);
             }
 
-            let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
+            let e_node = &mut self.e_nodes[e_node_idx];
             assert!(e_node.error.is_none());
 
             let outputs = e_node
@@ -342,50 +342,50 @@ impl ExecutionGraph {
         stack.reserve(10);
 
         for node in graph.nodes.iter().filter(|&node| node.terminal) {
-            self.e_nodes
+            let e_node_idx = self
+                .e_nodes
                 .compact_insert_with(&node.id, &mut write_idx, || ExecutionNode {
                     id: node.id,
                     ..Default::default()
                 });
 
             stack.push(Visit {
-                id: node.id,
+                e_node_idx,
                 cause: VisitCause::Terminal,
             });
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node_idx = self.e_nodes.index_of_key(&visit.id).unwrap();
-
             let output_request = match visit.cause {
                 VisitCause::Terminal => None,
                 VisitCause::OutputRequest { output_idx } => Some(output_idx),
                 VisitCause::Done => {
-                    let e_node = &mut self.e_nodes[e_node_idx];
+                    let e_node = &mut self.e_nodes[visit.e_node_idx];
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     e_node.process_state = ProcessState::Backward1;
-                    self.e_node_invoke_order.push(visit.id);
+                    self.e_node_invoke_order.push(visit.e_node_idx);
                     continue;
                 }
             };
 
-            let already_processed = match self.e_nodes[e_node_idx].process_state {
+            let e_node = &self.e_nodes[visit.e_node_idx];
+            let already_processed = match e_node.process_state {
                 ProcessState::None => false,
                 ProcessState::Processing => {
-                    return Err(ExecutionError::CycleDetected { node_id: visit.id });
+                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                 }
                 ProcessState::Backward1 => true,
                 ProcessState::Forward | ProcessState::Backward2 => unreachable!(),
             };
 
             if !already_processed {
-                let e_node = &mut self.e_nodes[e_node_idx];
-                let node = graph.by_id(&visit.id).unwrap();
+                let e_node = &mut self.e_nodes[visit.e_node_idx];
+                let node = graph.by_id(&e_node.id).unwrap();
                 let func = func_lib.by_id(&node.func_id).unwrap();
                 e_node.update(node, func);
                 e_node.process_state = ProcessState::Processing;
                 stack.push(Visit {
-                    id: e_node.id,
+                    e_node_idx: visit.e_node_idx,
                     cause: VisitCause::Done,
                 });
 
@@ -394,7 +394,7 @@ impl ExecutionGraph {
                         continue;
                     };
 
-                    self.e_nodes.compact_insert_with(
+                    let output_e_node_idx = self.e_nodes.compact_insert_with(
                         &port_address.target_id,
                         &mut write_idx,
                         || ExecutionNode {
@@ -404,7 +404,7 @@ impl ExecutionGraph {
                     );
 
                     stack.push(Visit {
-                        id: port_address.target_id,
+                        e_node_idx: output_e_node_idx,
                         cause: VisitCause::OutputRequest {
                             output_idx: port_address.port_idx,
                         },
@@ -413,7 +413,7 @@ impl ExecutionGraph {
             }
 
             if let Some(output_idx) = output_request {
-                let e_node = &mut self.e_nodes[e_node_idx];
+                let e_node = &mut self.e_nodes[visit.e_node_idx];
                 assert!(e_node.inited);
                 e_node.outputs[output_idx].usage_count += 1;
             }
@@ -427,9 +427,9 @@ impl ExecutionGraph {
 
     // Propagate input state forward through the processing order.
     fn forward(&mut self, graph: &Graph) {
-        for node_id in self.e_node_invoke_order.iter() {
-            let node = graph.by_id(node_id).unwrap();
-            let e_node_idx = self.e_nodes.index_of_key(node_id).unwrap();
+        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+            let node = graph.by_id(&e_node.id).unwrap();
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
@@ -496,23 +496,23 @@ impl ExecutionGraph {
         let mut stack: Vec<Visit> = take(&mut self.stack);
         assert!(stack.is_empty());
 
-        for e_node in self.e_nodes.iter() {
+        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
             if graph.by_id(&e_node.id).unwrap().terminal {
                 stack.push(Visit {
-                    id: e_node.id,
+                    e_node_idx,
                     cause: VisitCause::Terminal,
                 });
             }
         }
 
         while let Some(visit) = stack.pop() {
-            let e_node = &mut self.e_nodes.by_key_mut(&visit.id).unwrap();
+            let e_node = &mut self.e_nodes[visit.e_node_idx];
 
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
-                    self.e_node_invoke_order.push(visit.id);
+                    self.e_node_invoke_order.push(visit.e_node_idx);
                     e_node.process_state = ProcessState::Backward2;
                     continue;
                 }
@@ -533,10 +533,11 @@ impl ExecutionGraph {
 
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit {
-                id: visit.id,
+                e_node_idx: visit.e_node_idx,
                 cause: VisitCause::Done,
             });
 
+            let e_node = &self.e_nodes[visit.e_node_idx];
             for input in e_node.inputs.iter() {
                 match input.state {
                     InputState::None | InputState::Unchanged => continue,
@@ -548,7 +549,7 @@ impl ExecutionGraph {
                 };
 
                 stack.push(Visit {
-                    id: port_address.target_id,
+                    e_node_idx: self.e_nodes.index_of_key(&port_address.target_id).unwrap(),
                     cause: VisitCause::OutputRequest {
                         output_idx: port_address.port_idx,
                     },
@@ -567,7 +568,7 @@ impl ExecutionGraph {
         assert!(self.e_nodes.len() <= graph.nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
-        for e_node in self.e_nodes.iter() {
+        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
             assert!(e_node.inited);
             assert!(!seen_node_ids.contains(&e_node.id));
             seen_node_ids.insert(e_node.id);
@@ -576,7 +577,7 @@ impl ExecutionGraph {
                 assert_eq!(output_values.len(), e_node.outputs.len());
             }
 
-            if self.e_node_invoke_order.contains(&e_node.id) {
+            if self.e_node_invoke_order.contains(&e_node_idx) {
                 assert_eq!(e_node.process_state, ProcessState::Backward2);
             } else {
                 assert!(
@@ -616,10 +617,8 @@ impl ExecutionGraph {
         }
 
         for idx in 0..self.e_node_invoke_order.len() {
-            let id = self.e_node_invoke_order[idx];
-            assert!(!self.e_node_invoke_order[idx + 1..].contains(&id));
-
-            let e_node = self.e_nodes.by_key(&id).unwrap();
+            let e_node_idx = self.e_node_invoke_order[idx];
+            let e_node = &self.e_nodes[e_node_idx];
             assert!(!e_node.missing_required_inputs);
 
             let all_dependencies_in_order = e_node
@@ -630,7 +629,9 @@ impl ExecutionGraph {
                     Binding::None | Binding::Const(_) => None,
                 })
                 .all(|port_address| {
-                    !self.e_node_invoke_order[idx..].contains(&port_address.target_id)
+                    let output_e_node_idx =
+                        self.e_nodes.index_of_key(&port_address.target_id).unwrap();
+                    !self.e_node_invoke_order[idx..].contains(&output_e_node_idx)
                 });
             assert!(all_dependencies_in_order);
         }
@@ -866,7 +867,7 @@ mod tests {
         assert!(execution_graph
             .e_node_invoke_order
             .iter()
-            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
+            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -877,7 +878,7 @@ mod tests {
         assert!(execution_graph
             .e_node_invoke_order
             .iter()
-            .all(|id| execution_graph.by_id(id).unwrap().name != "get_b"));
+            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"));
 
         Ok(())
     }
@@ -900,7 +901,7 @@ mod tests {
         assert!(execution_graph
             .e_node_invoke_order
             .iter()
-            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
+            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
 
         Ok(())
     }
@@ -920,7 +921,7 @@ mod tests {
         assert!(execution_graph
             .e_node_invoke_order
             .iter()
-            .any(|id| execution_graph.by_id(id).unwrap().name == "get_b"));
+            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -930,7 +931,7 @@ mod tests {
         assert!(execution_graph
             .e_node_invoke_order
             .iter()
-            .all(|id| execution_graph.by_id(id).unwrap().name != "get_b"));
+            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"));
 
         Ok(())
     }
