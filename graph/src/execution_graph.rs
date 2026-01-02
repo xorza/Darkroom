@@ -429,8 +429,7 @@ impl ExecutionGraph {
     fn forward(&mut self, graph: &Graph) {
         for node_id in self.e_node_invoke_order.iter() {
             let node = graph.by_id(node_id).unwrap();
-            let e_inputs = self.e_nodes.by_key(node_id).unwrap().inputs.clone();
-            let mut input_states = Vec::with_capacity(node.inputs.len());
+
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
@@ -438,7 +437,7 @@ impl ExecutionGraph {
                 let input_state = match &input.binding {
                     Binding::None => InputState::None,
                     Binding::Const(_) => {
-                        let e_input = &e_inputs[input_idx];
+                        let e_input = &self.e_nodes.by_key(node_id).unwrap().inputs[input_idx];
                         if input.binding == e_input.binding {
                             InputState::Unchanged
                         } else {
@@ -461,26 +460,21 @@ impl ExecutionGraph {
                     }
                 };
 
+                let e_input = &mut self.e_nodes.by_key_mut(node_id).unwrap().inputs[input_idx];
+                if e_input.binding != input.binding {
+                    e_input.binding = input.binding.clone();
+                }
+                e_input.state = input_state;
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
-                    InputState::None => missing_required_inputs |= e_inputs[input_idx].required,
+                    InputState::None => missing_required_inputs |= e_input.required,
                 }
-
-                input_states.push(input_state);
             }
 
             let e_node = self.e_nodes.by_key_mut(node_id).unwrap();
             assert_eq!(e_node.process_state, ProcessState::Backward1);
             assert!(e_node.inited);
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let e_input = &mut e_node.inputs[input_idx];
-                if e_input.binding != input.binding {
-                    e_input.binding = input.binding.clone();
-                }
-                e_input.state = input_states[input_idx];
-            }
 
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
@@ -524,12 +518,9 @@ impl ExecutionGraph {
             };
 
             match e_node.process_state {
-                ProcessState::None | ProcessState::Backward1 => {
-                    panic!("Expected a processed node")
+                ProcessState::Processing | ProcessState::None | ProcessState::Backward1 => {
+                    unreachable!()
                 }
-                ProcessState::Processing => panic!(
-                    "Cycle detected too late. Should have been caught earlier in backward1()"
-                ),
                 ProcessState::Forward => {}
                 ProcessState::Backward2 => continue,
             }
