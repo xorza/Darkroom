@@ -30,6 +30,8 @@ const DOTTED_RADIUS_MAX: f32 = 2.4;
 const CONST_STROKE_GAMMA: f32 = 0.7;
 const PORT_RADIUS: f32 = 5.5;
 const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
+const HEADING_FONT_SIZE: f32 = 18.0;
+const BODY_FONT_SIZE: f32 = 18.0;
 
 #[derive(Debug, Clone)]
 pub struct Style {
@@ -68,11 +70,11 @@ impl Style {
     pub fn new(_ui: &egui::Ui, _scale: f32) -> Self {
         Self {
             heading_font: FontId {
-                size: 18.0,
+                size: HEADING_FONT_SIZE,
                 family: egui::FontFamily::Proportional,
             },
             body_font: FontId {
-                size: 13.0,
+                size: BODY_FONT_SIZE,
                 family: egui::FontFamily::Proportional,
             },
             text_color: TEXT_COLOR,
