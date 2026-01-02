@@ -218,7 +218,6 @@ impl ExecutionGraph {
         self.e_nodes.by_key_mut(node_id)
     }
 
-    // todo make it accept iter of NodeId
     pub fn invalidate_recurisevly<I>(&mut self, node_ids: I)
     where
         I: IntoIterator<Item = NodeId>,
@@ -251,6 +250,7 @@ impl ExecutionGraph {
         self.e_nodes.clear();
         self.e_node_invoke_order.clear();
     }
+
     #[cfg(debug_assertions)]
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.name == node_name)
@@ -267,7 +267,7 @@ impl ExecutionGraph {
         Ok(common::deserialize(serialized, format)?)
     }
 
-    // Rebuild execution state from the current graph and function library.
+    // Rebuild execution state
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
@@ -628,8 +628,8 @@ impl ExecutionGraph {
                 .any(|input| input.state == InputState::Changed);
             assert_eq!(changed_inputs, e_node.changed_inputs);
 
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let binding = &e_node.inputs[input_idx].binding;
+            for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
+                let binding = &e_input.binding;
                 match &input.binding {
                     Binding::None => {
                         assert!(matches!(binding, ExecutionBinding::None));
@@ -638,13 +638,13 @@ impl ExecutionGraph {
                         assert!(matches!(binding, ExecutionBinding::Const(_)));
                     }
                     Binding::Bind(port_address) => {
+                        assert!(matches!(binding, ExecutionBinding::Bind(_)));
+
                         let output_e_node = self.by_id(&port_address.id).unwrap();
 
                         {
-                            let e_node_port_address =
-                                e_node.inputs[input_idx].binding.unwrap_bind();
-                            assert_eq!(output_e_node.id, e_node_port_address.id);
-                            assert_eq!(port_address.port_idx, e_node_port_address.port_idx);
+                            let e_node_port_address = e_input.binding.unwrap_bind();
+                            assert_eq!(*port_address, *e_node_port_address);
                         }
                         assert!(port_address.port_idx < output_e_node.outputs.len());
                         assert_eq!(
