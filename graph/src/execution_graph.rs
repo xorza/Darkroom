@@ -198,6 +198,10 @@ impl ExecutionNode {
             self.output_values = None;
         }
 
+        assert_eq!(self.inputs.len(), node.inputs.len());
+        assert_eq!(self.inputs.len(), func.inputs.len());
+        assert_eq!(self.outputs.len(), func.outputs.len());
+
         #[cfg(debug_assertions)]
         {
             self.name.clear();
