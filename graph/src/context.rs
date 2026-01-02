@@ -18,7 +18,6 @@ pub struct ContextMeta {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ContextType {
     Lua,
-    OpenCl,
     Custom(ContextMeta),
 }
 
@@ -72,7 +71,6 @@ impl ContextManager {
                 let value = match ctx_type {
                     ContextType::Custom(meta) => (meta.ctor)(),
                     ContextType::Lua => todo!("ContextManager missing ctor for Lua"),
-                    ContextType::OpenCl => todo!("ContextManager missing ctor for OpenCl"),
                 };
                 entry.insert(value)
             }
