@@ -149,7 +149,7 @@ impl ScenariumApp {
     }
 
     fn default_path() -> PathBuf {
-        std::env::temp_dir().join("scenarium-graph.json")
+        std::env::temp_dir().join("scenarium-graph.lua")
     }
 
     fn set_status(&mut self, message: impl Into<String>) {

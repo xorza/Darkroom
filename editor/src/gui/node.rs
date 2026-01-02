@@ -1,5 +1,6 @@
 use eframe::egui;
-use graph::graph::NodeId;
+use graph::data::StaticValue;
+use graph::graph::{Binding, NodeId};
 use graph::prelude::{Func, FuncBehavior, FuncLib, NodeBehavior};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -384,6 +385,7 @@ pub fn render_node_bodies(
         ctx.painter().line_segment([c, d], close_stroke);
 
         render_node_ports(ctx, node_view, input_count, output_count, node_width);
+        render_node_const_bindings(ctx, node_view, node, func, input_count);
         render_node_labels(ctx, &node.name, func, node_rect, node_width);
     }
 
@@ -438,6 +440,87 @@ fn render_node_ports(
             ctx.style.output_port_color
         };
         ctx.painter().circle_filled(center, ctx.port_radius, color);
+    }
+}
+
+fn render_node_const_bindings(
+    ctx: &RenderContext,
+    view_node: &model::ViewNode,
+    node: &graph::graph::Node,
+    func: &Func,
+    input_count: usize,
+) {
+    let badge_padding = 4.0 * ctx.scale;
+    let badge_height = (ctx.layout.row_height * 0.65).max(10.0 * ctx.scale);
+    let badge_radius = 6.0 * ctx.scale;
+    let badge_gap = 6.0 * ctx.scale;
+
+    for (index, input) in node.inputs.iter().enumerate() {
+        if index >= input_count {
+            break;
+        }
+        let Binding::Const(value) = &input.binding else {
+            continue;
+        };
+
+        let label = static_value_label(value);
+        let label_width = text_width(ctx.painter(), &ctx.body_font, &label, ctx.text_color);
+        let badge_width = label_width + badge_padding * 2.0;
+        let center = node_input_pos(
+            ctx.origin,
+            view_node,
+            index,
+            func.inputs.len(),
+            &ctx.layout,
+            ctx.scale,
+        );
+        let badge_right = center.x - ctx.port_radius - badge_gap;
+        let badge_rect = egui::Rect::from_min_max(
+            egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
+            egui::pos2(badge_right, center.y + badge_height * 0.5),
+        );
+
+        let base = ctx.style.input_port_color;
+        let fill = egui::Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 200);
+        let stroke = egui::Stroke::new(1.0 * ctx.scale, base);
+        ctx.painter().rect(
+            badge_rect,
+            badge_radius,
+            fill,
+            stroke,
+            egui::StrokeKind::Inside,
+        );
+        ctx.painter().text(
+            badge_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            ctx.body_font.clone(),
+            ctx.text_color,
+        );
+    }
+}
+
+fn static_value_label(value: &StaticValue) -> String {
+    match value {
+        StaticValue::Null => "null".to_string(),
+        StaticValue::Float(value) => {
+            if value.fract() == 0.0 {
+                format!("{:.0}", value)
+            } else {
+                format!("{:.3}", value)
+            }
+        }
+        StaticValue::Int(value) => value.to_string(),
+        StaticValue::Bool(value) => value.to_string(),
+        StaticValue::String(value) => {
+            const MAX_LEN: usize = 12;
+            if value.chars().count() <= MAX_LEN {
+                value.clone()
+            } else {
+                let truncated: String = value.chars().take(MAX_LEN).collect();
+                format!("{}...", truncated)
+            }
+        }
     }
 }
 

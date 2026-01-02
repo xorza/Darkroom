@@ -138,6 +138,6 @@ fn is_lua_identifier_continue(ch: char) -> bool {
 
 fn push_indent(indent: usize, out: &mut String) {
     for _ in 0..indent {
-        out.push_str("    ");
+        out.push_str("  ");
     }
 }
