@@ -919,7 +919,7 @@ fn compute_layout_and_widths(
     let heading_font = node::scaled_font(ui, egui::TextStyle::Heading, scale);
     let body_font = node::scaled_font(ui, egui::TextStyle::Body, scale);
     let text_color = ui.visuals().text_color();
-    let style = crate::gui::style::GraphStyle::new(ui, scale);
+    let style = crate::gui::style::GraphStyle::new(scale);
 
     let width_ctx = node::NodeWidthContext {
         layout: &layout,

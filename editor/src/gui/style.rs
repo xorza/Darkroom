@@ -1,7 +1,33 @@
 use eframe::egui;
 use egui::{Color32, Stroke};
 
+const STROKE_WIDTH: f32 = 1.0;
+const HEADER_TEXT_OFFSET: f32 = 4.0;
+const CACHE_BUTTON_WIDTH_FACTOR: f32 = 3.1;
+const CACHE_BUTTON_VERTICAL_PAD_FACTOR: f32 = 0.4;
+const CACHE_BUTTON_TEXT_PAD_FACTOR: f32 = 0.5;
+const NODE_FILL: Color32 = Color32::from_rgb(27, 27, 27);
+const CACHE_ACTIVE_COLOR: Color32 = Color32::from_rgb(240, 205, 90);
+const CACHE_CHECKED_TEXT_COLOR: Color32 = Color32::from_rgb(60, 50, 20);
+const STATUS_DOT_RADIUS: f32 = 4.0;
+const STATUS_ITEM_GAP: f32 = 6.0;
 const INPUT_PORT_COLOR: Color32 = Color32::from_rgb(70, 150, 255);
+const CONST_STROKE_COLOR: Color32 = Color32::from_rgb(70, 150, 255);
+const OUTPUT_PORT_COLOR: Color32 = Color32::from_rgb(70, 200, 200);
+const INPUT_HOVER_COLOR: Color32 = Color32::from_rgb(120, 190, 255);
+const OUTPUT_HOVER_COLOR: Color32 = Color32::from_rgb(110, 230, 210);
+const CONNECTION_STROKE_WIDTH: f32 = 2.0;
+const CONNECTION_HIGHLIGHT_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
+const TEMP_CONNECTION_COLOR: Color32 = Color32::from_rgb(170, 200, 255);
+const BREAKER_COLOR: Color32 = Color32::from_rgb(255, 120, 120);
+const SELECTED_STROKE_COLOR: Color32 = Color32::from_rgb(192, 222, 255);
+const NODE_STROKE_COLOR: Color32 = Color32::from_rgb(60, 60, 60);
+const DOTTED_COLOR: Color32 = Color32::from_rgb(48, 48, 48);
+const DOTTED_BASE_SPACING: f32 = 24.0;
+const DOTTED_RADIUS_BASE: f32 = 1.2;
+const DOTTED_RADIUS_MIN: f32 = 0.6;
+const DOTTED_RADIUS_MAX: f32 = 2.4;
+const CONST_STROKE_GAMMA: f32 = 0.7;
 
 #[derive(Debug, Clone)]
 pub struct GraphStyle {
@@ -34,44 +60,40 @@ pub struct GraphStyle {
 }
 
 impl GraphStyle {
-    pub fn new(ui: &egui::Ui, scale: f32) -> Self {
+    pub fn new(scale: f32) -> Self {
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be positive");
 
-        let visuals = ui.visuals();
-
-        let node_stroke = visuals.widgets.noninteractive.bg_stroke;
-        let selected_stroke =
-            Stroke::new(node_stroke.width.max(1.2), visuals.selection.stroke.color);
-        let const_stroke = Stroke::new(node_stroke.width, INPUT_PORT_COLOR.gamma_multiply(0.7));
-
         Self {
             scale,
-            header_text_offset: 4.0 * scale,
-            cache_button_width_factor: 3.1,
-            cache_button_vertical_pad_factor: 0.4,
-            cache_button_text_pad_factor: 0.5,
-            cache_active_color: Color32::from_rgb(240, 205, 90),
-            cache_checked_text_color: Color32::from_rgb(60, 50, 20),
-            status_dot_radius: 4.0 * scale,
-            status_item_gap: 6.0 * scale,
+            header_text_offset: HEADER_TEXT_OFFSET,
+            cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
+            cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,
+            cache_button_text_pad_factor: CACHE_BUTTON_TEXT_PAD_FACTOR,
+            cache_active_color: CACHE_ACTIVE_COLOR,
+            cache_checked_text_color: CACHE_CHECKED_TEXT_COLOR,
+            status_dot_radius: STATUS_DOT_RADIUS,
+            status_item_gap: STATUS_ITEM_GAP,
             input_port_color: INPUT_PORT_COLOR,
-            output_port_color: Color32::from_rgb(70, 200, 200),
-            input_hover_color: Color32::from_rgb(120, 190, 255),
-            output_hover_color: Color32::from_rgb(110, 230, 210),
-            connection_stroke: Stroke::new(2.0, INPUT_PORT_COLOR),
-            connection_highlight_stroke: Stroke::new(2.5, Color32::from_rgb(255, 90, 90)),
-            temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
-            breaker_stroke: Stroke::new(2.5, Color32::from_rgb(255, 120, 120)),
-            dotted_color: Color32::from_rgba_unmultiplied(255, 255, 255, 28),
-            dotted_base_spacing: 24.0,
-            dotted_radius_base: 1.2,
-            dotted_radius_min: 0.6,
-            dotted_radius_max: 2.4,
-            node_fill: visuals.widgets.noninteractive.bg_fill,
-            node_stroke,
-            selected_stroke,
-            const_stroke,
+            output_port_color: OUTPUT_PORT_COLOR,
+            input_hover_color: INPUT_HOVER_COLOR,
+            output_hover_color: OUTPUT_HOVER_COLOR,
+            connection_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, INPUT_PORT_COLOR),
+            connection_highlight_stroke: Stroke::new(
+                CONNECTION_STROKE_WIDTH,
+                CONNECTION_HIGHLIGHT_COLOR,
+            ),
+            temp_connection_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, TEMP_CONNECTION_COLOR),
+            breaker_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, BREAKER_COLOR),
+            dotted_color: DOTTED_COLOR,
+            dotted_base_spacing: DOTTED_BASE_SPACING,
+            dotted_radius_base: DOTTED_RADIUS_BASE,
+            dotted_radius_min: DOTTED_RADIUS_MIN,
+            dotted_radius_max: DOTTED_RADIUS_MAX,
+            node_fill: NODE_FILL,
+            node_stroke: Stroke::new(STROKE_WIDTH, NODE_STROKE_COLOR),
+            selected_stroke: Stroke::new(STROKE_WIDTH, SELECTED_STROKE_COLOR),
+            const_stroke: Stroke::new(STROKE_WIDTH, CONST_STROKE_COLOR),
         }
     }
 }
