@@ -215,7 +215,7 @@ impl ExecutionGraph {
             .into_iter()
             .filter_map(|id| self.e_nodes.index_of_key(&id))
             .collect();
-        let mut seen = vec![false; self.e_nodes.len()];
+        let mut seen: Vec<bool> = vec![false; self.e_nodes.len()];
 
         while let Some(e_node_idx) = stack.pop() {
             if seen[e_node_idx] {
