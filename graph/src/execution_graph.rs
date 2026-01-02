@@ -66,10 +66,9 @@ pub struct ExecutionInput {
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ExecutionOutput {
-    Unused,
-    Used,
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub struct ExecutionOutput {
+    usage_count: usize,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -193,7 +192,7 @@ impl ExecutionNode {
 
             self.outputs.clear();
             self.outputs
-                .resize(func.outputs.len(), ExecutionOutput::Unused);
+                .resize(func.outputs.len(), ExecutionOutput::default());
 
             self.output_values = None;
         }
@@ -379,7 +378,7 @@ impl ExecutionGraph {
                 VisitCause::Terminal => {}
                 VisitCause::OutputRequest { output_idx } => {
                     if e_node.process_state != ProcessState::None {
-                        e_node.outputs[output_idx] = ExecutionOutput::Used
+                        e_node.outputs[output_idx].usage_count += 1;
                     }
                 }
                 VisitCause::Done => {
@@ -413,7 +412,7 @@ impl ExecutionGraph {
             e_node.update(node, func);
 
             if let VisitCause::OutputRequest { output_idx } = visit.cause {
-                e_node.outputs[output_idx] = ExecutionOutput::Used
+                e_node.outputs[output_idx].usage_count += 1;
             }
 
             for input in node.inputs.iter() {
@@ -647,10 +646,6 @@ impl ExecutionGraph {
                             assert_eq!(*port_address, *e_node_port_address);
                         }
                         assert!(port_address.port_idx < output_e_node.outputs.len());
-                        assert_eq!(
-                            output_e_node.outputs[port_address.port_idx],
-                            ExecutionOutput::Used
-                        );
                     }
                 }
             }
