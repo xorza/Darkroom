@@ -109,9 +109,11 @@ where
 
     pub fn compact_finish(&mut self, write_idx: usize) {
         assert!(write_idx <= self.items.len());
+
         self.items.truncate(write_idx);
         self.idx_by_key
             .retain(|&id, &mut idx| idx < write_idx && *self.items[idx].key() == id);
+
         assert_eq!(self.items.len(), self.idx_by_key.len());
 
         if is_debug() {
