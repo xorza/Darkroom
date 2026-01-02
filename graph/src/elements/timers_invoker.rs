@@ -54,7 +54,7 @@ impl Default for TimersInvoker {
                 },
             ],
             events: vec!["always".into(), "once".into(), "fps".into()],
-            lambda: async_lambda!(move |ctx, inputs, outputs| {
+            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 let now = Instant::now();
 
                 let (delta, frame_no) = {
@@ -72,10 +72,10 @@ impl Default for TimersInvoker {
                             frame_no: 2,
                         });
 
-                        let frequency = if inputs[0].is_none() {
+                        let frequency = if inputs[0].value.is_none() {
                             30.0
                         } else {
-                            inputs[0].as_float()
+                            inputs[0].value.as_float()
                         };
                         (1.0 / frequency, 1)
                     }

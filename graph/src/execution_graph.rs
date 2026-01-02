@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::args::Args;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
+use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{FuncId, FuncLambda};
 use common::{is_debug, FileFormat};
@@ -40,7 +40,7 @@ pub enum InputState {
     Unchanged,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum OutputRequest {
+pub enum OutputUsage {
     #[default]
     Skip,
     Needed,
@@ -290,8 +290,8 @@ impl ExecutionGraph {
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
         let start = std::time::Instant::now();
 
-        let mut inputs: Vec<(InputState, DynamicValue)> = Vec::default();
-        let mut output_meta: Vec<OutputRequest> = Vec::default();
+        let mut inputs: Vec<InvokeInput> = Vec::default();
+        let mut output_meta: Vec<OutputUsage> = Vec::default();
         let mut error: Option<ExecutionError> = None;
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
@@ -317,15 +317,18 @@ impl ExecutionGraph {
 
                 let value = value.convert_type(&input.data_type);
 
-                inputs.push((input.state, value));
+                inputs.push(InvokeInput {
+                    state: input.state,
+                    value,
+                });
             }
 
             output_meta.clear();
             output_meta.extend(e_node.outputs.iter().map(|output| {
                 if output.usage_count == 0 {
-                    OutputRequest::Skip
+                    OutputUsage::Skip
                 } else {
-                    OutputRequest::Needed
+                    OutputUsage::Needed
                 }
             }));
 

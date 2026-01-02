@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::execution_graph::OutputRequest;
+use crate::execution_graph::OutputUsage;
 use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
 use common::id_type;
@@ -30,15 +30,41 @@ pub enum InvokeError {
 
 pub type InvokeResult<T> = Result<T, InvokeError>;
 
-pub type AsyncLambda = dyn for<'a> Fn(
+#[derive(Debug)]
+pub struct InvokeInput {
+    pub state: InputState,
+    pub value: DynamicValue,
+}
+
+type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
+
+pub trait AsyncLambdaFn:
+    for<'a> Fn(
         &'a mut InvokeCache,
-        &'a [(InputState, DynamicValue)],
-        &'a [OutputRequest],
+        &'a [InvokeInput],
+        &'a [OutputUsage],
         &'a mut [DynamicValue],
-    ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
+    ) -> AsyncLambdaFuture<'a>
     + Send
     + Sync
-    + 'static;
+    + 'static
+{
+}
+
+impl<T> AsyncLambdaFn for T where
+    T: for<'a> Fn(
+            &'a mut InvokeCache,
+            &'a [InvokeInput],
+            &'a [OutputUsage],
+            &'a mut [DynamicValue],
+        ) -> AsyncLambdaFuture<'a>
+        + Send
+        + Sync
+        + 'static
+{
+}
+
+pub type AsyncLambda = dyn AsyncLambdaFn;
 
 #[derive(Clone, Default)]
 pub enum FuncLambda {
@@ -50,15 +76,7 @@ pub enum FuncLambda {
 impl FuncLambda {
     pub fn new<F>(lambda: F) -> Self
     where
-        F: for<'a> Fn(
-                &'a mut InvokeCache,
-                &'a [(InputState, DynamicValue)],
-                &'a [OutputRequest],
-                &'a mut [DynamicValue],
-            ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
-            + Send
-            + Sync
-            + 'static,
+        F: AsyncLambdaFn,
     {
         Self::Lambda(Arc::new(lambda))
     }
@@ -66,8 +84,8 @@ impl FuncLambda {
     pub async fn invoke(
         &self,
         cache: &mut InvokeCache,
-        inputs: &[(InputState, DynamicValue)],
-        outputs_meta: &[OutputRequest],
+        inputs: &[InvokeInput],
+        outputs_meta: &[OutputUsage],
         outputs: &mut [DynamicValue],
     ) -> InvokeResult<()> {
         match self {
@@ -373,12 +391,12 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: async_lambda!(move |ctx, inputs, outputs| {
+            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: i64 = inputs[0].as_int();
-                let b: i64 = inputs[1].as_int();
+                let a: i64 = inputs[0].value.as_int();
+                let b: i64 = inputs[1].value.as_int();
                 outputs[0] = (a * b).into();
                 ctx.set(a * b);
 
@@ -398,7 +416,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: async_lambda!(
-                move |_, _, outputs| { get_a = Arc::clone(&get_a) } => {
+                move |_, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a() as f64).into();
                     Ok(())
@@ -418,7 +436,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             lambda: async_lambda!(
-                move |_, _, outputs| { get_b = Arc::clone(&get_b) } => {
+                move |_, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
@@ -452,11 +470,11 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
-            lambda: async_lambda!(move |ctx, inputs, outputs| {
+            lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].as_int();
-                let b: i64 = inputs[1].as_int();
+                let a: i64 = inputs[0].value.as_int();
+                let b: i64 = inputs[1].value.as_int();
                 ctx.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
@@ -478,10 +496,10 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             outputs: vec![],
             events: vec![],
             lambda: async_lambda!(
-                move |_, inputs, _| { print = Arc::clone(&print) } => {
+                move |_, inputs, _, _| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
-                    print(inputs[0].as_int());
+                    print(inputs[0].value.as_int());
                     Ok(())
                 }
             ),
@@ -493,7 +511,8 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 #[cfg(test)]
 mod tests {
     use crate::data::DynamicValue;
-    use crate::function::{test_func_lib, InvokeCache, TestFuncHooks};
+    use crate::execution_graph::{InputState, OutputUsage};
+    use crate::function::{test_func_lib, InvokeCache, InvokeInput, TestFuncHooks};
     use common::FileFormat;
 
     #[test]
@@ -516,13 +535,23 @@ mod tests {
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
         let mut cache = InvokeCache::default();
-        let mut inputs = vec![DynamicValue::Int(2), DynamicValue::Int(4)];
+        let mut inputs = vec![
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(2),
+            },
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(4),
+            },
+        ];
         let mut outputs = vec![DynamicValue::None];
+        let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
         func_lib
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &mut outputs)
+            .invoke(&mut cache, &inputs, &outputs_meta, &mut outputs)
             .await?;
         assert_eq!(outputs[0].as_int(), 6);
         let cached = *cache
@@ -530,14 +559,14 @@ mod tests {
             .expect("InvokeCache should contain the sum value");
         assert_eq!(cached, 6);
 
-        inputs[0] = DynamicValue::Int(3);
-        inputs[1] = DynamicValue::Int(5);
+        inputs[0].value = DynamicValue::Int(3);
+        inputs[1].value = DynamicValue::Int(5);
         outputs[0] = DynamicValue::None;
         func_lib
             .by_id(&sum_id)
             .unwrap()
             .lambda
-            .invoke(&mut cache, &inputs, &mut outputs)
+            .invoke(&mut cache, &inputs, &outputs_meta, &mut outputs)
             .await?;
         assert_eq!(outputs[0].as_int(), 8);
 

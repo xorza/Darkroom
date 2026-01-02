@@ -186,3 +186,6 @@ Node headers now show an impure-function status dot for impure funcs.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 DynamicValue now owns the type-conversion helper previously in execution_graph.
 Execution graph validation now asserts output value cache length and ensures all bound output nodes exist in the execution node set.
+Function async lambda signatures are centralized via `AsyncLambdaFn` to avoid duplication in `graph/src/function.rs`.
+Invocation inputs now use `InvokeInput { state, value }`, and output usage is tracked via `OutputUsage` instead of `OutputRequest`.
+`async_lambda!` now only supports the 3-arg and 4-arg forms used in the codebase, dropping the generic fallback arms.

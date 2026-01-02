@@ -10,7 +10,8 @@ use tokio::sync::Mutex;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeArgs, InvokeCache};
+use crate::execution_graph::{InputState, OutputUsage};
+use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeId};
 use crate::{data, function};
 
@@ -107,7 +108,7 @@ impl LuaInvoker {
             let lua_func_template = lua_func.clone();
             let lua = Arc::clone(&self.lua);
             func.lambda = crate::async_lambda!(
-                move |_cache, inputs, outputs| {
+                move |_cache, inputs, _,outputs| {
                     func = func_template.clone(),
                     lua_func = lua_func_template.clone(),
                     lua = Arc::clone(&lua)
@@ -130,9 +131,9 @@ impl LuaInvoker {
 
                     let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
                     for (input_info, input) in func.inputs.iter().zip(inputs.iter()) {
-                        assert_eq!(input_info.data_type, *input.data_type());
+                        assert_eq!(input_info.data_type, *input.value.data_type());
 
-                        let invoke_value = to_lua_value(&lua, input)?;
+                        let invoke_value = to_lua_value(&lua, &input.value)?;
                         input_args.push(invoke_value);
                     }
 
@@ -496,8 +497,18 @@ mod tests {
         let funcs = invoker.func_lib();
         assert_eq!(funcs.funcs.len(), 5);
 
-        let mut inputs = Args::from_vec(vec![3, 5]);
+        let inputs = vec![
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(3),
+            },
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(5),
+            },
+        ];
         let mut outputs = Args::from_vec(vec![0]);
+        let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
 
         let mut cache = InvokeCache::default();
         // call 'mult' function
@@ -506,7 +517,12 @@ mod tests {
             .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
             .unwrap()
             .lambda
-            .invoke(&mut cache, inputs.as_mut_slice(), outputs.as_mut_slice())
+            .invoke(
+                &mut cache,
+                inputs.as_slice(),
+                &outputs_meta,
+                outputs.as_mut_slice(),
+            )
             .await
             .map_err(anyhow::Error::from)?;
         let result: i64 = outputs[0].as_int();
@@ -550,8 +566,18 @@ mod tests {
         let mut invoker = LuaInvoker::default();
         invoker.load(include_str!("../../../../test_resources/test_lua.lua"))?;
 
-        let mut inputs = Args::from_vec(vec![6, 7]);
+        let inputs = vec![
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(6),
+            },
+            InvokeInput {
+                state: InputState::Changed,
+                value: DynamicValue::Int(7),
+            },
+        ];
         let mut outputs = Args::from_vec(vec![0]);
+        let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut cache = InvokeCache::default();
 
         invoker
@@ -559,7 +585,12 @@ mod tests {
             .by_id(&FuncId::from_str("432b9bf1-f478-476c-a9c9-9a6e190124fc")?)
             .unwrap()
             .lambda
-            .invoke(&mut cache, inputs.as_mut_slice(), outputs.as_mut_slice())
+            .invoke(
+                &mut cache,
+                inputs.as_slice(),
+                &outputs_meta,
+                outputs.as_mut_slice(),
+            )
             .await
             .map_err(anyhow::Error::from)?;
 
