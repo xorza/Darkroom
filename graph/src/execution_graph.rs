@@ -42,7 +42,7 @@ pub enum InputState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionInput {
-    pub state: InputState,
+    pub state: Option<InputState>,
     pub required: bool,
     pub binding: Binding,
     pub data_type: DataType,
@@ -159,7 +159,7 @@ impl ExecutionNode {
                 self.inputs.clear();
                 for func_input in func.inputs.iter() {
                     self.inputs.push(ExecutionInput {
-                        state: InputState::Changed,
+                        state: None,
                         required: func_input.required,
                         binding: Binding::None,
                         data_type: func_input.data_type.clone(),
@@ -471,7 +471,7 @@ impl ExecutionGraph {
                 if e_input.binding != input.binding {
                     e_input.binding = input.binding.clone();
                 }
-                e_input.state = input_state;
+                e_input.state = Some(input_state);
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
@@ -547,7 +547,7 @@ impl ExecutionGraph {
             });
 
             for input in e_node.inputs.iter() {
-                match input.state {
+                match input.state.expect("Input state should be set") {
                     InputState::Unchanged | InputState::None => continue,
                     InputState::Changed => {}
                 }
@@ -609,12 +609,12 @@ impl ExecutionGraph {
             let missing_required_inputs = e_node
                 .inputs
                 .iter()
-                .any(|input| input.required && input.state == InputState::None);
+                .any(|input| input.required && input.state.unwrap() == InputState::None);
             assert_eq!(missing_required_inputs, e_node.missing_required_inputs);
             let changed_inputs = e_node
                 .inputs
                 .iter()
-                .any(|input| input.state == InputState::Changed);
+                .any(|input| input.state.unwrap() == InputState::Changed);
             assert_eq!(changed_inputs, e_node.changed_inputs);
 
             for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
@@ -754,9 +754,9 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state, InputState::None);
-        assert_eq!(mult.inputs[0].state, InputState::None);
-        assert_eq!(print.inputs[0].state, InputState::None);
+        assert_eq!(sum.inputs[0].state.unwrap(), InputState::None);
+        assert_eq!(mult.inputs[0].state.unwrap(), InputState::None);
+        assert_eq!(print.inputs[0].state.unwrap(), InputState::None);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
