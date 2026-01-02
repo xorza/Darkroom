@@ -92,10 +92,8 @@ struct ScenariumApp {
 impl ScenariumApp {
     fn new(ui_context: &egui::Context) -> Self {
         let graph_path = Self::default_path();
-
         let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
-
         let worker = Self::create_worker(&updated_status, &print_output, ui_context.clone());
 
         let mut result = Self {
