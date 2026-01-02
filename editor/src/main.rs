@@ -285,6 +285,17 @@ impl eframe::App for ScenariumApp {
                 .render(ui, &mut self.view_graph, &self.func_lib);
         });
 
+        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
+            ui.label(&self.status);
+        });
+        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Run").clicked() {
+                    self.run_graph();
+                }
+            });
+        });
+
         if !graph_interaction.actions.is_empty() {
             let node_ids_to_invalidate =
                 graph_interaction
@@ -299,16 +310,5 @@ impl eframe::App for ScenariumApp {
                     });
             self.worker.invalidate_caches(node_ids_to_invalidate);
         }
-
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            ui.label(&self.status);
-        });
-        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Run").clicked() {
-                    self.run_graph();
-                }
-            });
-        });
     }
 }
