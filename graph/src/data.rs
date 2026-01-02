@@ -22,7 +22,7 @@ pub enum DataType {
     Array {
         element_type: Box<DataType>,
         // length is not included in the hash or equality check
-        length: u64,
+        length: usize,
     },
     Custom {
         type_id: TypeId,
