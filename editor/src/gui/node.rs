@@ -481,12 +481,18 @@ fn render_node_const_bindings(
         );
 
         let fill = ctx.style.node_fill;
-        let stroke = egui::Stroke::new(1.0 * ctx.scale, ctx.style.input_port_color);
+        let stroke = egui::Stroke::new(
+            ctx.style.connection_stroke.width,
+            ctx.style.input_port_color,
+        );
+        let link_start = egui::pos2(badge_rect.max.x, center.y);
+        let link_end = egui::pos2(center.x - ctx.port_radius * 0.6, center.y);
+        ctx.painter().line_segment([link_start, link_end], stroke);
         ctx.painter().rect(
             badge_rect,
             badge_radius,
             fill,
-            stroke,
+            egui::Stroke::new(1.0 * ctx.scale, ctx.style.input_port_color),
             egui::StrokeKind::Inside,
         );
         ctx.painter().text(
