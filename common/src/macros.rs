@@ -64,6 +64,20 @@ macro_rules! id_type {
             }
         }
 
+        impl From<&str> for $name {
+            fn from(id: &str) -> $name {
+                let uuid = uuid::Uuid::parse_str(id)
+                    .expect(concat!("invalid UUID string for ", stringify!($name)));
+                $name(uuid)
+            }
+        }
+
+        impl From<String> for $name {
+            fn from(id: String) -> $name {
+                id.as_str().into()
+            }
+        }
+
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(f, "{}", self.0)

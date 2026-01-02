@@ -167,16 +167,14 @@ mod tests {
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
 
-        let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".parse().unwrap();
-        let frame_event_func_id: FuncId = "01897c92-d605-5f5a-7a21-627ed74824ff".parse().unwrap();
+        let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
+        let frame_event_func_id: FuncId = "01897c92-d605-5f5a-7a21-627ed74824ff".into();
 
-        let float_to_string_node_id: NodeId =
-            "eb6590aa-229d-4874-abba-37c56f5b97fa".parse().unwrap();
-        let float_to_string_func_id: FuncId =
-            "01896a88-bf15-dead-4a15-5969da5a9e65".parse().unwrap();
+        let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
+        let float_to_string_func_id: FuncId = "01896a88-bf15-dead-4a15-5969da5a9e65".into();
 
-        let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".parse().unwrap();
-        let print_func_id: FuncId = "01896910-0790-ad1b-aa12-3f1437196789".parse().unwrap();
+        let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
+        let print_func_id: FuncId = "01896910-0790-ad1b-aa12-3f1437196789".into();
 
         graph.add(Node {
             id: frame_event_node_id,

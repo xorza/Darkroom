@@ -61,6 +61,7 @@ Recent adjustments:
 - `common/src/key_index_vec.rs` tests cover compact insert and finish behavior for swap, append, and already-compacted paths.
 - `common/src/key_index_vec.rs` compaction now uses a constructor callback for new entries instead of default-only insertion.
 - `common/src/key_index_vec.rs` serializes as a flat array (no wrapper object) and rebuilds the index map from that array on load.
+- `common/src/macros.rs` `id_type!` now supports `From<&str>`/`From<String>` for UUID IDs, panicking with a clear message on invalid strings.
 - Removed `common/src/apply.rs` and replaced its usages with standard `Option` methods.
 - Switched logging to tracing; `common/src/log_setup.rs` wires console + rolling file output via `tracing-subscriber` and `tracing-appender`.
 - Execution graph construction now uses a DFS order with cycle detection, input/output binding validation, and ID-to-index maps for faster lookups.
