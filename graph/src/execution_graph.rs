@@ -70,12 +70,12 @@ struct Visit {
     cause: VisitCause,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPortAddress {
     pub target_idx: usize,
     pub port_idx: usize,
 }
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionBinding {
     #[default]
     None,
@@ -452,13 +452,16 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let (input_state, e_binding) = match &input.binding {
-                    Binding::None => (InputState::None, ExecutionBinding::None),
+                    Binding::None => (InputState::None, Some(ExecutionBinding::None)),
                     Binding::Const(value) => {
                         let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                         if Some(value) == e_input.binding.as_const() {
-                            (InputState::Unchanged, e_input.binding.clone())
+                            (InputState::Unchanged, None)
                         } else {
-                            (InputState::Changed, ExecutionBinding::Const(value.clone()))
+                            (
+                                InputState::Changed,
+                                Some(ExecutionBinding::Const(value.clone())),
+                            )
                         }
                     }
                     Binding::Bind(port_address) => {
@@ -469,18 +472,23 @@ impl ExecutionGraph {
                         assert!(output_e_node.inited);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        let e_binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                        let new_binding = ExecutionPortAddress {
                             target_idx: output_e_node_idx,
                             port_idx: port_address.port_idx,
-                        });
+                        };
+                        let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                        let new_binding = match e_input.binding.as_bind() {
+                            Some(existing) if *existing == new_binding => None,
+                            _ => Some(ExecutionBinding::Bind(new_binding)),
+                        };
 
                         if output_e_node.missing_required_inputs {
                             assert!(!output_e_node.wants_execute);
-                            (InputState::None, e_binding)
+                            (InputState::None, new_binding)
                         } else if output_e_node.wants_execute {
-                            (InputState::Changed, e_binding)
+                            (InputState::Changed, new_binding)
                         } else {
-                            (InputState::Unchanged, e_binding)
+                            (InputState::Unchanged, new_binding)
                         }
                     }
                 };
@@ -488,10 +496,9 @@ impl ExecutionGraph {
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
 
                 e_input.state = input_state;
-                //todo try skip
-                // if e_input.binding != e_binding {
-                e_input.binding = e_binding;
-                // }
+                if let Some(e_binding) = e_binding {
+                    e_input.binding = e_binding;
+                }
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
