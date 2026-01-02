@@ -227,15 +227,21 @@ impl ExecutionGraph {
             e_node.inited = false;
 
             for (output_e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-                e_node.inputs.iter().for_each(|input| match &input.binding {
-                    ExecutionBinding::Bind(port_address)
-                        if port_address.target_idx == e_node_idx =>
-                    {
-                        stack.push(output_e_node_idx)
-                    }
+                if seen[output_e_node_idx] {
+                    continue;
+                }
 
-                    _ => {}
+                let depends = e_node.inputs.iter().any(|input| {
+                    matches!(
+                        &input.binding,
+                        ExecutionBinding::Bind(port_address)
+                            if port_address.target_idx == e_node_idx
+                    )
                 });
+
+                if depends {
+                    stack.push(output_e_node_idx);
+                }
             }
         }
     }
