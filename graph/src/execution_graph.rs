@@ -453,7 +453,6 @@ impl ExecutionGraph {
                     }
                     Binding::Bind(port_address) => {
                         let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
-
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
 
