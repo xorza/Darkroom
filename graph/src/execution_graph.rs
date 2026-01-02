@@ -637,19 +637,20 @@ impl ExecutionGraph {
             assert_eq!(changed_inputs, e_node.changed_inputs);
 
             for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
-                let binding = &e_input.binding;
-                match &input.binding {
+                let binding = &input.binding;
+                let e_binding = &e_input.binding;
+                match binding {
                     Binding::None => {
-                        assert!(matches!(binding, ExecutionBinding::None));
+                        assert!(matches!(e_binding, ExecutionBinding::None));
                     }
                     Binding::Const(_) => {
-                        assert!(matches!(binding, ExecutionBinding::Const(_)));
+                        assert!(matches!(e_binding, ExecutionBinding::Const(_)));
                     }
                     Binding::Bind(port_address) => {
-                        assert!(matches!(binding, ExecutionBinding::Bind(_)));
+                        assert!(matches!(e_binding, ExecutionBinding::Bind(_)));
 
                         let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
-                        let e_node_port_address = e_input.binding.unwrap_bind();
+                        let e_node_port_address = e_binding.unwrap_bind();
                         assert_eq!(*port_address, *e_node_port_address);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
                     }
