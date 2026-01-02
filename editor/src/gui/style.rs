@@ -26,6 +26,7 @@ pub struct GraphStyle {
     pub dotted_radius_max: f32,
     pub node_fill: egui::Color32,
     pub node_stroke: egui::Stroke,
+    pub const_stroke: egui::Stroke,
     pub selected_stroke: egui::Stroke,
 }
 
@@ -35,9 +36,13 @@ impl GraphStyle {
         assert!(scale > 0.0, "style scale must be positive");
 
         let visuals = ui.visuals();
+
+        let input_port_color = egui::Color32::from_rgb(70, 150, 255);
         let node_stroke = visuals.widgets.noninteractive.bg_stroke;
         let selected_stroke =
-            egui::Stroke::new(node_stroke.width.max(2.0), visuals.selection.stroke.color);
+            egui::Stroke::new(node_stroke.width.max(1.2), visuals.selection.stroke.color);
+        let const_stroke =
+            egui::Stroke::new(node_stroke.width, input_port_color.gamma_multiply(0.7));
 
         Self {
             scale,
@@ -49,11 +54,11 @@ impl GraphStyle {
             cache_checked_text_color: egui::Color32::from_rgb(60, 50, 20),
             status_dot_radius: 4.0 * scale,
             status_item_gap: 6.0 * scale,
-            input_port_color: egui::Color32::from_rgb(70, 150, 255),
+            input_port_color,
             output_port_color: egui::Color32::from_rgb(70, 200, 200),
             input_hover_color: egui::Color32::from_rgb(120, 190, 255),
             output_hover_color: egui::Color32::from_rgb(110, 230, 210),
-            connection_stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(80, 160, 255)),
+            connection_stroke: egui::Stroke::new(2.0, input_port_color),
             connection_highlight_stroke: egui::Stroke::new(
                 2.5,
                 egui::Color32::from_rgb(255, 90, 90),
@@ -68,6 +73,7 @@ impl GraphStyle {
             node_fill: visuals.widgets.noninteractive.bg_fill,
             node_stroke,
             selected_stroke,
+            const_stroke,
         }
     }
 

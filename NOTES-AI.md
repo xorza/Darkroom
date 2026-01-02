@@ -199,3 +199,4 @@ Context meta constructors now share a `ContextCtor` type alias to avoid repeatin
 `graph::Input.binding` now skips serialization when `Binding::None`, and `Input.default_value` skips when `None`.
 `graph::Node.behavior` now skips serialization when `NodeBehavior::AsFunction` via `NodeBehavior::is_default`.
 Editor node rendering now shows const input bindings as small badges to the left of input ports.
+Const-binding badges now use a dedicated stroke color in the graph style.
