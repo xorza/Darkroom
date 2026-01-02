@@ -15,10 +15,7 @@ pub struct PortAddress {
     pub port_idx: usize,
 }
 
-// pub id: NodeId,
-// pub port_idx: usize,
-
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Binding {
     #[default]
     None,
@@ -210,6 +207,28 @@ impl Node {
 }
 
 impl Binding {
+    pub fn unwrap_bind(&self) -> &PortAddress {
+        match self {
+            Binding::Bind(port_address) => port_address,
+            Binding::None => {
+                panic!("expected Binding::Bind, got None")
+            }
+            Binding::Const(_) => {
+                panic!("expected Binding::Bind, got Const")
+            }
+        }
+    }
+    pub fn unwrap_const(&self) -> &StaticValue {
+        match self {
+            Binding::Const(const_value) => const_value,
+            Binding::None => {
+                panic!("expected Binding::Const, got None")
+            }
+            Binding::Bind(_) => {
+                panic!("expected Binding::Const, got Bind")
+            }
+        }
+    }
     pub fn as_output_binding(&self) -> Option<&PortAddress> {
         match self {
             Binding::Bind(output_binding) => Some(output_binding),
