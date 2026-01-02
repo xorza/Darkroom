@@ -52,11 +52,11 @@ arc-swap = { version = "*" }
 unused_crate_dependencies = "allow"
 dead_code = "allow"
 
-[profile.samply]
-inherits = "release"
-debug = true
-
 [profile.bench]
 debug = true
 strip = "none"
 split-debuginfo = "unpacked"
+
+[profile.release]
+# lto = true
+# strip = "symbols"
