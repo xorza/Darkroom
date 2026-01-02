@@ -39,7 +39,12 @@ pub enum InputState {
     Changed,
     Unchanged,
 }
-
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum OutputRequest {
+    #[default]
+    Skip,
+    Needed,
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub state: InputState,
@@ -135,8 +140,6 @@ pub struct ExecutionGraph {
     //caches
     #[serde(skip)]
     stack: Vec<Visit>,
-    #[serde(skip)]
-    input_args: Args,
 }
 
 impl ExecutionNode {
@@ -225,6 +228,7 @@ impl ExecutionGraph {
 
             let e_node = &mut self.e_nodes[e_node_idx];
             e_node.inited = false;
+            e_node.output_values = None;
 
             for (output_e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
                 if seen[output_e_node_idx] {
@@ -286,15 +290,16 @@ impl ExecutionGraph {
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
         let start = std::time::Instant::now();
 
-        let mut input_args: Args = take(&mut self.input_args);
+        let mut inputs: Vec<(InputState, DynamicValue)> = Vec::default();
+        let mut output_meta: Vec<OutputRequest> = Vec::default();
         let mut error: Option<ExecutionError> = None;
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
-            input_args.resize_and_clear(e_node.inputs.len());
             assert!(e_node.inited);
 
-            for (input_idx, input) in e_node.inputs.iter().enumerate() {
+            inputs.clear();
+            for input in e_node.inputs.iter() {
                 let value: DynamicValue = match &input.binding {
                     ExecutionBinding::None => DynamicValue::None,
                     ExecutionBinding::Const(value) => value.into(),
@@ -310,8 +315,19 @@ impl ExecutionGraph {
                     }
                 };
 
-                input_args[input_idx] = value.convert_type(&input.data_type);
+                let value = value.convert_type(&input.data_type);
+
+                inputs.push((input.state, value));
             }
+
+            output_meta.clear();
+            output_meta.extend(e_node.outputs.iter().map(|output| {
+                if output.usage_count == 0 {
+                    OutputRequest::Skip
+                } else {
+                    OutputRequest::Needed
+                }
+            }));
 
             let e_node = &mut self.e_nodes[e_node_idx];
             assert!(e_node.error.is_none());
@@ -325,7 +341,8 @@ impl ExecutionGraph {
                 .lambda
                 .invoke(
                     &mut e_node.cache,
-                    input_args.as_slice(),
+                    inputs.as_slice(),
+                    output_meta.as_slice(),
                     outputs.as_mut_slice(),
                 )
                 .await
@@ -342,9 +359,6 @@ impl ExecutionGraph {
                 break;
             }
         }
-
-        input_args.clear();
-        self.input_args = take(&mut input_args);
 
         match error {
             Some(err) => Err(err),

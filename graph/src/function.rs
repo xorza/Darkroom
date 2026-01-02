@@ -4,6 +4,8 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::execution_graph::OutputRequest;
+use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
@@ -20,8 +22,6 @@ pub enum FuncBehavior {
     Pure,
 }
 
-pub type InvokeArgs = [DynamicValue];
-
 #[derive(Debug, Error)]
 pub enum InvokeError {
     #[error("Invocation failed: {0}")]
@@ -32,8 +32,9 @@ pub type InvokeResult<T> = Result<T, InvokeError>;
 
 pub type AsyncLambda = dyn for<'a> Fn(
         &'a mut InvokeCache,
-        &'a InvokeArgs,
-        &'a mut InvokeArgs,
+        &'a [(InputState, DynamicValue)],
+        &'a [OutputRequest],
+        &'a mut [DynamicValue],
     ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
     + Send
     + Sync
@@ -51,8 +52,9 @@ impl FuncLambda {
     where
         F: for<'a> Fn(
                 &'a mut InvokeCache,
-                &'a InvokeArgs,
-                &'a mut InvokeArgs,
+                &'a [(InputState, DynamicValue)],
+                &'a [OutputRequest],
+                &'a mut [DynamicValue],
             ) -> Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>
             + Send
             + Sync
@@ -64,14 +66,15 @@ impl FuncLambda {
     pub async fn invoke(
         &self,
         cache: &mut InvokeCache,
-        inputs: &InvokeArgs,
-        outputs: &mut InvokeArgs,
+        inputs: &[(InputState, DynamicValue)],
+        outputs_meta: &[OutputRequest],
+        outputs: &mut [DynamicValue],
     ) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
                 panic!("Func missing lambda");
             }
-            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs).await,
+            FuncLambda::Lambda(inner) => (inner)(cache, inputs, outputs_meta, outputs).await,
         }
     }
 }
