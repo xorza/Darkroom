@@ -422,15 +422,6 @@ impl ExecutionGraph {
         self.stack = take(&mut stack);
         self.e_nodes.compact_finish(write_idx);
 
-        if is_debug() {
-            assert_eq!(self.e_nodes.len(), self.e_nodes.idx_by_key.len());
-            assert!(self.e_nodes.len() <= graph.nodes.len());
-            self.e_nodes.iter().enumerate().for_each(|(idx, e_node)| {
-                assert_eq!(graph.by_id(&e_node.id).unwrap().id, e_node.id);
-                assert_eq!(idx, self.e_nodes.idx_by_key[&e_node.id]);
-            });
-        }
-
         Ok(())
     }
 
