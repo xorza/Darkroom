@@ -32,83 +32,19 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new<Callback>(compute_callback: Callback) -> Self
+    pub fn new<Callback>(callback: Callback) -> Self
     where
         Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
     {
-        let compute_callback: Shared<Callback> = Shared::new(compute_callback);
+        let callback: Shared<Callback> = Shared::new(callback);
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            Self::worker_loop(rx, compute_callback).await;
+            worker_loop(rx, callback).await;
         });
 
         Self {
             thread_handle: Some(thread_handle),
             tx,
-        }
-    }
-
-    async fn worker_loop<Callback>(
-        mut rx: UnboundedReceiver<WorkerMessage>,
-        compute_callback: Shared<Callback>,
-    ) where
-        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
-    {
-        let mut execution_graph = ExecutionGraph::default();
-        let mut msgs: Vec<WorkerMessage> = Vec::default();
-        let mut context: Option<(Graph, FuncLib)> = None;
-        let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
-        let mut events: Vec<u8> = Vec::default();
-
-        'worker: loop {
-            let msg = rx.recv().await;
-            let Some(msg) = msg else { break };
-            msgs.push(msg);
-
-            loop {
-                match rx.try_recv() {
-                    Ok(msg) => msgs.push(msg),
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => break 'worker,
-                }
-            }
-
-            for msg in msgs.drain(..) {
-                match msg {
-                    WorkerMessage::Exit => break 'worker,
-                    WorkerMessage::Event => events.push(0),
-                    WorkerMessage::Update { graph, func_lib } => {
-                        events.clear();
-                        context = Some((graph, func_lib));
-                    }
-                    WorkerMessage::InvalidateCaches(node_ids) => {
-                        invalidate_node_ids.extend(node_ids)
-                    }
-                    WorkerMessage::Clear => {
-                        execution_graph.clear();
-                        events.clear();
-                        context = None;
-                        invalidate_node_ids.clear();
-                    }
-                }
-            }
-
-            if !invalidate_node_ids.is_empty() {
-                execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
-                assert!(invalidate_node_ids.is_empty());
-            }
-
-            if let Some((graph, func_lib)) = context.take() {
-                if let Err(err) = execution_graph.update(&graph, &func_lib) {
-                    (compute_callback.lock().await)(Err(err));
-                }
-            }
-
-            if !events.is_empty() {
-                let result = execution_graph.execute().await;
-                (compute_callback.lock().await)(result);
-                events.clear();
-            }
         }
     }
 
@@ -149,6 +85,66 @@ impl Drop for Worker {
     fn drop(&mut self) {
         if self.thread_handle.is_some() {
             error!("Worker dropped while the thread is still running; call Worker::exit() first");
+        }
+    }
+}
+
+async fn worker_loop<Callback>(mut rx: UnboundedReceiver<WorkerMessage>, callback: Shared<Callback>)
+where
+    Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
+{
+    let mut execution_graph = ExecutionGraph::default();
+    let mut msgs: Vec<WorkerMessage> = Vec::default();
+    let mut context: Option<(Graph, FuncLib)> = None;
+    let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
+    let mut events: Vec<u8> = Vec::default();
+
+    'worker: loop {
+        let msg = rx.recv().await;
+        let Some(msg) = msg else { break };
+        msgs.push(msg);
+
+        loop {
+            match rx.try_recv() {
+                Ok(msg) => msgs.push(msg),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => break 'worker,
+            }
+        }
+
+        for msg in msgs.drain(..) {
+            match msg {
+                WorkerMessage::Exit => break 'worker,
+                WorkerMessage::Event => events.push(0),
+                WorkerMessage::Update { graph, func_lib } => {
+                    events.clear();
+                    context = Some((graph, func_lib));
+                }
+                WorkerMessage::InvalidateCaches(node_ids) => invalidate_node_ids.extend(node_ids),
+                WorkerMessage::Clear => {
+                    execution_graph.clear();
+                    events.clear();
+                    context = None;
+                    invalidate_node_ids.clear();
+                }
+            }
+        }
+
+        if !invalidate_node_ids.is_empty() {
+            execution_graph.invalidate_recurisevly(invalidate_node_ids.drain());
+            assert!(invalidate_node_ids.is_empty());
+        }
+
+        if let Some((graph, func_lib)) = context.take() {
+            if let Err(err) = execution_graph.update(&graph, &func_lib) {
+                (callback.lock().await)(Err(err));
+            }
+        }
+
+        if !events.is_empty() {
+            let result = execution_graph.execute().await;
+            (callback.lock().await)(result);
+            events.clear();
         }
     }
 }
