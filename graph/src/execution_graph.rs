@@ -298,7 +298,7 @@ impl ExecutionGraph {
                     ExecutionBinding::None => DynamicValue::None,
                     ExecutionBinding::Const(value) => value.into(),
                     ExecutionBinding::Bind(port_address) => {
-                        let output_e_node = self.by_id(&port_address.id).unwrap();
+                        let output_e_node = self.e_nodes.by_key(&port_address.id).unwrap();
                         let output_values = output_e_node
                             .output_values
                             .as_ref()
@@ -340,10 +340,9 @@ impl ExecutionGraph {
                 error = Some(err);
                 break;
             }
-
-            input_args.clear();
         }
 
+        input_args.clear();
         self.input_args = take(&mut input_args);
 
         match error {
