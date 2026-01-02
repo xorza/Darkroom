@@ -404,7 +404,7 @@ impl ExecutionGraph {
                 cause: VisitCause::Done,
             });
 
-            let node = &graph.by_id(&visit.node_id).unwrap();
+            let node = graph.by_id(&visit.node_id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.update(node, func);
 
