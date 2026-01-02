@@ -1,4 +1,7 @@
 use eframe::egui;
+use egui::{Color32, Stroke};
+
+const INPUT_PORT_COLOR: Color32 = Color32::from_rgb(70, 150, 255);
 
 #[derive(Debug, Clone)]
 pub struct GraphStyle {
@@ -7,27 +10,27 @@ pub struct GraphStyle {
     pub cache_button_width_factor: f32,
     pub cache_button_vertical_pad_factor: f32,
     pub cache_button_text_pad_factor: f32,
-    pub cache_active_color: egui::Color32,
-    pub cache_checked_text_color: egui::Color32,
+    pub cache_active_color: Color32,
+    pub cache_checked_text_color: Color32,
     pub status_dot_radius: f32,
     pub status_item_gap: f32,
-    pub input_port_color: egui::Color32,
-    pub output_port_color: egui::Color32,
-    pub input_hover_color: egui::Color32,
-    pub output_hover_color: egui::Color32,
-    pub connection_stroke: egui::Stroke,
-    pub connection_highlight_stroke: egui::Stroke,
-    pub temp_connection_stroke: egui::Stroke,
-    pub breaker_stroke: egui::Stroke,
-    pub dotted_color: egui::Color32,
+    pub input_port_color: Color32,
+    pub output_port_color: Color32,
+    pub input_hover_color: Color32,
+    pub output_hover_color: Color32,
+    pub connection_stroke: Stroke,
+    pub connection_highlight_stroke: Stroke,
+    pub temp_connection_stroke: Stroke,
+    pub breaker_stroke: Stroke,
+    pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
     pub dotted_radius_base: f32,
     pub dotted_radius_min: f32,
     pub dotted_radius_max: f32,
-    pub node_fill: egui::Color32,
-    pub node_stroke: egui::Stroke,
-    pub const_stroke: egui::Stroke,
-    pub selected_stroke: egui::Stroke,
+    pub node_fill: Color32,
+    pub node_stroke: Stroke,
+    pub const_stroke: Stroke,
+    pub selected_stroke: Stroke,
 }
 
 impl GraphStyle {
@@ -37,12 +40,10 @@ impl GraphStyle {
 
         let visuals = ui.visuals();
 
-        let input_port_color = egui::Color32::from_rgb(70, 150, 255);
         let node_stroke = visuals.widgets.noninteractive.bg_stroke;
         let selected_stroke =
-            egui::Stroke::new(node_stroke.width.max(1.2), visuals.selection.stroke.color);
-        let const_stroke =
-            egui::Stroke::new(node_stroke.width, input_port_color.gamma_multiply(0.7));
+            Stroke::new(node_stroke.width.max(1.2), visuals.selection.stroke.color);
+        let const_stroke = Stroke::new(node_stroke.width, INPUT_PORT_COLOR.gamma_multiply(0.7));
 
         Self {
             scale,
@@ -50,22 +51,19 @@ impl GraphStyle {
             cache_button_width_factor: 3.1,
             cache_button_vertical_pad_factor: 0.4,
             cache_button_text_pad_factor: 0.5,
-            cache_active_color: egui::Color32::from_rgb(240, 205, 90),
-            cache_checked_text_color: egui::Color32::from_rgb(60, 50, 20),
+            cache_active_color: Color32::from_rgb(240, 205, 90),
+            cache_checked_text_color: Color32::from_rgb(60, 50, 20),
             status_dot_radius: 4.0 * scale,
             status_item_gap: 6.0 * scale,
-            input_port_color,
-            output_port_color: egui::Color32::from_rgb(70, 200, 200),
-            input_hover_color: egui::Color32::from_rgb(120, 190, 255),
-            output_hover_color: egui::Color32::from_rgb(110, 230, 210),
-            connection_stroke: egui::Stroke::new(2.0, input_port_color),
-            connection_highlight_stroke: egui::Stroke::new(
-                2.5,
-                egui::Color32::from_rgb(255, 90, 90),
-            ),
-            temp_connection_stroke: egui::Stroke::new(2.0, egui::Color32::from_rgb(170, 200, 255)),
-            breaker_stroke: egui::Stroke::new(2.5, egui::Color32::from_rgb(255, 120, 120)),
-            dotted_color: egui::Color32::from_rgba_unmultiplied(255, 255, 255, 28),
+            input_port_color: INPUT_PORT_COLOR,
+            output_port_color: Color32::from_rgb(70, 200, 200),
+            input_hover_color: Color32::from_rgb(120, 190, 255),
+            output_hover_color: Color32::from_rgb(110, 230, 210),
+            connection_stroke: Stroke::new(2.0, INPUT_PORT_COLOR),
+            connection_highlight_stroke: Stroke::new(2.5, Color32::from_rgb(255, 90, 90)),
+            temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
+            breaker_stroke: Stroke::new(2.5, Color32::from_rgb(255, 120, 120)),
+            dotted_color: Color32::from_rgba_unmultiplied(255, 255, 255, 28),
             dotted_base_spacing: 24.0,
             dotted_radius_base: 1.2,
             dotted_radius_min: 0.6,
@@ -75,118 +73,5 @@ impl GraphStyle {
             selected_stroke,
             const_stroke,
         }
-    }
-
-    pub fn validate(&self) {
-        assert!(self.scale.is_finite(), "style scale must be finite");
-        assert!(self.scale > 0.0, "style scale must be positive");
-        assert!(
-            self.header_text_offset.is_finite(),
-            "header text offset must be finite"
-        );
-        assert!(
-            self.cache_button_width_factor.is_finite(),
-            "cache button width factor must be finite"
-        );
-        assert!(
-            self.cache_button_width_factor > 0.0,
-            "cache button width factor must be positive"
-        );
-        assert!(
-            self.cache_button_vertical_pad_factor.is_finite(),
-            "cache button vertical padding factor must be finite"
-        );
-        assert!(
-            self.cache_button_vertical_pad_factor >= 0.0,
-            "cache button vertical padding factor must be non-negative"
-        );
-        assert!(
-            self.cache_button_text_pad_factor.is_finite(),
-            "cache button text padding factor must be finite"
-        );
-        assert!(
-            self.cache_button_text_pad_factor >= 0.0,
-            "cache button text padding factor must be non-negative"
-        );
-        assert!(
-            self.status_dot_radius.is_finite(),
-            "status dot radius must be finite"
-        );
-        assert!(
-            self.status_dot_radius >= 0.0,
-            "status dot radius must be non-negative"
-        );
-        assert!(
-            self.status_item_gap.is_finite(),
-            "status item gap must be finite"
-        );
-        assert!(
-            self.status_item_gap >= 0.0,
-            "status item gap must be non-negative"
-        );
-        assert!(
-            self.dotted_base_spacing.is_finite(),
-            "dot spacing base must be finite"
-        );
-        assert!(
-            self.dotted_base_spacing > 0.0,
-            "dot spacing base must be positive"
-        );
-        assert!(
-            self.dotted_radius_base.is_finite(),
-            "dot radius base must be finite"
-        );
-        assert!(
-            self.dotted_radius_base > 0.0,
-            "dot radius base must be positive"
-        );
-        assert!(
-            self.dotted_radius_min.is_finite(),
-            "dot radius min must be finite"
-        );
-        assert!(
-            self.dotted_radius_min >= 0.0,
-            "dot radius min must be non-negative"
-        );
-        assert!(
-            self.dotted_radius_max.is_finite(),
-            "dot radius max must be finite"
-        );
-        assert!(
-            self.dotted_radius_max >= self.dotted_radius_min,
-            "dot radius max must be >= min"
-        );
-        assert!(
-            self.connection_stroke.width.is_finite(),
-            "connection stroke width must be finite"
-        );
-        assert!(
-            self.connection_stroke.width >= 0.0,
-            "connection stroke width must be non-negative"
-        );
-        assert!(
-            self.connection_highlight_stroke.width.is_finite(),
-            "connection highlight stroke width must be finite"
-        );
-        assert!(
-            self.connection_highlight_stroke.width >= 0.0,
-            "connection highlight stroke width must be non-negative"
-        );
-        assert!(
-            self.temp_connection_stroke.width.is_finite(),
-            "temp connection stroke width must be finite"
-        );
-        assert!(
-            self.temp_connection_stroke.width >= 0.0,
-            "temp connection stroke width must be non-negative"
-        );
-        assert!(
-            self.breaker_stroke.width.is_finite(),
-            "breaker stroke width must be finite"
-        );
-        assert!(
-            self.breaker_stroke.width >= 0.0,
-            "breaker stroke width must be non-negative"
-        );
     }
 }

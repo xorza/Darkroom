@@ -85,7 +85,7 @@ impl<'a> RenderContext<'a> {
         let body_font = node::scaled_font(ui, egui::TextStyle::Body, view_graph.zoom);
         let text_color = ui.visuals().text_color();
         let style = GraphStyle::new(ui, view_graph.zoom);
-        style.validate();
+
         let width_ctx = node::NodeWidthContext {
             layout: &layout,
             heading_font: &heading_font,
