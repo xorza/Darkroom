@@ -11,7 +11,6 @@ use common::id_type;
 
 id_type!(TypeId);
 
-#[repr(C)]
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
@@ -32,8 +31,7 @@ pub enum DataType {
     },
 }
 
-#[repr(C)]
-#[derive(Clone, PartialEq, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum StaticValue {
     #[default]
     Null,
@@ -43,7 +41,23 @@ pub enum StaticValue {
     String(String),
 }
 
-#[repr(C)]
+impl PartialEq for StaticValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (StaticValue::Null, StaticValue::Null) => true,
+            (StaticValue::Float(left), StaticValue::Float(right)) => {
+                left.to_bits() == right.to_bits()
+            }
+            (StaticValue::Int(left), StaticValue::Int(right)) => left == right,
+            (StaticValue::Bool(left), StaticValue::Bool(right)) => left == right,
+            (StaticValue::String(left), StaticValue::String(right)) => left == right,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for StaticValue {}
+
 #[derive(Default, Debug)]
 pub enum DynamicValue {
     #[default]

@@ -76,6 +76,7 @@ Recent adjustments:
 Implements the data structures for graphs and nodes. Nodes are created from functions defined in a function library.
 Connections between nodes are represented by `Binding::Output` values.
 Data structures like graphs, function libraries, and execution graphs can be serialized to YAML or JSON.
+`StaticValue` implements `Eq` with a manual `PartialEq` that compares float variants by `f64::to_bits` for deterministic equality.
 
 Execution execution is handled by the `execution_graph` module which determines which nodes should run each tick.
 Additional modules drive execution and integration:

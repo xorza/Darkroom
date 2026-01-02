@@ -40,7 +40,7 @@ impl Default for TimersInvoker {
                 name: "frequency".to_string(),
                 required: false,
                 data_type: DataType::Float,
-                default_value: Some(StaticValue::Float(30.0)),
+                default_value: Some((30.0).into()),
                 value_options: vec![],
             }],
             outputs: vec![
