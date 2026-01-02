@@ -2,6 +2,7 @@
 #![allow(unused_imports)]
 
 pub mod common;
+pub mod context;
 pub mod data;
 pub mod elements;
 pub mod event;
@@ -12,6 +13,7 @@ pub mod macros;
 pub mod worker;
 
 pub mod prelude {
+    pub use crate::context::ContextKind;
     pub use crate::data::{DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,

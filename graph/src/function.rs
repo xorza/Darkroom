@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::context::ContextKind;
 use crate::execution_graph::OutputUsage;
 use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
@@ -143,6 +144,8 @@ pub struct Func {
     pub outputs: Vec<FuncOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<FuncEvent>,
+    #[serde(skip, default)]
+    pub required_contexts: Vec<ContextKind>,
 
     #[serde(skip, default)]
     pub lambda: FuncLambda,
@@ -383,6 +386,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -407,6 +411,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(
                 move |_, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
@@ -427,6 +432,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(
                 move |_, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
@@ -462,6 +468,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 data_type: DataType::Int,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -487,6 +494,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             outputs: vec![],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(
                 move |_, inputs, _, _| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;

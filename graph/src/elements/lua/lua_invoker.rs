@@ -178,6 +178,7 @@ impl LuaInvoker {
             inputs: vec![],
             outputs: vec![],
             events: vec![],
+            required_contexts: vec![],
             lambda: FuncLambda::None,
         };
 

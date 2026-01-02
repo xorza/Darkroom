@@ -54,6 +54,7 @@ impl Default for TimersInvoker {
                 },
             ],
             events: vec!["always".into(), "once".into(), "fps".into()],
+            required_contexts: vec![],
             lambda: async_lambda!(move |ctx, inputs, _, outputs| {
                 let now = Instant::now();
 

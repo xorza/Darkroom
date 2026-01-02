@@ -122,6 +122,7 @@ impl Default for BasicInvoker {
             }],
             outputs: vec![],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(
                 move |_, inputs, _, _| { output_stream = output_stream_clone.clone() } => {
                     assert_eq!(inputs.len(), 1);
@@ -173,6 +174,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_cache, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
@@ -206,6 +208,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::String,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(|_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -247,6 +250,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |cache, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -291,6 +295,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -332,6 +337,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -372,6 +378,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -418,6 +425,7 @@ impl Default for BasicInvoker {
                 },
             ],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -461,6 +469,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
@@ -493,6 +502,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -524,6 +534,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -555,6 +566,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -586,6 +598,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -617,6 +630,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -648,6 +662,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -679,6 +694,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
@@ -719,6 +735,7 @@ impl Default for BasicInvoker {
                 data_type: DataType::Float,
             }],
             events: vec![],
+            required_contexts: vec![],
             lambda: async_lambda!(move |_, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
