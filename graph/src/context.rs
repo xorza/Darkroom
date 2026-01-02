@@ -12,6 +12,7 @@ id_type!(CtxId);
 #[derive(Clone)]
 pub struct ContextMeta {
     pub ctx_id: CtxId,
+    pub description: String,
     ctor: Arc<ContextCtor>,
 }
 
@@ -54,13 +55,21 @@ impl ContextMeta {
     {
         let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
 
-        ContextMeta { ctx_id, ctor }
+        ContextMeta {
+            ctx_id,
+            description: "".into(),
+            ctor,
+        }
     }
 
     pub fn new_default<T: 'static + Send + Sync + Default>(ctx_id: CtxId) -> Self {
         let ctor: Arc<ContextCtor> = Arc::new(|| Box::new(T::default()) as Box<dyn Any>);
 
-        ContextMeta { ctx_id, ctor }
+        ContextMeta {
+            ctx_id,
+            description: "".into(),
+            ctor,
+        }
     }
 }
 
@@ -113,6 +122,7 @@ mod tests {
         let ctx_again = manager.get::<TestCtx>(&ctx_type);
         assert_eq!(ctx_again.value, 42);
     }
+
     #[test]
     fn custom_context_is_created_and_reused() {
         let meta = ContextMeta::new::<TestCtx, _>(
