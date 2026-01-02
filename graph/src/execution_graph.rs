@@ -18,11 +18,8 @@ use common::{is_debug, FileFormat};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionError {
-    #[error("Function invocation failed for function {function_id:?}: {message}")]
-    Invoke {
-        function_id: FuncId,
-        message: String,
-    },
+    #[error("Function invocation failed for function {func_id:?}: {message}")]
+    Invoke { func_id: FuncId, message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
 }
@@ -326,7 +323,7 @@ impl ExecutionGraph {
                 )
                 .await
                 .map_err(|source| ExecutionError::Invoke {
-                    function_id: e_node.func_id,
+                    func_id: e_node.func_id,
                     message: source.to_string(),
                 });
 

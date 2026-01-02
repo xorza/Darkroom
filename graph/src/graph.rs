@@ -71,7 +71,7 @@ pub struct Graph {
 impl Graph {
     pub fn add(&mut self, node: Node) {
         match self.nodes.iter().position(|n| n.id == node.id) {
-            Some(index) => self.nodes[index] = node,
+            Some(idx) => self.nodes[idx] = node,
             None => self.nodes.push(node),
         }
     }
