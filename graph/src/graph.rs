@@ -9,13 +9,13 @@ use common::{id_type, is_debug};
 
 id_type!(NodeId);
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct PortAddress {
     pub target_id: NodeId,
     pub port_idx: usize,
 }
 
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum Binding {
     #[default]
     None,
