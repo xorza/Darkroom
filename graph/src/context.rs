@@ -1,52 +1,85 @@
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use common::id_type;
+use hashbrown::HashMap;
+
 type ContextCtor = dyn Fn() -> Box<dyn Any> + Send + Sync;
+id_type!(CtxId);
 
 #[derive(Clone)]
 pub struct ContextMeta {
-    pub type_id: TypeId,
+    pub ctx_id: CtxId,
     pub ctor: Arc<ContextCtor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ContextKind {
+pub enum ContextType {
     Lua,
     OpenCl,
     Custom(ContextMeta),
+}
+
+#[derive(Debug, Default)]
+pub struct ContextManager {
+    pub store: HashMap<ContextType, Box<dyn Any>>,
 }
 
 impl Debug for ContextMeta {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ContextMeta {{ type_id: {:?}, ctor: <function> }}",
-            self.type_id
+            "ContextMeta {{ ctx_id: {:?}, ctor: <function> }}",
+            self.ctx_id
         )
     }
 }
 impl PartialEq for ContextMeta {
     fn eq(&self, other: &Self) -> bool {
-        self.type_id == other.type_id
+        self.ctx_id == other.ctx_id
     }
 }
 impl Eq for ContextMeta {}
 impl Hash for ContextMeta {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.type_id.hash(state);
+        self.ctx_id.hash(state);
     }
 }
 
 impl ContextMeta {
-    pub fn new<T: 'static + Send + Sync>(ctor: Arc<dyn Fn() -> T + Send + Sync>) -> Self {
+    pub fn new<T: 'static + Send + Sync>(
+        ctx_id: CtxId,
+        ctor: Arc<dyn Fn() -> T + Send + Sync>,
+    ) -> Self {
         let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
 
-        ContextMeta {
-            type_id: TypeId::of::<T>(),
-            ctor,
-        }
+        ContextMeta { ctx_id, ctor }
+    }
+}
+
+impl ContextManager {
+    pub fn get<T>(&mut self, ctx_type: &ContextType) -> &mut T
+    where
+        T: Any + Send + Sync + 'static,
+    {
+        use hashbrown::hash_map::Entry;
+
+        let boxed = match self.store.entry(ctx_type.clone()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => {
+                let value = match ctx_type {
+                    ContextType::Custom(meta) => (meta.ctor)(),
+                    ContextType::Lua => todo!("ContextManager missing ctor for Lua"),
+                    ContextType::OpenCl => todo!("ContextManager missing ctor for OpenCl"),
+                };
+                entry.insert(value)
+            }
+        };
+
+        boxed
+            .downcast_mut::<T>()
+            .expect("ContextManager has unexpected type")
     }
 }
