@@ -4,10 +4,12 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::sync::Arc;
 
+type ContextCtor = dyn Fn() -> Box<dyn Any> + Send + Sync;
+
 #[derive(Clone)]
 pub struct ContextMeta {
     pub type_id: TypeId,
-    pub ctor: Arc<dyn Fn() -> Box<dyn Any> + Send + Sync>,
+    pub ctor: Arc<ContextCtor>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -40,8 +42,7 @@ impl Hash for ContextMeta {
 
 impl ContextMeta {
     pub fn new<T: 'static + Send + Sync>(ctor: Arc<dyn Fn() -> T + Send + Sync>) -> Self {
-        let ctor: Arc<dyn Fn() -> Box<dyn Any> + Send + Sync> =
-            Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
+        let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any>);
 
         ContextMeta {
             type_id: TypeId::of::<T>(),
