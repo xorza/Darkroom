@@ -414,6 +414,7 @@ impl ExecutionGraph {
 
             if let Some(output_idx) = output_request {
                 let e_node = &mut self.e_nodes[e_node_idx];
+                assert!(e_node.inited);
                 e_node.outputs[output_idx].usage_count += 1;
             }
         }
