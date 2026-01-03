@@ -113,6 +113,13 @@ pub enum GraphUiAction {
     NodeRemoved,
 }
 
+pub struct GraphLayout {
+    pub origin: Pos2,
+    pub scale: f32,
+    pub node_layout: node_ui::NodeLayout,
+    pub node_widths: HashMap<NodeId, f32>,
+}
+
 impl GraphUi {
     pub fn reset(&mut self) {
         self.connection_breaker.reset();
@@ -121,63 +128,68 @@ impl GraphUi {
 
     pub fn render(
         &mut self,
-        ui: &mut Ui,
+        ui1: &mut Ui,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
         let mut fit_all = false;
         let mut view_selected = false;
-        let mut reset_view = false;
 
-        ui.horizontal(|ui| {
+        ui1.horizontal(|ui| {
             fit_all = ui.button("Fit all").clicked();
             view_selected = ui.button("View selected").clicked();
-            reset_view = ui.button("Reset view").clicked();
+            let reset_view = ui.button("Reset view").clicked();
+            if reset_view {
+                view_graph.zoom = 1.0;
+                view_graph.pan = egui::Vec2::ZERO;
+            }
         });
 
-        let rect = ui.available_rect_before_wrap();
-        let painter = ui.painter_at(rect);
+        let ctx = RenderContext::new(ui1);
 
-        let pointer_pos = ui.input(|input| input.pointer.hover_pos());
-        let pointer_in_rect = pointer_pos.map(|pos| rect.contains(pos)).unwrap_or(false);
+        let pointer_pos = ctx.ui.input(|input| input.pointer.hover_pos());
+        let pointer_in_rect = pointer_pos
+            .map(|pos| ctx.rect.contains(pos))
+            .unwrap_or(false);
 
         if pointer_in_rect {
-            update_zoom_and_pan(ui, rect, pointer_pos.unwrap(), view_graph);
+            update_zoom_and_pan(&ctx, pointer_pos.unwrap(), view_graph);
         }
 
-        let ctx = RenderContext::new(
-            ui,
-            painter,
-            rect,
-            view_graph.pan,
-            view_graph.zoom,
-            &view_graph,
-            &func_lib,
-        );
+        let origin = ctx.rect.min + view_graph.pan;
 
-        if reset_view {
-            view_graph.zoom = 1.0;
-            view_graph.pan = egui::Vec2::ZERO;
-        }
+        let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
+        let width_ctx = node_ui::NodeWidthContext {
+            node_layout: &node_layout,
+            style: &ctx.style,
+            scale: view_graph.zoom,
+        };
+        let node_widths =
+            node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
+        let graph_layout = GraphLayout {
+            origin,
+            scale: view_graph.zoom,
+            node_layout,
+            node_widths,
+        };
 
         if view_selected {
             view_selected_node(&ctx, view_graph, func_lib);
         }
-
         if fit_all {
             fit_all_nodes(&ctx, view_graph, func_lib);
         }
 
-        background(&ctx);
+        background(&ctx, &graph_layout);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
-            &ctx,
+            &graph_layout,
             view_graph,
             func_lib,
-            &ctx.node_layout,
-            &ctx.node_widths,
+            &graph_layout.node_layout,
+            &graph_layout.node_widths,
         );
         let hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
@@ -191,13 +203,13 @@ impl GraphUi {
                     let node = view_graph.graph.by_id(&view_node.id).unwrap();
                     let func = func_lib.by_id(&node.func_id).unwrap();
                     let node_rect = node_ui::node_rect_for_graph(
-                        ctx.origin,
+                        graph_layout.origin,
                         view_node,
                         func.inputs.len(),
                         func.outputs.len(),
-                        ctx.scale,
+                        graph_layout.scale,
                         &layout,
-                        *ctx.node_widths.get(&view_node.id).unwrap(),
+                        *graph_layout.node_widths.get(&view_node.id).unwrap(),
                     );
                     node_rect.contains(pos)
                 })
@@ -272,7 +284,7 @@ impl GraphUi {
             func_lib,
             render_origin,
             &layout,
-            &ctx.node_widths,
+            &graph_layout.node_widths,
             connection_breaker,
         );
         connections.render(&ctx);
@@ -284,7 +296,8 @@ impl GraphUi {
             ));
         }
 
-        let node_interaction = node_ui::render_node_bodies(&ctx, view_graph, func_lib);
+        let node_interaction =
+            node_ui::render_node_bodies(&ctx, &graph_layout, view_graph, func_lib);
 
         ui_interaction.actions.extend(node_interaction.actions);
         if let Some(node_id) = node_interaction.remove_request {
@@ -347,14 +360,9 @@ impl GraphUi {
     }
 }
 
-fn update_zoom_and_pan(
-    ui: &mut Ui,
-    rect: Rect,
-    cursor_pos: Pos2,
-    view_graph: &mut model::ViewGraph,
-) {
-    let scroll_delta = ui.input(|input| input.smooth_scroll_delta).y;
-    let pinch_delta = ui.input(|input| input.zoom_delta());
+fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut model::ViewGraph) {
+    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
+    let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
     let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
 
     // println!(
@@ -366,7 +374,7 @@ fn update_zoom_and_pan(
         let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
 
         if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
-            let origin = rect.min;
+            let origin = ctx.rect.min;
             let graph_pos = (cursor_pos - origin - view_graph.pan) / view_graph.zoom;
 
             view_graph.zoom = clamped_zoom;
@@ -374,8 +382,8 @@ fn update_zoom_and_pan(
         }
     }
 
-    let pan_id = ui.make_persistent_id("graph_pan");
-    let pan_response = ui.interact(rect, pan_id, egui::Sense::drag());
+    let pan_id = ctx.ui.make_persistent_id("graph_pan");
+    let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
     if pan_response.dragged_by(egui::PointerButton::Middle) {
         view_graph.pan += pan_response.drag_delta();
     }
@@ -385,6 +393,32 @@ fn update_zoom_and_pan(
 struct ConnectionRenderer {
     curves: Vec<ConnectionCurve>,
     highlighted: HashSet<ConnectionKey>,
+}
+
+impl GraphLayout {
+    pub fn node_width(&self, node_id: NodeId) -> f32 {
+        self.node_widths
+            .get(&node_id)
+            .copied()
+            .expect("node width must be precomputed")
+    }
+
+    pub fn node_rect(
+        &self,
+        view_node: &model::ViewNode,
+        input_count: usize,
+        output_count: usize,
+    ) -> Rect {
+        node_ui::node_rect_for_graph(
+            self.origin,
+            view_node,
+            input_count,
+            output_count,
+            self.scale,
+            &self.node_layout,
+            self.node_width(view_node.id),
+        )
+    }
 }
 
 impl ConnectionRenderer {
@@ -414,12 +448,12 @@ impl ConnectionRenderer {
     }
 }
 
-fn background(ctx: &RenderContext) {
-    let spacing = ctx.style.dotted_base_spacing * ctx.scale;
-    let radius = (ctx.style.dotted_radius_base * ctx.scale)
+fn background(ctx: &RenderContext, graph_layout: &GraphLayout) {
+    let spacing = ctx.style.dotted_base_spacing * graph_layout.scale;
+    let radius = (ctx.style.dotted_radius_base * graph_layout.scale)
         .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
     let color = ctx.style.dotted_color;
-    let origin = ctx.origin;
+    let origin = graph_layout.origin;
     let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
     let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);
     let start_x = ctx.rect.left() - offset_x - spacing;
@@ -501,7 +535,7 @@ fn collect_connection_curves(
 }
 
 fn collect_ports(
-    ctx: &RenderContext,
+    graph_layout: &GraphLayout,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     layout: &node_ui::NodeLayout,
@@ -524,7 +558,7 @@ fn collect_ports(
             .expect("node width must be precomputed");
         for index in 0..func.inputs.len() {
             let center = node_ui::node_input_pos(
-                ctx.origin,
+                graph_layout.origin,
                 node_view,
                 index,
                 func.inputs.len(),
@@ -543,7 +577,7 @@ fn collect_ports(
         }
         for index in 0..func.outputs.len() {
             let center = node_ui::node_output_pos(
-                ctx.origin,
+                graph_layout.origin,
                 node_view,
                 index,
                 &layout,
