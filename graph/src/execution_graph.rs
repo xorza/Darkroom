@@ -454,52 +454,48 @@ impl ExecutionGraph {
                 };
 
                 for (input_idx, input) in node.inputs.iter().enumerate() {
-                    {
-                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                        match (&input.binding, &e_input.binding) {
-                            (Binding::None, ExecutionBinding::None) => {
-                                e_input.state = Some(InputState::Unchanged)
-                            }
-                            (Binding::Const(value), ExecutionBinding::Const(existing))
-                                if value == existing =>
-                            {
-                                e_input.state = Some(InputState::Unchanged);
-                            }
-                            (Binding::Const(value), _) => {
-                                e_input.state = Some(InputState::Changed);
-                                e_input.binding = ExecutionBinding::Const(value.clone());
-                            }
-                            (Binding::Bind(_), ExecutionBinding::Bind(_)) => e_input.state = None,
-                            (_, _) => e_input.state = Some(InputState::Changed),
-                        };
-                    }
+                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                    match (&input.binding, &e_input.binding) {
+                        (Binding::None, ExecutionBinding::None) => {
+                            e_input.state = Some(InputState::Unchanged)
+                        }
+                        (Binding::Const(value), ExecutionBinding::Const(existing))
+                            if value == existing =>
+                        {
+                            e_input.state = Some(InputState::Unchanged);
+                        }
+                        (Binding::Const(value), _) => {
+                            e_input.state = Some(InputState::Changed);
+                            e_input.binding = ExecutionBinding::Const(value.clone());
+                        }
+                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => e_input.state = None,
+                        (_, _) => e_input.state = Some(InputState::Changed),
+                    };
 
-                    {
-                        let Binding::Bind(port_address) = &input.binding else {
-                            continue;
-                        };
-                        let output_e_node_idx = self.e_nodes.compact_insert_with(
-                            &port_address.target_id,
-                            &mut write_idx,
-                            || ExecutionNode {
-                                id: port_address.target_id,
-                                ..Default::default()
-                            },
-                        );
+                    let Binding::Bind(port_address) = &input.binding else {
+                        continue;
+                    };
+                    let output_e_node_idx = self.e_nodes.compact_insert_with(
+                        &port_address.target_id,
+                        &mut write_idx,
+                        || ExecutionNode {
+                            id: port_address.target_id,
+                            ..Default::default()
+                        },
+                    );
 
-                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                        e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                            target_idx: output_e_node_idx,
-                            port_idx: port_address.port_idx,
-                        });
+                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                    e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                        target_idx: output_e_node_idx,
+                        port_idx: port_address.port_idx,
+                    });
 
-                        stack.push(Visit {
-                            e_node_idx: output_e_node_idx,
-                            cause: VisitCause::OutputRequest {
-                                output_idx: port_address.port_idx,
-                            },
-                        });
-                    }
+                    stack.push(Visit {
+                        e_node_idx: output_e_node_idx,
+                        cause: VisitCause::OutputRequest {
+                            output_idx: port_address.port_idx,
+                        },
+                    });
                 }
             }
 
