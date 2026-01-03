@@ -444,32 +444,27 @@ impl ExecutionGraph {
                     node
                 };
 
-                // todo zip
                 for (input_idx, input) in node.inputs.iter().enumerate() {
                     {
-                        let e_node = &self.e_nodes[visit.e_node_idx];
-                        let e_input = &e_node.inputs[input_idx];
-                        let (new_e_binding, input_state) = match (&input.binding, &e_input.binding)
-                        {
-                            (Binding::None, ExecutionBinding::None) => (None, InputState::None),
+                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+
+                        match (&input.binding, &e_input.binding) {
+                            (Binding::None, ExecutionBinding::None) => {
+                                e_input.state = InputState::None;
+                            }
                             (Binding::Const(value), ExecutionBinding::Const(existing))
                                 if value == existing =>
                             {
-                                (None, InputState::Unchanged)
+                                e_input.state = InputState::Unchanged;
                             }
-                            (Binding::Const(value), _) => (
-                                Some(ExecutionBinding::Const(value.clone())),
-                                InputState::Changed,
-                            ),
-                            (_, _) => (None, InputState::Changed),
+                            (Binding::Const(value), _) => {
+                                e_input.state = InputState::Changed;
+                                e_input.binding = ExecutionBinding::Const(value.clone());
+                            }
+                            (_, _) => {
+                                e_input.state = InputState::None;
+                            }
                         };
-
-                        let e_node = &mut self.e_nodes[visit.e_node_idx];
-                        let e_input = &mut e_node.inputs[input_idx];
-                        e_input.state = input_state;
-                        if let Some(new_e_binding) = new_e_binding {
-                            e_input.binding = new_e_binding;
-                        }
                     }
 
                     {
@@ -485,13 +480,13 @@ impl ExecutionGraph {
                             },
                         );
 
-                        let e_node = &mut self.e_nodes[visit.e_node_idx];
                         let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
                             target_idx: output_e_node_idx,
                             port_idx: port_address.port_idx,
                         });
-                        if e_node.inputs[input_idx].binding != desired_binding {
-                            e_node.inputs[input_idx].binding = desired_binding;
+                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                        if e_input.binding != desired_binding {
+                            e_input.binding = desired_binding;
                         }
 
                         stack.push(Visit {
