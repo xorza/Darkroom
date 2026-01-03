@@ -45,7 +45,7 @@ pub enum OutputUsage {
     Skip,
     Needed,
 }
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
@@ -148,14 +148,14 @@ pub struct ExecutionGraph {
 
 impl ExecutionNode {
     fn reset(&mut self) {
-        self.terminal = false;
-        self.wants_execute = false;
-        self.missing_required_inputs = false;
-        self.changed_inputs = false;
         self.process_state = ProcessState::None;
+    }
+    fn prepare_for_execution(&mut self) {
+        self.wants_execute = false;
+        self.changed_inputs = false;
+        self.missing_required_inputs = false;
         self.run_time = 0.0;
         self.error = None;
-        self.outputs.fill(ExecutionOutput::default());
     }
     fn update(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
@@ -164,6 +164,7 @@ impl ExecutionNode {
         self.func_id = func.id;
         self.lambda = func.lambda.clone();
         self.terminal = node.terminal;
+        self.process_state = ProcessState::None;
 
         self.behavior = match node.behavior {
             NodeBehavior::AsFunction => match func.behavior {
@@ -173,25 +174,24 @@ impl ExecutionNode {
             NodeBehavior::Once => ExecutionBehavior::Once,
         };
 
+        self.outputs.clear();
+        self.outputs
+            .resize(func.outputs.len(), ExecutionOutput::default());
+
         if !self.inited {
             self.inited = true;
 
-            self.inputs.reserve(func.inputs.len());
-            if self.inputs.len() != node.inputs.len() {
-                self.inputs.clear();
-                for func_input in func.inputs.iter() {
-                    self.inputs.push(ExecutionInput {
-                        state: InputState::None,
-                        required: func_input.required,
-                        binding: ExecutionBinding::None,
-                        data_type: func_input.data_type.clone(),
-                    });
-                }
-            }
+            self.inputs
+                .resize(func.inputs.len(), ExecutionInput::default());
 
-            self.outputs.clear();
-            self.outputs
-                .resize(func.outputs.len(), ExecutionOutput::default());
+            for (input_idx, func_input) in func.inputs.iter().enumerate() {
+                self.inputs[input_idx] = ExecutionInput {
+                    state: InputState::None,
+                    required: func_input.required,
+                    binding: ExecutionBinding::None,
+                    data_type: func_input.data_type.clone(),
+                };
+            }
 
             self.output_values = None;
         }
@@ -282,18 +282,25 @@ impl ExecutionGraph {
         validate_execution_inputs(graph, func_lib);
 
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
-
         self.backward1(graph, func_lib)?;
-        self.forward();
-        self.backward2();
 
         self.validate_with(graph, func_lib);
 
         Ok(())
     }
 
+    fn pre_execute(&mut self) {
+        self.e_nodes.iter_mut().for_each(|e_node| {
+            e_node.changed_inputs = false;
+            e_node.missing_required_inputs = false;
+            e_node.prepare_for_execution();
+        });
+        self.forward();
+        self.backward2();
+    }
+
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
-        // self.backward2();
+        self.pre_execute();
 
         let start = std::time::Instant::now();
 
@@ -425,7 +432,9 @@ impl ExecutionGraph {
                         return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                     }
                     ProcessState::Backward1 => true,
-                    ProcessState::Forward | ProcessState::Backward2 => unreachable!(),
+
+                    // todo simplify ProcessState
+                    ProcessState::Backward2 | ProcessState::Forward => false,
                 }
             };
 
@@ -548,7 +557,10 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert_eq!(e_node.process_state, ProcessState::Backward1);
+            assert!(
+                e_node.process_state == ProcessState::Backward1
+                    || e_node.process_state == ProcessState::Backward2
+            );
             assert!(e_node.inited);
 
             e_node.process_state = ProcessState::Forward;
@@ -654,11 +666,12 @@ impl ExecutionGraph {
             }
 
             if self.e_node_invoke_order.contains(&e_node_idx) {
-                assert_eq!(e_node.process_state, ProcessState::Backward2);
+                assert_eq!(e_node.process_state, ProcessState::Backward1);
             } else {
                 assert!(
                     e_node.process_state == ProcessState::Forward
                         || e_node.process_state == ProcessState::Backward2
+                        || e_node.process_state == ProcessState::Backward1
                 );
             }
 
@@ -670,17 +683,6 @@ impl ExecutionGraph {
             assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
-
-            let missing_required_inputs = e_node
-                .inputs
-                .iter()
-                .any(|input| input.required && input.state == InputState::None);
-            assert_eq!(missing_required_inputs, e_node.missing_required_inputs);
-            let changed_inputs = e_node
-                .inputs
-                .iter()
-                .any(|input| input.state == InputState::Changed);
-            assert_eq!(changed_inputs, e_node.changed_inputs);
 
             for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
                 let binding = &input.binding;
@@ -823,6 +825,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         assert_eq!(execution_graph.e_nodes.len(), 4);
         assert!(execution_graph.by_name("get_a").is_none());
@@ -869,12 +872,14 @@ mod tests {
 
         {
             execution_graph.update(&graph, &func_lib)?;
+            execution_graph.pre_execute();
             let mult = execution_graph.by_name("mult").unwrap();
             assert!(mult.changed_inputs);
         }
 
         {
             execution_graph.update(&graph, &func_lib)?;
+            execution_graph.pre_execute();
             let mult = execution_graph.by_name("mult").unwrap();
             assert!(!mult.changed_inputs);
         }
@@ -882,6 +887,7 @@ mod tests {
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         assert_eq!(execution_graph.e_nodes.len(), 2);
         assert!(execution_graph.by_name("get_a").is_none());
@@ -980,6 +986,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         // pure node not invoked if has cached values
         assert!(execution_graph
@@ -1000,9 +1007,12 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
+
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         // get_b not in e_node_execution_order
         assert!(execution_graph
@@ -1023,6 +1033,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         // once node invoked is has no cached outputs
         assert!(execution_graph
@@ -1033,6 +1044,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         assert!(execution_graph
             .by_name_mut("mult")
@@ -1049,16 +1061,33 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn pure_node_always_caches() -> anyhow::Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pure_node_always_caches() -> anyhow::Result<()> {
+        let test_values = Arc::new(Mutex::new(TestValues {
+            a: 2,
+            b: 5,
+            result: 0,
+        }));
+
+        let test_values_a = test_values.clone();
+        let test_values_b = test_values.clone();
+        let test_values_result = test_values.clone();
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || test_values_a.try_lock().unwrap().a),
+            get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
+            print: Arc::new(move |result| {
+                test_values_result.try_lock().unwrap().result = result;
+            }),
+        });
+
         let mut graph = test_graph();
-        let mut func_lib = test_func_lib(TestFuncHooks::default());
 
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
 
         // once node invoked is has no cached outputs
         assert!(execution_graph
@@ -1066,14 +1095,9 @@ mod tests {
             .iter()
             .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
 
-        execution_graph.by_name_mut("get_b").unwrap().output_values =
-            Some(vec![DynamicValue::Int(7)]);
-        execution_graph.by_name_mut("mult").unwrap().output_values =
-            Some(vec![DynamicValue::Int(7)]);
+        execution_graph.execute().await?;
 
-        execution_graph.update(&graph, &func_lib)?;
-
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 2);
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
 
         // pure node not invoked is has cached outputs
         assert!(execution_graph
