@@ -143,6 +143,7 @@ impl ExecutionNode {
     fn invalidate(&mut self) {
         self.inited = false;
         self.output_values = None;
+        self.process_state = ProcessState::None;
         self.inputs.clear();
         self.outputs.clear();
         self.reset_for_execution();
@@ -551,8 +552,8 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert_eq!(e_node.process_state, ProcessState::Backward);
             assert!(e_node.inited);
+            assert_eq!(e_node.process_state, ProcessState::Backward);
 
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
