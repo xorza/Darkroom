@@ -8,20 +8,14 @@ mod main_window;
 mod model;
 
 use anyhow::Result;
-use arc_swap::ArcSwapOption;
-
 use eframe::{NativeOptions, egui};
-use graph::execution_graph::ExecutionGraph;
-use graph::graph::{Binding, NodeId};
-use graph::prelude::{FuncLib, TestFuncHooks, test_func_lib, test_graph};
-use graph::worker::{Worker, WorkerMessage};
-use pollster::{FutureExt, block_on};
-use std::ffi::OsStr;
+use graph::prelude::FuncLib;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::gui::graph::{GraphUi, GraphUiInteraction};
-use crate::model::ViewGraph;
+use crate::gui::graph::GraphUiInteraction;
+use crate::main_window::MainWindow;
+use crate::model::AppData;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -79,174 +73,34 @@ fn configure_visuals(ctx: &egui::Context) {
 
 #[derive(Debug)]
 struct ScenariumApp {
-    worker: Worker,
-    func_lib: FuncLib,
-    view_graph: ViewGraph,
-
-    graph_ui: GraphUi,
-
-    current_path: PathBuf,
-    print_output: Arc<ArcSwapOption<String>>,
-    updated_status: Arc<ArcSwapOption<String>>,
-    status: String,
-
-    ui_context: egui::Context,
-
-    graph_ui_interaction: GraphUiInteraction,
-    graph_updated: bool,
+    app_data: AppData,
+    main_window: MainWindow,
 }
 
 impl ScenariumApp {
     fn new(ui_context: &egui::Context) -> Self {
-        let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
-        let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
-        let worker = Self::create_worker(&updated_status, &print_output, ui_context.clone());
-
         let mut result = Self {
-            worker,
-            func_lib: FuncLib::default(),
-            view_graph: model::ViewGraph::default(),
-            current_path: Self::default_path(),
-            graph_ui: gui::graph::GraphUi::default(),
-            graph_updated: false,
-            print_output,
-            updated_status,
-            ui_context: ui_context.clone(),
-            status: "".to_string(),
-            graph_ui_interaction: GraphUiInteraction::default(),
+            app_data: AppData::new(ui_context, Self::default_path()),
+            main_window: MainWindow {
+                graph_ui: gui::graph::GraphUi::default(),
+                ui_context: ui_context.clone(),
+                graph_ui_interaction: GraphUiInteraction::default(),
+            },
         };
 
-        result.test_graph();
-        result.load();
+        result.main_window.test_graph(&mut result.app_data);
+        result.main_window.load(&mut result.app_data);
 
         result
-    }
-
-    fn create_worker(
-        updated_status: &Arc<ArcSwapOption<String>>,
-        print_output: &Arc<ArcSwapOption<String>>,
-        ui_context: egui::Context,
-    ) -> Worker {
-        let updated_status = Arc::clone(updated_status);
-        let print_output = Arc::clone(print_output);
-
-        Worker::new(move |result| {
-            match result {
-                Ok(stats) => {
-                    let print_output = print_output.swap(None);
-                    let summary = format!(
-                        "({} nodes, {:.0}s)",
-                        stats.executed_nodes, stats.elapsed_secs
-                    );
-                    let message = if let Some(print_output) = print_output {
-                        format!("Compute output: {print_output} {summary}")
-                    } else {
-                        format!("Compute finished {summary}")
-                    };
-                    updated_status.store(Some(Arc::new(message)));
-                }
-                Err(err) => {
-                    updated_status.store(Some(Arc::new(format!("Compute failed: {err}"))));
-                }
-            }
-
-            ui_context.request_repaint();
-        })
     }
 
     fn default_path() -> PathBuf {
         std::env::temp_dir().join("scenarium-graph.lua")
     }
-
-    fn set_status(&mut self, message: impl Into<String>) {
-        self.status = message.into();
-    }
-
-    fn poll_compute_status(&mut self) {
-        let updated_status = self.updated_status.swap(None);
-        if let Some(updated_status) = updated_status {
-            self.set_status(updated_status.as_ref());
-        }
-    }
-
-    fn set_graph_view(&mut self, view_graph: model::ViewGraph, status: impl Into<String>) {
-        view_graph
-            .validate()
-            .expect("graph should be valid before storing in app state");
-        self.view_graph = view_graph;
-        self.graph_ui.reset();
-        self.set_status(status);
-        self.worker.send(WorkerMessage::Clear);
-        self.graph_updated = true;
-    }
-
-    fn empty(&mut self) {
-        let view_graph = model::ViewGraph::default();
-        self.set_graph_view(view_graph, "Created new graph");
-    }
-
-    fn save(&mut self) {
-        assert!(
-            self.current_path.extension().is_some(),
-            "graph save path must include a file extension"
-        );
-        match self.view_graph.serialize_to_file(&self.current_path) {
-            Ok(()) => self.set_status(format!("Saved graph to {}", self.current_path.display())),
-            Err(err) => self.set_status(format!("Save failed: {err}")),
-        }
-    }
-
-    fn load(&mut self) {
-        assert!(
-            self.current_path.extension().is_some(),
-            "graph load path must include a file extension"
-        );
-        match model::ViewGraph::deserialize_from_file(&self.current_path) {
-            Ok(graph_view) => self.set_graph_view(
-                graph_view,
-                format!("Loaded graph from {}", self.current_path.display()),
-            ),
-            Err(err) => self.set_status(format!("Load failed: {err}")),
-        }
-    }
-
-    fn test_graph(&mut self) {
-        let mut graph = test_graph();
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
-
-        let func_lib = test_func_lib(self.sample_test_hooks());
-        let graph_view = model::ViewGraph::from_graph(&graph);
-        self.func_lib = func_lib;
-        self.set_graph_view(graph_view, "Loaded sample test graph");
-    }
-
-    fn sample_test_hooks(&self) -> TestFuncHooks {
-        let print_output = Arc::clone(&self.print_output);
-        TestFuncHooks {
-            get_a: Arc::new(|| 21),
-            get_b: Arc::new(|| 2),
-            print: Arc::new(move |value| {
-                print_output.store(Some(Arc::new(value.to_string())));
-            }),
-        }
-    }
-
-    fn run_graph(&mut self) {
-        if self.view_graph.graph.nodes.is_empty() {
-            self.set_status("Run failed: no compute graph loaded");
-            return;
-        }
-
-        if self.graph_updated {
-            self.worker
-                .update(self.view_graph.graph.clone(), self.func_lib.clone());
-        }
-        self.worker.event();
-    }
 }
 
 impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        main_window::render_main_window(self, ctx);
+        self.main_window.render(&mut self.app_data, ctx);
     }
 }

@@ -176,9 +176,11 @@ Sample test hooks in the editor now populate compute status output via the `prin
 The editor now uses a Tokio async main and `std::sync::Mutex` for compute status updates.
 Editor UI edits no longer invalidate execution nodes immediately; execution now relies on the worker's fresh graph/func-lib run.
 Editor print output now uses `arc-swap` to store the latest string without locking.
-Editor worker construction now lives in `ScenariumApp::create_worker` to keep status update wiring in one place.
+Editor worker construction now lives in `AppData::create_worker` (invoked by `AppData::new`) to keep status update wiring in one place.
 Worker completion/error callbacks now request an egui repaint via a stored `egui::Context` to refresh status output promptly.
-Editor main-window UI rendering now lives in `editor/src/main_window.rs`, with `ScenariumApp::update` delegating to it.
+Editor main-window UI rendering now lives in `editor/src/main_window.rs` via `MainWindow::render`, which `ScenariumApp::update` delegates to.
+Editor runtime state for worker/graphs now lives in `AppData` inside `ScenariumApp` to group core app data.
+Editor UI state is split: `MainWindow` holds graph UI/interaction context, while `AppData` (in `editor/src/model/app_data.rs`) holds status text, current path, and other core runtime data.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).
