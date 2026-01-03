@@ -2,17 +2,15 @@ use std::mem::take;
 use std::ops::{Index, IndexMut};
 use std::panic;
 
-use anyhow::Result;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
-use serde_yml::modules::error::new;
 use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
-use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
+use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::{FuncId, FuncLambda};
 use common::{is_debug, FileFormat};
 
@@ -363,6 +361,10 @@ impl ExecutionGraph {
                 });
 
             e_node.run_time = start.elapsed().as_secs_f64();
+            e_node
+                .inputs
+                .iter_mut()
+                .for_each(|input| input.state = InputState::Unchanged);
 
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
@@ -760,7 +762,6 @@ impl ExecutionBinding {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use std::sync::Arc;
 
     use super::*;
@@ -1255,6 +1256,63 @@ mod tests {
         // but node b was cached
         assert_eq!(guard.b, 6);
         assert_eq!(guard.result, 40);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn const_binding_invokes_only_once() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || unreachable!()),
+            get_b: Arc::new(move || unreachable!()),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let mut graph = test_graph();
+        graph
+            .by_name_mut("mult")
+            .unwrap()
+            .inputs
+            .iter_mut()
+            .for_each(|a| {
+                a.binding = Binding::Const(1.into());
+            });
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            2,
+            "mult should be invoked as no cached values"
+        );
+
+        graph
+            .by_name_mut("mult")
+            .unwrap()
+            .inputs
+            .iter_mut()
+            .for_each(|a| {
+                a.binding = Binding::Const(2.into());
+            });
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            2,
+            "mult should be invoked as const value changed"
+        );
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            1,
+            "mult should not be invoked again"
+        );
 
         Ok(())
     }
