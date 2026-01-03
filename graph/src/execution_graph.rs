@@ -730,7 +730,8 @@ impl ExecutionGraph {
         }
 
         let mut seen = vec![false; self.e_nodes.len()];
-        for &e_node_idx in self.e_node_invoke_order.iter() {
+        for idx in 0..self.e_node_invoke_order.len() {
+            let e_node_idx = self.e_node_invoke_order[idx];
             assert!(e_node_idx < self.e_nodes.len());
             assert!(!seen[e_node_idx]);
             seen[e_node_idx] = true;
@@ -745,7 +746,7 @@ impl ExecutionGraph {
                 match &e_input.binding {
                     ExecutionBinding::Bind(port_address) => {
                         assert!(port_address.target_idx < self.e_nodes.len());
-                        // assert!(seen[port_address.target_idx]);
+                        assert!(!self.e_node_invoke_order[idx..].contains(&port_address.target_idx));
                     }
                     ExecutionBinding::None | ExecutionBinding::Const(_) => {}
                 }
