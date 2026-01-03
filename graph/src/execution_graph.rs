@@ -92,9 +92,8 @@ enum ProcessState {
     #[default]
     None,
     Processing,
-    Backward1,
+    Backward,
     Forward,
-    Backward2,
 }
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
@@ -416,7 +415,7 @@ impl ExecutionGraph {
                 VisitCause::Done => {
                     let e_node = &mut self.e_nodes[visit.e_node_idx];
                     assert_eq!(e_node.process_state, ProcessState::Processing);
-                    e_node.process_state = ProcessState::Backward1;
+                    e_node.process_state = ProcessState::Backward;
                     self.e_node_invoke_order.push(visit.e_node_idx);
                     continue;
                 }
@@ -429,10 +428,8 @@ impl ExecutionGraph {
                     ProcessState::Processing => {
                         return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                     }
-                    ProcessState::Backward1 => true,
-
-                    // todo simplify ProcessState
-                    ProcessState::Backward2 | ProcessState::Forward => false,
+                    ProcessState::Backward => true,
+                    ProcessState::Forward => false,
                 }
             };
 
@@ -555,10 +552,7 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert!(
-                e_node.process_state == ProcessState::Backward1
-                    || e_node.process_state == ProcessState::Backward2
-            );
+            assert_eq!(e_node.process_state, ProcessState::Backward);
             assert!(e_node.inited);
 
             e_node.process_state = ProcessState::Forward;
@@ -599,21 +593,21 @@ impl ExecutionGraph {
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
                     self.e_node_invoke_order.push(visit.e_node_idx);
-                    e_node.process_state = ProcessState::Backward2;
+                    e_node.process_state = ProcessState::Backward;
                     continue;
                 }
             };
 
             match e_node.process_state {
-                ProcessState::Processing | ProcessState::None | ProcessState::Backward1 => {
+                ProcessState::Processing | ProcessState::None => {
                     unreachable!()
                 }
                 ProcessState::Forward => {}
-                ProcessState::Backward2 => continue,
+                ProcessState::Backward => continue,
             }
 
             if !e_node.wants_execute {
-                e_node.process_state = ProcessState::Backward2;
+                e_node.process_state = ProcessState::Backward;
                 continue;
             }
 
@@ -664,12 +658,11 @@ impl ExecutionGraph {
             }
 
             if self.e_node_invoke_order.contains(&e_node_idx) {
-                assert_eq!(e_node.process_state, ProcessState::Backward1);
+                assert_eq!(e_node.process_state, ProcessState::Backward);
             } else {
                 assert!(
                     e_node.process_state == ProcessState::Forward
-                        || e_node.process_state == ProcessState::Backward2
-                        || e_node.process_state == ProcessState::Backward1
+                        || e_node.process_state == ProcessState::Backward
                 );
             }
 
@@ -1004,6 +997,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
