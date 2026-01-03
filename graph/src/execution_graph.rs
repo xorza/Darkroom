@@ -286,8 +286,10 @@ impl ExecutionGraph {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.prepare_for_execution();
         });
-        self.forward();
+        self.forward2();
         self.backward2();
+
+        self.validate_for_execution();
     }
 
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
@@ -518,7 +520,7 @@ impl ExecutionGraph {
     }
 
     // Propagate input state forward through the processing order.
-    fn forward(&mut self) {
+    fn forward2(&mut self) {
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
