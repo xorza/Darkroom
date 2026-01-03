@@ -140,7 +140,14 @@ pub struct ExecutionGraph {
 }
 
 impl ExecutionNode {
-    fn prepare_for_execution(&mut self) {
+    fn invalidate(&mut self) {
+        self.inited = false;
+        self.output_values = None;
+        self.inputs.clear();
+        self.outputs.clear();
+        self.reset_for_execution();
+    }
+    fn reset_for_execution(&mut self) {
         self.wants_execute = false;
         self.changed_inputs = false;
         self.missing_required_inputs = false;
@@ -187,7 +194,6 @@ impl ExecutionNode {
         }
 
         assert_eq!(self.inputs.len(), node.inputs.len());
-        assert_eq!(self.inputs.len(), func.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
 
         #[cfg(debug_assertions)]
@@ -222,9 +228,7 @@ impl ExecutionGraph {
             }
             seen[e_node_idx] = true;
 
-            let e_node = &mut self.e_nodes[e_node_idx];
-            e_node.inited = false;
-            e_node.output_values = None;
+            self.e_nodes[e_node_idx].invalidate();
 
             for (output_e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
                 if seen[output_e_node_idx] {
@@ -280,7 +284,7 @@ impl ExecutionGraph {
 
     fn pre_execute(&mut self) {
         self.e_nodes.iter_mut().for_each(|e_node| {
-            e_node.prepare_for_execution();
+            e_node.reset_for_execution();
         });
         self.forward2();
         self.backward2();
