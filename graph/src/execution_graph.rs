@@ -361,10 +361,12 @@ impl ExecutionGraph {
                 });
 
             e_node.run_time = start.elapsed().as_secs_f64();
-            e_node
-                .inputs
-                .iter_mut()
-                .for_each(|input| input.state = InputState::Unchanged);
+
+            e_node.inputs.iter_mut().for_each(|input| {
+                if matches!(input.binding, ExecutionBinding::Const(_)) {
+                    input.state = InputState::Unchanged
+                }
+            });
 
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
