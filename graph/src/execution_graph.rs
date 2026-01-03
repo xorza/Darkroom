@@ -982,6 +982,10 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionGraph::default();
 
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert_eq!(execution_graph.e_nodes.len(), 5);
+
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
         let binding2: Binding = (graph.by_name("get_b").unwrap().id, 0).into();
         let mult = graph.by_name_mut("mult").unwrap();
@@ -990,12 +994,12 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
 
-        assert_eq!(execution_graph.e_nodes.len(), 4);
-
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
+
+        assert_eq!(execution_graph.e_nodes.len(), 4);
         assert!(execution_graph.by_name("sum").is_none());
         assert_eq!(get_a.outputs.len(), 1);
         assert_eq!(get_b.outputs.len(), 1);
@@ -1019,11 +1023,13 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        // pure node invoked if no cache values
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
+        assert!(
+            execution_graph
+                .e_node_invoke_order
+                .iter()
+                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
+            "pure node invoked if no cache values"
+        );
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -1031,11 +1037,13 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        // pure node not invoked if has cached values
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"));
+        assert!(
+            execution_graph
+                .e_node_invoke_order
+                .iter()
+                .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
+            "pure node not invoked if has cached values"
+        );
 
         Ok(())
     }
@@ -1056,11 +1064,13 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        // get_b not in e_node_execution_order
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
+        assert!(
+            execution_graph
+                .e_node_invoke_order
+                .iter()
+                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
+            "get_b not in e_node_execution_order"
+        );
 
         Ok(())
     }
@@ -1095,7 +1105,7 @@ mod tests {
                 .e_node_invoke_order
                 .iter()
                 .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
-            " once node not invoked is has cached outputs"
+            "once node not invoked is has cached outputs"
         );
 
         Ok(())
