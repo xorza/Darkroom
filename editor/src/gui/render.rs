@@ -10,26 +10,6 @@ use crate::{
     model::{self, ViewGraph},
 };
 
-#[derive(Debug, Clone, Copy)]
-pub struct PainterRef<'a> {
-    ptr: *const Painter,
-    _marker: PhantomData<&'a Painter>,
-}
-
-impl<'a> PainterRef<'a> {
-    pub fn new(painter: &'a Painter) -> Self {
-        Self {
-            ptr: painter as *const Painter,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn get(&self) -> &'a Painter {
-        assert!(!self.ptr.is_null(), "painter pointer must not be null");
-        unsafe { &*self.ptr }
-    }
-}
-
 pub struct RenderContext<'a> {
     pub ui: &'a mut Ui,
     pub painter: Painter,
