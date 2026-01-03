@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
             configure_visuals(&cc.egui_ctx);
-            Ok(Box::new(ScenariumApp::new(&cc.egui_ctx)))
+            Ok(Box::new(ScenariumEditor::new(&cc.egui_ctx)))
         }),
     )?;
 
@@ -70,12 +70,12 @@ fn configure_visuals(ctx: &egui::Context) {
 }
 
 #[derive(Debug)]
-struct ScenariumApp {
+struct ScenariumEditor {
     app_data: AppData,
     main_ui: MainUi,
 }
 
-impl ScenariumApp {
+impl ScenariumEditor {
     fn new(ui_context: &egui::Context) -> Self {
         let main_ui = MainUi::new(ui_context);
         let mut app = Self {
@@ -94,7 +94,7 @@ impl ScenariumApp {
     }
 }
 
-impl eframe::App for ScenariumApp {
+impl eframe::App for ScenariumEditor {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.main_ui.render(&mut self.app_data, ctx);
     }
