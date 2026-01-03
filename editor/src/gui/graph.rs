@@ -146,23 +146,23 @@ impl GraphUi {
             .unwrap_or(false);
 
         if pointer_in_rect {
-            update_zoom(pointer_pos.unwrap(), view_graph, &ctx);
+            update_zoom_and_pan(pointer_pos.unwrap(), view_graph, &ctx);
         }
 
-        let mut port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-        let mut ports = collect_ports(
+        let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
+        let ports = collect_ports(
             &ctx,
             view_graph,
             func_lib,
             &ctx.node_layout,
             &ctx.node_widths,
         );
-        let mut hovered_port = pointer_pos
+        let hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&ports, pos, port_activation));
-        let mut hovered_port_ref = hovered_port.as_ref();
+        let hovered_port_ref = hovered_port.as_ref();
         let layout = node::NodeLayout::default().scaled(view_graph.zoom);
-        let mut pointer_over_node = pointer_pos
+        let pointer_over_node = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
                 view_graph.view_nodes.iter().any(|view_node| {
@@ -183,68 +183,6 @@ impl GraphUi {
 
         let connection_breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
-
-        let pan_id = ctx.ui.make_persistent_id("graph_pan");
-        let pan_response = ctx.ui.interact(
-            ctx.rect,
-            pan_id,
-            // if connection_breaker.active
-            //     || connection_drag.active
-            //     || pointer_over_node
-            //     || hovered_port.is_some()
-            // {
-            //     egui::Sense::hover()
-            // } else {
-            egui::Sense::drag(),
-            // },
-        );
-
-        let mut pan_changed = false;
-        if pan_response.dragged_by(egui::PointerButton::Middle)
-            && !pointer_over_node
-            && !connection_breaker.active
-            && !connection_drag.active
-        {
-            view_graph.pan += pan_response.drag_delta();
-            pan_changed = true;
-        }
-
-        if pan_changed {
-            let rect = ctx.rect;
-            ctx = RenderContext::new(
-                ui,
-                painter,
-                rect,
-                view_graph.pan,
-                view_graph.zoom,
-                &view_graph,
-                func_lib,
-            );
-            port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-            ports = collect_ports(&ctx, view_graph, func_lib, &layout, &ctx.node_widths);
-            hovered_port = pointer_pos
-                .filter(|pos| ctx.rect.contains(*pos))
-                .and_then(|pos| find_port_near(&ports, pos, port_activation));
-            hovered_port_ref = hovered_port.as_ref();
-            pointer_over_node = pointer_pos
-                .filter(|pos| ctx.rect.contains(*pos))
-                .is_some_and(|pos| {
-                    view_graph.view_nodes.iter().any(|view_node| {
-                        let node = view_graph.graph.by_id(&view_node.id).unwrap();
-                        let func = func_lib.by_id(&node.func_id).unwrap();
-                        let node_rect = node::node_rect_for_graph(
-                            ctx.origin,
-                            view_node,
-                            func.inputs.len(),
-                            func.outputs.len(),
-                            ctx.scale,
-                            &layout,
-                            *ctx.node_widths.get(&view_node.id).unwrap(),
-                        );
-                        node_rect.contains(pos)
-                    })
-                });
-        }
 
         let primary_pressed = ctx.ui.input(|input| input.pointer.primary_pressed());
         let primary_down = ctx.ui.input(|input| input.pointer.primary_down());
@@ -390,7 +328,11 @@ impl GraphUi {
     }
 }
 
-fn update_zoom(cursor_pos: Pos2, view_graph: &mut model::ViewGraph, ctx: &RenderContext<'_>) {
+fn update_zoom_and_pan(
+    cursor_pos: Pos2,
+    view_graph: &mut model::ViewGraph,
+    ctx: &RenderContext<'_>,
+) {
     let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
     let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
     let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
@@ -410,6 +352,12 @@ fn update_zoom(cursor_pos: Pos2, view_graph: &mut model::ViewGraph, ctx: &Render
             view_graph.zoom = clamped_zoom;
             view_graph.pan = cursor_pos - origin - graph_pos * view_graph.zoom;
         }
+    }
+
+    let pan_id = ctx.ui.make_persistent_id("graph_pan");
+    let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
+    if pan_response.dragged_by(egui::PointerButton::Middle) {
+        view_graph.pan += pan_response.drag_delta();
     }
 }
 
