@@ -647,7 +647,7 @@ impl ExecutionGraph {
         self.stack = take(&mut stack);
     }
 
-    pub fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
+    fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }
@@ -724,7 +724,7 @@ impl ExecutionGraph {
         }
     }
 
-    pub fn validate_for_execution(&self) {
+    fn validate_for_execution(&self) {
         if !is_debug() {
             return;
         }
