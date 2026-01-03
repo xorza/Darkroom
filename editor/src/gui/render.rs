@@ -100,14 +100,3 @@ impl<'a> RenderContext<'a> {
         )
     }
 }
-
-pub trait WidgetRenderer {
-    type Output;
-
-    fn render(
-        &mut self,
-        ctx: &RenderContext,
-        view_graph: &mut model::ViewGraph,
-        func_lib: &FuncLib,
-    ) -> Self::Output;
-}

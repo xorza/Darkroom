@@ -5,10 +5,7 @@ use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
 
 use crate::{
-    gui::{
-        node,
-        render::{RenderContext, WidgetRenderer},
-    },
+    gui::{node, render::RenderContext},
     model,
 };
 use std::collections::HashSet;
@@ -376,7 +373,7 @@ impl GraphUi {
             &ctx.node_widths,
             connection_breaker,
         );
-        connections.render(&ctx, view_graph, func_lib);
+        connections.render(&ctx);
 
         if connection_breaker.active && connection_breaker.points.len() > 1 {
             ctx.painter.add(egui::Shape::line(
@@ -504,17 +501,8 @@ impl ConnectionRenderer {
     fn highlighted(&self) -> &HashSet<ConnectionKey> {
         &self.highlighted
     }
-}
 
-impl WidgetRenderer for ConnectionRenderer {
-    type Output = ();
-
-    fn render(
-        &mut self,
-        ctx: &RenderContext,
-        _view_graph: &mut model::ViewGraph,
-        _func_lib: &FuncLib,
-    ) -> Self::Output {
+    fn render(&mut self, ctx: &RenderContext) {
         draw_connections(&ctx.painter, &self.curves, &self.highlighted, &ctx.style);
     }
 }
@@ -522,15 +510,13 @@ impl WidgetRenderer for ConnectionRenderer {
 #[derive(Debug)]
 struct NodeBodyRenderer;
 
-impl WidgetRenderer for NodeBodyRenderer {
-    type Output = node::NodeInteraction;
-
+impl NodeBodyRenderer {
     fn render(
         &mut self,
         ctx: &RenderContext,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
-    ) -> Self::Output {
+    ) -> node::NodeInteraction {
         node::render_node_bodies(ctx, view_graph, func_lib)
     }
 }
