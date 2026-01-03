@@ -105,6 +105,7 @@ pub struct ExecutionNode {
 
     pub terminal: bool,
     pub missing_required_inputs: bool,
+    pub wants_execute: bool,
     pub changed_inputs: bool,
     pub behavior: ExecutionBehavior,
 
@@ -148,6 +149,7 @@ pub struct ExecutionGraph {
 impl ExecutionNode {
     fn reset(&mut self) {
         self.terminal = false;
+        self.wants_execute = false;
         self.missing_required_inputs = false;
         self.changed_inputs = false;
         self.process_state = ProcessState::None;
@@ -526,8 +528,10 @@ impl ExecutionGraph {
 
                         if output_e_node.missing_required_inputs {
                             InputState::None
-                        } else {
+                        } else if output_e_node.wants_execute {
                             InputState::Changed
+                        } else {
+                            InputState::Unchanged
                         }
                     };
 
@@ -550,6 +554,14 @@ impl ExecutionGraph {
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
             e_node.missing_required_inputs = missing_required_inputs;
+            e_node.wants_execute = !e_node.missing_required_inputs
+                && match e_node.behavior {
+                    ExecutionBehavior::Impure => true,
+                    ExecutionBehavior::Pure => {
+                        e_node.output_values.is_none() || e_node.changed_inputs
+                    }
+                    ExecutionBehavior::Once => e_node.output_values.is_none(),
+                };
         }
     }
 
@@ -590,16 +602,7 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
 
-            let execute = !e_node.missing_required_inputs
-                && match e_node.behavior {
-                    ExecutionBehavior::Impure => true,
-                    ExecutionBehavior::Pure => {
-                        e_node.output_values.is_none() || e_node.changed_inputs
-                    }
-                    ExecutionBehavior::Once => e_node.output_values.is_none(),
-                };
-
-            if !execute {
+            if !e_node.wants_execute {
                 e_node.process_state = ProcessState::Backward2;
                 continue;
             }
@@ -612,14 +615,10 @@ impl ExecutionGraph {
 
             let e_node = &self.e_nodes[visit.e_node_idx];
             for input in e_node.inputs.iter() {
-                match input.state {
-                    InputState::None | InputState::Unchanged => continue,
-                    InputState::Changed => {}
-                }
-
                 let Some(port_address) = input.binding.as_bind() else {
                     continue;
                 };
+                assert_ne!(input.state, InputState::None);
 
                 stack.push(Visit {
                     e_node_idx: port_address.target_idx,
