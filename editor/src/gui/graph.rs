@@ -266,7 +266,6 @@ impl GraphUi {
         let render_origin = ctx.rect.min + view_graph.pan;
 
         let mut connections = ConnectionRenderer::default();
-        let mut node_bodies = NodeBodyRenderer;
 
         connections.rebuild(
             view_graph,
@@ -285,7 +284,7 @@ impl GraphUi {
             ));
         }
 
-        let node_interaction = node_bodies.render(&ctx, view_graph, func_lib);
+        let node_interaction = node::render_node_bodies(&ctx, view_graph, func_lib);
 
         ui_interaction.actions.extend(node_interaction.actions);
         if let Some(node_id) = node_interaction.remove_request {
@@ -412,20 +411,6 @@ impl ConnectionRenderer {
 
     fn render(&mut self, ctx: &RenderContext) {
         draw_connections(&ctx.painter, &self.curves, &self.highlighted, &ctx.style);
-    }
-}
-
-#[derive(Debug)]
-struct NodeBodyRenderer;
-
-impl NodeBodyRenderer {
-    fn render(
-        &mut self,
-        ctx: &RenderContext,
-        view_graph: &mut model::ViewGraph,
-        func_lib: &FuncLib,
-    ) -> node::NodeInteraction {
-        node::render_node_bodies(ctx, view_graph, func_lib)
     }
 }
 
