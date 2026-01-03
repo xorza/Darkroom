@@ -369,7 +369,7 @@ impl GraphUi {
 }
 
 fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut model::ViewGraph) {
-    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
+    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
     let pinch_delta = ctx.ui.input(|input| {
         if input.modifiers.command {
             1.0
@@ -377,12 +377,15 @@ fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut m
             input.zoom_delta()
         }
     });
-    let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
 
-    // println!(
-    //     "scroll_delta {} pinch_delta {} zoom_delta {}",
-    //     scroll_delta, pinch_delta, zoom_delta
-    // );
+    let (zoom_delta, pan) = if scroll_delta.x.abs() > f32::EPSILON {
+        (1.0, scroll_delta)
+    } else {
+        (
+            (scroll_delta.length_sq() * 0.006).exp() * pinch_delta,
+            Vec2::ZERO,
+        )
+    };
 
     if (zoom_delta - 1.0).abs() > f32::EPSILON {
         let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -395,6 +398,8 @@ fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut m
             view_graph.pan = cursor_pos - origin - graph_pos * view_graph.zoom;
         }
     }
+
+    view_graph.pan += pan;
 
     // let pan_id = ctx.ui.make_persistent_id("graph_pan");
     // let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
