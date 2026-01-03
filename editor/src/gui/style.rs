@@ -67,7 +67,7 @@ pub struct Style {
 }
 
 impl Style {
-    pub fn new(_ui: &egui::Ui, _scale: f32) -> Self {
+    pub fn new() -> Self {
         Self {
             heading_font: FontId {
                 size: HEADING_FONT_SIZE,

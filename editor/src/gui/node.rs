@@ -72,7 +72,7 @@ pub fn render_node_bodies(
     view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
 ) -> NodeInteraction {
-    let visuals = ctx.ui().visuals();
+    let visuals = ctx.ui.visuals();
     let node_fill = ctx.style.node_fill;
     let node_stroke = ctx.style.node_stroke;
     let selected_stroke = ctx.style.selected_stroke;
@@ -140,13 +140,13 @@ pub fn render_node_bodies(
 
         let cache_text_width = if ctx.layout.cache_height > 0.0 {
             let cached_width = text_width(
-                ctx.painter(),
+                &ctx.painter,
                 &ctx.style.body_font.scaled(ctx.scale),
                 "cached",
                 ctx.style.text_color,
             );
             let cache_width = text_width(
-                ctx.painter(),
+                &ctx.painter,
                 &ctx.style.body_font.scaled(ctx.scale),
                 "cache",
                 ctx.style.text_color,
@@ -167,16 +167,14 @@ pub fn render_node_bodies(
             cache_button_pos,
             egui::vec2(cache_button_width, cache_button_height),
         );
-        let node_id = ctx.ui().make_persistent_id(("node_body", node.id));
-        let body_response = ctx.ui().interact(node_rect, node_id, egui::Sense::click());
+        let node_id = ctx.ui.make_persistent_id(("node_body", node.id));
+        let body_response = ctx.ui.interact(node_rect, node_id, egui::Sense::click());
 
-        let close_id = ctx.ui().make_persistent_id(("node_close", node.id));
-        let remove_response = ctx
-            .ui()
-            .interact(close_rect, close_id, egui::Sense::click());
+        let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
+        let remove_response = ctx.ui.interact(close_rect, close_id, egui::Sense::click());
         let cache_enabled = ctx.layout.cache_height > 0.0 && !node.terminal;
-        let cache_id = ctx.ui().make_persistent_id(("node_cache", node.id));
-        let cache_response = ctx.ui().interact(
+        let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+        let cache_response = ctx.ui.interact(
             cache_button_rect,
             cache_id,
             if cache_enabled {
@@ -186,9 +184,9 @@ pub fn render_node_bodies(
             },
         );
 
-        let header_id = ctx.ui().make_persistent_id(("node_header", node.id));
+        let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
         let response = ctx
-            .ui()
+            .ui
             .interact(header_drag_rect, header_id, egui::Sense::drag());
 
         if response.dragged() {
@@ -227,7 +225,7 @@ pub fn render_node_bodies(
             .or(view_graph.selected_node_id);
         let is_selected = selected_id.is_some_and(|id| id == node_view.id);
 
-        ctx.painter().rect(
+        ctx.painter.rect(
             node_rect,
             ctx.layout.corner_radius,
             node_fill,
@@ -252,7 +250,7 @@ pub fn render_node_bodies(
                 visuals.widgets.inactive.bg_fill
             };
             let button_stroke = visuals.widgets.inactive.bg_stroke;
-            ctx.painter().rect(
+            ctx.painter.rect(
                 cache_button_rect,
                 ctx.layout.corner_radius * 0.5,
                 button_fill,
@@ -268,7 +266,7 @@ pub fn render_node_bodies(
             } else {
                 visuals.text_color()
             };
-            ctx.painter().text(
+            ctx.painter.text(
                 cache_button_rect.center(),
                 egui::Align2::CENTER_CENTER,
                 button_text,
@@ -280,13 +278,13 @@ pub fn render_node_bodies(
         let dot_center_y = header_rect.center().y;
         for (index, (center_x, tooltip, color)) in dot_centers.iter().enumerate() {
             let dot_center = egui::pos2(*center_x, dot_center_y);
-            ctx.painter().circle_filled(dot_center, dot_radius, *color);
+            ctx.painter.circle_filled(dot_center, dot_radius, *color);
             let dot_rect = egui::Rect::from_center_size(
                 dot_center,
                 egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
             );
-            let dot_id = ctx.ui().make_persistent_id(("node_status", node.id, index));
-            let dot_response = ctx.ui().interact(dot_rect, dot_id, egui::Sense::hover());
+            let dot_id = ctx.ui.make_persistent_id(("node_status", node.id, index));
+            let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
             if dot_response.hovered() {
                 dot_response.show_tooltip_text(*tooltip);
             }
@@ -300,7 +298,7 @@ pub fn render_node_bodies(
             visuals.widgets.inactive.bg_fill
         };
         let close_stroke = visuals.widgets.inactive.bg_stroke;
-        ctx.painter().rect(
+        ctx.painter.rect(
             close_rect,
             ctx.layout.corner_radius * 0.6,
             close_fill,
@@ -326,8 +324,8 @@ pub fn render_node_bodies(
         );
         let close_color = visuals.text_color();
         let close_stroke = egui::Stroke::new(1.4 * ctx.scale, close_color);
-        ctx.painter().line_segment([a, b], close_stroke);
-        ctx.painter().line_segment([c, d], close_stroke);
+        ctx.painter.line_segment([a, b], close_stroke);
+        ctx.painter.line_segment([c, d], close_stroke);
 
         render_node_ports(ctx, node_view, input_count, output_count, node_width);
         render_node_const_bindings(ctx, node_view, node, func, input_count);
@@ -360,12 +358,12 @@ fn render_node_ports(
                 ctx.scale * ctx.style.port_radius * 2.0,
             ),
         );
-        let color = if ctx.ui().rect_contains_pointer(port_rect) {
+        let color = if ctx.ui.rect_contains_pointer(port_rect) {
             ctx.style.input_hover_color
         } else {
             ctx.style.input_port_color
         };
-        ctx.painter()
+        ctx.painter
             .circle_filled(center, ctx.scale * ctx.style.port_radius, color);
     }
 
@@ -385,12 +383,12 @@ fn render_node_ports(
                 ctx.scale * ctx.style.port_radius * 2.0,
             ),
         );
-        let color = if ctx.ui().rect_contains_pointer(port_rect) {
+        let color = if ctx.ui.rect_contains_pointer(port_rect) {
             ctx.style.output_hover_color
         } else {
             ctx.style.output_port_color
         };
-        ctx.painter()
+        ctx.painter
             .circle_filled(center, ctx.scale * ctx.style.port_radius, color);
     }
 }
@@ -417,7 +415,7 @@ fn render_node_const_bindings(
 
         let label = static_value_label(value);
         let label_width = text_width(
-            ctx.painter(),
+            &ctx.painter,
             &ctx.style.body_font,
             &label,
             ctx.style.text_color,
@@ -439,16 +437,16 @@ fn render_node_const_bindings(
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
         let link_end = egui::pos2(center.x - ctx.scale * ctx.style.port_radius * 0.6, center.y);
-        ctx.painter()
+        ctx.painter
             .line_segment([link_start, link_end], ctx.style.connection_stroke);
-        ctx.painter().rect(
+        ctx.painter.rect(
             badge_rect,
             badge_radius,
             ctx.style.node_fill,
             ctx.style.const_stroke,
             egui::StrokeKind::Inside,
         );
-        ctx.painter().text(
+        ctx.painter.text(
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
@@ -491,7 +489,7 @@ fn render_node_labels(
 ) {
     let header_text_offset = ctx.scale * ctx.style.header_text_offset;
 
-    ctx.painter().text(
+    ctx.painter.text(
         node_rect.min + egui::vec2(ctx.layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
         node_name,
@@ -508,7 +506,7 @@ fn render_node_labels(
                     + ctx.layout.padding
                     + ctx.layout.row_height * index as f32,
             );
-        ctx.painter().text(
+        ctx.painter.text(
             text_pos,
             egui::Align2::LEFT_TOP,
             &input.name,
@@ -526,7 +524,7 @@ fn render_node_labels(
                     + ctx.layout.padding
                     + ctx.layout.row_height * index as f32,
             );
-        ctx.painter().text(
+        ctx.painter.text(
             text_pos,
             egui::Align2::RIGHT_TOP,
             &output.name,
