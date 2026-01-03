@@ -980,19 +980,14 @@ mod tests {
     fn execution_graph_updates_after_graph_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
-
-        graph.by_name_mut("mult").unwrap().inputs = vec![
-            Input {
-                binding: (graph.by_name("get_a").unwrap().id, 0).into(),
-                default_value: None,
-            },
-            Input {
-                binding: (graph.by_name("get_b").unwrap().id, 0).into(),
-                default_value: None,
-            },
-        ];
-
         let mut execution_graph = ExecutionGraph::default();
+
+        let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
+        let binding2: Binding = (graph.by_name("get_b").unwrap().id, 0).into();
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = binding1;
+        mult.inputs[1].binding = binding2;
+
         execution_graph.update(&graph, &func_lib)?;
 
         assert_eq!(execution_graph.e_nodes.len(), 4);
@@ -1001,12 +996,11 @@ mod tests {
         let get_b = execution_graph.by_name("get_b").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
-
+        assert!(execution_graph.by_name("sum").is_none());
         assert_eq!(get_a.outputs.len(), 1);
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(mult.outputs.len(), 1);
         assert!(print.outputs.is_empty());
-
         assert_eq!(get_a.outputs[0].usage_count, 1);
         assert_eq!(get_b.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
