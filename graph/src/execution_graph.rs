@@ -614,11 +614,15 @@ impl ExecutionGraph {
             });
 
             let e_node = &self.e_nodes[visit.e_node_idx];
-            for input in e_node.inputs.iter() {
-                let Some(port_address) = input.binding.as_bind() else {
+            for e_input in e_node.inputs.iter() {
+                if e_input.state != InputState::Changed {
+                    continue;
+                }
+
+                let Some(port_address) = e_input.binding.as_bind() else {
                     continue;
                 };
-                assert_ne!(input.state, InputState::None);
+                assert_ne!(e_input.state, InputState::None);
 
                 stack.push(Visit {
                     e_node_idx: port_address.target_idx,
