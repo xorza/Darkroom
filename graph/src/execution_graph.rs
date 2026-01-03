@@ -112,7 +112,6 @@ pub struct ExecutionNode {
     pub outputs: Vec<ExecutionOutput>,
 
     pub func_id: FuncId,
-    pub wants_execute: bool,
 
     pub run_time: f64,
     pub error: Option<ExecutionError>,
@@ -152,7 +151,6 @@ impl ExecutionNode {
         self.missing_required_inputs = false;
         self.changed_inputs = false;
         self.process_state = ProcessState::None;
-        self.wants_execute = false;
         self.run_time = 0.0;
         self.error = None;
         self.outputs.fill(ExecutionOutput::default());
@@ -525,13 +523,11 @@ impl ExecutionGraph {
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
+
                         if output_e_node.missing_required_inputs {
-                            assert!(!output_e_node.wants_execute);
                             InputState::None
-                        } else if output_e_node.wants_execute {
-                            InputState::Changed
                         } else {
-                            InputState::Unchanged
+                            InputState::Changed
                         }
                     };
 
@@ -554,12 +550,6 @@ impl ExecutionGraph {
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
             e_node.missing_required_inputs = missing_required_inputs;
-            e_node.wants_execute = !missing_required_inputs
-                && match e_node.behavior {
-                    ExecutionBehavior::Impure => true,
-                    ExecutionBehavior::Pure => e_node.output_values.is_none() || changed_inputs,
-                    ExecutionBehavior::Once => e_node.output_values.is_none(),
-                };
         }
     }
 
@@ -600,7 +590,16 @@ impl ExecutionGraph {
                 ProcessState::Backward2 => continue,
             }
 
-            if !e_node.wants_execute {
+            let execute = !e_node.missing_required_inputs
+                && match e_node.behavior {
+                    ExecutionBehavior::Impure => true,
+                    ExecutionBehavior::Pure => {
+                        e_node.output_values.is_none() || e_node.changed_inputs
+                    }
+                    ExecutionBehavior::Once => e_node.output_values.is_none(),
+                };
+
+            if !execute {
                 e_node.process_state = ProcessState::Backward2;
                 continue;
             }
@@ -668,9 +667,6 @@ impl ExecutionGraph {
             assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
-
-            // it cannot be missing_required_inputs and wants_execute
-            assert!(!(e_node.wants_execute && e_node.missing_required_inputs));
 
             let missing_required_inputs = e_node
                 .inputs
