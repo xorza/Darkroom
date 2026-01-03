@@ -4,6 +4,7 @@
 mod common;
 mod gui;
 mod init;
+mod main_window;
 mod model;
 
 use anyhow::Result;
@@ -19,7 +20,7 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::gui::graph::{GraphUi, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph::{GraphUi, GraphUiInteraction};
 use crate::model::ViewGraph;
 
 #[tokio::main]
@@ -246,80 +247,6 @@ impl ScenariumApp {
 
 impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_compute_status();
-
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                {
-                    let style = ui.style_mut();
-                    style.spacing.button_padding = egui::vec2(16.0, 5.0);
-                    style.spacing.item_spacing = egui::vec2(10.0, 5.0);
-                    style
-                        .text_styles
-                        .entry(egui::TextStyle::Button)
-                        .and_modify(|font| font.size = 18.0);
-                }
-                ui.menu_button("File", |ui| {
-                    {
-                        let style = ui.style_mut();
-                        style.spacing.button_padding = egui::vec2(16.0, 5.0);
-                        style.spacing.item_spacing = egui::vec2(10.0, 5.0);
-                        style
-                            .text_styles
-                            .entry(egui::TextStyle::Button)
-                            .and_modify(|font| font.size = 18.0);
-                    }
-                    if ui.button("New").clicked() {
-                        self.empty();
-                        ui.close();
-                    }
-                    if ui.button("Save").clicked() {
-                        self.save();
-                        ui.close();
-                    }
-                    if ui.button("Load").clicked() {
-                        self.load();
-                        ui.close();
-                    }
-                    if ui.button("Test").clicked() {
-                        self.test_graph();
-                        ui.close();
-                    }
-                });
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.graph_ui.render(
-                ui,
-                &mut self.view_graph,
-                &self.func_lib,
-                &mut self.graph_ui_interaction,
-            );
-        });
-
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            ui.label(&self.status);
-        });
-        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Run").clicked() {
-                    self.run_graph();
-                }
-            });
-        });
-
-        if !self.graph_ui_interaction.actions.is_empty() {
-            let node_ids_to_invalidate = self.graph_ui_interaction.actions.iter().filter_map(
-                |(node_id, graph_ui_action)| match graph_ui_action {
-                    GraphUiAction::CacheToggled => None,
-                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
-                        self.graph_updated = true;
-                        Some(*node_id)
-                    }
-                },
-            );
-            self.worker.invalidate_caches(node_ids_to_invalidate);
-        }
+        main_window::render_main_window(self, ctx);
     }
 }
