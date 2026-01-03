@@ -287,8 +287,6 @@ impl ExecutionGraph {
 
     fn pre_execute(&mut self) {
         self.e_nodes.iter_mut().for_each(|e_node| {
-            e_node.changed_inputs = false;
-            e_node.missing_required_inputs = false;
             e_node.prepare_for_execution();
         });
         self.forward();
@@ -1006,8 +1004,6 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
