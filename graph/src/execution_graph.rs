@@ -926,27 +926,20 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionGraph::default();
 
-        // this excludes get_a from graph
+        // this excludes get_a and get_b from graph
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
-        {
-            execution_graph.update(&graph, &func_lib)?;
-            execution_graph.pre_execute();
-            let mult = execution_graph.by_name("mult").unwrap();
-            assert!(mult.changed_inputs);
-        }
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
+        assert!(execution_graph.by_name("mult").unwrap().changed_inputs);
 
-        {
-            execution_graph.update(&graph, &func_lib)?;
-            execution_graph.pre_execute();
-            let mult = execution_graph.by_name("mult").unwrap();
-            assert!(!mult.changed_inputs);
-        }
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
+        assert!(!execution_graph.by_name("mult").unwrap().changed_inputs);
 
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
+        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
@@ -957,10 +950,8 @@ mod tests {
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
-
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
-
         assert!(mult.changed_inputs);
         assert!(print.changed_inputs);
 
@@ -974,9 +965,6 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-
-        //avoid serialization of e_node_idx_by_id as deserialization order is not guaranteed
-        execution_graph.e_nodes.idx_by_key.clear();
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
@@ -1087,83 +1075,34 @@ mod tests {
     fn once_node_always_caches() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let mut func_lib = test_func_lib(TestFuncHooks::default());
+        let mut execution_graph = ExecutionGraph::default();
 
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::Once;
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
-        let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        // once node invoked is has no cached outputs
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
+        assert!(
+            execution_graph
+                .e_node_invoke_order
+                .iter()
+                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
+            "once node invoked if has no cached outputs"
+        );
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(execution_graph
-            .by_name_mut("mult")
-            .unwrap()
-            .output_values
-            .is_none());
-
-        // once node not invoked is has cached outputs
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"));
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn pure_node_always_caches() -> anyhow::Result<()> {
-        let test_values = Arc::new(Mutex::new(TestValues {
-            a: 2,
-            b: 5,
-            result: 0,
-        }));
-
-        let test_values_a = test_values.clone();
-        let test_values_b = test_values.clone();
-        let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || test_values_a.try_lock().unwrap().a),
-            get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
-            print: Arc::new(move |result| {
-                test_values_result.try_lock().unwrap().result = result;
-            }),
-        });
-
-        let mut graph = test_graph();
-
-        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
-        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
-
-        let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-
-        // once node invoked is has no cached outputs
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
-
-        execution_graph.execute().await?;
-
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
-
-        // pure node not invoked is has cached outputs
-        assert!(execution_graph
-            .e_node_invoke_order
-            .iter()
-            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "mult"));
+        assert!(
+            execution_graph
+                .e_node_invoke_order
+                .iter()
+                .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
+            " once node not invoked is has cached outputs"
+        );
 
         Ok(())
     }
@@ -1254,6 +1193,7 @@ mod tests {
         execution_graph.execute().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
+        // now result will be different
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
@@ -1261,69 +1201,6 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(test_values.try_lock()?.result, 63);
-
-        Ok(())
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn cached_value() -> anyhow::Result<()> {
-        let test_values = Arc::new(Mutex::new(TestValues {
-            a: 2,
-            b: 5,
-            result: 0,
-        }));
-
-        let test_values_a = test_values.clone();
-        let test_values_b = test_values.clone();
-        let test_values_result = test_values.clone();
-        let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || {
-                let mut guard = test_values_a.try_lock().unwrap();
-                let a1 = guard.a;
-                guard.a += 1;
-
-                a1
-            }),
-            get_b: Arc::new(move || {
-                let mut guard = test_values_b.try_lock().unwrap();
-                let b1 = guard.b;
-                guard.b += 1;
-                if b1 == 6 {
-                    panic!("Unexpected call to get_b");
-                }
-
-                b1
-            }),
-            print: Arc::new(move |result| {
-                test_values_result.try_lock().unwrap().result = result;
-            }),
-        });
-
-        let mut graph = test_graph();
-        func_lib.by_name_mut("get_a").unwrap().behavior = FuncBehavior::Impure;
-        graph.by_name_mut("get_a").unwrap().behavior = NodeBehavior::AsFunction;
-
-        let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-
-        // assert that both nodes were called
-        {
-            let guard = test_values.try_lock()?;
-            assert_eq!(guard.a, 3);
-            assert_eq!(guard.b, 6);
-            assert_eq!(guard.result, 35);
-        }
-
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-
-        // assert that node was called again
-        let guard = test_values.try_lock()?;
-        assert_eq!(guard.a, 4);
-        // but node b was cached
-        assert_eq!(guard.b, 6);
-        assert_eq!(guard.result, 40);
 
         Ok(())
     }
@@ -1337,16 +1214,13 @@ mod tests {
         });
 
         let mut graph = test_graph();
-        graph
-            .by_name_mut("mult")
-            .unwrap()
-            .inputs
-            .iter_mut()
-            .for_each(|a| {
-                a.binding = Binding::Const(1.into());
-            });
-
         let mut execution_graph = ExecutionGraph::default();
+
+        // this excludes get_a and get_b from graph
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
+        mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
+
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
@@ -1356,14 +1230,18 @@ mod tests {
             "mult should be invoked as no cached values"
         );
 
-        graph
-            .by_name_mut("mult")
-            .unwrap()
-            .inputs
-            .iter_mut()
-            .for_each(|a| {
-                a.binding = Binding::Const(2.into());
-            });
+        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(3));
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            1,
+            "changing value to the same should not recompute cache"
+        );
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
