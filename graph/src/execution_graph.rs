@@ -517,14 +517,14 @@ impl ExecutionGraph {
 
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                let input_state = match &e_input.binding {
-                    ExecutionBinding::Bind(port_address) => {
+
+                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
+                    let input_state = {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(output_e_node.inited);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
-
                         if output_e_node.missing_required_inputs {
                             assert!(!output_e_node.wants_execute);
                             InputState::None
@@ -533,14 +533,14 @@ impl ExecutionGraph {
                         } else {
                             InputState::Unchanged
                         }
-                    }
-                    _ => e_input.state,
-                };
+                    };
 
-                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                e_input.state = input_state;
+                    let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                    e_input.state = input_state;
+                }
 
-                match input_state {
+                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                match e_input.state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
                     InputState::None => missing_required_inputs |= e_input.required,
