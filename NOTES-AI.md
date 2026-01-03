@@ -182,6 +182,7 @@ Editor main-window UI rendering now lives in `editor/src/main_window.rs` via `Ma
 Editor runtime state for worker/graphs now lives in `AppData` inside `ScenariumApp` to group core app data.
 Editor UI state is split: `MainWindow` holds graph UI/interaction context, while `AppData` (in `editor/src/model/app_data.rs`) holds status text, current path, and other core runtime data.
 Main-window construction now creates a `UiRefresh` helper passed into `AppData::new` so worker callbacks can request egui repaints without holding raw context.
+Graph save/load, test-graph construction, and run-graph status handling now live in `AppData`, with `MainUi` delegating to those helpers and `ViewGraph` focusing on in-memory serialization only.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).

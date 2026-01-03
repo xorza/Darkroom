@@ -3,7 +3,6 @@ use common::{FileFormat, is_debug};
 use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 
 use super::ViewNode;
 
@@ -118,23 +117,6 @@ impl ViewGraph {
         view_graph.validate()?;
 
         Ok(view_graph)
-    }
-
-    pub fn serialize_to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path = path.as_ref();
-        let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
-            .map_err(anyhow::Error::from)?;
-        let payload = self.serialize(format);
-        std::fs::write(path, payload).map_err(anyhow::Error::from)
-    }
-
-    pub fn deserialize_from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-        let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
-            .map_err(anyhow::Error::from)?;
-        let payload = std::fs::read_to_string(path).map_err(anyhow::Error::from)?;
-
-        Self::deserialize(format, &payload)
     }
 
     pub fn select_node(&mut self, node_id: NodeId) {
