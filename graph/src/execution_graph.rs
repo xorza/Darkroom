@@ -599,9 +599,10 @@ impl ExecutionGraph {
             };
 
             match e_node.process_state {
-                ProcessState::Processing | ProcessState::None => {
-                    unreachable!()
+                ProcessState::Processing => {
+                    unreachable!("Cycles should be detected earlier in backward1()")
                 }
+                ProcessState::None => unreachable!("Node should have been processed in forward()"),
                 ProcessState::Forward => {}
                 ProcessState::Backward => continue,
             }
