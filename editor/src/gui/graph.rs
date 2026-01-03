@@ -188,15 +188,15 @@ impl GraphUi {
         let pan_response = ctx.ui.interact(
             ctx.rect,
             pan_id,
-            if connection_breaker.active
-                || connection_drag.active
-                || pointer_over_node
-                || hovered_port.is_some()
-            {
-                egui::Sense::hover()
-            } else {
-                egui::Sense::drag()
-            },
+            // if connection_breaker.active
+            //     || connection_drag.active
+            //     || pointer_over_node
+            //     || hovered_port.is_some()
+            // {
+            //     egui::Sense::hover()
+            // } else {
+            egui::Sense::drag(),
+            // },
         );
 
         let mut pan_changed = false;
@@ -393,7 +393,7 @@ impl GraphUi {
 fn update_zoom(cursor_pos: Pos2, view_graph: &mut model::ViewGraph, ctx: &RenderContext<'_>) {
     let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
     let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
-    let zoom_delta = (scroll_delta * 0.006).exp().max(pinch_delta);
+    let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
 
     // println!(
     //     "scroll_delta {} pinch_delta {} zoom_delta {}",
