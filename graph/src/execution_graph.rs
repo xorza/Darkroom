@@ -552,7 +552,10 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert!(e_node.inited);
+            assert!(
+                e_node.inited,
+                "Invalid node, call update after invalidating"
+            );
             assert_eq!(e_node.process_state, ProcessState::Backward);
 
             e_node.process_state = ProcessState::Forward;
