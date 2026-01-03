@@ -281,7 +281,6 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.stack.clear();
         self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
 
         self.backward1(graph, func_lib)?;
@@ -389,6 +388,7 @@ impl ExecutionGraph {
 
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
+        stack.clear();
 
         for node in graph.nodes.iter().filter(|&node| node.terminal) {
             let e_node_idx = self
