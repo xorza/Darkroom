@@ -29,16 +29,14 @@ pub struct ExecutionStats {
     pub elapsed_secs: f64,
     pub executed_nodes: usize,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
     Changed,
     Unchanged,
     Missing,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputUsage {
-    #[default]
     Skip,
     Needed,
 }
@@ -71,7 +69,6 @@ struct Visit {
     e_node_idx: usize,
     cause: VisitCause,
 }
-
 #[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionPortAddress {
     pub target_idx: usize,
