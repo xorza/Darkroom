@@ -120,8 +120,8 @@ impl GraphUi {
         ui: &mut egui::Ui,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
-    ) -> GraphUiInteraction {
-        let mut interaction = GraphUiInteraction::default();
+        ui_interaction: &mut GraphUiInteraction,
+    ) {
         let breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
 
@@ -360,13 +360,13 @@ impl GraphUi {
         }
 
         let node_interaction = node_bodies.render(&ctx, view_graph, func_lib);
-        interaction
+        ui_interaction
             .affected_nodes
             .extend(node_interaction.changed_nodes);
-        interaction.actions.extend(node_interaction.actions);
+        ui_interaction.actions.extend(node_interaction.actions);
         if let Some(node_id) = node_interaction.remove_request {
             view_graph.remove_node(node_id);
-            interaction.affected_nodes.insert(node_id);
+            ui_interaction.affected_nodes.insert(node_id);
         }
 
         if connection_drag.active {
@@ -390,8 +390,8 @@ impl GraphUi {
         if breaker.active && primary_released {
             let removed = remove_connections(view_graph, connections.highlighted());
             for node_id in removed {
-                interaction.affected_nodes.insert(node_id);
-                interaction
+                ui_interaction.affected_nodes.insert(node_id);
+                ui_interaction
                     .actions
                     .push((node_id, GraphUiAction::InputChanged));
             }
@@ -413,8 +413,8 @@ impl GraphUi {
                     target.port,
                 )
             {
-                interaction.affected_nodes.insert(node_id);
-                interaction
+                ui_interaction.affected_nodes.insert(node_id);
+                ui_interaction
                     .actions
                     .push((node_id, GraphUiAction::InputChanged));
             }
@@ -424,8 +424,6 @@ impl GraphUi {
         if let Some(selected_id) = node_interaction.selection_request {
             view_graph.select_node(selected_id);
         }
-
-        interaction
     }
 }
 

@@ -19,7 +19,8 @@ use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::gui::graph::GraphUiAction;
+use crate::gui::graph::{GraphUi, GraphUiAction, GraphUiInteraction};
+use crate::model::ViewGraph;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -79,20 +80,23 @@ fn configure_visuals(ctx: &egui::Context) {
 struct ScenariumApp {
     worker: Worker,
     func_lib: FuncLib,
-    view_graph: model::ViewGraph,
-    graph_path: PathBuf,
-    graph_ui: gui::graph::GraphUi,
-    graph_updated: bool,
+    view_graph: ViewGraph,
 
+    graph_ui: GraphUi,
+
+    current_path: PathBuf,
     print_output: Arc<ArcSwapOption<String>>,
     updated_status: Arc<ArcSwapOption<String>>,
-    ui_context: egui::Context,
     status: String,
+
+    ui_context: egui::Context,
+
+    graph_ui_interaction: GraphUiInteraction,
+    graph_updated: bool,
 }
 
 impl ScenariumApp {
     fn new(ui_context: &egui::Context) -> Self {
-        let graph_path = Self::default_path();
         let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let worker = Self::create_worker(&updated_status, &print_output, ui_context.clone());
@@ -101,14 +105,14 @@ impl ScenariumApp {
             worker,
             func_lib: FuncLib::default(),
             view_graph: model::ViewGraph::default(),
-            graph_path,
+            current_path: Self::default_path(),
             graph_ui: gui::graph::GraphUi::default(),
             graph_updated: false,
-
             print_output,
             updated_status,
             ui_context: ui_context.clone(),
             status: "".to_string(),
+            graph_ui_interaction: GraphUiInteraction::default(),
         };
 
         result.test_graph();
@@ -182,24 +186,24 @@ impl ScenariumApp {
 
     fn save(&mut self) {
         assert!(
-            self.graph_path.extension().is_some(),
+            self.current_path.extension().is_some(),
             "graph save path must include a file extension"
         );
-        match self.view_graph.serialize_to_file(&self.graph_path) {
-            Ok(()) => self.set_status(format!("Saved graph to {}", self.graph_path.display())),
+        match self.view_graph.serialize_to_file(&self.current_path) {
+            Ok(()) => self.set_status(format!("Saved graph to {}", self.current_path.display())),
             Err(err) => self.set_status(format!("Save failed: {err}")),
         }
     }
 
     fn load(&mut self) {
         assert!(
-            self.graph_path.extension().is_some(),
+            self.current_path.extension().is_some(),
             "graph load path must include a file extension"
         );
-        match model::ViewGraph::deserialize_from_file(&self.graph_path) {
+        match model::ViewGraph::deserialize_from_file(&self.current_path) {
             Ok(graph_view) => self.set_graph_view(
                 graph_view,
-                format!("Loaded graph from {}", self.graph_path.display()),
+                format!("Loaded graph from {}", self.current_path.display()),
             ),
             Err(err) => self.set_status(format!("Load failed: {err}")),
         }
@@ -243,6 +247,7 @@ impl ScenariumApp {
 impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_compute_status();
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 {
@@ -284,11 +289,13 @@ impl eframe::App for ScenariumApp {
             });
         });
 
-        let mut graph_interaction = gui::graph::GraphUiInteraction::default();
         egui::CentralPanel::default().show(ctx, |ui| {
-            graph_interaction = self
-                .graph_ui
-                .render(ui, &mut self.view_graph, &self.func_lib);
+            self.graph_ui.render(
+                ui,
+                &mut self.view_graph,
+                &self.func_lib,
+                &mut self.graph_ui_interaction,
+            );
         });
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
@@ -302,18 +309,16 @@ impl eframe::App for ScenariumApp {
             });
         });
 
-        if !graph_interaction.actions.is_empty() {
-            let node_ids_to_invalidate =
-                graph_interaction
-                    .actions
-                    .iter()
-                    .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
-                        GraphUiAction::CacheToggled => None,
-                        GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
-                            self.graph_updated = true;
-                            Some(*node_id)
-                        }
-                    });
+        if !self.graph_ui_interaction.actions.is_empty() {
+            let node_ids_to_invalidate = self.graph_ui_interaction.actions.iter().filter_map(
+                |(node_id, graph_ui_action)| match graph_ui_action {
+                    GraphUiAction::CacheToggled => None,
+                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
+                        self.graph_updated = true;
+                        Some(*node_id)
+                    }
+                },
+            );
             self.worker.invalidate_caches(node_ids_to_invalidate);
         }
     }

@@ -131,11 +131,9 @@ pub fn render_node_bodies(
         );
         let cache_button_height = if ctx.layout.cache_height > 0.0 {
             let vertical_padding = ctx.layout.padding * ctx.style.cache_button_vertical_pad_factor;
-            let size = (ctx.layout.cache_height - vertical_padding * 2.0)
+            (ctx.layout.cache_height - vertical_padding * 2.0)
                 .max(10.0 * ctx.scale)
-                .min(ctx.layout.cache_height);
-
-            size
+                .min(ctx.layout.cache_height)
         } else {
             0.0
         };
@@ -599,8 +597,7 @@ pub(crate) fn node_output_pos(
 
 pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
-    let offset = (dx * 0.5).max(40.0 * scale);
-    offset
+    (dx * 0.5).max(40.0 * scale)
 }
 
 #[derive(Debug)]
@@ -721,6 +718,5 @@ fn text_width(
     color: egui::Color32,
 ) -> f32 {
     let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
-    let width = galley.size().x;
-    width
+    galley.size().x
 }
