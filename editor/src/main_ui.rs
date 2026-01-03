@@ -24,13 +24,13 @@ impl UiContext {
 }
 
 #[derive(Debug)]
-pub struct MainWindow {
+pub struct MainUi {
     pub graph_ui: GraphUi,
     pub ui_context: UiContext,
     pub graph_ui_interaction: GraphUiInteraction,
 }
 
-impl MainWindow {
+impl MainUi {
     pub fn new(ctx: &egui::Context) -> Self {
         Self {
             graph_ui: GraphUi::default(),

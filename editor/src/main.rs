@@ -4,7 +4,7 @@
 mod common;
 mod gui;
 mod init;
-mod main_window;
+mod main_ui;
 mod model;
 
 use anyhow::Result;
@@ -12,7 +12,7 @@ use eframe::{NativeOptions, egui};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::main_window::MainWindow;
+use crate::main_ui::MainUi;
 use crate::model::AppData;
 
 #[tokio::main]
@@ -72,21 +72,21 @@ fn configure_visuals(ctx: &egui::Context) {
 #[derive(Debug)]
 struct ScenariumApp {
     app_data: AppData,
-    main_window: MainWindow,
+    main_ui: MainUi,
 }
 
 impl ScenariumApp {
     fn new(ui_context: &egui::Context) -> Self {
-        let main_window = MainWindow::new(ui_context);
-        let mut result = Self {
-            app_data: AppData::new(main_window.ui_context(), Self::default_path()),
-            main_window,
+        let main_ui = MainUi::new(ui_context);
+        let mut app = Self {
+            app_data: AppData::new(main_ui.ui_context(), Self::default_path()),
+            main_ui,
         };
 
-        result.main_window.test_graph(&mut result.app_data);
-        result.main_window.load(&mut result.app_data);
+        app.main_ui.test_graph(&mut app.app_data);
+        app.main_ui.load(&mut app.app_data);
 
-        result
+        app
     }
 
     fn default_path() -> PathBuf {
@@ -96,6 +96,6 @@ impl ScenariumApp {
 
 impl eframe::App for ScenariumApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.main_window.render(&mut self.app_data, ctx);
+        self.main_ui.render(&mut self.app_data, ctx);
     }
 }

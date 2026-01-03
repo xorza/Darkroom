@@ -4,7 +4,7 @@ use graph::worker::Worker;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::main_window::UiContext;
+use crate::main_ui::UiContext;
 use crate::model::ViewGraph;
 
 #[derive(Debug)]
