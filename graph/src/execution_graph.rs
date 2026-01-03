@@ -750,7 +750,6 @@ impl ExecutionBinding {
             _ => None,
         }
     }
-
     pub fn as_bind(&self) -> Option<&ExecutionPortAddress> {
         match self {
             ExecutionBinding::Bind(port_address) => Some(port_address),
@@ -1043,6 +1042,41 @@ mod tests {
             .e_node_invoke_order
             .iter()
             .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn pure_node_always_caches() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+
+        graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::AsFunction;
+        func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+
+        // once node invoked is has no cached outputs
+        assert!(execution_graph
+            .e_node_invoke_order
+            .iter()
+            .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"));
+
+        execution_graph.by_name_mut("get_b").unwrap().output_values =
+            Some(vec![DynamicValue::Int(7)]);
+        execution_graph.by_name_mut("mult").unwrap().output_values =
+            Some(vec![DynamicValue::Int(7)]);
+
+        execution_graph.update(&graph, &func_lib)?;
+
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 2);
+
+        // pure node not invoked is has cached outputs
+        assert!(execution_graph
+            .e_node_invoke_order
+            .iter()
+            .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "mult"));
 
         Ok(())
     }
