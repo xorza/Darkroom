@@ -103,6 +103,7 @@ pub struct ExecutionNode {
     inited: bool,
     process_state: ProcessState,
 
+    pub terminal: bool,
     pub missing_required_inputs: bool,
     pub changed_inputs: bool,
     pub behavior: ExecutionBehavior,
@@ -147,6 +148,7 @@ pub struct ExecutionGraph {
 
 impl ExecutionNode {
     fn reset(&mut self) {
+        self.terminal = false;
         self.missing_required_inputs = false;
         self.changed_inputs = false;
         self.process_state = ProcessState::None;
@@ -161,6 +163,7 @@ impl ExecutionNode {
 
         self.func_id = func.id;
         self.lambda = func.lambda.clone();
+        self.terminal = node.terminal;
 
         self.behavior = match node.behavior {
             NodeBehavior::AsFunction => match func.behavior {
@@ -283,7 +286,7 @@ impl ExecutionGraph {
 
         self.backward1(graph, func_lib)?;
         self.forward(graph);
-        self.backward2(graph);
+        self.backward2();
 
         self.validate_with(graph, func_lib);
 
@@ -551,14 +554,14 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect the execution order.
-    fn backward2(&mut self, graph: &Graph) {
+    fn backward2(&mut self) {
         self.e_node_invoke_order.clear();
 
         let mut stack: Vec<Visit> = take(&mut self.stack);
         assert!(stack.is_empty());
 
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            if graph.by_id(&e_node.id).unwrap().terminal {
+            if e_node.terminal {
                 stack.push(Visit {
                     e_node_idx,
                     cause: VisitCause::Terminal,
