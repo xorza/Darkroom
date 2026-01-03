@@ -147,9 +147,6 @@ pub struct ExecutionGraph {
 }
 
 impl ExecutionNode {
-    fn reset(&mut self) {
-        self.process_state = ProcessState::None;
-    }
     fn prepare_for_execution(&mut self) {
         self.wants_execute = false;
         self.changed_inputs = false;
@@ -157,7 +154,7 @@ impl ExecutionNode {
         self.run_time = 0.0;
         self.error = None;
     }
-    fn update(&mut self, node: &Node, func: &Func) {
+    fn reset(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
         assert_eq!(node.inputs.len(), func.inputs.len());
 
@@ -281,7 +278,6 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.e_nodes.iter_mut().for_each(|e_node| e_node.reset());
         self.backward1(graph, func_lib)?;
 
         self.validate_with(graph, func_lib);
@@ -393,6 +389,10 @@ impl ExecutionGraph {
         self.e_node_invoke_order.clear();
         self.stack.reserve(graph.nodes.len());
 
+        self.e_nodes
+            .iter_mut()
+            .for_each(|e_node| e_node.process_state = ProcessState::None);
+
         let mut write_idx = 0;
         let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.clear();
@@ -443,7 +443,7 @@ impl ExecutionGraph {
                     let e_node = &mut self.e_nodes[visit.e_node_idx];
                     let node = graph.by_id(&e_node.id).unwrap();
                     let func = func_lib.by_id(&node.func_id).unwrap();
-                    e_node.update(node, func);
+                    e_node.reset(node, func);
                     e_node.process_state = ProcessState::Processing;
                     stack.push(Visit {
                         e_node_idx: visit.e_node_idx,
