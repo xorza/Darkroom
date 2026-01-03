@@ -144,11 +144,9 @@ impl GraphUi {
         let pointer_in_rect = pointer_pos
             .map(|pos| ctx.rect.contains(pos))
             .unwrap_or(false);
-        let middle_down = ctx.ui.input(|input| input.pointer.middle_down());
-        let pointer_delta = ctx.ui.input(|input| input.pointer.delta());
 
         if pointer_in_rect {
-            update_zoom(view_graph, &ctx);
+            update_zoom(pointer_pos.unwrap(), view_graph, &ctx);
         }
 
         let mut port_activation = (ctx.style.port_radius * 1.6).max(10.0);
@@ -179,7 +177,6 @@ impl GraphUi {
                         &layout,
                         *ctx.node_widths.get(&view_node.id).unwrap(),
                     );
-                    // let node_rect = ctx.node_rect(view_node, func.inputs.len(), func.outputs.len());
                     node_rect.contains(pos)
                 })
             });
@@ -211,10 +208,7 @@ impl GraphUi {
             view_graph.pan += pan_response.drag_delta();
             pan_changed = true;
         }
-        // if middle_down && pointer_in_rect && !connection_breaker.active && !connection_drag.active {
-        //     view_graph.pan += pointer_delta;
-        //     pan_changed = true;
-        // }
+
         if pan_changed {
             let rect = ctx.rect;
             ctx = RenderContext::new(
@@ -396,50 +390,26 @@ impl GraphUi {
     }
 }
 
-fn update_zoom(view_graph: &mut model::ViewGraph, ctx: &RenderContext<'_>) {
-    let cursor_pos = ctx.ui.input(|input| input.pointer.hover_pos());
-    // let cursor_pos = ctx.ui.ctx().pointer_latest_pos().or(cursor_pos);
+fn update_zoom(cursor_pos: Pos2, view_graph: &mut model::ViewGraph, ctx: &RenderContext<'_>) {
+    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
+    let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
+    let zoom_delta = (scroll_delta * 0.006).exp().max(pinch_delta);
 
-    let modifiers = ctx.ui.input(|input| input.modifiers);
-    let scroll_delta = ctx.ui.input(|input| input.raw_scroll_delta);
-    let mut zoom_delta = ctx.ui.input(|input| input.zoom_delta());
-    let wheel_delta = ctx.ui.input(|input| {
-        input
-            .events
-            .iter()
-            .fold(egui::Vec2::ZERO, |acc, event| match event {
-                egui::Event::MouseWheel {
-                    unit: egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page,
-                    delta,
-                    ..
-                } => acc + *delta,
-                _ => acc,
-            })
-    });
-    let wheel_scroll = wheel_delta.length_sq() > f32::EPSILON;
-
-    if wheel_scroll && wheel_delta.y.abs() > f32::EPSILON {
-        let wheel_zoom = (wheel_delta.y * 0.06).exp();
-        zoom_delta *= wheel_zoom;
-    } else if (modifiers.command || modifiers.ctrl) && scroll_delta.y.abs() > f32::EPSILON {
-        let scroll_zoom = (scroll_delta.y * 0.003).exp();
-        zoom_delta *= scroll_zoom;
-    }
+    // println!(
+    //     "scroll_delta {} pinch_delta {} zoom_delta {}",
+    //     scroll_delta, pinch_delta, zoom_delta
+    // );
 
     if (zoom_delta - 1.0).abs() > f32::EPSILON {
         let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
 
         if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
-            let cursor = cursor_pos.unwrap();
-
             let origin = ctx.rect.min;
-            let graph_pos = (cursor - origin - view_graph.pan) / view_graph.zoom;
+            let graph_pos = (cursor_pos - origin - view_graph.pan) / view_graph.zoom;
 
             view_graph.zoom = clamped_zoom;
-            view_graph.pan = cursor - origin - graph_pos * view_graph.zoom;
+            view_graph.pan = cursor_pos - origin - graph_pos * view_graph.zoom;
         }
-    } else if !wheel_scroll && scroll_delta.length_sq() > f32::EPSILON {
-        view_graph.pan += scroll_delta;
     }
 }
 
