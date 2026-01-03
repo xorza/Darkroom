@@ -723,6 +723,69 @@ impl ExecutionGraph {
             assert!(all_dependencies_in_order);
         }
     }
+
+    pub fn validate_for_execution(&self) {
+        if !is_debug() {
+            return;
+        }
+
+        let mut seen = vec![false; self.e_nodes.len()];
+        for &e_node_idx in self.e_node_invoke_order.iter() {
+            assert!(e_node_idx < self.e_nodes.len());
+            assert!(!seen[e_node_idx]);
+            seen[e_node_idx] = true;
+
+            let e_node = &self.e_nodes[e_node_idx];
+            assert!(e_node.inited);
+            assert_eq!(e_node.process_state, ProcessState::Backward);
+            assert!(e_node.wants_execute);
+            assert!(!e_node.missing_required_inputs);
+
+            for e_input in e_node.inputs.iter() {
+                match &e_input.binding {
+                    ExecutionBinding::Bind(port_address) => {
+                        assert!(port_address.target_idx < self.e_nodes.len());
+                        // assert!(seen[port_address.target_idx]);
+                    }
+                    ExecutionBinding::None | ExecutionBinding::Const(_) => {}
+                }
+            }
+        }
+
+        for e_node in self.e_nodes.iter() {
+            assert!(e_node.inited);
+            assert_ne!(e_node.process_state, ProcessState::Processing);
+            assert_ne!(e_node.process_state, ProcessState::None);
+
+            if e_node.missing_required_inputs {
+                assert!(!e_node.wants_execute);
+            }
+
+            for e_input in e_node.inputs.iter() {
+                match &e_input.binding {
+                    ExecutionBinding::Bind(port_address) => {
+                        assert!(port_address.target_idx < self.e_nodes.len());
+
+                        let output_e_node = &self.e_nodes[port_address.target_idx];
+                        assert!(port_address.port_idx < output_e_node.outputs.len());
+
+                        if output_e_node.missing_required_inputs {
+                            assert_eq!(e_input.state, InputState::None);
+                        } else if output_e_node.wants_execute {
+                            assert_eq!(e_input.state, InputState::Changed);
+                        } else {
+                            assert_eq!(e_input.state, InputState::Unchanged);
+                        }
+                    }
+                    ExecutionBinding::None | ExecutionBinding::Const(_) => {}
+                }
+
+                if e_input.state == InputState::None {
+                    assert!(!e_input.required || e_node.missing_required_inputs);
+                }
+            }
+        }
+    }
 }
 
 fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
