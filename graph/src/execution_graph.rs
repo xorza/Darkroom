@@ -30,10 +30,8 @@ pub struct ExecutionStats {
     pub executed_nodes: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
-    #[default]
-    Unknown,
     Changed,
     Unchanged,
     Missing,
@@ -46,7 +44,7 @@ pub enum OutputUsage {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionInput {
-    pub state: InputState,
+    pub state: Option<InputState>,
     pub required: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
@@ -181,7 +179,7 @@ impl ExecutionNode {
 
             for (input_idx, func_input) in func.inputs.iter().enumerate() {
                 self.inputs[input_idx] = ExecutionInput {
-                    state: InputState::Unknown,
+                    state: None,
                     required: func_input.required,
                     binding: ExecutionBinding::None,
                     data_type: func_input.data_type.clone(),
@@ -326,7 +324,7 @@ impl ExecutionGraph {
                 let value = value.convert_type(&input.data_type);
 
                 inputs.push(InvokeInput {
-                    state: input.state,
+                    state: input.state.unwrap(),
                     value,
                 });
             }
@@ -367,7 +365,7 @@ impl ExecutionGraph {
 
             e_node.inputs.iter_mut().for_each(|input| {
                 if matches!(input.binding, ExecutionBinding::Const(_)) {
-                    input.state = InputState::Unchanged
+                    input.state = Some(InputState::Unchanged)
                 }
             });
 
@@ -458,25 +456,21 @@ impl ExecutionGraph {
                 for (input_idx, input) in node.inputs.iter().enumerate() {
                     {
                         let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-
                         match (&input.binding, &e_input.binding) {
                             (Binding::None, ExecutionBinding::None) => {
-                                e_input.state = InputState::Unchanged
+                                e_input.state = Some(InputState::Unchanged)
                             }
-
                             (Binding::Const(value), ExecutionBinding::Const(existing))
                                 if value == existing =>
                             {
-                                e_input.state = InputState::Unchanged;
+                                e_input.state = Some(InputState::Unchanged);
                             }
                             (Binding::Const(value), _) => {
-                                e_input.state = InputState::Changed;
+                                e_input.state = Some(InputState::Changed);
                                 e_input.binding = ExecutionBinding::Const(value.clone());
                             }
-                            (Binding::Bind(_), ExecutionBinding::Bind(_)) => {
-                                e_input.state = InputState::Unknown
-                            }
-                            (_, _) => e_input.state = InputState::Changed,
+                            (Binding::Bind(_), ExecutionBinding::Bind(_)) => e_input.state = None,
+                            (_, _) => e_input.state = Some(InputState::Changed),
                         };
                     }
 
@@ -532,7 +526,7 @@ impl ExecutionGraph {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                 let input_state = match &e_input.binding {
                     ExecutionBinding::None => InputState::Missing,
-                    ExecutionBinding::Const(_) => e_input.state,
+                    ExecutionBinding::Const(_) => e_input.state.unwrap(),
                     ExecutionBinding::Bind(port_address) => {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
@@ -551,12 +545,11 @@ impl ExecutionGraph {
                 };
 
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                e_input.state = input_state;
+                e_input.state = Some(input_state);
                 match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
                     InputState::Missing => missing_required_inputs |= e_input.required,
-                    InputState::Unknown => unreachable!("unprocessed input"),
                 }
             }
 
@@ -629,14 +622,13 @@ impl ExecutionGraph {
 
             let e_node = &self.e_nodes[visit.e_node_idx];
             for e_input in e_node.inputs.iter() {
-                if e_input.state != InputState::Changed {
+                if e_input.state.unwrap() != InputState::Changed {
                     continue;
                 }
 
                 let Some(port_address) = e_input.binding.as_bind() else {
                     continue;
                 };
-                assert_ne!(e_input.state, InputState::Unknown);
 
                 stack.push(Visit {
                     e_node_idx: port_address.target_idx,
@@ -774,17 +766,22 @@ impl ExecutionGraph {
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         if output_e_node.missing_required_inputs {
-                            assert_eq!(e_input.state, InputState::Missing);
+                            assert_eq!(e_input.state.unwrap(), InputState::Missing);
                         } else if output_e_node.wants_execute {
-                            assert_eq!(e_input.state, InputState::Changed);
+                            assert_eq!(e_input.state.unwrap(), InputState::Changed);
                         } else {
-                            assert_eq!(e_input.state, InputState::Unchanged);
+                            assert_eq!(e_input.state.unwrap(), InputState::Unchanged);
                         }
                     }
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => {}
+                    ExecutionBinding::None => {
+                        assert_eq!(e_input.state.unwrap(), InputState::Missing)
+                    }
+                    ExecutionBinding::Const(_) => {
+                        assert_ne!(e_input.state.unwrap(), InputState::Missing)
+                    }
                 }
 
-                if e_input.state == InputState::Missing {
+                if e_input.state.unwrap() == InputState::Missing {
                     assert!(!e_input.required || e_node.missing_required_inputs);
                 }
             }
@@ -907,9 +904,9 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state, InputState::Missing);
-        assert_eq!(mult.inputs[0].state, InputState::Missing);
-        assert_eq!(print.inputs[0].state, InputState::Missing);
+        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Missing);
+        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Missing);
+        assert_eq!(print.inputs[0].state.unwrap(), InputState::Missing);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
