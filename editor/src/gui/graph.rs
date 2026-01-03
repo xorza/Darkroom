@@ -126,7 +126,19 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
+        let mut fit_all = false;
+        let mut view_selected = false;
+        let mut reset_view = false;
+
+        ui.horizontal(|ui| {
+            fit_all = ui.button("Fit all").clicked();
+            view_selected = ui.button("View selected").clicked();
+            reset_view = ui.button("Reset view").clicked();
+        });
+
         let rect = ui.available_rect_before_wrap();
+        let painter = ui.painter_at(rect);
+
         let pointer_pos = ui.input(|input| input.pointer.hover_pos());
         let pointer_in_rect = pointer_pos.map(|pos| rect.contains(pos)).unwrap_or(false);
 
@@ -134,10 +146,9 @@ impl GraphUi {
             update_zoom_and_pan(ui, rect, pointer_pos.unwrap(), view_graph);
         }
 
-        let painter = ui.painter_at(rect);
-        let mut ctx = RenderContext::new(
+        let ctx = RenderContext::new(
             ui,
-            painter.clone(),
+            painter,
             rect,
             view_graph.pan,
             view_graph.zoom,
@@ -145,7 +156,20 @@ impl GraphUi {
             &func_lib,
         );
 
-        top_panel(view_graph, func_lib, ctx.rect, &mut ctx);
+        if reset_view {
+            view_graph.zoom = 1.0;
+            view_graph.pan = egui::Vec2::ZERO;
+        }
+
+        if view_selected {
+            view_selected_node(&ctx, view_graph, func_lib);
+        }
+
+        if fit_all {
+            fit_all_nodes(&ctx, view_graph, func_lib);
+        }
+
+        background(&ctx);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
@@ -243,8 +267,6 @@ impl GraphUi {
 
         let mut connections = ConnectionRenderer::default();
         let mut node_bodies = NodeBodyRenderer;
-
-        draw_dotted_background(&ctx);
 
         connections.rebuild(
             view_graph,
@@ -360,35 +382,6 @@ fn update_zoom_and_pan(
     }
 }
 
-fn top_panel(
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-    rect: egui::Rect,
-    ctx: &mut RenderContext,
-) {
-    let mut fit_all = false;
-    let mut view_selected = false;
-    let mut reset_view = false;
-    ctx.ui.horizontal(|ui| {
-        fit_all = ui.button("Fit all").clicked();
-        view_selected = ui.button("View selected").clicked();
-        reset_view = ui.button("Reset view").clicked();
-    });
-
-    if reset_view {
-        view_graph.zoom = 1.0;
-        view_graph.pan = egui::Vec2::ZERO;
-    }
-
-    if view_selected {
-        view_selected_node(&mut ctx.ui, &ctx.painter, rect, view_graph, func_lib);
-    }
-
-    if fit_all {
-        fit_all_nodes(&mut ctx.ui, &ctx.painter, rect, view_graph, func_lib);
-    }
-}
-
 #[derive(Debug, Default)]
 struct ConnectionRenderer {
     curves: Vec<ConnectionCurve>,
@@ -436,7 +429,7 @@ impl NodeBodyRenderer {
     }
 }
 
-fn draw_dotted_background(ctx: &RenderContext) {
+fn background(ctx: &RenderContext) {
     let spacing = ctx.style.dotted_base_spacing * ctx.scale;
     let radius = (ctx.style.dotted_radius_base * ctx.scale)
         .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
@@ -691,13 +684,7 @@ fn apply_connection(
     Some(input_node.id)
 }
 
-fn view_selected_node(
-    ui: &egui::Ui,
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-) {
+fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
     let Some(selected_id) = view_graph.selected_node_id else {
         return;
     };
@@ -717,7 +704,8 @@ fn view_selected_node(
         .by_id(&node.func_id)
         .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-    let (layout, node_widths) = compute_layout_and_widths(ui, painter, view_graph, func_lib, 1.0);
+    let (layout, node_widths) =
+        compute_layout_and_widths(&ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
     let node_width = node_widths
         .get(&node.id)
         .copied()
@@ -734,23 +722,18 @@ fn view_selected_node(
     .size();
     let center = node_view.pos.to_vec2() + size * 0.5;
     view_graph.zoom = 1.0;
-    view_graph.pan = rect.center() - rect.min - center;
+    view_graph.pan = ctx.rect.center() - ctx.rect.min - center;
 }
 
-fn fit_all_nodes(
-    ui: &egui::Ui,
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-) {
+fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
     if view_graph.view_nodes.is_empty() {
         view_graph.zoom = 1.0;
         view_graph.pan = egui::Vec2::ZERO;
         return;
     }
 
-    let (layout, node_widths) = compute_layout_and_widths(ui, painter, view_graph, func_lib, 1.0);
+    let (layout, node_widths) =
+        compute_layout_and_widths(&ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
     let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
@@ -786,7 +769,7 @@ fn fit_all_nodes(
     assert!(bounds_size.y.is_finite(), "bounds height must be finite");
 
     let padding = 24.0;
-    let available = rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
+    let available = ctx.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
     let zoom_x = if bounds_size.x > 0.0 {
         available.x / bounds_size.x
     } else {
@@ -801,7 +784,7 @@ fn fit_all_nodes(
     view_graph.zoom = target_zoom;
 
     let bounds_center = (min.to_vec2() + max.to_vec2()) * 0.5;
-    view_graph.pan = rect.center() - rect.min - bounds_center * view_graph.zoom;
+    view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * view_graph.zoom;
 }
 
 fn compute_layout_and_widths(
@@ -823,6 +806,7 @@ fn compute_layout_and_widths(
     let widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
     (node_layout, widths)
 }
+
 fn draw_connections(
     painter: &egui::Painter,
     curves: &[ConnectionCurve],
