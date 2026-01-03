@@ -480,14 +480,11 @@ impl ExecutionGraph {
                             },
                         );
 
-                        let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                        e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
                             target_idx: output_e_node_idx,
                             port_idx: port_address.port_idx,
                         });
-                        let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                        if e_input.binding != desired_binding {
-                            e_input.binding = desired_binding;
-                        }
 
                         stack.push(Visit {
                             e_node_idx: output_e_node_idx,
