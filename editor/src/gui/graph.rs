@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::Pos2;
+use egui::{Pos2, Rect, Ui};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
@@ -121,12 +121,19 @@ impl GraphUi {
 
     pub fn render(
         &mut self,
-        ui: &mut egui::Ui,
+        ui: &mut Ui,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
         let rect = ui.available_rect_before_wrap();
+        let pointer_pos = ui.input(|input| input.pointer.hover_pos());
+        let pointer_in_rect = pointer_pos.map(|pos| rect.contains(pos)).unwrap_or(false);
+
+        if pointer_in_rect {
+            update_zoom_and_pan(ui, rect, pointer_pos.unwrap(), view_graph);
+        }
+
         let painter = ui.painter_at(rect);
         let mut ctx = RenderContext::new(
             ui,
@@ -139,15 +146,6 @@ impl GraphUi {
         );
 
         top_panel(view_graph, func_lib, ctx.rect, &mut ctx);
-
-        let pointer_pos = ctx.ui.input(|input| input.pointer.hover_pos());
-        let pointer_in_rect = pointer_pos
-            .map(|pos| ctx.rect.contains(pos))
-            .unwrap_or(false);
-
-        if pointer_in_rect {
-            update_zoom_and_pan(pointer_pos.unwrap(), view_graph, &ctx);
-        }
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
@@ -329,12 +327,13 @@ impl GraphUi {
 }
 
 fn update_zoom_and_pan(
+    ui: &mut Ui,
+    rect: Rect,
     cursor_pos: Pos2,
     view_graph: &mut model::ViewGraph,
-    ctx: &RenderContext<'_>,
 ) {
-    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
-    let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
+    let scroll_delta = ui.input(|input| input.smooth_scroll_delta).y;
+    let pinch_delta = ui.input(|input| input.zoom_delta());
     let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
 
     // println!(
@@ -346,7 +345,7 @@ fn update_zoom_and_pan(
         let clamped_zoom = (view_graph.zoom * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
 
         if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
-            let origin = ctx.rect.min;
+            let origin = rect.min;
             let graph_pos = (cursor_pos - origin - view_graph.pan) / view_graph.zoom;
 
             view_graph.zoom = clamped_zoom;
@@ -354,8 +353,8 @@ fn update_zoom_and_pan(
         }
     }
 
-    let pan_id = ctx.ui.make_persistent_id("graph_pan");
-    let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
+    let pan_id = ui.make_persistent_id("graph_pan");
+    let pan_response = ui.interact(rect, pan_id, egui::Sense::drag());
     if pan_response.dragged_by(egui::PointerButton::Middle) {
         view_graph.pan += pan_response.drag_delta();
     }
