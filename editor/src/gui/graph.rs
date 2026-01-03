@@ -127,21 +127,23 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let rect = ui.available_rect_before_wrap();
-        let painter = ui.painter_at(rect);
-        let mut ctx = RenderContext::new(ui, painter.clone(), rect, view_graph, func_lib);
+        let rect1 = ui.available_rect_before_wrap();
+        let painter = ui.painter_at(rect1);
+        let mut ctx = RenderContext::new(ui, painter.clone(), rect1, view_graph, func_lib);
 
-        top_panel(view_graph, func_lib, rect, &mut ctx);
+        top_panel(view_graph, func_lib, ctx.rect, &mut ctx);
 
         let connection_breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
 
         let pointer_pos = ctx.ui.input(|input| input.pointer.hover_pos());
         let cursor_pos = ctx.ui.ctx().pointer_latest_pos().or(pointer_pos);
-        let pointer_in_rect = pointer_pos.map(|pos| rect.contains(pos)).unwrap_or(false);
+        let pointer_in_rect = pointer_pos
+            .map(|pos| ctx.rect.contains(pos))
+            .unwrap_or(false);
         let middle_down = ctx.ui.input(|input| input.pointer.middle_down());
         let pointer_delta = ctx.ui.input(|input| input.pointer.delta());
-        let zoom_active = cursor_pos.is_some_and(|pos| rect.contains(pos));
+        let zoom_active = cursor_pos.is_some_and(|pos| ctx.rect.contains(pos));
 
         if zoom_active {
             let modifiers = ctx.ui.input(|input| input.modifiers);
@@ -176,7 +178,7 @@ impl GraphUi {
                 if (clamped_zoom - view_graph.zoom).abs() > f32::EPSILON {
                     let cursor = cursor_pos.unwrap();
 
-                    let origin = rect.min;
+                    let origin = ctx.rect.min;
                     let graph_pos = (cursor - origin - view_graph.pan) / view_graph.zoom;
 
                     view_graph.zoom = clamped_zoom;
@@ -238,6 +240,7 @@ impl GraphUi {
             pan_changed = true;
         }
         if pan_changed {
+            let rect = ctx.rect;
             ctx = RenderContext::new(ui, painter, rect, view_graph, func_lib);
             port_activation = (ctx.style.port_radius * 1.6).max(10.0);
             ports = collect_ports(
@@ -326,7 +329,7 @@ impl GraphUi {
         let mut connections = ConnectionRenderer::default();
         let mut node_bodies = NodeBodyRenderer;
 
-        draw_dotted_background(&ctx.painter, rect, view_graph, &ctx.style);
+        draw_dotted_background(&ctx.painter, ctx.rect, view_graph, &ctx.style);
 
         connections.rebuild(
             view_graph,
