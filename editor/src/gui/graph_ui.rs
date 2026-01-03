@@ -5,7 +5,7 @@ use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
 
 use crate::{
-    gui::{node, render::RenderContext},
+    gui::{node_ui, render::RenderContext},
     model,
 };
 use std::collections::HashSet;
@@ -183,14 +183,14 @@ impl GraphUi {
             .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&ports, pos, port_activation));
         let hovered_port_ref = hovered_port.as_ref();
-        let layout = node::NodeLayout::default().scaled(view_graph.zoom);
+        let layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
         let pointer_over_node = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
                 view_graph.view_nodes.iter().any(|view_node| {
                     let node = view_graph.graph.by_id(&view_node.id).unwrap();
                     let func = func_lib.by_id(&node.func_id).unwrap();
-                    let node_rect = node::node_rect_for_graph(
+                    let node_rect = node_ui::node_rect_for_graph(
                         ctx.origin,
                         view_node,
                         func.inputs.len(),
@@ -284,7 +284,7 @@ impl GraphUi {
             ));
         }
 
-        let node_interaction = node::render_node_bodies(&ctx, view_graph, func_lib);
+        let node_interaction = node_ui::render_node_bodies(&ctx, view_graph, func_lib);
 
         ui_interaction.actions.extend(node_interaction.actions);
         if let Some(node_id) = node_interaction.remove_request {
@@ -393,7 +393,7 @@ impl ConnectionRenderer {
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
         origin: Pos2,
-        layout: &node::NodeLayout,
+        layout: &node_ui::NodeLayout,
         node_widths: &HashMap<NodeId, f32>,
         breaker: &ConnectionBreaker,
     ) {
@@ -448,7 +448,7 @@ fn collect_connection_curves(
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     origin: Pos2,
-    layout: &node::NodeLayout,
+    layout: &node_ui::NodeLayout,
     node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<ConnectionCurve> {
     let node_lookup: HashMap<_, _> = view_graph
@@ -468,7 +468,7 @@ fn collect_connection_curves(
             };
             let source_view = node_lookup.get(&binding.target_id).unwrap();
             let source_width = node_widths.get(&binding.target_id).copied().unwrap();
-            let start = node::node_output_pos(
+            let start = node_ui::node_output_pos(
                 origin,
                 source_view,
                 binding.port_idx,
@@ -476,7 +476,7 @@ fn collect_connection_curves(
                 view_graph.zoom,
                 source_width,
             );
-            let end = node::node_input_pos(
+            let end = node_ui::node_input_pos(
                 origin,
                 node_view,
                 input_index,
@@ -484,7 +484,7 @@ fn collect_connection_curves(
                 layout,
                 view_graph.zoom,
             );
-            let control_offset = node::bezier_control_offset(start, end, view_graph.zoom);
+            let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
             curves.push(ConnectionCurve {
                 key: ConnectionKey {
                     target_node_id: node.id,
@@ -504,7 +504,7 @@ fn collect_ports(
     ctx: &RenderContext,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    layout: &node::NodeLayout,
+    layout: &node_ui::NodeLayout,
     node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
@@ -523,7 +523,7 @@ fn collect_ports(
             .copied()
             .expect("node width must be precomputed");
         for index in 0..func.inputs.len() {
-            let center = node::node_input_pos(
+            let center = node_ui::node_input_pos(
                 ctx.origin,
                 node_view,
                 index,
@@ -542,7 +542,7 @@ fn collect_ports(
             });
         }
         for index in 0..func.outputs.len() {
-            let center = node::node_output_pos(
+            let center = node_ui::node_output_pos(
                 ctx.origin,
                 node_view,
                 index,
@@ -592,7 +592,7 @@ fn draw_temporary_connection(
 ) {
     assert!(scale.is_finite(), "connection scale must be finite");
     assert!(scale > 0.0, "connection scale must be positive");
-    let control_offset = node::bezier_control_offset(start, end, scale);
+    let control_offset = node_ui::bezier_control_offset(start, end, scale);
     let (start_sign, end_sign) = match start_kind {
         PortKind::Output => (1.0, -1.0),
         PortKind::Input => (-1.0, 1.0),
@@ -695,7 +695,7 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
         .get(&node.id)
         .copied()
         .expect("node width must be precomputed");
-    let size = node::node_rect_for_graph(
+    let size = node_ui::node_rect_for_graph(
         Pos2::ZERO,
         node_view,
         func.inputs.len(),
@@ -734,7 +734,7 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
             .get(&node.id)
             .copied()
             .expect("node width must be precomputed");
-        let rect = node::node_rect_for_graph(
+        let rect = node_ui::node_rect_for_graph(
             Pos2::ZERO,
             node_view,
             func.inputs.len(),
@@ -778,17 +778,17 @@ fn compute_layout_and_widths(
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     scale: f32,
-) -> (node::NodeLayout, HashMap<NodeId, f32>) {
-    let node_layout = node::NodeLayout::default().scaled(scale);
+) -> (node_ui::NodeLayout, HashMap<NodeId, f32>) {
+    let node_layout = node_ui::NodeLayout::default().scaled(scale);
 
     let style = crate::gui::style::Style::new();
 
-    let width_ctx = node::NodeWidthContext {
+    let width_ctx = node_ui::NodeWidthContext {
         node_layout: &node_layout,
         style: &style,
         scale,
     };
-    let widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
+    let widths = node_ui::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
     (node_layout, widths)
 }
 

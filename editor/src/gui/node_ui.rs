@@ -7,7 +7,7 @@ use hashbrown::HashMap;
 use std::collections::HashSet;
 
 use crate::{
-    gui::{graph::GraphUiAction, render::RenderContext},
+    gui::{graph_ui::GraphUiAction, render::RenderContext},
     model,
 };
 

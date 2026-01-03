@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use std::marker::PhantomData;
 
 use crate::{
-    gui::{node, style::Style},
+    gui::{node_ui, style::Style},
     model::{self, ViewGraph},
 };
 
@@ -18,7 +18,7 @@ pub struct RenderContext<'a> {
     pub origin: Pos2,
     pub scale: f32,
 
-    pub node_layout: node::NodeLayout,
+    pub node_layout: node_ui::NodeLayout,
     pub node_widths: HashMap<NodeId, f32>,
 }
 
@@ -35,13 +35,13 @@ impl<'a> RenderContext<'a> {
         let style = Style::new();
         let origin = rect.min + pan;
 
-        let node_layout = node::NodeLayout::default().scaled(view_graph.zoom);
-        let width_ctx = node::NodeWidthContext {
+        let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
+        let width_ctx = node_ui::NodeWidthContext {
             node_layout: &node_layout,
             style: &style,
             scale: view_graph.zoom,
         };
-        let node_widths = node::compute_node_widths(&painter, view_graph, func_lib, &width_ctx);
+        let node_widths = node_ui::compute_node_widths(&painter, view_graph, func_lib, &width_ctx);
 
         Self {
             ui,
@@ -69,7 +69,7 @@ impl<'a> RenderContext<'a> {
         input_count: usize,
         output_count: usize,
     ) -> Rect {
-        node::node_rect_for_graph(
+        node_ui::node_rect_for_graph(
             self.origin,
             view_node,
             input_count,

@@ -1,4 +1,4 @@
-use crate::gui::graph::{GraphUi, GraphUiInteraction};
+use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
 use crate::model::AppData;
 use eframe::egui;
 
