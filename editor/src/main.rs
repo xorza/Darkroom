@@ -9,11 +9,9 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
-use graph::prelude::FuncLib;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::gui::graph::GraphUiInteraction;
 use crate::main_window::MainWindow;
 use crate::model::AppData;
 
@@ -79,13 +77,10 @@ struct ScenariumApp {
 
 impl ScenariumApp {
     fn new(ui_context: &egui::Context) -> Self {
+        let main_window = MainWindow::new(ui_context);
         let mut result = Self {
-            app_data: AppData::new(ui_context, Self::default_path()),
-            main_window: MainWindow {
-                graph_ui: gui::graph::GraphUi::default(),
-                ui_context: ui_context.clone(),
-                graph_ui_interaction: GraphUiInteraction::default(),
-            },
+            app_data: AppData::new(main_window.ui_context(), Self::default_path()),
+            main_window,
         };
 
         result.main_window.test_graph(&mut result.app_data);

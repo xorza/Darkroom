@@ -1,10 +1,10 @@
 use arc_swap::ArcSwapOption;
-use eframe::egui;
 use graph::prelude::FuncLib;
 use graph::worker::Worker;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::main_window::UiContext;
 use crate::model::ViewGraph;
 
 #[derive(Debug)]
@@ -17,13 +17,15 @@ pub struct AppData {
     pub print_output: Arc<ArcSwapOption<String>>,
     pub updated_status: Arc<ArcSwapOption<String>>,
     pub status: String,
+    pub ui_context: UiContext,
 }
 
 impl AppData {
-    pub fn new(ui_context: &egui::Context, current_path: PathBuf) -> Self {
+    pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
         let updated_status: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let print_output: Arc<ArcSwapOption<String>> = Arc::new(ArcSwapOption::empty());
         let worker = Self::create_worker(&updated_status, &print_output, ui_context.clone());
+
         Self {
             worker,
             func_lib: FuncLib::default(),
@@ -33,13 +35,14 @@ impl AppData {
             print_output,
             updated_status,
             status: String::new(),
+            ui_context,
         }
     }
 
     fn create_worker(
         updated_status: &Arc<ArcSwapOption<String>>,
         print_output: &Arc<ArcSwapOption<String>>,
-        ui_context: egui::Context,
+        ui_refresh: UiContext,
     ) -> Worker {
         let updated_status = Arc::clone(updated_status);
         let print_output = Arc::clone(print_output);
@@ -64,7 +67,7 @@ impl AppData {
                 }
             }
 
-            ui_context.request_repaint();
+            ui_refresh.request_repaint();
         })
     }
 

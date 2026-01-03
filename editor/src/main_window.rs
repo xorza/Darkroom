@@ -8,14 +8,41 @@ use graph::worker::WorkerMessage;
 use crate::gui::graph::{GraphUi, GraphUiAction, GraphUiInteraction};
 use crate::model::{AppData, ViewGraph};
 
+#[derive(Clone, Debug)]
+pub struct UiContext {
+    ctx: egui::Context,
+}
+
+impl UiContext {
+    pub fn new(ctx: &egui::Context) -> Self {
+        Self { ctx: ctx.clone() }
+    }
+
+    pub fn request_repaint(&self) {
+        self.ctx.request_repaint();
+    }
+}
+
 #[derive(Debug)]
 pub struct MainWindow {
     pub graph_ui: GraphUi,
-    pub ui_context: egui::Context,
+    pub ui_context: UiContext,
     pub graph_ui_interaction: GraphUiInteraction,
 }
 
 impl MainWindow {
+    pub fn new(ctx: &egui::Context) -> Self {
+        Self {
+            graph_ui: GraphUi::default(),
+            ui_context: UiContext::new(ctx),
+            graph_ui_interaction: GraphUiInteraction::default(),
+        }
+    }
+
+    pub fn ui_context(&self) -> UiContext {
+        self.ui_context.clone()
+    }
+
     fn set_graph_view(
         &mut self,
         app_data: &mut AppData,
