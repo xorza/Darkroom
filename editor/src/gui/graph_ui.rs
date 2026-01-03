@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Pos2, Rect, Ui, Vec2};
+use egui::{Key, Pos2, Rect, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
@@ -134,19 +134,6 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let mut fit_all = false;
-        let mut view_selected = false;
-
-        ui1.horizontal(|ui| {
-            fit_all = ui.button("Fit all").clicked();
-            view_selected = ui.button("View selected").clicked();
-            let reset_view = ui.button("Reset view").clicked();
-            if reset_view {
-                view_graph.zoom = 1.0;
-                view_graph.pan = egui::Vec2::ZERO;
-            }
-        });
-
         let ctx = RenderContext::new(ui1);
 
         let pointer_pos = ctx.ui.input(|input| input.pointer.hover_pos());
@@ -158,14 +145,9 @@ impl GraphUi {
             update_zoom_and_pan(&ctx, pointer_pos.unwrap(), view_graph);
         }
 
-        if view_selected {
-            view_selected_node(&ctx, view_graph, func_lib);
-        }
-        if fit_all {
-            fit_all_nodes(&ctx, view_graph, func_lib);
-        }
-
         background(&ctx, view_graph.zoom, view_graph.pan);
+
+        let pan_id = ctx.ui.make_persistent_id("graph_pan");
 
         let graph_layout = {
             let origin = ctx.rect.min + view_graph.pan;
@@ -359,12 +341,42 @@ impl GraphUi {
         if let Some(selected_id) = node_interaction.selection_request {
             view_graph.select_node(selected_id);
         }
+
+        let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
+        if pan_response.dragged_by(egui::PointerButton::Middle) {
+            view_graph.pan += pan_response.drag_delta();
+        }
+
+        let mut fit_all = false;
+        let mut view_selected = false;
+
+        ctx.ui.horizontal(|ui| {
+            fit_all = ui.button("Fit all").clicked();
+            view_selected = ui.button("View selected").clicked();
+            let reset_view = ui.button("Reset view").clicked();
+            if reset_view {
+                view_graph.zoom = 1.0;
+                view_graph.pan = egui::Vec2::ZERO;
+            }
+        });
+        if view_selected {
+            view_selected_node(&ctx, view_graph, func_lib);
+        }
+        if fit_all {
+            fit_all_nodes(&ctx, view_graph, func_lib);
+        }
     }
 }
 
 fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut model::ViewGraph) {
     let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta).y;
-    let pinch_delta = ctx.ui.input(|input| input.zoom_delta());
+    let pinch_delta = ctx.ui.input(|input| {
+        if input.modifiers.command {
+            1.0
+        } else {
+            input.zoom_delta()
+        }
+    });
     let zoom_delta = (scroll_delta * 0.006).exp() * pinch_delta;
 
     // println!(
@@ -384,11 +396,11 @@ fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut m
         }
     }
 
-    let pan_id = ctx.ui.make_persistent_id("graph_pan");
-    let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
-    if pan_response.dragged_by(egui::PointerButton::Middle) {
-        view_graph.pan += pan_response.drag_delta();
-    }
+    // let pan_id = ctx.ui.make_persistent_id("graph_pan");
+    // let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
+    // if pan_response.dragged_by(egui::PointerButton::Middle) {
+    //     view_graph.pan += pan_response.drag_delta();
+    // }
 }
 
 #[derive(Debug, Default)]
