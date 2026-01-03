@@ -366,7 +366,7 @@ impl GraphUi {
         let mut connections = ConnectionRenderer::default();
         let mut node_bodies = NodeBodyRenderer;
 
-        draw_dotted_background(&ctx.painter, ctx.rect, view_graph, &ctx.style);
+        draw_dotted_background(&ctx);
 
         connections.rebuild(
             view_graph,
@@ -535,27 +535,22 @@ impl WidgetRenderer for NodeBodyRenderer {
     }
 }
 
-fn draw_dotted_background(
-    painter: &egui::Painter,
-    rect: egui::Rect,
-    view_graph: &model::ViewGraph,
-    style: &crate::gui::style::Style,
-) {
-    let spacing = style.dotted_base_spacing * view_graph.zoom;
-    let radius = (style.dotted_radius_base * view_graph.zoom)
-        .clamp(style.dotted_radius_min, style.dotted_radius_max);
-    let color = style.dotted_color;
-    let origin = rect.min + view_graph.pan;
-    let offset_x = (rect.left() - origin.x).rem_euclid(spacing);
-    let offset_y = (rect.top() - origin.y).rem_euclid(spacing);
-    let start_x = rect.left() - offset_x - spacing;
-    let start_y = rect.top() - offset_y - spacing;
+fn draw_dotted_background(ctx: &RenderContext) {
+    let spacing = ctx.style.dotted_base_spacing * ctx.scale;
+    let radius = (ctx.style.dotted_radius_base * ctx.scale)
+        .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
+    let color = ctx.style.dotted_color;
+    let origin = ctx.origin;
+    let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
+    let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);
+    let start_x = ctx.rect.left() - offset_x - spacing;
+    let start_y = ctx.rect.top() - offset_y - spacing;
 
     let mut y = start_y;
-    while y <= rect.bottom() + spacing {
+    while y <= ctx.rect.bottom() + spacing {
         let mut x = start_x;
-        while x <= rect.right() + spacing {
-            painter.circle_filled(Pos2::new(x, y), radius, color);
+        while x <= ctx.rect.right() + spacing {
+            ctx.painter.circle_filled(Pos2::new(x, y), radius, color);
             x += spacing;
         }
         y += spacing;
