@@ -1,9 +1,10 @@
 use eframe::egui;
-use egui::{Pos2, Rect, Ui};
+use egui::{Pos2, Rect, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
 
+use crate::model::graph_view;
 use crate::{
     gui::{node_ui, render::RenderContext},
     model,
@@ -157,23 +158,6 @@ impl GraphUi {
             update_zoom_and_pan(&ctx, pointer_pos.unwrap(), view_graph);
         }
 
-        let origin = ctx.rect.min + view_graph.pan;
-
-        let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-        let width_ctx = node_ui::NodeWidthContext {
-            node_layout: &node_layout,
-            style: &ctx.style,
-            scale: view_graph.zoom,
-        };
-        let node_widths =
-            node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
-        let graph_layout = GraphLayout {
-            origin,
-            scale: view_graph.zoom,
-            node_layout,
-            node_widths,
-        };
-
         if view_selected {
             view_selected_node(&ctx, view_graph, func_lib);
         }
@@ -181,7 +165,25 @@ impl GraphUi {
             fit_all_nodes(&ctx, view_graph, func_lib);
         }
 
-        background(&ctx, &graph_layout);
+        let graph_layout = {
+            let origin = ctx.rect.min + view_graph.pan;
+            let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
+            let width_ctx = node_ui::NodeWidthContext {
+                node_layout: &node_layout,
+                style: &ctx.style,
+                scale: view_graph.zoom,
+            };
+            let node_widths =
+                node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
+            GraphLayout {
+                origin,
+                scale: view_graph.zoom,
+                node_layout,
+                node_widths,
+            }
+        };
+
+        background(&ctx, view_graph.zoom, view_graph.pan);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
@@ -448,12 +450,12 @@ impl ConnectionRenderer {
     }
 }
 
-fn background(ctx: &RenderContext, graph_layout: &GraphLayout) {
-    let spacing = ctx.style.dotted_base_spacing * graph_layout.scale;
-    let radius = (ctx.style.dotted_radius_base * graph_layout.scale)
+fn background(ctx: &RenderContext, zoom: f32, pan: Vec2) {
+    let spacing = ctx.style.dotted_base_spacing * zoom;
+    let radius = (ctx.style.dotted_radius_base * zoom)
         .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
     let color = ctx.style.dotted_color;
-    let origin = graph_layout.origin;
+    let origin = ctx.rect.min + pan;
     let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
     let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);
     let start_x = ctx.rect.left() - offset_x - spacing;
