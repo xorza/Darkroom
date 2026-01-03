@@ -1,4 +1,4 @@
-use crate::gui::graph::GraphUi;
+use crate::gui::graph::{GraphUi, GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
 use common::FileFormat;
@@ -117,6 +117,25 @@ impl AppData {
         self.view_graph = view_graph;
         self.worker.send(WorkerMessage::Clear);
         self.graph_updated = true;
+    }
+
+    pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
+        if graph_ui_interaction.actions.is_empty() {
+            return;
+        }
+
+        let node_ids_to_invalidate =
+            graph_ui_interaction
+                .actions
+                .iter()
+                .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+                    GraphUiAction::CacheToggled => None,
+                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
+                        self.graph_updated = true;
+                        Some(*node_id)
+                    }
+                });
+        self.worker.invalidate_caches(node_ids_to_invalidate);
     }
 
     pub fn empty_graph(&mut self) {

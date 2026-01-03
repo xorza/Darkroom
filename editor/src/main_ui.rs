@@ -1,4 +1,4 @@
-use crate::gui::graph::{GraphUi, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph::{GraphUi, GraphUiInteraction};
 use crate::model::AppData;
 use eframe::egui;
 
@@ -125,17 +125,8 @@ impl MainUi {
             });
         });
 
-        if !self.graph_ui_interaction.actions.is_empty() {
-            let node_ids_to_invalidate = self.graph_ui_interaction.actions.iter().filter_map(
-                |(node_id, graph_ui_action)| match graph_ui_action {
-                    GraphUiAction::CacheToggled => None,
-                    GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
-                        app_data.graph_updated = true;
-                        Some(*node_id)
-                    }
-                },
-            );
-            app_data.worker.invalidate_caches(node_ids_to_invalidate);
-        }
+        app_data.handle_graph_ui_actions(&self.graph_ui_interaction);
+
+        self.graph_ui_interaction.clear();
     }
 }
