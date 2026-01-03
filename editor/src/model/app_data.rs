@@ -129,12 +129,14 @@ impl AppData {
                 .actions
                 .iter()
                 .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
+                    GraphUiAction::CacheToggled => None,
                     GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
                         self.graph_updated = true;
                         Some(*node_id)
                     }
                 });
         self.worker.invalidate_caches(node_ids_to_invalidate);
+        self.graph_updated = true;
     }
 
     pub fn empty_graph(&mut self) {

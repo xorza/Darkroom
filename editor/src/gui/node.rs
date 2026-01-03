@@ -201,6 +201,9 @@ pub fn render_node_bodies(
             } else {
                 NodeBehavior::Once
             };
+            interaction
+                .actions
+                .push((node_view.id, GraphUiAction::CacheToggled));
         }
 
         if remove_response.hovered() {

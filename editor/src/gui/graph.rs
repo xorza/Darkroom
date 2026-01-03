@@ -109,6 +109,7 @@ impl GraphUiInteraction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GraphUiAction {
+    CacheToggled,
     InputChanged,
     NodeRemoved,
 }

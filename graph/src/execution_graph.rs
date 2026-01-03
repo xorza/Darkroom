@@ -797,6 +797,8 @@ mod tests {
         assert_eq!(sum.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
 
+        assert!(mult.output_values.is_none());
+
         Ok(())
     }
 
@@ -1020,6 +1022,12 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
+
+        assert!(execution_graph
+            .by_name_mut("mult")
+            .unwrap()
+            .output_values
+            .is_none());
 
         // once node not invoked is has cached outputs
         assert!(execution_graph
