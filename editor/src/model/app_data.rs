@@ -129,7 +129,6 @@ impl AppData {
                 .actions
                 .iter()
                 .filter_map(|(node_id, graph_ui_action)| match graph_ui_action {
-                    GraphUiAction::CacheToggled => None,
                     GraphUiAction::InputChanged | GraphUiAction::NodeRemoved => {
                         self.graph_updated = true;
                         Some(*node_id)
