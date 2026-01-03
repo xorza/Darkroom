@@ -1,94 +1,78 @@
 use eframe::egui;
-use graph::graph::NodeId;
+use egui::{Painter, Pos2, Rect, Ui, Vec2};
+use graph::graph::{Node, NodeId};
 use graph::prelude::FuncLib;
-use std::collections::HashMap;
+use hashbrown::HashMap;
 use std::marker::PhantomData;
 
 use crate::{
     gui::{node, style::Style},
-    model,
+    model::{self, ViewGraph},
 };
 
 #[derive(Debug, Clone, Copy)]
-pub struct UiRef<'a> {
-    ptr: *const egui::Ui,
-    _marker: PhantomData<&'a egui::Ui>,
-}
-
-impl<'a> UiRef<'a> {
-    pub fn new(ui: &'a egui::Ui) -> Self {
-        Self {
-            ptr: ui as *const egui::Ui,
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn get(&self) -> &'a egui::Ui {
-        assert!(!self.ptr.is_null(), "ui pointer must not be null");
-        unsafe { &*self.ptr }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
 pub struct PainterRef<'a> {
-    ptr: *const egui::Painter,
-    _marker: PhantomData<&'a egui::Painter>,
+    ptr: *const Painter,
+    _marker: PhantomData<&'a Painter>,
 }
 
 impl<'a> PainterRef<'a> {
-    pub fn new(painter: &'a egui::Painter) -> Self {
+    pub fn new(painter: &'a Painter) -> Self {
         Self {
-            ptr: painter as *const egui::Painter,
+            ptr: painter as *const Painter,
             _marker: PhantomData,
         }
     }
 
-    pub fn get(&self) -> &'a egui::Painter {
+    pub fn get(&self) -> &'a Painter {
         assert!(!self.ptr.is_null(), "painter pointer must not be null");
         unsafe { &*self.ptr }
     }
 }
 
 pub struct RenderContext<'a> {
-    pub ui: &'a mut egui::Ui,
-    pub painter: egui::Painter,
-    pub rect: egui::Rect,
-    pub origin: egui::Pos2,
-    pub layout: node::NodeLayout,
+    pub ui: &'a mut Ui,
+    pub painter: Painter,
+    pub rect: Rect,
     pub style: Style,
-    pub node_widths: HashMap<NodeId, f32>,
+    pub origin: Pos2,
     pub scale: f32,
+
+    pub node_layout: node::NodeLayout,
+    pub node_widths: HashMap<NodeId, f32>,
 }
 
 impl<'a> RenderContext<'a> {
     pub fn new(
-        ui: &'a mut egui::Ui,
-        painter: egui::Painter,
-        rect: egui::Rect,
-        view_graph: &model::ViewGraph,
+        ui: &'a mut Ui,
+        painter: Painter,
+        rect: Rect,
+        pan: Vec2,
+        scale: f32,
+        view_graph: &ViewGraph,
         func_lib: &FuncLib,
     ) -> Self {
-        let layout = node::NodeLayout::default().scaled(view_graph.zoom);
-
         let style = Style::new();
+        let origin = rect.min + pan;
 
+        let node_layout = node::NodeLayout::default().scaled(view_graph.zoom);
         let width_ctx = node::NodeWidthContext {
-            layout: &layout,
+            node_layout: &node_layout,
             style: &style,
             scale: view_graph.zoom,
         };
         let node_widths = node::compute_node_widths(&painter, view_graph, func_lib, &width_ctx);
-        let origin = rect.min + view_graph.pan;
 
         Self {
             ui,
             painter,
             rect,
-            origin,
-            layout,
             style,
+            origin,
+            scale,
+
+            node_layout,
             node_widths,
-            scale: view_graph.zoom,
         }
     }
 
@@ -104,14 +88,14 @@ impl<'a> RenderContext<'a> {
         view_node: &model::ViewNode,
         input_count: usize,
         output_count: usize,
-    ) -> egui::Rect {
+    ) -> Rect {
         node::node_rect_for_graph(
             self.origin,
             view_node,
             input_count,
             output_count,
             self.scale,
-            &self.layout,
+            &self.node_layout,
             self.node_width(view_node.id),
         )
     }

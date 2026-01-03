@@ -24,3 +24,4 @@ dotenv = { workspace = true }
 tracing-rolling-file = { workspace = true }
 uuid = { workspace = true }
 arc-swap = { workspace = true }
+hashbrown = { workspace = true }

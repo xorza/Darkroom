@@ -1,6 +1,8 @@
 use eframe::egui;
+use egui::Pos2;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
+use hashbrown::HashMap;
 
 use crate::{
     gui::{
@@ -24,7 +26,7 @@ struct ConnectionKey {
 #[derive(Debug, Default)]
 struct ConnectionBreaker {
     pub active: bool,
-    pub points: Vec<egui::Pos2>,
+    pub points: Vec<Pos2>,
 }
 
 impl ConnectionBreaker {
@@ -50,15 +52,15 @@ struct PortRef {
 #[derive(Debug, Clone)]
 struct PortInfo {
     port: PortRef,
-    center: egui::Pos2,
+    center: Pos2,
 }
 
 #[derive(Debug)]
 struct ConnectionDrag {
     pub active: bool,
     start_port: PortRef,
-    start_pos: egui::Pos2,
-    current_pos: egui::Pos2,
+    start_pos: Pos2,
+    current_pos: Pos2,
 }
 
 impl Default for ConnectionDrag {
@@ -71,8 +73,8 @@ impl Default for ConnectionDrag {
         Self {
             active: false,
             start_port: placeholder,
-            start_pos: egui::Pos2::ZERO,
-            current_pos: egui::Pos2::ZERO,
+            start_pos: Pos2::ZERO,
+            current_pos: Pos2::ZERO,
         }
     }
 }
@@ -127,9 +129,25 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let rect1 = ui.available_rect_before_wrap();
-        let painter = ui.painter_at(rect1);
-        let mut ctx = RenderContext::new(ui, painter.clone(), rect1, view_graph, func_lib);
+        let rect = ui.available_rect_before_wrap();
+        let painter = ui.painter_at(rect);
+        let mut ctx = RenderContext::new(
+            ui,
+            painter.clone(),
+            rect,
+            view_graph.pan,
+            view_graph.zoom,
+            &view_graph,
+            &func_lib,
+        );
+
+        // let layout = node::NodeLayout::default().scaled(view_graph.zoom);
+        // let width_ctx = node::NodeWidthContext {
+        //     layout: &layout,
+        //     style: &ctx.style,
+        //     scale: ctx.scale,
+        // };
+        // let node_widths = node::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
 
         top_panel(view_graph, func_lib, ctx.rect, &mut ctx);
 
@@ -191,23 +209,33 @@ impl GraphUi {
 
         let mut port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let mut ports = collect_ports(
+            &ctx,
             view_graph,
             func_lib,
-            ctx.origin,
-            &ctx.layout,
+            &ctx.node_layout,
             &ctx.node_widths,
         );
         let mut hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&ports, pos, port_activation));
         let mut hovered_port_ref = hovered_port.as_ref();
+        let layout = node::NodeLayout::default().scaled(view_graph.zoom);
         let mut pointer_over_node = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
-                view_graph.view_nodes.iter().any(|node_view| {
-                    let node = view_graph.graph.by_id(&node_view.id).unwrap();
+                view_graph.view_nodes.iter().any(|view_node| {
+                    let node = view_graph.graph.by_id(&view_node.id).unwrap();
                     let func = func_lib.by_id(&node.func_id).unwrap();
-                    let node_rect = ctx.node_rect(node_view, func.inputs.len(), func.outputs.len());
+                    let node_rect = node::node_rect_for_graph(
+                        ctx.origin,
+                        view_node,
+                        func.inputs.len(),
+                        func.outputs.len(),
+                        ctx.scale,
+                        &layout,
+                        *ctx.node_widths.get(&view_node.id).unwrap(),
+                    );
+                    // let node_rect = ctx.node_rect(view_node, func.inputs.len(), func.outputs.len());
                     node_rect.contains(pos)
                 })
             });
@@ -241,15 +269,17 @@ impl GraphUi {
         }
         if pan_changed {
             let rect = ctx.rect;
-            ctx = RenderContext::new(ui, painter, rect, view_graph, func_lib);
-            port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-            ports = collect_ports(
-                view_graph,
+            ctx = RenderContext::new(
+                ui,
+                painter,
+                rect,
+                view_graph.pan,
+                view_graph.zoom,
+                &view_graph,
                 func_lib,
-                ctx.origin,
-                &ctx.layout,
-                &ctx.node_widths,
             );
+            port_activation = (ctx.style.port_radius * 1.6).max(10.0);
+            ports = collect_ports(&ctx, view_graph, func_lib, &layout, &ctx.node_widths);
             hovered_port = pointer_pos
                 .filter(|pos| ctx.rect.contains(*pos))
                 .and_then(|pos| find_port_near(&ports, pos, port_activation));
@@ -257,11 +287,18 @@ impl GraphUi {
             pointer_over_node = pointer_pos
                 .filter(|pos| ctx.rect.contains(*pos))
                 .is_some_and(|pos| {
-                    view_graph.view_nodes.iter().any(|node_view| {
-                        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+                    view_graph.view_nodes.iter().any(|view_node| {
+                        let node = view_graph.graph.by_id(&view_node.id).unwrap();
                         let func = func_lib.by_id(&node.func_id).unwrap();
-                        let node_rect =
-                            ctx.node_rect(node_view, func.inputs.len(), func.outputs.len());
+                        let node_rect = node::node_rect_for_graph(
+                            ctx.origin,
+                            view_node,
+                            func.inputs.len(),
+                            func.outputs.len(),
+                            ctx.scale,
+                            &layout,
+                            *ctx.node_widths.get(&view_node.id).unwrap(),
+                        );
                         node_rect.contains(pos)
                     })
                 });
@@ -314,7 +351,7 @@ impl GraphUi {
                         connection_breaker.points.push(pos);
                     } else {
                         let t = remaining / segment_len;
-                        let clamped = egui::pos2(
+                        let clamped = Pos2::new(
                             last_pos.x + (pos.x - last_pos.x) * t,
                             last_pos.y + (pos.y - last_pos.y) * t,
                         );
@@ -335,7 +372,7 @@ impl GraphUi {
             view_graph,
             func_lib,
             render_origin,
-            &ctx.layout,
+            &layout,
             &ctx.node_widths,
             connection_breaker,
         );
@@ -451,9 +488,9 @@ impl ConnectionRenderer {
         &mut self,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
-        origin: egui::Pos2,
+        origin: Pos2,
         layout: &node::NodeLayout,
-        node_widths: &std::collections::HashMap<NodeId, f32>,
+        node_widths: &HashMap<NodeId, f32>,
         breaker: &ConnectionBreaker,
     ) {
         self.curves = collect_connection_curves(view_graph, func_lib, origin, layout, node_widths);
@@ -518,7 +555,7 @@ fn draw_dotted_background(
     while y <= rect.bottom() + spacing {
         let mut x = start_x;
         while x <= rect.right() + spacing {
-            painter.circle_filled(egui::pos2(x, y), radius, color);
+            painter.circle_filled(Pos2::new(x, y), radius, color);
             x += spacing;
         }
         y += spacing;
@@ -528,19 +565,19 @@ fn draw_dotted_background(
 #[derive(Debug, Clone)]
 struct ConnectionCurve {
     key: ConnectionKey,
-    start: egui::Pos2,
-    end: egui::Pos2,
+    start: Pos2,
+    end: Pos2,
     control_offset: f32,
 }
 
 fn collect_connection_curves(
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    origin: egui::Pos2,
+    origin: Pos2,
     layout: &node::NodeLayout,
-    node_widths: &std::collections::HashMap<NodeId, f32>,
+    node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<ConnectionCurve> {
-    let node_lookup: std::collections::HashMap<_, _> = view_graph
+    let node_lookup: HashMap<_, _> = view_graph
         .view_nodes
         .iter()
         .map(|node| (node.id, node))
@@ -590,11 +627,11 @@ fn collect_connection_curves(
 }
 
 fn collect_ports(
+    ctx: &RenderContext,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    origin: egui::Pos2,
     layout: &node::NodeLayout,
-    node_widths: &std::collections::HashMap<NodeId, f32>,
+    node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
@@ -606,17 +643,18 @@ fn collect_ports(
         let func = func_lib
             .by_id(&node.func_id)
             .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+
         let node_width = node_widths
             .get(&node.id)
             .copied()
             .expect("node width must be precomputed");
         for index in 0..func.inputs.len() {
             let center = node::node_input_pos(
-                origin,
+                ctx.origin,
                 node_view,
                 index,
                 func.inputs.len(),
-                layout,
+                &layout,
                 view_graph.zoom,
             );
 
@@ -631,10 +669,10 @@ fn collect_ports(
         }
         for index in 0..func.outputs.len() {
             let center = node::node_output_pos(
-                origin,
+                ctx.origin,
                 node_view,
                 index,
-                layout,
+                &layout,
                 view_graph.zoom,
                 node_width,
             );
@@ -653,7 +691,7 @@ fn collect_ports(
     ports
 }
 
-fn find_port_near(ports: &[PortInfo], pos: egui::Pos2, radius: f32) -> Option<PortInfo> {
+fn find_port_near(ports: &[PortInfo], pos: Pos2, radius: f32) -> Option<PortInfo> {
     assert!(radius.is_finite(), "port activation radius must be finite");
     assert!(radius > 0.0, "port activation radius must be positive");
     let mut best = None;
@@ -673,8 +711,8 @@ fn find_port_near(ports: &[PortInfo], pos: egui::Pos2, radius: f32) -> Option<Po
 fn draw_temporary_connection(
     painter: &egui::Painter,
     scale: f32,
-    start: egui::Pos2,
-    end: egui::Pos2,
+    start: Pos2,
+    end: Pos2,
     start_kind: PortKind,
     style: &crate::gui::style::Style,
 ) {
@@ -700,7 +738,7 @@ fn draw_temporary_connection(
     painter.add(shape);
 }
 
-fn port_in_activation_range(cursor: &egui::Pos2, port_center: egui::Pos2, radius: f32) -> bool {
+fn port_in_activation_range(cursor: &Pos2, port_center: Pos2, radius: f32) -> bool {
     assert!(radius.is_finite(), "port activation radius must be finite");
     assert!(radius > 0.0, "port activation radius must be positive");
     cursor.distance(port_center) <= radius
@@ -789,7 +827,7 @@ fn view_selected_node(
         .copied()
         .expect("node width must be precomputed");
     let size = node::node_rect_for_graph(
-        egui::Pos2::ZERO,
+        Pos2::ZERO,
         node_view,
         func.inputs.len(),
         func.outputs.len(),
@@ -817,8 +855,8 @@ fn fit_all_nodes(
     }
 
     let (layout, node_widths) = compute_layout_and_widths(ui, painter, view_graph, func_lib, 1.0);
-    let mut min = egui::pos2(f32::INFINITY, f32::INFINITY);
-    let mut max = egui::pos2(f32::NEG_INFINITY, f32::NEG_INFINITY);
+    let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
+    let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
     for node_view in &view_graph.view_nodes {
         let node = view_graph
@@ -833,7 +871,7 @@ fn fit_all_nodes(
             .copied()
             .expect("node width must be precomputed");
         let rect = node::node_rect_for_graph(
-            egui::Pos2::ZERO,
+            Pos2::ZERO,
             node_view,
             func.inputs.len(),
             func.outputs.len(),
@@ -876,18 +914,18 @@ fn compute_layout_and_widths(
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     scale: f32,
-) -> (node::NodeLayout, std::collections::HashMap<NodeId, f32>) {
-    let layout = node::NodeLayout::default().scaled(scale);
+) -> (node::NodeLayout, HashMap<NodeId, f32>) {
+    let node_layout = node::NodeLayout::default().scaled(scale);
 
     let style = crate::gui::style::Style::new();
 
     let width_ctx = node::NodeWidthContext {
-        layout: &layout,
+        node_layout: &node_layout,
         style: &style,
         scale,
     };
     let widths = node::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
-    (layout, widths)
+    (node_layout, widths)
 }
 fn draw_connections(
     painter: &egui::Painter,
@@ -917,7 +955,7 @@ fn draw_connections(
     }
 }
 
-fn connection_hits(curves: &[ConnectionCurve], breaker: &[egui::Pos2]) -> HashSet<ConnectionKey> {
+fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
     let mut hits = HashSet::new();
     let breaker_segments = breaker.windows(2).map(|pair| (pair[0], pair[1]));
 
@@ -950,13 +988,7 @@ fn connection_hits(curves: &[ConnectionCurve], breaker: &[egui::Pos2]) -> HashSe
     hits
 }
 
-fn sample_cubic_bezier(
-    p0: egui::Pos2,
-    p1: egui::Pos2,
-    p2: egui::Pos2,
-    p3: egui::Pos2,
-    steps: usize,
-) -> Vec<egui::Pos2> {
+fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
     assert!(steps >= 2, "bezier sampling steps must be at least 2");
     let mut points = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
@@ -968,12 +1000,12 @@ fn sample_cubic_bezier(
         let d = t * t * t;
         let x = a * p0.x + b * p1.x + c * p2.x + d * p3.x;
         let y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
-        points.push(egui::pos2(x, y));
+        points.push(Pos2::new(x, y));
     }
     points
 }
 
-fn segments_intersect(a1: egui::Pos2, a2: egui::Pos2, b1: egui::Pos2, b2: egui::Pos2) -> bool {
+fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
     let o1 = orient(a1, a2, b1);
     let o2 = orient(a1, a2, b2);
     let o3 = orient(b1, b2, a1);
@@ -996,11 +1028,11 @@ fn segments_intersect(a1: egui::Pos2, a2: egui::Pos2, b1: egui::Pos2, b2: egui::
     (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
 }
 
-fn orient(a: egui::Pos2, b: egui::Pos2, c: egui::Pos2) -> f32 {
+fn orient(a: Pos2, b: Pos2, c: Pos2) -> f32 {
     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
 }
 
-fn on_segment(a: egui::Pos2, b: egui::Pos2, p: egui::Pos2) -> bool {
+fn on_segment(a: Pos2, b: Pos2, p: Pos2) -> bool {
     let min_x = a.x.min(b.x);
     let max_x = a.x.max(b.x);
     let min_y = a.y.min(b.y);
@@ -1031,7 +1063,7 @@ fn remove_connections(
     affected
 }
 
-fn breaker_path_length(points: &[egui::Pos2]) -> f32 {
+fn breaker_path_length(points: &[Pos2]) -> f32 {
     points
         .windows(2)
         .map(|pair| pair[0].distance(pair[1]))
