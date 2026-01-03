@@ -165,6 +165,8 @@ impl GraphUi {
             fit_all_nodes(&ctx, view_graph, func_lib);
         }
 
+        background(&ctx, view_graph.zoom, view_graph.pan);
+
         let graph_layout = {
             let origin = ctx.rect.min + view_graph.pan;
             let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
@@ -182,8 +184,6 @@ impl GraphUi {
                 node_widths,
             }
         };
-
-        background(&ctx, view_graph.zoom, view_graph.pan);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let ports = collect_ports(
