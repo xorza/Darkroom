@@ -33,9 +33,10 @@ pub struct ExecutionStats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum InputState {
     #[default]
-    None,
+    Unknown,
     Changed,
     Unchanged,
+    Missing,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum OutputUsage {
@@ -180,7 +181,7 @@ impl ExecutionNode {
 
             for (input_idx, func_input) in func.inputs.iter().enumerate() {
                 self.inputs[input_idx] = ExecutionInput {
-                    state: InputState::None,
+                    state: InputState::Unknown,
                     required: func_input.required,
                     binding: ExecutionBinding::None,
                     data_type: func_input.data_type.clone(),
@@ -460,8 +461,9 @@ impl ExecutionGraph {
 
                         match (&input.binding, &e_input.binding) {
                             (Binding::None, ExecutionBinding::None) => {
-                                e_input.state = InputState::None;
+                                e_input.state = InputState::Unchanged
                             }
+
                             (Binding::Const(value), ExecutionBinding::Const(existing))
                                 if value == existing =>
                             {
@@ -471,9 +473,10 @@ impl ExecutionGraph {
                                 e_input.state = InputState::Changed;
                                 e_input.binding = ExecutionBinding::Const(value.clone());
                             }
-                            (_, _) => {
-                                e_input.state = InputState::None;
+                            (Binding::Bind(_), ExecutionBinding::Bind(_)) => {
+                                e_input.state = InputState::Unknown
                             }
+                            (_, _) => e_input.state = InputState::Changed,
                         };
                     }
 
@@ -527,9 +530,10 @@ impl ExecutionGraph {
 
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-
-                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
-                    let input_state = {
+                let input_state = match &e_input.binding {
+                    ExecutionBinding::None => InputState::Missing,
+                    ExecutionBinding::Const(_) => e_input.state,
+                    ExecutionBinding::Bind(port_address) => {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
@@ -537,23 +541,22 @@ impl ExecutionGraph {
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         if output_e_node.missing_required_inputs {
-                            InputState::None
+                            InputState::Missing
                         } else if output_e_node.wants_execute {
                             InputState::Changed
                         } else {
                             InputState::Unchanged
                         }
-                    };
+                    }
+                };
 
-                    let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                    e_input.state = input_state;
-                }
-
-                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                match e_input.state {
+                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                e_input.state = input_state;
+                match input_state {
                     InputState::Unchanged => {}
                     InputState::Changed => changed_inputs = true,
-                    InputState::None => missing_required_inputs |= e_input.required,
+                    InputState::Missing => missing_required_inputs |= e_input.required,
+                    InputState::Unknown => unreachable!("unprocessed input"),
                 }
             }
 
@@ -633,7 +636,7 @@ impl ExecutionGraph {
                 let Some(port_address) = e_input.binding.as_bind() else {
                     continue;
                 };
-                assert_ne!(e_input.state, InputState::None);
+                assert_ne!(e_input.state, InputState::Unknown);
 
                 stack.push(Visit {
                     e_node_idx: port_address.target_idx,
@@ -771,7 +774,7 @@ impl ExecutionGraph {
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         if output_e_node.missing_required_inputs {
-                            assert_eq!(e_input.state, InputState::None);
+                            assert_eq!(e_input.state, InputState::Missing);
                         } else if output_e_node.wants_execute {
                             assert_eq!(e_input.state, InputState::Changed);
                         } else {
@@ -781,7 +784,7 @@ impl ExecutionGraph {
                     ExecutionBinding::None | ExecutionBinding::Const(_) => {}
                 }
 
-                if e_input.state == InputState::None {
+                if e_input.state == InputState::Missing {
                     assert!(!e_input.required || e_node.missing_required_inputs);
                 }
             }
@@ -904,9 +907,9 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state, InputState::None);
-        assert_eq!(mult.inputs[0].state, InputState::None);
-        assert_eq!(print.inputs[0].state, InputState::None);
+        assert_eq!(sum.inputs[0].state, InputState::Missing);
+        assert_eq!(mult.inputs[0].state, InputState::Missing);
+        assert_eq!(print.inputs[0].state, InputState::Missing);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
