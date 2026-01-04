@@ -299,7 +299,7 @@ fn update_zoom_and_pan(ctx: &mut GraphContext, cursor_pos: Pos2) {
     });
 
     let zoom_delta = if scroll_delta.y.abs() > f32::EPSILON {
-        (scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta
+        (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta
     } else {
         pinch_delta
     };
