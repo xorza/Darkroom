@@ -217,6 +217,7 @@ pub fn render_nodes(
             ui_interaction
                 .actions
                 .push((node_view.id, GraphUiAction::NodeRemoved));
+
             continue;
         }
 
@@ -343,6 +344,18 @@ pub fn render_nodes(
         );
         render_node_const_bindings(ctx, graph_layout, node_view, node, func, input_count);
         render_node_labels(ctx, graph_layout, &node.name, func, node_rect, node_width);
+    }
+
+    for action in ui_interaction.actions.iter() {
+        match action {
+            (node_id, GraphUiAction::NodeRemoved) => {
+                view_graph.remove_node(node_id);
+            }
+            (node_id, GraphUiAction::NodeSelected) => {
+                view_graph.select_node(node_id);
+            }
+            _ => {}
+        }
     }
 }
 

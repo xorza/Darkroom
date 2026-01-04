@@ -279,18 +279,6 @@ impl GraphUi {
         node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
         top_panel(view_graph, func_lib, ctx, graph_layout);
-
-        ui_interaction
-            .actions
-            .iter()
-            .for_each(|action| match action.1 {
-                GraphUiAction::CacheToggled => {}
-                GraphUiAction::InputChanged { .. } => {}
-                GraphUiAction::NodeRemoved => {
-                    view_graph.remove_node(action.0);
-                }
-                GraphUiAction::NodeSelected => view_graph.select_node(action.0),
-            });
     }
 
     fn render_connections(

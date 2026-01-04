@@ -119,9 +119,9 @@ impl ViewGraph {
         Ok(view_graph)
     }
 
-    pub fn select_node(&mut self, node_id: NodeId) {
+    pub fn select_node(&mut self, node_id: &NodeId) {
         assert!(
-            self.view_nodes.iter().any(|node| node.id == node_id),
+            self.view_nodes.iter().any(|node| node.id == *node_id),
             "selected node view must exist in graph"
         );
         assert!(
@@ -131,18 +131,18 @@ impl ViewGraph {
         let node_idx = self
             .view_nodes
             .iter()
-            .position(|node| node.id == node_id)
+            .position(|node| node.id == *node_id)
             .expect("selected node view must exist in graph");
         if node_idx + 1 != self.view_nodes.len() {
             let node = self.view_nodes.remove_by_index(node_idx);
             self.view_nodes.push(node);
         }
-        self.selected_node_id = Some(node_id);
+        self.selected_node_id = Some(*node_id);
     }
 
-    pub fn remove_node(&mut self, node_id: NodeId) {
+    pub fn remove_node(&mut self, node_id: &NodeId) {
         assert!(
-            self.view_nodes.iter().any(|node| node.id == node_id),
+            self.view_nodes.iter().any(|node| node.id == *node_id),
             "node must exist to be removed"
         );
         assert!(
@@ -150,12 +150,12 @@ impl ViewGraph {
             "node must exist in graph data to be removed"
         );
 
-        self.view_nodes.retain(|node| node.id != node_id);
-        self.graph.remove_by_id(node_id);
+        self.view_nodes.retain(|node| node.id != *node_id);
+        self.graph.remove_by_id(*node_id);
 
         if self
             .selected_node_id
-            .is_some_and(|selected| selected == node_id)
+            .is_some_and(|selected| selected == *node_id)
         {
             self.selected_node_id = None;
         }
