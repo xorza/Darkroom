@@ -354,17 +354,12 @@ impl NodeUi {
 
             match (&drag_port_info, &node_drag_port_result) {
                 (_, PortDragInfo::None) => {}
-                (_, PortDragInfo::DragStop(_)) => drag_port_info = node_drag_port_result,
-                (PortDragInfo::DragStop(_), _) => {}
+                (_, PortDragInfo::DragStop) => drag_port_info = node_drag_port_result,
+                (PortDragInfo::DragStop, _) => {}
                 (PortDragInfo::None, _) => drag_port_info = node_drag_port_result,
                 (_, PortDragInfo::DragStart(_)) => drag_port_info = node_drag_port_result,
                 _ => {}
             }
-            // if !matches!(node_drag_port_result, PortDragInfo::None) {
-            //     drag_port_info = node_drag_port_result;
-            // }
-
-            // if matches!(port_darg_info, PortDragInfo::None) {
         }
 
         for action in ui_interaction.actions.iter() {
@@ -401,7 +396,7 @@ pub enum PortDragInfo {
     None,
     Hover(PortInfo),
     DragStart(PortInfo),
-    DragStop(PortInfo),
+    DragStop,
 }
 
 fn render_node_ports(
@@ -413,7 +408,7 @@ fn render_node_ports(
     node_width: f32,
 ) -> PortDragInfo {
     let view_node = &ctx.view_graph.view_nodes[view_node_idx];
-    let mut port_darg_info: PortDragInfo = PortDragInfo::None;
+    let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
     for input_idx in 0..input_count {
         let center = node_input_pos(
@@ -458,11 +453,11 @@ fn render_node_ports(
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {
-            port_darg_info = PortDragInfo::DragStart(port_info);
+            port_drag_info = PortDragInfo::DragStart(port_info);
         } else if response.drag_stopped_by(PointerButton::Primary) {
-            port_darg_info = PortDragInfo::DragStop(port_info);
+            port_drag_info = PortDragInfo::DragStop;
         } else if response.hovered() {
-            port_darg_info = PortDragInfo::Hover(port_info);
+            port_drag_info = PortDragInfo::Hover(port_info);
         }
     }
 
@@ -509,15 +504,15 @@ fn render_node_ports(
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {
-            port_darg_info = PortDragInfo::DragStart(port_info);
+            port_drag_info = PortDragInfo::DragStart(port_info);
         } else if response.drag_stopped_by(PointerButton::Primary) {
-            port_darg_info = PortDragInfo::DragStop(port_info);
+            port_drag_info = PortDragInfo::DragStop;
         } else if response.hovered() {
-            port_darg_info = PortDragInfo::Hover(port_info);
+            port_drag_info = PortDragInfo::Hover(port_info);
         }
     }
 
-    port_darg_info
+    port_drag_info
 }
 
 fn render_node_const_bindings(
