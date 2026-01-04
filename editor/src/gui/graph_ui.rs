@@ -369,11 +369,11 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
     }
 
     let bounds = graph_layout
-        .node_rects
+        .node_layouts
         .values()
-        .copied()
+        .map(|layout| layout.rect)
         .reduce(|acc, rect| acc.union(rect))
-        .expect("node rects must be non-empty");
+        .expect("node layouts must be non-empty");
 
     let bounds_size = bounds.size();
 

@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::node_ui;
+use crate::gui::node_ui::{self, NodeLayoutInfo};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
@@ -23,7 +23,7 @@ pub struct PortInfo {
 pub struct GraphLayout {
     pub origin: Pos2,
     pub node_layout: node_ui::NodeLayout,
-    pub node_rects: HashMap<NodeId, Rect>,
+    pub node_layouts: HashMap<NodeId, NodeLayoutInfo>,
 }
 
 impl Default for GraphLayout {
@@ -31,7 +31,7 @@ impl Default for GraphLayout {
         Self {
             origin: Pos2::ZERO,
             node_layout: node_ui::NodeLayout::default(),
-            node_rects: HashMap::new(),
+            node_layouts: HashMap::new(),
         }
     }
 }
@@ -42,22 +42,20 @@ impl GraphLayout {
         self.origin = rect.min + ctx.view_graph.pan;
         self.node_layout = node_ui::NodeLayout::default().scaled(ctx.view_graph.scale);
 
-        node_ui::compute_node_rects(ctx, &self.node_layout, self.origin, &mut self.node_rects);
-    }
-
-    pub fn node_width(&self, node_id: &NodeId) -> f32 {
-        self.node_rects
-            .get(node_id)
-            .copied()
-            .expect("node width must be precomputed for view node")
-            .width()
+        node_ui::compute_node_layouts(ctx, &self.node_layout, self.origin, &mut self.node_layouts);
     }
 
     pub fn node_rect(&self, node_id: &NodeId) -> Rect {
-        *self.node_rects.get(node_id).unwrap()
+        self.node_layout(node_id).rect
     }
 
-    pub fn update_node_rect_position(&mut self, view_node_id: &NodeId, new_rect: Rect) {
-        self.node_rects.insert(*view_node_id, new_rect);
+    pub fn node_layout(&self, node_id: &NodeId) -> &NodeLayoutInfo {
+        self.node_layouts
+            .get(node_id)
+            .unwrap_or_else(|| panic!("node layout missing for {:?}", node_id))
+    }
+
+    pub fn update_node_layout(&mut self, view_node_id: &NodeId, layout: NodeLayoutInfo) {
+        self.node_layouts.insert(*view_node_id, layout);
     }
 }

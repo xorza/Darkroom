@@ -92,23 +92,16 @@ impl ConnectionUi {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;
                 };
-                let source_view = view_graph.view_nodes.by_key(&binding.target_id).unwrap();
-                let source_width = graph_layout.node_width(&binding.target_id);
-                let start = node_ui::node_output_pos(
-                    graph_layout.origin,
-                    source_view,
-                    binding.port_idx,
-                    &graph_layout.node_layout,
-                    view_graph.scale,
-                    source_width,
-                );
-                let end = node_ui::node_input_pos(
-                    graph_layout.origin,
-                    node_view,
-                    input_index,
-                    &graph_layout.node_layout,
-                    view_graph.scale,
-                );
+                let start = *graph_layout
+                    .node_layout(&binding.target_id)
+                    .output_centers
+                    .get(binding.port_idx)
+                    .unwrap_or_else(|| panic!("missing output center {}", binding.port_idx));
+                let end = *graph_layout
+                    .node_layout(&node.id)
+                    .input_centers
+                    .get(input_index)
+                    .unwrap_or_else(|| panic!("missing input center {}", input_index));
                 let control_offset = node_ui::bezier_control_offset(start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {

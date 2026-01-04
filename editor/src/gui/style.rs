@@ -40,6 +40,7 @@ const PORT_RADIUS: f32 = 5.5;
 const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
 const HEADING_FONT_SIZE: f32 = 18.0;
 const BODY_FONT_SIZE: f32 = 18.0;
+const CORNER_RADIUS: f32 = 6.0;
 
 #[derive(Debug, Clone)]
 pub struct Style {
@@ -82,6 +83,7 @@ pub struct Style {
     pub node_stroke: Stroke,
     pub const_stroke: Stroke,
     pub selected_stroke: Stroke,
+    pub corner_radius: f32,
 }
 
 impl Style {
@@ -135,6 +137,7 @@ impl Style {
             node_stroke: Stroke::new(STROKE_WIDTH, NODE_STROKE_COLOR),
             selected_stroke: Stroke::new(STROKE_WIDTH, SELECTED_STROKE_COLOR),
             const_stroke: Stroke::new(STROKE_WIDTH, CONST_STROKE_COLOR),
+            corner_radius: CORNER_RADIUS,
         }
     }
 }
