@@ -172,34 +172,6 @@ impl ConnectionRenderer {
     }
 }
 
-pub(crate) fn draw_temporary_connection(
-    painter: &egui::Painter,
-    scale: f32,
-    start: Pos2,
-    end: Pos2,
-    start_kind: PortKind,
-    style: &crate::gui::style::Style,
-) {
-    let control_offset = node_ui::bezier_control_offset(start, end, scale);
-    let (start_sign, end_sign) = match start_kind {
-        PortKind::Output => (1.0, -1.0),
-        PortKind::Input => (-1.0, 1.0),
-    };
-    let stroke = style.temp_connection_stroke;
-    let shape = egui::epaint::CubicBezierShape::from_points_stroke(
-        [
-            start,
-            start + egui::vec2(control_offset * start_sign, 0.0),
-            end + egui::vec2(control_offset * end_sign, 0.0),
-            end,
-        ],
-        false,
-        egui::Color32::TRANSPARENT,
-        stroke,
-    );
-    painter.add(shape);
-}
-
 fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
     assert!(steps >= 2, "bezier sampling steps must be at least 2");
     let mut points = Vec::with_capacity(steps + 1);

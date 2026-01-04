@@ -4,9 +4,7 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
 use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::{
-    ConnectionKey, ConnectionRenderer, PortKind, draw_temporary_connection,
-};
+use crate::gui::connection_ui::{ConnectionKey, ConnectionRenderer, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::model::graph_view;
 use crate::{
@@ -61,6 +59,28 @@ impl ConnectionDrag {
         self.start_port = port.port;
         self.start_pos = port.center;
         self.current_pos = port.center;
+    }
+
+    fn render(&self, ctx: &RenderContext, scale: f32) {
+        let control_offset =
+            node_ui::bezier_control_offset(self.start_pos, self.current_pos, scale);
+        let (start_sign, end_sign) = match self.start_port.kind {
+            PortKind::Output => (1.0, -1.0),
+            PortKind::Input => (-1.0, 1.0),
+        };
+        let stroke = ctx.style.temp_connection_stroke;
+        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
+            [
+                self.start_pos,
+                self.start_pos + egui::vec2(control_offset * start_sign, 0.0),
+                self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
+                self.current_pos,
+            ],
+            false,
+            egui::Color32::TRANSPARENT,
+            stroke,
+        );
+        ctx.painter.add(shape);
     }
 
     pub fn reset(&mut self) {
@@ -253,14 +273,12 @@ impl GraphUi {
                     self.connection_drag.reset();
                     self.state = InteractionState::Idle;
                 } else {
-                    if let Some(pos) = pointer_pos {
-                        self.connection_drag.current_pos = pos;
-                    }
+                    let cursor_pos = pointer_pos.unwrap_or(self.connection_drag.current_pos);
                     self.connection_drag.current_pos = hovered_port
                         .as_ref()
                         .filter(|&port| port.port.kind != self.connection_drag.start_port.kind)
                         .map(|port| port.center)
-                        .unwrap_or(self.connection_drag.current_pos);
+                        .unwrap_or(cursor_pos);
                 }
             }
         }
@@ -282,14 +300,7 @@ impl GraphUi {
         }
 
         if self.state == InteractionState::DraggingNewConnection {
-            draw_temporary_connection(
-                &ctx.painter,
-                view_graph.zoom,
-                self.connection_drag.start_pos,
-                self.connection_drag.current_pos,
-                self.connection_drag.start_port.kind,
-                &ctx.style,
-            );
+            self.connection_drag.render(&ctx, view_graph.zoom);
         }
 
         node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
