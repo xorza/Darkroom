@@ -46,10 +46,10 @@ impl ConnectionRenderer {
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.collect_curves(graph_layout, view_graph, func_lib);
-        self.highlighted = breaker
-            .filter(|&breaker| breaker.points.len() > 1)
-            .map(|breaker| connection_hits(&self.curves, &breaker.points))
-            .unwrap_or_default();
+
+        if let Some(breaker) = breaker {
+            self.collect_highlighted(breaker);
+        }
     }
 
     pub(crate) fn render(
@@ -142,6 +142,42 @@ impl ConnectionRenderer {
             }
         }
     }
+
+    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
+        self.highlighted.clear();
+
+        if breaker.points.len() < 2 {
+            return;
+        }
+
+        let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
+
+        for curve in self.curves.iter() {
+            let samples = sample_cubic_bezier(
+                curve.start,
+                curve.start + egui::vec2(curve.control_offset, 0.0),
+                curve.end + egui::vec2(-curve.control_offset, 0.0),
+                curve.end,
+                24,
+            );
+            let curve_segments = samples.windows(2).map(|pair| (pair[0], pair[1]));
+            let mut hit = false;
+            for (a1, a2) in breaker_segments.clone() {
+                for (b1, b2) in curve_segments.clone() {
+                    if segments_intersect(a1, a2, b1, b2) {
+                        hit = true;
+                        break;
+                    }
+                }
+                if hit {
+                    break;
+                }
+            }
+            if hit {
+                self.highlighted.insert(curve.key);
+            }
+        }
+    }
 }
 
 pub(crate) fn draw_temporary_connection(
@@ -170,38 +206,6 @@ pub(crate) fn draw_temporary_connection(
         stroke,
     );
     painter.add(shape);
-}
-fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
-    let mut hits = HashSet::new();
-    let breaker_segments = breaker.windows(2).map(|pair| (pair[0], pair[1]));
-
-    for curve in curves {
-        let samples = sample_cubic_bezier(
-            curve.start,
-            curve.start + egui::vec2(curve.control_offset, 0.0),
-            curve.end + egui::vec2(-curve.control_offset, 0.0),
-            curve.end,
-            24,
-        );
-        let curve_segments = samples.windows(2).map(|pair| (pair[0], pair[1]));
-        let mut hit = false;
-        for (a1, a2) in breaker_segments.clone() {
-            for (b1, b2) in curve_segments.clone() {
-                if segments_intersect(a1, a2, b1, b2) {
-                    hit = true;
-                    break;
-                }
-            }
-            if hit {
-                break;
-            }
-        }
-        if hit {
-            hits.insert(curve.key);
-        }
-    }
-
-    hits
 }
 
 fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
