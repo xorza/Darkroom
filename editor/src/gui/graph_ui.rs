@@ -395,18 +395,13 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
         return;
     }
 
-    let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
-    let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
-
-    for node_view in &ctx.view_graph.view_nodes {
-        let rect = graph_layout.node_rect(&node_view.id);
-        min.x = min.x.min(rect.min.x);
-        min.y = min.y.min(rect.min.y);
-        max.x = max.x.max(rect.max.x);
-        max.y = max.y.max(rect.max.y);
+    let mut iter = graph_layout.node_rects.values();
+    let mut bounds = *iter.next().unwrap();
+    for rect in iter {
+        bounds = bounds.union(*rect);
     }
 
-    let bounds_size = max - min;
+    let bounds_size = bounds.size();
 
     let padding = 24.0;
     let available = ctx.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
@@ -420,10 +415,10 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
     } else {
         1.0
     };
+
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     ctx.view_graph.scale = target_zoom;
-
-    let bounds_center = (min.to_vec2() + max.to_vec2()) * 0.5;
+    let bounds_center = bounds.center().to_vec2();
     ctx.view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * ctx.view_graph.scale;
 }
 
