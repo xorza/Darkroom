@@ -107,6 +107,8 @@ impl NodeUi {
             let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
             let node_rect = graph_layout.node_rect(&view_node.id);
 
+            // === body interaction
+
             let node_id = ctx.ui.make_persistent_id(("node_body", view_node.id));
             let body_response = ctx.ui.interact(
                 node_rect,
@@ -114,21 +116,19 @@ impl NodeUi {
                 egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
             );
 
-            if body_response.dragged_by(PointerButton::Middle)
-                || body_response.dragged_by(PointerButton::Primary)
-                || body_response.clicked()
-            {
-                let drag_delta = body_response.drag_delta();
-                if drag_delta.length_sq() > 0.5 {
-                    println!("Dragging node");
-                    view_node.pos += drag_delta / ctx.view_graph.scale;
-                    graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
-                }
-
+            let dragged = body_response.dragged_by(PointerButton::Middle)
+                || body_response.dragged_by(PointerButton::Primary);
+            if dragged {
+                view_node.pos += body_response.drag_delta() / ctx.view_graph.scale;
+                graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
+            }
+            if dragged || body_response.clicked() {
                 ui_interaction
                     .actions
                     .push((view_node.id, GraphUiAction::NodeSelected));
             }
+
+            // === body interaction
 
             let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -739,6 +739,7 @@ pub(crate) fn compute_node_rects(
     for view_node in ctx.view_graph.view_nodes.iter() {
         let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+
         let header_width = text_width(
             &ctx.painter,
             &ctx.style.heading_font.scaled(ctx.view_graph.scale),
@@ -813,21 +814,24 @@ pub(crate) fn compute_node_rects(
             max_row_width = max_row_width.max(row_width);
         }
 
-        let node_width = node_layout.node_width.max(
-            header_width
-                .max(max_row_width)
-                .max(cache_row_width)
-                .max(status_row_width),
-        );
+        let node_width = node_layout
+            .node_width
+            .max(header_width)
+            .max(max_row_width)
+            .max(cache_row_width)
+            .max(status_row_width);
 
-        let rect = node_rect_for_graph(
-            origin,
-            view_node,
-            func.inputs.len(),
-            func.outputs.len(),
-            ctx.view_graph.scale,
-            node_layout,
-            node_width,
+        let row_count = func.inputs.len().max(func.outputs.len()).max(1);
+        let height = node_layout.header_height
+            + node_layout.cache_height
+            + node_layout.padding
+            + node_layout.row_height * row_count as f32
+            + node_layout.padding;
+        let node_size = egui::vec2(node_width, height);
+
+        let rect = egui::Rect::from_min_size(
+            origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
+            node_size,
         );
 
         node_rects.insert(node.id, rect);
