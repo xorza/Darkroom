@@ -205,11 +205,8 @@ impl GraphUi {
                 let connection_drag = self.connection_drag.as_ref().unwrap();
                 if let Some(target) = hovered_port.as_ref()
                     && target.port.kind != connection_drag.start_port.kind
-                    && port_in_activation_range(
-                        &connection_drag.current_pos,
-                        target.center,
-                        ctx.style.port_activation_radius,
-                    )
+                    && connection_drag.current_pos.distance(target.center)
+                        <= ctx.style.port_activation_radius
                     && let Some(node_id) = apply_connection(
                         view_graph,
                         func_lib,
@@ -362,12 +359,6 @@ fn background(ctx: &RenderContext, zoom: f32, pan: Vec2) {
         }
         y += spacing;
     }
-}
-
-fn port_in_activation_range(cursor: &Pos2, port_center: Pos2, radius: f32) -> bool {
-    assert!(radius.is_finite(), "port activation radius must be finite");
-    assert!(radius > 0.0, "port activation radius must be positive");
-    cursor.distance(port_center) <= radius
 }
 
 fn apply_connection(
