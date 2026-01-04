@@ -27,7 +27,6 @@ const DOTTED_BASE_SPACING: f32 = 24.0;
 const DOTTED_RADIUS_BASE: f32 = 1.2;
 const DOTTED_RADIUS_MIN: f32 = 0.6;
 const DOTTED_RADIUS_MAX: f32 = 2.4;
-const CONST_STROKE_GAMMA: f32 = 0.7;
 const PORT_RADIUS: f32 = 5.5;
 const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
 const HEADING_FONT_SIZE: f32 = 18.0;

@@ -396,10 +396,8 @@ pub fn test_graph() -> Graph {
 
 #[cfg(test)]
 mod tests {
-    use crate::data::StaticValue;
-    use crate::graph::{Binding, Graph, Input, Node, PortAddress};
+    use crate::graph::Graph;
     use common::FileFormat;
-    use std::hint::black_box;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {

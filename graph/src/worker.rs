@@ -1,4 +1,3 @@
-
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
 use crate::function::FuncLib;
@@ -6,9 +5,7 @@ use crate::graph::{Graph, NodeId};
 use common::Shared;
 use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
-};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tracing::error;
 
@@ -137,16 +134,13 @@ where
 #[cfg(test)]
 mod tests {
     use common::output_stream::OutputStream;
-    use common::Shared;
-    use tokio::sync::Mutex;
 
-    use crate::data::StaticValue;
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::TimersInvoker;
     use crate::function::FuncId;
     use crate::graph::NodeId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
-    use crate::prelude::ExecutionGraph;
+
     use crate::worker::Worker;
 
     fn log_frame_no_graph() -> Graph {

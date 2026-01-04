@@ -99,9 +99,7 @@ impl ContextManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContextManager, ContextMeta, ContextType, CtxId};
-    use std::str::FromStr;
-    use std::sync::Arc;
+    use super::{ContextManager, ContextMeta, ContextType};
 
     #[derive(Debug, Default)]
     struct TestCtx {

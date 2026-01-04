@@ -420,13 +420,15 @@ impl From<&mlua::Value> for DynamicValue {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
 
     use common::output_stream::OutputStream;
 
     use super::*;
-    use crate::context::ContextManager;
-    use crate::function::FuncId;
+    use crate::{
+        context::ContextManager,
+        execution_graph::OutputUsage,
+        prelude::{InputState, InvokeCache, InvokeInput},
+    };
 
     #[test]
     fn lua_works() -> anyhow::Result<()> {

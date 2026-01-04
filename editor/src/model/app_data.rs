@@ -23,7 +23,7 @@ pub struct AppData {
     pub print_output: Arc<ArcSwapOption<String>>,
     pub updated_status: Arc<ArcSwapOption<String>>,
     pub status: String,
-    pub ui_context: UiContext,
+    pub _ui_context: UiContext,
 }
 
 impl AppData {
@@ -41,7 +41,7 @@ impl AppData {
             print_output,
             updated_status,
             status: String::new(),
-            ui_context,
+            _ui_context: ui_context,
         }
     }
 
