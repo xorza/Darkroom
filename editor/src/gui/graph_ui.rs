@@ -2,6 +2,7 @@ use eframe::egui;
 use egui::{Key, Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
+use tracing::Instrument;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_drag::ConnectionDrag;
@@ -136,10 +137,10 @@ impl GraphUi {
                 None
             }
         });
-        let hovered_port = self.graph_layout.hovered_port(ctx, pointer_pos);
-        let pointer_over_node =
-            self.graph_layout
-                .pointer_over_node(pointer_pos, view_graph, func_lib);
+        let hovered_port = self
+            .graph_layout
+            .hovered_port(pointer_pos, ctx.style.port_activation_radius);
+        let pointer_over_node = self.graph_layout.pointer_over_node(pointer_pos);
 
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {

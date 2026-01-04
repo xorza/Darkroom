@@ -79,29 +79,16 @@ impl GraphLayout {
             .width()
     }
 
-    pub fn node_rect(
-        &self,
-        view_node: &model::ViewNode,
-        input_count: usize,
-        output_count: usize,
-    ) -> Rect {
-        node_ui::node_rect_for_graph(
-            self.origin,
-            view_node,
-            input_count,
-            output_count,
-            self.scale,
-            &self.node_layout,
-            self.node_width(&view_node.id),
-        )
+    pub fn node_rect(&self, view_node: &model::ViewNode) -> Rect {
+        *self.node_rects.get(&view_node.id).unwrap()
     }
 
-    pub fn hovered_port(&self, ctx: &RenderContext, pointer_pos: Pos2) -> Option<PortInfo> {
+    pub fn hovered_port(&self, pointer_pos: Pos2, port_activation_radius: f32) -> Option<PortInfo> {
         if self.ports.is_empty() {
             return None;
         }
         let mut best = None;
-        let mut best_dist = ctx.style.port_activation_radius;
+        let mut best_dist = port_activation_radius;
 
         for port in &self.ports {
             let dist = port.center.distance(pointer_pos);
@@ -114,23 +101,10 @@ impl GraphLayout {
         best
     }
 
-    pub fn pointer_over_node(
-        &self,
-        pointer_pos: Pos2,
-        view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
-    ) -> bool {
-        view_graph.view_nodes.iter().any(|view_node| {
-            let node = view_graph
-                .graph
-                .by_id(&view_node.id)
-                .expect("view node must exist in graph");
-            let func = func_lib
-                .by_id(&node.func_id)
-                .expect("func must exist for view node");
-            let node_rect = self.node_rect(view_node, func.inputs.len(), func.outputs.len());
-            node_rect.contains(pointer_pos)
-        })
+    pub fn pointer_over_node(&self, pointer_pos: Pos2) -> bool {
+        self.node_rects
+            .iter()
+            .any(|(_, rect)| rect.contains(pointer_pos))
     }
 
     fn collect_ports(&mut self, view_graph: &model::ViewGraph, func_lib: &FuncLib) {
