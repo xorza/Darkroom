@@ -372,6 +372,49 @@ fn render_node_ports(
     let view_node = &ctx.view_graph.view_nodes[view_node_idx];
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
+    let port_radius = ctx.view_graph.scale * ctx.style.port_radius;
+    let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
+
+    let mut handle_port = |center: Pos2,
+                           kind: PortKind,
+                           idx: usize,
+                           base_color: egui::Color32,
+                           hover_color: egui::Color32| {
+        let port_rect = egui::Rect::from_center_size(center, port_rect_size);
+        let graph_bg_id = ctx
+            .ui
+            .make_persistent_id(("node_port", kind, view_node_idx, idx));
+        let response = ctx
+            .ui
+            .interact(port_rect, graph_bg_id, Sense::hover() | Sense::drag());
+        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
+
+        let color = if is_hovered { hover_color } else { base_color };
+        ctx.painter.circle_filled(center, port_radius, color);
+
+        let port_info = PortInfo {
+            port: PortRef {
+                node_id: view_node.id,
+                idx,
+                kind,
+            },
+            center,
+        };
+        let drag_info = if response.drag_started_by(PointerButton::Primary) {
+            PortDragInfo::DragStart(port_info)
+        } else if response.drag_stopped_by(PointerButton::Primary) {
+            PortDragInfo::DragStop
+        } else if is_hovered {
+            PortDragInfo::Hover(port_info)
+        } else {
+            PortDragInfo::None
+        };
+
+        if drag_info.prio() > port_drag_info.prio() {
+            port_drag_info = drag_info;
+        }
+    };
+
     for input_idx in 0..input_count {
         let center = node_input_pos(
             graph_layout.origin,
@@ -381,45 +424,13 @@ fn render_node_ports(
             &graph_layout.node_layout,
             ctx.view_graph.scale,
         );
-        let port_rect = egui::Rect::from_center_size(
+        handle_port(
             center,
-            egui::vec2(
-                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
-                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
-            ),
+            PortKind::Input,
+            input_idx,
+            ctx.style.input_port_color,
+            ctx.style.input_hover_color,
         );
-
-        let graph_bg_id = ctx
-            .ui
-            .make_persistent_id(("node_input", view_node_idx, input_idx));
-        let response = ctx
-            .ui
-            .interact(port_rect, graph_bg_id, Sense::hover() | Sense::drag());
-        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
-
-        let color = if is_hovered {
-            ctx.style.input_hover_color
-        } else {
-            ctx.style.input_port_color
-        };
-        ctx.painter
-            .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
-
-        let port_info = PortInfo {
-            port: PortRef {
-                node_id: view_node.id,
-                idx: input_idx,
-                kind: PortKind::Input,
-            },
-            center,
-        };
-        if response.drag_started_by(PointerButton::Primary) {
-            port_drag_info = PortDragInfo::DragStart(port_info);
-        } else if response.drag_stopped_by(PointerButton::Primary) {
-            port_drag_info = PortDragInfo::DragStop;
-        } else if is_hovered {
-            port_drag_info = PortDragInfo::Hover(port_info);
-        }
     }
 
     for output_idx in 0..output_count {
@@ -431,47 +442,13 @@ fn render_node_ports(
             ctx.view_graph.scale,
             node_width,
         );
-        let port_rect = egui::Rect::from_center_size(
+        handle_port(
             center,
-            egui::vec2(
-                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
-                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
-            ),
+            PortKind::Output,
+            output_idx,
+            ctx.style.output_port_color,
+            ctx.style.output_hover_color,
         );
-
-        let graph_bg_id = ctx
-            .ui
-            .make_persistent_id(("node_output", view_node_idx, output_idx));
-        let response = ctx.ui.interact(
-            port_rect,
-            graph_bg_id,
-            egui::Sense::hover() | egui::Sense::drag(),
-        );
-        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
-
-        let color = if is_hovered {
-            ctx.style.output_hover_color
-        } else {
-            ctx.style.output_port_color
-        };
-        ctx.painter
-            .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
-
-        let port_info = PortInfo {
-            port: PortRef {
-                node_id: view_node.id,
-                idx: output_idx,
-                kind: PortKind::Output,
-            },
-            center,
-        };
-        if response.drag_started_by(PointerButton::Primary) {
-            port_drag_info = PortDragInfo::DragStart(port_info);
-        } else if response.drag_stopped_by(PointerButton::Primary) {
-            port_drag_info = PortDragInfo::DragStop;
-        } else if is_hovered {
-            port_drag_info = PortDragInfo::Hover(port_info);
-        }
     }
 
     port_drag_info

@@ -16,7 +16,7 @@ pub(crate) struct ConnectionKey {
     pub(crate) input_idx: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PortKind {
     Input,
     Output,
