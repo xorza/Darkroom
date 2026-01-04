@@ -99,36 +99,50 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
-        self.process_drag(ctx, graph_layout, ui_interaction);
+        // self.process_drag(ctx, graph_layout, ui_interaction);
 
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
+            let node_rect = graph_layout.node_rect(&view_node.id);
+
+            let node_id = ctx.ui.make_persistent_id(("node_body", view_node.id));
+            let body_response = ctx.ui.interact(
+                node_rect,
+                node_id,
+                egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
+            );
+
+            if body_response.dragged_by(PointerButton::Middle)
+                || body_response.dragged_by(PointerButton::Primary)
+                || body_response.clicked()
+            {
+                let drag_delta = body_response.drag_delta();
+                if drag_delta.length_sq() > 0.5 {
+                    println!("Dragging node");
+                    view_node.pos += drag_delta / ctx.view_graph.scale;
+                    graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
+                }
+
+                ui_interaction
+                    .actions
+                    .push((view_node.id, GraphUiAction::NodeSelected));
+            }
+
             let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let input_count = func.inputs.len();
             let output_count = func.outputs.len();
-            let node_width = graph_layout.node_width(&node.id);
-            let node_size = node_size(
-                input_count,
-                output_count,
-                &graph_layout.node_layout,
-                node_width,
-            );
-            let node_rect = egui::Rect::from_min_size(
-                graph_layout.origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
-                node_size,
-            );
 
             let header_rect = egui::Rect::from_min_size(
                 node_rect.min,
-                egui::vec2(node_size.x, graph_layout.node_layout.header_height),
+                egui::vec2(node_rect.size().x, graph_layout.node_layout.header_height),
             );
             let cache_rect = egui::Rect::from_min_size(
                 node_rect.min + egui::vec2(0.0, graph_layout.node_layout.header_height),
-                egui::vec2(node_size.x, graph_layout.node_layout.cache_height),
+                egui::vec2(node_rect.size().x, graph_layout.node_layout.cache_height),
             );
             let button_size = (graph_layout.node_layout.header_height
                 - graph_layout.node_layout.padding)
@@ -198,8 +212,6 @@ impl NodeUi {
                 cache_button_pos,
                 egui::vec2(cache_button_width, cache_button_height),
             );
-            let node_id = ctx.ui.make_persistent_id(("node_body", node.id));
-            let body_response = ctx.ui.interact(node_rect, node_id, egui::Sense::click());
 
             let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
             let remove_response = ctx.ui.interact(close_rect, close_id, egui::Sense::click());
@@ -357,7 +369,7 @@ impl NodeUi {
                 view_node_idx,
                 input_count,
                 output_count,
-                node_width,
+                node_rect.width(),
             );
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
@@ -397,7 +409,14 @@ pub fn node_rect_for_graph(
     layout: &NodeLayout,
     node_width: f32,
 ) -> egui::Rect {
-    let node_size = node_size(input_count, output_count, layout, node_width);
+    let row_count = input_count.max(output_count).max(1);
+    let height = layout.header_height
+        + layout.cache_height
+        + layout.padding
+        + layout.row_height * row_count as f32
+        + layout.padding;
+    let node_size = egui::vec2(node_width, height);
+
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
 }
 
@@ -663,21 +682,6 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
     }
 }
 
-fn node_size(
-    input_count: usize,
-    output_count: usize,
-    layout: &NodeLayout,
-    node_width: f32,
-) -> egui::Vec2 {
-    let row_count = input_count.max(output_count).max(1);
-    let height = layout.header_height
-        + layout.cache_height
-        + layout.padding
-        + layout.row_height * row_count as f32
-        + layout.padding;
-    egui::vec2(node_width, height)
-}
-
 pub(crate) fn node_input_pos(
     origin: egui::Pos2,
     view_node: &model::ViewNode,
@@ -732,8 +736,6 @@ pub(crate) fn compute_node_rects(
 ) {
     node_rects.clear();
 
-    let scale_guess = node_layout.row_height / 18.0;
-
     for view_node in ctx.view_graph.view_nodes.iter() {
         let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -745,20 +747,14 @@ pub(crate) fn compute_node_rects(
         ) + node_layout.padding * 2.0;
         let vertical_padding = node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
         let cache_button_height = (node_layout.cache_height - vertical_padding * 2.0)
-            .max(10.0 * scale_guess)
+            .max(10.0 * ctx.view_graph.scale)
             .min(node_layout.cache_height);
         let cache_text_width = text_width(
             &ctx.painter,
             &ctx.style.body_font.scaled(ctx.view_graph.scale),
-            "cached",
-            ctx.style.text_color,
-        )
-        .max(text_width(
-            &ctx.painter,
-            &ctx.style.body_font.scaled(ctx.view_graph.scale),
             "cache",
             ctx.style.text_color,
-        ));
+        );
         let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
             .max(cache_button_height)
             .max(
@@ -817,7 +813,7 @@ pub(crate) fn compute_node_rects(
             max_row_width = max_row_width.max(row_width);
         }
 
-        let computed = node_layout.node_width.max(
+        let node_width = node_layout.node_width.max(
             header_width
                 .max(max_row_width)
                 .max(cache_row_width)
@@ -831,7 +827,7 @@ pub(crate) fn compute_node_rects(
             func.outputs.len(),
             ctx.view_graph.scale,
             node_layout,
-            computed,
+            node_width,
         );
 
         node_rects.insert(node.id, rect);
