@@ -228,7 +228,6 @@ impl GraphUi {
             ctx,
             &self.graph_layout,
             ctx.view_graph,
-            ctx.func_lib,
             if self.state == InteractionState::BreakingConnections {
                 Some(&self.connection_breaker)
             } else {

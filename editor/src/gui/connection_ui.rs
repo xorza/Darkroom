@@ -2,7 +2,7 @@ use eframe::egui;
 use egui::Pos2;
 use egui::epaint::CubicBezierShape;
 use graph::graph::NodeId;
-use graph::prelude::{Binding, FuncLib};
+use graph::prelude::Binding;
 use std::collections::HashSet;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -41,10 +41,9 @@ impl ConnectionUi {
         &mut self,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.collect_curves(graph_layout, view_graph, func_lib);
+        self.collect_curves(graph_layout, view_graph);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
@@ -57,10 +56,9 @@ impl ConnectionUi {
         ctx: &GraphContext,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(graph_layout, view_graph, func_lib, breaker);
+        self.rebuild(graph_layout, view_graph, breaker);
 
         for curve in &self.curves {
             let stroke = if self.highlighted.contains(&curve.key) {
@@ -84,17 +82,11 @@ impl ConnectionUi {
         }
     }
 
-    fn collect_curves(
-        &mut self,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
-    ) {
+    fn collect_curves(&mut self, graph_layout: &GraphLayout, view_graph: &model::ViewGraph) {
         self.curves.clear();
 
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
-            let _func = func_lib.by_id(&node.func_id).unwrap();
 
             for (input_index, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {

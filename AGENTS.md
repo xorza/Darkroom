@@ -5,7 +5,7 @@ AI coding rules for this project:
 - Use Result<> only for expected/legitimate failures (e.g., network, I/O, external services, user input).
 - Always add `#[derive(Debug)]` to Rust structs.
 - If Rust code was changed, run in following order:  
-  1. `cargo test && cargo fmt && cargo check && cargo clippy --fix --allow-dirty --allow-staged && cargo clippy --all-targets -- -D warnings`
+  1. `cargo test && cargo fmt && cargo check && cargo clippy --all-targets -- -D warnings`
   before confirming output.
 - Add asserts for function input arguments and outputs where applicable, so logic errors crash instead of being swallowed. Do not use asserts for user input and possible network failures.
 - Check online documentation for best practices and patterns.
