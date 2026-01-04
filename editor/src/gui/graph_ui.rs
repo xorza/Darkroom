@@ -16,6 +16,7 @@ use crate::{
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
+const SCROLL_ZOOM_SPEED: f32 = 0.0015;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum InteractionState {
@@ -297,13 +298,15 @@ fn update_zoom_and_pan(ctx: &mut GraphContext, cursor_pos: Pos2) {
         }
     });
 
-    let (zoom_delta, pan) = if scroll_delta.x.abs() > f32::EPSILON {
-        (1.0, scroll_delta)
+    let zoom_delta = if scroll_delta.y.abs() > f32::EPSILON {
+        (scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta
     } else {
-        (
-            (scroll_delta.length_sq() * 0.006).exp() * pinch_delta,
-            Vec2::ZERO,
-        )
+        pinch_delta
+    };
+    let pan = if scroll_delta.x.abs() > f32::EPSILON {
+        Vec2::new(scroll_delta.x, 0.0)
+    } else {
+        Vec2::ZERO
     };
 
     if (zoom_delta - 1.0).abs() > f32::EPSILON {
