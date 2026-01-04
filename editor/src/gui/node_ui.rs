@@ -579,7 +579,7 @@ pub(crate) fn node_input_pos(
     view_node: &model::ViewNode,
     index: usize,
     input_count: usize,
-    layout: &NodeLayout,
+    node_layout: &NodeLayout,
     scale: f32,
 ) -> egui::Pos2 {
     assert!(
@@ -589,11 +589,11 @@ pub(crate) fn node_input_pos(
     assert!(scale > 0.0, "graph scale must be positive");
     let y = origin.y
         + view_node.pos.y * scale
-        + layout.header_height
-        + layout.cache_height
-        + layout.padding
-        + layout.row_height * index as f32
-        + layout.row_height * 0.5;
+        + node_layout.header_height
+        + node_layout.cache_height
+        + node_layout.padding
+        + node_layout.row_height * index as f32
+        + node_layout.row_height * 0.5;
     egui::pos2(origin.x + view_node.pos.x * scale, y)
 }
 

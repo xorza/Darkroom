@@ -148,6 +148,13 @@ impl GraphUi {
                     None
                 }
             });
+        let primary_pressed =
+            pointer_pos.is_some() && ctx.ui.input(|input| input.pointer.primary_pressed());
+        let primary_down =
+            pointer_pos.is_some() && ctx.ui.input(|input| input.pointer.primary_down());
+        let primary_released =
+            pointer_pos.is_some() && ctx.ui.input(|input| input.pointer.primary_released());
+
         if let Some(pointer_pos) = pointer_pos {
             update_zoom_and_pan(&ctx, pointer_pos, view_graph);
         }
@@ -171,13 +178,7 @@ impl GraphUi {
         };
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-        let ports = collect_ports(
-            &graph_layout,
-            view_graph,
-            func_lib,
-            &graph_layout.node_layout,
-            &graph_layout.node_widths,
-        );
+        let ports = collect_ports(&graph_layout, view_graph, func_lib);
         let hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&ports, pos, port_activation));
@@ -204,10 +205,6 @@ impl GraphUi {
 
         let connection_breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
-
-        let primary_pressed = ctx.ui.input(|input| input.pointer.primary_pressed());
-        let primary_down = ctx.ui.input(|input| input.pointer.primary_down());
-        let primary_released = ctx.ui.input(|input| input.pointer.primary_released());
 
         if !connection_breaker.active
             && !connection_drag.active
@@ -555,8 +552,6 @@ fn collect_ports(
     graph_layout: &GraphLayout,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    layout: &node_ui::NodeLayout,
-    node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
@@ -569,7 +564,8 @@ fn collect_ports(
             .by_id(&node.func_id)
             .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-        let node_width = node_widths
+        let node_width = graph_layout
+            .node_widths
             .get(&node.id)
             .copied()
             .expect("node width must be precomputed");
@@ -579,7 +575,7 @@ fn collect_ports(
                 node_view,
                 index,
                 func.inputs.len(),
-                layout,
+                &graph_layout.node_layout,
                 view_graph.zoom,
             );
 
@@ -597,7 +593,7 @@ fn collect_ports(
                 graph_layout.origin,
                 node_view,
                 index,
-                layout,
+                &graph_layout.node_layout,
                 view_graph.zoom,
                 node_width,
             );
