@@ -1,5 +1,5 @@
 use crate::common::font::ScaledFontId;
-use crate::gui::graph_ui::GraphLayout;
+use crate::gui::graph_layout::GraphLayout;
 use eframe::egui;
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};

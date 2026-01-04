@@ -1,13 +1,12 @@
 use eframe::egui;
-use egui::{Key, Pos2, Rect, Ui, Vec2};
+use egui::{Key, Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
-use hashbrown::HashMap;
 
 use crate::gui::connection_ui::{
     ConnectionBreaker, ConnectionKey, ConnectionRenderer, PortKind, draw_temporary_connection,
 };
-use crate::gui::node_ui::NodeLayout;
+use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::model::graph_view;
 use crate::{
     gui::{node_ui, render::RenderContext},
@@ -18,19 +17,6 @@ use std::collections::HashSet;
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PortRef {
-    node_id: NodeId,
-    port_idx: usize,
-    kind: PortKind,
-}
-
-#[derive(Debug, Clone)]
-pub struct PortInfo {
-    port: PortRef,
-    center: Pos2,
-}
 
 #[derive(Debug)]
 struct ConnectionDrag {
@@ -93,15 +79,6 @@ pub enum GraphUiAction {
     NodeRemoved,
 }
 
-#[derive(Debug)]
-pub struct GraphLayout {
-    pub origin: Pos2,
-    pub scale: f32,
-    pub node_layout: node_ui::NodeLayout,
-    pub node_widths: HashMap<NodeId, f32>,
-    pub ports: Vec<PortInfo>,
-}
-
 impl GraphUi {
     pub fn reset(&mut self) {
         self.connection_breaker.reset();
@@ -142,10 +119,8 @@ impl GraphUi {
 
         let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
 
-        let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-        let hovered_port = graph_layout.hovered_port(pointer_pos, ctx.rect, port_activation);
-        let pointer_over_node =
-            graph_layout.pointer_over_node(pointer_pos, ctx.rect, view_graph, func_lib);
+        let hovered_port = graph_layout.hovered_port(&ctx, pointer_pos, ctx.rect);
+        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
 
         let connection_breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
@@ -265,7 +240,7 @@ impl GraphUi {
                 && port_in_activation_range(
                     &connection_drag.current_pos,
                     target.center,
-                    port_activation,
+                    ctx.style.port_activation_radius,
                 )
                 && let Some(node_id) = apply_connection(
                     view_graph,
@@ -346,90 +321,6 @@ fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut m
     }
 }
 
-impl GraphLayout {
-    fn build(
-        ctx: &RenderContext,
-        view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
-    ) -> GraphLayout {
-        let origin = ctx.rect.min + view_graph.pan;
-        let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-        let width_ctx = node_ui::NodeWidthContext {
-            node_layout: &node_layout,
-            style: &ctx.style,
-            scale: view_graph.zoom,
-        };
-        let node_widths =
-            node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
-
-        let ports = collect_ports(view_graph, func_lib, &node_widths, origin, &node_layout);
-        GraphLayout {
-            origin,
-            scale: view_graph.zoom,
-            node_layout,
-            node_widths,
-            ports,
-        }
-    }
-
-    pub fn node_width(&self, node_id: NodeId) -> f32 {
-        self.node_widths
-            .get(&node_id)
-            .copied()
-            .expect("node width must be precomputed")
-    }
-
-    pub fn node_rect(
-        &self,
-        view_node: &model::ViewNode,
-        input_count: usize,
-        output_count: usize,
-    ) -> Rect {
-        node_ui::node_rect_for_graph(
-            self.origin,
-            view_node,
-            input_count,
-            output_count,
-            self.scale,
-            &self.node_layout,
-            self.node_width(view_node.id),
-        )
-    }
-
-    pub fn hovered_port(
-        &self,
-        pointer_pos: Option<Pos2>,
-        rect: Rect,
-        activation_radius: f32,
-    ) -> Option<PortInfo> {
-        assert!(rect.is_finite(), "graph rect must be finite");
-        pointer_pos
-            .filter(|pos| rect.contains(*pos))
-            .and_then(|pos| find_port_near(&self.ports, pos, activation_radius))
-    }
-
-    pub fn pointer_over_node(
-        &self,
-        pointer_pos: Option<Pos2>,
-        rect: Rect,
-        view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
-    ) -> bool {
-        assert!(rect.is_finite(), "graph rect must be finite");
-        pointer_pos
-            .filter(|pos| rect.contains(*pos))
-            .is_some_and(|pos| {
-                view_graph.view_nodes.iter().any(|view_node| {
-                    let node = view_graph.graph.by_id(&view_node.id).unwrap();
-                    let func = func_lib.by_id(&node.func_id).unwrap();
-                    let node_rect =
-                        self.node_rect(view_node, func.inputs.len(), func.outputs.len());
-                    node_rect.contains(pos)
-                })
-            })
-    }
-}
-
 fn background(ctx: &RenderContext, zoom: f32, pan: Vec2) {
     let spacing = ctx.style.dotted_base_spacing * zoom;
     let radius = (ctx.style.dotted_radius_base * zoom)
@@ -450,80 +341,6 @@ fn background(ctx: &RenderContext, zoom: f32, pan: Vec2) {
         }
         y += spacing;
     }
-}
-
-fn collect_ports(
-    view_graph: &model::ViewGraph,
-    func_lib: &FuncLib,
-    node_widths: &HashMap<NodeId, f32>,
-    origin: Pos2,
-    node_layout: &NodeLayout,
-) -> Vec<PortInfo> {
-    let mut ports = Vec::new();
-
-    for node_view in view_graph.view_nodes.iter().rev() {
-        let node = view_graph.graph.by_id(&node_view.id).unwrap();
-        let func = func_lib.by_id(&node.func_id).unwrap();
-        let node_width = node_widths.get(&node.id).copied().unwrap();
-
-        for index in 0..func.inputs.len() {
-            let center = node_ui::node_input_pos(
-                origin,
-                node_view,
-                index,
-                func.inputs.len(),
-                node_layout,
-                view_graph.zoom,
-            );
-
-            ports.push(PortInfo {
-                port: PortRef {
-                    node_id: node.id,
-                    port_idx: index,
-                    kind: PortKind::Input,
-                },
-                center,
-            });
-        }
-        for index in 0..func.outputs.len() {
-            let center = node_ui::node_output_pos(
-                origin,
-                node_view,
-                index,
-                node_layout,
-                view_graph.zoom,
-                node_width,
-            );
-
-            ports.push(PortInfo {
-                port: PortRef {
-                    node_id: node.id,
-                    port_idx: index,
-                    kind: PortKind::Output,
-                },
-                center,
-            });
-        }
-    }
-
-    ports
-}
-
-fn find_port_near(ports: &[PortInfo], pos: Pos2, radius: f32) -> Option<PortInfo> {
-    assert!(radius.is_finite(), "port activation radius must be finite");
-    assert!(radius > 0.0, "port activation radius must be positive");
-    let mut best = None;
-    let mut best_dist = radius;
-
-    for port in ports {
-        let dist = port.center.distance(pos);
-        if dist < best_dist {
-            best_dist = dist;
-            best = Some(port.clone());
-        }
-    }
-
-    best
 }
 
 fn port_in_activation_range(cursor: &Pos2, port_center: Pos2, radius: f32) -> bool {

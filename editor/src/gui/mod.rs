@@ -1,4 +1,5 @@
 pub mod connection_ui;
+pub mod graph_layout;
 pub mod graph_ui;
 pub mod node_ui;
 pub mod render;
