@@ -6,6 +6,7 @@ use graph::prelude::{Binding, FuncLib, PortAddress};
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionKey, ConnectionRenderer, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
+use crate::gui::node_ui::NodeUi;
 use crate::model::graph_view;
 use crate::{
     gui::{node_ui, render::RenderContext},
@@ -94,6 +95,7 @@ pub struct GraphUi {
     connection_breaker: ConnectionBreaker,
     connection_drag: ConnectionDrag,
     connection_renderer: ConnectionRenderer,
+    node_ui: NodeUi,
 }
 
 #[derive(Debug, Default)]
@@ -169,9 +171,8 @@ impl GraphUi {
         });
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
-                if hovered_port.is_some() {
-                    let port = hovered_port.as_ref().unwrap();
-                    self.connection_drag.start(port.clone());
+                if let Some(hovered_port) = hovered_port.as_ref() {
+                    self.connection_drag.start(hovered_port.clone());
                     self.state = InteractionState::DraggingNewConnection;
                 } else if !pointer_over_node {
                     view_graph.selected_node_id = None;
@@ -183,13 +184,12 @@ impl GraphUi {
                 }
             }
             (InteractionState::Breaking, Some(PrimaryState::Pressed | PrimaryState::Down)) => {
-                if pointer_pos.is_some() {
-                    let pos = pointer_pos.unwrap();
+                if let Some(pointer_pos) = pointer_pos {
                     let should_add = self
                         .connection_breaker
                         .points
                         .last()
-                        .map(|last| last.distance(pos) > 2.0)
+                        .map(|last| last.distance(pointer_pos) > 2.0)
                         .unwrap_or(true);
                     if should_add {
                         let remaining = MAX_BREAKER_LENGTH
@@ -199,16 +199,16 @@ impl GraphUi {
                             .points
                             .last()
                             .copied()
-                            .unwrap_or(pos);
-                        let segment_len = last_pos.distance(pos);
+                            .unwrap_or(pointer_pos);
+                        let segment_len = last_pos.distance(pointer_pos);
                         if remaining > 0.0 && segment_len > 0.0 {
                             if segment_len <= remaining {
-                                self.connection_breaker.points.push(pos);
+                                self.connection_breaker.points.push(pointer_pos);
                             } else {
                                 let t = remaining / segment_len;
                                 let clamped = Pos2::new(
-                                    last_pos.x + (pos.x - last_pos.x) * t,
-                                    last_pos.y + (pos.y - last_pos.y) * t,
+                                    last_pos.x + (pointer_pos.x - last_pos.x) * t,
+                                    last_pos.y + (pointer_pos.y - last_pos.y) * t,
                                 );
                                 self.connection_breaker.points.push(clamped);
                             }
@@ -276,7 +276,8 @@ impl GraphUi {
 
         self.render_connections(view_graph, func_lib, &ctx, &graph_layout);
 
-        node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
+        self.node_ui
+            .render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
         top_panel(view_graph, func_lib, ctx, graph_layout);
     }

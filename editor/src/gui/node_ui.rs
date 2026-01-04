@@ -35,6 +35,9 @@ impl Default for NodeLayout {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct NodeUi {}
+
 impl NodeLayout {
     pub(crate) fn scaled(&self, scale: f32) -> Self {
         Self {
@@ -44,6 +47,309 @@ impl NodeLayout {
             row_height: self.row_height * scale,
             padding: self.padding * scale,
             corner_radius: self.corner_radius * scale,
+        }
+    }
+}
+
+impl NodeUi {
+    pub fn render_nodes(
+        &mut self,
+        ctx: &RenderContext,
+        graph_layout: &GraphLayout,
+        view_graph: &mut model::ViewGraph,
+        func_lib: &FuncLib,
+        ui_interaction: &mut GraphUiInteraction,
+    ) {
+        let visuals = ctx.ui.visuals();
+        let node_fill = ctx.style.node_fill;
+        let node_stroke = ctx.style.node_stroke;
+        let selected_stroke = ctx.style.selected_stroke;
+
+        for node_view in &mut view_graph.view_nodes {
+            let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
+
+            let input_count = func.inputs.len();
+            let output_count = func.outputs.len();
+            let node_width = graph_layout.node_width(node.id);
+            let node_size = node_size(
+                input_count,
+                output_count,
+                &graph_layout.node_layout,
+                node_width,
+            );
+            let node_rect = egui::Rect::from_min_size(
+                graph_layout.origin + node_view.pos.to_vec2() * graph_layout.scale,
+                node_size,
+            );
+            let header_rect = egui::Rect::from_min_size(
+                node_rect.min,
+                egui::vec2(node_size.x, graph_layout.node_layout.header_height),
+            );
+            let cache_rect = egui::Rect::from_min_size(
+                node_rect.min + egui::vec2(0.0, graph_layout.node_layout.header_height),
+                egui::vec2(node_size.x, graph_layout.node_layout.cache_height),
+            );
+            let button_size = (graph_layout.node_layout.header_height
+                - graph_layout.node_layout.padding)
+                .max(12.0 * graph_layout.scale)
+                .min(graph_layout.node_layout.header_height);
+            let button_pos = egui::pos2(
+                node_rect.max.x - graph_layout.node_layout.padding - button_size,
+                node_rect.min.y + (graph_layout.node_layout.header_height - button_size) * 0.5,
+            );
+            let close_rect =
+                egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
+            let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
+            let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
+            let mut dot_centers = Vec::new();
+            let has_terminal = node.terminal;
+            let has_impure = func.behavior == FuncBehavior::Impure;
+            if has_terminal || has_impure {
+                let dot_diameter = dot_radius * 2.0;
+                let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
+                let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
+                if has_terminal {
+                    dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
+                    dot_x -= dot_diameter + dot_gap;
+                }
+                if has_impure {
+                    dot_centers.push((dot_x, "impure", egui::Color32::from_rgb(255, 150, 70)));
+                    dot_x -= dot_diameter + dot_gap;
+                }
+                header_drag_right = dot_x + dot_gap - graph_layout.node_layout.padding;
+            }
+            let header_drag_rect = egui::Rect::from_min_max(
+                header_rect.min,
+                egui::pos2(header_drag_right, header_rect.max.y),
+            );
+            let cache_button_height = if graph_layout.node_layout.cache_height > 0.0 {
+                let vertical_padding =
+                    graph_layout.node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
+                (graph_layout.node_layout.cache_height - vertical_padding * 2.0)
+                    .max(10.0 * graph_layout.scale)
+                    .min(graph_layout.node_layout.cache_height)
+            } else {
+                0.0
+            };
+            let cache_button_padding =
+                graph_layout.node_layout.padding * ctx.style.cache_button_text_pad_factor;
+
+            let cache_text_width = if graph_layout.node_layout.cache_height > 0.0 {
+                let cached_width = text_width(
+                    &ctx.painter,
+                    &ctx.style.body_font.scaled(graph_layout.scale),
+                    "cached",
+                    ctx.style.text_color,
+                );
+                let cache_width = text_width(
+                    &ctx.painter,
+                    &ctx.style.body_font.scaled(graph_layout.scale),
+                    "cache",
+                    ctx.style.text_color,
+                );
+                cached_width.max(cache_width)
+            } else {
+                0.0
+            };
+            let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
+                .max(cache_button_height)
+                .max(cache_text_width + cache_button_padding * 2.0);
+
+            let cache_button_pos = egui::pos2(
+                cache_rect.min.x + graph_layout.node_layout.padding,
+                cache_rect.min.y
+                    + (graph_layout.node_layout.cache_height - cache_button_height) * 0.5,
+            );
+            let cache_button_rect = egui::Rect::from_min_size(
+                cache_button_pos,
+                egui::vec2(cache_button_width, cache_button_height),
+            );
+            let node_id = ctx.ui.make_persistent_id(("node_body", node.id));
+            let body_response = ctx.ui.interact(node_rect, node_id, egui::Sense::click());
+
+            let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
+            let remove_response = ctx.ui.interact(close_rect, close_id, egui::Sense::click());
+            let cache_enabled = graph_layout.node_layout.cache_height > 0.0 && !node.terminal;
+            let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+            let cache_response = ctx.ui.interact(
+                cache_button_rect,
+                cache_id,
+                if cache_enabled {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                },
+            );
+
+            let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
+            let response = ctx
+                .ui
+                .interact(header_drag_rect, header_id, egui::Sense::drag());
+
+            if response.dragged() {
+                node_view.pos += response.drag_delta() / graph_layout.scale;
+            }
+
+            if cache_enabled && cache_response.clicked() {
+                node.behavior = if node.behavior == NodeBehavior::Once {
+                    NodeBehavior::AsFunction
+                } else {
+                    NodeBehavior::Once
+                };
+                ui_interaction
+                    .actions
+                    .push((node_view.id, GraphUiAction::CacheToggled));
+            }
+
+            if remove_response.hovered() {
+                remove_response.show_tooltip_text("Remove node");
+            }
+
+            if remove_response.clicked() {
+                ui_interaction
+                    .actions
+                    .push((node_view.id, GraphUiAction::NodeRemoved));
+
+                continue;
+            }
+
+            let selected_id = if response.clicked() || response.dragged() || body_response.clicked()
+            {
+                ui_interaction
+                    .actions
+                    .push((node_view.id, GraphUiAction::NodeSelected));
+                Some(node_view.id)
+            } else {
+                view_graph.selected_node_id
+            };
+
+            let is_selected = selected_id.is_some_and(|id| id == node_view.id);
+
+            ctx.painter.rect(
+                node_rect,
+                graph_layout.node_layout.corner_radius,
+                node_fill,
+                if is_selected {
+                    selected_stroke
+                } else {
+                    node_stroke
+                },
+                egui::StrokeKind::Inside,
+            );
+
+            if graph_layout.node_layout.cache_height > 0.0 {
+                let button_fill = if !cache_enabled {
+                    visuals.widgets.noninteractive.bg_fill
+                } else if node.behavior == NodeBehavior::Once {
+                    ctx.style.cache_active_color
+                } else if cache_response.is_pointer_button_down_on() {
+                    visuals.widgets.active.bg_fill
+                } else if cache_response.hovered() {
+                    visuals.widgets.hovered.bg_fill
+                } else {
+                    visuals.widgets.inactive.bg_fill
+                };
+                let button_stroke = visuals.widgets.inactive.bg_stroke;
+                ctx.painter.rect(
+                    cache_button_rect,
+                    graph_layout.node_layout.corner_radius * 0.5,
+                    button_fill,
+                    button_stroke,
+                    egui::StrokeKind::Inside,
+                );
+
+                let button_text = "cache";
+                let button_text_color = if !cache_enabled {
+                    visuals.widgets.noninteractive.fg_stroke.color
+                } else if node.behavior == NodeBehavior::Once {
+                    ctx.style.cache_checked_text_color
+                } else {
+                    visuals.text_color()
+                };
+                ctx.painter.text(
+                    cache_button_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    button_text,
+                    ctx.style.body_font.scaled(graph_layout.scale),
+                    button_text_color,
+                );
+            }
+
+            let dot_center_y = header_rect.center().y;
+            for (index, (center_x, tooltip, color)) in dot_centers.iter().enumerate() {
+                let dot_center = egui::pos2(*center_x, dot_center_y);
+                ctx.painter.circle_filled(dot_center, dot_radius, *color);
+                let dot_rect = egui::Rect::from_center_size(
+                    dot_center,
+                    egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
+                );
+                let dot_id = ctx.ui.make_persistent_id(("node_status", node.id, index));
+                let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+                if dot_response.hovered() {
+                    dot_response.show_tooltip_text(*tooltip);
+                }
+            }
+
+            let close_fill = if remove_response.is_pointer_button_down_on() {
+                visuals.widgets.active.bg_fill
+            } else if remove_response.hovered() {
+                visuals.widgets.hovered.bg_fill
+            } else {
+                visuals.widgets.inactive.bg_fill
+            };
+            let close_stroke = visuals.widgets.inactive.bg_stroke;
+            ctx.painter.rect(
+                close_rect,
+                graph_layout.node_layout.corner_radius * 0.6,
+                close_fill,
+                close_stroke,
+                egui::StrokeKind::Inside,
+            );
+            let close_margin = button_size * 0.3;
+            let a = egui::pos2(
+                close_rect.min.x + close_margin,
+                close_rect.min.y + close_margin,
+            );
+            let b = egui::pos2(
+                close_rect.max.x - close_margin,
+                close_rect.max.y - close_margin,
+            );
+            let c = egui::pos2(
+                close_rect.min.x + close_margin,
+                close_rect.max.y - close_margin,
+            );
+            let d = egui::pos2(
+                close_rect.max.x - close_margin,
+                close_rect.min.y + close_margin,
+            );
+            let close_color = visuals.text_color();
+            let close_stroke = egui::Stroke::new(1.4 * graph_layout.scale, close_color);
+            ctx.painter.line_segment([a, b], close_stroke);
+            ctx.painter.line_segment([c, d], close_stroke);
+
+            render_node_ports(
+                ctx,
+                graph_layout,
+                node_view,
+                input_count,
+                output_count,
+                node_width,
+            );
+            render_node_const_bindings(ctx, graph_layout, node_view, node, func, input_count);
+            render_node_labels(ctx, graph_layout, &node.name, func, node_rect, node_width);
+        }
+
+        for action in ui_interaction.actions.iter() {
+            match action {
+                (node_id, GraphUiAction::NodeRemoved) => {
+                    view_graph.remove_node(node_id);
+                }
+                (node_id, GraphUiAction::NodeSelected) => {
+                    view_graph.select_node(node_id);
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -59,304 +365,6 @@ pub fn node_rect_for_graph(
 ) -> egui::Rect {
     let node_size = node_size(input_count, output_count, layout, node_width);
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
-}
-
-pub fn render_nodes(
-    ctx: &RenderContext,
-    graph_layout: &GraphLayout,
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-    ui_interaction: &mut GraphUiInteraction,
-) {
-    let visuals = ctx.ui.visuals();
-    let node_fill = ctx.style.node_fill;
-    let node_stroke = ctx.style.node_stroke;
-    let selected_stroke = ctx.style.selected_stroke;
-
-    for node_view in &mut view_graph.view_nodes {
-        let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
-        let func = func_lib.by_id(&node.func_id).unwrap();
-
-        let input_count = func.inputs.len();
-        let output_count = func.outputs.len();
-        let node_width = graph_layout.node_width(node.id);
-        let node_size = node_size(
-            input_count,
-            output_count,
-            &graph_layout.node_layout,
-            node_width,
-        );
-        let node_rect = egui::Rect::from_min_size(
-            graph_layout.origin + node_view.pos.to_vec2() * graph_layout.scale,
-            node_size,
-        );
-        let header_rect = egui::Rect::from_min_size(
-            node_rect.min,
-            egui::vec2(node_size.x, graph_layout.node_layout.header_height),
-        );
-        let cache_rect = egui::Rect::from_min_size(
-            node_rect.min + egui::vec2(0.0, graph_layout.node_layout.header_height),
-            egui::vec2(node_size.x, graph_layout.node_layout.cache_height),
-        );
-        let button_size = (graph_layout.node_layout.header_height
-            - graph_layout.node_layout.padding)
-            .max(12.0 * graph_layout.scale)
-            .min(graph_layout.node_layout.header_height);
-        let button_pos = egui::pos2(
-            node_rect.max.x - graph_layout.node_layout.padding - button_size,
-            node_rect.min.y + (graph_layout.node_layout.header_height - button_size) * 0.5,
-        );
-        let close_rect =
-            egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
-        let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
-        let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
-        let mut dot_centers = Vec::new();
-        let has_terminal = node.terminal;
-        let has_impure = func.behavior == FuncBehavior::Impure;
-        if has_terminal || has_impure {
-            let dot_diameter = dot_radius * 2.0;
-            let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
-            let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
-            if has_terminal {
-                dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
-                dot_x -= dot_diameter + dot_gap;
-            }
-            if has_impure {
-                dot_centers.push((dot_x, "impure", egui::Color32::from_rgb(255, 150, 70)));
-                dot_x -= dot_diameter + dot_gap;
-            }
-            header_drag_right = dot_x + dot_gap - graph_layout.node_layout.padding;
-        }
-        let header_drag_rect = egui::Rect::from_min_max(
-            header_rect.min,
-            egui::pos2(header_drag_right, header_rect.max.y),
-        );
-        let cache_button_height = if graph_layout.node_layout.cache_height > 0.0 {
-            let vertical_padding =
-                graph_layout.node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
-            (graph_layout.node_layout.cache_height - vertical_padding * 2.0)
-                .max(10.0 * graph_layout.scale)
-                .min(graph_layout.node_layout.cache_height)
-        } else {
-            0.0
-        };
-        let cache_button_padding =
-            graph_layout.node_layout.padding * ctx.style.cache_button_text_pad_factor;
-
-        let cache_text_width = if graph_layout.node_layout.cache_height > 0.0 {
-            let cached_width = text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(graph_layout.scale),
-                "cached",
-                ctx.style.text_color,
-            );
-            let cache_width = text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(graph_layout.scale),
-                "cache",
-                ctx.style.text_color,
-            );
-            cached_width.max(cache_width)
-        } else {
-            0.0
-        };
-        let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
-            .max(cache_button_height)
-            .max(cache_text_width + cache_button_padding * 2.0);
-
-        let cache_button_pos = egui::pos2(
-            cache_rect.min.x + graph_layout.node_layout.padding,
-            cache_rect.min.y + (graph_layout.node_layout.cache_height - cache_button_height) * 0.5,
-        );
-        let cache_button_rect = egui::Rect::from_min_size(
-            cache_button_pos,
-            egui::vec2(cache_button_width, cache_button_height),
-        );
-        let node_id = ctx.ui.make_persistent_id(("node_body", node.id));
-        let body_response = ctx.ui.interact(node_rect, node_id, egui::Sense::click());
-
-        let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
-        let remove_response = ctx.ui.interact(close_rect, close_id, egui::Sense::click());
-        let cache_enabled = graph_layout.node_layout.cache_height > 0.0 && !node.terminal;
-        let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
-        let cache_response = ctx.ui.interact(
-            cache_button_rect,
-            cache_id,
-            if cache_enabled {
-                egui::Sense::click()
-            } else {
-                egui::Sense::hover()
-            },
-        );
-
-        let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
-        let response = ctx
-            .ui
-            .interact(header_drag_rect, header_id, egui::Sense::drag());
-
-        if response.dragged() {
-            node_view.pos += response.drag_delta() / graph_layout.scale;
-        }
-
-        if cache_enabled && cache_response.clicked() {
-            node.behavior = if node.behavior == NodeBehavior::Once {
-                NodeBehavior::AsFunction
-            } else {
-                NodeBehavior::Once
-            };
-            ui_interaction
-                .actions
-                .push((node_view.id, GraphUiAction::CacheToggled));
-        }
-
-        if remove_response.hovered() {
-            remove_response.show_tooltip_text("Remove node");
-        }
-
-        if remove_response.clicked() {
-            ui_interaction
-                .actions
-                .push((node_view.id, GraphUiAction::NodeRemoved));
-
-            continue;
-        }
-
-        let selected_id = if response.clicked() || response.dragged() || body_response.clicked() {
-            ui_interaction
-                .actions
-                .push((node_view.id, GraphUiAction::NodeSelected));
-            Some(node_view.id)
-        } else {
-            view_graph.selected_node_id
-        };
-
-        let is_selected = selected_id.is_some_and(|id| id == node_view.id);
-
-        ctx.painter.rect(
-            node_rect,
-            graph_layout.node_layout.corner_radius,
-            node_fill,
-            if is_selected {
-                selected_stroke
-            } else {
-                node_stroke
-            },
-            egui::StrokeKind::Inside,
-        );
-
-        if graph_layout.node_layout.cache_height > 0.0 {
-            let button_fill = if !cache_enabled {
-                visuals.widgets.noninteractive.bg_fill
-            } else if node.behavior == NodeBehavior::Once {
-                ctx.style.cache_active_color
-            } else if cache_response.is_pointer_button_down_on() {
-                visuals.widgets.active.bg_fill
-            } else if cache_response.hovered() {
-                visuals.widgets.hovered.bg_fill
-            } else {
-                visuals.widgets.inactive.bg_fill
-            };
-            let button_stroke = visuals.widgets.inactive.bg_stroke;
-            ctx.painter.rect(
-                cache_button_rect,
-                graph_layout.node_layout.corner_radius * 0.5,
-                button_fill,
-                button_stroke,
-                egui::StrokeKind::Inside,
-            );
-
-            let button_text = "cache";
-            let button_text_color = if !cache_enabled {
-                visuals.widgets.noninteractive.fg_stroke.color
-            } else if node.behavior == NodeBehavior::Once {
-                ctx.style.cache_checked_text_color
-            } else {
-                visuals.text_color()
-            };
-            ctx.painter.text(
-                cache_button_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                button_text,
-                ctx.style.body_font.scaled(graph_layout.scale),
-                button_text_color,
-            );
-        }
-
-        let dot_center_y = header_rect.center().y;
-        for (index, (center_x, tooltip, color)) in dot_centers.iter().enumerate() {
-            let dot_center = egui::pos2(*center_x, dot_center_y);
-            ctx.painter.circle_filled(dot_center, dot_radius, *color);
-            let dot_rect = egui::Rect::from_center_size(
-                dot_center,
-                egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
-            );
-            let dot_id = ctx.ui.make_persistent_id(("node_status", node.id, index));
-            let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
-            if dot_response.hovered() {
-                dot_response.show_tooltip_text(*tooltip);
-            }
-        }
-
-        let close_fill = if remove_response.is_pointer_button_down_on() {
-            visuals.widgets.active.bg_fill
-        } else if remove_response.hovered() {
-            visuals.widgets.hovered.bg_fill
-        } else {
-            visuals.widgets.inactive.bg_fill
-        };
-        let close_stroke = visuals.widgets.inactive.bg_stroke;
-        ctx.painter.rect(
-            close_rect,
-            graph_layout.node_layout.corner_radius * 0.6,
-            close_fill,
-            close_stroke,
-            egui::StrokeKind::Inside,
-        );
-        let close_margin = button_size * 0.3;
-        let a = egui::pos2(
-            close_rect.min.x + close_margin,
-            close_rect.min.y + close_margin,
-        );
-        let b = egui::pos2(
-            close_rect.max.x - close_margin,
-            close_rect.max.y - close_margin,
-        );
-        let c = egui::pos2(
-            close_rect.min.x + close_margin,
-            close_rect.max.y - close_margin,
-        );
-        let d = egui::pos2(
-            close_rect.max.x - close_margin,
-            close_rect.min.y + close_margin,
-        );
-        let close_color = visuals.text_color();
-        let close_stroke = egui::Stroke::new(1.4 * graph_layout.scale, close_color);
-        ctx.painter.line_segment([a, b], close_stroke);
-        ctx.painter.line_segment([c, d], close_stroke);
-
-        render_node_ports(
-            ctx,
-            graph_layout,
-            node_view,
-            input_count,
-            output_count,
-            node_width,
-        );
-        render_node_const_bindings(ctx, graph_layout, node_view, node, func, input_count);
-        render_node_labels(ctx, graph_layout, &node.name, func, node_rect, node_width);
-    }
-
-    for action in ui_interaction.actions.iter() {
-        match action {
-            (node_id, GraphUiAction::NodeRemoved) => {
-                view_graph.remove_node(node_id);
-            }
-            (node_id, GraphUiAction::NodeSelected) => {
-                view_graph.select_node(node_id);
-            }
-            _ => {}
-        }
-    }
 }
 
 fn render_node_ports(

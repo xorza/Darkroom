@@ -125,7 +125,7 @@ impl ViewGraph {
             "selected node view must exist in graph"
         );
         assert!(
-            self.graph.by_id(&node_id).is_some(),
+            self.graph.by_id(node_id).is_some(),
             "selected node must exist in graph data"
         );
         let node_idx = self
@@ -146,7 +146,7 @@ impl ViewGraph {
             "node must exist to be removed"
         );
         assert!(
-            self.graph.by_id(&node_id).is_some(),
+            self.graph.by_id(node_id).is_some(),
             "node must exist in graph data to be removed"
         );
 
