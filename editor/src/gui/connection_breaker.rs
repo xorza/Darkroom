@@ -17,32 +17,34 @@ impl ConnectionBreaker {
     }
 
     pub fn add_point(&mut self, point: Pos2) {
-        let should_add = self
-            .points
-            .last()
-            .map(|last| last.distance(point) > MIN_POINT_DISTANCE)
-            .unwrap_or(true);
-        if !should_add {
+        let Some(last_pos) = self.points.last().copied() else {
+            self.points.push(point);
+            return;
+        };
+        if last_pos.distance(point) <= MIN_POINT_DISTANCE {
             return;
         }
 
         let remaining = MAX_BREAKER_LENGTH - self.path_length();
-        let last_pos = self.points.last().copied().unwrap_or(point);
-        let segment_len = last_pos.distance(point);
-        if remaining <= 0.0 || segment_len <= 0.0 {
+        if remaining <= 0.0 {
             return;
         }
 
-        if segment_len <= remaining {
-            self.points.push(point);
+        let segment_len = last_pos.distance(point);
+        if segment_len <= 0.0 {
+            return;
+        }
+
+        let clamped = if segment_len <= remaining {
+            point
         } else {
             let t = remaining / segment_len;
-            let clamped = Pos2::new(
+            Pos2::new(
                 last_pos.x + (point.x - last_pos.x) * t,
                 last_pos.y + (point.y - last_pos.y) * t,
-            );
-            self.points.push(clamped);
-        }
+            )
+        };
+        self.points.push(clamped);
     }
 
     pub fn render(&self, ctx: &GraphContext) {
