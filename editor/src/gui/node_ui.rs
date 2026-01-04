@@ -1,5 +1,6 @@
 use crate::common::font::ScaledFontId;
-use crate::gui::graph_layout::GraphLayout;
+use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use eframe::egui;
 use egui::{PointerButton, Pos2, Rect};
 use graph::data::StaticValue;
@@ -89,7 +90,9 @@ impl NodeUi {
         ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
-    ) {
+    ) -> Option<PortInfo> {
+        let mut drag_port_info: Option<PortInfo> = None;
+
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
             let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
@@ -338,7 +341,7 @@ impl NodeUi {
             ctx.painter.line_segment([a, b], close_stroke);
             ctx.painter.line_segment([c, d], close_stroke);
 
-            render_node_ports(
+            let node_drag_port_result = render_node_ports(
                 ctx,
                 graph_layout,
                 view_node_idx,
@@ -348,6 +351,10 @@ impl NodeUi {
             );
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
+
+            if node_drag_port_result.is_some() {
+                drag_port_info = node_drag_port_result;
+            }
         }
 
         for action in ui_interaction.actions.iter() {
@@ -361,6 +368,8 @@ impl NodeUi {
                 _ => {}
             }
         }
+
+        drag_port_info
     }
 }
 
@@ -384,12 +393,15 @@ fn render_node_ports(
     input_count: usize,
     output_count: usize,
     node_width: f32,
-) {
-    for index in 0..input_count {
+) -> Option<PortInfo> {
+    let view_node = &ctx.view_graph.view_nodes[view_node_idx];
+    let mut drag_port: Option<PortInfo> = None;
+
+    for input_idx in 0..input_count {
         let center = node_input_pos(
             graph_layout.origin,
-            &ctx.view_graph.view_nodes[view_node_idx],
-            index,
+            view_node,
+            input_idx,
             input_count,
             &graph_layout.node_layout,
             ctx.view_graph.scale,
@@ -404,7 +416,7 @@ fn render_node_ports(
 
         let graph_bg_id = ctx
             .ui
-            .make_persistent_id(("node_input", view_node_idx, index));
+            .make_persistent_id(("node_input", view_node_idx, input_idx));
         let response = ctx.ui.interact(
             port_rect,
             graph_bg_id,
@@ -418,13 +430,26 @@ fn render_node_ports(
         };
         ctx.painter
             .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
+
+        if response.drag_started_by(PointerButton::Primary)
+            | response.drag_stopped_by(PointerButton::Primary)
+        {
+            drag_port = Some(PortInfo {
+                port: PortRef {
+                    node_id: view_node.id,
+                    idx: input_idx,
+                    kind: PortKind::Input,
+                },
+                center,
+            });
+        }
     }
 
-    for index in 0..output_count {
+    for output_idx in 0..output_count {
         let center = node_output_pos(
             graph_layout.origin,
-            &ctx.view_graph.view_nodes[view_node_idx],
-            index,
+            view_node,
+            output_idx,
             &graph_layout.node_layout,
             ctx.view_graph.scale,
             node_width,
@@ -439,7 +464,7 @@ fn render_node_ports(
 
         let graph_bg_id = ctx
             .ui
-            .make_persistent_id(("node_output", view_node_idx, index));
+            .make_persistent_id(("node_output", view_node_idx, output_idx));
         let response = ctx.ui.interact(
             port_rect,
             graph_bg_id,
@@ -453,7 +478,22 @@ fn render_node_ports(
         };
         ctx.painter
             .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
+
+        if response.drag_started_by(PointerButton::Primary)
+            | response.drag_stopped_by(PointerButton::Primary)
+        {
+            drag_port = Some(PortInfo {
+                port: PortRef {
+                    node_id: view_node.id,
+                    idx: output_idx,
+                    kind: PortKind::Output,
+                },
+                center,
+            });
+        }
     }
+
+    drag_port
 }
 
 fn render_node_const_bindings(
