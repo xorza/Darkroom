@@ -562,18 +562,10 @@ fn collect_ports(
     let mut ports = Vec::new();
 
     for node_view in view_graph.view_nodes.iter().rev() {
-        let node = view_graph
-            .graph
-            .by_id(&node_view.id)
-            .expect("node view id must exist in graph data");
-        let func = func_lib
-            .by_id(&node.func_id)
-            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
+        let node_width = node_widths.get(&node.id).copied().unwrap();
 
-        let node_width = node_widths
-            .get(&node.id)
-            .copied()
-            .expect("node width must be precomputed");
         for index in 0..func.inputs.len() {
             let center = node_ui::node_input_pos(
                 origin,
@@ -741,8 +733,7 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
         .by_id(&node.func_id)
         .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-    let (layout, node_widths) =
-        compute_layout_and_widths(ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
+    let (layout, node_widths) = compute_layout_and_widths(&ctx.painter, view_graph, func_lib, 1.0);
     let node_width = node_widths
         .get(&node.id)
         .copied()
@@ -769,8 +760,7 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
         return;
     }
 
-    let (layout, node_widths) =
-        compute_layout_and_widths(ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
+    let (layout, node_widths) = compute_layout_and_widths(&ctx.painter, view_graph, func_lib, 1.0);
     let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
@@ -825,7 +815,6 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
 }
 
 fn compute_layout_and_widths(
-    _ui: &egui::Ui,
     painter: &egui::Painter,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
