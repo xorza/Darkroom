@@ -38,7 +38,6 @@ pub struct NodeLayoutInfo {
     pub rect: Rect,
     pub close_rect: Rect,
     pub cache_button_rect: Rect,
-    pub button_size: f32,
     pub dot_radius: f32,
     pub dot_centers: Vec<(Pos2, StatusDotKind)>,
     pub input_first_center: Pos2,
@@ -283,7 +282,7 @@ impl NodeUi {
                 close_stroke,
                 egui::StrokeKind::Inside,
             );
-            let close_margin = layout.button_size * 0.3;
+            let close_margin = layout.close_rect.width() * 0.3;
             let a = egui::pos2(
                 close_rect.min.x + close_margin,
                 close_rect.min.y + close_margin,
@@ -675,14 +674,14 @@ fn compute_node_layout(
         rect.min + egui::vec2(0.0, node_layout.header_height),
         egui::vec2(rect.width(), node_layout.cache_height),
     );
-    let button_size = (node_layout.header_height - node_layout.padding)
+    let close_size = (node_layout.header_height - node_layout.padding)
         .max(12.0 * scale)
         .min(node_layout.header_height);
-    let button_pos = egui::pos2(
-        rect.max.x - node_layout.padding - button_size,
-        rect.min.y + (node_layout.header_height - button_size) * 0.5,
+    let close_pos = egui::pos2(
+        rect.max.x - node_layout.padding - close_size,
+        rect.min.y + (node_layout.header_height - close_size) * 0.5,
     );
-    let close_rect = egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
+    let close_rect = egui::Rect::from_min_size(close_pos, egui::vec2(close_size, close_size));
 
     let dot_radius = scale * ctx.style.status_dot_radius;
     let mut dot_centers = Vec::new();
@@ -736,7 +735,6 @@ fn compute_node_layout(
         rect,
         close_rect,
         cache_button_rect,
-        button_size,
         dot_radius,
         dot_centers,
         input_first_center,
