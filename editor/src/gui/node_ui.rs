@@ -165,23 +165,12 @@ impl NodeUi {
             let cache_button_padding =
                 graph_layout.node_layout.padding * ctx.style.cache_button_text_pad_factor;
 
-            let cache_text_width = if graph_layout.node_layout.cache_height > 0.0 {
-                let cached_width = text_width(
-                    &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
-                    "cached",
-                    ctx.style.text_color,
-                );
-                let cache_width = text_width(
-                    &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
-                    "cache",
-                    ctx.style.text_color,
-                );
-                cached_width.max(cache_width)
-            } else {
-                0.0
-            };
+            let cache_text_width = text_width(
+                &ctx.painter,
+                &ctx.style.body_font.scaled(ctx.view_graph.scale),
+                "cache",
+                ctx.style.text_color,
+            );
             let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
                 .max(cache_button_height)
                 .max(cache_text_width + cache_button_padding * 2.0);
