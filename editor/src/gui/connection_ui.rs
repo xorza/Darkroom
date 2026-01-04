@@ -1,5 +1,6 @@
 use eframe::egui;
 use egui::Pos2;
+use egui::epaint::CubicBezierShape;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib};
 use hashbrown::HashMap;
@@ -52,7 +53,27 @@ impl ConnectionRenderer {
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.rebuild(graph_layout, view_graph, func_lib, breaker);
-        draw_connections(&ctx.painter, &self.curves, &self.highlighted, &ctx.style);
+
+        for curve in &self.curves {
+            let stroke = if self.highlighted.contains(&curve.key) {
+                ctx.style.connection_highlight_stroke
+            } else {
+                ctx.style.connection_stroke
+            };
+            let control_offset = curve.control_offset;
+            let shape = CubicBezierShape::from_points_stroke(
+                [
+                    curve.start,
+                    curve.start + egui::vec2(control_offset, 0.0),
+                    curve.end + egui::vec2(-control_offset, 0.0),
+                    curve.end,
+                ],
+                false,
+                egui::Color32::TRANSPARENT,
+                stroke,
+            );
+            ctx.painter.add(shape);
+        }
     }
 }
 
@@ -148,34 +169,6 @@ fn collect_connection_curves(
     }
 
     curves
-}
-
-fn draw_connections(
-    painter: &egui::Painter,
-    curves: &[ConnectionCurve],
-    highlighted: &HashSet<ConnectionKey>,
-    style: &crate::gui::style::Style,
-) {
-    for curve in curves {
-        let stroke = if highlighted.contains(&curve.key) {
-            style.connection_highlight_stroke
-        } else {
-            style.connection_stroke
-        };
-        let control_offset = curve.control_offset;
-        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
-            [
-                curve.start,
-                curve.start + egui::vec2(control_offset, 0.0),
-                curve.end + egui::vec2(-control_offset, 0.0),
-                curve.end,
-            ],
-            false,
-            egui::Color32::TRANSPARENT,
-            stroke,
-        );
-        painter.add(shape);
-    }
 }
 
 fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
