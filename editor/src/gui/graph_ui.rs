@@ -12,7 +12,6 @@ use crate::{gui::graph_ctx::GraphContext, model};
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
-const MAX_BREAKER_LENGTH: f32 = 900.0;
 const SCROLL_ZOOM_SPEED: f32 = 0.0015;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -191,35 +190,7 @@ impl GraphUi {
                 InteractionState::BreakingConnections,
                 Some(PrimaryState::Pressed | PrimaryState::Down),
             ) => {
-                let should_add = self
-                    .connection_breaker
-                    .points
-                    .last()
-                    .map(|last| last.distance(pointer_pos) > 2.0)
-                    .unwrap_or(true);
-                if should_add {
-                    let remaining =
-                        MAX_BREAKER_LENGTH - breaker_path_length(&self.connection_breaker.points);
-                    let last_pos = self
-                        .connection_breaker
-                        .points
-                        .last()
-                        .copied()
-                        .unwrap_or(pointer_pos);
-                    let segment_len = last_pos.distance(pointer_pos);
-                    if remaining > 0.0 && segment_len > 0.0 {
-                        if segment_len <= remaining {
-                            self.connection_breaker.points.push(pointer_pos);
-                        } else {
-                            let t = remaining / segment_len;
-                            let clamped = Pos2::new(
-                                last_pos.x + (pointer_pos.x - last_pos.x) * t,
-                                last_pos.y + (pointer_pos.y - last_pos.y) * t,
-                            );
-                            self.connection_breaker.points.push(clamped);
-                        }
-                    }
-                }
+                self.connection_breaker.add_point(pointer_pos);
             }
             (InteractionState::BreakingConnections, _) => {
                 for connection in self.connection_renderer.highlighted.iter() {
@@ -421,11 +392,4 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
     ctx.view_graph.scale = target_zoom;
     let bounds_center = bounds.center().to_vec2();
     ctx.view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * ctx.view_graph.scale;
-}
-
-fn breaker_path_length(points: &[Pos2]) -> f32 {
-    points
-        .windows(2)
-        .map(|pair| pair[0].distance(pair[1]))
-        .sum()
 }
