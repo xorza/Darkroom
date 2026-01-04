@@ -71,7 +71,7 @@ impl NodeUi {
 
             let input_count = func.inputs.len();
             let output_count = func.outputs.len();
-            let node_width = graph_layout.node_width(node.id);
+            let node_width = graph_layout.node_width(&node.id);
             let node_size = node_size(
                 input_count,
                 output_count,

@@ -53,7 +53,6 @@ impl GraphLayout {
     ) {
         let origin = ctx.rect.min + view_graph.pan;
         let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-
         let node_widths = node_ui::compute_node_widths(ctx, view_graph, func_lib, &node_layout);
 
         self.origin = origin;
@@ -64,9 +63,9 @@ impl GraphLayout {
         self.collect_ports(view_graph, func_lib);
     }
 
-    pub fn node_width(&self, node_id: NodeId) -> f32 {
+    pub fn node_width(&self, node_id: &NodeId) -> f32 {
         self.node_widths
-            .get(&node_id)
+            .get(node_id)
             .copied()
             .expect("node width must be precomputed for view node")
     }
@@ -84,7 +83,7 @@ impl GraphLayout {
             output_count,
             self.scale,
             &self.node_layout,
-            self.node_width(view_node.id),
+            self.node_width(&view_node.id),
         )
     }
 
@@ -129,19 +128,11 @@ impl GraphLayout {
         self.ports.clear();
         self.ports
             .reserve(Self::port_capacity(view_graph, func_lib));
+
         for node_view in view_graph.view_nodes.iter().rev() {
-            let node = view_graph
-                .graph
-                .by_id(&node_view.id)
-                .expect("view node must exist in graph");
-            let func = func_lib
-                .by_id(&node.func_id)
-                .expect("func must exist for view node");
-            let node_width = self
-                .node_widths
-                .get(&node.id)
-                .copied()
-                .expect("node width must be precomputed for view node");
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
+            let node_width = self.node_width(&node.id);
 
             for index in 0..func.inputs.len() {
                 let center = node_ui::node_input_pos(
@@ -187,13 +178,8 @@ impl GraphLayout {
     fn port_capacity(view_graph: &model::ViewGraph, func_lib: &FuncLib) -> usize {
         let mut total = 0;
         for node_view in view_graph.view_nodes.iter() {
-            let node = view_graph
-                .graph
-                .by_id(&node_view.id)
-                .expect("view node must exist in graph");
-            let func = func_lib
-                .by_id(&node.func_id)
-                .expect("func must exist for view node");
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
             total += func.inputs.len() + func.outputs.len();
         }
         total

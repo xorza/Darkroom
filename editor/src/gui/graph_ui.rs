@@ -421,27 +421,14 @@ fn view_selected_node(
     let Some(selected_id) = view_graph.selected_node_id else {
         return;
     };
-    let Some(node_view) = view_graph
-        .view_nodes
-        .iter()
-        .find(|node| node.id == selected_id)
-    else {
+    let Some(node_view) = view_graph.view_nodes.by_key(&selected_id) else {
         return;
     };
 
-    let node = view_graph
-        .graph
-        .by_id(&node_view.id)
-        .expect("node view id must exist in graph data");
-    let func = func_lib
-        .by_id(&node.func_id)
-        .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
+    let node = view_graph.graph.by_id(&node_view.id).unwrap();
+    let func = func_lib.by_id(&node.func_id).unwrap();
 
-    let node_width = graph_layout
-        .node_widths
-        .get(&node.id)
-        .copied()
-        .expect("node width must be precomputed");
+    let node_width = graph_layout.node_width(&node.id);
     let size = node_ui::node_rect_for_graph(
         Pos2::ZERO,
         node_view,
@@ -473,18 +460,9 @@ fn fit_all_nodes(
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
     for node_view in &view_graph.view_nodes {
-        let node = view_graph
-            .graph
-            .by_id(&node_view.id)
-            .expect("node view id must exist in graph data");
-        let func = func_lib
-            .by_id(&node.func_id)
-            .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
-        let node_width = graph_layout
-            .node_widths
-            .get(&node.id)
-            .copied()
-            .expect("node width must be precomputed");
+        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
+        let node_width = graph_layout.node_width(&node.id);
         let rect = node_ui::node_rect_for_graph(
             Pos2::ZERO,
             node_view,
