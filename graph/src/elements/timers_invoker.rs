@@ -1,9 +1,8 @@
-use std::str::FromStr;
 use std::time::Instant;
 
 use crate::async_lambda;
-use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncBehavior, FuncId, FuncInput, FuncLambda, FuncLib, FuncOutput};
+use crate::data::{DataType, DynamicValue};
+use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 
 #[derive(Debug)]
 pub struct TimersInvoker {

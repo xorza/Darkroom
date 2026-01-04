@@ -3,7 +3,6 @@ use egui::Pos2;
 use egui::epaint::CubicBezierShape;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib};
-use hashbrown::HashMap;
 use std::collections::HashSet;
 
 use crate::gui::connection_breaker::ConnectionBreaker;

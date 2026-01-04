@@ -1,9 +1,9 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
-use crate::function::{Func, FuncBehavior, FuncId};
+use crate::function::{Func, FuncId};
 use common::{deserialize, is_false, serialize, FileFormat, SerdeFormatResult};
 use common::{id_type, is_debug};
 

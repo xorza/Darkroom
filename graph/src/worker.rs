@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
@@ -8,9 +7,8 @@ use common::Shared;
 use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{
-    channel, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::error;
 

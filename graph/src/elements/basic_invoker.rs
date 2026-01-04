@@ -1,5 +1,3 @@
-use std::str::FromStr;
-use std::sync::Arc;
 
 use common::Shared;
 use rand::{Rng, SeedableRng};
@@ -12,7 +10,7 @@ use common::output_stream::OutputStream;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{
-    Func, FuncBehavior, FuncId, FuncInput, FuncLambda, FuncLib, FuncOutput, InvokeCache,
+    Func, FuncBehavior, FuncInput, FuncLib, FuncOutput,
     InvokeInput, ValueOption,
 };
 

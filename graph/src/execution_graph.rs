@@ -1,5 +1,4 @@
 use std::mem::take;
-use std::ops::{Index, IndexMut};
 use std::panic;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};

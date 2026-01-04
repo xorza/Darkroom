@@ -1,20 +1,17 @@
 use eframe::egui;
-use egui::{Key, Pos2, Ui, Vec2};
+use egui::{Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
-use tracing::Instrument;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_drag::ConnectionDrag;
-use crate::gui::connection_ui::{ConnectionKey, ConnectionUi, PortKind};
+use crate::gui::connection_ui::{ConnectionUi, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::NodeUi;
-use crate::model::graph_view;
 use crate::{
     gui::{node_ui, render::RenderContext},
     model,
 };
-use std::collections::HashSet;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;

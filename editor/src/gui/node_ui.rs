@@ -6,7 +6,6 @@ use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{Func, FuncBehavior, FuncLib, NodeBehavior};
 use hashbrown::HashMap;
-use std::collections::HashSet;
 
 use crate::{
     gui::{graph_ui::GraphUiAction, graph_ui::GraphUiInteraction, render::RenderContext},

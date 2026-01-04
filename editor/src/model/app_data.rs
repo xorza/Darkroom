@@ -1,4 +1,4 @@
-use crate::gui::graph_ui::{GraphUi, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui::GraphUiInteraction;
 use anyhow::Result;
 use arc_swap::ArcSwapOption;
 use common::FileFormat;

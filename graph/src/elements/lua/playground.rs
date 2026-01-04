@@ -1,8 +1,6 @@
 use common::Shared;
 use mlua::FromLuaMulti;
-use std::sync::Arc;
 
-use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 struct LuaCtx {

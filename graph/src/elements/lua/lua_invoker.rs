@@ -6,13 +6,11 @@ use std::fmt::Debug;
 use std::mem::take;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::execution_graph::{InputState, OutputUsage};
-use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib, InvokeCache, InvokeInput};
-use crate::graph::{Binding, Graph, Node, NodeId};
+use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib};
+use crate::graph::{Graph, Node, NodeId};
 use crate::{data, function};
 
 #[derive(Clone, Debug)]

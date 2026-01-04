@@ -1,14 +1,7 @@
 use eframe::egui;
-use egui::{Painter, Pos2, Rect, Ui, Vec2};
-use graph::graph::{Node, NodeId};
-use graph::prelude::FuncLib;
-use hashbrown::HashMap;
-use std::marker::PhantomData;
+use egui::{Painter, Rect, Ui};
 
-use crate::{
-    gui::{node_ui, style::Style},
-    model::{self, ViewGraph},
-};
+use crate::gui::style::Style;
 
 pub struct RenderContext<'a> {
     pub ui: &'a mut Ui,

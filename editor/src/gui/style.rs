@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontId, Stroke, TextStyle};
+use egui::{Color32, FontId, Stroke};
 
 const STROKE_WIDTH: f32 = 1.0;
 const HEADER_TEXT_OFFSET: f32 = 4.0;
