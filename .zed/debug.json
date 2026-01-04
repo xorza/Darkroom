@@ -4,15 +4,20 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "program": "editor",
     "label": "Rust (break on panic)",
     "adapter": "CodeLLDB",
     "request": "launch",
     "build": {
       "command": "cargo",
-      "args": ["run", "editor"],
+      "args": ["build", "-p", "scenarium-editor"],
     },
+    "program": "$ZED_WORKTREE_ROOT/target/debug/scenarium-editor",
     "sourceLanguages": ["rust"],
-    "initCommands": ["breakpoint set -n rust_panic"],
+    "initCommands": [
+      "breakpoint set -n rust_panic",
+      "breakpoint set -n rust_begin_unwind",
+      "breakpoint set -n core::panicking::panic_fmt",
+      "breakpoint set -n core::panicking::panic",
+    ],
   },
 ]
