@@ -65,6 +65,7 @@ pub struct GraphUi {
     state: InteractionState,
     connection_breaker: ConnectionBreaker,
     connection_drag: ConnectionDrag,
+    connection_renderer: ConnectionRenderer,
 }
 
 #[derive(Debug, Default)]
@@ -91,6 +92,7 @@ impl GraphUi {
         self.state = InteractionState::Idle;
         self.connection_breaker.reset();
         self.connection_drag.reset();
+        self.connection_renderer = ConnectionRenderer::default();
     }
 
     pub fn render(
@@ -188,8 +190,7 @@ impl GraphUi {
             }
         }
 
-        let mut connections = ConnectionRenderer::default();
-        connections.rebuild(
+        self.connection_renderer.rebuild(
             view_graph,
             func_lib,
             &graph_layout,
@@ -199,7 +200,7 @@ impl GraphUi {
                 None
             },
         );
-        connections.render(&ctx);
+        self.connection_renderer.render(&ctx);
 
         if self.state == InteractionState::Breaking && self.connection_breaker.points.len() > 1 {
             ctx.painter.add(Shape::line(
@@ -230,7 +231,7 @@ impl GraphUi {
         }
 
         if self.state == InteractionState::Breaking && primary_released {
-            for connection in connections.highlighted().iter() {
+            for connection in self.connection_renderer.highlighted().iter() {
                 if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id) {
                     node.inputs[connection.input_idx].binding = Binding::None;
                     ui_interaction.actions.push((
