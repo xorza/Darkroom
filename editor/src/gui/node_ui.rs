@@ -61,7 +61,7 @@ pub fn node_rect_for_graph(
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
 }
 
-pub fn render_node_bodies(
+pub fn render_nodes(
     ctx: &RenderContext,
     graph_layout: &GraphLayout,
     view_graph: &mut model::ViewGraph,

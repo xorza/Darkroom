@@ -198,7 +198,7 @@ impl GraphUi {
             ));
         }
 
-        node_ui::render_node_bodies(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
+        node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
         if self.connection_drag.active {
             if let Some(pos) = pointer_pos {
