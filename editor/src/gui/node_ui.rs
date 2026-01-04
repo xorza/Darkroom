@@ -39,7 +39,8 @@ pub struct NodeLayoutInfo {
     pub close_rect: Rect,
     pub cache_button_rect: Rect,
     pub dot_radius: f32,
-    pub dot_centers: Vec<(Pos2, StatusDotKind)>,
+    pub dot_first_center: Pos2,
+    pub dot_step: f32,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub row_height: f32,
@@ -73,6 +74,13 @@ impl NodeLayoutInfo {
         egui::pos2(
             self.output_first_center.x,
             self.output_first_center.y + self.row_height * index as f32,
+        )
+    }
+
+    pub fn dot_center(&self, index: usize) -> Pos2 {
+        egui::pos2(
+            self.dot_first_center.x - self.dot_step * index as f32,
+            self.dot_first_center.y,
         )
     }
 }
@@ -246,21 +254,31 @@ impl NodeUi {
                 button_text_color,
             );
 
-            for (index, (center, kind)) in layout.dot_centers.iter().enumerate() {
-                let dot_color = match kind {
-                    StatusDotKind::Terminal => ctx.style.status_terminal_color,
-                    StatusDotKind::Impure => ctx.style.status_impure_color,
-                };
-                let tooltip = match kind {
-                    StatusDotKind::Terminal => "terminal",
-                    StatusDotKind::Impure => "impure",
-                };
-                ctx.painter.circle_filled(*center, dot_radius, dot_color);
+            if node.terminal {
+                let center = layout.dot_center(0);
+                let dot_color = ctx.style.status_terminal_color;
+                let tooltip = "terminal";
+                ctx.painter.circle_filled(center, dot_radius, dot_color);
                 let dot_rect = egui::Rect::from_center_size(
-                    *center,
+                    center,
                     egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
                 );
-                let dot_id = ctx.ui.make_persistent_id(("node_status", node.id, index));
+                let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
+                let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+                if dot_response.hovered() {
+                    dot_response.show_tooltip_text(tooltip);
+                }
+            }
+            if func.behavior == FuncBehavior::Impure {
+                let center = layout.dot_center(1);
+                let dot_color = ctx.style.status_impure_color;
+                let tooltip = "impure";
+                ctx.painter.circle_filled(center, dot_radius, dot_color);
+                let dot_rect = egui::Rect::from_center_size(
+                    center,
+                    egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
+                );
+                let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
                 let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
                 if dot_response.hovered() {
                     dot_response.show_tooltip_text(tooltip);
@@ -684,22 +702,12 @@ fn compute_node_layout(
     let close_rect = egui::Rect::from_min_size(close_pos, egui::vec2(close_size, close_size));
 
     let dot_radius = scale * ctx.style.status_dot_radius;
-    let mut dot_centers = Vec::new();
-    let has_terminal = node.terminal;
-    let has_impure = func.behavior == FuncBehavior::Impure;
-    if has_terminal || has_impure {
-        let dot_diameter = dot_radius * 2.0;
-        let dot_gap = scale * ctx.style.status_item_gap;
-        let mut dot_x = close_rect.min.x - node_layout.padding - dot_radius;
+    let dot_step = (dot_radius * 2.0) + scale * ctx.style.status_item_gap;
+    let dot_first_center = {
+        let dot_x = close_rect.min.x - node_layout.padding - dot_radius;
         let dot_center_y = header_rect.center().y;
-        if has_terminal {
-            dot_centers.push((egui::pos2(dot_x, dot_center_y), StatusDotKind::Terminal));
-            dot_x -= dot_diameter + dot_gap;
-        }
-        if has_impure {
-            dot_centers.push((egui::pos2(dot_x, dot_center_y), StatusDotKind::Impure));
-        }
-    }
+        egui::pos2(dot_x, dot_center_y)
+    };
 
     let cache_button_rect = if node_layout.cache_height > 0.0 {
         let cache_button_height = (node_layout.cache_height - vertical_padding * 2.0)
@@ -736,7 +744,8 @@ fn compute_node_layout(
         close_rect,
         cache_button_rect,
         dot_radius,
-        dot_centers,
+        dot_first_center,
+        dot_step,
         input_first_center,
         output_first_center,
         row_height: node_layout.row_height,
