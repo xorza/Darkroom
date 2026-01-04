@@ -364,35 +364,13 @@ fn apply_connection(
         }
     };
 
-    let output_node = view_graph
-        .graph
-        .by_id(&output_port.node_id)
-        .expect("output node must exist");
-    let output_func = func_lib.by_id(&output_node.func_id).unwrap_or_else(|| {
-        panic!(
-            "Missing func for node {} ({})",
-            output_node.name, output_node.func_id
-        )
-    });
-    assert!(
-        output_port.idx < output_func.outputs.len(),
-        "output index must be valid for output node"
-    );
+    let output_node = view_graph.graph.by_id(&output_port.node_id).unwrap();
+    let output_func = func_lib.by_id(&output_node.func_id).unwrap();
+    assert!(output_port.idx < output_func.outputs.len());
 
-    let input_node = view_graph
-        .graph
-        .by_id_mut(&input_port.node_id)
-        .expect("input node must exist");
-    let input_func = func_lib.by_id(&input_node.func_id).unwrap_or_else(|| {
-        panic!(
-            "Missing func for node {} ({})",
-            input_node.name, input_node.func_id
-        )
-    });
-    assert!(
-        input_port.idx < input_func.inputs.len(),
-        "input index must be valid for input node"
-    );
+    let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+    let input_func = func_lib.by_id(&input_node.func_id).unwrap();
+    assert!(input_port.idx < input_func.inputs.len());
     input_node.inputs[input_port.idx].binding = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
         port_idx: output_port.idx,
