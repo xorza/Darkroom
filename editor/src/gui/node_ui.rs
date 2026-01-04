@@ -641,36 +641,36 @@ pub(crate) struct NodeWidthContext<'a> {
 }
 
 pub(crate) fn compute_node_widths(
-    painter: &egui::Painter,
+    ctx: &RenderContext,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    ctx: &NodeWidthContext<'_>,
+    node_layout: &NodeLayout,
 ) -> HashMap<NodeId, f32> {
-    let scale_guess = ctx.node_layout.row_height / 18.0;
+    let scale_guess = node_layout.row_height / 18.0;
     let mut widths = HashMap::with_capacity(view_graph.view_nodes.len());
 
     for node_view in &view_graph.view_nodes {
         let node = view_graph.graph.by_id(&node_view.id).unwrap();
         let func = func_lib.by_id(&node.func_id).unwrap();
         let header_width = text_width(
-            painter,
-            &ctx.style.heading_font.scaled(ctx.scale),
+            &ctx.painter,
+            &ctx.style.heading_font.scaled(view_graph.zoom),
             &node.name,
             ctx.style.text_color,
-        ) + ctx.node_layout.padding * 2.0;
-        let vertical_padding = ctx.node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
-        let cache_button_height = (ctx.node_layout.cache_height - vertical_padding * 2.0)
+        ) + node_layout.padding * 2.0;
+        let vertical_padding = node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
+        let cache_button_height = (node_layout.cache_height - vertical_padding * 2.0)
             .max(10.0 * scale_guess)
-            .min(ctx.node_layout.cache_height);
+            .min(node_layout.cache_height);
         let cache_text_width = text_width(
-            painter,
-            &ctx.style.body_font.scaled(ctx.scale),
+            &ctx.painter,
+            &ctx.style.body_font.scaled(view_graph.zoom),
             "cached",
             ctx.style.text_color,
         )
         .max(text_width(
-            painter,
-            &ctx.style.body_font.scaled(ctx.scale),
+            &ctx.painter,
+            &ctx.style.body_font.scaled(view_graph.zoom),
             "cache",
             ctx.style.text_color,
         ));
@@ -678,10 +678,10 @@ pub(crate) fn compute_node_widths(
             .max(cache_button_height)
             .max(
                 cache_text_width
-                    + ctx.node_layout.padding * ctx.style.cache_button_text_pad_factor * 2.0,
+                    + node_layout.padding * ctx.style.cache_button_text_pad_factor * 2.0,
             );
-        let cache_row_width = if ctx.node_layout.cache_height > 0.0 {
-            ctx.node_layout.padding + cache_button_width + ctx.node_layout.padding
+        let cache_row_width = if node_layout.cache_height > 0.0 {
+            node_layout.padding + cache_button_width + node_layout.padding
         } else {
             0.0
         };
@@ -690,7 +690,7 @@ pub(crate) fn compute_node_widths(
             let count = 2usize;
             let gaps = (count - 1) as f32;
             let total = count as f32 * dot_diameter + gaps * ctx.style.status_item_gap;
-            ctx.node_layout.padding + total + ctx.node_layout.padding
+            node_layout.padding + total + node_layout.padding
         };
 
         let input_widths: Vec<f32> = func
@@ -698,8 +698,8 @@ pub(crate) fn compute_node_widths(
             .iter()
             .map(|input| {
                 text_width(
-                    painter,
-                    &ctx.style.body_font.scaled(ctx.scale),
+                    &ctx.painter,
+                    &ctx.style.body_font.scaled(view_graph.zoom),
                     &input.name,
                     ctx.style.text_color,
                 )
@@ -710,8 +710,8 @@ pub(crate) fn compute_node_widths(
             .iter()
             .map(|output| {
                 text_width(
-                    painter,
-                    &ctx.style.body_font.scaled(ctx.scale),
+                    &ctx.painter,
+                    &ctx.style.body_font.scaled(view_graph.zoom),
                     &output.name,
                     ctx.style.text_color,
                 )
@@ -725,14 +725,14 @@ pub(crate) fn compute_node_widths(
         for row in 0..row_count {
             let left = input_widths.get(row).copied().unwrap_or(0.0);
             let right = output_widths.get(row).copied().unwrap_or(0.0);
-            let mut row_width = ctx.node_layout.padding * 2.0 + left + right;
+            let mut row_width = node_layout.padding * 2.0 + left + right;
             if left > 0.0 && right > 0.0 {
                 row_width += inter_side_padding;
             }
             max_row_width = max_row_width.max(row_width);
         }
 
-        let computed = ctx.node_layout.node_width.max(
+        let computed = node_layout.node_width.max(
             header_width
                 .max(max_row_width)
                 .max(cache_row_width)
