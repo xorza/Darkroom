@@ -142,11 +142,13 @@ impl DynamicValue {
         }
     }
     pub fn as_int(&self) -> i64 {
+        self.try_into().unwrap()
+    }
+    pub fn none_or_int(&self) -> Option<i64> {
         match self {
-            DynamicValue::Int(value) => *value,
-            _ => {
-                panic!("Value is not an int")
-            }
+            DynamicValue::Int(value) => Some(*value),
+            DynamicValue::None => None,
+            _ => panic!("Value is not a bool"),
         }
     }
     pub fn as_bool(&self) -> bool {
@@ -458,17 +460,6 @@ impl From<bool> for DynamicValue {
     }
 }
 
-impl From<DynamicValue> for i64 {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::Int(value) => value,
-            _ => {
-                panic!("Value is not an int")
-            }
-        }
-    }
-}
-
 impl From<DynamicValue> for f64 {
     fn from(value: DynamicValue) -> Self {
         match value {
@@ -520,6 +511,17 @@ impl From<DynamicValue> for String {
             _ => {
                 panic!("Value is not a string")
             }
+        }
+    }
+}
+
+impl TryFrom<&DynamicValue> for i64 {
+    type Error = ();
+
+    fn try_from(value: &DynamicValue) -> Result<Self, Self::Error> {
+        match value {
+            DynamicValue::Int(value) => Ok(*value),
+            _ => Err(()),
         }
     }
 }
