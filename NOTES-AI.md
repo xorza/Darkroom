@@ -218,3 +218,4 @@ Graph UI now stores a persistent `ConnectionRenderer` whose `render` method rebu
 `ConnectionBreaker` now has a `render` helper to draw its breaker path when active.
 `ConnectionBreaker` now lives in `editor/src/gui/connection_breaker.rs` to keep connection rendering helpers separate.
 `ConnectionRenderer` now owns its connection drawing logic via a `draw` helper instead of a free function.
+`ConnectionRenderer` now collects curves into its reusable `curves` buffer via a method instead of returning a new vector.

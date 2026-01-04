@@ -37,7 +37,7 @@ impl ConnectionRenderer {
         func_lib: &FuncLib,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.curves = collect_connection_curves(graph_layout, view_graph, func_lib);
+        self.collect_curves(graph_layout, view_graph, func_lib);
         self.highlighted = breaker
             .filter(|&breaker| breaker.points.len() > 1)
             .map(|breaker| connection_hits(&self.curves, &breaker.points))
@@ -73,6 +73,65 @@ impl ConnectionRenderer {
                 stroke,
             );
             ctx.painter.add(shape);
+        }
+    }
+
+    fn collect_curves(
+        &mut self,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        func_lib: &FuncLib,
+    ) {
+        self.curves.clear();
+
+        //todo use KeyVector for ViewNode colection in ViewGraph
+        let node_lookup: HashMap<_, _> = view_graph
+            .view_nodes
+            .iter()
+            .map(|node| (node.id, node))
+            .collect();
+
+        for node_view in &view_graph.view_nodes {
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
+
+            for (input_index, input) in node.inputs.iter().enumerate() {
+                let Binding::Bind(binding) = &input.binding else {
+                    continue;
+                };
+                let source_view = node_lookup.get(&binding.target_id).unwrap();
+                let source_width = graph_layout
+                    .node_widths
+                    .get(&binding.target_id)
+                    .copied()
+                    .unwrap();
+                let start = node_ui::node_output_pos(
+                    graph_layout.origin,
+                    source_view,
+                    binding.port_idx,
+                    &graph_layout.node_layout,
+                    view_graph.zoom,
+                    source_width,
+                );
+                let end = node_ui::node_input_pos(
+                    graph_layout.origin,
+                    node_view,
+                    input_index,
+                    func.inputs.len(),
+                    &graph_layout.node_layout,
+                    view_graph.zoom,
+                );
+                let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
+                self.curves.push(ConnectionCurve {
+                    key: ConnectionKey {
+                        input_node_id: node.id,
+                        input_idx: input_index,
+                    },
+                    start,
+                    end,
+                    control_offset,
+                });
+            }
         }
     }
 }
@@ -111,64 +170,6 @@ struct ConnectionCurve {
     start: Pos2,
     end: Pos2,
     control_offset: f32,
-}
-
-fn collect_connection_curves(
-    graph_layout: &GraphLayout,
-    view_graph: &model::ViewGraph,
-    func_lib: &FuncLib,
-) -> Vec<ConnectionCurve> {
-    let node_lookup: HashMap<_, _> = view_graph
-        .view_nodes
-        .iter()
-        .map(|node| (node.id, node))
-        .collect();
-    let mut curves = Vec::new();
-
-    for node_view in &view_graph.view_nodes {
-        let node = view_graph.graph.by_id(&node_view.id).unwrap();
-        let func = func_lib.by_id(&node.func_id).unwrap();
-
-        for (input_index, input) in node.inputs.iter().enumerate() {
-            let Binding::Bind(binding) = &input.binding else {
-                continue;
-            };
-            let source_view = node_lookup.get(&binding.target_id).unwrap();
-            let source_width = graph_layout
-                .node_widths
-                .get(&binding.target_id)
-                .copied()
-                .unwrap();
-            let start = node_ui::node_output_pos(
-                graph_layout.origin,
-                source_view,
-                binding.port_idx,
-                &graph_layout.node_layout,
-                view_graph.zoom,
-                source_width,
-            );
-            let end = node_ui::node_input_pos(
-                graph_layout.origin,
-                node_view,
-                input_index,
-                func.inputs.len(),
-                &graph_layout.node_layout,
-                view_graph.zoom,
-            );
-            let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
-            curves.push(ConnectionCurve {
-                key: ConnectionKey {
-                    input_node_id: node.id,
-                    input_idx: input_index,
-                },
-                start,
-                end,
-                control_offset,
-            });
-        }
-    }
-
-    curves
 }
 
 fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
