@@ -114,7 +114,7 @@ impl GraphUi {
             ui_interaction,
         );
 
-        top_panel(view_graph, func_lib, &mut ctx, &self.graph_layout);
+        self.top_panel(view_graph, func_lib, &mut ctx);
     }
 
     fn process_connections(
