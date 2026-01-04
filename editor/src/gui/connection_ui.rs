@@ -47,6 +47,7 @@ impl ConnectionRenderer {
     ) {
         self.collect_curves(graph_layout, view_graph, func_lib);
 
+        self.highlighted.clear();
         if let Some(breaker) = breaker {
             self.collect_highlighted(breaker);
         }
@@ -137,8 +138,6 @@ impl ConnectionRenderer {
     }
 
     fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
-        self.highlighted.clear();
-
         if breaker.points.len() < 2 {
             return;
         }
