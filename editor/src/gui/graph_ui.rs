@@ -101,6 +101,9 @@ impl GraphUi {
             self.process_connections(&mut ctx, graph_bg_id, ui_interaction, pointer_pos);
         }
 
+        self.node_ui
+            .process_input(&mut ctx, &mut self.graph_layout, ui_interaction);
+
         self.render_connections(&mut ctx);
 
         let drag_port_info =

@@ -61,19 +61,15 @@ impl NodeLayout {
 }
 
 impl NodeUi {
-    pub fn render_nodes(
+    pub fn process_input(
         &mut self,
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
-    ) -> PortDragInfo {
-        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
-
+    ) {
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
             let node_rect = graph_layout.node_rect(&view_node_id);
-
-            // === body interaction
 
             let node_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
             let body_response = ctx.ui.interact(
@@ -100,9 +96,22 @@ impl NodeUi {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeSelected));
+                ctx.view_graph.select_node(&view_node_id);
             }
+        }
+    }
 
-            // === body interaction
+    pub fn render_nodes(
+        &mut self,
+        ctx: &mut GraphContext,
+        graph_layout: &mut GraphLayout,
+        ui_interaction: &mut GraphUiInteraction,
+    ) -> PortDragInfo {
+        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
+
+        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
+            let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+            let node_rect = graph_layout.node_rect(&view_node_id);
 
             let node = ctx.view_graph.graph.by_id_mut(&view_node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -220,20 +229,15 @@ impl NodeUi {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeRemoved));
+                ctx.view_graph.remove_node(&view_node_id);
 
                 continue;
             }
 
-            let selected_id = if body_response.clicked() {
-                ui_interaction
-                    .actions
-                    .push((view_node_id, GraphUiAction::NodeSelected));
-                Some(view_node_id)
-            } else {
-                ctx.view_graph.selected_node_id
-            };
-
-            let is_selected = selected_id.is_some_and(|id| id == view_node_id);
+            let is_selected = ctx
+                .view_graph
+                .selected_node_id
+                .is_some_and(|id| id == view_node_id);
 
             ctx.painter.rect(
                 node_rect,
@@ -354,18 +358,6 @@ impl NodeUi {
                 (PortDragInfo::DragStop, _) => {}
                 (PortDragInfo::None, _) => drag_port_info = node_drag_port_result,
                 (_, PortDragInfo::DragStart(_)) => drag_port_info = node_drag_port_result,
-                _ => {}
-            }
-        }
-
-        for action in ui_interaction.actions.iter() {
-            match action {
-                (node_id, GraphUiAction::NodeRemoved) => {
-                    ctx.view_graph.remove_node(node_id);
-                }
-                (node_id, GraphUiAction::NodeSelected) => {
-                    ctx.view_graph.select_node(node_id);
-                }
                 _ => {}
             }
         }
