@@ -4,8 +4,9 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::connection_drag::ConnectionDrag;
 use crate::gui::connection_ui::{ConnectionKey, ConnectionRenderer, PortKind};
-use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
+use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::NodeUi;
 use crate::model::graph_view;
 use crate::{
@@ -31,62 +32,6 @@ enum PrimaryState {
     Pressed,
     Down,
     Released,
-}
-
-#[derive(Debug)]
-struct ConnectionDrag {
-    start_port: PortRef,
-    start_pos: Pos2,
-    current_pos: Pos2,
-}
-
-impl Default for ConnectionDrag {
-    fn default() -> Self {
-        let placeholder = PortRef {
-            node_id: NodeId::nil(),
-            idx: 0,
-            kind: PortKind::Output,
-        };
-        Self {
-            start_port: placeholder,
-            start_pos: Pos2::ZERO,
-            current_pos: Pos2::ZERO,
-        }
-    }
-}
-
-impl ConnectionDrag {
-    fn start(&mut self, port: PortInfo) {
-        self.start_port = port.port;
-        self.start_pos = port.center;
-        self.current_pos = port.center;
-    }
-
-    fn render(&self, ctx: &RenderContext, scale: f32) {
-        let control_offset =
-            node_ui::bezier_control_offset(self.start_pos, self.current_pos, scale);
-        let (start_sign, end_sign) = match self.start_port.kind {
-            PortKind::Output => (1.0, -1.0),
-            PortKind::Input => (-1.0, 1.0),
-        };
-        let stroke = ctx.style.temp_connection_stroke;
-        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
-            [
-                self.start_pos,
-                self.start_pos + egui::vec2(control_offset * start_sign, 0.0),
-                self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
-                self.current_pos,
-            ],
-            false,
-            egui::Color32::TRANSPARENT,
-            stroke,
-        );
-        ctx.painter.add(shape);
-    }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
-    }
 }
 
 #[derive(Debug, Default)]

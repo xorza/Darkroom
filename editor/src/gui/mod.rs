@@ -1,4 +1,5 @@
 pub mod connection_breaker;
+pub mod connection_drag;
 pub mod connection_ui;
 pub mod graph_layout;
 pub mod graph_ui;
