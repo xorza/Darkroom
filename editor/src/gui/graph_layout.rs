@@ -65,6 +65,7 @@ impl GraphLayout {
             self.scale,
             &mut self.node_rects,
         );
+
         self.collect_ports(view_graph, func_lib);
     }
 
@@ -102,6 +103,18 @@ impl GraphLayout {
         self.node_rects
             .iter()
             .any(|(_, rect)| rect.contains(pointer_pos))
+    }
+
+    pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode) {
+        let rect = self
+            .node_rects
+            .get(&view_node.id)
+            .copied()
+            .expect("node rect must be precomputed for view node");
+        let size = rect.size();
+        let min = self.origin + view_node.pos.to_vec2() * self.scale;
+        self.node_rects
+            .insert(view_node.id, Rect::from_min_size(min, size));
     }
 
     fn collect_ports(&mut self, view_graph: &model::ViewGraph, func_lib: &FuncLib) {

@@ -53,6 +53,75 @@ impl NodeLayout {
 }
 
 impl NodeUi {
+    pub fn process_caption_drag(
+        &mut self,
+        ctx: &RenderContext,
+        graph_layout: &mut GraphLayout,
+        view_graph: &mut model::ViewGraph,
+        func_lib: &FuncLib,
+        ui_interaction: &mut GraphUiInteraction,
+    ) {
+        for node_view in &mut view_graph.view_nodes {
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
+            let node_rect = *graph_layout
+                .node_rects
+                .get(&node.id)
+                .expect("node rect must be precomputed for view node");
+            let header_rect = egui::Rect::from_min_size(
+                node_rect.min,
+                egui::vec2(node_rect.width(), graph_layout.node_layout.header_height),
+            );
+            let button_size = (graph_layout.node_layout.header_height
+                - graph_layout.node_layout.padding)
+                .max(12.0 * graph_layout.scale)
+                .min(graph_layout.node_layout.header_height);
+            let button_pos = egui::pos2(
+                node_rect.max.x - graph_layout.node_layout.padding - button_size,
+                node_rect.min.y + (graph_layout.node_layout.header_height - button_size) * 0.5,
+            );
+            let close_rect =
+                egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
+            let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
+            let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
+            let has_terminal = node.terminal;
+            let has_impure = func.behavior == FuncBehavior::Impure;
+            if has_terminal || has_impure {
+                let dot_diameter = dot_radius * 2.0;
+                let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
+                let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
+                if has_terminal {
+                    dot_x -= dot_diameter + dot_gap;
+                }
+                if has_impure {
+                    dot_x -= dot_diameter + dot_gap;
+                }
+                header_drag_right = dot_x + dot_gap - graph_layout.node_layout.padding;
+            }
+            let header_drag_rect = egui::Rect::from_min_max(
+                header_rect.min,
+                egui::pos2(header_drag_right, header_rect.max.y),
+            );
+
+            let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
+            let response = ctx
+                .ui
+                .interact(header_drag_rect, header_id, egui::Sense::drag());
+
+            if response.dragged() {
+                node_view.pos += response.drag_delta() / graph_layout.scale;
+                graph_layout.update_node_rect_position(node_view);
+                ui_interaction
+                    .actions
+                    .push((node_view.id, GraphUiAction::NodeSelected));
+            } else if response.clicked() {
+                ui_interaction
+                    .actions
+                    .push((node_view.id, GraphUiAction::NodeSelected));
+            }
+        }
+    }
+
     pub fn render_nodes(
         &mut self,
         ctx: &RenderContext,
@@ -101,7 +170,6 @@ impl NodeUi {
             );
             let close_rect =
                 egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
-            let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
             let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
             let mut dot_centers = Vec::new();
             let has_terminal = node.terminal;
@@ -116,14 +184,8 @@ impl NodeUi {
                 }
                 if has_impure {
                     dot_centers.push((dot_x, "impure", egui::Color32::from_rgb(255, 150, 70)));
-                    dot_x -= dot_diameter + dot_gap;
                 }
-                header_drag_right = dot_x + dot_gap - graph_layout.node_layout.padding;
             }
-            let header_drag_rect = egui::Rect::from_min_max(
-                header_rect.min,
-                egui::pos2(header_drag_right, header_rect.max.y),
-            );
             let cache_button_height = if graph_layout.node_layout.cache_height > 0.0 {
                 let vertical_padding =
                     graph_layout.node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
@@ -183,15 +245,6 @@ impl NodeUi {
                 },
             );
 
-            let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
-            let response = ctx
-                .ui
-                .interact(header_drag_rect, header_id, egui::Sense::drag());
-
-            if response.dragged() {
-                node_view.pos += response.drag_delta() / graph_layout.scale;
-            }
-
             if cache_enabled && cache_response.clicked() {
                 node.behavior = if node.behavior == NodeBehavior::Once {
                     NodeBehavior::AsFunction
@@ -215,8 +268,7 @@ impl NodeUi {
                 continue;
             }
 
-            let selected_id = if response.clicked() || response.dragged() || body_response.clicked()
-            {
+            let selected_id = if body_response.clicked() {
                 ui_interaction
                     .actions
                     .push((node_view.id, GraphUiAction::NodeSelected));
