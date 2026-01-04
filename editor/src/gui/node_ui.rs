@@ -52,7 +52,7 @@ impl NodeLayout {
 }
 
 impl NodeUi {
-    pub fn process_caption_drag(
+    pub fn process_drag(
         &mut self,
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
@@ -68,7 +68,7 @@ impl NodeUi {
             );
             let button_size = (graph_layout.node_layout.header_height
                 - graph_layout.node_layout.padding)
-                .max(12.0 * graph_layout.scale)
+                .max(12.0 * ctx.view_graph.scale)
                 .min(graph_layout.node_layout.header_height);
             let button_pos = egui::pos2(
                 node_rect.max.x - graph_layout.node_layout.padding - button_size,
@@ -77,12 +77,12 @@ impl NodeUi {
             let close_rect =
                 egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
             let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
-            let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
+            let dot_radius = ctx.view_graph.scale * ctx.style.status_dot_radius;
             let has_terminal = node.terminal;
             let has_impure = func.behavior == FuncBehavior::Impure;
             if has_terminal || has_impure {
                 let dot_diameter = dot_radius * 2.0;
-                let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
+                let dot_gap = ctx.view_graph.scale * ctx.style.status_item_gap;
                 let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
                 if has_terminal {
                     dot_x -= dot_diameter + dot_gap;
@@ -103,8 +103,8 @@ impl NodeUi {
                 .interact(header_drag_rect, header_id, egui::Sense::drag());
 
             if response.dragged() {
-                node_view.pos += response.drag_delta() / graph_layout.scale;
-                graph_layout.update_node_rect_position(node_view);
+                node_view.pos += response.drag_delta() / ctx.view_graph.scale;
+                graph_layout.update_node_rect_position(node_view, ctx.view_graph.scale);
                 ui_interaction
                     .actions
                     .push((node_view.id, GraphUiAction::NodeSelected));
@@ -137,7 +137,7 @@ impl NodeUi {
                 node_width,
             );
             let node_rect = egui::Rect::from_min_size(
-                graph_layout.origin + view_node.pos.to_vec2() * graph_layout.scale,
+                graph_layout.origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
                 node_size,
             );
             let header_rect = egui::Rect::from_min_size(
@@ -150,7 +150,7 @@ impl NodeUi {
             );
             let button_size = (graph_layout.node_layout.header_height
                 - graph_layout.node_layout.padding)
-                .max(12.0 * graph_layout.scale)
+                .max(12.0 * ctx.view_graph.scale)
                 .min(graph_layout.node_layout.header_height);
             let button_pos = egui::pos2(
                 node_rect.max.x - graph_layout.node_layout.padding - button_size,
@@ -158,13 +158,13 @@ impl NodeUi {
             );
             let close_rect =
                 egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
-            let dot_radius = graph_layout.scale * ctx.style.status_dot_radius;
+            let dot_radius = ctx.view_graph.scale * ctx.style.status_dot_radius;
             let mut dot_centers = Vec::new();
             let has_terminal = node.terminal;
             let has_impure = func.behavior == FuncBehavior::Impure;
             if has_terminal || has_impure {
                 let dot_diameter = dot_radius * 2.0;
-                let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
+                let dot_gap = ctx.view_graph.scale * ctx.style.status_item_gap;
                 let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
                 if has_terminal {
                     dot_centers.push((dot_x, "terminal", ctx.style.status_terminal_color));
@@ -178,7 +178,7 @@ impl NodeUi {
                 let vertical_padding =
                     graph_layout.node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
                 (graph_layout.node_layout.cache_height - vertical_padding * 2.0)
-                    .max(10.0 * graph_layout.scale)
+                    .max(10.0 * ctx.view_graph.scale)
                     .min(graph_layout.node_layout.cache_height)
             } else {
                 0.0
@@ -189,13 +189,13 @@ impl NodeUi {
             let cache_text_width = if graph_layout.node_layout.cache_height > 0.0 {
                 let cached_width = text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(graph_layout.scale),
+                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
                     "cached",
                     ctx.style.text_color,
                 );
                 let cache_width = text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(graph_layout.scale),
+                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
                     "cache",
                     ctx.style.text_color,
                 );
@@ -312,7 +312,7 @@ impl NodeUi {
                     cache_button_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     button_text,
-                    ctx.style.body_font.scaled(graph_layout.scale),
+                    ctx.style.body_font.scaled(ctx.view_graph.scale),
                     button_text_color,
                 );
             }
@@ -365,7 +365,7 @@ impl NodeUi {
                 close_rect.min.y + close_margin,
             );
             let close_color = ctx.style.widget_text_color;
-            let close_stroke = egui::Stroke::new(1.4 * graph_layout.scale, close_color);
+            let close_stroke = egui::Stroke::new(1.4 * ctx.view_graph.scale, close_color);
             ctx.painter.line_segment([a, b], close_stroke);
             ctx.painter.line_segment([c, d], close_stroke);
 
@@ -423,13 +423,13 @@ fn render_node_ports(
             index,
             input_count,
             &graph_layout.node_layout,
-            graph_layout.scale,
+            ctx.view_graph.scale,
         );
         let port_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(
-                graph_layout.scale * ctx.style.port_radius * 2.0,
-                graph_layout.scale * ctx.style.port_radius * 2.0,
+                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
+                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
             ),
         );
         let color = if ctx.ui.rect_contains_pointer(port_rect) {
@@ -438,7 +438,7 @@ fn render_node_ports(
             ctx.style.input_port_color
         };
         ctx.painter
-            .circle_filled(center, graph_layout.scale * ctx.style.port_radius, color);
+            .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
     }
 
     for index in 0..output_count {
@@ -447,14 +447,14 @@ fn render_node_ports(
             &ctx.view_graph.view_nodes[view_node_idx],
             index,
             &graph_layout.node_layout,
-            graph_layout.scale,
+            ctx.view_graph.scale,
             node_width,
         );
         let port_rect = egui::Rect::from_center_size(
             center,
             egui::vec2(
-                graph_layout.scale * ctx.style.port_radius * 2.0,
-                graph_layout.scale * ctx.style.port_radius * 2.0,
+                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
+                ctx.view_graph.scale * ctx.style.port_radius * 2.0,
             ),
         );
         let color = if ctx.ui.rect_contains_pointer(port_rect) {
@@ -463,7 +463,7 @@ fn render_node_ports(
             ctx.style.output_port_color
         };
         ctx.painter
-            .circle_filled(center, graph_layout.scale * ctx.style.port_radius, color);
+            .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
     }
 }
 
@@ -476,10 +476,10 @@ fn render_node_const_bindings(
     let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-    let badge_padding = 4.0 * graph_layout.scale;
-    let badge_height = (graph_layout.node_layout.row_height * 1.2).max(10.0 * graph_layout.scale);
-    let badge_radius = 6.0 * graph_layout.scale;
-    let badge_gap = 6.0 * graph_layout.scale;
+    let badge_padding = 4.0 * ctx.view_graph.scale;
+    let badge_height = (graph_layout.node_layout.row_height * 1.2).max(10.0 * ctx.view_graph.scale);
+    let badge_radius = 6.0 * ctx.view_graph.scale;
+    let badge_gap = 6.0 * ctx.view_graph.scale;
 
     for (index, input) in node.inputs.iter().enumerate() {
         if index >= func.inputs.len() {
@@ -503,9 +503,9 @@ fn render_node_const_bindings(
             index,
             func.inputs.len(),
             &graph_layout.node_layout,
-            graph_layout.scale,
+            ctx.view_graph.scale,
         );
-        let badge_right = center.x - graph_layout.scale * ctx.style.port_radius - badge_gap;
+        let badge_right = center.x - ctx.view_graph.scale * ctx.style.port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
             egui::pos2(badge_right, center.y + badge_height * 0.5),
@@ -513,7 +513,7 @@ fn render_node_const_bindings(
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
         let link_end = egui::pos2(
-            center.x - graph_layout.scale * ctx.style.port_radius * 0.6,
+            center.x - ctx.view_graph.scale * ctx.style.port_radius * 0.6,
             center.y,
         );
         ctx.painter
@@ -529,7 +529,7 @@ fn render_node_const_bindings(
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            ctx.style.body_font.scaled(graph_layout.scale),
+            ctx.style.body_font.scaled(ctx.view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -564,7 +564,7 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
     let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-    let header_text_offset = graph_layout.scale * ctx.style.header_text_offset;
+    let header_text_offset = ctx.view_graph.scale * ctx.style.header_text_offset;
 
     let node_rect = graph_layout.node_rect(&view_node.id);
 
@@ -572,7 +572,7 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
         node_rect.min + egui::vec2(graph_layout.node_layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
         &mut node.name,
-        ctx.style.heading_font.scaled(graph_layout.scale),
+        ctx.style.heading_font.scaled(ctx.view_graph.scale),
         ctx.style.text_color,
     );
 
@@ -589,7 +589,7 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
             text_pos,
             egui::Align2::LEFT_TOP,
             &input.name,
-            ctx.style.body_font.scaled(graph_layout.scale),
+            ctx.style.body_font.scaled(ctx.view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -607,7 +607,7 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
             text_pos,
             egui::Align2::RIGHT_TOP,
             &output.name,
-            ctx.style.body_font.scaled(graph_layout.scale),
+            ctx.style.body_font.scaled(ctx.view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -678,7 +678,6 @@ pub(crate) fn compute_node_rects(
     ctx: &GraphContext,
     node_layout: &NodeLayout,
     origin: Pos2,
-    scale: f32,
     node_rects: &mut HashMap<NodeId, Rect>,
 ) {
     node_rects.clear();
@@ -690,7 +689,7 @@ pub(crate) fn compute_node_rects(
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
         let header_width = text_width(
             &ctx.painter,
-            &ctx.style.heading_font.scaled(ctx.scale),
+            &ctx.style.heading_font.scaled(ctx.view_graph.scale),
             &node.name,
             ctx.style.text_color,
         ) + node_layout.padding * 2.0;
@@ -700,13 +699,13 @@ pub(crate) fn compute_node_rects(
             .min(node_layout.cache_height);
         let cache_text_width = text_width(
             &ctx.painter,
-            &ctx.style.body_font.scaled(ctx.scale),
+            &ctx.style.body_font.scaled(ctx.view_graph.scale),
             "cached",
             ctx.style.text_color,
         )
         .max(text_width(
             &ctx.painter,
-            &ctx.style.body_font.scaled(ctx.scale),
+            &ctx.style.body_font.scaled(ctx.view_graph.scale),
             "cache",
             ctx.style.text_color,
         ));
@@ -735,7 +734,7 @@ pub(crate) fn compute_node_rects(
             .map(|input| {
                 text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.scale),
+                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
                     &input.name,
                     ctx.style.text_color,
                 )
@@ -747,7 +746,7 @@ pub(crate) fn compute_node_rects(
             .map(|output| {
                 text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.scale),
+                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
                     &output.name,
                     ctx.style.text_color,
                 )
@@ -780,7 +779,7 @@ pub(crate) fn compute_node_rects(
             view_node,
             func.inputs.len(),
             func.outputs.len(),
-            scale,
+            ctx.view_graph.scale,
             node_layout,
             computed,
         );

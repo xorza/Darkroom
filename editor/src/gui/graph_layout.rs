@@ -24,7 +24,6 @@ pub struct PortInfo {
 #[derive(Debug)]
 pub struct GraphLayout {
     pub origin: Pos2,
-    pub scale: f32,
     pub rect: Rect,
     pub node_layout: node_ui::NodeLayout,
     pub node_rects: HashMap<NodeId, Rect>,
@@ -35,7 +34,6 @@ impl Default for GraphLayout {
     fn default() -> Self {
         Self {
             origin: Pos2::ZERO,
-            scale: 1.0,
             rect: Rect::NOTHING,
             node_layout: node_ui::NodeLayout::default(),
             node_rects: HashMap::new(),
@@ -46,18 +44,11 @@ impl Default for GraphLayout {
 
 impl GraphLayout {
     pub fn update(&mut self, ctx: &GraphContext) {
-        self.origin = ctx.rect.min + ctx.pan;
-        self.scale = ctx.scale;
+        self.origin = ctx.rect.min + ctx.view_graph.pan;
         self.rect = ctx.rect;
-        self.node_layout = node_ui::NodeLayout::default().scaled(ctx.scale);
+        self.node_layout = node_ui::NodeLayout::default().scaled(ctx.view_graph.scale);
 
-        node_ui::compute_node_rects(
-            ctx,
-            &self.node_layout,
-            self.origin,
-            self.scale,
-            &mut self.node_rects,
-        );
+        node_ui::compute_node_rects(ctx, &self.node_layout, self.origin, &mut self.node_rects);
 
         self.collect_ports(ctx);
     }
@@ -98,10 +89,10 @@ impl GraphLayout {
             .any(|(_, rect)| rect.contains(pointer_pos))
     }
 
-    pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode) {
+    pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode, scale: f32) {
         let rect = self.node_rect(&view_node.id);
         let size = rect.size();
-        let min = self.origin + view_node.pos.to_vec2() * self.scale;
+        let min = self.origin + view_node.pos.to_vec2() * scale;
         self.node_rects
             .insert(view_node.id, Rect::from_min_size(min, size));
     }
@@ -123,7 +114,7 @@ impl GraphLayout {
                     index,
                     func.inputs.len(),
                     &self.node_layout,
-                    self.scale,
+                    ctx.view_graph.scale,
                 );
 
                 self.ports.push(PortInfo {
@@ -141,7 +132,7 @@ impl GraphLayout {
                     node_view,
                     index,
                     &self.node_layout,
-                    self.scale,
+                    ctx.view_graph.scale,
                     node_width,
                 );
 
