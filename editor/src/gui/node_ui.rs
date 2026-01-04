@@ -737,105 +737,110 @@ pub(crate) fn compute_node_rects(
     node_rects.clear();
 
     for view_node in ctx.view_graph.view_nodes.iter() {
-        let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-        let header_width = text_width(
-            &ctx.painter,
-            &ctx.style.heading_font.scaled(ctx.view_graph.scale),
-            &node.name,
-            ctx.style.text_color,
-        ) + node_layout.padding * 2.0;
-        let vertical_padding = node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
-        let cache_button_height = (node_layout.cache_height - vertical_padding * 2.0)
-            .max(10.0 * ctx.view_graph.scale)
-            .min(node_layout.cache_height);
-        let cache_text_width = text_width(
-            &ctx.painter,
-            &ctx.style.body_font.scaled(ctx.view_graph.scale),
-            "cache",
-            ctx.style.text_color,
-        );
-        let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
-            .max(cache_button_height)
-            .max(
-                cache_text_width
-                    + node_layout.padding * ctx.style.cache_button_text_pad_factor * 2.0,
-            );
-        let cache_row_width = if node_layout.cache_height > 0.0 {
-            node_layout.padding + cache_button_width + node_layout.padding
-        } else {
-            0.0
-        };
-        let status_row_width = {
-            let dot_diameter = ctx.style.status_dot_radius * 2.0;
-            let count = 2usize;
-            let gaps = (count - 1) as f32;
-            let total = count as f32 * dot_diameter + gaps * ctx.style.status_item_gap;
-            node_layout.padding + total + node_layout.padding
-        };
-
-        let input_widths: Vec<f32> = func
-            .inputs
-            .iter()
-            .map(|input| {
-                text_width(
-                    &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
-                    &input.name,
-                    ctx.style.text_color,
-                )
-            })
-            .collect();
-        let output_widths: Vec<f32> = func
-            .outputs
-            .iter()
-            .map(|output| {
-                text_width(
-                    &ctx.painter,
-                    &ctx.style.body_font.scaled(ctx.view_graph.scale),
-                    &output.name,
-                    ctx.style.text_color,
-                )
-            })
-            .collect();
-
-        let row_count = func.inputs.len().max(func.outputs.len()).max(1);
-        let mut max_row_width: f32 = 0.0;
-
-        let inter_side_padding = 0.0;
-        for row in 0..row_count {
-            let left = input_widths.get(row).copied().unwrap_or(0.0);
-            let right = output_widths.get(row).copied().unwrap_or(0.0);
-            let mut row_width = node_layout.padding * 2.0 + left + right;
-            if left > 0.0 && right > 0.0 {
-                row_width += inter_side_padding;
-            }
-            max_row_width = max_row_width.max(row_width);
-        }
-
-        let node_width = node_layout
-            .node_width
-            .max(header_width)
-            .max(max_row_width)
-            .max(cache_row_width)
-            .max(status_row_width);
-
-        let row_count = func.inputs.len().max(func.outputs.len()).max(1);
-        let height = node_layout.header_height
-            + node_layout.cache_height
-            + node_layout.padding
-            + node_layout.row_height * row_count as f32
-            + node_layout.padding;
-        let node_size = egui::vec2(node_width, height);
-
-        let rect = egui::Rect::from_min_size(
-            origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
-            node_size,
-        );
-
-        node_rects.insert(node.id, rect);
+        let rect = compute_node_rect(ctx, node_layout, origin, view_node);
+        node_rects.insert(view_node.id, rect);
     }
+}
+
+fn compute_node_rect(
+    ctx: &GraphContext,
+    node_layout: &NodeLayout,
+    origin: Pos2,
+    view_node: &model::ViewNode,
+) -> Rect {
+    let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
+    let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+
+    let header_width = text_width(
+        &ctx.painter,
+        &ctx.style.heading_font.scaled(ctx.view_graph.scale),
+        &node.name,
+        ctx.style.text_color,
+    ) + node_layout.padding * 2.0;
+    let vertical_padding = node_layout.padding * ctx.style.cache_button_vertical_pad_factor;
+    let cache_button_height = (node_layout.cache_height - vertical_padding * 2.0)
+        .max(10.0 * ctx.view_graph.scale)
+        .min(node_layout.cache_height);
+    let cache_text_width = text_width(
+        &ctx.painter,
+        &ctx.style.body_font.scaled(ctx.view_graph.scale),
+        "cache",
+        ctx.style.text_color,
+    );
+    let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
+        .max(cache_button_height)
+        .max(cache_text_width + node_layout.padding * ctx.style.cache_button_text_pad_factor * 2.0);
+    let cache_row_width = if node_layout.cache_height > 0.0 {
+        node_layout.padding + cache_button_width + node_layout.padding
+    } else {
+        0.0
+    };
+    let status_row_width = {
+        let dot_diameter = ctx.style.status_dot_radius * 2.0;
+        let count = 2usize;
+        let gaps = (count - 1) as f32;
+        let total = count as f32 * dot_diameter + gaps * ctx.style.status_item_gap;
+        node_layout.padding + total + node_layout.padding
+    };
+
+    let input_widths: Vec<f32> = func
+        .inputs
+        .iter()
+        .map(|input| {
+            text_width(
+                &ctx.painter,
+                &ctx.style.body_font.scaled(ctx.view_graph.scale),
+                &input.name,
+                ctx.style.text_color,
+            )
+        })
+        .collect();
+    let output_widths: Vec<f32> = func
+        .outputs
+        .iter()
+        .map(|output| {
+            text_width(
+                &ctx.painter,
+                &ctx.style.body_font.scaled(ctx.view_graph.scale),
+                &output.name,
+                ctx.style.text_color,
+            )
+        })
+        .collect();
+
+    let row_count = func.inputs.len().max(func.outputs.len()).max(1);
+    let mut max_row_width: f32 = 0.0;
+
+    let inter_side_padding = 0.0;
+    for row in 0..row_count {
+        let left = input_widths.get(row).copied().unwrap_or(0.0);
+        let right = output_widths.get(row).copied().unwrap_or(0.0);
+        let mut row_width = node_layout.padding * 2.0 + left + right;
+        if left > 0.0 && right > 0.0 {
+            row_width += inter_side_padding;
+        }
+        max_row_width = max_row_width.max(row_width);
+    }
+
+    let node_width = node_layout
+        .node_width
+        .max(header_width)
+        .max(max_row_width)
+        .max(cache_row_width)
+        .max(status_row_width);
+
+    let row_count = func.inputs.len().max(func.outputs.len()).max(1);
+    let height = node_layout.header_height
+        + node_layout.cache_height
+        + node_layout.padding
+        + node_layout.row_height * row_count as f32
+        + node_layout.padding;
+    let node_size = egui::vec2(node_width, height);
+
+    egui::Rect::from_min_size(
+        origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
+        node_size,
+    )
 }
 
 fn text_width(
