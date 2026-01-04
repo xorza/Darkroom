@@ -374,26 +374,6 @@ impl NodeUi {
     }
 }
 
-pub fn node_rect_for_graph(
-    origin: egui::Pos2,
-    view_node: &model::ViewNode,
-    input_count: usize,
-    output_count: usize,
-    scale: f32,
-    layout: &NodeLayout,
-    node_width: f32,
-) -> egui::Rect {
-    let row_count = input_count.max(output_count).max(1);
-    let height = layout.header_height
-        + layout.cache_height
-        + layout.padding
-        + layout.row_height * row_count as f32
-        + layout.padding;
-    let node_size = egui::vec2(node_width, height);
-
-    egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
-}
-
 fn render_node_ports(
     ctx: &GraphContext,
     graph_layout: &GraphLayout,

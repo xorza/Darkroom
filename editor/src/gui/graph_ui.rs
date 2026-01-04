@@ -8,10 +8,7 @@ use crate::gui::connection_drag::ConnectionDrag;
 use crate::gui::connection_ui::{ConnectionUi, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
-use crate::{
-    gui::{graph_ctx::GraphContext, node_ui},
-    model,
-};
+use crate::{gui::graph_ctx::GraphContext, model};
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
@@ -386,23 +383,9 @@ fn view_selected_node(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
         return;
     };
 
-    let node = ctx.view_graph.graph.by_id(&node_view.id).unwrap();
-    let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-    let node_width = graph_layout.node_width(&node.id);
-    let size = node_ui::node_rect_for_graph(
-        Pos2::ZERO,
-        node_view,
-        func.inputs.len(),
-        func.outputs.len(),
-        1.0,
-        &graph_layout.node_layout,
-        node_width,
-    )
-    .size();
-    let center = node_view.pos.to_vec2() + size * 0.5;
+    let rect = graph_layout.node_rect(&node_view.id);
     ctx.view_graph.scale = 1.0;
-    ctx.view_graph.pan = ctx.rect.center() - ctx.rect.min - center;
+    ctx.view_graph.pan = ctx.rect.center() - ctx.rect.min - rect.center().to_vec2();
 }
 
 fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
@@ -416,18 +399,7 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
     for node_view in &ctx.view_graph.view_nodes {
-        let node = ctx.view_graph.graph.by_id(&node_view.id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-        let node_width = graph_layout.node_width(&node.id);
-        let rect = node_ui::node_rect_for_graph(
-            Pos2::ZERO,
-            node_view,
-            func.inputs.len(),
-            func.outputs.len(),
-            1.0,
-            &graph_layout.node_layout,
-            node_width,
-        );
+        let rect = graph_layout.node_rect(&node_view.id);
         min.x = min.x.min(rect.min.x);
         min.y = min.y.min(rect.min.y);
         max.x = max.x.max(rect.max.x);
@@ -435,8 +407,6 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
     }
 
     let bounds_size = max - min;
-    assert!(bounds_size.x.is_finite(), "bounds width must be finite");
-    assert!(bounds_size.y.is_finite(), "bounds height must be finite");
 
     let padding = 24.0;
     let available = ctx.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
