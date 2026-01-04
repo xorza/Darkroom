@@ -41,8 +41,11 @@ pub struct NodeLayoutInfo {
     pub button_size: f32,
     pub dot_radius: f32,
     pub dot_centers: Vec<(Pos2, StatusDotKind)>,
-    pub input_centers: Vec<Pos2>,
-    pub output_centers: Vec<Pos2>,
+    pub input_first_center: Pos2,
+    pub output_first_center: Pos2,
+    pub row_height: f32,
+    pub input_count: usize,
+    pub output_count: usize,
 }
 
 impl Default for NodeLayout {
@@ -54,6 +57,24 @@ impl Default for NodeLayout {
             row_height: 18.0,
             padding: 8.0,
         }
+    }
+}
+
+impl NodeLayoutInfo {
+    pub fn input_center(&self, index: usize) -> Pos2 {
+        assert!(index < self.input_count, "input index out of range");
+        egui::pos2(
+            self.input_first_center.x,
+            self.input_first_center.y + self.row_height * index as f32,
+        )
+    }
+
+    pub fn output_center(&self, index: usize) -> Pos2 {
+        assert!(index < self.output_count, "output index out of range");
+        egui::pos2(
+            self.output_first_center.x,
+            self.output_first_center.y + self.row_height * index as f32,
+        )
     }
 }
 
@@ -354,10 +375,7 @@ fn render_node_ports(
     let layout = graph_layout.node_layout(&view_node.id);
 
     for input_idx in 0..input_count {
-        let center = *layout
-            .input_centers
-            .get(input_idx)
-            .unwrap_or_else(|| panic!("missing input center {}", input_idx));
+        let center = layout.input_center(input_idx);
         handle_port(
             center,
             PortKind::Input,
@@ -368,10 +386,7 @@ fn render_node_ports(
     }
 
     for output_idx in 0..output_count {
-        let center = *layout
-            .output_centers
-            .get(output_idx)
-            .unwrap_or_else(|| panic!("missing output center {}", output_idx));
+        let center = layout.output_center(output_idx);
         handle_port(
             center,
             PortKind::Output,
@@ -426,10 +441,7 @@ fn render_node_const_bindings(
             ctx.style.text_color,
         );
         let badge_width = label_width + badge_padding * 2.0;
-        let center = *layout
-            .input_centers
-            .get(index)
-            .unwrap_or_else(|| panic!("missing input center {}", index));
+        let center = layout.input_center(index);
         let badge_right = center.x - ctx.view_graph.scale * ctx.style.port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
@@ -717,18 +729,8 @@ fn compute_node_layout(
         + node_layout.cache_height
         + node_layout.padding
         + node_layout.row_height * 0.5;
-    let input_centers = (0..func.inputs.len())
-        .map(|index| {
-            let y = base_y + node_layout.row_height * index as f32;
-            egui::pos2(rect.min.x, y)
-        })
-        .collect();
-    let output_centers = (0..func.outputs.len())
-        .map(|index| {
-            let y = base_y + node_layout.row_height * index as f32;
-            egui::pos2(rect.min.x + node_width, y)
-        })
-        .collect();
+    let input_first_center = egui::pos2(rect.min.x, base_y);
+    let output_first_center = egui::pos2(rect.min.x + node_width, base_y);
 
     NodeLayoutInfo {
         rect,
@@ -737,8 +739,11 @@ fn compute_node_layout(
         button_size,
         dot_radius,
         dot_centers,
-        input_centers,
-        output_centers,
+        input_first_center,
+        output_first_center,
+        row_height: node_layout.row_height,
+        input_count: func.inputs.len(),
+        output_count: func.outputs.len(),
     }
 }
 
