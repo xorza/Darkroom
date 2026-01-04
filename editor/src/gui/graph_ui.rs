@@ -395,11 +395,12 @@ fn fit_all_nodes(ctx: &mut GraphContext, graph_layout: &GraphLayout) {
         return;
     }
 
-    let mut iter = graph_layout.node_rects.values();
-    let mut bounds = *iter.next().unwrap();
-    for rect in iter {
-        bounds = bounds.union(*rect);
-    }
+    let bounds = graph_layout
+        .node_rects
+        .values()
+        .copied()
+        .reduce(|acc, rect| acc.union(rect))
+        .expect("node rects must be non-empty");
 
     let bounds_size = bounds.size();
 
