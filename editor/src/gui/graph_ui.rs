@@ -149,7 +149,6 @@ impl GraphUi {
 
         if self.state == InteractionState::Idle
             && primary_pressed
-            && pointer_pos.is_some()
             && let Some(port) = hovered_port.as_ref()
         {
             self.connection_drag.start(port.clone());
