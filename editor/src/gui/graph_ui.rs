@@ -135,7 +135,6 @@ impl GraphUi {
 
         if self.state == InteractionState::Idle
             && primary_pressed
-            && pointer_pos.is_some()
             && !pointer_over_node
             && hovered_port.is_none()
         {
@@ -206,8 +205,6 @@ impl GraphUi {
             self.connection_breaker.render(&ctx);
         }
 
-        node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
-
         if self.state == InteractionState::DraggingNewConnection {
             if let Some(pos) = pointer_pos {
                 self.connection_drag.current_pos = pos;
@@ -274,6 +271,8 @@ impl GraphUi {
             self.connection_drag.reset();
             self.state = InteractionState::Idle;
         }
+
+        node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
         let mut fit_all = false;
         let mut view_selected = false;
