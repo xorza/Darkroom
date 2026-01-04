@@ -98,20 +98,6 @@ impl GraphUi {
 
         let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
 
-        let primary_state = pointer_pos.and_then(|_| {
-            ctx.ui.input(|input| {
-                if input.pointer.primary_pressed() {
-                    Some(PrimaryState::Pressed)
-                } else if input.pointer.primary_released() {
-                    Some(PrimaryState::Released)
-                } else if input.pointer.primary_down() {
-                    Some(PrimaryState::Down)
-                } else {
-                    None
-                }
-            })
-        });
-
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
                 view_graph,
@@ -120,7 +106,6 @@ impl GraphUi {
                 &ctx,
                 pointer_pos,
                 &graph_layout,
-                primary_state,
             );
         }
 
@@ -140,8 +125,18 @@ impl GraphUi {
         ctx: &RenderContext<'_>,
         pointer_pos: Pos2,
         graph_layout: &GraphLayout,
-        primary_state: Option<PrimaryState>,
     ) {
+        let primary_state = ctx.ui.input(|input| {
+            if input.pointer.primary_pressed() {
+                Some(PrimaryState::Pressed)
+            } else if input.pointer.primary_released() {
+                Some(PrimaryState::Released)
+            } else if input.pointer.primary_down() {
+                Some(PrimaryState::Down)
+            } else {
+                None
+            }
+        });
         let hovered_port = graph_layout.hovered_port(ctx, pointer_pos);
         let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
 
