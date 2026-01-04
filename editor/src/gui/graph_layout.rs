@@ -83,12 +83,6 @@ impl GraphLayout {
         best
     }
 
-    pub fn pointer_over_node(&self, pointer_pos: Pos2) -> bool {
-        self.node_rects
-            .iter()
-            .any(|(_, rect)| rect.contains(pointer_pos))
-    }
-
     pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode, scale: f32) {
         let rect = self.node_rect(&view_node.id);
         let size = rect.size();

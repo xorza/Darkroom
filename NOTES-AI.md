@@ -232,3 +232,4 @@ GraphLayout now collects ports via a `&mut self` method that uses stored layout 
 Graph UI now keeps a persistent `GraphLayout` and updates it in-place each frame.
 Node UI now splits caption-drag handling from node rendering and updates `GraphLayout.node_rects` when dragging.
 Mouse wheel zoom now uses signed vertical scroll delta with a small exponential factor for smoother zoom direction.
+Graph UI now uses `ui.interact` on node rects to determine pointer-over-node state instead of manual rect contains checks.

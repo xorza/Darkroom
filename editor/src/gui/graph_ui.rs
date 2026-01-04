@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Pos2, Ui, Vec2};
+use egui::{Id, Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
@@ -82,6 +82,9 @@ impl GraphUi {
 
         background(&ctx);
 
+        let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
+        ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::hover());
+
         let pointer_pos = ctx
             .ui
             .input(|input| input.pointer.hover_pos())
@@ -94,13 +97,13 @@ impl GraphUi {
             });
 
         if let Some(pointer_pos) = pointer_pos {
-            update_zoom_and_pan(&mut ctx, pointer_pos);
+            update_zoom_and_pan(&mut ctx, graph_bg_id, pointer_pos);
         }
 
         self.graph_layout.update(&ctx);
 
         if let Some(pointer_pos) = pointer_pos {
-            self.process_connections(&mut ctx, ui_interaction, pointer_pos);
+            self.process_connections(&mut ctx, graph_bg_id, ui_interaction, pointer_pos);
         }
 
         self.node_ui
@@ -117,6 +120,7 @@ impl GraphUi {
     fn process_connections(
         &mut self,
         ctx: &mut GraphContext,
+        graph_bg_id: Id,
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
     ) {
@@ -134,7 +138,8 @@ impl GraphUi {
         let hovered_port = self
             .graph_layout
             .hovered_port(pointer_pos, ctx.style.port_activation_radius);
-        let pointer_over_node = self.graph_layout.pointer_over_node(pointer_pos);
+        let bg_hover_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
+        let pointer_over_node = !bg_hover_response.hovered();
 
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
@@ -288,7 +293,7 @@ impl GraphUi {
     }
 }
 
-fn update_zoom_and_pan(ctx: &mut GraphContext, cursor_pos: Pos2) {
+fn update_zoom_and_pan(ctx: &mut GraphContext, graph_bg_id: Id, cursor_pos: Pos2) {
     let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
     let pinch_delta = ctx.ui.input(|input| {
         if input.modifiers.command {
@@ -323,8 +328,8 @@ fn update_zoom_and_pan(ctx: &mut GraphContext, cursor_pos: Pos2) {
 
     ctx.view_graph.pan += pan;
 
-    let pan_id = ctx.ui.make_persistent_id("graph_pan");
-    let pan_response = ctx.ui.interact(ctx.rect, pan_id, egui::Sense::drag());
+    // let pan_id = ctx.ui.make_persistent_id("graph_pan");
+    let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
     if pan_response.dragged_by(egui::PointerButton::Middle) {
         ctx.view_graph.pan += pan_response.drag_delta();
     }

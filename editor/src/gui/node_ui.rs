@@ -140,6 +140,10 @@ impl NodeUi {
                 graph_layout.origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
                 node_size,
             );
+
+            let hover_id = ctx.ui.make_persistent_id(("node_hover", view_node.id));
+            let _response = ctx.ui.interact(node_rect, hover_id, egui::Sense::hover());
+
             let header_rect = egui::Rect::from_min_size(
                 node_rect.min,
                 egui::vec2(node_size.x, graph_layout.node_layout.header_height),
