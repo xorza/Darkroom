@@ -190,17 +190,17 @@ impl GraphUi {
             }
         }
 
-        self.connection_renderer.rebuild(
+        self.connection_renderer.render(
+            &ctx,
+            &graph_layout,
             view_graph,
             func_lib,
-            &graph_layout,
             if self.state == InteractionState::Breaking {
                 Some(&self.connection_breaker)
             } else {
                 None
             },
         );
-        self.connection_renderer.render(&ctx);
 
         if self.state == InteractionState::Breaking && self.connection_breaker.points.len() > 1 {
             ctx.painter.add(Shape::line(
@@ -231,7 +231,7 @@ impl GraphUi {
         }
 
         if self.state == InteractionState::Breaking && primary_released {
-            for connection in self.connection_renderer.highlighted().iter() {
+            for connection in self.connection_renderer.highlighted.iter() {
                 if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id) {
                     node.inputs[connection.input_idx].binding = Binding::None;
                     ui_interaction.actions.push((

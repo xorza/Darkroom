@@ -593,17 +593,17 @@ pub(crate) fn node_output_pos(
     origin: egui::Pos2,
     view_node: &model::ViewNode,
     index: usize,
-    layout: &NodeLayout,
+    node_layout: &NodeLayout,
     scale: f32,
     node_width: f32,
 ) -> egui::Pos2 {
     let y = origin.y
         + view_node.pos.y * scale
-        + layout.header_height
-        + layout.cache_height
-        + layout.padding
-        + layout.row_height * index as f32
-        + layout.row_height * 0.5;
+        + node_layout.header_height
+        + node_layout.cache_height
+        + node_layout.padding
+        + node_layout.row_height * index as f32
+        + node_layout.row_height * 0.5;
     egui::pos2(origin.x + view_node.pos.x * scale + node_width, y)
 }
 

@@ -35,35 +35,33 @@ pub(crate) enum PortKind {
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionRenderer {
     curves: Vec<ConnectionCurve>,
-    highlighted: HashSet<ConnectionKey>,
+    pub highlighted: HashSet<ConnectionKey>,
 }
 
 impl ConnectionRenderer {
     pub(crate) fn rebuild(
         &mut self,
+        graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
-        graph_layout: &GraphLayout,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.curves = collect_connection_curves(
-            view_graph,
-            func_lib,
-            graph_layout.origin,
-            &graph_layout.node_layout,
-            &graph_layout.node_widths,
-        );
+        self.curves = collect_connection_curves(graph_layout, view_graph, func_lib);
         self.highlighted = breaker
             .filter(|&breaker| breaker.points.len() > 1)
             .map(|breaker| connection_hits(&self.curves, &breaker.points))
             .unwrap_or_default();
     }
 
-    pub(crate) fn highlighted(&self) -> &HashSet<ConnectionKey> {
-        &self.highlighted
-    }
-
-    pub(crate) fn render(&mut self, ctx: &RenderContext) {
+    pub(crate) fn render(
+        &mut self,
+        ctx: &RenderContext,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        func_lib: &FuncLib,
+        breaker: Option<&ConnectionBreaker>,
+    ) {
+        self.rebuild(graph_layout, view_graph, func_lib, breaker);
         draw_connections(&ctx.painter, &self.curves, &self.highlighted, &ctx.style);
     }
 }
@@ -107,11 +105,9 @@ struct ConnectionCurve {
 }
 
 fn collect_connection_curves(
+    graph_layout: &GraphLayout,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
-    origin: Pos2,
-    layout: &node_ui::NodeLayout,
-    node_widths: &HashMap<NodeId, f32>,
 ) -> Vec<ConnectionCurve> {
     let node_lookup: HashMap<_, _> = view_graph
         .view_nodes
@@ -129,21 +125,25 @@ fn collect_connection_curves(
                 continue;
             };
             let source_view = node_lookup.get(&binding.target_id).unwrap();
-            let source_width = node_widths.get(&binding.target_id).copied().unwrap();
+            let source_width = graph_layout
+                .node_widths
+                .get(&binding.target_id)
+                .copied()
+                .unwrap();
             let start = node_ui::node_output_pos(
-                origin,
+                graph_layout.origin,
                 source_view,
                 binding.port_idx,
-                layout,
+                &graph_layout.node_layout,
                 view_graph.zoom,
                 source_width,
             );
             let end = node_ui::node_input_pos(
-                origin,
+                graph_layout.origin,
                 node_view,
                 input_index,
                 func.inputs.len(),
-                layout,
+                &graph_layout.node_layout,
                 view_graph.zoom,
             );
             let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
