@@ -53,7 +53,6 @@ impl GraphLayout {
     ) {
         let origin = ctx.rect.min + view_graph.pan;
         let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-        // let node_widths = node_ui::compute_node_widths(ctx, view_graph, func_lib, &node_layout);
 
         let a = node_ui::compute_node_rects(
             ctx,
