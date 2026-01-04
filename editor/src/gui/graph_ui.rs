@@ -144,6 +144,16 @@ impl GraphUi {
                     None
                 }
             });
+
+        if let Some(pointer_pos) = pointer_pos {
+            update_zoom_and_pan(&ctx, pointer_pos, view_graph);
+        }
+
+        let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
+
+        let hovered_port = graph_layout.hovered_port(&ctx, pointer_pos, ctx.rect);
+        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
+
         let primary_state = pointer_pos.and_then(|_| {
             ctx.ui.input(|input| {
                 if input.pointer.primary_pressed() {
@@ -157,16 +167,6 @@ impl GraphUi {
                 }
             })
         });
-
-        if let Some(pointer_pos) = pointer_pos {
-            update_zoom_and_pan(&ctx, pointer_pos, view_graph);
-        }
-
-        let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
-
-        let hovered_port = graph_layout.hovered_port(&ctx, pointer_pos, ctx.rect);
-        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
-
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
                 if hovered_port.is_some() {
@@ -274,46 +274,11 @@ impl GraphUi {
             _ => {}
         }
 
-        self.connection_renderer.render(
-            &ctx,
-            &graph_layout,
-            view_graph,
-            func_lib,
-            if self.state == InteractionState::Breaking {
-                Some(&self.connection_breaker)
-            } else {
-                None
-            },
-        );
-
-        match self.state {
-            InteractionState::Idle => {}
-            InteractionState::DraggingNewConnection => {
-                self.connection_drag.render(&ctx, view_graph.zoom)
-            }
-            InteractionState::Breaking => self.connection_breaker.render(&ctx),
-        }
+        self.render_connections(view_graph, func_lib, &ctx, &graph_layout);
 
         node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
-        let mut fit_all = false;
-        let mut view_selected = false;
-
-        ctx.ui.horizontal(|ui| {
-            fit_all = ui.button("Fit all").clicked();
-            view_selected = ui.button("View selected").clicked();
-            let reset_view = ui.button("Reset view").clicked();
-            if reset_view {
-                view_graph.zoom = 1.0;
-                view_graph.pan = egui::Vec2::ZERO;
-            }
-        });
-        if view_selected {
-            view_selected_node(&ctx, &graph_layout, view_graph, func_lib);
-        }
-        if fit_all {
-            fit_all_nodes(&ctx, &graph_layout, view_graph, func_lib);
-        }
+        top_panel(view_graph, func_lib, ctx, graph_layout);
 
         ui_interaction
             .actions
@@ -326,6 +291,60 @@ impl GraphUi {
                 }
                 GraphUiAction::NodeSelected => view_graph.select_node(action.0),
             });
+    }
+
+    fn render_connections(
+        &mut self,
+        view_graph: &mut model::ViewGraph,
+        func_lib: &FuncLib,
+        ctx: &RenderContext<'_>,
+        graph_layout: &GraphLayout,
+    ) {
+        self.connection_renderer.render(
+            ctx,
+            graph_layout,
+            view_graph,
+            func_lib,
+            if self.state == InteractionState::Breaking {
+                Some(&self.connection_breaker)
+            } else {
+                None
+            },
+        );
+
+        match self.state {
+            InteractionState::Idle => {}
+            InteractionState::DraggingNewConnection => {
+                self.connection_drag.render(ctx, view_graph.zoom)
+            }
+            InteractionState::Breaking => self.connection_breaker.render(ctx),
+        }
+    }
+}
+
+fn top_panel(
+    view_graph: &mut model::ViewGraph,
+    func_lib: &FuncLib,
+    ctx: RenderContext,
+    graph_layout: GraphLayout,
+) {
+    let mut fit_all = false;
+    let mut view_selected = false;
+
+    ctx.ui.horizontal(|ui| {
+        fit_all = ui.button("Fit all").clicked();
+        view_selected = ui.button("View selected").clicked();
+        let reset_view = ui.button("Reset view").clicked();
+        if reset_view {
+            view_graph.zoom = 1.0;
+            view_graph.pan = egui::Vec2::ZERO;
+        }
+    });
+    if view_selected {
+        view_selected_node(&ctx, &graph_layout, view_graph, func_lib);
+    }
+    if fit_all {
+        fit_all_nodes(&ctx, &graph_layout, view_graph, func_lib);
     }
 }
 
