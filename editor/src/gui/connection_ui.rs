@@ -17,13 +17,11 @@ pub(crate) struct ConnectionKey {
 
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionBreaker {
-    pub(crate) active: bool,
     pub(crate) points: Vec<Pos2>,
 }
 
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
-        self.active = false;
         self.points.clear();
     }
 }
@@ -46,7 +44,7 @@ impl ConnectionRenderer {
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
         graph_layout: &GraphLayout,
-        breaker: &ConnectionBreaker,
+        breaker: Option<&ConnectionBreaker>,
     ) {
         self.curves = collect_connection_curves(
             view_graph,
@@ -55,11 +53,10 @@ impl ConnectionRenderer {
             &graph_layout.node_layout,
             &graph_layout.node_widths,
         );
-        self.highlighted = if breaker.active && breaker.points.len() > 1 {
-            connection_hits(&self.curves, &breaker.points)
-        } else {
-            HashSet::new()
-        };
+        self.highlighted = breaker
+            .filter(|&breaker| breaker.points.len() > 1)
+            .map(|breaker| connection_hits(&self.curves, &breaker.points))
+            .unwrap_or_default();
     }
 
     pub(crate) fn highlighted(&self) -> &HashSet<ConnectionKey> {

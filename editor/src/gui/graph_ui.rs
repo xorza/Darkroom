@@ -18,9 +18,16 @@ const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum InteractionState {
+    #[default]
+    Idle,
+    Breaking,
+    Dragging,
+}
+
 #[derive(Debug)]
 struct ConnectionDrag {
-    pub active: bool,
     start_port: PortRef,
     start_pos: Pos2,
     current_pos: Pos2,
@@ -34,7 +41,6 @@ impl Default for ConnectionDrag {
             kind: PortKind::Output,
         };
         Self {
-            active: false,
             start_port: placeholder,
             start_pos: Pos2::ZERO,
             current_pos: Pos2::ZERO,
@@ -44,19 +50,19 @@ impl Default for ConnectionDrag {
 
 impl ConnectionDrag {
     fn start(&mut self, port: PortInfo) {
-        self.active = true;
         self.start_port = port.port;
         self.start_pos = port.center;
         self.current_pos = port.center;
     }
 
     pub fn reset(&mut self) {
-        self.active = false;
+        *self = Self::default();
     }
 }
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
+    state: InteractionState,
     connection_breaker: ConnectionBreaker,
     connection_drag: ConnectionDrag,
 }
@@ -82,6 +88,7 @@ pub enum GraphUiAction {
 
 impl GraphUi {
     pub fn reset(&mut self) {
+        self.state = InteractionState::Idle;
         self.connection_breaker.reset();
         self.connection_drag.reset();
     }
@@ -123,31 +130,30 @@ impl GraphUi {
         let hovered_port = graph_layout.hovered_port(&ctx, pointer_pos, ctx.rect);
         let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
 
-        if !self.connection_breaker.active
-            && !self.connection_drag.active
+        if self.state == InteractionState::Idle
             && primary_pressed
             && pointer_pos.is_some()
             && !pointer_over_node
             && hovered_port.is_none()
         {
             view_graph.selected_node_id = None;
-            self.connection_breaker.active = true;
-            self.connection_breaker.points.clear();
+            self.state = InteractionState::Breaking;
+            self.connection_breaker.reset();
             if let Some(pos) = pointer_pos {
                 self.connection_breaker.points.push(pos);
             }
         }
 
-        if !self.connection_breaker.active
-            && !self.connection_drag.active
+        if self.state == InteractionState::Idle
             && primary_pressed
             && pointer_pos.is_some()
             && let Some(port) = hovered_port.as_ref()
         {
             self.connection_drag.start(port.clone());
+            self.state = InteractionState::Dragging;
         }
 
-        if self.connection_breaker.active
+        if self.state == InteractionState::Breaking
             && primary_down
             && let Some(pos) = pointer_pos
         {
@@ -187,11 +193,15 @@ impl GraphUi {
             view_graph,
             func_lib,
             &graph_layout,
-            &self.connection_breaker,
+            if self.state == InteractionState::Breaking {
+                Some(&self.connection_breaker)
+            } else {
+                None
+            },
         );
         connections.render(&ctx);
 
-        if self.connection_breaker.active && self.connection_breaker.points.len() > 1 {
+        if self.state == InteractionState::Breaking && self.connection_breaker.points.len() > 1 {
             ctx.painter.add(Shape::line(
                 self.connection_breaker.points.clone(),
                 ctx.style.breaker_stroke,
@@ -200,7 +210,7 @@ impl GraphUi {
 
         node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
-        if self.connection_drag.active {
+        if self.state == InteractionState::Dragging {
             if let Some(pos) = pointer_pos {
                 self.connection_drag.current_pos = pos;
             }
@@ -219,7 +229,7 @@ impl GraphUi {
             );
         }
 
-        if self.connection_breaker.active && primary_released {
+        if self.state == InteractionState::Breaking && primary_released {
             for connection in connections.highlighted().iter() {
                 if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id) {
                     node.inputs[connection.input_idx].binding = Binding::None;
@@ -232,9 +242,10 @@ impl GraphUi {
                 }
             }
             self.connection_breaker.reset();
+            self.state = InteractionState::Idle;
         }
 
-        if self.connection_drag.active && primary_released {
+        if self.state == InteractionState::Dragging && primary_released {
             if let Some(target) = hovered_port.as_ref()
                 && target.port.kind != self.connection_drag.start_port.kind
                 && port_in_activation_range(
@@ -263,6 +274,7 @@ impl GraphUi {
                 ));
             }
             self.connection_drag.reset();
+            self.state = InteractionState::Idle;
         }
 
         let mut fit_all = false;

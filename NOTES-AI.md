@@ -213,3 +213,4 @@ Graph render context now pulls fonts, text color, and port radius from the share
 GraphLayout now exposes helpers to detect hovered ports and pointer-over-node states for graph UI interactions.
 GraphLayout and port query helpers now live in `editor/src/gui/graph_layout.rs` to keep graph UI rendering focused.
 `render_node_bodies` now mutates `GraphUiInteraction` directly and applies selection/removal internally instead of returning a NodeInteraction bundle.
+Graph UI now uses an `InteractionState` enum to represent idle vs. connection drag/breaker modes, and passes `ConnectionBreaker` as `Option<&ConnectionBreaker>` when active while reusing breaker/drag allocations.
