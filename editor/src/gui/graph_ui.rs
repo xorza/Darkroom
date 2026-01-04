@@ -30,7 +30,7 @@ impl Default for ConnectionDrag {
     fn default() -> Self {
         let placeholder = PortRef {
             node_id: NodeId::nil(),
-            port_idx: 0,
+            idx: 0,
             kind: PortKind::Output,
         };
         Self {
@@ -75,8 +75,9 @@ impl GraphUiInteraction {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GraphUiAction {
     CacheToggled,
-    InputChanged,
+    InputChanged { input_idx: usize },
     NodeRemoved,
+    NodeSelected,
 }
 
 impl GraphUi {
@@ -197,13 +198,7 @@ impl GraphUi {
             ));
         }
 
-        let node_interaction =
-            node_ui::render_node_bodies(&ctx, &graph_layout, view_graph, func_lib);
-
-        ui_interaction.actions.extend(node_interaction.actions);
-        if let Some(node_id) = node_interaction.remove_request {
-            view_graph.remove_node(node_id);
-        }
+        node_ui::render_node_bodies(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
         if self.connection_drag.active {
             if let Some(pos) = pointer_pos {
@@ -225,11 +220,16 @@ impl GraphUi {
         }
 
         if self.connection_breaker.active && primary_released {
-            let removed = remove_connections(view_graph, connections.highlighted());
-            for node_id in removed {
-                ui_interaction
-                    .actions
-                    .push((node_id, GraphUiAction::InputChanged));
+            for connection in connections.highlighted().iter() {
+                if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id) {
+                    node.inputs[connection.input_idx].binding = Binding::None;
+                    ui_interaction.actions.push((
+                        connection.input_node_id,
+                        GraphUiAction::InputChanged {
+                            input_idx: connection.input_idx,
+                        },
+                    ));
+                }
             }
             self.connection_breaker.reset();
         }
@@ -249,15 +249,20 @@ impl GraphUi {
                     target.port,
                 )
             {
-                ui_interaction
-                    .actions
-                    .push((node_id, GraphUiAction::InputChanged));
+                let port_idx = if target.port.kind == PortKind::Input {
+                    target.port.idx
+                } else {
+                    self.connection_drag.start_port.idx
+                };
+
+                ui_interaction.actions.push((
+                    node_id,
+                    GraphUiAction::InputChanged {
+                        input_idx: port_idx,
+                    },
+                ));
             }
             self.connection_drag.reset();
-        }
-
-        if let Some(selected_id) = node_interaction.selection_request {
-            view_graph.select_node(selected_id);
         }
 
         let mut fit_all = false;
@@ -278,6 +283,18 @@ impl GraphUi {
         if fit_all {
             fit_all_nodes(&ctx, &graph_layout, view_graph, func_lib);
         }
+
+        ui_interaction
+            .actions
+            .iter()
+            .for_each(|action| match action.1 {
+                GraphUiAction::CacheToggled => {}
+                GraphUiAction::InputChanged { .. } => {}
+                GraphUiAction::NodeRemoved => {
+                    view_graph.remove_node(action.0);
+                }
+                GraphUiAction::NodeSelected => view_graph.select_node(action.0),
+            });
     }
 }
 
@@ -375,7 +392,7 @@ fn apply_connection(
         )
     });
     assert!(
-        output_port.port_idx < output_func.outputs.len(),
+        output_port.idx < output_func.outputs.len(),
         "output index must be valid for output node"
     );
 
@@ -390,12 +407,12 @@ fn apply_connection(
         )
     });
     assert!(
-        input_port.port_idx < input_func.inputs.len(),
+        input_port.idx < input_func.inputs.len(),
         "input index must be valid for input node"
     );
-    input_node.inputs[input_port.port_idx].binding = Binding::Bind(PortAddress {
+    input_node.inputs[input_port.idx].binding = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
-        port_idx: output_port.port_idx,
+        port_idx: output_port.idx,
     });
     Some(input_node.id)
 }
@@ -509,29 +526,6 @@ fn fit_all_nodes(
 
     let bounds_center = (min.to_vec2() + max.to_vec2()) * 0.5;
     view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * view_graph.zoom;
-}
-
-fn remove_connections(
-    view_graph: &mut model::ViewGraph,
-    highlighted: &HashSet<ConnectionKey>,
-) -> HashSet<NodeId> {
-    let mut affected = HashSet::new();
-    if highlighted.is_empty() {
-        return affected;
-    }
-    for node in view_graph.graph.nodes.iter_mut() {
-        for (input_index, input) in node.inputs.iter_mut().enumerate() {
-            let key = ConnectionKey {
-                target_node_id: node.id,
-                input_index,
-            };
-            if highlighted.contains(&key) {
-                input.binding = Binding::None;
-                affected.insert(node.id);
-            }
-        }
-    }
-    affected
 }
 
 fn breaker_path_length(points: &[Pos2]) -> f32 {

@@ -12,7 +12,7 @@ use crate::model;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
     pub node_id: NodeId,
-    pub port_idx: usize,
+    pub idx: usize,
     pub kind: PortKind,
 }
 
@@ -142,7 +142,7 @@ fn collect_ports(
             ports.push(PortInfo {
                 port: PortRef {
                     node_id: node.id,
-                    port_idx: index,
+                    idx: index,
                     kind: PortKind::Input,
                 },
                 center,
@@ -161,7 +161,7 @@ fn collect_ports(
             ports.push(PortInfo {
                 port: PortRef {
                     node_id: node.id,
-                    port_idx: index,
+                    idx: index,
                     kind: PortKind::Output,
                 },
                 center,

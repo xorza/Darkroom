@@ -8,16 +8,9 @@ use hashbrown::HashMap;
 use std::collections::HashSet;
 
 use crate::{
-    gui::{graph_ui::GraphUiAction, render::RenderContext},
+    gui::{graph_ui::GraphUiAction, graph_ui::GraphUiInteraction, render::RenderContext},
     model,
 };
-
-#[derive(Debug, Default)]
-pub struct NodeInteraction {
-    pub selection_request: Option<NodeId>,
-    pub remove_request: Option<NodeId>,
-    pub actions: Vec<(NodeId, GraphUiAction)>,
-}
 
 #[derive(Debug)]
 pub struct NodeLayout {
@@ -73,12 +66,12 @@ pub fn render_node_bodies(
     graph_layout: &GraphLayout,
     view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
-) -> NodeInteraction {
+    ui_interaction: &mut GraphUiInteraction,
+) {
     let visuals = ctx.ui.visuals();
     let node_fill = ctx.style.node_fill;
     let node_stroke = ctx.style.node_stroke;
     let selected_stroke = ctx.style.selected_stroke;
-    let mut interaction = NodeInteraction::default();
 
     for node_view in &mut view_graph.view_nodes {
         let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
@@ -211,7 +204,7 @@ pub fn render_node_bodies(
             } else {
                 NodeBehavior::Once
             };
-            interaction
+            ui_interaction
                 .actions
                 .push((node_view.id, GraphUiAction::CacheToggled));
         }
@@ -221,20 +214,21 @@ pub fn render_node_bodies(
         }
 
         if remove_response.clicked() {
-            interaction.remove_request = Some(node_view.id);
-            interaction
+            ui_interaction
                 .actions
                 .push((node_view.id, GraphUiAction::NodeRemoved));
             continue;
         }
 
-        if response.clicked() || response.dragged() || body_response.clicked() {
-            interaction.selection_request = Some(node_view.id);
-        }
+        let selected_id = if response.clicked() || response.dragged() || body_response.clicked() {
+            ui_interaction
+                .actions
+                .push((node_view.id, GraphUiAction::NodeSelected));
+            Some(node_view.id)
+        } else {
+            view_graph.selected_node_id
+        };
 
-        let selected_id = interaction
-            .selection_request
-            .or(view_graph.selected_node_id);
         let is_selected = selected_id.is_some_and(|id| id == node_view.id);
 
         ctx.painter.rect(
@@ -350,8 +344,6 @@ pub fn render_node_bodies(
         render_node_const_bindings(ctx, graph_layout, node_view, node, func, input_count);
         render_node_labels(ctx, graph_layout, &node.name, func, node_rect, node_width);
     }
-
-    interaction
 }
 
 fn render_node_ports(

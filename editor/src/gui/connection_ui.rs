@@ -11,8 +11,8 @@ use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
-    pub(crate) target_node_id: NodeId,
-    pub(crate) input_index: usize,
+    pub(crate) input_node_id: NodeId,
+    pub(crate) input_idx: usize,
 }
 
 #[derive(Debug, Default)]
@@ -152,8 +152,8 @@ fn collect_connection_curves(
             let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
             curves.push(ConnectionCurve {
                 key: ConnectionKey {
-                    target_node_id: node.id,
-                    input_index,
+                    input_node_id: node.id,
+                    input_idx: input_index,
                 },
                 start,
                 end,

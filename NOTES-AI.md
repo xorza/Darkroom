@@ -212,3 +212,4 @@ Graph UI style defaults now use named constants for all fixed values in `GraphSt
 Graph render context now pulls fonts, text color, and port radius from the shared GUI style.
 GraphLayout now exposes helpers to detect hovered ports and pointer-over-node states for graph UI interactions.
 GraphLayout and port query helpers now live in `editor/src/gui/graph_layout.rs` to keep graph UI rendering focused.
+`render_node_bodies` now mutates `GraphUiInteraction` directly and applies selection/removal internally instead of returning a NodeInteraction bundle.
