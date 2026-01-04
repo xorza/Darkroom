@@ -9,6 +9,7 @@ use crate::gui::node_ui;
 #[derive(Debug)]
 pub struct ConnectionDrag {
     pub start_port: PortRef,
+    pub end_port: Option<PortRef>,
     pub start_pos: Pos2,
     pub current_pos: Pos2,
 }
@@ -17,6 +18,7 @@ impl ConnectionDrag {
     pub fn new(port: PortInfo) -> Self {
         Self {
             start_port: port.port,
+            end_port: None,
             start_pos: port.center,
             current_pos: port.center,
         }

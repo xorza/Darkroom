@@ -113,19 +113,30 @@ impl GraphUi {
         let drag_port_info =
             self.node_ui
                 .render_nodes(&mut ctx, &self.graph_layout, ui_interaction);
+
         match (self.state, drag_port_info) {
             (InteractionState::Idle, PortDragInfo::DragStart(port_info)) => {
-                println!("Drag start");
                 self.connection_drag = Some(ConnectionDrag::new(port_info.clone()));
                 self.state = InteractionState::DraggingNewConnection;
             }
             (InteractionState::DraggingNewConnection, PortDragInfo::Hover(port_info)) => {
-                println!("Drag hover");
-                let drag = self.connection_drag.as_mut().unwrap();
-                drag.current_pos = port_info.center;
+                println!("hover {:?}", port_info);
+                let connection_drag = self.connection_drag.as_mut().unwrap();
+                if connection_drag.start_port.kind != port_info.port.kind {
+                    connection_drag.end_port = Some(port_info.port.clone());
+                    connection_drag.current_pos = port_info.center;
+                }
             }
             (_, PortDragInfo::DragStop) => {
-                println!("Drag stop");
+                let connection_drag = self.connection_drag.as_mut().unwrap();
+                if let Some(end_port) = connection_drag.end_port {
+                    let node_id =
+                        apply_connection(ctx.view_graph, connection_drag.start_port, end_port);
+                    let input_idx = sort_ports(connection_drag.start_port, end_port).0.idx;
+                    ui_interaction
+                        .actions
+                        .push((node_id, GraphUiAction::InputChanged { input_idx }));
+                }
                 self.connection_drag = None;
                 self.state = InteractionState::Idle;
             }
@@ -154,9 +165,6 @@ impl GraphUi {
             }
         });
 
-        // let hovered_port = self
-        //     .graph_layout
-        //     .hovered_port(pointer_pos, ctx.style.port_activation_radius);
         let pointer_on_background = ctx
             .ui
             .interact(ctx.rect, graph_bg_id, egui::Sense::hover())
@@ -164,11 +172,6 @@ impl GraphUi {
 
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
-                // if let Some(hovered_port) = hovered_port.as_ref() {
-                //     self.connection_drag = Some(ConnectionDrag::new(hovered_port.clone()));
-                //     self.state = InteractionState::DraggingNewConnection;
-                // }
-
                 if pointer_on_background {
                     ctx.view_graph.selected_node_id = None;
                     self.state = InteractionState::Breaking;
@@ -228,43 +231,9 @@ impl GraphUi {
                 self.connection_breaker.reset();
                 self.state = InteractionState::Idle;
             }
-            (InteractionState::DraggingNewConnection, Some(PrimaryState::Released)) => {
-                // let connection_drag = self.connection_drag.as_ref().unwrap();
-                // if let Some(target) = hovered_port.as_ref()
-                //     && target.port.kind != connection_drag.start_port.kind
-                //     && connection_drag.current_pos.distance(target.center)
-                //         <= ctx.style.port_activation_radius
-                //     && let Some(node_id) = apply_connection(
-                //         ctx.view_graph,
-                //         ctx.func_lib,
-                //         connection_drag.start_port,
-                //         target.port,
-                //     )
-                // {
-                //     let port_idx = if target.port.kind == PortKind::Input {
-                //         target.port.idx
-                //     } else {
-                //         connection_drag.start_port.idx
-                //     };
-
-                //     ui_interaction.actions.push((
-                //         node_id,
-                //         GraphUiAction::InputChanged {
-                //             input_idx: port_idx,
-                //         },
-                //     ));
-                // }
-                // self.connection_drag = None;
-                // self.state = InteractionState::Idle;
-            }
             (InteractionState::DraggingNewConnection, _) => {
                 let drag = self.connection_drag.as_mut().unwrap();
                 drag.current_pos = pointer_pos;
-                // drag.current_pos = hovered_port
-                //     .as_ref()
-                //     .filter(|&port| port.port.kind != drag.start_port.kind)
-                //     .map(|port| port.center)
-                //     .unwrap_or(pointer_pos);
             }
             _ => {}
         }
@@ -380,33 +349,24 @@ fn background(ctx: &GraphContext) {
     }
 }
 
-fn apply_connection(
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-    start: PortRef,
-    end: PortRef,
-) -> Option<NodeId> {
-    assert!(start.kind != end.kind, "ports must be of opposite types");
-    let (output_port, input_port) = match (start.kind, end.kind) {
-        (PortKind::Output, PortKind::Input) => (start, end),
-        (PortKind::Input, PortKind::Output) => (end, start),
-        _ => {
-            return None;
-        }
-    };
+fn sort_ports(a: PortRef, b: PortRef) -> (PortRef, PortRef) {
+    match (a.kind, b.kind) {
+        (PortKind::Output, PortKind::Input) => (b, a),
+        (PortKind::Input, PortKind::Output) => (a, b),
+        _ => unreachable!("ports must be of opposite types"),
+    }
+}
 
-    let output_node = view_graph.graph.by_id(&output_port.node_id).unwrap();
-    let output_func = func_lib.by_id(&output_node.func_id).unwrap();
-    assert!(output_port.idx < output_func.outputs.len());
+fn apply_connection(view_graph: &mut model::ViewGraph, a: PortRef, b: PortRef) -> NodeId {
+    let (input_port, output_port) = sort_ports(a, b);
 
     let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-    let input_func = func_lib.by_id(&input_node.func_id).unwrap();
-    assert!(input_port.idx < input_func.inputs.len());
     input_node.inputs[input_port.idx].binding = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
         port_idx: output_port.idx,
     });
-    Some(input_node.id)
+
+    input_node.id
 }
 
 fn view_selected_node(ctx: &mut GraphContext, graph_layout: &GraphLayout) {

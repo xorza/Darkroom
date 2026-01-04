@@ -2,7 +2,7 @@ use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use eframe::egui;
-use egui::{PointerButton, Pos2, Rect};
+use egui::{PointerButton, Pos2, Rect, Sense};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncBehavior, NodeBehavior};
@@ -352,6 +352,7 @@ impl NodeUi {
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
 
+            println!("node_drag_port_result {:?}", node_drag_port_result);
             match (&drag_port_info, &node_drag_port_result) {
                 (_, PortDragInfo::None) => {}
                 (_, PortDragInfo::DragStop) => drag_port_info = node_drag_port_result,
@@ -430,13 +431,12 @@ fn render_node_ports(
         let graph_bg_id = ctx
             .ui
             .make_persistent_id(("node_input", view_node_idx, input_idx));
-        let response = ctx.ui.interact(
-            port_rect,
-            graph_bg_id,
-            egui::Sense::hover() | egui::Sense::drag(),
-        );
+        let response = ctx
+            .ui
+            .interact(port_rect, graph_bg_id, Sense::hover() | Sense::drag());
+        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
 
-        let color = if response.hovered() {
+        let color = if is_hovered {
             ctx.style.input_hover_color
         } else {
             ctx.style.input_port_color
@@ -456,7 +456,7 @@ fn render_node_ports(
             port_drag_info = PortDragInfo::DragStart(port_info);
         } else if response.drag_stopped_by(PointerButton::Primary) {
             port_drag_info = PortDragInfo::DragStop;
-        } else if response.hovered() {
+        } else if is_hovered {
             port_drag_info = PortDragInfo::Hover(port_info);
         }
     }
@@ -486,8 +486,9 @@ fn render_node_ports(
             graph_bg_id,
             egui::Sense::hover() | egui::Sense::drag(),
         );
+        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
 
-        let color = if response.hovered() {
+        let color = if is_hovered {
             ctx.style.output_hover_color
         } else {
             ctx.style.output_port_color
@@ -507,7 +508,7 @@ fn render_node_ports(
             port_drag_info = PortDragInfo::DragStart(port_info);
         } else if response.drag_stopped_by(PointerButton::Primary) {
             port_drag_info = PortDragInfo::DragStop;
-        } else if response.hovered() {
+        } else if is_hovered {
             port_drag_info = PortDragInfo::Hover(port_info);
         }
     }
