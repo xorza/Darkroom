@@ -62,13 +62,11 @@ impl NodeUi {
             let node_rect = graph_layout.node_rect(&view_node.id);
 
             let node_body_id = ctx.ui.make_persistent_id(("node_hover", view_node.id));
-            let _response = ctx
-                .ui
-                .interact(node_rect, node_body_id, egui::Sense::hover());
-
-            let response = ctx
-                .ui
-                .interact(node_rect, node_body_id, egui::Sense::drag());
+            let response = ctx.ui.interact(
+                node_rect,
+                node_body_id,
+                egui::Sense::hover() | egui::Sense::drag(),
+            );
 
             if response.dragged_by(PointerButton::Middle)
                 || response.dragged_by(PointerButton::Primary)

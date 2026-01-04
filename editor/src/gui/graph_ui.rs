@@ -134,18 +134,21 @@ impl GraphUi {
                 None
             }
         });
+
         let hovered_port = self
             .graph_layout
             .hovered_port(pointer_pos, ctx.style.port_activation_radius);
         let bg_hover_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::hover());
-        let pointer_over_node = !bg_hover_response.hovered();
+        let pointer_on_background = !bg_hover_response.hovered();
 
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
                 if let Some(hovered_port) = hovered_port.as_ref() {
                     self.connection_drag = Some(ConnectionDrag::new(hovered_port.clone()));
                     self.state = InteractionState::DraggingNewConnection;
-                } else if !pointer_over_node {
+                }
+
+                if pointer_on_background {
                     ctx.view_graph.selected_node_id = None;
                     self.state = InteractionState::Breaking;
                     self.connection_breaker.reset();
@@ -234,13 +237,12 @@ impl GraphUi {
                 self.state = InteractionState::Idle;
             }
             (InteractionState::DraggingNewConnection, _) => {
-                if let Some(drag) = self.connection_drag.as_mut() {
-                    drag.current_pos = hovered_port
-                        .as_ref()
-                        .filter(|&port| port.port.kind != drag.start_port.kind)
-                        .map(|port| port.center)
-                        .unwrap_or(pointer_pos);
-                }
+                let drag = self.connection_drag.as_mut().unwrap();
+                drag.current_pos = hovered_port
+                    .as_ref()
+                    .filter(|&port| port.port.kind != drag.start_port.kind)
+                    .map(|port| port.center)
+                    .unwrap_or(pointer_pos);
             }
             _ => {}
         }
