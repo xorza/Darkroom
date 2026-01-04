@@ -32,12 +32,12 @@ struct ConnectionCurve {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct ConnectionRenderer {
+pub(crate) struct ConnectionUi {
     curves: Vec<ConnectionCurve>,
     pub highlighted: HashSet<ConnectionKey>,
 }
 
-impl ConnectionRenderer {
+impl ConnectionUi {
     pub(crate) fn rebuild(
         &mut self,
         graph_layout: &GraphLayout,

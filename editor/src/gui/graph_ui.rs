@@ -5,7 +5,7 @@ use graph::prelude::{Binding, FuncLib, PortAddress};
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_drag::ConnectionDrag;
-use crate::gui::connection_ui::{ConnectionKey, ConnectionRenderer, PortKind};
+use crate::gui::connection_ui::{ConnectionKey, ConnectionUi, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::NodeUi;
 use crate::model::graph_view;
@@ -39,7 +39,7 @@ pub struct GraphUi {
     state: InteractionState,
     connection_breaker: ConnectionBreaker,
     connection_drag: Option<ConnectionDrag>,
-    connection_renderer: ConnectionRenderer,
+    connection_renderer: ConnectionUi,
     node_ui: NodeUi,
 }
 
@@ -67,7 +67,7 @@ impl GraphUi {
         self.state = InteractionState::Idle;
         self.connection_breaker.reset();
         self.connection_drag = None;
-        self.connection_renderer = ConnectionRenderer::default();
+        self.connection_renderer = ConnectionUi::default();
     }
 
     pub fn render(
