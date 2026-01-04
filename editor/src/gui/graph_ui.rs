@@ -178,16 +178,20 @@ impl GraphUi {
                 self.state = InteractionState::Idle;
             }
             (InteractionState::DraggingNewConnection, Some(PrimaryState::Released)) => {
-                if let Some(connection_drag) = self.connection_drag.as_ref()
-                    && let Some(target) = hovered_port.as_ref()
+                let connection_drag = self.connection_drag.as_ref().unwrap();
+                if let Some(target) = hovered_port.as_ref()
                     && target.port.kind != connection_drag.start_port.kind
                     && port_in_activation_range(
                         &connection_drag.current_pos,
                         target.center,
                         ctx.style.port_activation_radius,
                     )
-                    && let Some(node_id) =
-                        apply_connection(view_graph, func_lib, connection_drag.start_port, target.port)
+                    && let Some(node_id) = apply_connection(
+                        view_graph,
+                        func_lib,
+                        connection_drag.start_port,
+                        target.port,
+                    )
                 {
                     let port_idx = if target.port.kind == PortKind::Input {
                         target.port.idx
