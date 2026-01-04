@@ -94,7 +94,7 @@ impl ConnectionUi {
 
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+            let _func = func_lib.by_id(&node.func_id).unwrap();
 
             for (input_index, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {
@@ -114,7 +114,6 @@ impl ConnectionUi {
                     graph_layout.origin,
                     node_view,
                     input_index,
-                    func.inputs.len(),
                     &graph_layout.node_layout,
                     view_graph.scale,
                 );

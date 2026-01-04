@@ -272,7 +272,6 @@ impl NodeUi {
                     egui::StrokeKind::Inside,
                 );
 
-                let button_text = "cache";
                 let button_text_color = if !cache_enabled {
                     ctx.style.widget_noninteractive_text_color
                 } else if node.behavior == NodeBehavior::Once {
@@ -283,7 +282,7 @@ impl NodeUi {
                 ctx.painter.text(
                     cache_button_rect.center(),
                     egui::Align2::CENTER_CENTER,
-                    button_text,
+                    "cache",
                     ctx.style.body_font.scaled(ctx.view_graph.scale),
                     button_text_color,
                 );
@@ -420,7 +419,6 @@ fn render_node_ports(
             graph_layout.origin,
             view_node,
             input_idx,
-            input_count,
             &graph_layout.node_layout,
             ctx.view_graph.scale,
         );
@@ -499,7 +497,6 @@ fn render_node_const_bindings(
             graph_layout.origin,
             &ctx.view_graph.view_nodes[view_node_idx],
             index,
-            func.inputs.len(),
             &graph_layout.node_layout,
             ctx.view_graph.scale,
         );
@@ -615,15 +612,9 @@ pub(crate) fn node_input_pos(
     origin: egui::Pos2,
     view_node: &model::ViewNode,
     index: usize,
-    input_count: usize,
     node_layout: &NodeLayout,
     scale: f32,
 ) -> egui::Pos2 {
-    assert!(
-        index < input_count,
-        "input index must be within node inputs"
-    );
-    assert!(scale > 0.0, "graph scale must be positive");
     let y = origin.y
         + view_node.pos.y * scale
         + node_layout.header_height
