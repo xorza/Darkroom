@@ -20,7 +20,6 @@ pub enum WorkerMessage {
     Event,
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
-    InvalidateCaches(Vec<NodeId>),
 }
 
 type EventQueue = Shared<Vec<EventId>>;
@@ -52,17 +51,6 @@ impl Worker {
         self.tx.send(msg).unwrap();
     }
 
-    pub fn invalidate_caches<I>(&mut self, node_ids: I)
-    where
-        I: IntoIterator<Item = NodeId>,
-    {
-        let node_ids: Vec<NodeId> = node_ids.into_iter().collect();
-        if !node_ids.is_empty() {
-            self.tx
-                .send(WorkerMessage::InvalidateCaches(node_ids))
-                .unwrap();
-        }
-    }
     pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
         self.tx
             .send(WorkerMessage::Update { graph, func_lib })
@@ -120,7 +108,6 @@ where
                     events.clear();
                     context = Some((graph, func_lib));
                 }
-                WorkerMessage::InvalidateCaches(node_ids) => invalidate_node_ids.extend(node_ids),
                 WorkerMessage::Clear => {
                     execution_graph.clear();
                     events.clear();
