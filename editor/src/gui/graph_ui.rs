@@ -93,6 +93,7 @@ pub enum GraphUiAction {
     NodeRemoved,
 }
 
+#[derive(Debug)]
 pub struct GraphLayout {
     pub origin: Pos2,
     pub scale: f32,
@@ -139,26 +140,7 @@ impl GraphUi {
             update_zoom_and_pan(&ctx, pointer_pos, view_graph);
         }
 
-        let graph_layout = {
-            let origin = ctx.rect.min + view_graph.pan;
-            let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-            let width_ctx = node_ui::NodeWidthContext {
-                node_layout: &node_layout,
-                style: &ctx.style,
-                scale: view_graph.zoom,
-            };
-            let node_widths =
-                node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
-
-            let ports = collect_ports(view_graph, func_lib, &node_widths, origin, &node_layout);
-            GraphLayout {
-                origin,
-                scale: view_graph.zoom,
-                node_layout,
-                node_widths,
-                ports,
-            }
-        };
+        let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
         let hovered_port = pointer_pos
@@ -384,6 +366,31 @@ fn update_zoom_and_pan(ctx: &RenderContext, cursor_pos: Pos2, view_graph: &mut m
 }
 
 impl GraphLayout {
+    fn build(
+        ctx: &RenderContext,
+        view_graph: &model::ViewGraph,
+        func_lib: &FuncLib,
+    ) -> GraphLayout {
+        let origin = ctx.rect.min + view_graph.pan;
+        let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
+        let width_ctx = node_ui::NodeWidthContext {
+            node_layout: &node_layout,
+            style: &ctx.style,
+            scale: view_graph.zoom,
+        };
+        let node_widths =
+            node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
+
+        let ports = collect_ports(view_graph, func_lib, &node_widths, origin, &node_layout);
+        GraphLayout {
+            origin,
+            scale: view_graph.zoom,
+            node_layout,
+            node_widths,
+            ports,
+        }
+    }
+
     pub fn node_width(&self, node_id: NodeId) -> f32 {
         self.node_widths
             .get(&node_id)
