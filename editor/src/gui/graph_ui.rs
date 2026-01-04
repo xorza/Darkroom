@@ -274,31 +274,31 @@ impl GraphUi {
             InteractionState::Breaking => self.connection_breaker.render(ctx),
         }
     }
-}
 
-fn top_panel(
-    view_graph: &mut model::ViewGraph,
-    func_lib: &FuncLib,
-    ctx: &mut RenderContext,
-    graph_layout: &GraphLayout,
-) {
-    let mut fit_all = false;
-    let mut view_selected = false;
+    fn top_panel(
+        &self,
+        view_graph: &mut model::ViewGraph,
+        func_lib: &FuncLib,
+        ctx: &mut RenderContext,
+    ) {
+        let mut fit_all = false;
+        let mut view_selected = false;
 
-    ctx.ui.horizontal(|ui| {
-        fit_all = ui.button("Fit all").clicked();
-        view_selected = ui.button("View selected").clicked();
-        let reset_view = ui.button("Reset view").clicked();
-        if reset_view {
-            view_graph.zoom = 1.0;
-            view_graph.pan = egui::Vec2::ZERO;
+        ctx.ui.horizontal(|ui| {
+            fit_all = ui.button("Fit all").clicked();
+            view_selected = ui.button("View selected").clicked();
+            let reset_view = ui.button("Reset view").clicked();
+            if reset_view {
+                view_graph.zoom = 1.0;
+                view_graph.pan = egui::Vec2::ZERO;
+            }
+        });
+        if view_selected {
+            view_selected_node(ctx, &self.graph_layout, view_graph, func_lib);
         }
-    });
-    if view_selected {
-        view_selected_node(ctx, graph_layout, view_graph, func_lib);
-    }
-    if fit_all {
-        fit_all_nodes(ctx, graph_layout, view_graph, func_lib);
+        if fit_all {
+            fit_all_nodes(ctx, &self.graph_layout, view_graph, func_lib);
+        }
     }
 }
 
