@@ -83,35 +83,22 @@ impl GraphLayout {
         )
     }
 
-    pub fn hovered_port(
-        &self,
-        ctx: &RenderContext,
-        pointer_pos: Option<Pos2>,
-        rect: Rect,
-    ) -> Option<PortInfo> {
-        pointer_pos
-            .filter(|pos| rect.contains(*pos))
-            .and_then(|pos| find_port_near(&self.ports, pos, ctx.style.port_activation_radius))
+    pub fn hovered_port(&self, ctx: &RenderContext, pointer_pos: Pos2) -> Option<PortInfo> {
+        find_port_near(&self.ports, pointer_pos, ctx.style.port_activation_radius)
     }
 
     pub fn pointer_over_node(
         &self,
-        pointer_pos: Option<Pos2>,
-
+        pointer_pos: Pos2,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
     ) -> bool {
-        pointer_pos
-            .filter(|pos| self.rect.contains(*pos))
-            .is_some_and(|pos| {
-                view_graph.view_nodes.iter().any(|view_node| {
-                    let node = view_graph.graph.by_id(&view_node.id).unwrap();
-                    let func = func_lib.by_id(&node.func_id).unwrap();
-                    let node_rect =
-                        self.node_rect(view_node, func.inputs.len(), func.outputs.len());
-                    node_rect.contains(pos)
-                })
-            })
+        view_graph.view_nodes.iter().any(|view_node| {
+            let node = view_graph.graph.by_id(&view_node.id).unwrap();
+            let func = func_lib.by_id(&node.func_id).unwrap();
+            let node_rect = self.node_rect(view_node, func.inputs.len(), func.outputs.len());
+            node_rect.contains(pointer_pos)
+        })
     }
 }
 

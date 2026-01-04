@@ -98,9 +98,6 @@ impl GraphUi {
 
         let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
 
-        let hovered_port = graph_layout.hovered_port(&ctx, pointer_pos, ctx.rect);
-        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
-
         let primary_state = pointer_pos.and_then(|_| {
             ctx.ui.input(|input| {
                 if input.pointer.primary_pressed() {
@@ -114,6 +111,40 @@ impl GraphUi {
                 }
             })
         });
+
+        if let Some(pointer_pos) = pointer_pos {
+            self.process_connections(
+                view_graph,
+                func_lib,
+                ui_interaction,
+                &ctx,
+                pointer_pos,
+                &graph_layout,
+                primary_state,
+            );
+        }
+
+        self.render_connections(view_graph, func_lib, &ctx, &graph_layout);
+
+        self.node_ui
+            .render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
+
+        top_panel(view_graph, func_lib, ctx, graph_layout);
+    }
+
+    fn process_connections(
+        &mut self,
+        view_graph: &mut model::ViewGraph,
+        func_lib: &FuncLib,
+        ui_interaction: &mut GraphUiInteraction,
+        ctx: &RenderContext<'_>,
+        pointer_pos: Pos2,
+        graph_layout: &GraphLayout,
+        primary_state: Option<PrimaryState>,
+    ) {
+        let hovered_port = graph_layout.hovered_port(ctx, pointer_pos);
+        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
+
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
                 if let Some(hovered_port) = hovered_port.as_ref() {
@@ -123,40 +154,37 @@ impl GraphUi {
                     view_graph.selected_node_id = None;
                     self.state = InteractionState::Breaking;
                     self.connection_breaker.reset();
-                    if let Some(pos) = pointer_pos {
-                        self.connection_breaker.points.push(pos);
-                    }
+
+                    self.connection_breaker.points.push(pointer_pos);
                 }
             }
             (InteractionState::Breaking, Some(PrimaryState::Pressed | PrimaryState::Down)) => {
-                if let Some(pointer_pos) = pointer_pos {
-                    let should_add = self
+                let should_add = self
+                    .connection_breaker
+                    .points
+                    .last()
+                    .map(|last| last.distance(pointer_pos) > 2.0)
+                    .unwrap_or(true);
+                if should_add {
+                    let remaining =
+                        MAX_BREAKER_LENGTH - breaker_path_length(&self.connection_breaker.points);
+                    let last_pos = self
                         .connection_breaker
                         .points
                         .last()
-                        .map(|last| last.distance(pointer_pos) > 2.0)
-                        .unwrap_or(true);
-                    if should_add {
-                        let remaining = MAX_BREAKER_LENGTH
-                            - breaker_path_length(&self.connection_breaker.points);
-                        let last_pos = self
-                            .connection_breaker
-                            .points
-                            .last()
-                            .copied()
-                            .unwrap_or(pointer_pos);
-                        let segment_len = last_pos.distance(pointer_pos);
-                        if remaining > 0.0 && segment_len > 0.0 {
-                            if segment_len <= remaining {
-                                self.connection_breaker.points.push(pointer_pos);
-                            } else {
-                                let t = remaining / segment_len;
-                                let clamped = Pos2::new(
-                                    last_pos.x + (pointer_pos.x - last_pos.x) * t,
-                                    last_pos.y + (pointer_pos.y - last_pos.y) * t,
-                                );
-                                self.connection_breaker.points.push(clamped);
-                            }
+                        .copied()
+                        .unwrap_or(pointer_pos);
+                    let segment_len = last_pos.distance(pointer_pos);
+                    if remaining > 0.0 && segment_len > 0.0 {
+                        if segment_len <= remaining {
+                            self.connection_breaker.points.push(pointer_pos);
+                        } else {
+                            let t = remaining / segment_len;
+                            let clamped = Pos2::new(
+                                last_pos.x + (pointer_pos.x - last_pos.x) * t,
+                                last_pos.y + (pointer_pos.y - last_pos.y) * t,
+                            );
+                            self.connection_breaker.points.push(clamped);
                         }
                     }
                 }
@@ -211,23 +239,15 @@ impl GraphUi {
             }
             (InteractionState::DraggingNewConnection, _) => {
                 if let Some(drag) = self.connection_drag.as_mut() {
-                    let cursor_pos = pointer_pos.unwrap_or(drag.current_pos);
                     drag.current_pos = hovered_port
                         .as_ref()
                         .filter(|&port| port.port.kind != drag.start_port.kind)
                         .map(|port| port.center)
-                        .unwrap_or(cursor_pos);
+                        .unwrap_or(pointer_pos);
                 }
             }
             _ => {}
         }
-
-        self.render_connections(view_graph, func_lib, &ctx, &graph_layout);
-
-        self.node_ui
-            .render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
-
-        top_panel(view_graph, func_lib, ctx, graph_layout);
     }
 
     fn render_connections(
