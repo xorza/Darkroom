@@ -105,8 +105,6 @@ impl GraphUi {
             self.process_connections(view_graph, func_lib, ui_interaction, &ctx, pointer_pos);
         }
 
-        self.render_connections(view_graph, func_lib, &ctx);
-
         self.node_ui.process_caption_drag(
             &ctx,
             &mut self.graph_layout,
@@ -114,6 +112,9 @@ impl GraphUi {
             func_lib,
             ui_interaction,
         );
+
+        self.render_connections(view_graph, func_lib, &ctx);
+
         self.node_ui.render_nodes(
             &ctx,
             &self.graph_layout,
