@@ -579,7 +579,7 @@ fn collect_ports(
                 node_view,
                 index,
                 func.inputs.len(),
-                &layout,
+                layout,
                 view_graph.zoom,
             );
 
@@ -597,7 +597,7 @@ fn collect_ports(
                 graph_layout.origin,
                 node_view,
                 index,
-                &layout,
+                layout,
                 view_graph.zoom,
                 node_width,
             );
@@ -741,7 +741,7 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
         .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
     let (layout, node_widths) =
-        compute_layout_and_widths(&ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
+        compute_layout_and_widths(ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
     let node_width = node_widths
         .get(&node.id)
         .copied()
@@ -769,7 +769,7 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
     }
 
     let (layout, node_widths) =
-        compute_layout_and_widths(&ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
+        compute_layout_and_widths(ctx.ui, &ctx.painter, view_graph, func_lib, 1.0);
     let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
