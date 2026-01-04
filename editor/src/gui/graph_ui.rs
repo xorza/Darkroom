@@ -7,7 +7,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_drag::ConnectionDrag;
 use crate::gui::connection_ui::{ConnectionUi, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::node_ui::NodeUi;
+use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{
     gui::{graph_ctx::GraphContext, node_ui},
     model,
@@ -114,39 +114,22 @@ impl GraphUi {
             self.node_ui
                 .render_nodes(&mut ctx, &self.graph_layout, ui_interaction);
         match (self.state, drag_port_info) {
-            (InteractionState::Idle, Some(dragged_port)) => {
-                self.connection_drag = Some(ConnectionDrag::new(dragged_port.clone()));
+            (InteractionState::Idle, PortDragInfo::DragStart(port_info)) => {
+                println!("Drag start");
+                self.connection_drag = Some(ConnectionDrag::new(port_info.clone()));
                 self.state = InteractionState::DraggingNewConnection;
             }
-            (InteractionState::DraggingNewConnection, Some(dragged_port)) => {
-                let connection_drag = self.connection_drag.as_ref().unwrap();
-                if dragged_port.port.kind != connection_drag.start_port.kind
-                    && connection_drag.current_pos.distance(dragged_port.center)
-                        <= ctx.style.port_activation_radius
-                    && let Some(node_id) = apply_connection(
-                        ctx.view_graph,
-                        ctx.func_lib,
-                        connection_drag.start_port,
-                        dragged_port.port,
-                    )
-                {
-                    let port_idx = if dragged_port.port.kind == PortKind::Input {
-                        dragged_port.port.idx
-                    } else {
-                        connection_drag.start_port.idx
-                    };
-
-                    ui_interaction.actions.push((
-                        node_id,
-                        GraphUiAction::InputChanged {
-                            input_idx: port_idx,
-                        },
-                    ));
-                }
+            (InteractionState::DraggingNewConnection, PortDragInfo::Hover(port_info)) => {
+                println!("Drag hover");
+                let drag = self.connection_drag.as_mut().unwrap();
+                drag.current_pos = port_info.center;
+            }
+            (_, PortDragInfo::DragStop(_)) => {
+                println!("Drag stop");
                 self.connection_drag = None;
                 self.state = InteractionState::Idle;
             }
-            _ => {}
+            (_, _) => {}
         }
 
         self.top_panel(&mut ctx);

@@ -90,8 +90,8 @@ impl NodeUi {
         ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
-    ) -> Option<PortInfo> {
-        let mut drag_port_info: Option<PortInfo> = None;
+    ) -> PortDragInfo {
+        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
@@ -352,9 +352,19 @@ impl NodeUi {
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
 
-            if node_drag_port_result.is_some() {
-                drag_port_info = node_drag_port_result;
+            match (&drag_port_info, &node_drag_port_result) {
+                (_, PortDragInfo::None) => {}
+                (_, PortDragInfo::DragStop(_)) => drag_port_info = node_drag_port_result,
+                (PortDragInfo::DragStop(_), _) => {}
+                (PortDragInfo::None, _) => drag_port_info = node_drag_port_result,
+                (_, PortDragInfo::DragStart(_)) => drag_port_info = node_drag_port_result,
+                _ => {}
             }
+            // if !matches!(node_drag_port_result, PortDragInfo::None) {
+            //     drag_port_info = node_drag_port_result;
+            // }
+
+            // if matches!(port_darg_info, PortDragInfo::None) {
         }
 
         for action in ui_interaction.actions.iter() {
@@ -386,6 +396,14 @@ pub fn node_rect_for_graph(
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
 }
 
+#[derive(Debug, Clone)]
+pub enum PortDragInfo {
+    None,
+    Hover(PortInfo),
+    DragStart(PortInfo),
+    DragStop(PortInfo),
+}
+
 fn render_node_ports(
     ctx: &GraphContext,
     graph_layout: &GraphLayout,
@@ -393,9 +411,9 @@ fn render_node_ports(
     input_count: usize,
     output_count: usize,
     node_width: f32,
-) -> Option<PortInfo> {
+) -> PortDragInfo {
     let view_node = &ctx.view_graph.view_nodes[view_node_idx];
-    let mut drag_port: Option<PortInfo> = None;
+    let mut port_darg_info: PortDragInfo = PortDragInfo::None;
 
     for input_idx in 0..input_count {
         let center = node_input_pos(
@@ -431,17 +449,20 @@ fn render_node_ports(
         ctx.painter
             .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
 
-        if response.drag_started_by(PointerButton::Primary)
-            | response.drag_stopped_by(PointerButton::Primary)
-        {
-            drag_port = Some(PortInfo {
-                port: PortRef {
-                    node_id: view_node.id,
-                    idx: input_idx,
-                    kind: PortKind::Input,
-                },
-                center,
-            });
+        let port_info = PortInfo {
+            port: PortRef {
+                node_id: view_node.id,
+                idx: input_idx,
+                kind: PortKind::Input,
+            },
+            center,
+        };
+        if response.drag_started_by(PointerButton::Primary) {
+            port_darg_info = PortDragInfo::DragStart(port_info);
+        } else if response.drag_stopped_by(PointerButton::Primary) {
+            port_darg_info = PortDragInfo::DragStop(port_info);
+        } else if response.hovered() {
+            port_darg_info = PortDragInfo::Hover(port_info);
         }
     }
 
@@ -479,21 +500,24 @@ fn render_node_ports(
         ctx.painter
             .circle_filled(center, ctx.view_graph.scale * ctx.style.port_radius, color);
 
-        if response.drag_started_by(PointerButton::Primary)
-            | response.drag_stopped_by(PointerButton::Primary)
-        {
-            drag_port = Some(PortInfo {
-                port: PortRef {
-                    node_id: view_node.id,
-                    idx: output_idx,
-                    kind: PortKind::Output,
-                },
-                center,
-            });
+        let port_info = PortInfo {
+            port: PortRef {
+                node_id: view_node.id,
+                idx: output_idx,
+                kind: PortKind::Output,
+            },
+            center,
+        };
+        if response.drag_started_by(PointerButton::Primary) {
+            port_darg_info = PortDragInfo::DragStart(port_info);
+        } else if response.drag_stopped_by(PointerButton::Primary) {
+            port_darg_info = PortDragInfo::DragStop(port_info);
+        } else if response.hovered() {
+            port_darg_info = PortDragInfo::Hover(port_info);
         }
     }
 
-    drag_port
+    port_darg_info
 }
 
 fn render_node_const_bindings(
