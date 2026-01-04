@@ -77,8 +77,8 @@ impl GraphLayout {
             .width()
     }
 
-    pub fn node_rect(&self, view_node: &model::ViewNode) -> Rect {
-        *self.node_rects.get(&view_node.id).unwrap()
+    fn node_rect(&self, node_id: &NodeId) -> Rect {
+        *self.node_rects.get(node_id).unwrap()
     }
 
     pub fn hovered_port(&self, pointer_pos: Pos2, port_activation_radius: f32) -> Option<PortInfo> {
