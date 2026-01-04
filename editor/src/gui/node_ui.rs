@@ -349,17 +349,12 @@ impl NodeUi {
                 output_count,
                 node_rect.width(),
             );
+            if node_drag_port_result.prio() > drag_port_info.prio() {
+                drag_port_info = node_drag_port_result;
+            }
+
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
-
-            match (&drag_port_info, &node_drag_port_result) {
-                (_, PortDragInfo::None) => {}
-                (_, PortDragInfo::DragStop) => drag_port_info = node_drag_port_result,
-                (PortDragInfo::DragStop, _) => {}
-                (PortDragInfo::None, _) => drag_port_info = node_drag_port_result,
-                (_, PortDragInfo::DragStart(_)) => drag_port_info = node_drag_port_result,
-                _ => {}
-            }
         }
 
         drag_port_info
@@ -480,6 +475,17 @@ fn render_node_ports(
     }
 
     port_drag_info
+}
+
+impl PortDragInfo {
+    fn prio(&self) -> u32 {
+        match self {
+            PortDragInfo::None => 0,
+            PortDragInfo::Hover(_) => 5,
+            PortDragInfo::DragStart(_) => 8,
+            PortDragInfo::DragStop => 10,
+        }
+    }
 }
 
 fn render_node_const_bindings(
