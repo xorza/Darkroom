@@ -403,7 +403,17 @@ fn render_node_ports(
                 ctx.view_graph.scale * ctx.style.port_radius * 2.0,
             ),
         );
-        let color = if ctx.ui.rect_contains_pointer(port_rect) {
+
+        let graph_bg_id = ctx
+            .ui
+            .make_persistent_id(("node_input", view_node_idx, index));
+        let response = ctx.ui.interact(
+            port_rect,
+            graph_bg_id,
+            egui::Sense::hover() | egui::Sense::drag(),
+        );
+
+        let color = if response.hovered() {
             ctx.style.input_hover_color
         } else {
             ctx.style.input_port_color
@@ -428,7 +438,17 @@ fn render_node_ports(
                 ctx.view_graph.scale * ctx.style.port_radius * 2.0,
             ),
         );
-        let color = if ctx.ui.rect_contains_pointer(port_rect) {
+
+        let graph_bg_id = ctx
+            .ui
+            .make_persistent_id(("node_output", view_node_idx, index));
+        let response = ctx.ui.interact(
+            port_rect,
+            graph_bg_id,
+            egui::Sense::hover() | egui::Sense::drag(),
+        );
+
+        let color = if response.hovered() {
             ctx.style.output_hover_color
         } else {
             ctx.style.output_port_color

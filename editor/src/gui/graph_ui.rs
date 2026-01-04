@@ -83,7 +83,6 @@ impl GraphUi {
         background(&ctx);
 
         let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
-        ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::hover());
 
         let pointer_pos = ctx
             .ui
@@ -138,7 +137,7 @@ impl GraphUi {
         let hovered_port = self
             .graph_layout
             .hovered_port(pointer_pos, ctx.style.port_activation_radius);
-        let bg_hover_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
+        let bg_hover_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::hover());
         let pointer_over_node = !bg_hover_response.hovered();
 
         match (self.state, primary_state) {
