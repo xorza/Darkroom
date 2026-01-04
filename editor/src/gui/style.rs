@@ -22,6 +22,15 @@ const TEMP_CONNECTION_COLOR: Color32 = Color32::from_rgb(170, 200, 255);
 const BREAKER_COLOR: Color32 = Color32::from_rgb(255, 120, 120);
 const SELECTED_STROKE_COLOR: Color32 = Color32::from_rgb(192, 222, 255);
 const NODE_STROKE_COLOR: Color32 = Color32::from_rgb(60, 60, 60);
+const WIDGET_TEXT_COLOR: Color32 = Color32::from_rgb(220, 220, 220);
+const WIDGET_NONINTERACTIVE_TEXT_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
+const WIDGET_NONINTERACTIVE_BG_FILL: Color32 = Color32::from_rgb(35, 35, 35);
+const WIDGET_ACTIVE_BG_FILL: Color32 = Color32::from_rgb(60, 60, 60);
+const WIDGET_HOVER_BG_FILL: Color32 = Color32::from_rgb(50, 50, 50);
+const WIDGET_INACTIVE_BG_FILL: Color32 = Color32::from_rgb(40, 40, 40);
+const WIDGET_INACTIVE_BG_STROKE_COLOR: Color32 = Color32::from_rgb(65, 65, 65);
+const STATUS_TERMINAL_COLOR: Color32 = SELECTED_STROKE_COLOR;
+const STATUS_IMPURE_COLOR: Color32 = Color32::from_rgb(255, 150, 70);
 const DOTTED_COLOR: Color32 = Color32::from_rgb(48, 48, 48);
 const DOTTED_BASE_SPACING: f32 = 24.0;
 const DOTTED_RADIUS_BASE: f32 = 1.2;
@@ -76,7 +85,7 @@ pub struct Style {
 }
 
 impl Style {
-    pub fn new_from_visuals(visuals: &egui::Visuals) -> Self {
+    pub fn new() -> Self {
         Self {
             heading_font: FontId {
                 size: HEADING_FONT_SIZE,
@@ -87,13 +96,13 @@ impl Style {
                 family: egui::FontFamily::Proportional,
             },
             text_color: TEXT_COLOR,
-            widget_text_color: visuals.text_color(),
-            widget_noninteractive_text_color: visuals.widgets.noninteractive.fg_stroke.color,
-            widget_noninteractive_bg_fill: visuals.widgets.noninteractive.bg_fill,
-            widget_active_bg_fill: visuals.widgets.active.bg_fill,
-            widget_hover_bg_fill: visuals.widgets.hovered.bg_fill,
-            widget_inactive_bg_fill: visuals.widgets.inactive.bg_fill,
-            widget_inactive_bg_stroke: visuals.widgets.inactive.bg_stroke,
+            widget_text_color: WIDGET_TEXT_COLOR,
+            widget_noninteractive_text_color: WIDGET_NONINTERACTIVE_TEXT_COLOR,
+            widget_noninteractive_bg_fill: WIDGET_NONINTERACTIVE_BG_FILL,
+            widget_active_bg_fill: WIDGET_ACTIVE_BG_FILL,
+            widget_hover_bg_fill: WIDGET_HOVER_BG_FILL,
+            widget_inactive_bg_fill: WIDGET_INACTIVE_BG_FILL,
+            widget_inactive_bg_stroke: Stroke::new(STROKE_WIDTH, WIDGET_INACTIVE_BG_STROKE_COLOR),
             port_radius: PORT_RADIUS,
             port_activation_radius: PORT_RADIUS * 1.6,
             header_text_offset: HEADER_TEXT_OFFSET,
@@ -102,8 +111,8 @@ impl Style {
             cache_button_text_pad_factor: CACHE_BUTTON_TEXT_PAD_FACTOR,
             cache_active_color: CACHE_ACTIVE_COLOR,
             cache_checked_text_color: CACHE_CHECKED_TEXT_COLOR,
-            status_terminal_color: visuals.selection.stroke.color,
-            status_impure_color: egui::Color32::from_rgb(255, 150, 70),
+            status_terminal_color: STATUS_TERMINAL_COLOR,
+            status_impure_color: STATUS_IMPURE_COLOR,
             status_dot_radius: STATUS_DOT_RADIUS,
             status_item_gap: STATUS_ITEM_GAP,
             input_port_color: INPUT_PORT_COLOR,
