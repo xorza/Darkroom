@@ -380,7 +380,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 },
                 FuncInput {
                     name: "B".to_string(),
-                    required: true,
+                    required: false,
                     data_type: DataType::Int,
                     default_value: None,
                     value_options: vec![],
@@ -397,7 +397,8 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 assert_eq!(outputs.len(), 1);
 
                 let a: i64 = inputs[0].value.as_int();
-                let b: i64 = inputs[1].value.as_int();
+                // let b: i64 = inputs[1].value.as_int();
+                let b: i64 = inputs[1].value.none_or_int().unwrap_or(1);
                 outputs[0] = (a * b).into();
                 cache.set(a * b);
 
@@ -478,7 +479,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_int();
-                let b:i64 = inputs[1].value.none_or_int().unwrap_or_default();
+                let b: i64 = inputs[1].value.none_or_int().unwrap_or_default();
                 // let b: i64 = inputs[1].value.as_int();
                 cache.set(a + b);
                 outputs[0] = (a + b).into();

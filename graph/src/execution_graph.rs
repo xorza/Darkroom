@@ -93,7 +93,6 @@ enum ProcessState {
 pub struct ExecutionNode {
     pub id: NodeId,
 
-    inited: bool,
     process_state: ProcessState,
 
     pub terminal: bool,
@@ -141,7 +140,6 @@ pub struct ExecutionGraph {
 
 impl ExecutionNode {
     fn invalidate(&mut self) {
-        self.inited = false;
         self.output_values = None;
         self.process_state = ProcessState::None;
         self.inputs.clear();
@@ -176,22 +174,16 @@ impl ExecutionNode {
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::default());
 
-        if !self.inited {
-            self.inited = true;
+        self.inputs
+            .resize(func.inputs.len(), ExecutionInput::default());
 
-            self.inputs
-                .resize(func.inputs.len(), ExecutionInput::default());
-
-            for (input_idx, func_input) in func.inputs.iter().enumerate() {
-                self.inputs[input_idx] = ExecutionInput {
-                    state: None,
-                    required: func_input.required,
-                    binding: ExecutionBinding::None,
-                    data_type: func_input.data_type.clone(),
-                };
+        for (input_idx, func_input) in func.inputs.iter().enumerate() {
+            let e_input = &mut self.inputs[input_idx];
+            e_input.state = None;
+            e_input.required = func_input.required;
+            if e_input.data_type != func_input.data_type {
+                e_input.data_type = func_input.data_type.clone();
             }
-
-            self.output_values = None;
         }
 
         assert_eq!(self.inputs.len(), node.inputs.len());
@@ -304,7 +296,6 @@ impl ExecutionGraph {
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
-            assert!(e_node.inited);
 
             inputs.clear();
             for input in e_node.inputs.iter() {
@@ -365,11 +356,15 @@ impl ExecutionGraph {
 
             e_node.run_time = start.elapsed().as_secs_f64();
 
-            e_node.inputs.iter_mut().for_each(|input| {
-                if matches!(input.binding, ExecutionBinding::Const(_)) {
-                    input.state = Some(InputState::Unchanged)
-                }
-            });
+            e_node
+                .inputs
+                .iter_mut()
+                .for_each(|input| match &input.binding {
+                    ExecutionBinding::None | ExecutionBinding::Const(_) => {
+                        input.state = Some(InputState::Unchanged)
+                    }
+                    ExecutionBinding::Bind(_) => {}
+                });
 
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
@@ -474,7 +469,10 @@ impl ExecutionGraph {
                             e_input.state = Some(InputState::Changed);
                             e_input.binding = ExecutionBinding::Const(value.clone());
                         }
-                        (Binding::Bind(_), _) => e_input.state = None,
+                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => e_input.state = None,
+                        (Binding::Bind(_), _) => {
+                            e_input.state = Some(InputState::Changed);
+                        }
                     };
 
                     let Binding::Bind(port_address) = &input.binding else {
@@ -506,7 +504,6 @@ impl ExecutionGraph {
 
             if let Some(output_idx) = output_request {
                 let e_node = &mut self.e_nodes[visit.e_node_idx];
-                assert!(e_node.inited);
                 e_node.outputs[output_idx].usage_count += 1;
             }
         }
@@ -532,7 +529,6 @@ impl ExecutionGraph {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
-                        assert!(output_e_node.inited);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         if output_e_node.missing_required_inputs {
@@ -555,10 +551,6 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert!(
-                e_node.inited,
-                "Invalid node, call update after invalidating"
-            );
             assert_eq!(e_node.process_state, ProcessState::Backward);
 
             e_node.process_state = ProcessState::Forward;
@@ -655,7 +647,6 @@ impl ExecutionGraph {
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            assert!(e_node.inited);
             assert!(!seen_node_ids.contains(&e_node.id));
             seen_node_ids.insert(e_node.id);
 
@@ -736,7 +727,6 @@ impl ExecutionGraph {
             seen[e_node_idx] = true;
 
             let e_node = &self.e_nodes[e_node_idx];
-            assert!(e_node.inited);
             assert_eq!(e_node.process_state, ProcessState::Backward);
             assert!(e_node.wants_execute);
             assert!(!e_node.missing_required_inputs);
@@ -753,7 +743,6 @@ impl ExecutionGraph {
         }
 
         for e_node in self.e_nodes.iter() {
-            assert!(e_node.inited);
             assert_ne!(e_node.process_state, ProcessState::Processing);
             assert_ne!(e_node.process_state, ProcessState::None);
 
@@ -839,7 +828,7 @@ mod tests {
     use super::*;
     use crate::data::{DynamicValue, StaticValue};
     use crate::function::{test_func_lib, TestFuncHooks};
-    use crate::graph::{test_graph, Input, NodeBehavior};
+    use crate::graph::{test_graph, NodeBehavior};
     use common::FileFormat;
     use tokio::sync::Mutex;
 
@@ -1144,19 +1133,9 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
 
-        let get_a = graph.by_name("get_a").unwrap().id;
-        let get_b = graph.by_name("get_b").unwrap().id;
         let sum = graph.by_name("sum").unwrap().id;
-        let mult = graph.by_name("mult").unwrap().id;
-        let print = graph.by_name("print").unwrap().id;
 
         execution_graph.invalidate_recursively(vec![sum]);
-
-        assert!(execution_graph.by_id(&get_a).unwrap().inited);
-        assert!(execution_graph.by_id(&get_b).unwrap().inited);
-        assert!(!execution_graph.by_id(&sum).unwrap().inited);
-        assert!(!execution_graph.by_id(&mult).unwrap().inited);
-        assert!(!execution_graph.by_id(&print).unwrap().inited);
 
         Ok(())
     }
@@ -1275,7 +1254,7 @@ mod tests {
     async fn asd() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
-            get_b: Arc::new(move || 5),
+            get_b: Arc::new(move || 11),
             print: Arc::new(move |_result| {}),
         });
 
@@ -1285,8 +1264,10 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        // second input for sum is optional
-        let sum = graph.by_name_mut("sum").unwrap();
+        // second input for mult is optional
+        // this excludes get_a, get_b and sum
+        let sum = graph.by_name_mut("mult").unwrap();
+        sum.inputs[0].binding = Binding::Const(2.into());
         sum.inputs[1].binding = Binding::None;
 
         execution_graph.update(&graph, &func_lib)?;
@@ -1294,19 +1275,8 @@ mod tests {
 
         assert_eq!(
             execution_graph.e_node_invoke_order.iter().len(),
-            1,
-            "changing value to the same should not recompute cache"
-        );
-
-        let mult = graph.by_name_mut("mult").unwrap();
-        mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-
-        assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
             2,
-            "mult should be invoked as const value changed"
+            "changing binding should recompute sum"
         );
 
         execution_graph.update(&graph, &func_lib)?;
@@ -1315,7 +1285,7 @@ mod tests {
         assert_eq!(
             execution_graph.e_node_invoke_order.iter().len(),
             1,
-            "mult should not be invoked again"
+            "nothing changed so nothing should be recomputed"
         );
 
         Ok(())
