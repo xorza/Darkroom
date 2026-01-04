@@ -23,6 +23,14 @@ pub(crate) enum PortKind {
     Output,
 }
 
+#[derive(Debug, Clone)]
+struct ConnectionCurve {
+    key: ConnectionKey,
+    start: Pos2,
+    end: Pos2,
+    control_offset: f32,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionRenderer {
     curves: Vec<ConnectionCurve>,
@@ -163,15 +171,6 @@ pub(crate) fn draw_temporary_connection(
     );
     painter.add(shape);
 }
-
-#[derive(Debug, Clone)]
-struct ConnectionCurve {
-    key: ConnectionKey,
-    start: Pos2,
-    end: Pos2,
-    control_offset: f32,
-}
-
 fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
     let mut hits = HashSet::new();
     let breaker_segments = breaker.windows(2).map(|pair| (pair[0], pair[1]));
