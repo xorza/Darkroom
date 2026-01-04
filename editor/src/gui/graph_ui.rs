@@ -333,7 +333,6 @@ fn update_zoom_and_pan(ctx: &mut GraphContext, graph_bg_id: Id, cursor_pos: Pos2
 
     ctx.view_graph.pan += pan;
 
-    // let pan_id = ctx.ui.make_persistent_id("graph_pan");
     let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
     if pan_response.dragged_by(PointerButton::Middle) {
         ctx.view_graph.pan += pan_response.drag_delta();

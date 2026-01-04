@@ -13,6 +13,14 @@ use crate::{
     model,
 };
 
+#[derive(Debug, Clone)]
+pub enum PortDragInfo {
+    None,
+    Hover(PortInfo),
+    DragStart(PortInfo),
+    DragStop,
+}
+
 #[derive(Debug)]
 pub struct NodeLayout {
     pub node_width: f32,
@@ -391,14 +399,6 @@ pub fn node_rect_for_graph(
 ) -> egui::Rect {
     let node_size = node_size(input_count, output_count, layout, node_width);
     egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size)
-}
-
-#[derive(Debug, Clone)]
-pub enum PortDragInfo {
-    None,
-    Hover(PortInfo),
-    DragStart(PortInfo),
-    DragStop,
 }
 
 fn render_node_ports(

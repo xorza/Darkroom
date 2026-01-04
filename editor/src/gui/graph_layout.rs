@@ -23,7 +23,6 @@ pub struct PortInfo {
 #[derive(Debug)]
 pub struct GraphLayout {
     pub origin: Pos2,
-    pub rect: Rect,
     pub node_layout: node_ui::NodeLayout,
     pub node_rects: HashMap<NodeId, Rect>,
 }
@@ -32,7 +31,6 @@ impl Default for GraphLayout {
     fn default() -> Self {
         Self {
             origin: Pos2::ZERO,
-            rect: Rect::NOTHING,
             node_layout: node_ui::NodeLayout::default(),
             node_rects: HashMap::new(),
         }
@@ -41,8 +39,8 @@ impl Default for GraphLayout {
 
 impl GraphLayout {
     pub fn update(&mut self, ctx: &GraphContext) {
-        self.origin = ctx.rect.min + ctx.view_graph.pan;
-        self.rect = ctx.rect;
+        let rect = ctx.ui.available_rect_before_wrap();
+        self.origin = rect.min + ctx.view_graph.pan;
         self.node_layout = node_ui::NodeLayout::default().scaled(ctx.view_graph.scale);
 
         node_ui::compute_node_rects(ctx, &self.node_layout, self.origin, &mut self.node_rects);
