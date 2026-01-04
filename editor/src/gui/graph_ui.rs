@@ -105,14 +105,11 @@ impl GraphUi {
             self.process_connections(&mut ctx, graph_bg_id, ui_interaction, pointer_pos);
         }
 
-        self.node_ui
-            .process_drag(&mut ctx, &mut self.graph_layout, ui_interaction);
-
         self.render_connections(&mut ctx);
 
         let drag_port_info =
             self.node_ui
-                .render_nodes(&mut ctx, &self.graph_layout, ui_interaction);
+                .render_nodes(&mut ctx, &mut self.graph_layout, ui_interaction);
 
         match (self.state, drag_port_info) {
             (InteractionState::Idle, PortDragInfo::DragStart(port_info)) => {

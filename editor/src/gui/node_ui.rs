@@ -53,7 +53,7 @@ impl NodeLayout {
 }
 
 impl NodeUi {
-    pub fn process_drag(
+    fn process_drag(
         &mut self,
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
@@ -88,9 +88,11 @@ impl NodeUi {
     pub fn render_nodes(
         &mut self,
         ctx: &mut GraphContext,
-        graph_layout: &GraphLayout,
+        graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
+        self.process_drag(ctx, graph_layout, ui_interaction);
+
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
