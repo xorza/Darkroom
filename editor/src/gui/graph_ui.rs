@@ -138,12 +138,18 @@ impl GraphUi {
 
         background(&ctx, view_graph.zoom, view_graph.pan);
 
-        let pointer_pos = ctx.ui.input(|input| input.pointer.hover_pos());
-        let pointer_in_rect = pointer_pos
-            .map(|pos| ctx.rect.contains(pos))
-            .unwrap_or(false);
-        if pointer_in_rect {
-            update_zoom_and_pan(&ctx, pointer_pos.unwrap(), view_graph);
+        let pointer_pos = ctx
+            .ui
+            .input(|input| input.pointer.hover_pos())
+            .and_then(|pos| {
+                if ctx.rect.contains(pos) {
+                    Some(pos)
+                } else {
+                    None
+                }
+            });
+        if let Some(pointer_pos) = pointer_pos {
+            update_zoom_and_pan(&ctx, pointer_pos, view_graph);
         }
 
         let graph_layout = {
@@ -206,7 +212,7 @@ impl GraphUi {
         if !connection_breaker.active
             && !connection_drag.active
             && primary_pressed
-            && pointer_in_rect
+            && pointer_pos.is_some()
             && !pointer_over_node
             && hovered_port.is_none()
         {
@@ -221,7 +227,7 @@ impl GraphUi {
         if !connection_breaker.active
             && !connection_drag.active
             && primary_pressed
-            && pointer_in_rect
+            && pointer_pos.is_some()
             && let Some(port) = hovered_port_ref
         {
             connection_drag.start(port.clone());
