@@ -5,7 +5,6 @@ use hashbrown::HashMap;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::node_ui;
-use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
@@ -58,11 +57,7 @@ impl GraphLayout {
         *self.node_rects.get(node_id).unwrap()
     }
 
-    pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode, scale: f32) {
-        let rect = self.node_rect(&view_node.id);
-        let size = rect.size();
-        let min = self.origin + view_node.pos.to_vec2() * scale;
-        self.node_rects
-            .insert(view_node.id, Rect::from_min_size(min, size));
+    pub fn update_node_rect_position(&mut self, view_node_id: &NodeId, new_rect: Rect) {
+        self.node_rects.insert(*view_node_id, new_rect);
     }
 }

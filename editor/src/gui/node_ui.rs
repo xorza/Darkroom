@@ -61,55 +61,21 @@ impl NodeLayout {
 }
 
 impl NodeUi {
-    fn process_drag(
-        &mut self,
-        ctx: &mut GraphContext,
-        graph_layout: &mut GraphLayout,
-        ui_interaction: &mut GraphUiInteraction,
-    ) {
-        for view_node in ctx.view_graph.view_nodes.iter_mut() {
-            let node_rect = graph_layout.node_rect(&view_node.id);
-
-            let node_body_id = ctx.ui.make_persistent_id(("node_hover", view_node.id));
-            let response = ctx.ui.interact(
-                node_rect,
-                node_body_id,
-                egui::Sense::hover() | egui::Sense::drag(),
-            );
-
-            if response.dragged_by(PointerButton::Middle)
-                || response.dragged_by(PointerButton::Primary)
-            {
-                view_node.pos += response.drag_delta() / ctx.view_graph.scale;
-                graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
-                ui_interaction
-                    .actions
-                    .push((view_node.id, GraphUiAction::NodeSelected));
-            } else if response.clicked() {
-                ui_interaction
-                    .actions
-                    .push((view_node.id, GraphUiAction::NodeSelected));
-            }
-        }
-    }
-
     pub fn render_nodes(
         &mut self,
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
-        // self.process_drag(ctx, graph_layout, ui_interaction);
-
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
-            let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
-            let node_rect = graph_layout.node_rect(&view_node.id);
+            let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+            let node_rect = graph_layout.node_rect(&view_node_id);
 
             // === body interaction
 
-            let node_id = ctx.ui.make_persistent_id(("node_body", view_node.id));
+            let node_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
             let body_response = ctx.ui.interact(
                 node_rect,
                 node_id,
@@ -119,18 +85,26 @@ impl NodeUi {
             let dragged = body_response.dragged_by(PointerButton::Middle)
                 || body_response.dragged_by(PointerButton::Primary);
             if dragged {
-                view_node.pos += body_response.drag_delta() / ctx.view_graph.scale;
-                graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
+                ctx.view_graph.view_nodes[view_node_idx].pos +=
+                    body_response.drag_delta() / ctx.view_graph.scale;
+
+                let new_rect = compute_node_rect(
+                    ctx,
+                    &view_node_id,
+                    &graph_layout.node_layout,
+                    graph_layout.origin,
+                );
+                graph_layout.update_node_rect_position(&view_node_id, new_rect);
             }
             if dragged || body_response.clicked() {
                 ui_interaction
                     .actions
-                    .push((view_node.id, GraphUiAction::NodeSelected));
+                    .push((view_node_id, GraphUiAction::NodeSelected));
             }
 
             // === body interaction
 
-            let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+            let node = ctx.view_graph.graph.by_id_mut(&view_node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let input_count = func.inputs.len();
@@ -235,7 +209,7 @@ impl NodeUi {
                 };
                 ui_interaction
                     .actions
-                    .push((view_node.id, GraphUiAction::CacheToggled));
+                    .push((view_node_id, GraphUiAction::CacheToggled));
             }
 
             if remove_response.hovered() {
@@ -245,7 +219,7 @@ impl NodeUi {
             if remove_response.clicked() {
                 ui_interaction
                     .actions
-                    .push((view_node.id, GraphUiAction::NodeRemoved));
+                    .push((view_node_id, GraphUiAction::NodeRemoved));
 
                 continue;
             }
@@ -253,13 +227,13 @@ impl NodeUi {
             let selected_id = if body_response.clicked() {
                 ui_interaction
                     .actions
-                    .push((view_node.id, GraphUiAction::NodeSelected));
-                Some(view_node.id)
+                    .push((view_node_id, GraphUiAction::NodeSelected));
+                Some(view_node_id)
             } else {
                 ctx.view_graph.selected_node_id
             };
 
-            let is_selected = selected_id.is_some_and(|id| id == view_node.id);
+            let is_selected = selected_id.is_some_and(|id| id == view_node_id);
 
             ctx.painter.rect(
                 node_rect,
@@ -737,18 +711,18 @@ pub(crate) fn compute_node_rects(
     node_rects.clear();
 
     for view_node in ctx.view_graph.view_nodes.iter() {
-        let rect = compute_node_rect(ctx, node_layout, origin, view_node);
+        let rect = compute_node_rect(ctx, &view_node.id, node_layout, origin);
         node_rects.insert(view_node.id, rect);
     }
 }
 
 fn compute_node_rect(
     ctx: &GraphContext,
+    view_node_id: &NodeId,
     node_layout: &NodeLayout,
     origin: Pos2,
-    view_node: &model::ViewNode,
 ) -> Rect {
-    let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
+    let node = ctx.view_graph.graph.by_id(view_node_id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
     let header_width = text_width(
@@ -837,6 +811,7 @@ fn compute_node_rect(
         + node_layout.padding;
     let node_size = egui::vec2(node_width, height);
 
+    let view_node = ctx.view_graph.view_nodes.by_key(view_node_id).unwrap();
     egui::Rect::from_min_size(
         origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
         node_size,
