@@ -352,7 +352,6 @@ impl NodeUi {
             render_node_const_bindings(ctx, graph_layout, view_node_idx);
             render_node_labels(ctx, graph_layout, view_node_idx);
 
-            println!("node_drag_port_result {:?}", node_drag_port_result);
             match (&drag_port_info, &node_drag_port_result) {
                 (_, PortDragInfo::None) => {}
                 (_, PortDragInfo::DragStop) => drag_port_info = node_drag_port_result,

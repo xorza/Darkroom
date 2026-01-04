@@ -116,23 +116,30 @@ impl GraphUi {
 
         match (self.state, drag_port_info) {
             (InteractionState::Idle, PortDragInfo::DragStart(port_info)) => {
-                self.connection_drag = Some(ConnectionDrag::new(port_info.clone()));
+                self.connection_drag = Some(ConnectionDrag::new(port_info));
                 self.state = InteractionState::DraggingNewConnection;
             }
             (InteractionState::DraggingNewConnection, PortDragInfo::Hover(port_info)) => {
-                println!("hover {:?}", port_info);
                 let connection_drag = self.connection_drag.as_mut().unwrap();
-                if connection_drag.start_port.kind != port_info.port.kind {
-                    connection_drag.end_port = Some(port_info.port.clone());
+                if connection_drag.start_port.port.kind != port_info.port.kind {
+                    connection_drag.end_port = Some(port_info);
                     connection_drag.current_pos = port_info.center;
                 }
             }
             (_, PortDragInfo::DragStop) => {
                 let connection_drag = self.connection_drag.as_mut().unwrap();
-                if let Some(end_port) = connection_drag.end_port {
-                    let node_id =
-                        apply_connection(ctx.view_graph, connection_drag.start_port, end_port);
-                    let input_idx = sort_ports(connection_drag.start_port, end_port).0.idx;
+                if let Some(end_port) = &connection_drag.end_port
+                    && end_port.center.distance(connection_drag.current_pos)
+                        < ctx.style.port_activation_radius
+                {
+                    let node_id = apply_connection(
+                        ctx.view_graph,
+                        connection_drag.start_port.port,
+                        end_port.port,
+                    );
+                    let input_idx = sort_ports(connection_drag.start_port.port, end_port.port)
+                        .0
+                        .idx;
                     ui_interaction
                         .actions
                         .push((node_id, GraphUiAction::InputChanged { input_idx }));
@@ -349,6 +356,7 @@ fn background(ctx: &GraphContext) {
     }
 }
 
+// Result(input, output)
 fn sort_ports(a: PortRef, b: PortRef) -> (PortRef, PortRef) {
     match (a.kind, b.kind) {
         (PortKind::Output, PortKind::Input) => (b, a),
