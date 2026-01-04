@@ -102,11 +102,7 @@ impl ConnectionUi {
                     continue;
                 };
                 let source_view = view_graph.view_nodes.by_key(&binding.target_id).unwrap();
-                let source_width = graph_layout
-                    .node_widths
-                    .get(&binding.target_id)
-                    .copied()
-                    .unwrap();
+                let source_width = graph_layout.node_width(&binding.target_id);
                 let start = node_ui::node_output_pos(
                     graph_layout.origin,
                     source_view,

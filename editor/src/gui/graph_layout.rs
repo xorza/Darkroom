@@ -27,7 +27,7 @@ pub struct GraphLayout {
     pub scale: f32,
     pub rect: Rect,
     pub node_layout: node_ui::NodeLayout,
-    pub node_widths: HashMap<NodeId, f32>,
+    pub node_rects: HashMap<NodeId, Rect>,
     pub ports: Vec<PortInfo>,
 }
 
@@ -38,7 +38,7 @@ impl Default for GraphLayout {
             scale: 1.0,
             rect: Rect::NOTHING,
             node_layout: node_ui::NodeLayout::default(),
-            node_widths: HashMap::new(),
+            node_rects: HashMap::new(),
             ports: Vec::new(),
         }
     }
@@ -53,21 +53,31 @@ impl GraphLayout {
     ) {
         let origin = ctx.rect.min + view_graph.pan;
         let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
-        let node_widths = node_ui::compute_node_widths(ctx, view_graph, func_lib, &node_layout);
+        // let node_widths = node_ui::compute_node_widths(ctx, view_graph, func_lib, &node_layout);
+
+        let a = node_ui::compute_node_rects(
+            ctx,
+            view_graph,
+            func_lib,
+            &node_layout,
+            origin,
+            view_graph.zoom,
+        );
 
         self.origin = origin;
         self.scale = view_graph.zoom;
         self.rect = ctx.rect;
         self.node_layout = node_layout;
-        self.node_widths = node_widths;
+        self.node_rects = a;
         self.collect_ports(view_graph, func_lib);
     }
 
     pub fn node_width(&self, node_id: &NodeId) -> f32 {
-        self.node_widths
+        self.node_rects
             .get(node_id)
             .copied()
             .expect("node width must be precomputed for view node")
+            .width()
     }
 
     pub fn node_rect(

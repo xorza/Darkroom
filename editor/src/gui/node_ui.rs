@@ -1,6 +1,7 @@
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_layout::GraphLayout;
 use eframe::egui;
+use egui::{Pos2, Rect};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{Func, FuncBehavior, FuncLib, NodeBehavior};
@@ -640,17 +641,19 @@ pub(crate) struct NodeWidthContext<'a> {
     pub scale: f32,
 }
 
-pub(crate) fn compute_node_widths(
+pub(crate) fn compute_node_rects(
     ctx: &RenderContext,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
     node_layout: &NodeLayout,
-) -> HashMap<NodeId, f32> {
+    origin: Pos2,
+    scale: f32,
+) -> HashMap<NodeId, Rect> {
     let scale_guess = node_layout.row_height / 18.0;
-    let mut widths = HashMap::with_capacity(view_graph.view_nodes.len());
+    let mut rects = HashMap::with_capacity(view_graph.view_nodes.len());
 
-    for node_view in &view_graph.view_nodes {
-        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+    for view_node in &view_graph.view_nodes {
+        let node = view_graph.graph.by_id(&view_node.id).unwrap();
         let func = func_lib.by_id(&node.func_id).unwrap();
         let header_width = text_width(
             &ctx.painter,
@@ -738,10 +741,21 @@ pub(crate) fn compute_node_widths(
                 .max(cache_row_width)
                 .max(status_row_width),
         );
-        widths.insert(node.id, computed);
+
+        let rect = node_rect_for_graph(
+            origin,
+            view_node,
+            func.inputs.len(),
+            func.outputs.len(),
+            scale,
+            node_layout,
+            computed,
+        );
+
+        rects.insert(node.id, rect);
     }
 
-    widths
+    rects
 }
 
 fn text_width(
