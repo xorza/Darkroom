@@ -124,7 +124,7 @@ impl GraphUi {
                 let drag = self.connection_drag.as_mut().unwrap();
                 drag.current_pos = port_info.center;
             }
-            (_, PortDragInfo::DragStop(_)) => {
+            (_, PortDragInfo::DragStop) => {
                 println!("Drag stop");
                 self.connection_drag = None;
                 self.state = InteractionState::Idle;
