@@ -77,9 +77,9 @@ impl GraphLayout {
             .width()
     }
 
-    // fn node_rect(&self, node_id: &NodeId) -> Rect {
-    //     *self.node_rects.get(node_id).unwrap()
-    // }
+    pub fn node_rect(&self, node_id: &NodeId) -> Rect {
+        *self.node_rects.get(node_id).unwrap()
+    }
 
     pub fn hovered_port(&self, pointer_pos: Pos2, port_activation_radius: f32) -> Option<PortInfo> {
         if self.ports.is_empty() {
@@ -106,11 +106,7 @@ impl GraphLayout {
     }
 
     pub fn update_node_rect_position(&mut self, view_node: &model::ViewNode) {
-        let rect = self
-            .node_rects
-            .get(&view_node.id)
-            .copied()
-            .expect("node rect must be precomputed for view node");
+        let rect = self.node_rect(&view_node.id);
         let size = rect.size();
         let min = self.origin + view_node.pos.to_vec2() * self.scale;
         self.node_rects

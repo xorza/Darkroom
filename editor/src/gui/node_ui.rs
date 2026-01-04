@@ -63,10 +63,7 @@ impl NodeUi {
         for node_view in &mut view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
-            let node_rect = *graph_layout
-                .node_rects
-                .get(&node.id)
-                .expect("node rect must be precomputed for view node");
+            let node_rect = graph_layout.node_rect(&node.id);
             let header_rect = egui::Rect::from_min_size(
                 node_rect.min,
                 egui::vec2(node_rect.width(), graph_layout.node_layout.header_height),
@@ -129,11 +126,6 @@ impl NodeUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let visuals = ctx.ui.visuals();
-        let node_fill = ctx.style.node_fill;
-        let node_stroke = ctx.style.node_stroke;
-        let selected_stroke = ctx.style.selected_stroke;
-
         for node_view in &mut view_graph.view_nodes {
             let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
@@ -178,11 +170,11 @@ impl NodeUi {
                 let dot_gap = graph_layout.scale * ctx.style.status_item_gap;
                 let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
                 if has_terminal {
-                    dot_centers.push((dot_x, "terminal", visuals.selection.stroke.color));
+                    dot_centers.push((dot_x, "terminal", ctx.style.status_terminal_color));
                     dot_x -= dot_diameter + dot_gap;
                 }
                 if has_impure {
-                    dot_centers.push((dot_x, "impure", egui::Color32::from_rgb(255, 150, 70)));
+                    dot_centers.push((dot_x, "impure", ctx.style.status_impure_color));
                 }
             }
             let cache_button_height = if graph_layout.node_layout.cache_height > 0.0 {
@@ -281,28 +273,28 @@ impl NodeUi {
             ctx.painter.rect(
                 node_rect,
                 graph_layout.node_layout.corner_radius,
-                node_fill,
+                ctx.style.node_fill,
                 if is_selected {
-                    selected_stroke
+                    ctx.style.selected_stroke
                 } else {
-                    node_stroke
+                    ctx.style.node_stroke
                 },
                 egui::StrokeKind::Inside,
             );
 
             if graph_layout.node_layout.cache_height > 0.0 {
                 let button_fill = if !cache_enabled {
-                    visuals.widgets.noninteractive.bg_fill
+                    ctx.style.widget_noninteractive_bg_fill
                 } else if node.behavior == NodeBehavior::Once {
                     ctx.style.cache_active_color
                 } else if cache_response.is_pointer_button_down_on() {
-                    visuals.widgets.active.bg_fill
+                    ctx.style.widget_active_bg_fill
                 } else if cache_response.hovered() {
-                    visuals.widgets.hovered.bg_fill
+                    ctx.style.widget_hover_bg_fill
                 } else {
-                    visuals.widgets.inactive.bg_fill
+                    ctx.style.widget_inactive_bg_fill
                 };
-                let button_stroke = visuals.widgets.inactive.bg_stroke;
+                let button_stroke = ctx.style.widget_inactive_bg_stroke;
                 ctx.painter.rect(
                     cache_button_rect,
                     graph_layout.node_layout.corner_radius * 0.5,
@@ -313,11 +305,11 @@ impl NodeUi {
 
                 let button_text = "cache";
                 let button_text_color = if !cache_enabled {
-                    visuals.widgets.noninteractive.fg_stroke.color
+                    ctx.style.widget_noninteractive_text_color
                 } else if node.behavior == NodeBehavior::Once {
                     ctx.style.cache_checked_text_color
                 } else {
-                    visuals.text_color()
+                    ctx.style.widget_text_color
                 };
                 ctx.painter.text(
                     cache_button_rect.center(),
@@ -344,13 +336,13 @@ impl NodeUi {
             }
 
             let close_fill = if remove_response.is_pointer_button_down_on() {
-                visuals.widgets.active.bg_fill
+                ctx.style.widget_active_bg_fill
             } else if remove_response.hovered() {
-                visuals.widgets.hovered.bg_fill
+                ctx.style.widget_hover_bg_fill
             } else {
-                visuals.widgets.inactive.bg_fill
+                ctx.style.widget_inactive_bg_fill
             };
-            let close_stroke = visuals.widgets.inactive.bg_stroke;
+            let close_stroke = ctx.style.widget_inactive_bg_stroke;
             ctx.painter.rect(
                 close_rect,
                 graph_layout.node_layout.corner_radius * 0.6,
@@ -375,7 +367,7 @@ impl NodeUi {
                 close_rect.max.x - close_margin,
                 close_rect.min.y + close_margin,
             );
-            let close_color = visuals.text_color();
+            let close_color = ctx.style.widget_text_color;
             let close_stroke = egui::Stroke::new(1.4 * graph_layout.scale, close_color);
             ctx.painter.line_segment([a, b], close_stroke);
             ctx.painter.line_segment([c, d], close_stroke);

@@ -12,7 +12,7 @@ pub struct RenderContext<'a> {
 
 impl<'a> RenderContext<'a> {
     pub fn new(ui: &'a mut Ui) -> Self {
-        let style = Style::new();
+        let style = Style::new_from_visuals(ui.visuals());
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter_at(rect);
 

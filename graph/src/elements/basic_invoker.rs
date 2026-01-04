@@ -1,4 +1,3 @@
-
 use common::Shared;
 use rand::{Rng, SeedableRng};
 use strum::IntoEnumIterator;
@@ -10,8 +9,7 @@ use common::output_stream::OutputStream;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{
-    Func, FuncBehavior, FuncInput, FuncLib, FuncOutput,
-    InvokeInput, ValueOption,
+    Func, FuncBehavior, FuncInput, FuncLib, FuncOutput, InvokeInput, ValueOption,
 };
 
 #[derive(Debug)]

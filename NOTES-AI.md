@@ -5,6 +5,7 @@ This file captures implementation details and internal structure for AI agents.
 ## Project Overview
 
 Scenarium collects the tooling required to build node based applications. The repository is a Rust workspace containing the core graph implementation and an editor front end.
+Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to centralize theme values.
 
 ## Repository Layout
 

@@ -37,6 +37,13 @@ pub struct Style {
     pub heading_font: egui::FontId,
     pub body_font: egui::FontId,
     pub text_color: Color32,
+    pub widget_text_color: Color32,
+    pub widget_noninteractive_text_color: Color32,
+    pub widget_noninteractive_bg_fill: Color32,
+    pub widget_active_bg_fill: Color32,
+    pub widget_hover_bg_fill: Color32,
+    pub widget_inactive_bg_fill: Color32,
+    pub widget_inactive_bg_stroke: Stroke,
     pub port_radius: f32,
     pub port_activation_radius: f32,
     pub header_text_offset: f32,
@@ -45,6 +52,8 @@ pub struct Style {
     pub cache_button_text_pad_factor: f32,
     pub cache_active_color: Color32,
     pub cache_checked_text_color: Color32,
+    pub status_terminal_color: Color32,
+    pub status_impure_color: Color32,
     pub status_dot_radius: f32,
     pub status_item_gap: f32,
     pub input_port_color: Color32,
@@ -67,7 +76,7 @@ pub struct Style {
 }
 
 impl Style {
-    pub fn new() -> Self {
+    pub fn new_from_visuals(visuals: &egui::Visuals) -> Self {
         Self {
             heading_font: FontId {
                 size: HEADING_FONT_SIZE,
@@ -78,6 +87,13 @@ impl Style {
                 family: egui::FontFamily::Proportional,
             },
             text_color: TEXT_COLOR,
+            widget_text_color: visuals.text_color(),
+            widget_noninteractive_text_color: visuals.widgets.noninteractive.fg_stroke.color,
+            widget_noninteractive_bg_fill: visuals.widgets.noninteractive.bg_fill,
+            widget_active_bg_fill: visuals.widgets.active.bg_fill,
+            widget_hover_bg_fill: visuals.widgets.hovered.bg_fill,
+            widget_inactive_bg_fill: visuals.widgets.inactive.bg_fill,
+            widget_inactive_bg_stroke: visuals.widgets.inactive.bg_stroke,
             port_radius: PORT_RADIUS,
             port_activation_radius: PORT_RADIUS * 1.6,
             header_text_offset: HEADER_TEXT_OFFSET,
@@ -86,6 +102,8 @@ impl Style {
             cache_button_text_pad_factor: CACHE_BUTTON_TEXT_PAD_FACTOR,
             cache_active_color: CACHE_ACTIVE_COLOR,
             cache_checked_text_color: CACHE_CHECKED_TEXT_COLOR,
+            status_terminal_color: visuals.selection.stroke.color,
+            status_impure_color: egui::Color32::from_rgb(255, 150, 70),
             status_dot_radius: STATUS_DOT_RADIUS,
             status_item_gap: STATUS_ITEM_GAP,
             input_port_color: INPUT_PORT_COLOR,

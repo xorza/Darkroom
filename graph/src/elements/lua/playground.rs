@@ -1,7 +1,6 @@
 use common::Shared;
 use mlua::FromLuaMulti;
 
-
 #[derive(Debug, Clone)]
 struct LuaCtx {
     inner: Shared<mlua::Lua>,
