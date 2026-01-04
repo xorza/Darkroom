@@ -5,6 +5,7 @@ use graph::prelude::{Binding, FuncLib};
 use hashbrown::HashMap;
 use std::collections::HashSet;
 
+use crate::gui::graph_layout::GraphLayout;
 use crate::gui::{node_ui, render::RenderContext};
 use crate::model;
 
@@ -44,12 +45,16 @@ impl ConnectionRenderer {
         &mut self,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
-        origin: Pos2,
-        layout: &node_ui::NodeLayout,
-        node_widths: &HashMap<NodeId, f32>,
+        graph_layout: &GraphLayout,
         breaker: &ConnectionBreaker,
     ) {
-        self.curves = collect_connection_curves(view_graph, func_lib, origin, layout, node_widths);
+        self.curves = collect_connection_curves(
+            view_graph,
+            func_lib,
+            graph_layout.origin,
+            &graph_layout.node_layout,
+            &graph_layout.node_widths,
+        );
         self.highlighted = if breaker.active && breaker.points.len() > 1 {
             connection_hits(&self.curves, &breaker.points)
         } else {

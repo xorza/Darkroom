@@ -180,14 +180,7 @@ impl GraphUi {
 
         let mut connections = ConnectionRenderer::default();
 
-        connections.rebuild(
-            view_graph,
-            func_lib,
-            graph_layout.origin,
-            &graph_layout.node_layout,
-            &graph_layout.node_widths,
-            connection_breaker,
-        );
+        connections.rebuild(view_graph, func_lib, &graph_layout, connection_breaker);
         connections.render(&ctx);
 
         if connection_breaker.active && connection_breaker.points.len() > 1 {
