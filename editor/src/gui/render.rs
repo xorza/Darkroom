@@ -30,5 +30,4 @@ impl<'a> RenderContext<'a> {
             style,
         }
     }
-
 }

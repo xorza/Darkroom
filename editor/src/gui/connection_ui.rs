@@ -1,0 +1,274 @@
+use eframe::egui;
+use egui::Pos2;
+use graph::graph::NodeId;
+use graph::prelude::{Binding, FuncLib};
+use hashbrown::HashMap;
+use std::collections::HashSet;
+
+use crate::gui::{node_ui, render::RenderContext};
+use crate::model;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ConnectionKey {
+    pub(crate) target_node_id: NodeId,
+    pub(crate) input_index: usize,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ConnectionBreaker {
+    pub(crate) active: bool,
+    pub(crate) points: Vec<Pos2>,
+}
+
+impl ConnectionBreaker {
+    pub fn reset(&mut self) {
+        self.active = false;
+        self.points.clear();
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PortKind {
+    Input,
+    Output,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ConnectionRenderer {
+    curves: Vec<ConnectionCurve>,
+    highlighted: HashSet<ConnectionKey>,
+}
+
+impl ConnectionRenderer {
+    pub(crate) fn rebuild(
+        &mut self,
+        view_graph: &model::ViewGraph,
+        func_lib: &FuncLib,
+        origin: Pos2,
+        layout: &node_ui::NodeLayout,
+        node_widths: &HashMap<NodeId, f32>,
+        breaker: &ConnectionBreaker,
+    ) {
+        self.curves = collect_connection_curves(view_graph, func_lib, origin, layout, node_widths);
+        self.highlighted = if breaker.active && breaker.points.len() > 1 {
+            connection_hits(&self.curves, &breaker.points)
+        } else {
+            HashSet::new()
+        };
+    }
+
+    pub(crate) fn highlighted(&self) -> &HashSet<ConnectionKey> {
+        &self.highlighted
+    }
+
+    pub(crate) fn render(&mut self, ctx: &RenderContext) {
+        draw_connections(&ctx.painter, &self.curves, &self.highlighted, &ctx.style);
+    }
+}
+
+pub(crate) fn draw_temporary_connection(
+    painter: &egui::Painter,
+    scale: f32,
+    start: Pos2,
+    end: Pos2,
+    start_kind: PortKind,
+    style: &crate::gui::style::Style,
+) {
+    assert!(scale.is_finite(), "connection scale must be finite");
+    assert!(scale > 0.0, "connection scale must be positive");
+    let control_offset = node_ui::bezier_control_offset(start, end, scale);
+    let (start_sign, end_sign) = match start_kind {
+        PortKind::Output => (1.0, -1.0),
+        PortKind::Input => (-1.0, 1.0),
+    };
+    let stroke = style.temp_connection_stroke;
+    let shape = egui::epaint::CubicBezierShape::from_points_stroke(
+        [
+            start,
+            start + egui::vec2(control_offset * start_sign, 0.0),
+            end + egui::vec2(control_offset * end_sign, 0.0),
+            end,
+        ],
+        false,
+        egui::Color32::TRANSPARENT,
+        stroke,
+    );
+    painter.add(shape);
+}
+
+#[derive(Debug, Clone)]
+struct ConnectionCurve {
+    key: ConnectionKey,
+    start: Pos2,
+    end: Pos2,
+    control_offset: f32,
+}
+
+fn collect_connection_curves(
+    view_graph: &model::ViewGraph,
+    func_lib: &FuncLib,
+    origin: Pos2,
+    layout: &node_ui::NodeLayout,
+    node_widths: &HashMap<NodeId, f32>,
+) -> Vec<ConnectionCurve> {
+    let node_lookup: HashMap<_, _> = view_graph
+        .view_nodes
+        .iter()
+        .map(|node| (node.id, node))
+        .collect();
+    let mut curves = Vec::new();
+
+    for node_view in &view_graph.view_nodes {
+        let node = view_graph.graph.by_id(&node_view.id).unwrap();
+        let func = func_lib.by_id(&node.func_id).unwrap();
+
+        for (input_index, input) in node.inputs.iter().enumerate() {
+            let Binding::Bind(binding) = &input.binding else {
+                continue;
+            };
+            let source_view = node_lookup.get(&binding.target_id).unwrap();
+            let source_width = node_widths.get(&binding.target_id).copied().unwrap();
+            let start = node_ui::node_output_pos(
+                origin,
+                source_view,
+                binding.port_idx,
+                layout,
+                view_graph.zoom,
+                source_width,
+            );
+            let end = node_ui::node_input_pos(
+                origin,
+                node_view,
+                input_index,
+                func.inputs.len(),
+                layout,
+                view_graph.zoom,
+            );
+            let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
+            curves.push(ConnectionCurve {
+                key: ConnectionKey {
+                    target_node_id: node.id,
+                    input_index,
+                },
+                start,
+                end,
+                control_offset,
+            });
+        }
+    }
+
+    curves
+}
+
+fn draw_connections(
+    painter: &egui::Painter,
+    curves: &[ConnectionCurve],
+    highlighted: &HashSet<ConnectionKey>,
+    style: &crate::gui::style::Style,
+) {
+    for curve in curves {
+        let stroke = if highlighted.contains(&curve.key) {
+            style.connection_highlight_stroke
+        } else {
+            style.connection_stroke
+        };
+        let control_offset = curve.control_offset;
+        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
+            [
+                curve.start,
+                curve.start + egui::vec2(control_offset, 0.0),
+                curve.end + egui::vec2(-control_offset, 0.0),
+                curve.end,
+            ],
+            false,
+            egui::Color32::TRANSPARENT,
+            stroke,
+        );
+        painter.add(shape);
+    }
+}
+
+fn connection_hits(curves: &[ConnectionCurve], breaker: &[Pos2]) -> HashSet<ConnectionKey> {
+    let mut hits = HashSet::new();
+    let breaker_segments = breaker.windows(2).map(|pair| (pair[0], pair[1]));
+
+    for curve in curves {
+        let samples = sample_cubic_bezier(
+            curve.start,
+            curve.start + egui::vec2(curve.control_offset, 0.0),
+            curve.end + egui::vec2(-curve.control_offset, 0.0),
+            curve.end,
+            24,
+        );
+        let curve_segments = samples.windows(2).map(|pair| (pair[0], pair[1]));
+        let mut hit = false;
+        for (a1, a2) in breaker_segments.clone() {
+            for (b1, b2) in curve_segments.clone() {
+                if segments_intersect(a1, a2, b1, b2) {
+                    hit = true;
+                    break;
+                }
+            }
+            if hit {
+                break;
+            }
+        }
+        if hit {
+            hits.insert(curve.key);
+        }
+    }
+
+    hits
+}
+
+fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
+    assert!(steps >= 2, "bezier sampling steps must be at least 2");
+    let mut points = Vec::with_capacity(steps + 1);
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let one_minus = 1.0 - t;
+        let a = one_minus * one_minus * one_minus;
+        let b = 3.0 * one_minus * one_minus * t;
+        let c = 3.0 * one_minus * t * t;
+        let d = t * t * t;
+        let x = a * p0.x + b * p1.x + c * p2.x + d * p3.x;
+        let y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
+        points.push(Pos2::new(x, y));
+    }
+    points
+}
+
+fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
+    let o1 = orient(a1, a2, b1);
+    let o2 = orient(a1, a2, b2);
+    let o3 = orient(b1, b2, a1);
+    let o4 = orient(b1, b2, a2);
+    let eps = 1e-6;
+
+    if o1.abs() < eps && on_segment(a1, a2, b1) {
+        return true;
+    }
+    if o2.abs() < eps && on_segment(a1, a2, b2) {
+        return true;
+    }
+    if o3.abs() < eps && on_segment(b1, b2, a1) {
+        return true;
+    }
+    if o4.abs() < eps && on_segment(b1, b2, a2) {
+        return true;
+    }
+
+    (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+}
+
+fn orient(a: Pos2, b: Pos2, c: Pos2) -> f32 {
+    (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+}
+
+fn on_segment(a: Pos2, b: Pos2, p: Pos2) -> bool {
+    let min_x = a.x.min(b.x);
+    let max_x = a.x.max(b.x);
+    let min_y = a.y.min(b.y);
+    let max_y = a.y.max(b.y);
+    p.x >= min_x - 1e-6 && p.x <= max_x + 1e-6 && p.y >= min_y - 1e-6 && p.y <= max_y + 1e-6
+}

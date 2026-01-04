@@ -185,6 +185,7 @@ Main-window construction now creates a `UiRefresh` helper passed into `AppData::
 Graph save/load, test-graph construction, graph-UI action handling, and run-graph status handling now live in `AppData`, with `MainUi` delegating to those helpers and `ViewGraph` focusing on in-memory serialization only.
 Node cache toggles now emit `GraphUiAction::CacheToggled` so the UI action stream captures that event.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
+Graph connection rendering (curve generation, hit detection, and temporary-connection drawing) now lives in `editor/src/gui/connection_render.rs` with `graph_ui.rs` focusing on interaction flow.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).
 Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).

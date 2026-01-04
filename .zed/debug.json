@@ -4,12 +4,13 @@
 // see: https://zed.dev/docs/debugger
 [
   {
+    "program": "editor",
     "label": "Rust (break on panic)",
     "adapter": "CodeLLDB",
     "request": "launch",
     "build": {
       "command": "cargo",
-      "args": ["build"],
+      "args": ["run", "editor"],
     },
     "sourceLanguages": ["rust"],
     "initCommands": ["breakpoint set -n rust_panic"],
