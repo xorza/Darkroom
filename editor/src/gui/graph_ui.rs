@@ -110,12 +110,12 @@ impl GraphUi {
 
     pub fn render(
         &mut self,
-        ui1: &mut Ui,
+        ui: &mut Ui,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let ctx = RenderContext::new(ui1);
+        let ctx = RenderContext::new(ui);
 
         background(&ctx, view_graph.zoom, view_graph.pan);
 
@@ -143,28 +143,9 @@ impl GraphUi {
         let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-        let hovered_port = pointer_pos
-            .filter(|pos| ctx.rect.contains(*pos))
-            .and_then(|pos| find_port_near(&graph_layout.ports, pos, port_activation));
-
-        let pointer_over_node = pointer_pos
-            .filter(|pos| ctx.rect.contains(*pos))
-            .is_some_and(|pos| {
-                view_graph.view_nodes.iter().any(|view_node| {
-                    let node = view_graph.graph.by_id(&view_node.id).unwrap();
-                    let func = func_lib.by_id(&node.func_id).unwrap();
-                    let node_rect = node_ui::node_rect_for_graph(
-                        graph_layout.origin,
-                        view_node,
-                        func.inputs.len(),
-                        func.outputs.len(),
-                        graph_layout.scale,
-                        &graph_layout.node_layout,
-                        *graph_layout.node_widths.get(&view_node.id).unwrap(),
-                    );
-                    node_rect.contains(pos)
-                })
-            });
+        let hovered_port = graph_layout.hovered_port(pointer_pos, ctx.rect, port_activation);
+        let pointer_over_node =
+            graph_layout.pointer_over_node(pointer_pos, ctx.rect, view_graph, func_lib);
 
         let connection_breaker = &mut self.connection_breaker;
         let connection_drag = &mut self.connection_drag;
@@ -413,6 +394,39 @@ impl GraphLayout {
             &self.node_layout,
             self.node_width(view_node.id),
         )
+    }
+
+    pub fn hovered_port(
+        &self,
+        pointer_pos: Option<Pos2>,
+        rect: Rect,
+        activation_radius: f32,
+    ) -> Option<PortInfo> {
+        assert!(rect.is_finite(), "graph rect must be finite");
+        pointer_pos
+            .filter(|pos| rect.contains(*pos))
+            .and_then(|pos| find_port_near(&self.ports, pos, activation_radius))
+    }
+
+    pub fn pointer_over_node(
+        &self,
+        pointer_pos: Option<Pos2>,
+        rect: Rect,
+        view_graph: &model::ViewGraph,
+        func_lib: &FuncLib,
+    ) -> bool {
+        assert!(rect.is_finite(), "graph rect must be finite");
+        pointer_pos
+            .filter(|pos| rect.contains(*pos))
+            .is_some_and(|pos| {
+                view_graph.view_nodes.iter().any(|view_node| {
+                    let node = view_graph.graph.by_id(&view_node.id).unwrap();
+                    let func = func_lib.by_id(&node.func_id).unwrap();
+                    let node_rect =
+                        self.node_rect(view_node, func.inputs.len(), func.outputs.len());
+                    node_rect.contains(pos)
+                })
+            })
     }
 }
 

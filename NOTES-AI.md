@@ -210,3 +210,4 @@ Editor node rendering now shows const input bindings as small badges to the left
 Const-binding badges now use a dedicated stroke color in the graph style.
 Graph UI style defaults now use named constants for all fixed values in `GraphStyle::new`.
 Graph render context now pulls fonts, text color, and port radius from the shared GUI style.
+GraphLayout now exposes helpers to detect hovered ports and pointer-over-node states for graph UI interactions.
