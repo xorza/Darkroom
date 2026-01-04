@@ -317,10 +317,10 @@ impl GraphUi {
             }
         });
         if view_selected {
-            view_selected_node(&ctx, view_graph, func_lib);
+            view_selected_node(&ctx, &graph_layout, view_graph, func_lib);
         }
         if fit_all {
-            fit_all_nodes(&ctx, view_graph, func_lib);
+            fit_all_nodes(&ctx, &graph_layout, view_graph, func_lib);
         }
     }
 }
@@ -569,7 +569,12 @@ fn apply_connection(
     Some(input_node.id)
 }
 
-fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
+fn view_selected_node(
+    ctx: &RenderContext,
+    graph_layout: &GraphLayout,
+    view_graph: &mut model::ViewGraph,
+    func_lib: &FuncLib,
+) {
     let Some(selected_id) = view_graph.selected_node_id else {
         return;
     };
@@ -589,8 +594,8 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
         .by_id(&node.func_id)
         .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-    let (layout, node_widths) = compute_layout_and_widths(&ctx.painter, view_graph, func_lib, 1.0);
-    let node_width = node_widths
+    let node_width = graph_layout
+        .node_widths
         .get(&node.id)
         .copied()
         .expect("node width must be precomputed");
@@ -600,7 +605,7 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
         func.inputs.len(),
         func.outputs.len(),
         1.0,
-        &layout,
+        &graph_layout.node_layout,
         node_width,
     )
     .size();
@@ -609,14 +614,18 @@ fn view_selected_node(ctx: &RenderContext, view_graph: &mut model::ViewGraph, fu
     view_graph.pan = ctx.rect.center() - ctx.rect.min - center;
 }
 
-fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
+fn fit_all_nodes(
+    ctx: &RenderContext,
+    graph_layout: &GraphLayout,
+    view_graph: &mut model::ViewGraph,
+    func_lib: &FuncLib,
+) {
     if view_graph.view_nodes.is_empty() {
         view_graph.zoom = 1.0;
         view_graph.pan = egui::Vec2::ZERO;
         return;
     }
 
-    let (layout, node_widths) = compute_layout_and_widths(&ctx.painter, view_graph, func_lib, 1.0);
     let mut min = Pos2::new(f32::INFINITY, f32::INFINITY);
     let mut max = Pos2::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
 
@@ -628,7 +637,8 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
         let func = func_lib
             .by_id(&node.func_id)
             .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
-        let node_width = node_widths
+        let node_width = graph_layout
+            .node_widths
             .get(&node.id)
             .copied()
             .expect("node width must be precomputed");
@@ -638,7 +648,7 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
             func.inputs.len(),
             func.outputs.len(),
             1.0,
-            &layout,
+            &graph_layout.node_layout,
             node_width,
         );
         min.x = min.x.min(rect.min.x);
@@ -668,25 +678,6 @@ fn fit_all_nodes(ctx: &RenderContext, view_graph: &mut model::ViewGraph, func_li
 
     let bounds_center = (min.to_vec2() + max.to_vec2()) * 0.5;
     view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * view_graph.zoom;
-}
-
-fn compute_layout_and_widths(
-    painter: &egui::Painter,
-    view_graph: &model::ViewGraph,
-    func_lib: &FuncLib,
-    scale: f32,
-) -> (node_ui::NodeLayout, HashMap<NodeId, f32>) {
-    let node_layout = node_ui::NodeLayout::default().scaled(scale);
-
-    let style = crate::gui::style::Style::new();
-
-    let width_ctx = node_ui::NodeWidthContext {
-        node_layout: &node_layout,
-        style: &style,
-        scale,
-    };
-    let widths = node_ui::compute_node_widths(painter, view_graph, func_lib, &width_ctx);
-    (node_layout, widths)
 }
 
 fn remove_connections(
