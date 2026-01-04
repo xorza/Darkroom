@@ -2,9 +2,9 @@ use eframe::egui;
 use egui::Pos2;
 
 use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{PortInfo, PortRef};
 use crate::gui::node_ui;
-use crate::gui::render::RenderContext;
 
 #[derive(Debug)]
 pub struct ConnectionDrag {
@@ -22,7 +22,7 @@ impl ConnectionDrag {
         }
     }
 
-    pub fn render(&self, ctx: &RenderContext, zoom: f32) {
+    pub fn render(&self, ctx: &GraphContext, zoom: f32) {
         let control_offset = node_ui::bezier_control_offset(self.start_pos, self.current_pos, zoom);
         let (start_sign, end_sign) = match self.start_port.kind {
             PortKind::Output => (1.0, -1.0),

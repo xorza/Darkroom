@@ -4,11 +4,11 @@ use eframe::egui;
 use egui::{Pos2, Rect};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
-use graph::prelude::{Func, FuncBehavior, FuncLib, NodeBehavior};
+use graph::prelude::{FuncBehavior, NodeBehavior};
 use hashbrown::HashMap;
 
 use crate::{
-    gui::{graph_ui::GraphUiAction, graph_ui::GraphUiInteraction, render::RenderContext},
+    gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction},
     model,
 };
 
@@ -54,15 +54,13 @@ impl NodeLayout {
 impl NodeUi {
     pub fn process_caption_drag(
         &mut self,
-        ctx: &RenderContext,
+        ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
-        view_graph: &mut model::ViewGraph,
-        func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        for node_view in &mut view_graph.view_nodes {
-            let node = view_graph.graph.by_id(&node_view.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+        for node_view in ctx.view_graph.view_nodes.iter_mut() {
+            let node = ctx.view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
             let node_rect = graph_layout.node_rect(&node.id);
             let header_rect = egui::Rect::from_min_size(
                 node_rect.min,
@@ -120,15 +118,14 @@ impl NodeUi {
 
     pub fn render_nodes(
         &mut self,
-        ctx: &RenderContext,
+        ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
-        view_graph: &mut model::ViewGraph,
-        func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        for node_view in &mut view_graph.view_nodes {
-            let node = view_graph.graph.by_id_mut(&node_view.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
+            let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
+            let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let input_count = func.inputs.len();
             let output_count = func.outputs.len();
@@ -140,7 +137,7 @@ impl NodeUi {
                 node_width,
             );
             let node_rect = egui::Rect::from_min_size(
-                graph_layout.origin + node_view.pos.to_vec2() * graph_layout.scale,
+                graph_layout.origin + view_node.pos.to_vec2() * graph_layout.scale,
                 node_size,
             );
             let header_rect = egui::Rect::from_min_size(
@@ -244,7 +241,7 @@ impl NodeUi {
                 };
                 ui_interaction
                     .actions
-                    .push((node_view.id, GraphUiAction::CacheToggled));
+                    .push((view_node.id, GraphUiAction::CacheToggled));
             }
 
             if remove_response.hovered() {
@@ -254,7 +251,7 @@ impl NodeUi {
             if remove_response.clicked() {
                 ui_interaction
                     .actions
-                    .push((node_view.id, GraphUiAction::NodeRemoved));
+                    .push((view_node.id, GraphUiAction::NodeRemoved));
 
                 continue;
             }
@@ -262,13 +259,13 @@ impl NodeUi {
             let selected_id = if body_response.clicked() {
                 ui_interaction
                     .actions
-                    .push((node_view.id, GraphUiAction::NodeSelected));
-                Some(node_view.id)
+                    .push((view_node.id, GraphUiAction::NodeSelected));
+                Some(view_node.id)
             } else {
-                view_graph.selected_node_id
+                ctx.view_graph.selected_node_id
             };
 
-            let is_selected = selected_id.is_some_and(|id| id == node_view.id);
+            let is_selected = selected_id.is_some_and(|id| id == view_node.id);
 
             ctx.painter.rect(
                 node_rect,
@@ -375,22 +372,22 @@ impl NodeUi {
             render_node_ports(
                 ctx,
                 graph_layout,
-                node_view,
+                view_node_idx,
                 input_count,
                 output_count,
                 node_width,
             );
-            render_node_const_bindings(ctx, graph_layout, node_view, node, func, input_count);
-            render_node_labels(ctx, graph_layout, &node.name, func, node_rect, node_width);
+            render_node_const_bindings(ctx, graph_layout, view_node_idx);
+            render_node_labels(ctx, graph_layout, view_node_idx);
         }
 
         for action in ui_interaction.actions.iter() {
             match action {
                 (node_id, GraphUiAction::NodeRemoved) => {
-                    view_graph.remove_node(node_id);
+                    ctx.view_graph.remove_node(node_id);
                 }
                 (node_id, GraphUiAction::NodeSelected) => {
-                    view_graph.select_node(node_id);
+                    ctx.view_graph.select_node(node_id);
                 }
                 _ => {}
             }
@@ -412,9 +409,9 @@ pub fn node_rect_for_graph(
 }
 
 fn render_node_ports(
-    ctx: &RenderContext,
+    ctx: &GraphContext,
     graph_layout: &GraphLayout,
-    view_node: &model::ViewNode,
+    view_node_idx: usize,
     input_count: usize,
     output_count: usize,
     node_width: f32,
@@ -422,7 +419,7 @@ fn render_node_ports(
     for index in 0..input_count {
         let center = node_input_pos(
             graph_layout.origin,
-            view_node,
+            &ctx.view_graph.view_nodes[view_node_idx],
             index,
             input_count,
             &graph_layout.node_layout,
@@ -447,7 +444,7 @@ fn render_node_ports(
     for index in 0..output_count {
         let center = node_output_pos(
             graph_layout.origin,
-            view_node,
+            &ctx.view_graph.view_nodes[view_node_idx],
             index,
             &graph_layout.node_layout,
             graph_layout.scale,
@@ -471,20 +468,21 @@ fn render_node_ports(
 }
 
 fn render_node_const_bindings(
-    ctx: &RenderContext,
+    ctx: &mut GraphContext,
     graph_layout: &GraphLayout,
-    view_node: &model::ViewNode,
-    node: &graph::graph::Node,
-    func: &Func,
-    input_count: usize,
+    view_node_idx: usize,
 ) {
+    let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
+    let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+    let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+
     let badge_padding = 4.0 * graph_layout.scale;
     let badge_height = (graph_layout.node_layout.row_height * 1.2).max(10.0 * graph_layout.scale);
     let badge_radius = 6.0 * graph_layout.scale;
     let badge_gap = 6.0 * graph_layout.scale;
 
     for (index, input) in node.inputs.iter().enumerate() {
-        if index >= input_count {
+        if index >= func.inputs.len() {
             break;
         }
         let Binding::Const(value) = &input.binding else {
@@ -501,7 +499,7 @@ fn render_node_const_bindings(
         let badge_width = label_width + badge_padding * 2.0;
         let center = node_input_pos(
             graph_layout.origin,
-            view_node,
+            &ctx.view_graph.view_nodes[view_node_idx],
             index,
             func.inputs.len(),
             &graph_layout.node_layout,
@@ -561,20 +559,19 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(
-    ctx: &RenderContext,
-    graph_layout: &GraphLayout,
-    node_name: &str,
-    func: &Func,
-    node_rect: egui::Rect,
-    node_width: f32,
-) {
+fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_node_idx: usize) {
+    let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
+    let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+    let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+
     let header_text_offset = graph_layout.scale * ctx.style.header_text_offset;
+
+    let node_rect = graph_layout.node_rect(&view_node.id);
 
     ctx.painter.text(
         node_rect.min + egui::vec2(graph_layout.node_layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
-        node_name,
+        &mut node.name,
         ctx.style.heading_font.scaled(graph_layout.scale),
         ctx.style.text_color,
     );
@@ -600,7 +597,7 @@ fn render_node_labels(
     for (index, output) in func.outputs.iter().enumerate() {
         let text_pos = node_rect.min
             + egui::vec2(
-                node_width - graph_layout.node_layout.padding,
+                node_rect.width() - graph_layout.node_layout.padding,
                 graph_layout.node_layout.header_height
                     + graph_layout.node_layout.cache_height
                     + graph_layout.node_layout.padding
@@ -678,9 +675,7 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
 }
 
 pub(crate) fn compute_node_rects(
-    ctx: &RenderContext,
-    view_graph: &model::ViewGraph,
-    func_lib: &FuncLib,
+    ctx: &GraphContext,
     node_layout: &NodeLayout,
     origin: Pos2,
     scale: f32,
@@ -690,12 +685,12 @@ pub(crate) fn compute_node_rects(
 
     let scale_guess = node_layout.row_height / 18.0;
 
-    for view_node in &view_graph.view_nodes {
-        let node = view_graph.graph.by_id(&view_node.id).unwrap();
-        let func = func_lib.by_id(&node.func_id).unwrap();
+    for view_node in ctx.view_graph.view_nodes.iter() {
+        let node = ctx.view_graph.graph.by_id(&view_node.id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
         let header_width = text_width(
             &ctx.painter,
-            &ctx.style.heading_font.scaled(view_graph.zoom),
+            &ctx.style.heading_font.scaled(ctx.scale),
             &node.name,
             ctx.style.text_color,
         ) + node_layout.padding * 2.0;
@@ -705,13 +700,13 @@ pub(crate) fn compute_node_rects(
             .min(node_layout.cache_height);
         let cache_text_width = text_width(
             &ctx.painter,
-            &ctx.style.body_font.scaled(view_graph.zoom),
+            &ctx.style.body_font.scaled(ctx.scale),
             "cached",
             ctx.style.text_color,
         )
         .max(text_width(
             &ctx.painter,
-            &ctx.style.body_font.scaled(view_graph.zoom),
+            &ctx.style.body_font.scaled(ctx.scale),
             "cache",
             ctx.style.text_color,
         ));
@@ -740,7 +735,7 @@ pub(crate) fn compute_node_rects(
             .map(|input| {
                 text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(view_graph.zoom),
+                    &ctx.style.body_font.scaled(ctx.scale),
                     &input.name,
                     ctx.style.text_color,
                 )
@@ -752,7 +747,7 @@ pub(crate) fn compute_node_rects(
             .map(|output| {
                 text_width(
                     &ctx.painter,
-                    &ctx.style.body_font.scaled(view_graph.zoom),
+                    &ctx.style.body_font.scaled(ctx.scale),
                     &output.name,
                     ctx.style.text_color,
                 )

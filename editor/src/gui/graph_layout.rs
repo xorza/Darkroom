@@ -4,8 +4,8 @@ use graph::prelude::FuncLib;
 use hashbrown::HashMap;
 
 use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_ctx::GraphContext;
 use crate::gui::node_ui;
-use crate::gui::render::RenderContext;
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,28 +45,21 @@ impl Default for GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(
-        &mut self,
-        ctx: &RenderContext,
-        view_graph: &model::ViewGraph,
-        func_lib: &FuncLib,
-    ) {
-        self.origin = ctx.rect.min + view_graph.pan;
-        self.scale = view_graph.zoom;
+    pub fn update(&mut self, ctx: &GraphContext) {
+        self.origin = ctx.rect.min + ctx.pan;
+        self.scale = ctx.scale;
         self.rect = ctx.rect;
-        self.node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
+        self.node_layout = node_ui::NodeLayout::default().scaled(ctx.scale);
 
         node_ui::compute_node_rects(
             ctx,
-            view_graph,
-            func_lib,
             &self.node_layout,
             self.origin,
             self.scale,
             &mut self.node_rects,
         );
 
-        self.collect_ports(view_graph, func_lib);
+        self.collect_ports(ctx);
     }
 
     pub fn node_width(&self, node_id: &NodeId) -> f32 {
@@ -113,14 +106,14 @@ impl GraphLayout {
             .insert(view_node.id, Rect::from_min_size(min, size));
     }
 
-    fn collect_ports(&mut self, view_graph: &model::ViewGraph, func_lib: &FuncLib) {
+    fn collect_ports(&mut self, ctx: &GraphContext) {
         self.ports.clear();
         self.ports
-            .reserve(Self::port_capacity(view_graph, func_lib));
+            .reserve(Self::port_capacity(ctx.view_graph, ctx.func_lib));
 
-        for node_view in view_graph.view_nodes.iter().rev() {
-            let node = view_graph.graph.by_id(&node_view.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+        for node_view in ctx.view_graph.view_nodes.iter().rev() {
+            let node = ctx.view_graph.graph.by_id(&node_view.id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
             let node_width = self.node_width(&node.id);
 
             for index in 0..func.inputs.len() {

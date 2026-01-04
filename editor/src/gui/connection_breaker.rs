@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::Pos2;
 
-use crate::gui::render::RenderContext;
+use crate::gui::graph_ctx::GraphContext;
 
 #[derive(Debug, Default)]
 pub struct ConnectionBreaker {
@@ -13,7 +13,7 @@ impl ConnectionBreaker {
         self.points.clear();
     }
 
-    pub fn render(&self, ctx: &RenderContext) {
+    pub fn render(&self, ctx: &GraphContext) {
         if self.points.len() > 1 {
             ctx.painter.add(egui::Shape::line(
                 self.points.clone(),

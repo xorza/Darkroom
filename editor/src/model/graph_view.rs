@@ -11,7 +11,7 @@ pub struct ViewGraph {
     pub graph: CoreGraph,
     pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
     pub pan: egui::Vec2,
-    pub zoom: f32,
+    pub scale: f32,
     pub selected_node_id: Option<NodeId>,
 }
 
@@ -21,7 +21,7 @@ impl Default for ViewGraph {
             graph: CoreGraph::default(),
             view_nodes: KeyIndexVec::default(),
             pan: egui::Vec2::ZERO,
-            zoom: 1.0,
+            scale: 1.0,
             selected_node_id: None,
         }
     }
@@ -42,7 +42,7 @@ impl ViewGraph {
             graph: graph.clone(),
             view_nodes: nodes,
             pan: egui::Vec2::ZERO,
-            zoom: 1.0,
+            scale: 1.0,
             selected_node_id: None,
         };
         view_graph
@@ -58,7 +58,7 @@ impl ViewGraph {
 
         self.graph.validate();
 
-        if !self.zoom.is_finite() || self.zoom <= 0.0 {
+        if !self.scale.is_finite() || self.scale <= 0.0 {
             return Err(anyhow!("graph zoom must be finite and positive"));
         }
         if !self.pan.x.is_finite() || !self.pan.y.is_finite() {
@@ -209,7 +209,7 @@ mod tests {
             deserialized.graph.nodes.len(),
             "graph nodes should round-trip"
         );
-        assert_eq!(graph.zoom, deserialized.zoom, "zoom should round-trip");
+        assert_eq!(graph.scale, deserialized.scale, "zoom should round-trip");
         assert_eq!(graph.pan, deserialized.pan, "pan should round-trip");
     }
 }

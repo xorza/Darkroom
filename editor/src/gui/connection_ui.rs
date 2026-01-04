@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::GraphLayout;
-use crate::gui::{node_ui, render::RenderContext};
+use crate::gui::{graph_ctx::GraphContext, node_ui};
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,7 +54,7 @@ impl ConnectionUi {
 
     pub(crate) fn render(
         &mut self,
-        ctx: &RenderContext,
+        ctx: &GraphContext,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
@@ -107,7 +107,7 @@ impl ConnectionUi {
                     source_view,
                     binding.port_idx,
                     &graph_layout.node_layout,
-                    view_graph.zoom,
+                    view_graph.scale,
                     source_width,
                 );
                 let end = node_ui::node_input_pos(
@@ -116,9 +116,9 @@ impl ConnectionUi {
                     input_index,
                     func.inputs.len(),
                     &graph_layout.node_layout,
-                    view_graph.zoom,
+                    view_graph.scale,
                 );
-                let control_offset = node_ui::bezier_control_offset(start, end, view_graph.zoom);
+                let control_offset = node_ui::bezier_control_offset(start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
