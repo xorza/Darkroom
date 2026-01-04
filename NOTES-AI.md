@@ -225,3 +225,4 @@ Graph UI now stores a persistent `ConnectionRenderer` whose `render` method rebu
 Graph UI now uses a `PrimaryState` enum to model pressed/down/released pointer state instead of separate booleans.
 Connection drag drawing now lives on `ConnectionDrag::render` instead of an inline call.
 `ConnectionDrag` now lives in `editor/src/gui/connection_drag.rs` to keep graph UI focused on state handling.
+Graph UI now stores `ConnectionDrag` as an `Option` and drops it when the drag ends.

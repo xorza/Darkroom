@@ -1,6 +1,5 @@
 use eframe::egui;
 use egui::Pos2;
-use graph::graph::NodeId;
 
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{PortInfo, PortRef};
@@ -14,26 +13,13 @@ pub struct ConnectionDrag {
     pub current_pos: Pos2,
 }
 
-impl Default for ConnectionDrag {
-    fn default() -> Self {
-        let placeholder = PortRef {
-            node_id: NodeId::nil(),
-            idx: 0,
-            kind: PortKind::Output,
-        };
-        Self {
-            start_port: placeholder,
-            start_pos: Pos2::ZERO,
-            current_pos: Pos2::ZERO,
-        }
-    }
-}
-
 impl ConnectionDrag {
-    pub fn start(&mut self, port: PortInfo) {
-        self.start_port = port.port;
-        self.start_pos = port.center;
-        self.current_pos = port.center;
+    pub fn new(port: PortInfo) -> Self {
+        Self {
+            start_port: port.port,
+            start_pos: port.center,
+            current_pos: port.center,
+        }
     }
 
     pub fn render(&self, ctx: &RenderContext, zoom: f32) {
@@ -55,9 +41,5 @@ impl ConnectionDrag {
             stroke,
         );
         ctx.painter.add(shape);
-    }
-
-    pub fn reset(&mut self) {
-        *self = Self::default();
     }
 }

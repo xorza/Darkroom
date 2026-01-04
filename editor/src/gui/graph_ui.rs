@@ -38,7 +38,7 @@ enum PrimaryState {
 pub struct GraphUi {
     state: InteractionState,
     connection_breaker: ConnectionBreaker,
-    connection_drag: ConnectionDrag,
+    connection_drag: Option<ConnectionDrag>,
     connection_renderer: ConnectionRenderer,
     node_ui: NodeUi,
 }
@@ -66,7 +66,7 @@ impl GraphUi {
     pub fn reset(&mut self) {
         self.state = InteractionState::Idle;
         self.connection_breaker.reset();
-        self.connection_drag.reset();
+        self.connection_drag = None;
         self.connection_renderer = ConnectionRenderer::default();
     }
 
@@ -117,7 +117,7 @@ impl GraphUi {
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
                 if let Some(hovered_port) = hovered_port.as_ref() {
-                    self.connection_drag.start(hovered_port.clone());
+                    self.connection_drag = Some(ConnectionDrag::new(hovered_port.clone()));
                     self.state = InteractionState::DraggingNewConnection;
                 } else if !pointer_over_node {
                     view_graph.selected_node_id = None;
@@ -178,24 +178,21 @@ impl GraphUi {
                 self.state = InteractionState::Idle;
             }
             (InteractionState::DraggingNewConnection, Some(PrimaryState::Released)) => {
-                if let Some(target) = hovered_port.as_ref()
-                    && target.port.kind != self.connection_drag.start_port.kind
+                if let Some(connection_drag) = self.connection_drag.as_ref()
+                    && let Some(target) = hovered_port.as_ref()
+                    && target.port.kind != connection_drag.start_port.kind
                     && port_in_activation_range(
-                        &self.connection_drag.current_pos,
+                        &connection_drag.current_pos,
                         target.center,
                         ctx.style.port_activation_radius,
                     )
-                    && let Some(node_id) = apply_connection(
-                        view_graph,
-                        func_lib,
-                        self.connection_drag.start_port,
-                        target.port,
-                    )
+                    && let Some(node_id) =
+                        apply_connection(view_graph, func_lib, connection_drag.start_port, target.port)
                 {
                     let port_idx = if target.port.kind == PortKind::Input {
                         target.port.idx
                     } else {
-                        self.connection_drag.start_port.idx
+                        connection_drag.start_port.idx
                     };
 
                     ui_interaction.actions.push((
@@ -205,16 +202,18 @@ impl GraphUi {
                         },
                     ));
                 }
-                self.connection_drag.reset();
+                self.connection_drag = None;
                 self.state = InteractionState::Idle;
             }
             (InteractionState::DraggingNewConnection, _) => {
-                let cursor_pos = pointer_pos.unwrap_or(self.connection_drag.current_pos);
-                self.connection_drag.current_pos = hovered_port
-                    .as_ref()
-                    .filter(|&port| port.port.kind != self.connection_drag.start_port.kind)
-                    .map(|port| port.center)
-                    .unwrap_or(cursor_pos);
+                if let Some(drag) = self.connection_drag.as_mut() {
+                    let cursor_pos = pointer_pos.unwrap_or(drag.current_pos);
+                    drag.current_pos = hovered_port
+                        .as_ref()
+                        .filter(|&port| port.port.kind != drag.start_port.kind)
+                        .map(|port| port.center)
+                        .unwrap_or(cursor_pos);
+                }
             }
             _ => {}
         }
@@ -249,7 +248,9 @@ impl GraphUi {
         match self.state {
             InteractionState::Idle => {}
             InteractionState::DraggingNewConnection => {
-                self.connection_drag.render(ctx, view_graph.zoom)
+                if let Some(drag) = self.connection_drag.as_ref() {
+                    drag.render(ctx, view_graph.zoom);
+                }
             }
             InteractionState::Breaking => self.connection_breaker.render(ctx),
         }
