@@ -92,13 +92,6 @@ impl ConnectionRenderer {
     ) {
         self.curves.clear();
 
-        //todo use KeyVector for ViewNode colection in ViewGraph
-        let node_lookup: HashMap<_, _> = view_graph
-            .view_nodes
-            .iter()
-            .map(|node| (node.id, node))
-            .collect();
-
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
@@ -107,7 +100,7 @@ impl ConnectionRenderer {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;
                 };
-                let source_view = node_lookup.get(&binding.target_id).unwrap();
+                let source_view = view_graph.view_nodes.by_key(&binding.target_id).unwrap();
                 let source_width = graph_layout
                     .node_widths
                     .get(&binding.target_id)
