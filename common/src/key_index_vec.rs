@@ -21,6 +21,13 @@ where
     K: Copy + Eq + Hash,
     V: Default + KeyIndexKey<K>,
 {
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            items: Vec::with_capacity(capacity),
+            idx_by_key: HashMap::with_capacity(capacity),
+        }
+    }
+
     pub fn push(&mut self, v: V) {
         self.idx_by_key.insert(*v.key(), self.items.len());
         self.items.push(v);
@@ -38,9 +45,42 @@ where
         Some(removed)
     }
 
+    pub fn remove_by_index(&mut self, idx: usize) -> V {
+        assert!(
+            idx < self.items.len(),
+            "remove_by_index expects a valid index"
+        );
+        let removed = self.items.remove(idx);
+        let key = *removed.key();
+        let had_key = self.idx_by_key.remove(&key).is_some();
+        assert!(had_key, "remove_by_index expects the key to exist");
+
+        for (pos, item) in self.items.iter().enumerate().skip(idx) {
+            self.idx_by_key.insert(*item.key(), pos);
+        }
+
+        removed
+    }
+
     pub fn clear(&mut self) {
         self.items.clear();
         self.idx_by_key.clear();
+    }
+
+    pub fn retain(&mut self, mut predicate: impl FnMut(&V) -> bool) {
+        self.items.retain(|item| predicate(item));
+        self.idx_by_key.clear();
+        self.idx_by_key.reserve(self.items.len());
+        for (idx, item) in self.items.iter().enumerate() {
+            let key = *item.key();
+            let replaced = self.idx_by_key.insert(key, idx);
+            assert!(replaced.is_none(), "retain cannot produce duplicate keys");
+        }
+        assert_eq!(
+            self.items.len(),
+            self.idx_by_key.len(),
+            "retain must keep key/index maps in sync"
+        );
     }
 
     pub fn iter(&self) -> std::slice::Iter<'_, V> {
@@ -146,6 +186,32 @@ where
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         assert!(idx < self.items.len());
         &mut self.items[idx]
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: Default + KeyIndexKey<K>,
+{
+    type Item = &'a V;
+    type IntoIter = std::slice::Iter<'a, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter()
+    }
+}
+
+impl<'a, K, V> IntoIterator for &'a mut KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: Default + KeyIndexKey<K>,
+{
+    type Item = &'a mut V;
+    type IntoIter = std::slice::IterMut<'a, V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.items.iter_mut()
     }
 }
 

@@ -1,5 +1,5 @@
 use anyhow::{Result, anyhow, bail};
-use common::{FileFormat, is_debug};
+use common::{FileFormat, is_debug, key_index_vec::KeyIndexVec};
 use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -9,7 +9,7 @@ use super::ViewNode;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewGraph {
     pub graph: CoreGraph,
-    pub view_nodes: Vec<ViewNode>,
+    pub view_nodes: KeyIndexVec<NodeId, ViewNode>,
     pub pan: egui::Vec2,
     pub zoom: f32,
     pub selected_node_id: Option<NodeId>,
@@ -19,7 +19,7 @@ impl Default for ViewGraph {
     fn default() -> Self {
         Self {
             graph: CoreGraph::default(),
-            view_nodes: Vec::new(),
+            view_nodes: KeyIndexVec::default(),
             pan: egui::Vec2::ZERO,
             zoom: 1.0,
             selected_node_id: None,
@@ -29,7 +29,7 @@ impl Default for ViewGraph {
 
 impl ViewGraph {
     pub fn from_graph(graph: &CoreGraph) -> Self {
-        let mut nodes = Vec::with_capacity(graph.nodes.len());
+        let mut nodes = KeyIndexVec::with_capacity(graph.nodes.len());
         for (index, node) in graph.nodes.iter().enumerate() {
             let column = index % 3;
             let row = index / 3;
@@ -66,7 +66,7 @@ impl ViewGraph {
         }
 
         let mut view_nodes = HashMap::new();
-        for node in &self.view_nodes {
+        for node in self.view_nodes.iter() {
             if !node.pos.x.is_finite() || !node.pos.y.is_finite() {
                 return Err(anyhow!("node position must be finite"));
             }
@@ -128,13 +128,13 @@ impl ViewGraph {
             self.graph.by_id(&node_id).is_some(),
             "selected node must exist in graph data"
         );
-        let node_index = self
+        let node_idx = self
             .view_nodes
             .iter()
             .position(|node| node.id == node_id)
             .expect("selected node view must exist in graph");
-        if node_index + 1 != self.view_nodes.len() {
-            let node = self.view_nodes.remove(node_index);
+        if node_idx + 1 != self.view_nodes.len() {
+            let node = self.view_nodes.remove_by_index(node_idx);
             self.view_nodes.push(node);
         }
         self.selected_node_id = Some(node_id);

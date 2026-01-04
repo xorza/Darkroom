@@ -220,3 +220,5 @@ Graph UI now stores a persistent `ConnectionRenderer` whose `render` method rebu
 `ConnectionRenderer` now owns its connection drawing logic via a `draw` helper instead of a free function.
 `ConnectionRenderer` now collects curves into its reusable `curves` buffer via a method instead of returning a new vector.
 `ConnectionRenderer` now clears and refills its `highlighted` set in-place when evaluating breaker hits.
+`KeyIndexVec::remove_by_index` now asserts index/key validity and returns `V` directly to surface logic errors.
+`KeyIndexVec` now supports `retain` and `IntoIterator` for borrowed forms, rebuilding its key map after retention.

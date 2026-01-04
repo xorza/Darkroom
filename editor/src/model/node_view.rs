@@ -1,3 +1,4 @@
+use common::key_index_vec::KeyIndexKey;
 use graph::graph::NodeId;
 use serde::{Deserialize, Serialize};
 
@@ -15,5 +16,10 @@ impl Default for ViewNode {
             id,
             pos: egui::Pos2::ZERO,
         }
+    }
+}
+impl KeyIndexKey<NodeId> for ViewNode {
+    fn key(&self) -> &NodeId {
+        &self.id
     }
 }
