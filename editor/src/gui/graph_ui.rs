@@ -1,10 +1,11 @@
 use eframe::egui;
-use egui::{Key, Pos2, Shape, Ui, Vec2};
+use egui::{Key, Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
+use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{
-    ConnectionBreaker, ConnectionKey, ConnectionRenderer, PortKind, draw_temporary_connection,
+    ConnectionKey, ConnectionRenderer, PortKind, draw_temporary_connection,
 };
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::model::graph_view;
@@ -23,7 +24,7 @@ enum InteractionState {
     #[default]
     Idle,
     Breaking,
-    Dragging,
+    DraggingNewConnection,
 }
 
 #[derive(Debug)]
@@ -152,7 +153,7 @@ impl GraphUi {
             && let Some(port) = hovered_port.as_ref()
         {
             self.connection_drag.start(port.clone());
-            self.state = InteractionState::Dragging;
+            self.state = InteractionState::DraggingNewConnection;
         }
 
         if self.state == InteractionState::Breaking
@@ -202,16 +203,13 @@ impl GraphUi {
             },
         );
 
-        if self.state == InteractionState::Breaking && self.connection_breaker.points.len() > 1 {
-            ctx.painter.add(Shape::line(
-                self.connection_breaker.points.clone(),
-                ctx.style.breaker_stroke,
-            ));
+        if self.state == InteractionState::Breaking {
+            self.connection_breaker.render(&ctx);
         }
 
         node_ui::render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
 
-        if self.state == InteractionState::Dragging {
+        if self.state == InteractionState::DraggingNewConnection {
             if let Some(pos) = pointer_pos {
                 self.connection_drag.current_pos = pos;
             }
@@ -246,7 +244,7 @@ impl GraphUi {
             self.state = InteractionState::Idle;
         }
 
-        if self.state == InteractionState::Dragging && primary_released {
+        if self.state == InteractionState::DraggingNewConnection && primary_released {
             if let Some(target) = hovered_port.as_ref()
                 && target.port.kind != self.connection_drag.start_port.kind
                 && port_in_activation_range(

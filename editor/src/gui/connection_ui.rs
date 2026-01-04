@@ -5,6 +5,7 @@ use graph::prelude::{Binding, FuncLib};
 use hashbrown::HashMap;
 use std::collections::HashSet;
 
+use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::GraphLayout;
 use crate::gui::{node_ui, render::RenderContext};
 use crate::model;
@@ -13,17 +14,6 @@ use crate::model;
 pub(crate) struct ConnectionKey {
     pub(crate) input_node_id: NodeId,
     pub(crate) input_idx: usize,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct ConnectionBreaker {
-    pub(crate) points: Vec<Pos2>,
-}
-
-impl ConnectionBreaker {
-    pub fn reset(&mut self) {
-        self.points.clear();
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,8 +64,6 @@ pub(crate) fn draw_temporary_connection(
     start_kind: PortKind,
     style: &crate::gui::style::Style,
 ) {
-    assert!(scale.is_finite(), "connection scale must be finite");
-    assert!(scale > 0.0, "connection scale must be positive");
     let control_offset = node_ui::bezier_control_offset(start, end, scale);
     let (start_sign, end_sign) = match start_kind {
         PortKind::Output => (1.0, -1.0),

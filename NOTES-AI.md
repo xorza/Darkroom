@@ -215,3 +215,5 @@ GraphLayout and port query helpers now live in `editor/src/gui/graph_layout.rs` 
 `render_node_bodies` now mutates `GraphUiInteraction` directly and applies selection/removal internally instead of returning a NodeInteraction bundle.
 Graph UI now uses an `InteractionState` enum to represent idle vs. connection drag/breaker modes, and passes `ConnectionBreaker` as `Option<&ConnectionBreaker>` when active while reusing breaker/drag allocations.
 Graph UI now stores a persistent `ConnectionRenderer` whose `render` method rebuilds curves/highlights before drawing.
+`ConnectionBreaker` now has a `render` helper to draw its breaker path when active.
+`ConnectionBreaker` now lives in `editor/src/gui/connection_breaker.rs` to keep connection rendering helpers separate.
