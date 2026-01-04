@@ -4,6 +4,7 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 use hashbrown::HashMap;
 
+use crate::gui::node_ui::NodeLayout;
 use crate::model::graph_view;
 use crate::{
     gui::{node_ui, render::RenderContext},
@@ -48,7 +49,7 @@ struct PortRef {
 }
 
 #[derive(Debug, Clone)]
-struct PortInfo {
+pub struct PortInfo {
     port: PortRef,
     center: Pos2,
 }
@@ -119,6 +120,7 @@ pub struct GraphLayout {
     pub scale: f32,
     pub node_layout: node_ui::NodeLayout,
     pub node_widths: HashMap<NodeId, f32>,
+    pub ports: Vec<PortInfo>,
 }
 
 impl GraphUi {
@@ -169,21 +171,22 @@ impl GraphUi {
             };
             let node_widths =
                 node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
+
+            let ports = collect_ports(view_graph, func_lib, &node_widths, origin, &node_layout);
             GraphLayout {
                 origin,
                 scale: view_graph.zoom,
                 node_layout,
                 node_widths,
+                ports,
             }
         };
 
         let port_activation = (ctx.style.port_radius * 1.6).max(10.0);
-        let ports = collect_ports(&graph_layout, view_graph, func_lib);
         let hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
-            .and_then(|pos| find_port_near(&ports, pos, port_activation));
+            .and_then(|pos| find_port_near(&graph_layout.ports, pos, port_activation));
         let hovered_port_ref = hovered_port.as_ref();
-        let layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
         let pointer_over_node = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
@@ -196,7 +199,7 @@ impl GraphUi {
                         func.inputs.len(),
                         func.outputs.len(),
                         graph_layout.scale,
-                        &layout,
+                        &graph_layout.node_layout,
                         *graph_layout.node_widths.get(&view_node.id).unwrap(),
                     );
                     node_rect.contains(pos)
@@ -267,7 +270,7 @@ impl GraphUi {
             view_graph,
             func_lib,
             render_origin,
-            &layout,
+            &graph_layout.node_layout,
             &graph_layout.node_widths,
             connection_breaker,
         );
@@ -549,9 +552,11 @@ fn collect_connection_curves(
 }
 
 fn collect_ports(
-    graph_layout: &GraphLayout,
     view_graph: &model::ViewGraph,
     func_lib: &FuncLib,
+    node_widths: &HashMap<NodeId, f32>,
+    origin: Pos2,
+    node_layout: &NodeLayout,
 ) -> Vec<PortInfo> {
     let mut ports = Vec::new();
 
@@ -564,18 +569,17 @@ fn collect_ports(
             .by_id(&node.func_id)
             .unwrap_or_else(|| panic!("Missing func for node {} ({})", node.name, node.func_id));
 
-        let node_width = graph_layout
-            .node_widths
+        let node_width = node_widths
             .get(&node.id)
             .copied()
             .expect("node width must be precomputed");
         for index in 0..func.inputs.len() {
             let center = node_ui::node_input_pos(
-                graph_layout.origin,
+                origin,
                 node_view,
                 index,
                 func.inputs.len(),
-                &graph_layout.node_layout,
+                node_layout,
                 view_graph.zoom,
             );
 
@@ -590,10 +594,10 @@ fn collect_ports(
         }
         for index in 0..func.outputs.len() {
             let center = node_ui::node_output_pos(
-                graph_layout.origin,
+                origin,
                 node_view,
                 index,
-                &graph_layout.node_layout,
+                node_layout,
                 view_graph.zoom,
                 node_width,
             );
