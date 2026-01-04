@@ -186,7 +186,7 @@ impl GraphUi {
         let hovered_port = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .and_then(|pos| find_port_near(&graph_layout.ports, pos, port_activation));
-        let hovered_port_ref = hovered_port.as_ref();
+
         let pointer_over_node = pointer_pos
             .filter(|pos| ctx.rect.contains(*pos))
             .is_some_and(|pos| {
@@ -228,7 +228,7 @@ impl GraphUi {
             && !connection_drag.active
             && primary_pressed
             && pointer_pos.is_some()
-            && let Some(port) = hovered_port_ref
+            && let Some(port) = hovered_port.as_ref()
         {
             connection_drag.start(port.clone());
         }
@@ -295,8 +295,9 @@ impl GraphUi {
             if let Some(pos) = pointer_pos {
                 connection_drag.current_pos = pos;
             }
-            let end_pos = hovered_port_ref
-                .filter(|port| port.port.kind != connection_drag.start_port.kind)
+            let end_pos = hovered_port
+                .as_ref()
+                .filter(|&port| port.port.kind != connection_drag.start_port.kind)
                 .map(|port| port.center)
                 .unwrap_or(connection_drag.current_pos);
             draw_temporary_connection(
@@ -320,7 +321,7 @@ impl GraphUi {
         }
 
         if connection_drag.active && primary_released {
-            if let Some(target) = hovered_port_ref
+            if let Some(target) = hovered_port.as_ref()
                 && target.port.kind != connection_drag.start_port.kind
                 && port_in_activation_range(
                     &connection_drag.current_pos,
