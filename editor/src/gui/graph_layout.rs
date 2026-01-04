@@ -31,12 +31,26 @@ pub struct GraphLayout {
     pub ports: Vec<PortInfo>,
 }
 
+impl Default for GraphLayout {
+    fn default() -> Self {
+        Self {
+            origin: Pos2::ZERO,
+            scale: 1.0,
+            rect: Rect::NOTHING,
+            node_layout: node_ui::NodeLayout::default(),
+            node_widths: HashMap::new(),
+            ports: Vec::new(),
+        }
+    }
+}
+
 impl GraphLayout {
-    pub fn build(
+    pub fn update(
+        &mut self,
         ctx: &RenderContext,
         view_graph: &model::ViewGraph,
         func_lib: &FuncLib,
-    ) -> GraphLayout {
+    ) {
         let origin = ctx.rect.min + view_graph.pan;
         let node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
         let width_ctx = node_ui::NodeWidthContext {
@@ -47,16 +61,12 @@ impl GraphLayout {
         let node_widths =
             node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
 
-        let mut layout = GraphLayout {
-            origin,
-            scale: view_graph.zoom,
-            rect: ctx.rect,
-            node_layout,
-            node_widths,
-            ports: Vec::new(),
-        };
-        layout.collect_ports(view_graph, func_lib);
-        layout
+        self.origin = origin;
+        self.scale = view_graph.zoom;
+        self.rect = ctx.rect;
+        self.node_layout = node_layout;
+        self.node_widths = node_widths;
+        self.collect_ports(view_graph, func_lib);
     }
 
     pub fn node_width(&self, node_id: NodeId) -> f32 {

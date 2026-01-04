@@ -37,6 +37,7 @@ enum PrimaryState {
 #[derive(Debug, Default)]
 pub struct GraphUi {
     state: InteractionState,
+    graph_layout: GraphLayout,
     connection_breaker: ConnectionBreaker,
     connection_drag: Option<ConnectionDrag>,
     connection_renderer: ConnectionUi,
@@ -65,6 +66,7 @@ pub enum GraphUiAction {
 impl GraphUi {
     pub fn reset(&mut self) {
         self.state = InteractionState::Idle;
+        self.graph_layout = GraphLayout::default();
         self.connection_breaker.reset();
         self.connection_drag = None;
         self.connection_renderer = ConnectionUi::default();
@@ -77,7 +79,7 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        let ctx = RenderContext::new(ui);
+        let mut ctx = RenderContext::new(ui);
 
         background(&ctx, view_graph.zoom, view_graph.pan);
 
@@ -96,25 +98,23 @@ impl GraphUi {
             update_zoom_and_pan(&ctx, pointer_pos, view_graph);
         }
 
-        let graph_layout = GraphLayout::build(&ctx, view_graph, func_lib);
+        self.graph_layout.update(&ctx, view_graph, func_lib);
 
         if let Some(pointer_pos) = pointer_pos {
-            self.process_connections(
-                view_graph,
-                func_lib,
-                ui_interaction,
-                &ctx,
-                pointer_pos,
-                &graph_layout,
-            );
+            self.process_connections(view_graph, func_lib, ui_interaction, &ctx, pointer_pos);
         }
 
-        self.render_connections(view_graph, func_lib, &ctx, &graph_layout);
+        self.render_connections(view_graph, func_lib, &ctx);
 
-        self.node_ui
-            .render_nodes(&ctx, &graph_layout, view_graph, func_lib, ui_interaction);
+        self.node_ui.render_nodes(
+            &ctx,
+            &self.graph_layout,
+            view_graph,
+            func_lib,
+            ui_interaction,
+        );
 
-        top_panel(view_graph, func_lib, ctx, graph_layout);
+        top_panel(view_graph, func_lib, &mut ctx, &self.graph_layout);
     }
 
     fn process_connections(
@@ -124,7 +124,6 @@ impl GraphUi {
         ui_interaction: &mut GraphUiInteraction,
         ctx: &RenderContext<'_>,
         pointer_pos: Pos2,
-        graph_layout: &GraphLayout,
     ) {
         let primary_state = ctx.ui.input(|input| {
             if input.pointer.primary_pressed() {
@@ -137,8 +136,10 @@ impl GraphUi {
                 None
             }
         });
-        let hovered_port = graph_layout.hovered_port(ctx, pointer_pos);
-        let pointer_over_node = graph_layout.pointer_over_node(pointer_pos, view_graph, func_lib);
+        let hovered_port = self.graph_layout.hovered_port(ctx, pointer_pos);
+        let pointer_over_node =
+            self.graph_layout
+                .pointer_over_node(pointer_pos, view_graph, func_lib);
 
         match (self.state, primary_state) {
             (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
@@ -250,11 +251,10 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ctx: &RenderContext<'_>,
-        graph_layout: &GraphLayout,
     ) {
         self.connection_renderer.render(
             ctx,
-            graph_layout,
+            &self.graph_layout,
             view_graph,
             func_lib,
             if self.state == InteractionState::Breaking {
@@ -279,8 +279,8 @@ impl GraphUi {
 fn top_panel(
     view_graph: &mut model::ViewGraph,
     func_lib: &FuncLib,
-    ctx: RenderContext,
-    graph_layout: GraphLayout,
+    ctx: &mut RenderContext,
+    graph_layout: &GraphLayout,
 ) {
     let mut fit_all = false;
     let mut view_selected = false;
@@ -295,10 +295,10 @@ fn top_panel(
         }
     });
     if view_selected {
-        view_selected_node(&ctx, &graph_layout, view_graph, func_lib);
+        view_selected_node(ctx, graph_layout, view_graph, func_lib);
     }
     if fit_all {
-        fit_all_nodes(&ctx, &graph_layout, view_graph, func_lib);
+        fit_all_nodes(ctx, graph_layout, view_graph, func_lib);
     }
 }
 

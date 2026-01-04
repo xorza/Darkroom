@@ -228,3 +228,4 @@ Connection drag drawing now lives on `ConnectionDrag::render` instead of an inli
 Graph UI now stores `ConnectionDrag` as an `Option` and drops it when the drag ends.
 Graph layout now preallocates port capacity, centralizes port collection on `GraphLayout`, and uses explicit expects for missing graph/func data.
 GraphLayout now collects ports via a `&mut self` method that uses stored layout fields instead of threading parameters.
+Graph UI now keeps a persistent `GraphLayout` and updates it in-place each frame.
