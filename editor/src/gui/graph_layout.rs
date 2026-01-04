@@ -1,11 +1,10 @@
-use eframe::egui;
 use egui::{Pos2, Rect};
 use graph::graph::NodeId;
 use graph::prelude::FuncLib;
 use hashbrown::HashMap;
 
 use crate::gui::connection_ui::PortKind;
-use crate::gui::node_ui::{self, NodeLayout};
+use crate::gui::node_ui;
 use crate::gui::render::RenderContext;
 use crate::model;
 
@@ -48,22 +47,23 @@ impl GraphLayout {
         let node_widths =
             node_ui::compute_node_widths(&ctx.painter, view_graph, func_lib, &width_ctx);
 
-        let ports = collect_ports(view_graph, func_lib, &node_widths, origin, &node_layout);
-        GraphLayout {
+        let mut layout = GraphLayout {
             origin,
             scale: view_graph.zoom,
             rect: ctx.rect,
             node_layout,
             node_widths,
-            ports,
-        }
+            ports: Vec::new(),
+        };
+        layout.collect_ports(view_graph, func_lib);
+        layout
     }
 
     pub fn node_width(&self, node_id: NodeId) -> f32 {
         self.node_widths
             .get(&node_id)
             .copied()
-            .expect("node width must be precomputed")
+            .expect("node width must be precomputed for view node")
     }
 
     pub fn node_rect(
@@ -84,7 +84,21 @@ impl GraphLayout {
     }
 
     pub fn hovered_port(&self, ctx: &RenderContext, pointer_pos: Pos2) -> Option<PortInfo> {
-        find_port_near(&self.ports, pointer_pos, ctx.style.port_activation_radius)
+        if self.ports.is_empty() {
+            return None;
+        }
+        let mut best = None;
+        let mut best_dist = ctx.style.port_activation_radius;
+
+        for port in &self.ports {
+            let dist = port.center.distance(pointer_pos);
+            if dist < best_dist {
+                best_dist = dist;
+                best = Some(port.clone());
+            }
+        }
+
+        best
     }
 
     pub fn pointer_over_node(
@@ -94,84 +108,89 @@ impl GraphLayout {
         func_lib: &FuncLib,
     ) -> bool {
         view_graph.view_nodes.iter().any(|view_node| {
-            let node = view_graph.graph.by_id(&view_node.id).unwrap();
-            let func = func_lib.by_id(&node.func_id).unwrap();
+            let node = view_graph
+                .graph
+                .by_id(&view_node.id)
+                .expect("view node must exist in graph");
+            let func = func_lib
+                .by_id(&node.func_id)
+                .expect("func must exist for view node");
             let node_rect = self.node_rect(view_node, func.inputs.len(), func.outputs.len());
             node_rect.contains(pointer_pos)
         })
     }
-}
 
-fn collect_ports(
-    view_graph: &model::ViewGraph,
-    func_lib: &FuncLib,
-    node_widths: &HashMap<NodeId, f32>,
-    origin: Pos2,
-    node_layout: &NodeLayout,
-) -> Vec<PortInfo> {
-    let mut ports = Vec::new();
+    fn collect_ports(&mut self, view_graph: &model::ViewGraph, func_lib: &FuncLib) {
+        self.ports.clear();
+        self.ports
+            .reserve(Self::port_capacity(view_graph, func_lib));
+        for node_view in view_graph.view_nodes.iter().rev() {
+            let node = view_graph
+                .graph
+                .by_id(&node_view.id)
+                .expect("view node must exist in graph");
+            let func = func_lib
+                .by_id(&node.func_id)
+                .expect("func must exist for view node");
+            let node_width = self
+                .node_widths
+                .get(&node.id)
+                .copied()
+                .expect("node width must be precomputed for view node");
 
-    for node_view in view_graph.view_nodes.iter().rev() {
-        let node = view_graph.graph.by_id(&node_view.id).unwrap();
-        let func = func_lib.by_id(&node.func_id).unwrap();
-        let node_width = node_widths.get(&node.id).copied().unwrap();
+            for index in 0..func.inputs.len() {
+                let center = node_ui::node_input_pos(
+                    self.origin,
+                    node_view,
+                    index,
+                    func.inputs.len(),
+                    &self.node_layout,
+                    self.scale,
+                );
 
-        for index in 0..func.inputs.len() {
-            let center = node_ui::node_input_pos(
-                origin,
-                node_view,
-                index,
-                func.inputs.len(),
-                node_layout,
-                view_graph.zoom,
-            );
+                self.ports.push(PortInfo {
+                    port: PortRef {
+                        node_id: node.id,
+                        idx: index,
+                        kind: PortKind::Input,
+                    },
+                    center,
+                });
+            }
+            for index in 0..func.outputs.len() {
+                let center = node_ui::node_output_pos(
+                    self.origin,
+                    node_view,
+                    index,
+                    &self.node_layout,
+                    self.scale,
+                    node_width,
+                );
 
-            ports.push(PortInfo {
-                port: PortRef {
-                    node_id: node.id,
-                    idx: index,
-                    kind: PortKind::Input,
-                },
-                center,
-            });
-        }
-        for index in 0..func.outputs.len() {
-            let center = node_ui::node_output_pos(
-                origin,
-                node_view,
-                index,
-                node_layout,
-                view_graph.zoom,
-                node_width,
-            );
-
-            ports.push(PortInfo {
-                port: PortRef {
-                    node_id: node.id,
-                    idx: index,
-                    kind: PortKind::Output,
-                },
-                center,
-            });
-        }
-    }
-
-    ports
-}
-
-fn find_port_near(ports: &[PortInfo], pos: Pos2, radius: f32) -> Option<PortInfo> {
-    assert!(radius.is_finite(), "port activation radius must be finite");
-    assert!(radius > 0.0, "port activation radius must be positive");
-    let mut best = None;
-    let mut best_dist = radius;
-
-    for port in ports {
-        let dist = port.center.distance(pos);
-        if dist < best_dist {
-            best_dist = dist;
-            best = Some(port.clone());
+                self.ports.push(PortInfo {
+                    port: PortRef {
+                        node_id: node.id,
+                        idx: index,
+                        kind: PortKind::Output,
+                    },
+                    center,
+                });
+            }
         }
     }
 
-    best
+    fn port_capacity(view_graph: &model::ViewGraph, func_lib: &FuncLib) -> usize {
+        let mut total = 0;
+        for node_view in view_graph.view_nodes.iter() {
+            let node = view_graph
+                .graph
+                .by_id(&node_view.id)
+                .expect("view node must exist in graph");
+            let func = func_lib
+                .by_id(&node.func_id)
+                .expect("func must exist for view node");
+            total += func.inputs.len() + func.outputs.len();
+        }
+        total
+    }
 }
