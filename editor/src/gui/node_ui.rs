@@ -256,9 +256,8 @@ impl NodeUi {
 
             if node.terminal {
                 let center = layout.dot_center(0);
-                let dot_color = ctx.style.status_terminal_color;
-                let tooltip = "terminal";
-                ctx.painter.circle_filled(center, dot_radius, dot_color);
+                ctx.painter
+                    .circle_filled(center, dot_radius, ctx.style.status_terminal_color);
                 let dot_rect = egui::Rect::from_center_size(
                     center,
                     egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
@@ -266,14 +265,13 @@ impl NodeUi {
                 let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
                 let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
                 if dot_response.hovered() {
-                    dot_response.show_tooltip_text(tooltip);
+                    dot_response.show_tooltip_text("terminal");
                 }
             }
             if func.behavior == FuncBehavior::Impure {
                 let center = layout.dot_center(1);
-                let dot_color = ctx.style.status_impure_color;
-                let tooltip = "impure";
-                ctx.painter.circle_filled(center, dot_radius, dot_color);
+                ctx.painter
+                    .circle_filled(center, dot_radius, ctx.style.status_impure_color);
                 let dot_rect = egui::Rect::from_center_size(
                     center,
                     egui::vec2(dot_radius * 2.0, dot_radius * 2.0),
@@ -281,46 +279,11 @@ impl NodeUi {
                 let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
                 let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
                 if dot_response.hovered() {
-                    dot_response.show_tooltip_text(tooltip);
+                    dot_response.show_tooltip_text("impure");
                 }
             }
 
-            let close_fill = if remove_response.is_pointer_button_down_on() {
-                ctx.style.widget_active_bg_fill
-            } else if remove_response.hovered() {
-                ctx.style.widget_hover_bg_fill
-            } else {
-                ctx.style.widget_inactive_bg_fill
-            };
-            let close_stroke = ctx.style.widget_inactive_bg_stroke;
-            ctx.painter.rect(
-                close_rect,
-                ctx.style.corner_radius * 0.6,
-                close_fill,
-                close_stroke,
-                egui::StrokeKind::Inside,
-            );
-            let close_margin = layout.close_rect.width() * 0.3;
-            let a = egui::pos2(
-                close_rect.min.x + close_margin,
-                close_rect.min.y + close_margin,
-            );
-            let b = egui::pos2(
-                close_rect.max.x - close_margin,
-                close_rect.max.y - close_margin,
-            );
-            let c = egui::pos2(
-                close_rect.min.x + close_margin,
-                close_rect.max.y - close_margin,
-            );
-            let d = egui::pos2(
-                close_rect.max.x - close_margin,
-                close_rect.min.y + close_margin,
-            );
-            let close_color = ctx.style.widget_text_color;
-            let close_stroke = egui::Stroke::new(1.4 * ctx.view_graph.scale, close_color);
-            ctx.painter.line_segment([a, b], close_stroke);
-            ctx.painter.line_segment([c, d], close_stroke);
+            remove_btn(ctx, &layout.close_rect, remove_response);
 
             let node_drag_port_result =
                 render_node_ports(ctx, graph_layout, view_node_idx, input_count, output_count);
@@ -334,6 +297,45 @@ impl NodeUi {
 
         drag_port_info
     }
+}
+
+fn remove_btn(ctx: &mut GraphContext, close_rect: &Rect, remove_response: egui::Response) {
+    let close_fill = if remove_response.is_pointer_button_down_on() {
+        ctx.style.widget_active_bg_fill
+    } else if remove_response.hovered() {
+        ctx.style.widget_hover_bg_fill
+    } else {
+        ctx.style.widget_inactive_bg_fill
+    };
+    let close_stroke = ctx.style.widget_inactive_bg_stroke;
+    ctx.painter.rect(
+        *close_rect,
+        ctx.style.corner_radius * 0.6,
+        close_fill,
+        close_stroke,
+        egui::StrokeKind::Inside,
+    );
+    let close_margin = close_rect.width() * 0.3;
+    let a = egui::pos2(
+        close_rect.min.x + close_margin,
+        close_rect.min.y + close_margin,
+    );
+    let b = egui::pos2(
+        close_rect.max.x - close_margin,
+        close_rect.max.y - close_margin,
+    );
+    let c = egui::pos2(
+        close_rect.min.x + close_margin,
+        close_rect.max.y - close_margin,
+    );
+    let d = egui::pos2(
+        close_rect.max.x - close_margin,
+        close_rect.min.y + close_margin,
+    );
+    let close_color = ctx.style.widget_text_color;
+    let close_stroke = egui::Stroke::new(1.4 * ctx.view_graph.scale, close_color);
+    ctx.painter.line_segment([a, b], close_stroke);
+    ctx.painter.line_segment([c, d], close_stroke);
 }
 
 fn render_node_ports(
