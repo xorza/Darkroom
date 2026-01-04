@@ -648,9 +648,11 @@ pub(crate) fn compute_node_rects(
     node_layout: &NodeLayout,
     origin: Pos2,
     scale: f32,
-) -> HashMap<NodeId, Rect> {
+    node_rects: &mut HashMap<NodeId, Rect>,
+) {
+    node_rects.clear();
+
     let scale_guess = node_layout.row_height / 18.0;
-    let mut rects = HashMap::with_capacity(view_graph.view_nodes.len());
 
     for view_node in &view_graph.view_nodes {
         let node = view_graph.graph.by_id(&view_node.id).unwrap();
@@ -752,10 +754,8 @@ pub(crate) fn compute_node_rects(
             computed,
         );
 
-        rects.insert(node.id, rect);
+        node_rects.insert(node.id, rect);
     }
-
-    rects
 }
 
 fn text_width(

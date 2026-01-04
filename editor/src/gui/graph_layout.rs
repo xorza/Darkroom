@@ -56,17 +56,16 @@ impl GraphLayout {
         self.rect = ctx.rect;
         self.node_layout = node_ui::NodeLayout::default().scaled(view_graph.zoom);
 
-        self.collect_ports(view_graph, func_lib);
-
-        let a = node_ui::compute_node_rects(
+        node_ui::compute_node_rects(
             ctx,
             view_graph,
             func_lib,
             &self.node_layout,
             self.origin,
-            view_graph.zoom,
+            self.scale,
+            &mut self.node_rects,
         );
-        self.node_rects = a;
+        self.collect_ports(view_graph, func_lib);
     }
 
     pub fn node_width(&self, node_id: &NodeId) -> f32 {
