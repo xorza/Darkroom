@@ -48,9 +48,6 @@ mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua
 criterion = { version = "*" }
 arc-swap = { version = "*" }
 
-[workspace.lints.rust]
-unused_crate_dependencies = "allow"
-dead_code = "allow"
 
 [profile.bench]
 debug = true

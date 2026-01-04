@@ -686,13 +686,6 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
     (dx * 0.5).max(40.0 * scale)
 }
 
-#[derive(Debug)]
-pub(crate) struct NodeWidthContext<'a> {
-    pub node_layout: &'a NodeLayout,
-    pub style: &'a crate::gui::style::Style,
-    pub scale: f32,
-}
-
 pub(crate) fn compute_node_rects(
     ctx: &RenderContext,
     view_graph: &model::ViewGraph,
