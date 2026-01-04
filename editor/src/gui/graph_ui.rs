@@ -262,14 +262,12 @@ impl GraphUi {
             }
         }
 
-        let render_origin = ctx.rect.min + view_graph.pan;
-
         let mut connections = ConnectionRenderer::default();
 
         connections.rebuild(
             view_graph,
             func_lib,
-            render_origin,
+            graph_layout.origin,
             &graph_layout.node_layout,
             &graph_layout.node_widths,
             connection_breaker,
