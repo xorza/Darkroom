@@ -27,12 +27,6 @@ pub struct NodeLayout {
     pub padding: f32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StatusDotKind {
-    Terminal,
-    Impure,
-}
-
 #[derive(Debug, Clone)]
 pub struct NodeLayoutInfo {
     pub rect: Rect,
@@ -44,8 +38,6 @@ pub struct NodeLayoutInfo {
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub row_height: f32,
-    pub input_count: usize,
-    pub output_count: usize,
 }
 
 impl Default for NodeLayout {
@@ -62,7 +54,6 @@ impl Default for NodeLayout {
 
 impl NodeLayoutInfo {
     pub fn input_center(&self, index: usize) -> Pos2 {
-        assert!(index < self.input_count, "input index out of range");
         egui::pos2(
             self.input_first_center.x,
             self.input_first_center.y + self.row_height * index as f32,
@@ -70,7 +61,6 @@ impl NodeLayoutInfo {
     }
 
     pub fn output_center(&self, index: usize) -> Pos2 {
-        assert!(index < self.output_count, "output index out of range");
         egui::pos2(
             self.output_first_center.x,
             self.output_first_center.y + self.row_height * index as f32,
@@ -751,8 +741,6 @@ fn compute_node_layout(
         input_first_center,
         output_first_center,
         row_height: node_layout.row_height,
-        input_count: func.inputs.len(),
-        output_count: func.outputs.len(),
     }
 }
 
