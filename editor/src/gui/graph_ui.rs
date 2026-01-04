@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Id, Pos2, Ui, Vec2};
+use egui::{Id, PointerButton, Pos2, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
@@ -330,7 +330,7 @@ fn update_zoom_and_pan(ctx: &mut GraphContext, graph_bg_id: Id, cursor_pos: Pos2
 
     // let pan_id = ctx.ui.make_persistent_id("graph_pan");
     let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
-    if pan_response.dragged_by(egui::PointerButton::Middle) {
+    if pan_response.dragged_by(PointerButton::Middle) {
         ctx.view_graph.pan += pan_response.drag_delta();
     }
 }

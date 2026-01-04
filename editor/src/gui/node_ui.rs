@@ -1,7 +1,7 @@
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_layout::GraphLayout;
 use eframe::egui;
-use egui::{Pos2, Rect};
+use egui::{PointerButton, Pos2, Rect};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncBehavior, NodeBehavior};
@@ -58,60 +58,30 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        for node_view in ctx.view_graph.view_nodes.iter_mut() {
-            let node = ctx.view_graph.graph.by_id(&node_view.id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-            let node_rect = graph_layout.node_rect(&node.id);
-            let header_rect = egui::Rect::from_min_size(
-                node_rect.min,
-                egui::vec2(node_rect.width(), graph_layout.node_layout.header_height),
-            );
-            let button_size = (graph_layout.node_layout.header_height
-                - graph_layout.node_layout.padding)
-                .max(12.0 * ctx.view_graph.scale)
-                .min(graph_layout.node_layout.header_height);
-            let button_pos = egui::pos2(
-                node_rect.max.x - graph_layout.node_layout.padding - button_size,
-                node_rect.min.y + (graph_layout.node_layout.header_height - button_size) * 0.5,
-            );
-            let close_rect =
-                egui::Rect::from_min_size(button_pos, egui::vec2(button_size, button_size));
-            let mut header_drag_right = close_rect.min.x - graph_layout.node_layout.padding;
-            let dot_radius = ctx.view_graph.scale * ctx.style.status_dot_radius;
-            let has_terminal = node.terminal;
-            let has_impure = func.behavior == FuncBehavior::Impure;
-            if has_terminal || has_impure {
-                let dot_diameter = dot_radius * 2.0;
-                let dot_gap = ctx.view_graph.scale * ctx.style.status_item_gap;
-                let mut dot_x = close_rect.min.x - graph_layout.node_layout.padding - dot_radius;
-                if has_terminal {
-                    dot_x -= dot_diameter + dot_gap;
-                }
-                if has_impure {
-                    dot_x -= dot_diameter + dot_gap;
-                }
-                header_drag_right = dot_x + dot_gap - graph_layout.node_layout.padding;
-            }
-            let header_drag_rect = egui::Rect::from_min_max(
-                header_rect.min,
-                egui::pos2(header_drag_right, header_rect.max.y),
-            );
+        for view_node in ctx.view_graph.view_nodes.iter_mut() {
+            let node_rect = graph_layout.node_rect(&view_node.id);
 
-            let header_id = ctx.ui.make_persistent_id(("node_header", node.id));
+            let node_body_id = ctx.ui.make_persistent_id(("node_hover", view_node.id));
+            let _response = ctx
+                .ui
+                .interact(node_rect, node_body_id, egui::Sense::hover());
+
             let response = ctx
                 .ui
-                .interact(header_drag_rect, header_id, egui::Sense::drag());
+                .interact(node_rect, node_body_id, egui::Sense::drag());
 
-            if response.dragged() {
-                node_view.pos += response.drag_delta() / ctx.view_graph.scale;
-                graph_layout.update_node_rect_position(node_view, ctx.view_graph.scale);
+            if response.dragged_by(PointerButton::Middle)
+                || response.dragged_by(PointerButton::Primary)
+            {
+                view_node.pos += response.drag_delta() / ctx.view_graph.scale;
+                graph_layout.update_node_rect_position(view_node, ctx.view_graph.scale);
                 ui_interaction
                     .actions
-                    .push((node_view.id, GraphUiAction::NodeSelected));
+                    .push((view_node.id, GraphUiAction::NodeSelected));
             } else if response.clicked() {
                 ui_interaction
                     .actions
-                    .push((node_view.id, GraphUiAction::NodeSelected));
+                    .push((view_node.id, GraphUiAction::NodeSelected));
             }
         }
     }
@@ -140,9 +110,6 @@ impl NodeUi {
                 graph_layout.origin + view_node.pos.to_vec2() * ctx.view_graph.scale,
                 node_size,
             );
-
-            let hover_id = ctx.ui.make_persistent_id(("node_hover", view_node.id));
-            let _response = ctx.ui.interact(node_rect, hover_id, egui::Sense::hover());
 
             let header_rect = egui::Rect::from_min_size(
                 node_rect.min,
