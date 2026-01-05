@@ -6,7 +6,6 @@ use egui::{PointerButton, Pos2, Rect, Sense};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncBehavior, NodeBehavior};
-use hashbrown::HashMap;
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
 
@@ -591,20 +590,6 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx
 pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
     (dx * 0.5).max(40.0 * scale)
-}
-
-pub(crate) fn compute_node_rects(
-    ctx: &GraphContext,
-    node_layout: &NodeLayout,
-    origin: Pos2,
-    node_rects: &mut HashMap<NodeId, Rect>,
-) {
-    node_rects.clear();
-
-    for view_node in ctx.view_graph.view_nodes.iter() {
-        let layout = compute_node_layout(ctx, &view_node.id, node_layout, origin);
-        node_rects.insert(view_node.id, layout.rect);
-    }
 }
 
 pub(crate) fn compute_node_layout(

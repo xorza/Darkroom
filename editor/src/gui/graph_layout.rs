@@ -42,7 +42,13 @@ impl GraphLayout {
         self.origin = rect.min + ctx.view_graph.pan;
         self.node_layout = node_ui::NodeLayout::from_scale(ctx.view_graph.scale);
 
-        node_ui::compute_node_rects(ctx, &self.node_layout, self.origin, &mut self.node_rects);
+        self.node_rects.clear();
+
+        for view_node in ctx.view_graph.view_nodes.iter() {
+            let layout =
+                node_ui::compute_node_layout(ctx, &view_node.id, &self.node_layout, self.origin);
+            self.node_rects.insert(view_node.id, layout.rect);
+        }
     }
 
     pub fn node_rect(&self, node_id: &NodeId) -> Rect {
