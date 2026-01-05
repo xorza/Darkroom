@@ -1101,12 +1101,9 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(
-            execution_graph
-                .e_node_invoke_order
-                .iter()
-                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
-            "once node invoked if has no cached outputs"
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
         );
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
@@ -1114,12 +1111,9 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(
-            execution_graph
-                .e_node_invoke_order
-                .iter()
-                .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
-            "once node not invoked is has cached outputs"
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["get_a", "sum", "mult", "print"]
         );
 
         Ok(())
@@ -1233,20 +1227,15 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            2,
-            "mult should be invoked as no cached values"
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
         );
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(3));
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            1,
-            "changing value to the same should not recompute cache"
-        );
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
@@ -1254,19 +1243,14 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            2,
-            "mult should be invoked as const value changed"
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
         );
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            1,
-            "mult should not be invoked again"
-        );
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         Ok(())
     }
