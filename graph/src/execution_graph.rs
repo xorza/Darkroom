@@ -743,6 +743,32 @@ impl ExecutionGraph {
             return;
         }
 
+        for e_node in self.e_nodes.iter() {
+            assert_ne!(e_node.process_state, ProcessState::Processing);
+            assert_ne!(e_node.process_state, ProcessState::None);
+
+            if e_node.missing_required_inputs {
+                assert!(!e_node.wants_execute);
+            }
+
+            for e_input in e_node.inputs.iter() {
+                assert_ne!(e_input.binding, ExecutionBinding::Undefined);
+
+                let ExecutionBinding::Bind(port_address) = &e_input.binding else {
+                    continue;
+                };
+
+                assert!(port_address.target_idx < self.e_nodes.len());
+
+                let output_e_node = &self.e_nodes[port_address.target_idx];
+                assert!(port_address.port_idx < output_e_node.outputs.len());
+
+                if output_e_node.wants_execute {
+                    assert_eq!(e_input.state, InputState::Changed);
+                }
+            }
+        }
+
         let mut seen = vec![false; self.e_nodes.len()];
         for idx in 0..self.e_node_invoke_order.len() {
             let e_node_idx = self.e_node_invoke_order[idx];
@@ -763,33 +789,6 @@ impl ExecutionGraph {
                         assert!(!self.e_node_invoke_order[idx..].contains(&port_address.target_idx));
                     }
                     ExecutionBinding::None | ExecutionBinding::Const(_) => {}
-                }
-            }
-        }
-
-        for e_node in self.e_nodes.iter() {
-            assert_ne!(e_node.process_state, ProcessState::Processing);
-            assert_ne!(e_node.process_state, ProcessState::None);
-
-            if e_node.missing_required_inputs {
-                assert!(!e_node.wants_execute);
-            }
-
-            for e_input in e_node.inputs.iter() {
-                match &e_input.binding {
-                    ExecutionBinding::Bind(port_address) => {
-                        assert!(port_address.target_idx < self.e_nodes.len());
-
-                        let output_e_node = &self.e_nodes[port_address.target_idx];
-                        assert!(port_address.port_idx < output_e_node.outputs.len());
-
-                        if output_e_node.wants_execute {
-                            assert_eq!(e_input.state, InputState::Changed);
-                        }
-                    }
-                    ExecutionBinding::None => {}
-                    ExecutionBinding::Const(_) => {}
-                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
                 }
             }
         }
