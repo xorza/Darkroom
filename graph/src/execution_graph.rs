@@ -807,6 +807,14 @@ mod tests {
     use common::FileFormat;
     use tokio::sync::Mutex;
 
+    fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String> {
+        execution_graph
+            .e_node_invoke_order
+            .iter()
+            .map(|&e_node_idx| execution_graph.e_nodes[e_node_idx].name.clone())
+            .collect()
+    }
+
     #[test]
     fn basic_run() -> anyhow::Result<()> {
         let graph = test_graph();
@@ -1420,7 +1428,7 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            get_execute_node_names_in_order(&execution_graph),
+            execution_node_names_in_order(&execution_graph),
             ["mult", "print"]
         );
 
