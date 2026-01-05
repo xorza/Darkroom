@@ -436,7 +436,7 @@ fn render_node_const_bindings(
     let badge_radius = 6.0 * scale;
     let badge_gap = 6.0 * scale;
 
-    for (index, input) in node.inputs.iter().enumerate() {
+    for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {
             continue;
         };
@@ -449,7 +449,7 @@ fn render_node_const_bindings(
             ctx.style.text_color,
         );
         let badge_width = label_width + badge_padding * 2.0;
-        let center = layout.input_center(index);
+        let center = layout.input_center(input_idx);
         let badge_right = center.x - scale * ctx.style.port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
