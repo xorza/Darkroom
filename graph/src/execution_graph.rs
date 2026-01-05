@@ -32,7 +32,6 @@ pub struct ExecutionStats {
 pub enum InputState {
     Changed,
     Unchanged,
-    None,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutputUsage {
@@ -521,31 +520,46 @@ impl ExecutionGraph {
 
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                let input_state = match &e_input.binding {
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => e_input.state.unwrap(),
+                match &e_input.binding {
+                    ExecutionBinding::None => missing_required_inputs |= e_input.required,
+                    ExecutionBinding::Const(_) => {}
                     ExecutionBinding::Bind(port_address) => {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        if output_e_node.missing_required_inputs {
-                            InputState::None
-                        } else if output_e_node.wants_execute {
-                            InputState::Changed
+                        missing_required_inputs |= output_e_node.missing_required_inputs;
+
+                        let output_e_node_wants_execute = output_e_node.wants_execute;
+
+                        let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                        if output_e_node_wants_execute {
+                            e_input.state = Some(InputState::Changed);
+                            changed_inputs = true;
                         } else {
-                            InputState::Unchanged
+                            e_input.state = Some(InputState::Unchanged);
                         }
+
+                        // if output_e_node.wants_execute {
+                        //     InputState::Changed
+                        // } else {
+                        //     InputState::Unchanged
+                        // }
                     }
                 };
 
-                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                e_input.state = Some(input_state);
-                match input_state {
-                    InputState::Unchanged => {}
-                    InputState::Changed => changed_inputs = true,
-                    InputState::None => missing_required_inputs |= e_input.required,
+                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                if e_input.state.unwrap() == InputState::Changed {
+                    changed_inputs = true;
                 }
+
+                // let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                // e_input.state = Some(input_state);
+                // match input_state {
+                //     InputState::Unchanged => {}
+                //     InputState::Changed => changed_inputs = true,
+                // }
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -756,22 +770,14 @@ impl ExecutionGraph {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        if output_e_node.missing_required_inputs {
-                            assert_eq!(e_input.state.unwrap(), InputState::None);
-                        } else if output_e_node.wants_execute {
+                        if output_e_node.wants_execute {
                             assert_eq!(e_input.state.unwrap(), InputState::Changed);
                         } else {
                             assert_eq!(e_input.state.unwrap(), InputState::Unchanged);
                         }
                     }
                     ExecutionBinding::None => {}
-                    ExecutionBinding::Const(_) => {
-                        assert_ne!(e_input.state.unwrap(), InputState::None)
-                    }
-                }
-
-                if e_input.state.unwrap() == InputState::None {
-                    assert!(!e_input.required || e_node.missing_required_inputs);
+                    ExecutionBinding::Const(_) => {}
                 }
             }
         }
@@ -893,9 +899,9 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state.unwrap(), InputState::None);
-        assert_eq!(mult.inputs[0].state.unwrap(), InputState::None);
-        assert_eq!(print.inputs[0].state.unwrap(), InputState::None);
+        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(print.inputs[0].state.unwrap(), InputState::Unchanged);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
