@@ -1295,19 +1295,14 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            2,
-            "changing binding should recompute sum"
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
         );
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            1,
-            "nothing changed so nothing should be recomputed"
-        );
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         Ok(())
     }
