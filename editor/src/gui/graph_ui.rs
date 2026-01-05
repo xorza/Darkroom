@@ -97,6 +97,13 @@ impl GraphUi {
 
         self.graph_layout.update(&ctx, view_graph);
 
+        let drag_port_info = self.node_ui.process_input(
+            &mut ctx,
+            view_graph,
+            &mut self.graph_layout,
+            ui_interaction,
+        );
+
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
                 &mut ctx,
@@ -107,19 +114,12 @@ impl GraphUi {
             );
         }
 
-        let drag_port_info = self.node_ui.process_input(
-            &mut ctx,
-            view_graph,
-            &mut self.graph_layout,
-            ui_interaction,
-        );
+        self.process_connection_drag(&mut ctx, view_graph, ui_interaction, drag_port_info);
 
         self.render_connections(&mut ctx, view_graph);
 
         self.node_ui
             .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
-
-        self.process_connection_drag(&mut ctx, view_graph, ui_interaction, drag_port_info);
 
         self.top_panel(&mut ctx, view_graph);
     }
