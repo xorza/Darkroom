@@ -363,6 +363,7 @@ impl ExecutionGraph {
 
             e_node.run_time = start.elapsed().as_secs_f64();
 
+            // after node execution, const and none bindings set unchanged
             e_node
                 .inputs
                 .iter_mut()
@@ -439,7 +440,7 @@ impl ExecutionGraph {
                         return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                     }
                     ProcessState::Backward => true,
-                    ProcessState::Forward => false,
+                    ProcessState::Forward => unreachable!("should be None"),
                 }
             };
 
@@ -507,6 +508,8 @@ impl ExecutionGraph {
                             output_idx: port_address.port_idx,
                         },
                     });
+
+                    assert_ne!(e_input.binding, ExecutionBinding::Undefined);
                 }
             }
 
@@ -543,14 +546,12 @@ impl ExecutionGraph {
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
 
-                        let output_e_node_wants_execute = output_e_node.wants_execute;
-
-                        let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                        if output_e_node_wants_execute {
-                            e_input.state = Some(InputState::Changed);
+                        let input_state = if output_e_node.wants_execute {
+                            InputState::Changed
                         } else {
-                            e_input.state = Some(InputState::Unchanged);
-                        }
+                            InputState::Unchanged
+                        };
+                        self.e_nodes[e_node_idx].inputs[input_idx].state = Some(input_state);
                     }
                 };
 
