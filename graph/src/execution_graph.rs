@@ -130,6 +130,7 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
+    pub e_node_process_order: Vec<usize>,
     pub e_node_invoke_order: Vec<usize>,
 
     #[serde(skip)]
@@ -271,11 +272,139 @@ impl ExecutionGraph {
         Ok(common::deserialize(serialized, format)?)
     }
 
-    // Rebuild execution state
+    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.backward1(graph, func_lib)?;
+        self.e_node_process_order.reserve(graph.nodes.len());
+        self.e_node_process_order.clear();
+        self.stack.reserve(graph.nodes.len());
+
+        self.e_nodes
+            .iter_mut()
+            .for_each(|e_node| e_node.process_state = ProcessState::None);
+
+        let mut write_idx = 0;
+        let mut stack: Vec<Visit> = take(&mut self.stack);
+        stack.clear();
+
+        for node in graph.nodes.iter().filter(|&node| node.terminal) {
+            let e_node_idx = self
+                .e_nodes
+                .compact_insert_with(&node.id, &mut write_idx, || ExecutionNode {
+                    id: node.id,
+                    ..Default::default()
+                });
+
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Terminal,
+            });
+        }
+
+        while let Some(visit) = stack.pop() {
+            let output_request = match visit.cause {
+                VisitCause::Terminal => None,
+                VisitCause::OutputRequest { output_idx } => Some(output_idx),
+                VisitCause::Done => {
+                    let e_node = &mut self.e_nodes[visit.e_node_idx];
+                    assert_eq!(e_node.process_state, ProcessState::Processing);
+                    e_node.process_state = ProcessState::Backward;
+                    self.e_node_process_order.push(visit.e_node_idx);
+                    continue;
+                }
+            };
+
+            let already_processed = {
+                let e_node = &self.e_nodes[visit.e_node_idx];
+                match e_node.process_state {
+                    ProcessState::None => false,
+                    ProcessState::Processing => {
+                        return Err(ExecutionError::CycleDetected { node_id: e_node.id });
+                    }
+                    ProcessState::Backward => true,
+                    ProcessState::Forward => unreachable!("should be None"),
+                }
+            };
+
+            if !already_processed {
+                let node = {
+                    let e_node = &mut self.e_nodes[visit.e_node_idx];
+                    let node = graph.by_id(&e_node.id).unwrap();
+                    let func = func_lib.by_id(&node.func_id).unwrap();
+                    e_node.reset(node, func);
+                    e_node.process_state = ProcessState::Processing;
+                    stack.push(Visit {
+                        e_node_idx: visit.e_node_idx,
+                        cause: VisitCause::Done,
+                    });
+
+                    node
+                };
+
+                for (input_idx, input) in node.inputs.iter().enumerate() {
+                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                    e_input.state = match (&input.binding, &e_input.binding) {
+                        (Binding::None, ExecutionBinding::None) => InputState::Unchanged,
+                        (Binding::None, _) => {
+                            e_input.binding = ExecutionBinding::None;
+                            InputState::Changed
+                        }
+                        (Binding::Const(value), ExecutionBinding::Const(existing))
+                            if value == existing =>
+                        {
+                            InputState::Unchanged
+                        }
+                        (Binding::Const(value), _) => {
+                            e_input.binding = ExecutionBinding::Const(value.clone());
+                            InputState::Changed
+                        }
+                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => {
+                            e_input.binding = ExecutionBinding::Undefined;
+                            InputState::Unchanged
+                        }
+                        (Binding::Bind(_), _) => {
+                            e_input.binding = ExecutionBinding::Undefined;
+                            InputState::Changed
+                        }
+                    };
+                    let Binding::Bind(port_address) = &input.binding else {
+                        continue;
+                    };
+                    let output_e_node_idx = self.e_nodes.compact_insert_with(
+                        &port_address.target_id,
+                        &mut write_idx,
+                        || ExecutionNode {
+                            id: port_address.target_id,
+                            ..Default::default()
+                        },
+                    );
+
+                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
+                    e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                        target_idx: output_e_node_idx,
+                        port_idx: port_address.port_idx,
+                    });
+
+                    stack.push(Visit {
+                        e_node_idx: output_e_node_idx,
+                        cause: VisitCause::OutputRequest {
+                            output_idx: port_address.port_idx,
+                        },
+                    });
+
+                    assert_ne!(e_input.binding, ExecutionBinding::Undefined);
+                }
+            }
+
+            if let Some(output_idx) = output_request {
+                let e_node = &mut self.e_nodes[visit.e_node_idx];
+                e_node.outputs[output_idx].usage_count += 1;
+            }
+        }
+
+        self.stack = take(&mut stack);
+        self.e_nodes.compact_finish(write_idx);
 
         self.validate_with(graph, func_lib);
 
@@ -388,144 +517,9 @@ impl ExecutionGraph {
         }
     }
 
-    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
-    fn backward1(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
-        self.e_node_invoke_order.reserve(graph.nodes.len());
-        self.e_node_invoke_order.clear();
-        self.stack.reserve(graph.nodes.len());
-
-        self.e_nodes
-            .iter_mut()
-            .for_each(|e_node| e_node.process_state = ProcessState::None);
-
-        let mut write_idx = 0;
-        let mut stack: Vec<Visit> = take(&mut self.stack);
-        stack.clear();
-
-        for node in graph.nodes.iter().filter(|&node| node.terminal) {
-            let e_node_idx = self
-                .e_nodes
-                .compact_insert_with(&node.id, &mut write_idx, || ExecutionNode {
-                    id: node.id,
-                    ..Default::default()
-                });
-
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Terminal,
-            });
-        }
-
-        while let Some(visit) = stack.pop() {
-            let output_request = match visit.cause {
-                VisitCause::Terminal => None,
-                VisitCause::OutputRequest { output_idx } => Some(output_idx),
-                VisitCause::Done => {
-                    let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    assert_eq!(e_node.process_state, ProcessState::Processing);
-                    e_node.process_state = ProcessState::Backward;
-                    self.e_node_invoke_order.push(visit.e_node_idx);
-                    continue;
-                }
-            };
-
-            let already_processed = {
-                let e_node = &self.e_nodes[visit.e_node_idx];
-                match e_node.process_state {
-                    ProcessState::None => false,
-                    ProcessState::Processing => {
-                        return Err(ExecutionError::CycleDetected { node_id: e_node.id });
-                    }
-                    ProcessState::Backward => true,
-                    ProcessState::Forward => unreachable!("should be None"),
-                }
-            };
-
-            if !already_processed {
-                let node = {
-                    let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    let node = graph.by_id(&e_node.id).unwrap();
-                    let func = func_lib.by_id(&node.func_id).unwrap();
-                    e_node.reset(node, func);
-                    e_node.process_state = ProcessState::Processing;
-                    stack.push(Visit {
-                        e_node_idx: visit.e_node_idx,
-                        cause: VisitCause::Done,
-                    });
-
-                    node
-                };
-
-                for (input_idx, input) in node.inputs.iter().enumerate() {
-                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                    e_input.state = match (&input.binding, &e_input.binding) {
-                        (Binding::None, ExecutionBinding::None) => InputState::Unchanged,
-                        (Binding::None, _) => {
-                            e_input.binding = ExecutionBinding::None;
-                            InputState::Changed
-                        }
-                        (Binding::Const(value), ExecutionBinding::Const(existing))
-                            if value == existing =>
-                        {
-                            InputState::Unchanged
-                        }
-                        (Binding::Const(value), _) => {
-                            e_input.binding = ExecutionBinding::Const(value.clone());
-                            InputState::Changed
-                        }
-                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => {
-                            e_input.binding = ExecutionBinding::Undefined;
-                            InputState::Unchanged
-                        }
-                        (Binding::Bind(_), _) => {
-                            e_input.binding = ExecutionBinding::Undefined;
-                            InputState::Changed
-                        }
-                    };
-                    let Binding::Bind(port_address) = &input.binding else {
-                        continue;
-                    };
-                    let output_e_node_idx = self.e_nodes.compact_insert_with(
-                        &port_address.target_id,
-                        &mut write_idx,
-                        || ExecutionNode {
-                            id: port_address.target_id,
-                            ..Default::default()
-                        },
-                    );
-
-                    let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                    e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                        target_idx: output_e_node_idx,
-                        port_idx: port_address.port_idx,
-                    });
-
-                    stack.push(Visit {
-                        e_node_idx: output_e_node_idx,
-                        cause: VisitCause::OutputRequest {
-                            output_idx: port_address.port_idx,
-                        },
-                    });
-
-                    assert_ne!(e_input.binding, ExecutionBinding::Undefined);
-                }
-            }
-
-            if let Some(output_idx) = output_request {
-                let e_node = &mut self.e_nodes[visit.e_node_idx];
-                e_node.outputs[output_idx].usage_count += 1;
-            }
-        }
-
-        self.stack = take(&mut stack);
-        self.e_nodes.compact_finish(write_idx);
-
-        Ok(())
-    }
-
     // Propagate input state forward through the processing order.
     fn forward2(&mut self) {
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+        for e_node_idx in self.e_node_process_order.iter().copied() {
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
@@ -702,8 +696,8 @@ impl ExecutionGraph {
             }
         }
 
-        for idx in 0..self.e_node_invoke_order.len() {
-            let e_node_idx = self.e_node_invoke_order[idx];
+        for idx in 0..self.e_node_process_order.len() {
+            let e_node_idx = self.e_node_process_order[idx];
             let e_node = &self.e_nodes[e_node_idx];
 
             let all_dependencies_in_order = e_node
@@ -715,7 +709,7 @@ impl ExecutionGraph {
                     ExecutionBinding::None | ExecutionBinding::Const(_) => None,
                 })
                 .all(|port_address| {
-                    !self.e_node_invoke_order[idx..].contains(&port_address.target_idx)
+                    !self.e_node_process_order[idx..].contains(&port_address.target_idx)
                 });
             assert!(all_dependencies_in_order);
         }
@@ -836,8 +830,10 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
+        assert_eq!(execution_graph.e_node_process_order.len(), 5);
         assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
         assert!(execution_graph
             .e_nodes
@@ -1052,6 +1048,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
 
         assert!(
             execution_graph
