@@ -28,8 +28,9 @@ pub struct ExecutionStats {
     pub elapsed_secs: f64,
     pub executed_nodes: usize,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
+    #[default]
     Changed,
     Unchanged,
 }
@@ -40,7 +41,7 @@ pub enum OutputUsage {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExecutionInput {
-    pub state: Option<InputState>,
+    pub state: InputState,
     pub required: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
@@ -324,7 +325,7 @@ impl ExecutionGraph {
                 let value = value.convert_type(&input.data_type);
 
                 inputs.push(InvokeInput {
-                    state: input.state.unwrap(),
+                    state: input.state,
                     value,
                 });
             }
@@ -366,7 +367,7 @@ impl ExecutionGraph {
                 .for_each(|input| match &input.binding {
                     ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                     ExecutionBinding::None | ExecutionBinding::Const(_) => {
-                        input.state = Some(InputState::Unchanged)
+                        input.state = InputState::Unchanged
                     }
                     ExecutionBinding::Bind(_) => {}
                 });
@@ -457,29 +458,30 @@ impl ExecutionGraph {
 
                 for (input_idx, input) in node.inputs.iter().enumerate() {
                     let e_input = &mut self.e_nodes[visit.e_node_idx].inputs[input_idx];
-                    match (&input.binding, &e_input.binding) {
-                        (Binding::None, ExecutionBinding::None) => {
-                            e_input.state = Some(InputState::Unchanged)
-                        }
+                    e_input.state = match (&input.binding, &e_input.binding) {
+                        (Binding::None, ExecutionBinding::None) => InputState::Unchanged,
                         (Binding::None, _) => {
-                            e_input.state = Some(InputState::Changed);
                             e_input.binding = ExecutionBinding::None;
+                            InputState::Changed
                         }
                         (Binding::Const(value), ExecutionBinding::Const(existing))
                             if value == existing =>
                         {
-                            e_input.state = Some(InputState::Unchanged);
+                            InputState::Unchanged
                         }
                         (Binding::Const(value), _) => {
-                            e_input.state = Some(InputState::Changed);
                             e_input.binding = ExecutionBinding::Const(value.clone());
+                            InputState::Changed
                         }
-                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => e_input.state = None,
+                        (Binding::Bind(_), ExecutionBinding::Bind(_)) => {
+                            e_input.binding = ExecutionBinding::Undefined;
+                            InputState::Unchanged
+                        }
                         (Binding::Bind(_), _) => {
-                            e_input.state = Some(InputState::Changed);
+                            e_input.binding = ExecutionBinding::Undefined;
+                            InputState::Changed
                         }
                     };
-
                     let Binding::Bind(port_address) = &input.binding else {
                         continue;
                     };
@@ -542,16 +544,14 @@ impl ExecutionGraph {
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
 
-                        self.e_nodes[e_node_idx].inputs[input_idx].state = Some(
-                            output_e_node
-                                .wants_execute
-                                .then_else(InputState::Changed, InputState::Unchanged),
-                        );
+                        self.e_nodes[e_node_idx].inputs[input_idx].state = output_e_node
+                            .wants_execute
+                            .then_else(InputState::Changed, InputState::Unchanged);
                     }
                 };
 
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                if e_input.state.unwrap() == InputState::Changed {
+                if e_input.state == InputState::Changed {
                     changed_inputs = true;
                 }
             }
@@ -624,7 +624,7 @@ impl ExecutionGraph {
 
             let e_node = &self.e_nodes[visit.e_node_idx];
             for e_input in e_node.inputs.iter() {
-                if e_input.state.unwrap() != InputState::Changed {
+                if e_input.state != InputState::Changed {
                     continue;
                 }
 
@@ -766,9 +766,9 @@ impl ExecutionGraph {
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
                         if output_e_node.wants_execute {
-                            assert_eq!(e_input.state.unwrap(), InputState::Changed);
+                            assert_eq!(e_input.state, InputState::Changed);
                         } else {
-                            assert_eq!(e_input.state.unwrap(), InputState::Unchanged);
+                            assert_eq!(e_input.state, InputState::Unchanged);
                         }
                     }
                     ExecutionBinding::None => {}
@@ -895,9 +895,9 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Changed);
-        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Unchanged);
-        assert_eq!(print.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(sum.inputs[0].state, InputState::Changed);
+        assert_eq!(mult.inputs[0].state, InputState::Unchanged);
+        assert_eq!(print.inputs[0].state, InputState::Unchanged);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
@@ -942,11 +942,11 @@ mod tests {
         assert!(sum.changed_inputs);
         assert!(mult.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Changed);
-        assert_eq!(sum.inputs[1].state.unwrap(), InputState::Changed);
-        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Unchanged);
-        assert_eq!(mult.inputs[1].state.unwrap(), InputState::Changed);
-        assert_eq!(print.inputs[0].state.unwrap(), InputState::Changed);
+        assert_eq!(sum.inputs[0].state, InputState::Changed);
+        assert_eq!(sum.inputs[1].state, InputState::Changed);
+        assert_eq!(mult.inputs[0].state, InputState::Unchanged);
+        assert_eq!(mult.inputs[1].state, InputState::Changed);
+        assert_eq!(print.inputs[0].state, InputState::Changed);
 
         Ok(())
     }
@@ -1362,6 +1362,39 @@ mod tests {
             execution_graph.e_node_invoke_order.iter().len(),
             3,
             "sum binging change so sum should be recomputed"
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn change_from_const_to_bind_recomputes() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        let get_b_id = graph.by_name_mut("get_b").unwrap().id;
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::Const(33.into());
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[1].binding = (get_b_id, 0).into();
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            3,
+            "changed from const to bind should recompute"
         );
 
         Ok(())
