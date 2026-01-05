@@ -712,10 +712,10 @@ impl ExecutionGraph {
             }
         }
 
-        let mut seen_in_process_order = HashSet::with_capacity(self.e_nodes.len());
+        let mut seen = HashSet::with_capacity(self.e_nodes.len());
         for &e_node_idx in self.e_node_process_order.iter() {
             assert!(e_node_idx < self.e_nodes.len());
-            assert!(seen_in_process_order.insert(e_node_idx));
+            assert!(seen.insert(e_node_idx));
         }
 
         let mut seen_in_process_order = HashSet::with_capacity(self.e_nodes.len());
