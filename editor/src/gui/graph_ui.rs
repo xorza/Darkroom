@@ -147,40 +147,36 @@ impl GraphUi {
             .interact(ctx.rect, graph_bg_id, egui::Sense::hover())
             .hovered();
 
-        if let Some(pointer_pos) = pointer_pos {
-            if self.state == InteractionState::DraggingNewConnection {
-                let drag = self.connection_drag.as_mut().unwrap();
-                drag.current_pos = pointer_pos;
-            }
-
-            if self.state == InteractionState::BreakingConnections
-                && matches!(
-                    primary_state,
-                    Some(PrimaryState::Pressed | PrimaryState::Down)
-                )
-            {
-                self.connection_breaker.add_point(pointer_pos);
-            }
-        }
+        let primary_pressed = matches!(primary_state, Some(PrimaryState::Pressed));
+        let primary_down = matches!(
+            primary_state,
+            Some(PrimaryState::Pressed | PrimaryState::Down)
+        );
 
         match (self.state, primary_state) {
-            (InteractionState::Idle, Some(PrimaryState::Pressed)) => {
-                if let PortDragInfo::DragStart(port_info) = drag_port_info {
-                    self.connection_drag = Some(ConnectionDrag::new(port_info));
-                    self.state = InteractionState::DraggingNewConnection;
-                    return;
-                }
-                if pointer_on_background {
-                    view_graph.selected_node_id = None;
-                    self.state = InteractionState::BreakingConnections;
-                    self.connection_breaker.reset();
-
-                    if let Some(pointer_pos) = pointer_pos {
-                        self.connection_breaker.points.push(pointer_pos);
+            (InteractionState::Idle, _) => {
+                if primary_pressed {
+                    if let PortDragInfo::DragStart(port_info) = drag_port_info {
+                        self.connection_drag = Some(ConnectionDrag::new(port_info));
+                        self.state = InteractionState::DraggingNewConnection;
+                    } else if pointer_on_background {
+                        view_graph.selected_node_id = None;
+                        self.state = InteractionState::BreakingConnections;
+                        self.connection_breaker.reset();
+                        if let Some(pointer_pos) = pointer_pos {
+                            self.connection_breaker.points.push(pointer_pos);
+                        }
                     }
                 }
             }
             (InteractionState::BreakingConnections, _) => {
+                if primary_down {
+                    if let Some(pointer_pos) = pointer_pos {
+                        self.connection_breaker.add_point(pointer_pos);
+                    }
+                    return;
+                }
+
                 for connection in self.connection_renderer.highlighted.iter() {
                     if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id)
                     {
@@ -224,7 +220,13 @@ impl GraphUi {
                 }
                 PortDragInfo::DragStart(_) | PortDragInfo::None => {}
             },
-            _ => {}
+        }
+
+        if self.state == InteractionState::DraggingNewConnection
+            && let Some(pointer_pos) = pointer_pos
+        {
+            let drag = self.connection_drag.as_mut().unwrap();
+            drag.current_pos = pointer_pos;
         }
     }
 
