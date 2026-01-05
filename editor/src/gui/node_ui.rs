@@ -11,13 +11,6 @@ use graph::prelude::{Func, FuncBehavior, NodeBehavior};
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
 use crate::model::{ViewGraph, ViewNode};
 
-const NODE_WIDTH: f32 = 180.0;
-const HEADER_HEIGHT: f32 = 22.0;
-const CACHE_HEIGHT: f32 = 20.0;
-const ROW_HEIGHT: f32 = 18.0;
-const PADDING: f32 = 8.0;
-const CORNER_RADIUS: f32 = 6.0;
-
 #[derive(Debug, Clone)]
 pub enum PortDragInfo {
     None,
@@ -28,17 +21,10 @@ pub enum PortDragInfo {
 
 #[derive(Debug, Clone)]
 pub struct NodeLayout {
-    pub header_height: f32,
-    pub cache_height: f32,
-    pub row_height: f32,
-    pub padding: f32,
-    pub corner_radius: f32,
     pub rect: Rect,
     pub remove_btn_rect: Rect,
     pub cache_button_rect: Rect,
-    pub dot_radius: f32,
     pub dot_first_center: Option<Pos2>,
-    pub dot_step: f32,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
 }
@@ -47,25 +33,25 @@ pub struct NodeLayout {
 pub struct NodeUi {}
 
 impl NodeLayout {
-    pub fn input_center(&self, index: usize) -> Pos2 {
+    pub fn input_center(&self, index: usize, row_height: f32) -> Pos2 {
         egui::pos2(
             self.input_first_center.x,
-            self.input_first_center.y + self.row_height * index as f32,
+            self.input_first_center.y + row_height * index as f32,
         )
     }
 
-    pub fn output_center(&self, index: usize) -> Pos2 {
+    pub fn output_center(&self, index: usize, row_height: f32) -> Pos2 {
         egui::pos2(
             self.output_first_center.x,
-            self.output_first_center.y + self.row_height * index as f32,
+            self.output_first_center.y + row_height * index as f32,
         )
     }
 
-    pub fn dot_center(&self, index: usize) -> Pos2 {
+    pub fn dot_center(&self, index: usize, dot_step: f32) -> Pos2 {
         let first = self
             .dot_first_center
             .expect("dot center missing when dots are present");
-        egui::pos2(first.x - self.dot_step * index as f32, first.y)
+        egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 }
 
@@ -168,9 +154,10 @@ impl NodeUi {
                 .selected_node_id
                 .is_some_and(|id| id == view_node_id);
 
+            let corner_radius = ctx.style.node_corner_radius * view_graph.scale;
             ctx.painter.rect(
                 layout.rect,
-                layout.corner_radius,
+                corner_radius,
                 ctx.style.node_fill,
                 if is_selected {
                     ctx.style.selected_stroke
@@ -182,7 +169,7 @@ impl NodeUi {
             ctx.painter.text(
                 layout.rect.min
                     + egui::vec2(
-                        layout.padding,
+                        ctx.style.node_padding * view_graph.scale,
                         view_graph.scale * ctx.style.header_text_offset,
                     ),
                 egui::Align2::LEFT_TOP,
@@ -192,7 +179,7 @@ impl NodeUi {
             );
 
             cache_btn(ctx, layout, node, cache_response, view_graph.scale);
-            hints(ctx, layout, node, func);
+            hints(ctx, layout, node, func, view_graph.scale);
             remove_btn(ctx, layout, remove_response, view_graph.scale);
 
             let node_drag_port_result =
@@ -247,7 +234,7 @@ fn cache_btn(
     let button_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
         layout.cache_button_rect,
-        layout.corner_radius * 0.5,
+        ctx.style.node_corner_radius * scale * 0.5,
         cache_button_fill,
         button_stroke,
         egui::StrokeKind::Inside,
@@ -274,15 +261,17 @@ fn hints(
     layout: &NodeLayout,
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
+    scale: f32,
 ) {
+    let dot_radius = scale * ctx.style.status_dot_radius;
+    let dot_step = (dot_radius * 2.0) + scale * ctx.style.status_item_gap;
+
     if node.terminal {
-        let center = layout.dot_center(0);
+        let center = layout.dot_center(0, dot_step);
         ctx.painter
-            .circle_filled(center, layout.dot_radius, ctx.style.status_terminal_color);
-        let dot_rect = egui::Rect::from_center_size(
-            center,
-            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
-        );
+            .circle_filled(center, dot_radius, ctx.style.status_terminal_color);
+        let dot_rect =
+            egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
         let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
         if dot_response.hovered() {
@@ -290,13 +279,11 @@ fn hints(
         }
     }
     if func.behavior == FuncBehavior::Impure {
-        let center = layout.dot_center(usize::from(node.terminal));
+        let center = layout.dot_center(usize::from(node.terminal), dot_step);
         ctx.painter
-            .circle_filled(center, layout.dot_radius, ctx.style.status_impure_color);
-        let dot_rect = egui::Rect::from_center_size(
-            center,
-            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
-        );
+            .circle_filled(center, dot_radius, ctx.style.status_impure_color);
+        let dot_rect =
+            egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
         let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
         if dot_response.hovered() {
@@ -321,7 +308,7 @@ fn remove_btn(
     let close_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
         layout.remove_btn_rect,
-        layout.corner_radius * 0.6,
+        ctx.style.node_corner_radius * scale * 0.6,
         close_fill,
         close_stroke,
         egui::StrokeKind::Inside,
@@ -361,6 +348,7 @@ fn render_node_ports(
 
     let port_radius = scale * ctx.style.port_radius;
     let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
+    let row_height = ctx.style.node_row_height * scale;
 
     let handle_port = |center: Pos2,
                        kind: PortKind,
@@ -400,7 +388,7 @@ fn render_node_ports(
     };
 
     for input_idx in 0..func.inputs.len() {
-        let center = layout.input_center(input_idx);
+        let center = layout.input_center(input_idx, row_height);
         let drag_info = handle_port(
             center,
             PortKind::Input,
@@ -412,7 +400,7 @@ fn render_node_ports(
     }
 
     for output_idx in 0..func.outputs.len() {
-        let center = layout.output_center(output_idx);
+        let center = layout.output_center(output_idx, row_height);
         let drag_info = handle_port(
             center,
             PortKind::Output,
@@ -436,7 +424,8 @@ fn render_node_const_bindings(
     let port_radius = scale * ctx.style.port_radius;
     let link_inset = port_radius * 0.6;
     let badge_padding = 4.0 * scale;
-    let badge_height = (layout.row_height * 1.2).max(10.0 * scale);
+    let row_height = ctx.style.node_row_height * scale;
+    let badge_height = (row_height * 1.2).max(10.0 * scale);
     let badge_radius = 6.0 * scale;
     let badge_gap = 6.0 * scale;
     let stroke = ctx.style.connection_stroke;
@@ -449,7 +438,7 @@ fn render_node_const_bindings(
         let label = static_value_label(value);
         let label_width = text_width(&ctx.painter, &font, &label, ctx.style.text_color);
         let badge_width = label_width + badge_padding * 2.0;
-        let center = layout.input_center(input_idx);
+        let center = layout.input_center(input_idx, row_height);
         let badge_right = center.x - port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
@@ -506,8 +495,10 @@ fn render_node_labels(
     layout: &NodeLayout,
     func: &Func,
 ) {
+    let row_height = ctx.style.node_row_height * view_graph.scale;
+    let padding = ctx.style.node_padding * view_graph.scale;
     for (input_idx, input) in func.inputs.iter().enumerate() {
-        let text_pos = layout.input_center(input_idx) + vec2(layout.padding, 0.0);
+        let text_pos = layout.input_center(input_idx, row_height) + vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::LEFT_CENTER,
@@ -518,7 +509,7 @@ fn render_node_labels(
     }
 
     for (output_idx, output) in func.outputs.iter().enumerate() {
-        let text_pos = layout.output_center(output_idx) - vec2(layout.padding, 0.0);
+        let text_pos = layout.output_center(output_idx, row_height) - vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::RIGHT_CENTER,
@@ -540,12 +531,11 @@ pub(crate) fn compute_node_layout(
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
     let scale = view_graph.scale;
 
-    let node_width_base = NODE_WIDTH * scale;
-    let header_height = HEADER_HEIGHT * scale;
-    let cache_height = CACHE_HEIGHT * scale;
-    let row_height = ROW_HEIGHT * scale;
-    let padding = PADDING * scale;
-    let corner_radius = CORNER_RADIUS * scale;
+    let node_width_base = ctx.style.node_width * scale;
+    let header_height = ctx.style.node_header_height * scale;
+    let cache_height = ctx.style.node_cache_height * scale;
+    let row_height = ctx.style.node_row_height * scale;
+    let padding = ctx.style.node_padding * scale;
 
     let header_width = text_width(
         &ctx.painter,
@@ -630,7 +620,6 @@ pub(crate) fn compute_node_layout(
     let close_rect = egui::Rect::from_min_size(close_pos, egui::vec2(close_size, close_size));
 
     let dot_radius = scale * ctx.style.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + scale * ctx.style.status_item_gap;
     let has_terminal = node.terminal;
     let has_impure = func.behavior == FuncBehavior::Impure;
     let dot_first_center = if has_terminal || has_impure {
@@ -671,16 +660,9 @@ pub(crate) fn compute_node_layout(
         rect,
         remove_btn_rect,
         cache_button_rect,
-        dot_radius,
         dot_first_center,
-        dot_step,
         input_first_center,
         output_first_center,
-        row_height,
-        header_height,
-        cache_height,
-        padding,
-        corner_radius,
     }
 }
 

@@ -39,11 +39,13 @@ pub(crate) struct ConnectionUi {
 impl ConnectionUi {
     pub(crate) fn rebuild(
         &mut self,
+        ctx: &GraphContext,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.collect_curves(graph_layout, view_graph);
+        let row_height = ctx.style.node_row_height * view_graph.scale;
+        self.collect_curves(graph_layout, view_graph, row_height);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
@@ -58,7 +60,7 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(graph_layout, view_graph, breaker);
+        self.rebuild(ctx, graph_layout, view_graph, breaker);
 
         for curve in &self.curves {
             let stroke = if self.highlighted.contains(&curve.key) {
@@ -82,7 +84,12 @@ impl ConnectionUi {
         }
     }
 
-    fn collect_curves(&mut self, graph_layout: &GraphLayout, view_graph: &model::ViewGraph) {
+    fn collect_curves(
+        &mut self,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        row_height: f32,
+    ) {
         self.curves.clear();
 
         for node_view in &view_graph.view_nodes {
@@ -94,8 +101,8 @@ impl ConnectionUi {
                 };
                 let start_layout = graph_layout.node_layout(&binding.target_id);
                 let end_layout = graph_layout.node_layout(&node.id);
-                let start = start_layout.output_center(binding.port_idx);
-                let end = end_layout.input_center(input_index);
+                let start = start_layout.output_center(binding.port_idx, row_height);
+                let end = end_layout.input_center(input_index, row_height);
                 let control_offset = bezier_control_offset(start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {

@@ -37,6 +37,12 @@ const DOTTED_RADIUS_BASE: f32 = 1.2;
 const DOTTED_RADIUS_MIN: f32 = 0.6;
 const DOTTED_RADIUS_MAX: f32 = 2.4;
 const PORT_RADIUS: f32 = 5.5;
+const NODE_WIDTH: f32 = 180.0;
+const NODE_HEADER_HEIGHT: f32 = 22.0;
+const NODE_CACHE_HEIGHT: f32 = 20.0;
+const NODE_ROW_HEIGHT: f32 = 18.0;
+const NODE_PADDING: f32 = 8.0;
+const NODE_CORNER_RADIUS: f32 = 6.0;
 const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
 const HEADING_FONT_SIZE: f32 = 18.0;
 const BODY_FONT_SIZE: f32 = 18.0;
@@ -78,6 +84,12 @@ pub struct Style {
     pub dotted_radius_base: f32,
     pub dotted_radius_min: f32,
     pub dotted_radius_max: f32,
+    pub node_width: f32,
+    pub node_header_height: f32,
+    pub node_cache_height: f32,
+    pub node_row_height: f32,
+    pub node_padding: f32,
+    pub node_corner_radius: f32,
     pub node_fill: Color32,
     pub node_stroke: Stroke,
     pub const_stroke: Stroke,
@@ -131,6 +143,12 @@ impl Style {
             dotted_radius_base: DOTTED_RADIUS_BASE,
             dotted_radius_min: DOTTED_RADIUS_MIN,
             dotted_radius_max: DOTTED_RADIUS_MAX,
+            node_width: NODE_WIDTH,
+            node_header_height: NODE_HEADER_HEIGHT,
+            node_cache_height: NODE_CACHE_HEIGHT,
+            node_row_height: NODE_ROW_HEIGHT,
+            node_padding: NODE_PADDING,
+            node_corner_radius: NODE_CORNER_RADIUS,
             node_fill: NODE_FILL,
             node_stroke: Stroke::new(STROKE_WIDTH, NODE_STROKE_COLOR),
             selected_stroke: Stroke::new(STROKE_WIDTH, SELECTED_STROKE_COLOR),
