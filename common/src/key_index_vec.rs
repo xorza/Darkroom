@@ -272,6 +272,21 @@ mod tests {
     }
 
     #[test]
+    fn add_overwrites_existing_key() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 1, value: 33 });
+        vec.add(TestItem { id: 2, value: 299 });
+        vec.add(TestItem { id: 1, value: 99 });
+
+        assert_eq!(vec.items.len(), 2);
+        assert_eq!(vec.idx_by_key.len(), 2);
+        assert_eq!(vec.index_of_key(&1), Some(0));
+        assert_eq!(vec.by_key(&1).unwrap().value, 99);
+        assert_eq!(vec.by_key(&2).unwrap().value, 299);
+    }
+
+    #[test]
     fn key_index_vec_roundtrip_formats() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
         vec.add(TestItem { id: 1, value: 10 });
