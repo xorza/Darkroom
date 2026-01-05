@@ -436,8 +436,8 @@ impl ExecutionGraph {
             e_node.reset_for_execution();
         });
 
-        self.forward2();
-        self.backward2();
+        self.forward();
+        self.backward();
 
         self.validate_for_execution();
     }
@@ -533,7 +533,7 @@ impl ExecutionGraph {
     }
 
     // Propagate input state forward through the processing order.
-    fn forward2(&mut self) {
+    fn forward(&mut self) {
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &mut self.e_nodes[e_node_idx];
 
@@ -588,7 +588,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect the execution order.
-    fn backward2(&mut self) {
+    fn backward(&mut self) {
         self.e_node_invoke_order.clear();
         self.e_node_invoke_order
             .reserve(self.e_node_process_order.len());
