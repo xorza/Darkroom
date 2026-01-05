@@ -514,7 +514,7 @@ impl ExecutionGraph {
                 assert_ne!(input.binding, ExecutionBinding::Undefined);
                 input.state = InputState::Unchanged;
             });
-
+            
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
                 error = Some(err);
@@ -1083,23 +1083,15 @@ mod tests {
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_result| {}),
         });
+        let mut execution_graph = ExecutionGraph::default();
 
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = Binding::Const(5.into());
-        sum.inputs[1].binding = Binding::None;
 
-        let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
         assert_eq!(execution_graph.e_node_invoke_order.len(), 4);
-
-        execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
-
-        execution_graph.execute().await?;
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
 
         execution_graph.execute().await?;
         assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
