@@ -294,6 +294,7 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         graph.validate_with(func_lib);
 
+        self.e_node_invoke_order.clear();
         self.e_node_process_order.clear();
         self.e_node_process_order.reserve(graph.nodes.len());
 
@@ -589,6 +590,8 @@ impl ExecutionGraph {
     // Walk upstream dependencies to collect the execution order.
     fn backward2(&mut self) {
         self.e_node_invoke_order.clear();
+        self.e_node_invoke_order
+            .reserve(self.e_node_process_order.len());
 
         let mut stack: Vec<Visit> = take(&mut self.stack);
         assert!(stack.is_empty());
