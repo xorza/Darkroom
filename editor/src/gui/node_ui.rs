@@ -90,25 +90,9 @@ impl NodeUi {
                     .push((view_node_id, GraphUiAction::NodeSelected));
                 view_graph.select_node(&view_node_id);
             }
-        }
-    }
 
-    pub fn render_nodes(
-        &mut self,
-        ctx: &mut GraphContext,
-        view_graph: &mut ViewGraph,
-        graph_layout: &mut GraphLayout,
-        ui_interaction: &mut GraphUiInteraction,
-    ) -> PortDragInfo {
-        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
-
-        for view_node_idx in 0..view_graph.view_nodes.len() {
-            let view_node = &view_graph.view_nodes[view_node_idx];
-            let view_node_id = view_graph.view_nodes[view_node_idx].id;
             let layout = graph_layout.node_layout(&view_node_id);
-
             let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
             let remove_response =
@@ -146,9 +130,42 @@ impl NodeUi {
                     .actions
                     .push((view_node_id, GraphUiAction::NodeRemoved));
                 view_graph.remove_node(&view_node_id);
-
                 continue;
             }
+        }
+    }
+
+    pub fn render_nodes(
+        &mut self,
+        ctx: &mut GraphContext,
+        view_graph: &mut ViewGraph,
+        graph_layout: &mut GraphLayout,
+    ) -> PortDragInfo {
+        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
+
+        for view_node_idx in 0..view_graph.view_nodes.len() {
+            let view_node = &view_graph.view_nodes[view_node_idx];
+            let view_node_id = view_graph.view_nodes[view_node_idx].id;
+            let layout = graph_layout.node_layout(&view_node_id);
+
+            let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+
+            let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
+            let remove_response =
+                ctx.ui
+                    .interact(layout.remove_btn_rect, close_id, egui::Sense::click());
+
+            let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+            let cache_response = ctx.ui.interact(
+                layout.cache_button_rect,
+                cache_id,
+                if !node.terminal {
+                    egui::Sense::click()
+                } else {
+                    egui::Sense::hover()
+                },
+            );
 
             let is_selected = view_graph
                 .selected_node_id
