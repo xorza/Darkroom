@@ -1395,4 +1395,39 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn asd() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        // first execution caches output value for get_b
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = Binding::Const(2.into());
+        mult.inputs[1].binding = Binding::Const(21.into());
+
+        // now get_b is not used
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        let get_b_id = graph.by_name_mut("get_b").unwrap().id;
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = (get_b_id, 0).into();
+
+        // now get_b is used again and should use values cached from first run
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        Ok(())
+    }
 }
