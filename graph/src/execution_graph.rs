@@ -772,12 +772,9 @@ impl ExecutionGraph {
         let mut pending_after: HashSet<usize> = self.e_node_invoke_order.iter().copied().collect();
         assert_eq!(pending_after.len(), self.e_node_invoke_order.len());
 
-        let mut seen = vec![false; self.e_nodes.len()];
         for &e_node_idx in self.e_node_invoke_order.iter() {
             assert!(e_node_idx < self.e_nodes.len());
-            assert!(!seen[e_node_idx]);
-            seen[e_node_idx] = true;
-            assert!(pending_after.remove(&e_node_idx));
+            pending_after.remove(&e_node_idx);
 
             let e_node = &self.e_nodes[e_node_idx];
             assert_eq!(e_node.process_state, ProcessState::Backward);
