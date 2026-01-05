@@ -292,7 +292,7 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
-        validate_execution_inputs(graph, func_lib);
+        graph.validate_execution_inputs(func_lib);
 
         self.e_node_process_order.clear();
         self.e_node_process_order.reserve(graph.nodes.len());
@@ -786,27 +786,6 @@ impl ExecutionGraph {
                     ExecutionBinding::Const(_) => {}
                     ExecutionBinding::Undefined => panic!("uninitialized binding"),
                 }
-            }
-        }
-    }
-}
-
-fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
-    if !is_debug() {
-        return;
-    }
-
-    graph.validate();
-
-    for node in graph.nodes.iter() {
-        let func = func_lib.by_id(&node.func_id).unwrap();
-        assert_eq!(node.inputs.len(), func.inputs.len());
-
-        for input in node.inputs.iter() {
-            if let Binding::Bind(port_address) = &input.binding {
-                let output_node = graph.by_id(&port_address.target_id).unwrap();
-                let output_func = func_lib.by_id(&output_node.func_id).unwrap();
-                assert!(port_address.port_idx < output_func.outputs.len());
             }
         }
     }

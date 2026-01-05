@@ -3,7 +3,7 @@ use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
-use crate::function::{Func, FuncId};
+use crate::function::{Func, FuncId, FuncLib};
 use common::{deserialize, is_false, serialize, FileFormat, SerdeFormatResult};
 use common::{id_type, is_debug};
 
@@ -162,6 +162,27 @@ impl Graph {
             for input in node.inputs.iter() {
                 if let Binding::Bind(output_binding) = &input.binding {
                     assert!(self.by_id(&output_binding.target_id).is_some());
+                }
+            }
+        }
+    }
+
+    pub(crate) fn validate_execution_inputs(&self, func_lib: &FuncLib) {
+        if !is_debug() {
+            return;
+        }
+
+        self.validate();
+
+        for node in self.nodes.iter() {
+            let func = func_lib.by_id(&node.func_id).unwrap();
+            assert_eq!(node.inputs.len(), func.inputs.len());
+
+            for input in node.inputs.iter() {
+                if let Binding::Bind(port_address) = &input.binding {
+                    let output_node = self.by_id(&port_address.target_id).unwrap();
+                    let output_func = func_lib.by_id(&output_node.func_id).unwrap();
+                    assert!(port_address.port_idx < output_func.outputs.len());
                 }
             }
         }
