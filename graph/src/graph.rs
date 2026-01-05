@@ -167,7 +167,7 @@ impl Graph {
         }
     }
 
-    pub(crate) fn validate_execution_inputs(&self, func_lib: &FuncLib) {
+    pub fn validate_with(&self, func_lib: &FuncLib) {
         if !is_debug() {
             return;
         }

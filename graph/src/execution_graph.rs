@@ -292,7 +292,7 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
-        graph.validate_execution_inputs(func_lib);
+        graph.validate_with(func_lib);
 
         self.e_node_process_order.clear();
         self.e_node_process_order.reserve(graph.nodes.len());
