@@ -117,11 +117,10 @@ where
             assert!(invalidate_node_ids.is_empty());
         }
 
-        if let Some((graph, func_lib)) = context.take() {
-            if let Err(err) = execution_graph.update(&graph, &func_lib) {
+        if let Some((graph, func_lib)) = context.take()
+            && let Err(err) = execution_graph.update(&graph, &func_lib) {
                 (callback.lock().await)(Err(err));
             }
-        }
 
         if !events.is_empty() {
             let result = execution_graph.execute().await;
