@@ -17,6 +17,6 @@ pub mod yaml_format;
 pub use bool_ext::BoolExt;
 pub use constants::EPSILON;
 pub use debug::is_debug;
-pub use file_format::{get_file_extension, FileExtensionError, FileFormat, FileFormatResult};
-pub use serde::{deserialize, is_false, serialize, SerdeFormatError, SerdeFormatResult};
+pub use file_format::{FileExtensionError, FileFormat, FileFormatResult, get_file_extension};
+pub use serde::{SerdeFormatError, SerdeFormatResult, deserialize, is_false, serialize};
 pub use shared::Shared;

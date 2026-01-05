@@ -257,7 +257,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{deserialize, serialize, FileFormat};
+    use crate::{FileFormat, deserialize, serialize};
 
     #[derive(Debug, Default, Serialize, Deserialize)]
     struct TestItem {

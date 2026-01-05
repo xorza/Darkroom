@@ -1,6 +1,6 @@
 use mlua::{Lua, LuaSerdeExt, Value};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeLuaError {

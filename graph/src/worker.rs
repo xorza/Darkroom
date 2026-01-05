@@ -5,7 +5,7 @@ use crate::graph::{Graph, NodeId};
 use common::Shared;
 use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::error;
 
@@ -118,9 +118,10 @@ where
         }
 
         if let Some((graph, func_lib)) = context.take()
-            && let Err(err) = execution_graph.update(&graph, &func_lib) {
-                (callback.lock().await)(Err(err));
-            }
+            && let Err(err) = execution_graph.update(&graph, &func_lib)
+        {
+            (callback.lock().await)(Err(err));
+        }
 
         if !events.is_empty() {
             let result = execution_graph.execute().await;

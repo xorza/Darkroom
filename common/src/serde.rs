@@ -1,5 +1,5 @@
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use crate::file_format::FileFormat;
 use crate::normalize_string::NormalizeString;

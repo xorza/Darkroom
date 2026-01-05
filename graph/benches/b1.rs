@@ -1,10 +1,10 @@
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 use graph::{
     graph::test_graph,
-    prelude::{test_func_lib, ExecutionGraph, TestFuncHooks},
+    prelude::{ExecutionGraph, TestFuncHooks, test_func_lib},
 };
 
 fn bench_foo(c: &mut Criterion) {

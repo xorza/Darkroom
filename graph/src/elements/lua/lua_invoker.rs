@@ -1,6 +1,6 @@
 use anyhow::Error;
-use common::output_stream::OutputStream;
 use common::Shared;
+use common::output_stream::OutputStream;
 use hashbrown::HashMap;
 use std::fmt::Debug;
 use std::mem::take;
@@ -50,41 +50,42 @@ impl LuaInvoker {
     pub fn load(&mut self, script: &str) -> anyhow::Result<()> {
         let output_stream = self.output_stream.clone();
 
-        let print_function = self.lua.create_function(
-            move |_lua: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
-                let mut output = String::new();
+        let print_function =
+            self.lua
+                .create_function(move |_: &mlua::Lua, args: mlua::Variadic<mlua::Value>| {
+                    let mut output = String::new();
 
-                for (index, arg) in args.into_iter().enumerate() {
-                    if index > 0 {
-                        output.push('\t');
+                    for (index, arg) in args.into_iter().enumerate() {
+                        if index > 0 {
+                            output.push('\t');
+                        }
+
+                        match arg {
+                            mlua::Value::Nil => output.push_str("Nil"),
+                            mlua::Value::Boolean(v) => output.push_str(&v.to_string()),
+                            mlua::Value::LightUserData(_) => output.push_str("LightUserData"),
+                            mlua::Value::Integer(v) => output.push_str(&v.to_string()),
+                            mlua::Value::Number(v) => output.push_str(&v.to_string()),
+                            mlua::Value::String(v) => output.push_str(
+                                v.to_str().expect("Lua string is not valid UTF-8").as_ref(),
+                            ),
+                            mlua::Value::Table(_) => output.push_str("Table"),
+                            mlua::Value::Function(_) => output.push_str("Function"),
+                            mlua::Value::Thread(_) => output.push_str("Thread"),
+                            mlua::Value::UserData(_) => output.push_str("UserData"),
+                            mlua::Value::Error(err) => output.push_str(&err.to_string()),
+                            _ => panic!("not supported"),
+                        }
                     }
 
-                    match arg {
-                        mlua::Value::Nil => output.push_str("Nil"),
-                        mlua::Value::Boolean(v) => output.push_str(&v.to_string()),
-                        mlua::Value::LightUserData(_) => output.push_str("LightUserData"),
-                        mlua::Value::Integer(v) => output.push_str(&v.to_string()),
-                        mlua::Value::Number(v) => output.push_str(&v.to_string()),
-                        mlua::Value::String(v) => output
-                            .push_str(v.to_str().expect("Lua string is not valid UTF-8").as_ref()),
-                        mlua::Value::Table(_) => output.push_str("Table"),
-                        mlua::Value::Function(_) => output.push_str("Function"),
-                        mlua::Value::Thread(_) => output.push_str("Thread"),
-                        mlua::Value::UserData(_) => output.push_str("UserData"),
-                        mlua::Value::Error(err) => output.push_str(&err.to_string()),
-                        _ => panic!("not supported"),
+                    let mut guard = output_stream
+                        .try_lock()
+                        .expect("Output stream mutex is already locked");
+                    if let Some(stream) = guard.as_mut() {
+                        stream.write(output);
                     }
-                }
-
-                let mut guard = output_stream
-                    .try_lock()
-                    .expect("Output stream mutex is already locked");
-                if let Some(stream) = guard.as_mut() {
-                    stream.write(output);
-                }
-                Ok(())
-            },
-        )?;
+                    Ok(())
+                })?;
         self.lua.globals().set("print", print_function)?;
 
         self.lua.load(script).exec()?;
@@ -106,7 +107,7 @@ impl LuaInvoker {
             let lua_func_template = lua_func.clone();
             let lua = Arc::clone(&self.lua);
             func.lambda = crate::async_lambda!(
-                move |_context_manager, _cache, inputs, _output_usage, outputs| {
+                move |_, _, inputs, _, outputs| {
                     func = func_template.clone(),
                     lua_func = lua_func_template.clone(),
                     lua = Arc::clone(&lua)
@@ -254,7 +255,7 @@ impl LuaInvoker {
                     let func_name = func.name.clone();
                     let outputs_len = outputs_len as u32;
 
-                    move |_lua: &mlua::Lua,
+                    move |_: &mlua::Lua,
                           mut inputs: mlua::Variadic<mlua::Value>|
                           -> Result<mlua::Variadic<mlua::Value>, mlua::Error> {
                         let mut connection = FuncConnections {

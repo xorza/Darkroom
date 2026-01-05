@@ -1057,7 +1057,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
         let mut execution_graph = ExecutionGraph::default();
 
@@ -1222,7 +1222,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || unreachable!()),
             get_b: Arc::new(move || unreachable!()),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();
@@ -1270,7 +1270,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();
@@ -1306,7 +1306,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();
@@ -1342,7 +1342,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();
@@ -1379,7 +1379,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();
@@ -1400,7 +1400,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
-            print: Arc::new(move |_result| {}),
+            print: Arc::new(move |_| {}),
         });
 
         let mut graph = test_graph();

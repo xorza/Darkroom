@@ -126,10 +126,9 @@ impl Default for BasicInvoker {
                     let mut guard = output_stream
                         .try_lock()
                         .expect("Output stream mutex is already locked");
-                    let _ = guard.as_mut().is_some_and(|s| {
-                        s.write(value);
-                        true
-                    });
+                    if let Some(stream) = guard.as_mut() {
+                        stream.write(value);
+                    }
                     info!("{:?}", value);
                     Ok(())
                 }

@@ -10,7 +10,7 @@ use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use common::{deserialize, serialize, FileFormat};
+use common::{FileFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -392,7 +392,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_ctx, cache, inputs, _output_usage, outputs| {
+            lambda: async_lambda!(move |_, cache, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -419,7 +419,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_ctx, _cache, _inputs, _output_usage, outputs| { get_a = Arc::clone(&get_a) } => {
+                move |_, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a() as f64).into();
                     Ok(())
@@ -440,7 +440,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_ctx, _cache, _inputs, _output_usage, outputs| { get_b = Arc::clone(&get_b) } => {
+                move |_, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
@@ -475,7 +475,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_ctx_manager, cache, inputs, _output_usage, outputs| {
+            lambda: async_lambda!(move |_, cache, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_int();
@@ -503,7 +503,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_ctx_manager, _cache, inputs, _output_usage, _outputs| { print = Arc::clone(&print) } => {
+                move |_, _, inputs, _, _| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].value.as_int());
@@ -520,7 +520,7 @@ mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::{InputState, OutputUsage};
-    use crate::function::{test_func_lib, InvokeCache, InvokeInput, TestFuncHooks};
+    use crate::function::{InvokeCache, InvokeInput, TestFuncHooks, test_func_lib};
     use common::FileFormat;
 
     #[test]

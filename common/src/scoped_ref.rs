@@ -28,17 +28,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::ScopeRef;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn drop_runs_once() {
         let counter = Arc::new(AtomicUsize::new(0));
         {
             let counter = Arc::clone(&counter);
-            let _guard = ScopeRef::new(move || {
+            let guard = ScopeRef::new(move || {
                 counter.fetch_add(1, Ordering::SeqCst);
             });
+            let _ = &guard;
         }
 
         assert_eq!(
@@ -54,9 +55,10 @@ mod tests {
 
         let value = {
             let counter = Arc::clone(&counter);
-            let _guard = ScopeRef::new(move || {
+            let guard = ScopeRef::new(move || {
                 counter.fetch_add(1, Ordering::SeqCst);
             });
+            let _ = &guard;
             42
         };
 

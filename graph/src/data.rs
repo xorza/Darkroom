@@ -243,10 +243,7 @@ impl Clone for DynamicValue {
                 *self = DynamicValue::String(value.clone());
             }
             // DynamicValue::Array(value) => { *self = DynamicValue::Array(value.clone()); }
-            DynamicValue::Custom {
-                data_type,
-                data: _data,
-            } => {
+            DynamicValue::Custom { data_type, data: _ } => {
                 *self = DynamicValue::Custom {
                     data_type: data_type.clone(),
                     // data: *data.clone(),

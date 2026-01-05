@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
-use common::{deserialize, is_false, serialize, FileFormat, SerdeFormatResult};
+use common::{FileFormat, SerdeFormatResult, deserialize, is_false, serialize};
 use common::{id_type, is_debug};
 
 id_type!(NodeId);
@@ -211,7 +211,7 @@ impl Node {
             })
             .collect();
 
-        let events: Vec<Event> = func.events.iter().map(|_event| Event::default()).collect();
+        let events: Vec<Event> = func.events.iter().map(|_| Event::default()).collect();
 
         Node {
             id: NodeId::unique(),
