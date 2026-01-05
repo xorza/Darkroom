@@ -97,7 +97,7 @@ impl NodeUi {
             let layout = graph_layout.node_layout(&view_node_id);
             let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
 
-            let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
+            let close_id = ctx.ui.make_persistent_id(("node_remove", node.id));
             let remove_response =
                 ctx.ui
                     .interact(layout.remove_btn_rect, close_id, egui::Sense::click());
@@ -157,7 +157,7 @@ impl NodeUi {
             let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
+            let close_id = ctx.ui.make_persistent_id(("node_remove", node.id));
             let remove_response =
                 ctx.ui
                     .interact(layout.remove_btn_rect, close_id, egui::Sense::click());
