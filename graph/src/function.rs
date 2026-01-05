@@ -167,16 +167,16 @@ pub struct FuncLib {
 
 impl Func {
     pub fn terminal(&self) -> bool {
-        self.validate().unwrap();
+        self.validate();
+
         self.outputs.is_empty()
     }
 
-    fn validate(&self) -> anyhow::Result<()> {
+    fn validate(&self) {
         assert!(
             !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
             "Function with no outputs should be impure"
         );
-        Ok(())
     }
 }
 
@@ -205,7 +205,7 @@ impl FuncLib {
         self.funcs.iter_mut().find(|func| func.name == name)
     }
     pub fn add(&mut self, func: Func) {
-        func.validate().unwrap();
+        func.validate();
 
         self.funcs.add(func);
     }
