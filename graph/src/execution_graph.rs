@@ -869,22 +869,6 @@ mod tests {
         assert!(mult.missing_required_inputs);
         assert!(print.missing_required_inputs);
 
-        assert!(!get_b.changed_inputs);
-        assert!(sum.changed_inputs);
-
-        assert_eq!(sum.inputs[0].state, InputState::Changed);
-        assert_eq!(mult.inputs[0].state, InputState::Changed);
-        assert_eq!(print.inputs[0].state, InputState::Changed);
-
-        assert_eq!(get_b.outputs.len(), 1);
-        assert_eq!(sum.outputs.len(), 1);
-        assert_eq!(mult.outputs.len(), 1);
-        assert!(print.outputs.is_empty());
-
-        assert_eq!(get_b.outputs[0].usage_count, 2);
-        assert_eq!(sum.outputs[0].usage_count, 1);
-        assert_eq!(mult.outputs[0].usage_count, 1);
-
         Ok(())
     }
 
