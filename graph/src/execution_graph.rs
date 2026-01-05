@@ -1036,7 +1036,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn node_skips_consequent_invokations() -> anyhow::Result<()> {
-        let mut graph = test_graph();
+        let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
@@ -1044,13 +1044,10 @@ mod tests {
         });
         let mut execution_graph = ExecutionGraph::default();
 
-        let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::Const(5.into());
-
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 4);
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
 
         execution_graph.execute().await?;
         assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
