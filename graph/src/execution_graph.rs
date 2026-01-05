@@ -1433,13 +1433,17 @@ mod tests {
         );
 
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
-
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = (get_b_id, 0).into();
 
         // now get_b is used again and should use values cached from first run
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
 
         Ok(())
     }
