@@ -382,7 +382,7 @@ impl ExecutionGraph {
 
     // Walk backward from terminal nodes to collect process order and detect cycles.
     fn backward1(&mut self) -> ExecutionResult<()> {
-        let mut stack: Vec<Visit> = take(&mut self.stack);
+        let stack = &mut self.stack;
         stack.clear();
 
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
@@ -438,8 +438,6 @@ impl ExecutionGraph {
                 };
             }
         }
-
-        self.stack = take(&mut stack);
 
         Ok(())
     }
@@ -603,8 +601,8 @@ impl ExecutionGraph {
         self.e_node_invoke_order
             .reserve(self.e_node_process_order.len());
 
-        let mut stack: Vec<Visit> = take(&mut self.stack);
-        assert!(stack.is_empty());
+        let stack = &mut self.stack;
+        stack.clear();
 
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
             if e_node.terminal {
@@ -666,8 +664,6 @@ impl ExecutionGraph {
                 });
             }
         }
-
-        self.stack = take(&mut stack);
     }
 
     fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
