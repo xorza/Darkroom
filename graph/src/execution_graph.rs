@@ -785,8 +785,7 @@ impl ExecutionGraph {
         }
 
         let mut seen = vec![false; self.e_nodes.len()];
-        for idx in 0..self.e_node_invoke_order.len() {
-            let e_node_idx = self.e_node_invoke_order[idx];
+        for &e_node_idx in self.e_node_invoke_order.iter() {
             assert!(e_node_idx < self.e_nodes.len());
             assert!(!seen[e_node_idx]);
             seen[e_node_idx] = true;
