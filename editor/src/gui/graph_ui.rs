@@ -155,8 +155,8 @@ impl GraphUi {
             Some(PrimaryState::Pressed | PrimaryState::Down)
         );
 
-        match (self.state, primary_state) {
-            (InteractionState::Idle, _) => {
+        match self.state {
+            InteractionState::Idle => {
                 if primary_pressed {
                     if let PortDragInfo::DragStart(port_info) = drag_port_info {
                         self.connection_drag = Some(ConnectionDrag::new(port_info));
@@ -169,60 +169,61 @@ impl GraphUi {
                     }
                 }
             }
-            (InteractionState::BreakingConnections, _) => {
+            InteractionState::BreakingConnections => {
                 if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                     return;
                 }
 
                 for connection in self.connection_renderer.highlighted.iter() {
-                    if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id)
-                    {
-                        node.inputs[connection.input_idx].binding = Binding::None;
-                        ui_interaction.actions.push((
-                            connection.input_node_id,
-                            GraphUiAction::InputChanged {
-                                input_idx: connection.input_idx,
-                            },
-                        ));
-                    }
+                    let node = view_graph
+                        .graph
+                        .nodes
+                        .by_key_mut(&connection.input_node_id)
+                        .unwrap();
+
+                    node.inputs[connection.input_idx].binding = Binding::None;
+                    ui_interaction.actions.push((
+                        connection.input_node_id,
+                        GraphUiAction::InputChanged {
+                            input_idx: connection.input_idx,
+                        },
+                    ));
                 }
                 self.connection_breaker.reset();
                 self.state = InteractionState::Idle;
             }
-            (InteractionState::DraggingNewConnection, _) => match drag_port_info {
-                PortDragInfo::Hover(port_info) => {
-                    let connection_drag = self.connection_drag.as_mut().unwrap();
-                    if connection_drag.start_port.port.kind != port_info.port.kind {
-                        connection_drag.end_port = Some(port_info);
-                        connection_drag.current_pos = port_info.center;
-                    }
-                }
-                PortDragInfo::DragStop => {
-                    let connection_drag = self.connection_drag.as_mut().unwrap();
-                    if let Some(end_port) = &connection_drag.end_port
-                        && end_port.center.distance(connection_drag.current_pos)
-                            < ctx.style.port_activation_radius
-                    {
-                        let (input_node_id, input_idx) = apply_connection(
-                            view_graph,
-                            connection_drag.start_port.port,
-                            end_port.port,
-                        );
-                        ui_interaction
-                            .actions
-                            .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
-                    }
-                    self.connection_drag = None;
-                    self.state = InteractionState::Idle;
-                }
-                PortDragInfo::DragStart(_) | PortDragInfo::None => {}
-            },
-        }
+            InteractionState::DraggingNewConnection => {
+                let connection_drag = self.connection_drag.as_mut().unwrap();
+                connection_drag.current_pos = pointer_pos;
 
-        if self.state == InteractionState::DraggingNewConnection {
-            let drag = self.connection_drag.as_mut().unwrap();
-            drag.current_pos = pointer_pos;
+                match drag_port_info {
+                    PortDragInfo::Hover(port_info) => {
+                        if connection_drag.start_port.port.kind != port_info.port.kind {
+                            connection_drag.end_port = Some(port_info);
+                            connection_drag.current_pos = port_info.center;
+                        }
+                    }
+                    PortDragInfo::DragStop => {
+                        if let Some(end_port) = &connection_drag.end_port
+                            && end_port.center.distance(connection_drag.current_pos)
+                                < ctx.style.port_activation_radius
+                        {
+                            let (input_node_id, input_idx) = apply_connection(
+                                view_graph,
+                                connection_drag.start_port.port,
+                                end_port.port,
+                            );
+                            ui_interaction
+                                .actions
+                                .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                        }
+                        self.connection_drag = None;
+                        self.state = InteractionState::Idle;
+                    }
+                    PortDragInfo::DragStart(_) | PortDragInfo::None => {}
+                }
+            }
         }
     }
 
