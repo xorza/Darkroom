@@ -408,7 +408,7 @@ impl ExecutionGraph {
                 }
             };
 
-            let e_node = &self.e_nodes[visit.e_node_idx];
+            let e_node = &mut self.e_nodes[visit.e_node_idx];
             match e_node.process_state {
                 ProcessState::None => unreachable!("should be Forward"),
                 ProcessState::Processing => {
@@ -418,7 +418,6 @@ impl ExecutionGraph {
                 ProcessState::Forward => {}
             }
 
-            let e_node = &mut self.e_nodes[visit.e_node_idx];
             e_node.process_state = ProcessState::Processing;
             stack.push(Visit {
                 e_node_idx: visit.e_node_idx,
