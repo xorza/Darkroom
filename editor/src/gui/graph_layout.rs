@@ -22,16 +22,14 @@ pub struct PortInfo {
 #[derive(Debug)]
 pub struct GraphLayout {
     pub origin: Pos2,
-    pub node_layout: node_ui::NodeLayout,
-    pub node_rects: HashMap<NodeId, Rect>,
+    pub node_layouts: HashMap<NodeId, node_ui::NodeLayout>,
 }
 
 impl Default for GraphLayout {
     fn default() -> Self {
         Self {
             origin: Pos2::ZERO,
-            node_layout: node_ui::NodeLayout::default(),
-            node_rects: HashMap::new(),
+            node_layouts: HashMap::new(),
         }
     }
 }
@@ -40,25 +38,21 @@ impl GraphLayout {
     pub fn update(&mut self, ctx: &GraphContext) {
         let rect = ctx.ui.available_rect_before_wrap();
         self.origin = rect.min + ctx.view_graph.pan;
-        self.node_layout = node_ui::NodeLayout::from_scale(ctx.view_graph.scale);
-
-        self.node_rects.clear();
-
-        for view_node in ctx.view_graph.view_nodes.iter() {
-            let layout =
-                node_ui::compute_node_layout(ctx, &view_node.id, &self.node_layout, self.origin);
-            self.node_rects.insert(view_node.id, layout.rect);
-        }
+        let base_layout = node_ui::NodeLayout::from_scale(ctx.view_graph.scale);
+        node_ui::compute_node_layouts(ctx, &base_layout, self.origin, &mut self.node_layouts);
     }
 
     pub fn node_rect(&self, node_id: &NodeId) -> Rect {
-        *self
-            .node_rects
-            .get(node_id)
-            .unwrap_or_else(|| panic!("node rect missing for {:?}", node_id))
+        self.node_layout(node_id).rect
     }
 
-    pub fn update_node_rect_position(&mut self, view_node_id: &NodeId, new_rect: Rect) {
-        self.node_rects.insert(*view_node_id, new_rect);
+    pub fn node_layout(&self, node_id: &NodeId) -> &node_ui::NodeLayout {
+        self.node_layouts
+            .get(node_id)
+            .unwrap_or_else(|| panic!("node layout missing for {:?}", node_id))
+    }
+
+    pub fn update_node_layout(&mut self, view_node_id: &NodeId, new_layout: node_ui::NodeLayout) {
+        self.node_layouts.insert(*view_node_id, new_layout);
     }
 }

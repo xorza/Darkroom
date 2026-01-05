@@ -6,6 +6,7 @@ use egui::{PointerButton, Pos2, Rect, Sense};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncBehavior, NodeBehavior};
+use hashbrown::HashMap;
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
 
@@ -46,9 +47,9 @@ impl Default for NodeLayout {
             row_height: 18.0,
             padding: 8.0,
             corner_radius: 6.0,
-            rect: Rect::NOTHING,
-            close_rect: Rect::NOTHING,
-            cache_button_rect: Rect::NOTHING,
+            rect: Rect::ZERO,
+            close_rect: Rect::ZERO,
+            cache_button_rect: Rect::ZERO,
             dot_radius: 0.0,
             dot_first_center: None,
             dot_step: 0.0,
@@ -79,15 +80,9 @@ impl NodeLayout {
 
     pub(crate) fn with_pos(mut self, offset: Pos2) -> Self {
         let delta = offset.to_vec2();
-        if self.rect != Rect::NOTHING {
-            self.rect = self.rect.translate(delta);
-        }
-        if self.close_rect != Rect::NOTHING {
-            self.close_rect = self.close_rect.translate(delta);
-        }
-        if self.cache_button_rect != Rect::NOTHING {
-            self.cache_button_rect = self.cache_button_rect.translate(delta);
-        }
+        self.rect = self.rect.translate(delta);
+        self.close_rect = self.close_rect.translate(delta);
+        self.cache_button_rect = self.cache_button_rect.translate(delta);
         if let Some(center) = self.dot_first_center.as_mut() {
             *center += delta;
         }
@@ -144,13 +139,10 @@ impl NodeUi {
                 ctx.view_graph.view_nodes[view_node_idx].pos +=
                     body_response.drag_delta() / ctx.view_graph.scale;
 
-                let new_layout = compute_node_layout(
-                    ctx,
-                    &view_node_id,
-                    &graph_layout.node_layout,
-                    graph_layout.origin,
-                );
-                graph_layout.update_node_rect_position(&view_node_id, new_layout.rect);
+                let base_layout = NodeLayout::from_scale(ctx.view_graph.scale);
+                let new_layout =
+                    compute_node_layout(ctx, &view_node_id, &base_layout, graph_layout.origin);
+                graph_layout.update_node_layout(&view_node_id, new_layout);
             }
             if dragged || body_response.clicked() {
                 ui_interaction
@@ -171,12 +163,7 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = compute_node_layout(
-                ctx,
-                &view_node_id,
-                &graph_layout.node_layout,
-                graph_layout.origin,
-            );
+            let layout = graph_layout.node_layout(&view_node_id);
             let node_rect = layout.rect;
 
             let node = ctx.view_graph.graph.by_id_mut(&view_node_id).unwrap();
@@ -307,16 +294,16 @@ impl NodeUi {
                 }
             }
 
-            remove_btn(ctx, &layout, remove_response);
+            remove_btn(ctx, layout, remove_response);
 
             let node_drag_port_result =
-                render_node_ports(ctx, &layout, view_node_idx, input_count, output_count);
+                render_node_ports(ctx, layout, view_node_idx, input_count, output_count);
             if node_drag_port_result.prio() > drag_port_info.prio() {
                 drag_port_info = node_drag_port_result;
             }
 
-            render_node_const_bindings(ctx, &layout, view_node_idx);
-            render_node_labels(ctx, &layout, view_node_idx);
+            render_node_const_bindings(ctx, layout, view_node_idx);
+            render_node_labels(ctx, layout, view_node_idx);
         }
 
         drag_port_info
@@ -590,6 +577,20 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx
 pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
     (dx * 0.5).max(40.0 * scale)
+}
+
+pub(crate) fn compute_node_layouts(
+    ctx: &GraphContext,
+    node_layout: &NodeLayout,
+    origin: Pos2,
+    node_layouts: &mut HashMap<NodeId, NodeLayout>,
+) {
+    node_layouts.clear();
+
+    for view_node in ctx.view_graph.view_nodes.iter() {
+        let layout = compute_node_layout(ctx, &view_node.id, node_layout, origin);
+        node_layouts.insert(view_node.id, layout);
+    }
 }
 
 pub(crate) fn compute_node_layout(

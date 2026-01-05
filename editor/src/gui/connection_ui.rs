@@ -39,12 +39,11 @@ pub(crate) struct ConnectionUi {
 impl ConnectionUi {
     pub(crate) fn rebuild(
         &mut self,
-        ctx: &GraphContext,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.collect_curves(ctx, graph_layout, view_graph);
+        self.collect_curves(graph_layout, view_graph);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
@@ -59,7 +58,7 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(ctx, graph_layout, view_graph, breaker);
+        self.rebuild(graph_layout, view_graph, breaker);
 
         for curve in &self.curves {
             let stroke = if self.highlighted.contains(&curve.key) {
@@ -83,12 +82,7 @@ impl ConnectionUi {
         }
     }
 
-    fn collect_curves(
-        &mut self,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-    ) {
+    fn collect_curves(&mut self, graph_layout: &GraphLayout, view_graph: &model::ViewGraph) {
         self.curves.clear();
 
         for node_view in &view_graph.view_nodes {
@@ -98,18 +92,8 @@ impl ConnectionUi {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;
                 };
-                let start_layout = node_ui::compute_node_layout(
-                    ctx,
-                    &binding.target_id,
-                    &graph_layout.node_layout,
-                    graph_layout.origin,
-                );
-                let end_layout = node_ui::compute_node_layout(
-                    ctx,
-                    &node.id,
-                    &graph_layout.node_layout,
-                    graph_layout.origin,
-                );
+                let start_layout = graph_layout.node_layout(&binding.target_id);
+                let end_layout = graph_layout.node_layout(&node.id);
                 let start = start_layout.output_center(binding.port_idx);
                 let end = end_layout.input_center(input_index);
                 let control_offset = node_ui::bezier_control_offset(start, end, view_graph.scale);
