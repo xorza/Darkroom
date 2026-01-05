@@ -522,8 +522,7 @@ impl ExecutionGraph {
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                 let input_state = match &e_input.binding {
-                    ExecutionBinding::None => InputState::None,
-                    ExecutionBinding::Const(_) => e_input.state.unwrap(),
+                    ExecutionBinding::None | ExecutionBinding::Const(_) => e_input.state.unwrap(),
                     ExecutionBinding::Bind(port_address) => {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
@@ -765,9 +764,7 @@ impl ExecutionGraph {
                             assert_eq!(e_input.state.unwrap(), InputState::Unchanged);
                         }
                     }
-                    ExecutionBinding::None => {
-                        assert_eq!(e_input.state.unwrap(), InputState::None)
-                    }
+                    ExecutionBinding::None => {}
                     ExecutionBinding::Const(_) => {
                         assert_ne!(e_input.state.unwrap(), InputState::None)
                     }
@@ -1314,14 +1311,14 @@ mod tests {
         );
 
         let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[0].binding = Binding::None;
+        sum.inputs[1].binding = Binding::None;
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
         assert_eq!(
             execution_graph.e_node_invoke_order.iter().len(),
-            4,
+            3,
             "sum binging change so sum should be recomputed"
         );
 
