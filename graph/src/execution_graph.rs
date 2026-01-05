@@ -824,6 +824,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
+        );
+
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert_eq!(execution_graph.e_node_process_order.len(), 5);
         assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
@@ -880,6 +885,8 @@ mod tests {
         assert!(mult.missing_required_inputs);
         assert!(print.missing_required_inputs);
 
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 0);
+
         Ok(())
     }
 
@@ -905,6 +912,11 @@ mod tests {
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
 
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["get_b", "mult", "print"]
+        );
+
         Ok(())
     }
 
@@ -922,6 +934,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
+
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(mult.changed_inputs);
         assert_eq!(mult.inputs[0].state, InputState::Changed);
@@ -929,6 +946,11 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(!execution_graph.by_name("mult").unwrap().changed_inputs);
@@ -942,7 +964,10 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 2);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
 
         assert_eq!(mult.inputs[0].state, InputState::Changed);
         assert_eq!(mult.inputs[1].state, InputState::Unchanged);
@@ -1016,13 +1041,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(
-            execution_graph
-                .e_node_invoke_order
-                .iter()
-                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
-            "pure node invoked if no cache values"
-        );
+        assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
@@ -1030,13 +1049,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(
-            execution_graph
-                .e_node_invoke_order
-                .iter()
-                .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
-            "pure node not invoked if has cached values"
-        );
+        assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
         Ok(())
     }
@@ -1054,10 +1067,13 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
+        );
 
         execution_graph.execute().await?;
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         Ok(())
     }
