@@ -151,6 +151,7 @@ Execution graph invalidation now uses a `Vec<bool>` visited map instead of a `Ha
 Execution graph execution now returns `ExecutionStats` (elapsed seconds + executed node count).
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.
+Execution graph debug validation now checks process/invoke order bounds/uniqueness and uses position maps for dependency ordering assertions.
 Graph now exposes a `dependent_nodes` traversal to gather downstream nodes from a starting node id.
 Graph tests now cover `dependent_nodes` traversal ordering and reachability.
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.

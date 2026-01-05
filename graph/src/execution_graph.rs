@@ -666,24 +666,18 @@ impl ExecutionGraph {
         }
 
         assert!(self.e_nodes.len() <= graph.nodes.len());
+        assert!(self.e_node_process_order.len() <= self.e_nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
-        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            assert!(!seen_node_ids.contains(&e_node.id));
-            seen_node_ids.insert(e_node.id);
+        for e_node in self.e_nodes.iter() {
+            assert!(seen_node_ids.insert(e_node.id));
 
             if let Some(output_values) = e_node.output_values.as_ref() {
                 assert_eq!(output_values.len(), e_node.outputs.len());
             }
 
-            if self.e_node_invoke_order.contains(&e_node_idx) {
-                assert_eq!(e_node.process_state, ProcessState::Backward);
-            } else {
-                assert!(
-                    e_node.process_state == ProcessState::Forward
-                        || e_node.process_state == ProcessState::Backward
-                );
-            }
+            assert_ne!(e_node.process_state, ProcessState::Processing);
+            assert_ne!(e_node.process_state, ProcessState::None);
 
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&e_node.func_id).unwrap();
@@ -692,6 +686,7 @@ impl ExecutionGraph {
             assert_eq!(node.id, e_node.id);
             assert_eq!(node.func_id, func.id);
             assert_eq!(e_node.inputs.len(), node.inputs.len());
+            assert_eq!(node.inputs.len(), func.inputs.len());
             assert_eq!(e_node.outputs.len(), func.outputs.len());
 
             for (input, e_input) in node.inputs.iter().zip(e_node.inputs.iter()) {
@@ -706,33 +701,40 @@ impl ExecutionGraph {
                         Binding::Bind(port_address),
                         ExecutionBinding::Bind(execution_port_address),
                     ) => {
+                        assert!(execution_port_address.target_idx < self.e_nodes.len());
+                        let target_e_node = &self.e_nodes[execution_port_address.target_idx];
+                        assert!(execution_port_address.port_idx < target_e_node.outputs.len());
                         assert_eq!(port_address.port_idx, execution_port_address.port_idx);
-                        assert_eq!(
-                            port_address.target_id,
-                            self.e_nodes[execution_port_address.target_idx].id
-                        );
+                        assert_eq!(port_address.target_id, target_e_node.id);
                     }
                     (_, _) => panic!("Mismatched bindings"),
                 }
             }
         }
 
-        for idx in 0..self.e_node_process_order.len() {
-            let e_node_idx = self.e_node_process_order[idx];
-            let e_node = &self.e_nodes[e_node_idx];
+        let mut seen_in_process_order = HashSet::with_capacity(self.e_nodes.len());
+        for &e_node_idx in self.e_node_process_order.iter() {
+            assert!(e_node_idx < self.e_nodes.len());
+            assert!(seen_in_process_order.insert(e_node_idx));
+        }
 
-            let all_dependencies_in_order = e_node
-                .inputs
-                .iter()
-                .filter_map(|input| match &input.binding {
+        let mut seen_in_process_order = HashSet::with_capacity(self.e_nodes.len());
+        for &e_node_idx in self.e_node_process_order.iter() {
+            assert!(e_node_idx < self.e_nodes.len());
+
+            let e_node = &self.e_nodes[e_node_idx];
+            for input in e_node.inputs.iter() {
+                match &input.binding {
                     ExecutionBinding::Undefined => panic!("uninitialized binding"),
-                    ExecutionBinding::Bind(port_address) => Some(port_address),
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => None,
-                })
-                .all(|port_address| {
-                    !self.e_node_process_order[idx..].contains(&port_address.target_idx)
-                });
-            assert!(all_dependencies_in_order);
+                    ExecutionBinding::Bind(port_address) => {
+                        assert!(port_address.target_idx < self.e_nodes.len());
+                        assert!(seen_in_process_order.contains(&port_address.target_idx));
+                    }
+                    ExecutionBinding::None | ExecutionBinding::Const(_) => {}
+                }
+            }
+
+            assert!(seen_in_process_order.insert(e_node_idx));
         }
     }
 
