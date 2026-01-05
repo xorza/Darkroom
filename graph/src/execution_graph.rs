@@ -802,7 +802,7 @@ mod tests {
     use tokio::sync::Mutex;
 
     #[test]
-    fn simple_run() -> anyhow::Result<()> {
+    fn basic_run() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks::default());
 
@@ -817,6 +817,10 @@ mod tests {
             .e_nodes
             .iter()
             .all(|e_node| !e_node.missing_required_inputs));
+        assert!(execution_graph
+            .e_nodes
+            .iter()
+            .all(|e_node| e_node.wants_execute));
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -824,16 +828,16 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(get_a.outputs.len(), 1);
-        assert_eq!(get_b.outputs.len(), 1);
-        assert_eq!(sum.outputs.len(), 1);
-        assert_eq!(mult.outputs.len(), 1);
-        assert!(print.outputs.is_empty());
-
         assert_eq!(get_a.outputs[0].usage_count, 1);
         assert_eq!(get_b.outputs[0].usage_count, 2);
         assert_eq!(sum.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
+
+        assert!(!get_a.changed_inputs);
+        assert!(!get_b.changed_inputs);
+        assert!(sum.changed_inputs);
+        assert!(mult.changed_inputs);
+        assert!(print.changed_inputs);
 
         Ok(())
     }
