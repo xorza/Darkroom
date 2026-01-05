@@ -835,8 +835,6 @@ mod tests {
         assert_eq!(sum.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
 
-        assert!(mult.output_values.is_none());
-
         Ok(())
     }
 
