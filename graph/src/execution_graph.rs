@@ -543,10 +543,11 @@ impl ExecutionGraph {
 
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
+                        let output_e_node_wants_execute = output_e_node.wants_execute;
 
-                        self.e_nodes[e_node_idx].inputs[input_idx].state = output_e_node
-                            .wants_execute
-                            .then_else(InputState::Changed, InputState::Unchanged);
+                        let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                        e_input.state = output_e_node_wants_execute
+                            .then_else(InputState::Changed, e_input.state);
                     }
                 };
 
@@ -767,8 +768,6 @@ impl ExecutionGraph {
 
                         if output_e_node.wants_execute {
                             assert_eq!(e_input.state, InputState::Changed);
-                        } else {
-                            assert_eq!(e_input.state, InputState::Unchanged);
                         }
                     }
                     ExecutionBinding::None => {}
@@ -896,8 +895,8 @@ mod tests {
         assert!(sum.changed_inputs);
 
         assert_eq!(sum.inputs[0].state, InputState::Changed);
-        assert_eq!(mult.inputs[0].state, InputState::Unchanged);
-        assert_eq!(print.inputs[0].state, InputState::Unchanged);
+        assert_eq!(mult.inputs[0].state, InputState::Changed);
+        assert_eq!(print.inputs[0].state, InputState::Changed);
 
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(sum.outputs.len(), 1);
@@ -944,7 +943,7 @@ mod tests {
 
         assert_eq!(sum.inputs[0].state, InputState::Changed);
         assert_eq!(sum.inputs[1].state, InputState::Changed);
-        assert_eq!(mult.inputs[0].state, InputState::Unchanged);
+        assert_eq!(mult.inputs[0].state, InputState::Changed);
         assert_eq!(mult.inputs[1].state, InputState::Changed);
         assert_eq!(print.inputs[0].state, InputState::Changed);
 
@@ -1386,7 +1385,7 @@ mod tests {
         execution_graph.execute().await?;
 
         let sum = graph.by_name_mut("sum").unwrap();
-        sum.inputs[1].binding = (get_b_id, 0).into();
+        sum.inputs[0].binding = (get_b_id, 0).into();
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
