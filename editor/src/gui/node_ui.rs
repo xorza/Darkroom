@@ -526,11 +526,6 @@ fn render_node_labels(
     }
 }
 
-pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f32) -> f32 {
-    let dx = (end.x - start.x).abs();
-    (dx * 0.5).max(40.0 * scale)
-}
-
 pub(crate) fn compute_node_layout(
     ctx: &GraphContext,
     view_graph: &ViewGraph,

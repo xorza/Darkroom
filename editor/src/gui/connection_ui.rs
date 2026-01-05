@@ -6,8 +6,8 @@ use graph::prelude::Binding;
 use std::collections::HashSet;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::GraphLayout;
-use crate::gui::{graph_ctx::GraphContext, node_ui};
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,7 +96,7 @@ impl ConnectionUi {
                 let end_layout = graph_layout.node_layout(&node.id);
                 let start = start_layout.output_center(binding.port_idx);
                 let end = end_layout.input_center(input_index);
-                let control_offset = node_ui::bezier_control_offset(start, end, view_graph.scale);
+                let control_offset = bezier_control_offset(start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
@@ -143,6 +143,11 @@ impl ConnectionUi {
             }
         }
     }
+}
+
+pub(crate) fn bezier_control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
+    let dx = (end.x - start.x).abs();
+    (dx * 0.5).max(40.0 * scale)
 }
 
 fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
