@@ -193,6 +193,8 @@ Editor run status now appends execution stats (node count + elapsed seconds).
 Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).
 Node headers now show an impure-function status dot for impure funcs.
 Graph UI helpers now pass `ViewGraph` explicitly instead of storing it on `GraphContext`.
+Node layout sizing now computes row widths inline and reuses cached cache-button metrics to avoid extra allocations.
+Node layout translation now happens before struct construction to avoid mutable layout patch-up.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 DynamicValue now owns the type-conversion helper previously in execution_graph.
 Execution graph validation now asserts output value cache length and ensures all bound output nodes exist in the execution node set.
