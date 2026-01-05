@@ -9,6 +9,7 @@ use crate::gui::connection_ui::{ConnectionUi, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::graph_ctx::GraphContext, model};
+use common::BoolExt;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
@@ -83,13 +84,7 @@ impl GraphUi {
         let pointer_pos = ctx
             .ui
             .input(|input| input.pointer.hover_pos())
-            .and_then(|pos| {
-                if ctx.rect.contains(pos) {
-                    Some(pos)
-                } else {
-                    None
-                }
-            });
+            .and_then(|pos| ctx.rect.contains(pos).then_else(Some(pos), None));
 
         if let Some(pointer_pos) = pointer_pos {
             update_zoom_and_pan(&mut ctx, view_graph, graph_bg_id, pointer_pos);
@@ -287,16 +282,12 @@ fn update_zoom_and_pan(
         }
     });
 
-    let zoom_delta = if scroll_delta.y.abs() > f32::EPSILON {
-        (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta
-    } else {
-        pinch_delta
-    };
-    let pan = if scroll_delta.x.abs() > f32::EPSILON {
-        Vec2::new(scroll_delta.x, 0.0)
-    } else {
-        Vec2::ZERO
-    };
+    let zoom_delta = (scroll_delta.y.abs() > f32::EPSILON).then_else(
+        (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta,
+        pinch_delta,
+    );
+    let pan =
+        (scroll_delta.x.abs() > f32::EPSILON).then_else(Vec2::new(scroll_delta.x, 0.0), Vec2::ZERO);
 
     if (zoom_delta - 1.0).abs() > f32::EPSILON {
         let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -396,16 +387,8 @@ fn fit_all_nodes(
 
     let padding = 24.0;
     let available = ctx.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
-    let zoom_x = if bounds_size.x > 0.0 {
-        available.x / bounds_size.x
-    } else {
-        1.0
-    };
-    let zoom_y = if bounds_size.y > 0.0 {
-        available.y / bounds_size.y
-    } else {
-        1.0
-    };
+    let zoom_x = (bounds_size.x > 0.0).then_else(available.x / bounds_size.x, 1.0);
+    let zoom_y = (bounds_size.y > 0.0).then_else(available.y / bounds_size.y, 1.0);
 
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     view_graph.scale = target_zoom;

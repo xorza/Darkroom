@@ -182,11 +182,7 @@ impl NodeUi {
                 layout.rect,
                 corner_radius,
                 ctx.style.node_fill,
-                if is_selected {
-                    ctx.style.selected_stroke
-                } else {
-                    ctx.style.node_stroke
-                },
+                is_selected.then_else(ctx.style.selected_stroke, ctx.style.node_stroke),
                 egui::StrokeKind::Inside,
             );
             ctx.painter.text(
@@ -510,13 +506,8 @@ fn render_node_const_bindings(
 fn static_value_label(value: &StaticValue) -> String {
     match value {
         StaticValue::Null => "null".to_string(),
-        StaticValue::Float(value) => {
-            if value.fract() == 0.0 {
-                format!("{:.0}", value)
-            } else {
-                format!("{:.3}", value)
-            }
-        }
+        StaticValue::Float(value) => (value.fract() == 0.0)
+            .then_else_with(|| format!("{:.0}", value), || format!("{:.3}", value)),
         StaticValue::Int(value) => value.to_string(),
         StaticValue::Bool(value) => value.to_string(),
         StaticValue::String(value) => {

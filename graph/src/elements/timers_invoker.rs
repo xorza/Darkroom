@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
+use common::BoolExt;
 
 #[derive(Debug)]
 pub struct TimersInvoker {
@@ -78,11 +79,10 @@ impl Default for TimersInvoker {
                             frame_no: 2,
                         });
 
-                        let frequency = if inputs[0].value.is_none() {
-                            30.0
-                        } else {
-                            inputs[0].value.as_float()
-                        };
+                        let frequency = inputs[0]
+                            .value
+                            .is_none()
+                            .then_else_with(|| 30.0, || inputs[0].value.as_float());
                         (1.0 / frequency, 1)
                     }
                 };
