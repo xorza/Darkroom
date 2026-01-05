@@ -141,6 +141,24 @@ pub struct ExecutionGraph {
     stack: Vec<Visit>,
 }
 
+impl ExecutionBinding {
+    pub fn as_const(&self) -> Option<&StaticValue> {
+        match self {
+            ExecutionBinding::Const(static_value) => Some(static_value),
+            _ => None,
+        }
+    }
+    pub fn as_bind(&self) -> Option<&ExecutionPortAddress> {
+        match self {
+            ExecutionBinding::Bind(port_address) => Some(port_address),
+            _ => None,
+        }
+    }
+    pub fn is_none(&self) -> bool {
+        matches!(self, ExecutionBinding::None)
+    }
+}
+
 impl ExecutionNode {
     fn invalidate(&mut self) {
         self.output_values = None;
@@ -416,6 +434,7 @@ impl ExecutionGraph {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
+
         self.forward2();
         self.backward2();
 
@@ -490,17 +509,11 @@ impl ExecutionGraph {
 
             e_node.run_time = start.elapsed().as_secs_f64();
 
-            // after node execution, const and none bindings set unchanged
-            e_node
-                .inputs
-                .iter_mut()
-                .for_each(|input| match &input.binding {
-                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => {
-                        input.state = InputState::Unchanged
-                    }
-                    ExecutionBinding::Bind(_) => {}
-                });
+            // after node execution assume unchanged
+            e_node.inputs.iter_mut().for_each(|input| {
+                assert_ne!(input.binding, ExecutionBinding::Undefined);
+                input.state = InputState::Unchanged;
+            });
 
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
@@ -522,45 +535,43 @@ impl ExecutionGraph {
     fn forward2(&mut self) {
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &mut self.e_nodes[e_node_idx];
-            if e_node.process_state == ProcessState::Forward {
-                // node was not updated since last pre_execute, no need to process it twice
-                continue;
-            }
 
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
-            for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
-                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                match &e_input.binding {
-                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
-                    ExecutionBinding::None => missing_required_inputs |= e_input.required,
-                    ExecutionBinding::Const(_) => {}
-                    ExecutionBinding::Bind(port_address) => {
-                        let output_e_node = &self.e_nodes[port_address.target_idx];
+            if e_node.process_state != ProcessState::Forward {
+                // node was not updated since last pre_execute, no need to process it twice
 
-                        assert_eq!(output_e_node.process_state, ProcessState::Forward);
-                        assert!(port_address.port_idx < output_e_node.outputs.len());
+                for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
+                    let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                    match &e_input.binding {
+                        ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
+                        ExecutionBinding::None => missing_required_inputs |= e_input.required,
+                        ExecutionBinding::Const(_) => {}
+                        ExecutionBinding::Bind(port_address) => {
+                            let output_e_node = &self.e_nodes[port_address.target_idx];
 
-                        missing_required_inputs |=
-                            e_input.required && output_e_node.missing_required_inputs;
-                        let output_e_node_wants_execute = output_e_node.wants_execute;
+                            assert_eq!(output_e_node.process_state, ProcessState::Forward);
+                            assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                        e_input.state = output_e_node_wants_execute
-                            .then_else(InputState::Changed, e_input.state);
+                            missing_required_inputs |=
+                                e_input.required && output_e_node.missing_required_inputs;
+                            let output_e_node_wants_execute = output_e_node.wants_execute;
+
+                            let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                            e_input.state = output_e_node_wants_execute
+                                .then_else(InputState::Changed, e_input.state);
+                        }
+                    };
+
+                    let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                    if e_input.state == InputState::Changed {
+                        changed_inputs = true;
                     }
-                };
-
-                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                if e_input.state == InputState::Changed {
-                    changed_inputs = true;
                 }
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            assert_eq!(e_node.process_state, ProcessState::Backward);
-
             e_node.process_state = ProcessState::Forward;
             e_node.changed_inputs = changed_inputs;
             e_node.missing_required_inputs = missing_required_inputs;
@@ -798,24 +809,6 @@ fn validate_execution_inputs(graph: &Graph, func_lib: &FuncLib) {
                 assert!(port_address.port_idx < output_func.outputs.len());
             }
         }
-    }
-}
-
-impl ExecutionBinding {
-    pub fn as_const(&self) -> Option<&StaticValue> {
-        match self {
-            ExecutionBinding::Const(static_value) => Some(static_value),
-            _ => None,
-        }
-    }
-    pub fn as_bind(&self) -> Option<&ExecutionPortAddress> {
-        match self {
-            ExecutionBinding::Bind(port_address) => Some(port_address),
-            _ => None,
-        }
-    }
-    pub fn is_none(&self) -> bool {
-        matches!(self, ExecutionBinding::None)
     }
 }
 
@@ -1103,8 +1096,13 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
+
         execution_graph.execute().await?;
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
+
         execution_graph.execute().await?;
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 1);
 
         Ok(())
     }
