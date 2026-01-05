@@ -532,6 +532,9 @@ impl ExecutionGraph {
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
 
+                        // todo revert
+                        // missing_required_inputs |= output_e_node.missing_required_inputs;
+
                         let output_e_node_wants_execute = output_e_node.wants_execute;
 
                         let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
@@ -697,7 +700,6 @@ impl ExecutionGraph {
         for idx in 0..self.e_node_invoke_order.len() {
             let e_node_idx = self.e_node_invoke_order[idx];
             let e_node = &self.e_nodes[e_node_idx];
-            assert!(!e_node.missing_required_inputs);
 
             let all_dependencies_in_order = e_node
                 .inputs
@@ -898,6 +900,44 @@ mod tests {
         assert_eq!(get_b.outputs[0].usage_count, 2);
         assert_eq!(sum.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
+
+        Ok(())
+    }
+
+    #[test]
+    fn missing_non_required_input() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let mut func_lib = test_func_lib(TestFuncHooks::default());
+
+        // this excludes get_a from graph
+        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
+
+        // this makes mult execute with missing non required input
+        func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.pre_execute();
+
+        assert_eq!(execution_graph.e_nodes.len(), 4);
+        assert!(execution_graph.by_name("get_a").is_none());
+
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        let sum = execution_graph.by_name("sum").unwrap();
+        let mult = execution_graph.by_name("mult").unwrap();
+        let print = execution_graph.by_name("print").unwrap();
+
+        assert!(!get_b.missing_required_inputs);
+        assert!(sum.missing_required_inputs);
+        assert!(!mult.missing_required_inputs);
+        assert!(!print.missing_required_inputs);
+
+        assert!(!get_b.changed_inputs);
+        assert!(sum.changed_inputs);
+
+        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Changed);
+        assert_eq!(print.inputs[0].state.unwrap(), InputState::Changed);
 
         Ok(())
     }
