@@ -10,7 +10,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::{FuncId, FuncLambda};
-use common::{is_debug, BoolExt, FileFormat};
+use common::{BoolExt, FileFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionError {
@@ -645,20 +645,16 @@ impl ExecutionGraph {
 
             let e_node = &self.e_nodes[visit.e_node_idx];
             for e_input in e_node.inputs.iter() {
-                if e_input.state != InputState::Changed {
-                    continue;
-                }
-
-                let Some(port_address) = e_input.binding.as_bind() else {
-                    continue;
+                if e_input.state == InputState::Changed
+                    && let Some(port_address) = e_input.binding.as_bind()
+                {
+                    stack.push(Visit {
+                        e_node_idx: port_address.target_idx,
+                        cause: VisitCause::OutputRequest {
+                            output_idx: port_address.port_idx,
+                        },
+                    });
                 };
-
-                stack.push(Visit {
-                    e_node_idx: port_address.target_idx,
-                    cause: VisitCause::OutputRequest {
-                        output_idx: port_address.port_idx,
-                    },
-                });
             }
         }
     }
@@ -799,8 +795,8 @@ mod tests {
 
     use super::*;
     use crate::data::{DynamicValue, StaticValue};
-    use crate::function::{test_func_lib, TestFuncHooks};
-    use crate::graph::{test_graph, NodeBehavior};
+    use crate::function::{TestFuncHooks, test_func_lib};
+    use crate::graph::{NodeBehavior, test_graph};
     use common::FileFormat;
     use tokio::sync::Mutex;
 
@@ -829,14 +825,18 @@ mod tests {
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert_eq!(execution_graph.e_node_process_order.len(), 5);
         assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
-        assert!(execution_graph
-            .e_nodes
-            .iter()
-            .all(|e_node| !e_node.missing_required_inputs));
-        assert!(execution_graph
-            .e_nodes
-            .iter()
-            .all(|e_node| e_node.wants_execute));
+        assert!(
+            execution_graph
+                .e_nodes
+                .iter()
+                .all(|e_node| !e_node.missing_required_inputs)
+        );
+        assert!(
+            execution_graph
+                .e_nodes
+                .iter()
+                .all(|e_node| e_node.wants_execute)
+        );
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
