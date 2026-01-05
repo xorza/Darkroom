@@ -90,7 +90,7 @@ impl NodeUi {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeSelected));
-                view_graph.select_node(&view_node_id);
+                view_graph.selected_node_id = Some(view_node_id);
             }
 
             let layout = graph_layout.node_layout(&view_node_id);
