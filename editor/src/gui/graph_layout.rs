@@ -38,7 +38,12 @@ impl GraphLayout {
     pub fn update(&mut self, ctx: &GraphContext) {
         let rect = ctx.ui.available_rect_before_wrap();
         self.origin = rect.min + ctx.view_graph.pan;
-        node_ui::compute_node_layouts(ctx, self.origin, &mut self.node_layouts);
+        self.node_layouts.clear();
+
+        for view_node in ctx.view_graph.view_nodes.iter() {
+            let layout = node_ui::compute_node_layout(ctx, &view_node.id, self.origin);
+            self.node_layouts.insert(view_node.id, layout);
+        }
     }
 
     pub fn node_rect(&self, node_id: &NodeId) -> Rect {

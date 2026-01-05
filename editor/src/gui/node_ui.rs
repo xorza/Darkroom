@@ -534,19 +534,6 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
     (dx * 0.5).max(40.0 * scale)
 }
 
-pub(crate) fn compute_node_layouts(
-    ctx: &GraphContext,
-    origin: Pos2,
-    node_layouts: &mut HashMap<NodeId, NodeLayout>,
-) {
-    node_layouts.clear();
-
-    for view_node in ctx.view_graph.view_nodes.iter() {
-        let layout = compute_node_layout(ctx, &view_node.id, origin);
-        node_layouts.insert(view_node.id, layout);
-    }
-}
-
 pub(crate) fn compute_node_layout(
     ctx: &GraphContext,
     view_node_id: &NodeId,
