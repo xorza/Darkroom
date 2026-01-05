@@ -276,8 +276,9 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         validate_execution_inputs(graph, func_lib);
 
-        self.e_node_process_order.reserve(graph.nodes.len());
         self.e_node_process_order.clear();
+        self.e_node_process_order.reserve(graph.nodes.len());
+
         self.stack.reserve(graph.nodes.len());
 
         self.e_nodes
@@ -520,6 +521,12 @@ impl ExecutionGraph {
     // Propagate input state forward through the processing order.
     fn forward2(&mut self) {
         for e_node_idx in self.e_node_process_order.iter().copied() {
+            let e_node = &mut self.e_nodes[e_node_idx];
+            if e_node.process_state == ProcessState::Forward {
+                // node was not updated since last pre_execute, no need to process it twice
+                continue;
+            }
+
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
@@ -1071,6 +1078,33 @@ mod tests {
                 .all(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name != "get_b"),
             "pure node not invoked if has cached values"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn node_skips_consequent_invokations() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::Const(5.into());
+        sum.inputs[1].binding = Binding::None;
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 4);
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
 
         Ok(())
     }
