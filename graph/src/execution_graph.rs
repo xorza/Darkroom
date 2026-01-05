@@ -91,7 +91,9 @@ enum ProcessState {
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionNode {
     pub id: NodeId,
+    inited: bool,
 
+    // used only for debuggind and assertions
     process_state: ProcessState,
 
     pub terminal: bool,
@@ -154,10 +156,27 @@ impl ExecutionNode {
     }
     fn reset(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
+        assert_eq!(node.func_id, func.id);
         assert_eq!(node.inputs.len(), func.inputs.len());
 
-        self.func_id = func.id;
-        self.lambda = func.lambda.clone();
+        if !self.inited {
+            // assume that functions never change in runtime
+            self.inited = true;
+            self.func_id = func.id;
+            self.lambda = func.lambda.clone();
+
+            self.inputs
+                .resize(func.inputs.len(), ExecutionInput::default());
+
+            for (input_idx, func_input) in func.inputs.iter().enumerate() {
+                let e_input = &mut self.inputs[input_idx];
+                e_input.required = func_input.required;
+                if e_input.data_type != func_input.data_type {
+                    e_input.data_type = func_input.data_type.clone();
+                }
+            }
+        }
+
         self.terminal = node.terminal;
         self.process_state = ProcessState::None;
 
@@ -172,17 +191,6 @@ impl ExecutionNode {
         self.outputs.clear();
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::default());
-
-        self.inputs
-            .resize(func.inputs.len(), ExecutionInput::default());
-
-        for (input_idx, func_input) in func.inputs.iter().enumerate() {
-            let e_input = &mut self.inputs[input_idx];
-            e_input.required = func_input.required;
-            if e_input.data_type != func_input.data_type {
-                e_input.data_type = func_input.data_type.clone();
-            }
-        }
 
         assert_eq!(self.inputs.len(), node.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
