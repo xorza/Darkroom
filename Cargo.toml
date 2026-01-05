@@ -22,28 +22,28 @@ imaginarium = { git = "https://github.com/xorza/imaginarium.git" }
 
 serde = { version = "*", features = ["derive"] }
 serde_yml = { version = "*" }
-serde_json =  { version = "*" }
+serde_json = { version = "*" }
 uuid = { version = "*", features = ["v4", "serde"] }
-anyhow =  { version = "*" }
+anyhow = { version = "*" }
 thiserror = { version = "*" }
 bytemuck = { version = "*", features = ["derive"] }
-pollster =  { version = "*" }
-num-traits =  { version = "*" }
+pollster = { version = "*" }
+num-traits = { version = "*" }
 glam = { version = "*", features = ["serde"] }
-strum =  { version = "*" }
-strum_macros =  { version = "*" }
-rand =  { version = "*" }
+strum = { version = "*" }
+strum_macros = { version = "*" }
+rand = { version = "*" }
 tokio = { version = "*", features = ["full"] }
 tracing = { version = "*" }
 tracing-subscriber = { version = "*", features = ["env-filter", "fmt", "time"] }
-tracing-appender =  { version = "*" }
+tracing-appender = { version = "*" }
 tracing-rolling-file = { version = "*", features = ["non-blocking"] }
 dotenv = { version = "*" }
 rayon = { version = "*" }
 toml = { version = "*" }
 hashbrown = { version = "*", features = ["serde"] }
 bytes = { version = "*" }
-lazy_static =  { version = "*" }
+lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 criterion = { version = "*" }
 arc-swap = { version = "*" }

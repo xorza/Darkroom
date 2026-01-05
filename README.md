@@ -1,6 +1,7 @@
 # Scenarium
 
-Scenarium is a collection of tools and libraries for building node based data processing pipelines with async-capable function execution. Written in Rust.
+Scenarium is a collection of tools and libraries for building node based data processing pipelines with async-capable
+function execution. Written in Rust.
 
 ## Repository Layout
 
@@ -8,7 +9,8 @@ Scenarium is a collection of tools and libraries for building node based data pr
 - **graph** – the main graph library
 - **editor** – visual editor for building and executing graphs
 
-Implementation details, recent editor behavior changes, execution status updates, and UI action tracking are documented in `NOTES-AI.md`.
+Implementation details, recent editor behavior changes, execution status updates, and UI action tracking are documented
+in `NOTES-AI.md`.
 
 ## License
 
