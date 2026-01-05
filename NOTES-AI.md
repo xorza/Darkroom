@@ -157,6 +157,7 @@ Graph tests now cover `dependent_nodes` traversal ordering and reachability.
 Compute now sorts invocations by `ExecutionNode::invocation_order`, which resets to `u64::MAX` each pass and is set during scheduling.
 Compute input value conversion now uses a single loop instead of iterator chains.
 Execution graph update/backward/forward comments now describe traversal intent and invariants.
+Execution graph update/forward/backward comments now clarify rebuild, binding refresh, and cycle-detection intent.
 Execution graph now rebuilds the `e_node_idx_by_id` cache each update and uses it for node lookups.
 Execution node cache rebuild now drops execution nodes missing from the current graph.
 Execution node cache update compacts in-place with swaps and truncation to minimize allocations.

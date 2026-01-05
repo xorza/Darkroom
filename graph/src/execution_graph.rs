@@ -290,7 +290,7 @@ impl ExecutionGraph {
         Ok(common::deserialize(serialized, format)?)
     }
 
-    // Walk upstream dependencies to collect active nodes in processing order for input-state evaluation.
+    // Rebuild execution-node caches and schedule data from the current graph/func library.
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
         graph.validate_with(func_lib);
 
@@ -306,6 +306,7 @@ impl ExecutionGraph {
         Ok(())
     }
 
+    // Build execution nodes and bind inputs, refreshing cached node state.
     fn forward1(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.e_nodes
             .iter_mut()
@@ -379,6 +380,7 @@ impl ExecutionGraph {
         self.e_nodes.compact_finish(write_idx);
     }
 
+    // Walk backward from terminal nodes to collect process order and detect cycles.
     fn backward1(&mut self) -> ExecutionResult<()> {
         let mut stack: Vec<Visit> = take(&mut self.stack);
         stack.clear();
