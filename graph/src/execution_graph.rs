@@ -927,16 +927,17 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert!(!get_b.missing_required_inputs);
         assert!(sum.missing_required_inputs);
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
 
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
+        assert!(mult.changed_inputs);
 
         assert_eq!(sum.inputs[0].state.unwrap(), InputState::Unchanged);
-        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Changed);
+        assert_eq!(mult.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(mult.inputs[1].state.unwrap(), InputState::Unchanged);
         assert_eq!(print.inputs[0].state.unwrap(), InputState::Changed);
 
         Ok(())
