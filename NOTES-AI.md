@@ -8,6 +8,7 @@ Scenarium collects the tooling required to build node based applications. The re
 Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to centralize theme values.
 Connection UI now owns the shared bezier control-offset helper used for connection drawing and drag previews.
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
+Port drag selection now uses a helper to prefer the highest-priority drag state.
 
 ## Repository Layout
 

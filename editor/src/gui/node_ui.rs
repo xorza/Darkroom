@@ -197,9 +197,7 @@ impl NodeUi {
 
             let node_drag_port_result =
                 render_node_ports(ctx, layout, view_node, func, view_graph.scale);
-            if node_drag_port_result.prio() > drag_port_info.prio() {
-                drag_port_info = node_drag_port_result;
-            }
+            drag_port_info = drag_port_info.prefer(node_drag_port_result);
 
             render_node_const_bindings(ctx, layout, node, view_graph.scale);
             render_node_labels(ctx, view_graph, layout, func);
@@ -216,6 +214,14 @@ impl PortDragInfo {
             PortDragInfo::Hover(_) => 5,
             PortDragInfo::DragStart(_) => 8,
             PortDragInfo::DragStop => 10,
+        }
+    }
+
+    fn prefer(self, other: Self) -> Self {
+        if other.prio() > self.prio() {
+            other
+        } else {
+            self
         }
     }
 }
@@ -356,11 +362,12 @@ fn render_node_ports(
     let port_radius = scale * ctx.style.port_radius;
     let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
 
-    let mut handle_port = |center: Pos2,
-                           kind: PortKind,
-                           idx: usize,
-                           base_color: egui::Color32,
-                           hover_color: egui::Color32| {
+    let handle_port = |center: Pos2,
+                       kind: PortKind,
+                       idx: usize,
+                       base_color: egui::Color32,
+                       hover_color: egui::Color32|
+     -> PortDragInfo {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let graph_bg_id = ctx
             .ui
@@ -381,7 +388,7 @@ fn render_node_ports(
             },
             center,
         };
-        let drag_info = if response.drag_started_by(PointerButton::Primary) {
+        if response.drag_started_by(PointerButton::Primary) {
             PortDragInfo::DragStart(port_info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
             PortDragInfo::DragStop
@@ -389,33 +396,31 @@ fn render_node_ports(
             PortDragInfo::Hover(port_info)
         } else {
             PortDragInfo::None
-        };
-
-        if drag_info.prio() > port_drag_info.prio() {
-            port_drag_info = drag_info;
         }
     };
 
     for input_idx in 0..func.inputs.len() {
         let center = layout.input_center(input_idx);
-        handle_port(
+        let drag_info = handle_port(
             center,
             PortKind::Input,
             input_idx,
             ctx.style.input_port_color,
             ctx.style.input_hover_color,
         );
+        port_drag_info = port_drag_info.prefer(drag_info);
     }
 
     for output_idx in 0..func.outputs.len() {
         let center = layout.output_center(output_idx);
-        handle_port(
+        let drag_info = handle_port(
             center,
             PortKind::Output,
             output_idx,
             ctx.style.output_port_color,
             ctx.style.output_hover_color,
         );
+        port_drag_info = port_drag_info.prefer(drag_info);
     }
 
     port_drag_info
