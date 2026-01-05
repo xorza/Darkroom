@@ -839,6 +839,8 @@ mod tests {
         assert!(mult.changed_inputs);
         assert!(print.changed_inputs);
 
+        assert!(print.terminal);
+
         Ok(())
     }
 
