@@ -18,26 +18,24 @@ pub enum PortDragInfo {
     DragStop,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeLayout {
     pub node_width: f32,
     pub header_height: f32,
     pub cache_height: f32,
     pub row_height: f32,
     pub padding: f32,
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeLayoutInfo {
+    pub corner_radius: f32,
     pub rect: Rect,
     pub close_rect: Rect,
     pub cache_button_rect: Rect,
     pub dot_radius: f32,
-    pub dot_first_center: Pos2,
+    pub dot_first_center: Option<Pos2>,
     pub dot_step: f32,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
-    pub row_height: f32,
+    pub input_count: usize,
+    pub output_count: usize,
 }
 
 impl Default for NodeLayout {
@@ -48,30 +46,18 @@ impl Default for NodeLayout {
             cache_height: 20.0,
             row_height: 18.0,
             padding: 8.0,
+            corner_radius: 6.0,
+            rect: Rect::NOTHING,
+            close_rect: Rect::NOTHING,
+            cache_button_rect: Rect::NOTHING,
+            dot_radius: 0.0,
+            dot_first_center: None,
+            dot_step: 0.0,
+            input_first_center: Pos2::ZERO,
+            output_first_center: Pos2::ZERO,
+            input_count: 0,
+            output_count: 0,
         }
-    }
-}
-
-impl NodeLayoutInfo {
-    pub fn input_center(&self, index: usize) -> Pos2 {
-        egui::pos2(
-            self.input_first_center.x,
-            self.input_first_center.y + self.row_height * index as f32,
-        )
-    }
-
-    pub fn output_center(&self, index: usize) -> Pos2 {
-        egui::pos2(
-            self.output_first_center.x,
-            self.output_first_center.y + self.row_height * index as f32,
-        )
-    }
-
-    pub fn dot_center(&self, index: usize) -> Pos2 {
-        egui::pos2(
-            self.dot_first_center.x - self.dot_step * index as f32,
-            self.dot_first_center.y,
-        )
     }
 }
 
@@ -79,14 +65,59 @@ impl NodeLayoutInfo {
 pub struct NodeUi {}
 
 impl NodeLayout {
-    pub(crate) fn scaled(&self, scale: f32) -> Self {
+    pub(crate) fn from_scale(scale: f32) -> Self {
+        let base = NodeLayout::default();
         Self {
-            node_width: self.node_width * scale,
-            header_height: self.header_height * scale,
-            cache_height: self.cache_height * scale,
-            row_height: self.row_height * scale,
-            padding: self.padding * scale,
+            node_width: base.node_width * scale,
+            header_height: base.header_height * scale,
+            cache_height: base.cache_height * scale,
+            row_height: base.row_height * scale,
+            padding: base.padding * scale,
+            corner_radius: base.corner_radius * scale,
+            ..base
         }
+    }
+
+    pub(crate) fn with_pos(mut self, offset: Pos2) -> Self {
+        let delta = offset.to_vec2();
+        if self.rect != Rect::NOTHING {
+            self.rect = self.rect.translate(delta);
+        }
+        if self.close_rect != Rect::NOTHING {
+            self.close_rect = self.close_rect.translate(delta);
+        }
+        if self.cache_button_rect != Rect::NOTHING {
+            self.cache_button_rect = self.cache_button_rect.translate(delta);
+        }
+        if let Some(center) = self.dot_first_center.as_mut() {
+            *center += delta;
+        }
+        self.input_first_center += delta;
+        self.output_first_center += delta;
+        self
+    }
+
+    pub fn input_center(&self, index: usize) -> Pos2 {
+        assert!(index < self.input_count, "input index out of range");
+        egui::pos2(
+            self.input_first_center.x,
+            self.input_first_center.y + self.row_height * index as f32,
+        )
+    }
+
+    pub fn output_center(&self, index: usize) -> Pos2 {
+        assert!(index < self.output_count, "output index out of range");
+        egui::pos2(
+            self.output_first_center.x,
+            self.output_first_center.y + self.row_height * index as f32,
+        )
+    }
+
+    pub fn dot_center(&self, index: usize) -> Pos2 {
+        let first = self
+            .dot_first_center
+            .expect("dot center missing when dots are present");
+        egui::pos2(first.x - self.dot_step * index as f32, first.y)
     }
 }
 
@@ -99,8 +130,7 @@ impl NodeUi {
     ) {
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = graph_layout.node_layout(&view_node_id);
-            let node_rect = layout.rect;
+            let node_rect = graph_layout.node_rect(&view_node_id);
 
             let node_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
             let body_response = ctx.ui.interact(
@@ -121,7 +151,7 @@ impl NodeUi {
                     &graph_layout.node_layout,
                     graph_layout.origin,
                 );
-                graph_layout.update_node_layout(&view_node_id, new_layout);
+                graph_layout.update_node_rect_position(&view_node_id, new_layout.rect);
             }
             if dragged || body_response.clicked() {
                 ui_interaction
@@ -142,7 +172,12 @@ impl NodeUi {
 
         for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-            let layout = graph_layout.node_layout(&view_node_id);
+            let layout = compute_node_layout(
+                ctx,
+                &view_node_id,
+                &graph_layout.node_layout,
+                graph_layout.origin,
+            );
             let node_rect = layout.rect;
 
             let node = ctx.view_graph.graph.by_id_mut(&view_node_id).unwrap();
@@ -156,7 +191,7 @@ impl NodeUi {
 
             let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
             let remove_response = ctx.ui.interact(close_rect, close_id, egui::Sense::click());
-            let cache_enabled = !node.terminal;
+            let cache_enabled = layout.cache_height > 0.0 && !node.terminal;
             let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
             let cache_response = ctx.ui.interact(
                 cache_button_rect,
@@ -199,7 +234,7 @@ impl NodeUi {
 
             ctx.painter.rect(
                 node_rect,
-                ctx.style.corner_radius,
+                layout.corner_radius,
                 ctx.style.node_fill,
                 if is_selected {
                     ctx.style.selected_stroke
@@ -223,7 +258,7 @@ impl NodeUi {
             let button_stroke = ctx.style.widget_inactive_bg_stroke;
             ctx.painter.rect(
                 cache_button_rect,
-                ctx.style.corner_radius * 0.5,
+                layout.corner_radius * 0.5,
                 button_fill,
                 button_stroke,
                 egui::StrokeKind::Inside,
@@ -259,7 +294,7 @@ impl NodeUi {
                 }
             }
             if func.behavior == FuncBehavior::Impure {
-                let center = layout.dot_center(1);
+                let center = layout.dot_center(usize::from(node.terminal));
                 ctx.painter
                     .circle_filled(center, dot_radius, ctx.style.status_impure_color);
                 let dot_rect = egui::Rect::from_center_size(
@@ -273,23 +308,23 @@ impl NodeUi {
                 }
             }
 
-            remove_btn(ctx, &layout.close_rect, remove_response);
+            remove_btn(ctx, &layout, remove_response);
 
             let node_drag_port_result =
-                render_node_ports(ctx, graph_layout, view_node_idx, input_count, output_count);
+                render_node_ports(ctx, &layout, view_node_idx, input_count, output_count);
             if node_drag_port_result.prio() > drag_port_info.prio() {
                 drag_port_info = node_drag_port_result;
             }
 
-            render_node_const_bindings(ctx, graph_layout, view_node_idx);
-            render_node_labels(ctx, graph_layout, view_node_idx);
+            render_node_const_bindings(ctx, &layout, view_node_idx);
+            render_node_labels(ctx, &layout, view_node_idx);
         }
 
         drag_port_info
     }
 }
 
-fn remove_btn(ctx: &mut GraphContext, close_rect: &Rect, remove_response: egui::Response) {
+fn remove_btn(ctx: &mut GraphContext, layout: &NodeLayout, remove_response: egui::Response) {
     let close_fill = if remove_response.is_pointer_button_down_on() {
         ctx.style.widget_active_bg_fill
     } else if remove_response.hovered() {
@@ -299,12 +334,13 @@ fn remove_btn(ctx: &mut GraphContext, close_rect: &Rect, remove_response: egui::
     };
     let close_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
-        *close_rect,
-        ctx.style.corner_radius * 0.6,
+        layout.close_rect,
+        layout.corner_radius * 0.6,
         close_fill,
         close_stroke,
         egui::StrokeKind::Inside,
     );
+    let close_rect = layout.close_rect;
     let close_margin = close_rect.width() * 0.3;
     let a = egui::pos2(
         close_rect.min.x + close_margin,
@@ -330,7 +366,7 @@ fn remove_btn(ctx: &mut GraphContext, close_rect: &Rect, remove_response: egui::
 
 fn render_node_ports(
     ctx: &GraphContext,
-    graph_layout: &GraphLayout,
+    layout: &NodeLayout,
     view_node_idx: usize,
     input_count: usize,
     output_count: usize,
@@ -381,8 +417,6 @@ fn render_node_ports(
         }
     };
 
-    let layout = graph_layout.node_layout(&view_node.id);
-
     for input_idx in 0..input_count {
         let center = layout.input_center(input_idx);
         handle_port(
@@ -419,18 +453,13 @@ impl PortDragInfo {
     }
 }
 
-fn render_node_const_bindings(
-    ctx: &mut GraphContext,
-    graph_layout: &GraphLayout,
-    view_node_idx: usize,
-) {
+fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx: usize) {
     let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
     let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-    let layout = graph_layout.node_layout(&view_node.id);
 
     let badge_padding = 4.0 * ctx.view_graph.scale;
-    let badge_height = (graph_layout.node_layout.row_height * 1.2).max(10.0 * ctx.view_graph.scale);
+    let badge_height = (layout.row_height * 1.2).max(10.0 * ctx.view_graph.scale);
     let badge_radius = 6.0 * ctx.view_graph.scale;
     let badge_gap = 6.0 * ctx.view_graph.scale;
 
@@ -505,17 +534,17 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_node_idx: usize) {
+fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx: usize) {
     let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
     let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
     let header_text_offset = ctx.view_graph.scale * ctx.style.header_text_offset;
 
-    let node_rect = graph_layout.node_rect(&view_node.id);
+    let node_rect = layout.rect;
 
     ctx.painter.text(
-        node_rect.min + egui::vec2(graph_layout.node_layout.padding, header_text_offset),
+        node_rect.min + egui::vec2(layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
         &mut node.name,
         ctx.style.heading_font.scaled(ctx.view_graph.scale),
@@ -525,11 +554,11 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
     for (index, input) in func.inputs.iter().enumerate() {
         let text_pos = node_rect.min
             + egui::vec2(
-                graph_layout.node_layout.padding,
-                graph_layout.node_layout.header_height
-                    + graph_layout.node_layout.cache_height
-                    + graph_layout.node_layout.padding
-                    + graph_layout.node_layout.row_height * index as f32,
+                layout.padding,
+                layout.header_height
+                    + layout.cache_height
+                    + layout.padding
+                    + layout.row_height * index as f32,
             );
         ctx.painter.text(
             text_pos,
@@ -543,11 +572,11 @@ fn render_node_labels(ctx: &mut GraphContext, graph_layout: &GraphLayout, view_n
     for (index, output) in func.outputs.iter().enumerate() {
         let text_pos = node_rect.min
             + egui::vec2(
-                node_rect.width() - graph_layout.node_layout.padding,
-                graph_layout.node_layout.header_height
-                    + graph_layout.node_layout.cache_height
-                    + graph_layout.node_layout.padding
-                    + graph_layout.node_layout.row_height * index as f32,
+                node_rect.width() - layout.padding,
+                layout.header_height
+                    + layout.cache_height
+                    + layout.padding
+                    + layout.row_height * index as f32,
             );
         ctx.painter.text(
             text_pos,
@@ -564,26 +593,26 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
     (dx * 0.5).max(40.0 * scale)
 }
 
-pub(crate) fn compute_node_layouts(
+pub(crate) fn compute_node_rects(
     ctx: &GraphContext,
     node_layout: &NodeLayout,
     origin: Pos2,
-    node_layouts: &mut HashMap<NodeId, NodeLayoutInfo>,
+    node_rects: &mut HashMap<NodeId, Rect>,
 ) {
-    node_layouts.clear();
+    node_rects.clear();
 
     for view_node in ctx.view_graph.view_nodes.iter() {
         let layout = compute_node_layout(ctx, &view_node.id, node_layout, origin);
-        node_layouts.insert(view_node.id, layout);
+        node_rects.insert(view_node.id, layout.rect);
     }
 }
 
-fn compute_node_layout(
+pub(crate) fn compute_node_layout(
     ctx: &GraphContext,
     view_node_id: &NodeId,
     node_layout: &NodeLayout,
     origin: Pos2,
-) -> NodeLayoutInfo {
+) -> NodeLayout {
     let node = ctx.view_graph.graph.by_id(view_node_id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
     let scale = ctx.view_graph.scale;
@@ -674,8 +703,7 @@ fn compute_node_layout(
         + node_layout.padding;
     let node_size = egui::vec2(node_width, height);
 
-    let view_node = ctx.view_graph.view_nodes.by_key(view_node_id).unwrap();
-    let rect = egui::Rect::from_min_size(origin + view_node.pos.to_vec2() * scale, node_size);
+    let rect = egui::Rect::from_min_size(Pos2::ZERO, node_size);
     let header_rect = egui::Rect::from_min_size(
         rect.min,
         egui::vec2(rect.width(), node_layout.header_height),
@@ -695,10 +723,14 @@ fn compute_node_layout(
 
     let dot_radius = scale * ctx.style.status_dot_radius;
     let dot_step = (dot_radius * 2.0) + scale * ctx.style.status_item_gap;
-    let dot_first_center = {
+    let has_terminal = node.terminal;
+    let has_impure = func.behavior == FuncBehavior::Impure;
+    let dot_first_center = if has_terminal || has_impure {
         let dot_x = close_rect.min.x - node_layout.padding - dot_radius;
         let dot_center_y = header_rect.center().y;
-        egui::pos2(dot_x, dot_center_y)
+        Some(egui::pos2(dot_x, dot_center_y))
+    } else {
+        None
     };
 
     let cache_button_rect = if node_layout.cache_height > 0.0 {
@@ -731,7 +763,8 @@ fn compute_node_layout(
     let input_first_center = egui::pos2(rect.min.x, base_y);
     let output_first_center = egui::pos2(rect.min.x + node_width, base_y);
 
-    NodeLayoutInfo {
+    let view_node = ctx.view_graph.view_nodes.by_key(view_node_id).unwrap();
+    NodeLayout {
         rect,
         close_rect,
         cache_button_rect,
@@ -741,7 +774,15 @@ fn compute_node_layout(
         input_first_center,
         output_first_center,
         row_height: node_layout.row_height,
+        input_count: func.inputs.len(),
+        output_count: func.outputs.len(),
+        node_width,
+        header_height: node_layout.header_height,
+        cache_height: node_layout.cache_height,
+        padding: node_layout.padding,
+        corner_radius: node_layout.corner_radius,
     }
+    .with_pos(origin + view_node.pos.to_vec2() * scale)
 }
 
 fn text_width(

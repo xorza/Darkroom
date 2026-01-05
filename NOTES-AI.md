@@ -235,4 +235,4 @@ Mouse wheel zoom now uses signed vertical scroll delta with a small exponential 
 Graph UI now uses `ui.interact` on node rects to determine pointer-over-node state instead of manual rect contains checks.
 Connection breaker now encapsulates point addition/length limiting logic in `ConnectionBreaker::add_point`.
 Breaker max length is now owned by `connection_breaker.rs` rather than `graph_ui.rs`.
-Node UI now computes and caches a per-node `NodeLayoutInfo` (rects, port centers, button geometry, status dots) via `compute_node_layouts`, and uses that cached layout throughout rendering instead of recomputing positions.
+Node layout data is now unified into `NodeLayout` with `from_scale`/`with_pos`; `GraphLayout` stores rects only and uses `compute_node_rects`, while render paths build per-node layouts on demand.
