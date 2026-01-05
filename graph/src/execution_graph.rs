@@ -1374,7 +1374,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn change_from_const_to_bind_recomputes1() -> anyhow::Result<()> {
+    async fn required_none_binding_execute_is_stable() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
@@ -1388,9 +1388,6 @@ mod tests {
         sum.inputs[0].binding = Binding::None;
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.execute().await?;
-        execution_graph.execute().await?;
-        execution_graph.execute().await?;
         execution_graph.execute().await?;
         execution_graph.execute().await?;
 

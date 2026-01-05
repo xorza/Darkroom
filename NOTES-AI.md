@@ -214,6 +214,7 @@ Graph UI helpers now pass `ViewGraph` explicitly instead of storing it on `Graph
 Node layout sizing now computes row widths inline and reuses cached cache-button metrics to avoid extra allocations.
 Node layout translation now happens before struct construction to avoid mutable layout patch-up.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
+Execution graph tests include `none_binding_execute_is_stable` to exercise repeated execution with an unset input binding.
 DynamicValue now owns the type-conversion helper previously in execution_graph.
 Execution graph validation now asserts output value cache length and ensures all bound output nodes exist in the execution node set.
 Function async lambda signatures are centralized via `AsyncLambdaFn` to avoid duplication in `graph/src/function.rs`.
