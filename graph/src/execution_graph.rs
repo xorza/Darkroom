@@ -331,11 +331,7 @@ impl ExecutionGraph {
 
             output_usage.clear();
             output_usage.extend(e_node.outputs.iter().map(|output| {
-                if output.usage_count == 0 {
-                    OutputUsage::Skip
-                } else {
-                    OutputUsage::Needed
-                }
+                (output.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)
             }));
 
             let e_node = &mut self.e_nodes[e_node_idx];

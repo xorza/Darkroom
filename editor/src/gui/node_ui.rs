@@ -2,6 +2,7 @@ use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
+use common::BoolExt;
 use eframe::egui;
 use egui::{PointerButton, Pos2, Rect, Sense, vec2};
 use graph::data::StaticValue;
@@ -113,11 +114,8 @@ impl NodeUi {
             );
 
             if !node.terminal && cache_response.clicked() {
-                node.behavior = if node.behavior == NodeBehavior::Once {
-                    NodeBehavior::AsFunction
-                } else {
-                    NodeBehavior::Once
-                };
+                node.behavior = (node.behavior == NodeBehavior::Once)
+                    .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::CacheToggled));
@@ -226,11 +224,7 @@ impl PortDragInfo {
     }
 
     fn prefer(self, other: Self) -> Self {
-        if other.prio() > self.prio() {
-            other
-        } else {
-            self
-        }
+        (other.prio() > self.prio()).then_else(other, self)
     }
 }
 
@@ -436,7 +430,7 @@ fn render_node_ports(
             .ui
             .make_persistent_id(("node_port", kind, view_node.id, idx));
         let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
-        let color = if is_hovered { hover_color } else { base_color };
+        let color = is_hovered.then_else(hover_color, base_color);
         ctx.painter.circle_filled(center, port_radius, color);
     };
 

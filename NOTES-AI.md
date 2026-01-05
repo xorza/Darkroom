@@ -125,6 +125,7 @@ Execution graph creation and scheduling are split into clearer phases (node buil
 Execution graph propagation asserts nodes were processed before input state evaluation.
 Execution graph input-state propagation now inlines the wants-execute check when storing input state.
 Execution graph input-state propagation now uses `BoolExt::then_else` for the wants-execute branch.
+Execution graph output usage now uses `BoolExt::then_else` for Skip/Needed selection.
 Execution graph propagation expects function library entries to exist and asserts input index bounds.
 Execution graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 Execution graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous execution.
