@@ -439,6 +439,8 @@ impl ExecutionGraph {
             }
         }
 
+        self.stack = take(&mut stack);
+
         Ok(())
     }
 
