@@ -1265,7 +1265,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn asd() -> anyhow::Result<()> {
+    async fn optional_input_binding_change_recomputes() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
@@ -1306,7 +1306,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn asd1() -> anyhow::Result<()> {
+    async fn const_input_excludes_upstream_node() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
