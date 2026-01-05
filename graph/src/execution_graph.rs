@@ -11,7 +11,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
 use crate::prelude::{FuncId, FuncLambda};
-use common::{is_debug, FileFormat};
+use common::{is_debug, BoolExt, FileFormat};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum ExecutionError {
@@ -546,12 +546,11 @@ impl ExecutionGraph {
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
 
-                        let input_state = if output_e_node.wants_execute {
-                            InputState::Changed
-                        } else {
-                            InputState::Unchanged
-                        };
-                        self.e_nodes[e_node_idx].inputs[input_idx].state = Some(input_state);
+                        self.e_nodes[e_node_idx].inputs[input_idx].state = Some(
+                            output_e_node
+                                .wants_execute
+                                .then_else(InputState::Changed, InputState::Unchanged),
+                        );
                     }
                 };
 

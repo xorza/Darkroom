@@ -56,6 +56,7 @@ Recent adjustments:
 - `common/src/scoped_ref.rs` uses generic drop callbacks (no boxing), derives `Debug` on scoped refs, and uses `expect` in `Drop` for invariant enforcement.
 - `common/src/shared.rs` defines `Shared<T>` as a `Debug` newtype wrapper around `Arc<Mutex<T>>` with convenience `lock`, `lock_owned`, `try_lock`, `get_mut`, and `arc` helpers plus `Deref` to the inner `Arc`; it now supports `T: ?Sized` and reserves `new`/`Default` for sized types.
 - `common/src/lib.rs` now re-exports helpers from module files (`constants`, `debug`, `file_format`, `serde_format`, `shared`) to keep the crate root minimal.
+- `common/src/bool_ext.rs` adds `BoolExt` with `then_else` and `then_else_with` helpers for conditional value selection.
 - Worker execution now skips `execute()` when `ExecutionGraph::update` fails, forwarding the update error directly to the compute callback.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in invokers use async closures wrapped in `Box::pin(async move { ... })`.
@@ -122,6 +123,8 @@ Benchmarks:
 Execution graph construction now uses an explicit stack for active-node ordering to avoid deep recursion limits.
 Execution graph creation and scheduling are split into clearer phases (node build, propagation, scheduling).
 Execution graph propagation asserts nodes were processed before input state evaluation.
+Execution graph input-state propagation now inlines the wants-execute check when storing input state.
+Execution graph input-state propagation now uses `BoolExt::then_else` for the wants-execute branch.
 Execution graph propagation expects function library entries to exist and asserts input index bounds.
 Execution graph build validates graph+func-lib alignment once up front and no longer repeats validation checks in each phase.
 Execution graph node collection uses a helper to reuse cached state (invoke cache, output values, binding counts) from the previous execution.
