@@ -427,10 +427,14 @@ fn render_node_const_bindings(
     node: &Node,
     scale: f32,
 ) {
+    let font = ctx.style.body_font.scaled(scale);
+    let port_radius = scale * ctx.style.port_radius;
+    let link_inset = port_radius * 0.6;
     let badge_padding = 4.0 * scale;
     let badge_height = (layout.row_height * 1.2).max(10.0 * scale);
     let badge_radius = 6.0 * scale;
     let badge_gap = 6.0 * scale;
+    let stroke = ctx.style.connection_stroke;
 
     for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {
@@ -438,24 +442,18 @@ fn render_node_const_bindings(
         };
 
         let label = static_value_label(value);
-        let label_width = text_width(
-            &ctx.painter,
-            &ctx.style.body_font,
-            &label,
-            ctx.style.text_color,
-        );
+        let label_width = text_width(&ctx.painter, &font, &label, ctx.style.text_color);
         let badge_width = label_width + badge_padding * 2.0;
         let center = layout.input_center(input_idx);
-        let badge_right = center.x - scale * ctx.style.port_radius - badge_gap;
+        let badge_right = center.x - port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
             egui::pos2(badge_right, center.y + badge_height * 0.5),
         );
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
-        let link_end = egui::pos2(center.x - scale * ctx.style.port_radius * 0.6, center.y);
-        ctx.painter
-            .line_segment([link_start, link_end], ctx.style.connection_stroke);
+        let link_end = egui::pos2(center.x - link_inset, center.y);
+        ctx.painter.line_segment([link_start, link_end], stroke);
         ctx.painter.rect(
             badge_rect,
             badge_radius,
@@ -467,7 +465,7 @@ fn render_node_const_bindings(
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            ctx.style.body_font.scaled(scale),
+            font.clone(),
             ctx.style.text_color,
         );
     }
