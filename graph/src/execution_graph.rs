@@ -1368,6 +1368,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["get_b", "sum", "mult", "print"]
+        );
+
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = (get_b_id, 0).into();
 
@@ -1375,9 +1380,8 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            3,
-            "changed from const to bind should recompute"
+            execution_node_names_in_order(&execution_graph),
+            ["sum", "mult", "print"]
         );
 
         Ok(())
