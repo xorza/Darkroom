@@ -529,23 +529,17 @@ impl ExecutionGraph {
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        missing_required_inputs |= output_e_node.missing_required_inputs;
+                        missing_required_inputs |=
+                            e_input.required && output_e_node.missing_required_inputs;
 
                         let output_e_node_wants_execute = output_e_node.wants_execute;
 
                         let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
                         if output_e_node_wants_execute {
                             e_input.state = Some(InputState::Changed);
-                            changed_inputs = true;
                         } else {
                             e_input.state = Some(InputState::Unchanged);
                         }
-
-                        // if output_e_node.wants_execute {
-                        //     InputState::Changed
-                        // } else {
-                        //     InputState::Unchanged
-                        // }
                     }
                 };
 
@@ -553,13 +547,6 @@ impl ExecutionGraph {
                 if e_input.state.unwrap() == InputState::Changed {
                     changed_inputs = true;
                 }
-
-                // let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                // e_input.state = Some(input_state);
-                // match input_state {
-                //     InputState::Unchanged => {}
-                //     InputState::Changed => changed_inputs = true,
-                // }
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
