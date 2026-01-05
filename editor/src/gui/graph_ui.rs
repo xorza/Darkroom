@@ -112,12 +112,9 @@ impl GraphUi {
 
         self.render_connections(&mut ctx, view_graph);
 
-        let drag_port_info = self.node_ui.render_nodes(
-            &mut ctx,
-            view_graph,
-            &mut self.graph_layout,
-            ui_interaction,
-        );
+        let drag_port_info =
+            self.node_ui
+                .render_nodes(&mut ctx, view_graph, &mut self.graph_layout, ui_interaction);
 
         self.process_connection_drag(&mut ctx, view_graph, ui_interaction, drag_port_info);
 
@@ -208,8 +205,7 @@ impl GraphUi {
             }
             (InteractionState::BreakingConnections, _) => {
                 for connection in self.connection_renderer.highlighted.iter() {
-                    if let Some(node) =
-                        view_graph.graph.nodes.by_key_mut(&connection.input_node_id)
+                    if let Some(node) = view_graph.graph.nodes.by_key_mut(&connection.input_node_id)
                     {
                         node.inputs[connection.input_idx].binding = Binding::None;
                         ui_interaction.actions.push((

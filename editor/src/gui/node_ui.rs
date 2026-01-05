@@ -98,7 +98,8 @@ impl NodeUi {
                 view_graph.view_nodes[view_node_idx].pos +=
                     body_response.drag_delta() / view_graph.scale;
 
-                let new_layout = compute_node_layout(ctx, view_graph, &view_node_id, graph_layout.origin);
+                let new_layout =
+                    compute_node_layout(ctx, view_graph, &view_node_id, graph_layout.origin);
                 graph_layout.update_node_layout(&view_node_id, new_layout);
             }
             if dragged || body_response.clicked() {
@@ -198,8 +199,14 @@ impl NodeUi {
 
             remove_btn(ctx, view_graph, layout, remove_response);
 
-            let node_drag_port_result =
-                render_node_ports(ctx, view_graph, layout, view_node_idx, input_count, output_count);
+            let node_drag_port_result = render_node_ports(
+                ctx,
+                view_graph,
+                layout,
+                view_node_idx,
+                input_count,
+                output_count,
+            );
             if node_drag_port_result.prio() > drag_port_info.prio() {
                 drag_port_info = node_drag_port_result;
             }

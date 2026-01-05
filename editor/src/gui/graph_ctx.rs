@@ -4,7 +4,6 @@ use graph::prelude::FuncLib;
 
 use crate::gui::style::Style;
 
-#[derive(Debug)]
 pub struct GraphContext<'a> {
     pub ui: &'a mut Ui,
     pub painter: Painter,
@@ -12,6 +11,16 @@ pub struct GraphContext<'a> {
     pub style: Style,
 
     pub func_lib: &'a FuncLib,
+}
+
+impl<'a> std::fmt::Debug for GraphContext<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphContext")
+            .field("rect", &self.rect)
+            .field("style", &self.style)
+            .field("func_lib", &"FuncLib")
+            .finish()
+    }
 }
 
 impl<'a> GraphContext<'a> {
