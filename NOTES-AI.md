@@ -11,6 +11,7 @@ Node cache/remove button interactions and their side effects now run in `NodeUi:
 Port drag/hover interaction now happens in `NodeUi::process_input`, with port rendering split into a draw-only pass.
 Connection drag handling is now folded into `GraphUi::process_connections` to keep connection input logic in one place.
 `GraphUi::process_connections` now uses simpler primary-state flags and consolidates drag/breaker updates for clearer flow.
+`GraphUi::process_connections` now requires an in-bounds `Pos2` and is only called when the pointer is inside the graph rect.
 Connection UI now owns the shared bezier control-offset helper used for connection drawing and drag previews.
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
 Port drag selection now uses a helper to prefer the highest-priority drag state.

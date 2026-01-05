@@ -104,14 +104,16 @@ impl GraphUi {
             ui_interaction,
         );
 
-        self.process_connections(
-            &mut ctx,
-            view_graph,
-            graph_bg_id,
-            ui_interaction,
-            pointer_pos,
-            drag_port_info,
-        );
+        if let Some(pointer_pos) = pointer_pos {
+            self.process_connections(
+                &mut ctx,
+                view_graph,
+                graph_bg_id,
+                ui_interaction,
+                pointer_pos,
+                drag_port_info,
+            );
+        }
 
         self.render_connections(&mut ctx, view_graph);
 
@@ -127,7 +129,7 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         graph_bg_id: Id,
         ui_interaction: &mut GraphUiInteraction,
-        pointer_pos: Option<Pos2>,
+        pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) {
         let primary_state = ctx.ui.input(|input| {
@@ -163,17 +165,13 @@ impl GraphUi {
                         view_graph.selected_node_id = None;
                         self.state = InteractionState::BreakingConnections;
                         self.connection_breaker.reset();
-                        if let Some(pointer_pos) = pointer_pos {
-                            self.connection_breaker.points.push(pointer_pos);
-                        }
+                        self.connection_breaker.points.push(pointer_pos);
                     }
                 }
             }
             (InteractionState::BreakingConnections, _) => {
                 if primary_down {
-                    if let Some(pointer_pos) = pointer_pos {
-                        self.connection_breaker.add_point(pointer_pos);
-                    }
+                    self.connection_breaker.add_point(pointer_pos);
                     return;
                 }
 
@@ -222,9 +220,7 @@ impl GraphUi {
             },
         }
 
-        if self.state == InteractionState::DraggingNewConnection
-            && let Some(pointer_pos) = pointer_pos
-        {
+        if self.state == InteractionState::DraggingNewConnection {
             let drag = self.connection_drag.as_mut().unwrap();
             drag.current_pos = pointer_pos;
         }
