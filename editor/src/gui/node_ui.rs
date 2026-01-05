@@ -177,36 +177,43 @@ impl NodeUi {
                 .selected_node_id
                 .is_some_and(|id| id == view_node_id);
 
-            let corner_radius = ctx.style.node_corner_radius * view_graph.scale;
-            ctx.painter.rect(
-                layout.rect,
-                corner_radius,
-                ctx.style.node_fill,
-                is_selected.then_else(ctx.style.selected_stroke, ctx.style.node_stroke),
-                egui::StrokeKind::Inside,
-            );
-            ctx.painter.text(
-                layout.rect.min
-                    + egui::vec2(
-                        ctx.style.node_padding * view_graph.scale,
-                        view_graph.scale * ctx.style.header_text_offset,
-                    ),
-                egui::Align2::LEFT_TOP,
-                &mut node.name,
-                ctx.style.heading_font.scaled(view_graph.scale),
-                ctx.style.text_color,
-            );
-
-            cache_btn(ctx, layout, node, cache_response, view_graph.scale);
-            hints(ctx, layout, node, func, view_graph.scale);
-            remove_btn(ctx, layout, remove_response, view_graph.scale);
-
+            render_body(ctx, node, layout, is_selected, view_graph.scale);
+            render_remove_btn(ctx, layout, remove_response, view_graph.scale);
+            render_cache_btn(ctx, layout, node, cache_response, view_graph.scale);
+            render_hints(ctx, layout, node, func, view_graph.scale);
             render_node_ports(ctx, layout, view_node, func, view_graph.scale);
-
             render_node_const_bindings(ctx, layout, node, view_graph.scale);
             render_node_labels(ctx, view_graph, layout, func);
         }
     }
+}
+
+fn render_body(
+    ctx: &mut GraphContext<'_>,
+    node: &mut Node,
+    layout: &NodeLayout,
+    selected: bool,
+    scale: f32,
+) {
+    let corner_radius = ctx.style.node_corner_radius * scale;
+    ctx.painter.rect(
+        layout.rect,
+        corner_radius,
+        ctx.style.node_fill,
+        selected.then_else(ctx.style.selected_stroke, ctx.style.node_stroke),
+        egui::StrokeKind::Inside,
+    );
+    ctx.painter.text(
+        layout.rect.min
+            + egui::vec2(
+                ctx.style.node_padding * scale,
+                scale * ctx.style.header_text_offset,
+            ),
+        egui::Align2::LEFT_TOP,
+        &mut node.name,
+        ctx.style.heading_font.scaled(scale),
+        ctx.style.text_color,
+    );
 }
 
 impl PortDragInfo {
@@ -224,7 +231,7 @@ impl PortDragInfo {
     }
 }
 
-fn cache_btn(
+fn render_cache_btn(
     ctx: &mut GraphContext,
     layout: &NodeLayout,
     node: &graph::prelude::Node,
@@ -267,7 +274,7 @@ fn cache_btn(
     );
 }
 
-fn hints(
+fn render_hints(
     ctx: &mut GraphContext,
     layout: &NodeLayout,
     node: &graph::prelude::Node,
@@ -303,7 +310,7 @@ fn hints(
     }
 }
 
-fn remove_btn(
+fn render_remove_btn(
     ctx: &mut GraphContext,
     layout: &NodeLayout,
     remove_response: egui::Response,

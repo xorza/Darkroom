@@ -514,7 +514,7 @@ impl ExecutionGraph {
                 assert_ne!(input.binding, ExecutionBinding::Undefined);
                 input.state = InputState::Unchanged;
             });
-            
+
             if let Err(err) = invoke_result {
                 e_node.error = Some(err.clone());
                 error = Some(err);
