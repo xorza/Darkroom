@@ -782,14 +782,9 @@ impl ExecutionGraph {
             assert!(!e_node.missing_required_inputs);
 
             for e_input in e_node.inputs.iter() {
-                match &e_input.binding {
-                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
-                    ExecutionBinding::Bind(port_address) => {
-                        assert!(port_address.target_idx < self.e_nodes.len());
-                        assert!(!self.e_node_invoke_order[idx..].contains(&port_address.target_idx));
-                    }
-                    ExecutionBinding::None | ExecutionBinding::Const(_) => {}
-                }
+                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
+                    assert!(!self.e_node_invoke_order[idx..].contains(&port_address.target_idx));
+                };
             }
         }
     }
