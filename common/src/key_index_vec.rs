@@ -28,6 +28,7 @@ where
         }
     }
 
+    // todo handle kay for node with existing key, rename to add
     pub fn push(&mut self, v: V) {
         self.idx_by_key.insert(*v.key(), self.items.len());
         self.items.push(v);
