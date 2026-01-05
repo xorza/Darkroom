@@ -671,7 +671,7 @@ impl ExecutionGraph {
             return;
         }
 
-        assert!(self.e_nodes.len() <= graph.nodes.len());
+        assert!(self.e_nodes.len() == graph.nodes.len());
         assert!(self.e_node_process_order.len() <= self.e_nodes.len());
 
         let mut seen_node_ids: HashSet<NodeId> = HashSet::with_capacity(self.e_nodes.len());
@@ -862,9 +862,6 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert_eq!(execution_graph.e_nodes.len(), 4);
-        assert!(execution_graph.by_name("get_a").is_none());
-
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -937,7 +934,7 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(execution_graph.e_nodes.len(), 2);
+        assert_eq!(execution_graph.e_node_invoke_order.len(), 2);
 
         assert_eq!(mult.inputs[0].state, InputState::Changed);
         assert_eq!(mult.inputs[1].state, InputState::Unchanged);
@@ -975,8 +972,6 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
 
-        assert_eq!(execution_graph.e_nodes.len(), 5);
-
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
         let binding2: Binding = (graph.by_name("get_b").unwrap().id, 0).into();
         let mult = graph.by_name_mut("mult").unwrap();
@@ -990,8 +985,6 @@ mod tests {
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
 
-        assert_eq!(execution_graph.e_nodes.len(), 4);
-        assert!(execution_graph.by_name("sum").is_none());
         assert_eq!(get_a.outputs.len(), 1);
         assert_eq!(get_b.outputs.len(), 1);
         assert_eq!(mult.outputs.len(), 1);
