@@ -3,7 +3,7 @@ use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
 use eframe::egui;
-use egui::{PointerButton, Pos2, Rect, Sense};
+use egui::{PointerButton, Pos2, Rect, Sense, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{Func, FuncBehavior, NodeBehavior};
@@ -41,8 +41,6 @@ pub struct NodeLayout {
     pub dot_step: f32,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
-    pub input_count: usize,
-    pub output_count: usize,
 }
 
 #[derive(Debug, Default)]
@@ -50,7 +48,6 @@ pub struct NodeUi {}
 
 impl NodeLayout {
     pub fn input_center(&self, index: usize) -> Pos2 {
-        assert!(index < self.input_count, "input index out of range");
         egui::pos2(
             self.input_first_center.x,
             self.input_first_center.y + self.row_height * index as f32,
@@ -58,7 +55,6 @@ impl NodeLayout {
     }
 
     pub fn output_center(&self, index: usize) -> Pos2 {
-        assert!(index < self.output_count, "output index out of range");
         egui::pos2(
             self.output_first_center.x,
             self.output_first_center.y + self.row_height * index as f32,
@@ -507,36 +503,22 @@ fn render_node_labels(
     layout: &NodeLayout,
     func: &Func,
 ) {
-    for (index, input) in func.inputs.iter().enumerate() {
-        let text_pos = layout.rect.min
-            + egui::vec2(
-                layout.padding,
-                layout.header_height
-                    + layout.cache_height
-                    + layout.padding
-                    + layout.row_height * index as f32,
-            );
+    for (input_idx, input) in func.inputs.iter().enumerate() {
+        let text_pos = layout.input_center(input_idx) + vec2(layout.padding, 0.0);
         ctx.painter.text(
             text_pos,
-            egui::Align2::LEFT_TOP,
+            egui::Align2::LEFT_CENTER,
             &input.name,
             ctx.style.body_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }
 
-    for (index, output) in func.outputs.iter().enumerate() {
-        let text_pos = layout.rect.min
-            + egui::vec2(
-                layout.rect.width() - layout.padding,
-                layout.header_height
-                    + layout.cache_height
-                    + layout.padding
-                    + layout.row_height * index as f32,
-            );
+    for (output_idx, output) in func.outputs.iter().enumerate() {
+        let text_pos = layout.output_center(output_idx) - vec2(layout.padding, 0.0);
         ctx.painter.text(
             text_pos,
-            egui::Align2::RIGHT_TOP,
+            egui::Align2::RIGHT_CENTER,
             &output.name,
             ctx.style.body_font.scaled(view_graph.scale),
             ctx.style.text_color,
@@ -697,8 +679,6 @@ pub(crate) fn compute_node_layout(
         input_first_center,
         output_first_center,
         row_height,
-        input_count: func.inputs.len(),
-        output_count: func.outputs.len(),
         header_height,
         cache_height,
         padding,
