@@ -1078,12 +1078,9 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert!(
-            execution_graph
-                .e_node_invoke_order
-                .iter()
-                .any(|e_node_idx| execution_graph.e_nodes[*e_node_idx].name == "get_b"),
-            "get_b not in e_node_execution_order"
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
         );
 
         Ok(())
