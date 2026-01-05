@@ -1330,9 +1330,8 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            4,
-            "get_a is excluded"
+            execution_node_names_in_order(&execution_graph),
+            ["get_b", "sum", "mult", "print"]
         );
 
         let sum = graph.by_name_mut("sum").unwrap();
@@ -1342,9 +1341,8 @@ mod tests {
         execution_graph.execute().await?;
 
         assert_eq!(
-            execution_graph.e_node_invoke_order.iter().len(),
-            3,
-            "sum binging change so sum should be recomputed"
+            execution_node_names_in_order(&execution_graph),
+            ["sum", "mult", "print"]
         );
 
         Ok(())
