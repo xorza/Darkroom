@@ -903,30 +903,38 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionGraph::default();
 
-        // this excludes get_a and get_b from graph
+        // this excludes get_a, get_b and sum from graph
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
-        assert!(execution_graph.by_name("mult").unwrap().changed_inputs);
+
+        let mult = execution_graph.by_name("mult").unwrap();
+        assert!(mult.changed_inputs);
+        assert_eq!(mult.inputs[0].state, InputState::Changed);
+        assert_eq!(mult.inputs[1].state, InputState::Changed);
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
+
+        let mult = execution_graph.by_name("mult").unwrap();
         assert!(!execution_graph.by_name("mult").unwrap().changed_inputs);
+        assert_eq!(mult.inputs[0].state, InputState::Unchanged);
+        assert_eq!(mult.inputs[1].state, InputState::Unchanged);
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.pre_execute();
 
-        assert_eq!(execution_graph.e_nodes.len(), 2);
-        assert!(execution_graph.by_name("get_a").is_none());
-        assert!(execution_graph.by_name("get_b").is_none());
-        assert!(execution_graph.by_name("sum").is_none());
-
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
+
+        assert_eq!(execution_graph.e_nodes.len(), 2);
+
+        assert_eq!(mult.inputs[0].state, InputState::Changed);
+        assert_eq!(mult.inputs[1].state, InputState::Unchanged);
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
         assert!(mult.changed_inputs);
