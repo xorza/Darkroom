@@ -93,7 +93,6 @@ pub struct ExecutionNode {
     pub id: NodeId,
     inited: bool,
 
-    // used only for debuggind and assertions
     process_state: ProcessState,
 
     pub terminal: bool,
