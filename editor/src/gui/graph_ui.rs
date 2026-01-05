@@ -107,14 +107,17 @@ impl GraphUi {
             );
         }
 
-        self.node_ui
-            .process_input(&mut ctx, view_graph, &mut self.graph_layout, ui_interaction);
+        let drag_port_info = self.node_ui.process_input(
+            &mut ctx,
+            view_graph,
+            &mut self.graph_layout,
+            ui_interaction,
+        );
 
         self.render_connections(&mut ctx, view_graph);
 
-        let drag_port_info =
-            self.node_ui
-                .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
+        self.node_ui
+            .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
 
         self.process_connection_drag(&mut ctx, view_graph, ui_interaction, drag_port_info);
 

@@ -8,6 +8,7 @@ Scenarium collects the tooling required to build node based applications. The re
 Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to centralize theme values.
 Editor node layout constants (width, header/cache/row heights, padding, corner radius) now live in `Style`, and `NodeLayout` only keeps computed geometry.
 Node cache/remove button interactions and their side effects now run in `NodeUi::process_input`, leaving render logic focused on drawing.
+Port drag/hover interaction now happens in `NodeUi::process_input`, with port rendering split into a draw-only pass.
 Connection UI now owns the shared bezier control-offset helper used for connection drawing and drag previews.
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
 Port drag selection now uses a helper to prefer the highest-priority drag state.

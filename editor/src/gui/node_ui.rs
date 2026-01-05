@@ -62,7 +62,9 @@ impl NodeUi {
         view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
-    ) {
+    ) -> PortDragInfo {
+        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
+
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let view_node_id = view_graph.view_nodes[view_node_idx].id;
             let node_rect = graph_layout.node_rect(&view_node_id);
@@ -132,7 +134,15 @@ impl NodeUi {
                 view_graph.remove_node(&view_node_id);
                 continue;
             }
+
+            let view_node = &view_graph.view_nodes[view_node_idx];
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+            let node_drag_port_result =
+                interact_node_ports(ctx, layout, view_node, func, view_graph.scale);
+            drag_port_info = drag_port_info.prefer(node_drag_port_result);
         }
+
+        drag_port_info
     }
 
     pub fn render_nodes(
@@ -140,9 +150,7 @@ impl NodeUi {
         ctx: &mut GraphContext,
         view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
-    ) -> PortDragInfo {
-        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
-
+    ) {
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let view_node = &view_graph.view_nodes[view_node_idx];
             let view_node_id = view_graph.view_nodes[view_node_idx].id;
@@ -199,15 +207,11 @@ impl NodeUi {
             hints(ctx, layout, node, func, view_graph.scale);
             remove_btn(ctx, layout, remove_response, view_graph.scale);
 
-            let node_drag_port_result =
-                render_node_ports(ctx, layout, view_node, func, view_graph.scale);
-            drag_port_info = drag_port_info.prefer(node_drag_port_result);
+            render_node_ports(ctx, layout, view_node, func, view_graph.scale);
 
             render_node_const_bindings(ctx, layout, node, view_graph.scale);
             render_node_labels(ctx, view_graph, layout, func);
         }
-
-        drag_port_info
     }
 }
 
@@ -354,7 +358,7 @@ fn remove_btn(
     ctx.painter.line_segment([c, d], close_stroke);
 }
 
-fn render_node_ports(
+fn interact_node_ports(
     ctx: &GraphContext,
     layout: &NodeLayout,
     view_node: &ViewNode,
@@ -363,16 +367,11 @@ fn render_node_ports(
 ) -> PortDragInfo {
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
-    let port_radius = scale * ctx.style.port_radius;
-    let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
     let row_height = ctx.style.node_row_height * scale;
 
-    let handle_port = |center: Pos2,
-                       kind: PortKind,
-                       idx: usize,
-                       base_color: egui::Color32,
-                       hover_color: egui::Color32|
-     -> PortDragInfo {
+    let handle_port = |center: Pos2, kind: PortKind, idx: usize| -> PortDragInfo {
+        let port_radius = scale * ctx.style.port_radius;
+        let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let graph_bg_id = ctx
             .ui
@@ -381,9 +380,6 @@ fn render_node_ports(
             .ui
             .interact(port_rect, graph_bg_id, Sense::hover() | Sense::drag());
         let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
-
-        let color = if is_hovered { hover_color } else { base_color };
-        ctx.painter.circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
             port: PortRef {
@@ -406,31 +402,66 @@ fn render_node_ports(
 
     for input_idx in 0..func.inputs.len() {
         let center = layout.input_center(input_idx, row_height);
-        let drag_info = handle_port(
-            center,
-            PortKind::Input,
-            input_idx,
-            ctx.style.input_port_color,
-            ctx.style.input_hover_color,
-        );
+        let drag_info = handle_port(center, PortKind::Input, input_idx);
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 
     for output_idx in 0..func.outputs.len() {
         let center = layout.output_center(output_idx, row_height);
-        let drag_info = handle_port(
-            center,
-            PortKind::Output,
-            output_idx,
-            ctx.style.output_port_color,
-            ctx.style.output_hover_color,
-        );
+        let drag_info = handle_port(center, PortKind::Output, output_idx);
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 
     port_drag_info
 }
 
+fn render_node_ports(
+    ctx: &GraphContext,
+    layout: &NodeLayout,
+    view_node: &ViewNode,
+    func: &Func,
+    scale: f32,
+) {
+    let port_radius = scale * ctx.style.port_radius;
+    let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
+    let row_height = ctx.style.node_row_height * scale;
+
+    let draw_port = |center: Pos2,
+                     kind: PortKind,
+                     idx: usize,
+                     base_color: egui::Color32,
+                     hover_color: egui::Color32| {
+        let port_rect = egui::Rect::from_center_size(center, port_rect_size);
+        let _port_id = ctx
+            .ui
+            .make_persistent_id(("node_port", kind, view_node.id, idx));
+        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
+        let color = if is_hovered { hover_color } else { base_color };
+        ctx.painter.circle_filled(center, port_radius, color);
+    };
+
+    for input_idx in 0..func.inputs.len() {
+        let center = layout.input_center(input_idx, row_height);
+        draw_port(
+            center,
+            PortKind::Input,
+            input_idx,
+            ctx.style.input_port_color,
+            ctx.style.input_hover_color,
+        );
+    }
+
+    for output_idx in 0..func.outputs.len() {
+        let center = layout.output_center(output_idx, row_height);
+        draw_port(
+            center,
+            PortKind::Output,
+            output_idx,
+            ctx.style.output_port_color,
+            ctx.style.output_hover_color,
+        );
+    }
+}
 fn render_node_const_bindings(
     ctx: &mut GraphContext,
     layout: &NodeLayout,
