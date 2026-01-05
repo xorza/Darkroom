@@ -206,6 +206,7 @@ Node cache toggles now emit `GraphUiAction::CacheToggled` so the UI action strea
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node data and bindings directly on the core graph.
 Graph connection rendering (curve generation, hit detection, and temporary-connection drawing) now lives in `editor/src/gui/connection_render.rs` with `graph_ui.rs` focusing on interaction flow.
 `GraphLayout::build` now encapsulates layout/width/port collection for the graph UI render pass.
+Graph view validation now panics on invalid zoom, pan, node positions, or mismatched node lists instead of returning errors.
 Editor execution invalidation now batches affected node IDs before recursive invalidation.
 Editor run status now appends execution stats (node count + elapsed seconds).
 Graph UI interaction state now records per-node action types (cache toggle, input change, node removal).

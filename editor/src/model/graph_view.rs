@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow, bail};
+use anyhow::{Result, bail};
 use common::{FileFormat, is_debug, key_index_vec::KeyIndexVec};
 use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
@@ -45,66 +45,62 @@ impl ViewGraph {
             scale: 1.0,
             selected_node_id: None,
         };
-        view_graph
-            .validate()
-            .expect("graph view should be valid after conversion");
+        view_graph.validate();
         view_graph
     }
 
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) {
         if !is_debug() {
-            return Ok(());
+            return;
         }
 
         self.graph.validate();
 
-        if !self.scale.is_finite() || self.scale <= 0.0 {
-            return Err(anyhow!("graph zoom must be finite and positive"));
-        }
-        if !self.pan.x.is_finite() || !self.pan.y.is_finite() {
-            return Err(anyhow!("graph pan must be finite"));
-        }
+        assert!(
+            self.scale.is_finite() && self.scale > 0.0,
+            "graph zoom must be finite and positive"
+        );
+        assert!(
+            self.pan.x.is_finite() && self.pan.y.is_finite(),
+            "graph pan must be finite"
+        );
 
         let mut view_nodes = HashMap::new();
         for node in self.view_nodes.iter() {
-            if !node.pos.x.is_finite() || !node.pos.y.is_finite() {
-                return Err(anyhow!("node position must be finite"));
-            }
+            assert!(
+                node.pos.x.is_finite() && node.pos.y.is_finite(),
+                "node position must be finite"
+            );
             let prior = view_nodes.insert(node.id, ());
-            if prior.is_some() {
-                return Err(anyhow!("duplicate node id detected"));
-            }
+            assert!(prior.is_none(), "duplicate node id detected");
         }
 
         if let Some(selected_node_id) = self.selected_node_id
             && !view_nodes.contains_key(&selected_node_id)
         {
-            return Err(anyhow!("selected node id must exist in graph"));
+            panic!("selected node id must exist in graph");
         }
 
         let mut graph_nodes = HashMap::new();
         for node in self.graph.nodes.iter() {
             let prior = graph_nodes.insert(node.id, ());
-            if prior.is_some() {
-                return Err(anyhow!("duplicate node id detected in graph"));
-            }
+            assert!(prior.is_none(), "duplicate node id detected in graph");
         }
 
-        if view_nodes.len() != graph_nodes.len() {
-            return Err(anyhow!("graph view node list must match graph nodes"));
-        }
+        assert_eq!(
+            view_nodes.len(),
+            graph_nodes.len(),
+            "graph view node list must match graph nodes"
+        );
         for node_id in graph_nodes.keys() {
             if !view_nodes.contains_key(node_id) {
-                return Err(anyhow!("graph view missing node position"));
+                panic!("graph view missing node position");
             }
         }
-
-        Ok(())
     }
 
     pub fn serialize(&self, format: FileFormat) -> String {
-        self.validate()
-            .expect("graph view must be valid before serialization");
+        self.validate();
         common::serialize(self, format)
     }
 
@@ -114,7 +110,7 @@ impl ViewGraph {
         }
 
         let view_graph = common::deserialize::<ViewGraph>(input, format)?;
-        view_graph.validate()?;
+        view_graph.validate();
 
         Ok(view_graph)
     }
@@ -140,7 +136,7 @@ mod tests {
     #[test]
     fn graph_view_test() {
         let graph = build_test_view();
-        assert!(graph.validate().is_ok());
+        graph.validate();
     }
 
     #[test]
@@ -164,7 +160,7 @@ mod tests {
         );
         let deserialized = ViewGraph::deserialize(format, &serialized)
             .expect("graph deserialization should succeed for test payload");
-        assert!(deserialized.validate().is_ok());
+        deserialized.validate();
         assert_eq!(
             graph.view_nodes.len(),
             deserialized.view_nodes.len(),

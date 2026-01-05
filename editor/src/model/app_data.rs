@@ -110,9 +110,7 @@ impl AppData {
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph) {
-        view_graph
-            .validate()
-            .expect("graph should be valid before storing in app state");
+        view_graph.validate();
 
         self.view_graph = view_graph;
         self.worker.send(WorkerMessage::Clear);
