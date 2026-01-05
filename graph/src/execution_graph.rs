@@ -540,36 +540,33 @@ impl ExecutionGraph {
             let mut changed_inputs = false;
             let mut missing_required_inputs = false;
 
-            if e_node.process_state != ProcessState::Forward {
-                // node was not updated since last pre_execute, no need to process it twice
+            assert_ne!(e_node.process_state, ProcessState::None);
+            assert_ne!(e_node.process_state, ProcessState::Processing);
 
-                for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
-                    let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                    match &e_input.binding {
-                        ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
-                        ExecutionBinding::None => missing_required_inputs |= e_input.required,
-                        ExecutionBinding::Const(_) => {}
-                        ExecutionBinding::Bind(port_address) => {
-                            let output_e_node = &self.e_nodes[port_address.target_idx];
+            for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
+                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                match &e_input.binding {
+                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
+                    ExecutionBinding::None => missing_required_inputs |= e_input.required,
+                    ExecutionBinding::Const(_) => {}
+                    ExecutionBinding::Bind(port_address) => {
+                        let output_e_node = &self.e_nodes[port_address.target_idx];
 
-                            assert_eq!(output_e_node.process_state, ProcessState::Forward);
-                            assert!(port_address.port_idx < output_e_node.outputs.len());
+                        assert_eq!(output_e_node.process_state, ProcessState::Forward);
+                        assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                            missing_required_inputs |=
-                                e_input.required && output_e_node.missing_required_inputs;
-                            let output_e_node_wants_execute = output_e_node.wants_execute;
+                        missing_required_inputs |=
+                            e_input.required && output_e_node.missing_required_inputs;
+                        let output_e_node_wants_execute = output_e_node.wants_execute;
 
-                            let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                            e_input.state = output_e_node_wants_execute
-                                .then_else(InputState::Changed, e_input.state);
-                        }
-                    };
-
-                    let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                    if e_input.state == InputState::Changed {
-                        changed_inputs = true;
+                        let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                        e_input.state = output_e_node_wants_execute
+                            .then_else(InputState::Changed, e_input.state);
                     }
-                }
+                };
+
+                let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
+                changed_inputs |= e_input.state == InputState::Changed;
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
@@ -1372,6 +1369,30 @@ mod tests {
             3,
             "changed from const to bind should recompute"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn change_from_const_to_bind_recomputes1() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::None;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
+        execution_graph.execute().await?;
 
         Ok(())
     }
