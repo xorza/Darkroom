@@ -1289,4 +1289,42 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn asd1() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_result| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::Const(33.into());
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            4,
+            "get_a is excluded"
+        );
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::None;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_graph.e_node_invoke_order.iter().len(),
+            4,
+            "sum binging change so sum should be recomputed"
+        );
+
+        Ok(())
+    }
 }
