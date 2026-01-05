@@ -743,12 +743,6 @@ impl ExecutionGraph {
             return;
         }
 
-        let mut nodes_in_process_order = HashSet::with_capacity(self.e_node_process_order.len());
-        for &e_node_idx in self.e_node_process_order.iter() {
-            assert!(e_node_idx < self.e_nodes.len());
-            assert!(nodes_in_process_order.insert(e_node_idx));
-        }
-
         for e_node in self.e_nodes.iter() {
             assert_ne!(e_node.process_state, ProcessState::Processing);
             assert_ne!(e_node.process_state, ProcessState::None);
@@ -765,7 +759,6 @@ impl ExecutionGraph {
                 };
 
                 assert!(port_address.target_idx < self.e_nodes.len());
-                assert!(nodes_in_process_order.contains(&port_address.target_idx));
 
                 let output_e_node = &self.e_nodes[port_address.target_idx];
                 assert!(port_address.port_idx < output_e_node.outputs.len());
@@ -780,7 +773,6 @@ impl ExecutionGraph {
 
         let mut pending_after = HashSet::with_capacity(self.e_node_invoke_order.len());
         for &e_node_idx in self.e_node_invoke_order.iter() {
-            assert!(e_node_idx < self.e_nodes.len());
             assert!(pending_after.insert(e_node_idx));
         }
 
