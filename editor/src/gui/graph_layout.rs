@@ -5,6 +5,7 @@ use hashbrown::HashMap;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::node_ui;
+use crate::model::ViewGraph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
@@ -35,13 +36,13 @@ impl Default for GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, ctx: &GraphContext) {
+    pub fn update(&mut self, ctx: &GraphContext, view_graph: &ViewGraph) {
         let rect = ctx.ui.available_rect_before_wrap();
-        self.origin = rect.min + ctx.view_graph.pan;
+        self.origin = rect.min + view_graph.pan;
         self.node_layouts.clear();
 
-        for view_node in ctx.view_graph.view_nodes.iter() {
-            let layout = node_ui::compute_node_layout(ctx, &view_node.id, self.origin);
+        for view_node in view_graph.view_nodes.iter() {
+            let layout = node_ui::compute_node_layout(ctx, view_graph, &view_node.id, self.origin);
             self.node_layouts.insert(view_node.id, layout);
         }
     }

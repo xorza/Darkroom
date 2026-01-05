@@ -9,6 +9,7 @@ use graph::graph::{Binding, NodeId};
 use graph::prelude::{FuncBehavior, NodeBehavior};
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
+use crate::model::ViewGraph;
 
 const NODE_WIDTH: f32 = 180.0;
 const HEADER_HEIGHT: f32 = 22.0;
@@ -76,11 +77,12 @@ impl NodeUi {
     pub fn process_input(
         &mut self,
         ctx: &mut GraphContext,
+        view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) {
-        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
-            let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+        for view_node_idx in 0..view_graph.view_nodes.len() {
+            let view_node_id = view_graph.view_nodes[view_node_idx].id;
             let node_rect = graph_layout.node_rect(&view_node_id);
 
             let node_ui_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
@@ -93,17 +95,17 @@ impl NodeUi {
             let dragged = body_response.dragged_by(PointerButton::Middle)
                 || body_response.dragged_by(PointerButton::Primary);
             if dragged {
-                ctx.view_graph.view_nodes[view_node_idx].pos +=
-                    body_response.drag_delta() / ctx.view_graph.scale;
+                view_graph.view_nodes[view_node_idx].pos +=
+                    body_response.drag_delta() / view_graph.scale;
 
-                let new_layout = compute_node_layout(ctx, &view_node_id, graph_layout.origin);
+                let new_layout = compute_node_layout(ctx, view_graph, &view_node_id, graph_layout.origin);
                 graph_layout.update_node_layout(&view_node_id, new_layout);
             }
             if dragged || body_response.clicked() {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeSelected));
-                ctx.view_graph.select_node(&view_node_id);
+                view_graph.select_node(&view_node_id);
             }
         }
     }
@@ -111,16 +113,17 @@ impl NodeUi {
     pub fn render_nodes(
         &mut self,
         ctx: &mut GraphContext,
+        view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
-        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
-            let view_node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+        for view_node_idx in 0..view_graph.view_nodes.len() {
+            let view_node_id = view_graph.view_nodes[view_node_idx].id;
             let layout = graph_layout.node_layout(&view_node_id);
 
-            let node = ctx.view_graph.graph.by_id_mut(&view_node_id).unwrap();
+            let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let input_count = func.inputs.len();
@@ -161,13 +164,12 @@ impl NodeUi {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeRemoved));
-                ctx.view_graph.remove_node(&view_node_id);
+                view_graph.remove_node(&view_node_id);
 
                 continue;
             }
 
-            let is_selected = ctx
-                .view_graph
+            let is_selected = view_graph
                 .selected_node_id
                 .is_some_and(|id| id == view_node_id);
 
@@ -189,21 +191,21 @@ impl NodeUi {
                 cache_response,
                 &ctx.style,
                 &mut ctx.painter,
-                ctx.view_graph.scale,
+                view_graph.scale,
             );
 
             hints(layout, node, func, &mut ctx.painter, ctx.ui, &ctx.style);
 
-            remove_btn(ctx, layout, remove_response);
+            remove_btn(ctx, view_graph, layout, remove_response);
 
             let node_drag_port_result =
-                render_node_ports(ctx, layout, view_node_idx, input_count, output_count);
+                render_node_ports(ctx, view_graph, layout, view_node_idx, input_count, output_count);
             if node_drag_port_result.prio() > drag_port_info.prio() {
                 drag_port_info = node_drag_port_result;
             }
 
-            render_node_const_bindings(ctx, layout, view_node_idx);
-            render_node_labels(ctx, layout, view_node_idx);
+            render_node_const_bindings(ctx, view_graph, layout, view_node_idx);
+            render_node_labels(ctx, view_graph, layout, view_node_idx);
         }
 
         drag_port_info
@@ -290,7 +292,12 @@ fn cache_btn(
     );
 }
 
-fn remove_btn(ctx: &mut GraphContext, layout: &NodeLayout, remove_response: egui::Response) {
+fn remove_btn(
+    ctx: &mut GraphContext,
+    view_graph: &ViewGraph,
+    layout: &NodeLayout,
+    remove_response: egui::Response,
+) {
     let close_fill = if remove_response.is_pointer_button_down_on() {
         ctx.style.widget_active_bg_fill
     } else if remove_response.hovered() {
@@ -325,22 +332,23 @@ fn remove_btn(ctx: &mut GraphContext, layout: &NodeLayout, remove_response: egui
         close_rect.min.y + close_margin,
     );
     let close_color = ctx.style.widget_text_color;
-    let close_stroke = egui::Stroke::new(1.4 * ctx.view_graph.scale, close_color);
+    let close_stroke = egui::Stroke::new(1.4 * view_graph.scale, close_color);
     ctx.painter.line_segment([a, b], close_stroke);
     ctx.painter.line_segment([c, d], close_stroke);
 }
 
 fn render_node_ports(
     ctx: &GraphContext,
+    view_graph: &ViewGraph,
     layout: &NodeLayout,
     view_node_idx: usize,
     input_count: usize,
     output_count: usize,
 ) -> PortDragInfo {
-    let view_node = &ctx.view_graph.view_nodes[view_node_idx];
+    let view_node = &view_graph.view_nodes[view_node_idx];
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
-    let port_radius = ctx.view_graph.scale * ctx.style.port_radius;
+    let port_radius = view_graph.scale * ctx.style.port_radius;
     let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
 
     let mut handle_port = |center: Pos2,
@@ -419,15 +427,20 @@ impl PortDragInfo {
     }
 }
 
-fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx: usize) {
-    let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
-    let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+fn render_node_const_bindings(
+    ctx: &mut GraphContext,
+    view_graph: &mut ViewGraph,
+    layout: &NodeLayout,
+    view_node_idx: usize,
+) {
+    let view_node = &mut view_graph.view_nodes[view_node_idx];
+    let node = view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-    let badge_padding = 4.0 * ctx.view_graph.scale;
-    let badge_height = (layout.row_height * 1.2).max(10.0 * ctx.view_graph.scale);
-    let badge_radius = 6.0 * ctx.view_graph.scale;
-    let badge_gap = 6.0 * ctx.view_graph.scale;
+    let badge_padding = 4.0 * view_graph.scale;
+    let badge_height = (layout.row_height * 1.2).max(10.0 * view_graph.scale);
+    let badge_radius = 6.0 * view_graph.scale;
+    let badge_gap = 6.0 * view_graph.scale;
 
     for (index, input) in node.inputs.iter().enumerate() {
         if index >= func.inputs.len() {
@@ -446,7 +459,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, view_
         );
         let badge_width = label_width + badge_padding * 2.0;
         let center = layout.input_center(index);
-        let badge_right = center.x - ctx.view_graph.scale * ctx.style.port_radius - badge_gap;
+        let badge_right = center.x - view_graph.scale * ctx.style.port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
             egui::pos2(badge_right, center.y + badge_height * 0.5),
@@ -454,7 +467,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, view_
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
         let link_end = egui::pos2(
-            center.x - ctx.view_graph.scale * ctx.style.port_radius * 0.6,
+            center.x - view_graph.scale * ctx.style.port_radius * 0.6,
             center.y,
         );
         ctx.painter
@@ -470,7 +483,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, view_
             badge_rect.center(),
             egui::Align2::CENTER_CENTER,
             label,
-            ctx.style.body_font.scaled(ctx.view_graph.scale),
+            ctx.style.body_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -500,12 +513,17 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx: usize) {
-    let view_node = &mut ctx.view_graph.view_nodes[view_node_idx];
-    let node = ctx.view_graph.graph.by_id_mut(&view_node.id).unwrap();
+fn render_node_labels(
+    ctx: &mut GraphContext,
+    view_graph: &mut ViewGraph,
+    layout: &NodeLayout,
+    view_node_idx: usize,
+) {
+    let view_node = &mut view_graph.view_nodes[view_node_idx];
+    let node = view_graph.graph.by_id_mut(&view_node.id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-    let header_text_offset = ctx.view_graph.scale * ctx.style.header_text_offset;
+    let header_text_offset = view_graph.scale * ctx.style.header_text_offset;
 
     let node_rect = layout.rect;
 
@@ -513,7 +531,7 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx
         node_rect.min + egui::vec2(layout.padding, header_text_offset),
         egui::Align2::LEFT_TOP,
         &mut node.name,
-        ctx.style.heading_font.scaled(ctx.view_graph.scale),
+        ctx.style.heading_font.scaled(view_graph.scale),
         ctx.style.text_color,
     );
 
@@ -530,7 +548,7 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx
             text_pos,
             egui::Align2::LEFT_TOP,
             &input.name,
-            ctx.style.body_font.scaled(ctx.view_graph.scale),
+            ctx.style.body_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -548,7 +566,7 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, view_node_idx
             text_pos,
             egui::Align2::RIGHT_TOP,
             &output.name,
-            ctx.style.body_font.scaled(ctx.view_graph.scale),
+            ctx.style.body_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -561,12 +579,13 @@ pub(crate) fn bezier_control_offset(start: egui::Pos2, end: egui::Pos2, scale: f
 
 pub(crate) fn compute_node_layout(
     ctx: &GraphContext,
+    view_graph: &ViewGraph,
     view_node_id: &NodeId,
     origin: Pos2,
 ) -> NodeLayout {
-    let node = ctx.view_graph.graph.by_id(view_node_id).unwrap();
+    let node = view_graph.graph.by_id(view_node_id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-    let scale = ctx.view_graph.scale;
+    let scale = view_graph.scale;
 
     let node_width_base = NODE_WIDTH * scale;
     let header_height = HEADER_HEIGHT * scale;
@@ -706,7 +725,7 @@ pub(crate) fn compute_node_layout(
     let input_first_center = egui::pos2(rect.min.x, base_y);
     let output_first_center = egui::pos2(rect.min.x + node_width, base_y);
 
-    let view_node = ctx.view_graph.view_nodes.by_key(view_node_id).unwrap();
+    let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
     let mut layout = NodeLayout {
         rect,
         remove_btn_rect: close_rect,
