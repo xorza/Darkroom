@@ -1419,6 +1419,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
 
+        assert_eq!(
+            get_execute_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
+
         let get_b_id = graph.by_name_mut("get_b").unwrap().id;
 
         let mult = graph.by_name_mut("mult").unwrap();
