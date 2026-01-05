@@ -28,10 +28,14 @@ where
         }
     }
 
-    // todo handle kay for node with existing key, rename to add
-    pub fn push(&mut self, v: V) {
-        self.idx_by_key.insert(*v.key(), self.items.len());
-        self.items.push(v);
+    pub fn add(&mut self, v: V) {
+        let key = *v.key();
+        if let Some(&idx) = self.idx_by_key.get(&key) {
+            self.items[idx] = v;
+        } else {
+            self.idx_by_key.insert(key, self.items.len());
+            self.items.push(v);
+        }
     }
 
     pub fn remove_by_key(&mut self, key: &K) -> Option<V> {
@@ -270,8 +274,8 @@ mod tests {
     #[test]
     fn key_index_vec_roundtrip_formats() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
-        vec.push(TestItem { id: 1, value: 10 });
-        vec.push(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = serialize(&vec, format);
@@ -294,9 +298,9 @@ mod tests {
     #[test]
     fn compact_insert_with_cases() {
         let mut vec = KeyIndexVec::<u32, TestItem>::default();
-        vec.push(TestItem { id: 10, value: 100 });
-        vec.push(TestItem { id: 20, value: 200 });
-        vec.push(TestItem { id: 30, value: 300 });
+        vec.add(TestItem { id: 10, value: 100 });
+        vec.add(TestItem { id: 20, value: 200 });
+        vec.add(TestItem { id: 30, value: 300 });
 
         let mut write_idx = 0;
 

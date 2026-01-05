@@ -35,7 +35,7 @@ impl ViewGraph {
             let row = index / 3;
             let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
 
-            nodes.push(ViewNode { id: node.id, pos });
+            nodes.add(ViewNode { id: node.id, pos });
         }
 
         let view_graph = Self {

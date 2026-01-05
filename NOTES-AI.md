@@ -246,6 +246,7 @@ Graph UI now stores a persistent `ConnectionRenderer` whose `render` method rebu
 `ConnectionRenderer` now clears and refills its `highlighted` set in-place when evaluating breaker hits.
 `KeyIndexVec::remove_by_index` now asserts index/key validity and returns `V` directly to surface logic errors.
 `KeyIndexVec` now supports `retain` and `IntoIterator` for borrowed forms, rebuilding its key map after retention.
+`KeyIndexVec::push` was renamed to `add`; it now asserts key/index map sync and overwrites existing items when a key already exists.
 Graph UI now uses a `PrimaryState` enum to model pressed/down/released pointer state instead of separate booleans.
 Connection drag drawing now lives on `ConnectionDrag::render` instead of an inline call.
 `ConnectionDrag` now lives in `editor/src/gui/connection_drag.rs` to keep graph UI focused on state handling.

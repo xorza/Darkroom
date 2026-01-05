@@ -68,10 +68,7 @@ pub struct Graph {
 
 impl Graph {
     pub fn add(&mut self, node: Node) {
-        match self.nodes.iter().position(|n| n.id == node.id) {
-            Some(idx) => self.nodes[idx] = node,
-            None => self.nodes.push(node),
-        }
+        self.nodes.add(node);
     }
     pub fn remove_by_id(&mut self, id: NodeId) {
         assert!(!id.is_nil());

@@ -207,7 +207,7 @@ impl FuncLib {
     pub fn add(&mut self, func: Func) {
         func.validate().unwrap();
 
-        self.funcs.push(func);
+        self.funcs.add(func);
     }
 
     pub fn merge(&mut self, other: FuncLib) {
