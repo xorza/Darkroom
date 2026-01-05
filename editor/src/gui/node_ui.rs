@@ -1,15 +1,15 @@
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::style::Style;
+
 use eframe::egui;
-use egui::{Painter, PointerButton, Pos2, Rect, Sense, Ui};
+use egui::{PointerButton, Pos2, Rect, Sense};
 use graph::data::StaticValue;
 use graph::graph::{Binding, NodeId};
-use graph::prelude::{FuncBehavior, NodeBehavior};
+use graph::prelude::{Func, FuncBehavior, NodeBehavior};
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
-use crate::model::ViewGraph;
+use crate::model::{ViewGraph, ViewNode};
 
 const NODE_WIDTH: f32 = 180.0;
 const HEADER_HEIGHT: f32 = 22.0;
@@ -121,14 +121,12 @@ impl NodeUi {
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
+            let view_node = &view_graph.view_nodes[view_node_idx];
             let view_node_id = view_graph.view_nodes[view_node_idx].id;
             let layout = graph_layout.node_layout(&view_node_id);
 
             let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-            let input_count = func.inputs.len();
-            let output_count = func.outputs.len();
 
             let close_id = ctx.ui.make_persistent_id(("node_close", node.id));
             let remove_response =
@@ -186,27 +184,11 @@ impl NodeUi {
                 egui::StrokeKind::Inside,
             );
 
-            cache_btn(
-                layout,
-                node,
-                cache_response,
-                &ctx.style,
-                &mut ctx.painter,
-                view_graph.scale,
-            );
-
-            hints(layout, node, func, &mut ctx.painter, ctx.ui, &ctx.style);
-
+            cache_btn(ctx, layout, node, cache_response, view_graph.scale);
+            hints(ctx, layout, node, func);
             remove_btn(ctx, view_graph, layout, remove_response);
 
-            let node_drag_port_result = render_node_ports(
-                ctx,
-                view_graph,
-                layout,
-                view_node_idx,
-                input_count,
-                output_count,
-            );
+            let node_drag_port_result = render_node_ports(ctx, view_graph, layout, view_node, func);
             if node_drag_port_result.prio() > drag_port_info.prio() {
                 drag_port_info = node_drag_port_result;
             }
@@ -219,63 +201,26 @@ impl NodeUi {
     }
 }
 
-fn hints(
-    layout: &NodeLayout,
-    node: &graph::prelude::Node,
-    func: &graph::prelude::Func,
-    painter: &mut Painter,
-    ui: &mut Ui,
-    style: &Style,
-) {
-    if node.terminal {
-        let center = layout.dot_center(0);
-        painter.circle_filled(center, layout.dot_radius, style.status_terminal_color);
-        let dot_rect = egui::Rect::from_center_size(
-            center,
-            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
-        );
-        let dot_id = ui.make_persistent_id(("node_status_terminal", node.id));
-        let dot_response = ui.interact(dot_rect, dot_id, egui::Sense::hover());
-        if dot_response.hovered() {
-            dot_response.show_tooltip_text("terminal");
-        }
-    }
-    if func.behavior == FuncBehavior::Impure {
-        let center = layout.dot_center(usize::from(node.terminal));
-        painter.circle_filled(center, layout.dot_radius, style.status_impure_color);
-        let dot_rect = egui::Rect::from_center_size(
-            center,
-            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
-        );
-        let dot_id = ui.make_persistent_id(("node_status_impure", node.id));
-        let dot_response = ui.interact(dot_rect, dot_id, egui::Sense::hover());
-        if dot_response.hovered() {
-            dot_response.show_tooltip_text("impure");
-        }
-    }
-}
-
 fn cache_btn(
+    ctx: &mut GraphContext,
     layout: &NodeLayout,
     node: &graph::prelude::Node,
     cache_response: egui::Response,
-    style: &Style,
-    painter: &mut Painter,
     scale: f32,
 ) {
     let cache_button_fill = if node.terminal {
-        style.widget_noninteractive_bg_fill
+        ctx.style.widget_noninteractive_bg_fill
     } else if node.behavior == NodeBehavior::Once {
-        style.cache_active_color
+        ctx.style.cache_active_color
     } else if cache_response.is_pointer_button_down_on() {
-        style.widget_active_bg_fill
+        ctx.style.widget_active_bg_fill
     } else if cache_response.hovered() {
-        style.widget_hover_bg_fill
+        ctx.style.widget_hover_bg_fill
     } else {
-        style.widget_inactive_bg_fill
+        ctx.style.widget_inactive_bg_fill
     };
-    let button_stroke = style.widget_inactive_bg_stroke;
-    painter.rect(
+    let button_stroke = ctx.style.widget_inactive_bg_stroke;
+    ctx.painter.rect(
         layout.cache_button_rect,
         layout.corner_radius * 0.5,
         cache_button_fill,
@@ -284,19 +229,55 @@ fn cache_btn(
     );
 
     let button_text_color = if node.terminal {
-        style.widget_noninteractive_text_color
+        ctx.style.widget_noninteractive_text_color
     } else if node.behavior == NodeBehavior::Once {
-        style.cache_checked_text_color
+        ctx.style.cache_checked_text_color
     } else {
-        style.widget_text_color
+        ctx.style.widget_text_color
     };
-    painter.text(
+    ctx.painter.text(
         layout.cache_button_rect.center(),
         egui::Align2::CENTER_CENTER,
         "cache",
-        style.body_font.scaled(scale),
+        ctx.style.body_font.scaled(scale),
         button_text_color,
     );
+}
+
+fn hints(
+    ctx: &mut GraphContext,
+    layout: &NodeLayout,
+    node: &graph::prelude::Node,
+    func: &graph::prelude::Func,
+) {
+    if node.terminal {
+        let center = layout.dot_center(0);
+        ctx.painter
+            .circle_filled(center, layout.dot_radius, ctx.style.status_terminal_color);
+        let dot_rect = egui::Rect::from_center_size(
+            center,
+            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
+        );
+        let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
+        let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+        if dot_response.hovered() {
+            dot_response.show_tooltip_text("terminal");
+        }
+    }
+    if func.behavior == FuncBehavior::Impure {
+        let center = layout.dot_center(usize::from(node.terminal));
+        ctx.painter
+            .circle_filled(center, layout.dot_radius, ctx.style.status_impure_color);
+        let dot_rect = egui::Rect::from_center_size(
+            center,
+            egui::vec2(layout.dot_radius * 2.0, layout.dot_radius * 2.0),
+        );
+        let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
+        let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+        if dot_response.hovered() {
+            dot_response.show_tooltip_text("impure");
+        }
+    }
 }
 
 fn remove_btn(
@@ -348,11 +329,9 @@ fn render_node_ports(
     ctx: &GraphContext,
     view_graph: &ViewGraph,
     layout: &NodeLayout,
-    view_node_idx: usize,
-    input_count: usize,
-    output_count: usize,
+    view_node: &ViewNode,
+    func: &Func,
 ) -> PortDragInfo {
-    let view_node = &view_graph.view_nodes[view_node_idx];
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
     let port_radius = view_graph.scale * ctx.style.port_radius;
@@ -366,7 +345,7 @@ fn render_node_ports(
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let graph_bg_id = ctx
             .ui
-            .make_persistent_id(("node_port", kind, view_node_idx, idx));
+            .make_persistent_id(("node_port", kind, view_node.id, idx));
         let response = ctx
             .ui
             .interact(port_rect, graph_bg_id, Sense::hover() | Sense::drag());
@@ -398,7 +377,7 @@ fn render_node_ports(
         }
     };
 
-    for input_idx in 0..input_count {
+    for input_idx in 0..func.inputs.len() {
         let center = layout.input_center(input_idx);
         handle_port(
             center,
@@ -409,7 +388,7 @@ fn render_node_ports(
         );
     }
 
-    for output_idx in 0..output_count {
+    for output_idx in 0..func.outputs.len() {
         let center = layout.output_center(output_idx);
         handle_port(
             center,
