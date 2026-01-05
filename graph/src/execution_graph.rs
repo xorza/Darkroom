@@ -754,18 +754,16 @@ impl ExecutionGraph {
             for e_input in e_node.inputs.iter() {
                 assert_ne!(e_input.binding, ExecutionBinding::Undefined);
 
-                let ExecutionBinding::Bind(port_address) = &e_input.binding else {
-                    continue;
+                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
+                    assert!(port_address.target_idx < self.e_nodes.len());
+
+                    let output_e_node = &self.e_nodes[port_address.target_idx];
+                    assert!(port_address.port_idx < output_e_node.outputs.len());
+
+                    if output_e_node.wants_execute {
+                        assert_eq!(e_input.state, InputState::Changed);
+                    }
                 };
-
-                assert!(port_address.target_idx < self.e_nodes.len());
-
-                let output_e_node = &self.e_nodes[port_address.target_idx];
-                assert!(port_address.port_idx < output_e_node.outputs.len());
-
-                if output_e_node.wants_execute {
-                    assert_eq!(e_input.state, InputState::Changed);
-                }
             }
         }
 
