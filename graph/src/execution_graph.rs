@@ -72,9 +72,10 @@ pub struct ExecutionPortAddress {
     pub target_idx: usize,
     pub port_idx: usize,
 }
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ExecutionBinding {
     #[default]
+    Undefined,
     None,
     Const(StaticValue),
     Bind(ExecutionPortAddress),
@@ -177,7 +178,6 @@ impl ExecutionNode {
 
         for (input_idx, func_input) in func.inputs.iter().enumerate() {
             let e_input = &mut self.inputs[input_idx];
-            e_input.state = None;
             e_input.required = func_input.required;
             if e_input.data_type != func_input.data_type {
                 e_input.data_type = func_input.data_type.clone();
@@ -298,6 +298,7 @@ impl ExecutionGraph {
             inputs.clear();
             for input in e_node.inputs.iter() {
                 let value: DynamicValue = match &input.binding {
+                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                     ExecutionBinding::None => DynamicValue::None,
                     ExecutionBinding::Const(value) => value.into(),
                     ExecutionBinding::Bind(port_address) => {
@@ -358,6 +359,7 @@ impl ExecutionGraph {
                 .inputs
                 .iter_mut()
                 .for_each(|input| match &input.binding {
+                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                     ExecutionBinding::None | ExecutionBinding::Const(_) => {
                         input.state = Some(InputState::Unchanged)
                     }
@@ -521,6 +523,7 @@ impl ExecutionGraph {
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
                 match &e_input.binding {
+                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
                     ExecutionBinding::None => missing_required_inputs |= e_input.required,
                     ExecutionBinding::Const(_) => {}
                     ExecutionBinding::Bind(port_address) => {
@@ -531,9 +534,6 @@ impl ExecutionGraph {
 
                         missing_required_inputs |=
                             e_input.required && output_e_node.missing_required_inputs;
-
-                        // todo revert
-                        // missing_required_inputs |= output_e_node.missing_required_inputs;
 
                         let output_e_node_wants_execute = output_e_node.wants_execute;
 
@@ -705,6 +705,7 @@ impl ExecutionGraph {
                 .inputs
                 .iter()
                 .filter_map(|input| match &input.binding {
+                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
                     ExecutionBinding::Bind(port_address) => Some(port_address),
                     ExecutionBinding::None | ExecutionBinding::Const(_) => None,
                 })
@@ -734,6 +735,7 @@ impl ExecutionGraph {
 
             for e_input in e_node.inputs.iter() {
                 match &e_input.binding {
+                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
                     ExecutionBinding::Bind(port_address) => {
                         assert!(port_address.target_idx < self.e_nodes.len());
                         assert!(!self.e_node_invoke_order[idx..].contains(&port_address.target_idx));
@@ -767,6 +769,7 @@ impl ExecutionGraph {
                     }
                     ExecutionBinding::None => {}
                     ExecutionBinding::Const(_) => {}
+                    ExecutionBinding::Undefined => panic!("uninitialized binding"),
                 }
             }
         }
@@ -888,7 +891,7 @@ mod tests {
         assert!(!get_b.changed_inputs);
         assert!(sum.changed_inputs);
 
-        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Unchanged);
+        assert_eq!(sum.inputs[0].state.unwrap(), InputState::Changed);
         assert_eq!(mult.inputs[0].state.unwrap(), InputState::Unchanged);
         assert_eq!(print.inputs[0].state.unwrap(), InputState::Unchanged);
 
