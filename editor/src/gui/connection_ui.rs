@@ -71,7 +71,6 @@ struct ConnectionCurve {
     key: ConnectionKey,
     start: Pos2,
     end: Pos2,
-    control_offset: f32,
 }
 
 #[derive(Debug, Default)]
@@ -94,7 +93,7 @@ impl ConnectionUi {
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
-            self.collect_highlighted(breaker);
+            self.collect_highlighted(breaker, view_graph.scale);
         }
     }
 
@@ -113,7 +112,7 @@ impl ConnectionUi {
             } else {
                 ctx.style.connection_stroke
             };
-            let control_offset = curve.control_offset;
+            let control_offset = bezier_control_offset(curve.start, curve.end, view_graph.scale);
             let points = sample_cubic_bezier(
                 curve.start,
                 curve.start + egui::vec2(control_offset, 0.0),
@@ -197,7 +196,6 @@ impl ConnectionUi {
                 let end_layout = graph_layout.node_layout(&node.id);
                 let start = start_layout.output_center(binding.port_idx, row_height);
                 let end = end_layout.input_center(input_index, row_height);
-                let control_offset = bezier_control_offset(start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
@@ -205,13 +203,12 @@ impl ConnectionUi {
                     },
                     start,
                     end,
-                    control_offset,
                 });
             }
         }
     }
 
-    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
+    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker, scale: f32) {
         if breaker.points.len() < 2 {
             return;
         }
@@ -219,10 +216,11 @@ impl ConnectionUi {
         let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
 
         for curve in self.curves.iter() {
+            let control_offset = bezier_control_offset(curve.start, curve.end, scale);
             let samples = sample_cubic_bezier(
                 curve.start,
-                curve.start + egui::vec2(curve.control_offset, 0.0),
-                curve.end + egui::vec2(-curve.control_offset, 0.0),
+                curve.start + egui::vec2(control_offset, 0.0),
+                curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
                 24,
             );
