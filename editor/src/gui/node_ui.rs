@@ -98,6 +98,10 @@ impl NodeUi {
             render_node_labels(ctx, view_graph, &node_layout, func);
         }
 
+        while let Some(node_id) = self.node_ids_to_remove.pop() {
+            view_graph.remove_node(&node_id);
+        }
+
         drag_port_info
     }
 }
@@ -109,7 +113,7 @@ fn body_drag(
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
 ) -> NodeLayout {
-    let node_layout = graph_layout.node_layout(&node_id).clone();
+    let node_layout = graph_layout.node_layout(node_id).clone();
 
     let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
     let body_response = ctx.ui.interact(
@@ -133,7 +137,7 @@ fn body_drag(
             body_response.drag_delta() / view_graph.scale;
 
         let new_layout = compute_node_layout(ctx, view_graph, node_id, graph_layout.origin);
-        graph_layout.update_node_layout(&node_id, new_layout.clone());
+        graph_layout.update_node_layout(node_id, new_layout.clone());
         return new_layout;
     }
 
