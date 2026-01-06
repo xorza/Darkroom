@@ -1,5 +1,6 @@
 #[macro_use]
 pub mod macros;
+pub mod bezier;
 pub mod bool_ext;
 pub mod constants;
 pub mod debug;
@@ -14,6 +15,7 @@ pub mod shared;
 pub mod toggle;
 pub mod yaml_format;
 
+pub use bezier::Bezier;
 pub use bool_ext::BoolExt;
 pub use constants::EPSILON;
 pub use debug::is_debug;

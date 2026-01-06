@@ -468,6 +468,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "egui",
  "mlua",
  "serde",
  "serde_json",

@@ -29,6 +29,7 @@ Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
 Connection drag lifecycle now goes through `ConnectionUi` helpers (`start_drag`, `update_drag`, `stop_drag`), and
 `ConnectionUi::render` draws the active drag path.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
+Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.
 
 ## Repository Layout
 
