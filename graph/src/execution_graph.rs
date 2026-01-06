@@ -440,7 +440,7 @@ impl ExecutionGraph {
     }
 
     pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
-        self.pre_execute();
+        self.pre_execute()?;
 
         let start = std::time::Instant::now();
 
@@ -529,15 +529,17 @@ impl ExecutionGraph {
         }
     }
 
-    fn pre_execute(&mut self) {
+    fn pre_execute(&mut self) -> ExecutionResult<()> {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
 
         self.forward2();
-        self.backward2();
+        self.backward2()?;
 
         self.validate_for_execution();
+
+        Ok(())
     }
 
     // Propagate input state forward through the processing order.
@@ -593,7 +595,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect the execution order.
-    fn backward2(&mut self) {
+    fn backward2(&mut self) -> ExecutionResult<()> {
         self.e_node_invoke_order.clear();
         self.e_node_invoke_order
             .reserve(self.e_node_process_order.len());
@@ -625,7 +627,7 @@ impl ExecutionGraph {
 
             match e_node.process_state {
                 ProcessState::Processing => {
-                    unreachable!("Cycles should be detected earlier in backward1()")
+                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
                 }
                 ProcessState::None => unreachable!("Node should have been processed in forward()"),
                 ProcessState::Forward => {}
@@ -657,6 +659,8 @@ impl ExecutionGraph {
                 };
             }
         }
+
+        Ok(())
     }
 
     fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
@@ -815,7 +819,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -870,7 +874,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
@@ -899,7 +903,7 @@ mod tests {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -929,7 +933,7 @@ mod tests {
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -942,7 +946,7 @@ mod tests {
         assert_eq!(mult.inputs[1].state, InputState::Changed);
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -956,7 +960,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
@@ -1036,7 +1040,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1044,7 +1048,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1089,7 +1093,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1109,7 +1113,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1119,7 +1123,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute();
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
