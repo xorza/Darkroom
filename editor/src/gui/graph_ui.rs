@@ -111,12 +111,20 @@ impl GraphUi {
 
         self.graph_layout.update(&ctx, view_graph);
 
+        render_background(&ctx, view_graph);
+
+        self.render_connections(&mut ctx, view_graph);
+
         let drag_port_info = self.node_ui.process_input(
             &mut ctx,
             view_graph,
             &mut self.graph_layout,
             ui_interaction,
         );
+        self.node_ui
+            .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
+
+        self.top_panel(&mut ctx, view_graph);
 
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
@@ -128,15 +136,6 @@ impl GraphUi {
                 drag_port_info,
             )?;
         }
-
-        background(&ctx, view_graph);
-
-        self.render_connections(&mut ctx, view_graph);
-
-        self.node_ui
-            .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
-
-        self.top_panel(&mut ctx, view_graph);
 
         Ok(())
     }
@@ -339,7 +338,7 @@ fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) 
     (scroll_delta, mouse_wheel_delta)
 }
 
-fn background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
+fn render_background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
     let spacing = ctx.style.dotted_base_spacing * view_graph.scale;
     let radius = (ctx.style.dotted_radius_base * view_graph.scale)
         .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
