@@ -105,12 +105,14 @@ impl MainUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            self.graph_ui.render(
+            let _ = self.graph_ui.process_input(
                 ui,
                 &mut app_data.view_graph,
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
             );
+            self.graph_ui
+                .render(ui, &mut app_data.view_graph, &app_data.func_lib);
         });
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {

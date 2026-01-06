@@ -31,7 +31,7 @@ enum PrimaryState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CycleError {
+pub(crate) enum CycleError {
     Detected {
         input_node_id: NodeId,
         output_node_id: NodeId,
@@ -74,16 +74,14 @@ impl GraphUi {
         self.connections = ConnectionUi::default();
     }
 
-    pub fn render(
+    pub fn process_input(
         &mut self,
         ui: &mut Ui,
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-    ) {
+    ) -> Result<(), CycleError> {
         let mut ctx = GraphContext::new(ui, func_lib);
-
-        background(&ctx, view_graph);
 
         let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
 
@@ -113,15 +111,24 @@ impl GraphUi {
                 ui_interaction,
                 pointer_pos,
                 drag_port_info,
-            );
+            )?;
         }
 
+        self.top_panel(&mut ctx, view_graph);
+
+        Ok(())
+    }
+
+    pub fn render(&mut self, ui: &mut Ui, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
+        let mut ctx = GraphContext::new(ui, func_lib);
+
+        background(&ctx, view_graph);
+
+        self.graph_layout.update(&ctx, view_graph);
         self.render_connections(&mut ctx, view_graph);
 
         self.node_ui
             .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
-
-        self.top_panel(&mut ctx, view_graph);
     }
 
     fn process_connections(
@@ -132,7 +139,7 @@ impl GraphUi {
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
-    ) {
+    ) -> Result<(), CycleError> {
         let primary_state = ctx.ui.input(|input| {
             if input.pointer.primary_pressed() {
                 Some(PrimaryState::Pressed)
@@ -203,19 +210,19 @@ impl GraphUi {
                         start_port,
                         end_port,
                     } => {
-                        if let Ok((input_node_id, input_idx)) =
-                            apply_connection(view_graph, start_port.port, end_port.port)
-                        {
-                            ui_interaction
-                                .actions
-                                .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
-                        }
+                        let (input_node_id, input_idx) =
+                            apply_connection(view_graph, start_port.port, end_port.port)?;
+                        ui_interaction
+                            .actions
+                            .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
 
                         self.state = InteractionState::Idle;
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
     fn render_connections(&mut self, ctx: &mut GraphContext, view_graph: &model::ViewGraph) {
