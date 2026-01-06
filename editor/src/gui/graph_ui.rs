@@ -331,7 +331,13 @@ fn background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
     }
 }
 
-// result -> (input_node_id, input_idx)
+/// Connects an output port to an input port in `view_graph`.
+///
+/// Returns the input node id and input port index that were updated.
+///
+/// # Panics
+/// Panics if the ports are not of opposite kinds, or if the input node id
+/// is not present in the graph.
 fn apply_connection(view_graph: &mut model::ViewGraph, a: PortRef, b: PortRef) -> (NodeId, usize) {
     let (input_port, output_port) = match (a.kind, b.kind) {
         (PortKind::Output, PortKind::Input) => (b, a),

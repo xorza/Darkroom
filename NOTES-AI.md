@@ -21,6 +21,7 @@ rect.
 Connection UI now owns the shared bezier control-offset helper used for connection drawing and drag previews.
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
+Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 
 ## Repository Layout
 
