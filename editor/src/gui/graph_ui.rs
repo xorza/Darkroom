@@ -157,8 +157,7 @@ impl GraphUi {
                     } else if pointer_on_background {
                         view_graph.selected_node_id = None;
                         self.state = InteractionState::BreakingConnections;
-                        self.connection_breaker.reset();
-                        self.connection_breaker.points.push(pointer_pos);
+                        self.connection_breaker.start(pointer_pos);
                     }
                 }
             }

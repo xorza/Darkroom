@@ -346,5 +346,6 @@ checks.
 Connection breaker now encapsulates point addition/length limiting logic in `ConnectionBreaker::add_point`.
 Breaker max length is now owned by `connection_breaker.rs` rather than `graph_ui.rs`.
 Connection hit-testing now precomputes breaker segments and avoids repeated iterator cloning.
+Connection breaker now stores segments directly, avoiding point-window allocations for hit testing.
 `GraphLayout` now stores per-node `NodeLayout` values built by `compute_node_layouts` (no shared base layout), and
 layout geometry is derived from local constants inside `compute_node_layout`.

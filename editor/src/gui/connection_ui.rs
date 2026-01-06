@@ -121,15 +121,10 @@ impl ConnectionUi {
     }
 
     fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
-        if breaker.points.len() < 2 {
+        let breaker_segments = breaker.segments();
+        if breaker_segments.is_empty() {
             return;
         }
-
-        let breaker_segments: Vec<(Pos2, Pos2)> = breaker
-            .points
-            .windows(2)
-            .map(|pair| (pair[0], pair[1]))
-            .collect();
 
         for curve in self.curves.iter() {
             let curve_segments = self.point_cache[curve.start_idx..curve.end_idx]
@@ -137,7 +132,7 @@ impl ConnectionUi {
                 .map(|pair| (pair[0], pair[1]));
             let mut hit = false;
             'outer: for (b1, b2) in curve_segments {
-                for (a1, a2) in &breaker_segments {
+                for (a1, a2) in breaker_segments {
                     if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
                         hit = true;
                         break 'outer;

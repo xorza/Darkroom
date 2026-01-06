@@ -8,17 +8,28 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug, Default)]
 pub struct ConnectionBreaker {
-    pub points: Vec<Pos2>,
+    segments: Vec<(Pos2, Pos2)>,
+    last_point: Option<Pos2>,
 }
 
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
-        self.points.clear();
+        self.segments.clear();
+        self.last_point = None;
+    }
+
+    pub fn start(&mut self, point: Pos2) {
+        self.segments.clear();
+        self.last_point = Some(point);
+    }
+
+    pub fn segments(&self) -> &[(Pos2, Pos2)] {
+        &self.segments
     }
 
     pub fn add_point(&mut self, point: Pos2) {
-        let Some(last_pos) = self.points.last().copied() else {
-            self.points.push(point);
+        let Some(last_pos) = self.last_point else {
+            self.last_point = Some(point);
             return;
         };
         if last_pos.distance(point) <= MIN_POINT_DISTANCE {
@@ -44,22 +55,26 @@ impl ConnectionBreaker {
                 last_pos.y + (point.y - last_pos.y) * t,
             )
         };
-        self.points.push(clamped);
+        self.segments.push((last_pos, clamped));
+        self.last_point = Some(clamped);
     }
 
     pub fn render(&self, ctx: &GraphContext) {
-        if self.points.len() > 1 {
-            ctx.painter.add(egui::Shape::line(
-                self.points.clone(),
-                ctx.style.breaker_stroke,
-            ));
+        if self.segments.is_empty() {
+            return;
+        }
+
+        // todo optimize
+        for (start, end) in &self.segments {
+            ctx.painter
+                .line_segment([*start, *end], ctx.style.breaker_stroke);
         }
     }
 
     fn path_length(&self) -> f32 {
-        self.points
-            .windows(2)
-            .map(|pair| pair[0].distance(pair[1]))
+        self.segments
+            .iter()
+            .map(|(start, end)| start.distance(*end))
             .sum()
     }
 }
