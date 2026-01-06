@@ -382,12 +382,20 @@ fn fit_all_nodes(
         return;
     }
 
-    let bounds = graph_layout
-        .node_layouts
-        .values()
-        .map(|layout| layout.rect)
-        .reduce(|acc, rect| acc.union(rect))
-        .expect("node layouts must be non-empty");
+    let origin = graph_layout.origin;
+    let scale = view_graph.scale;
+    let to_graph_rect = |rect: egui::Rect| {
+        let min = (rect.min - origin) / scale;
+        let max = (rect.max - origin) / scale;
+        egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
+    };
+
+    let mut layouts = graph_layout.node_layouts.values();
+    let first = layouts.next().unwrap();
+    let mut bounds = to_graph_rect(first.rect);
+    for layout in layouts {
+        bounds = bounds.union(to_graph_rect(layout.rect));
+    }
 
     let bounds_size = bounds.size();
 

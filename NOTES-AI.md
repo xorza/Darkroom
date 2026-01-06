@@ -22,6 +22,7 @@ Connection UI now owns the shared bezier control-offset helper used for connecti
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
+Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
 
 ## Repository Layout
 
