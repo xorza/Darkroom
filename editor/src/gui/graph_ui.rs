@@ -36,7 +36,7 @@ pub struct GraphUi {
     graph_layout: GraphLayout,
     connection_breaker: ConnectionBreaker,
     connection_drag: Option<ConnectionDrag>,
-    connection_renderer: ConnectionUi,
+    connections: ConnectionUi,
     node_ui: NodeUi,
 }
 
@@ -65,7 +65,7 @@ impl GraphUi {
         self.graph_layout = GraphLayout::default();
         self.connection_breaker.reset();
         self.connection_drag = None;
-        self.connection_renderer = ConnectionUi::default();
+        self.connections = ConnectionUi::default();
     }
 
     pub fn render(
@@ -170,7 +170,7 @@ impl GraphUi {
                     return;
                 }
 
-                for connection in self.connection_renderer.highlighted.iter() {
+                for connection in self.connections.highlighted.iter() {
                     let node = view_graph
                         .graph
                         .nodes
@@ -223,7 +223,7 @@ impl GraphUi {
     }
 
     fn render_connections(&mut self, ctx: &mut GraphContext, view_graph: &model::ViewGraph) {
-        self.connection_renderer.render(
+        self.connections.render(
             ctx,
             &self.graph_layout,
             view_graph,
