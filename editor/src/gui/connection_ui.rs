@@ -49,22 +49,6 @@ impl ConnectionDrag {
             end_port: None,
         }
     }
-
-    pub(crate) fn render(&self, ctx: &GraphContext, zoom: f32) {
-        let control_offset = bezier_control_offset(self.start_port.center, self.current_pos, zoom);
-        let (start_sign, end_sign) = match self.start_port.port.kind {
-            PortKind::Output => (1.0, -1.0),
-            PortKind::Input => (-1.0, 1.0),
-        };
-        let stroke = ctx.style.temp_connection_stroke;
-        let points = sample_cubic_bezier(
-            self.start_port.center,
-            self.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
-            self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
-            self.current_pos,
-        );
-        ctx.painter.add(egui::Shape::line(points, stroke));
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -79,6 +63,8 @@ pub(crate) struct ConnectionUi {
     curves: Vec<ConnectionCurve>,
     pub(crate) highlighted: HashSet<ConnectionKey>,
     pub(crate) drag: Option<ConnectionDrag>,
+
+    point_cache: Vec<Pos2>,
 }
 
 impl ConnectionUi {
@@ -114,17 +100,36 @@ impl ConnectionUi {
                 ctx.style.connection_stroke
             };
             let control_offset = bezier_control_offset(curve.start, curve.end, view_graph.scale);
-            let points = sample_cubic_bezier(
+            sample_cubic_bezier(
+                &mut self.point_cache,
                 curve.start,
                 curve.start + egui::vec2(control_offset, 0.0),
                 curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
             );
-            ctx.painter.add(egui::Shape::line(points, stroke));
+            ctx.painter
+                .add(egui::Shape::line(self.point_cache.clone(), stroke));
         }
 
         if let Some(drag) = &self.drag {
-            drag.render(ctx, view_graph.scale);
+            let control_offset =
+                bezier_control_offset(drag.start_port.center, drag.current_pos, view_graph.scale);
+            let (start_sign, end_sign) = match drag.start_port.port.kind {
+                PortKind::Output => (1.0, -1.0),
+                PortKind::Input => (-1.0, 1.0),
+            };
+            let stroke = ctx.style.temp_connection_stroke;
+            sample_cubic_bezier(
+                &mut self.point_cache,
+                drag.start_port.center,
+                drag.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
+                drag.current_pos + egui::vec2(control_offset * end_sign, 0.0),
+                drag.current_pos,
+            );
+            ctx.painter
+                .add(egui::Shape::line(self.point_cache.clone(), stroke));
+            // }
+            // drag.render(ctx, view_graph.scale);
         }
     }
 
@@ -217,13 +222,14 @@ impl ConnectionUi {
 
         for curve in self.curves.iter() {
             let control_offset = bezier_control_offset(curve.start, curve.end, scale);
-            let samples = sample_cubic_bezier(
+            sample_cubic_bezier(
+                &mut self.point_cache,
                 curve.start,
                 curve.start + egui::vec2(control_offset, 0.0),
                 curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
             );
-            let curve_segments = samples.windows(2).map(|pair| (pair[0], pair[1]));
+            let curve_segments = self.point_cache.windows(2).map(|pair| (pair[0], pair[1]));
             let mut hit = false;
             for (a1, a2) in breaker_segments.clone() {
                 for (b1, b2) in curve_segments.clone() {
@@ -248,11 +254,12 @@ fn bezier_control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     (dx * 0.5).max(10.0 * scale)
 }
 
-fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> {
+fn sample_cubic_bezier(points: &mut Vec<Pos2>, p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) {
     let steps = BEZIER_STEPS;
     assert!(steps > 2);
 
-    let mut points = Vec::with_capacity(steps + 1);
+    points.clear();
+
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
         let one_minus = 1.0 - t;
@@ -264,7 +271,6 @@ fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> {
         let y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
         points.push(Pos2::new(x, y));
     }
-    points
 }
 
 fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
