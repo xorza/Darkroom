@@ -295,11 +295,10 @@ impl GraphUi {
             }
         });
 
-        let (zoom_delta, pan) = if mouse_wheel_delta > f32::EPSILON {
-            ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO)
-        } else {
-            (pinch_delta, scroll_delta)
-        };
+        let (zoom_delta, pan) = (mouse_wheel_delta > f32::EPSILON).then_else(
+            ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO),
+            (pinch_delta, scroll_delta),
+        );
 
         {
             // zoom
