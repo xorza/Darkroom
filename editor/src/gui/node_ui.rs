@@ -68,17 +68,9 @@ impl NodeUi {
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let node_id = view_graph.view_nodes[view_node_idx].id;
-            let mut node_layout = graph_layout.node_layout(&node_id).clone();
+            let node_layout = graph_layout.node_layout(&node_id).clone();
 
-            body_drag(
-                ctx,
-                view_graph,
-                graph_layout,
-                ui_interaction,
-                view_node_idx,
-                node_id,
-                &mut node_layout,
-            );
+            body_drag(ctx, view_graph, graph_layout, ui_interaction, &node_id);
 
             let node = view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -114,10 +106,10 @@ fn body_drag(
     view_graph: &mut ViewGraph,
     graph_layout: &mut GraphLayout,
     ui_interaction: &mut GraphUiInteraction,
-    view_node_idx: usize,
-    node_id: NodeId,
-    node_layout: &mut NodeLayout,
-) {
+    node_id: &NodeId,
+) -> NodeLayout {
+    let node_layout = graph_layout.node_layout(&node_id).clone();
+
     let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
     let body_response = ctx.ui.interact(
         node_layout.rect,
@@ -127,20 +119,24 @@ fn body_drag(
 
     let dragged = body_response.dragged_by(PointerButton::Middle)
         || body_response.dragged_by(PointerButton::Primary);
-    if dragged {
-        view_graph.view_nodes[view_node_idx].pos += body_response.drag_delta() / view_graph.scale;
-
-        let new_layout = compute_node_layout(ctx, view_graph, &node_id, graph_layout.origin);
-        graph_layout.update_node_layout(&node_id, new_layout.clone());
-        *node_layout = new_layout;
-    }
 
     if dragged || body_response.clicked() {
         ui_interaction
             .actions
-            .push((node_id, GraphUiAction::NodeSelected));
-        view_graph.selected_node_id = Some(node_id);
+            .push((*node_id, GraphUiAction::NodeSelected));
+        view_graph.selected_node_id = Some(*node_id);
     }
+
+    if dragged {
+        view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
+            body_response.drag_delta() / view_graph.scale;
+
+        let new_layout = compute_node_layout(ctx, view_graph, node_id, graph_layout.origin);
+        graph_layout.update_node_layout(&node_id, new_layout.clone());
+        return new_layout;
+    }
+
+    node_layout
 }
 
 fn render_body(
