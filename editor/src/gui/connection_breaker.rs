@@ -64,11 +64,11 @@ impl ConnectionBreaker {
             return;
         }
 
-        // todo optimize
-        for (start, end) in &self.segments {
-            ctx.painter
-                .line_segment([*start, *end], ctx.style.breaker_stroke);
-        }
+        let mut points: Vec<Pos2> = Vec::with_capacity(self.segments.len() + 1);
+        points.push(self.segments[0].0);
+        points.extend(self.segments.iter().map(|(_, end)| end));
+
+        ctx.painter.line(points, ctx.style.breaker_stroke);
     }
 
     fn path_length(&self) -> f32 {
