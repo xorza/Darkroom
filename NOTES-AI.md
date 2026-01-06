@@ -24,7 +24,7 @@ Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
-Graph UI now captures mouse wheel delta/unit each frame and exposes them as public fields on `GraphUi`.
+Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 
 ## Repository Layout
 

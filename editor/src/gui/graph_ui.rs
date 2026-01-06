@@ -301,6 +301,10 @@ impl GraphUi {
     }
 }
 
+/// Returns smooth scroll delta plus an accumulated mouse-wheel line/page magnitude.
+///
+/// Trackpad/gesture scrolling is folded into the returned `Vec2`, while mouse wheel
+/// steps (line/page units) are accumulated separately to keep zoom/pan heuristics stable.
 fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) {
     let (scroll_delta, mouse_wheel_delta) = {
         let base_scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
