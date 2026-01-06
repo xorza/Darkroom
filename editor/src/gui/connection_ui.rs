@@ -102,11 +102,15 @@ impl ConnectionUi {
                 let start_layout = graph_layout.node_layout(&binding.target_id);
                 let end_layout = graph_layout.node_layout(&node.id);
 
-                let start = end_layout.input_center(input_index, row_height);
-                let end = start_layout.output_center(binding.port_idx, row_height);
+                let input_pos = end_layout.input_center(input_index, row_height);
+                let output_pos = start_layout.output_center(binding.port_idx, row_height);
 
-                let (start_idx, end_idx) =
-                    ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+                let (start_idx, end_idx) = ConnectionBezier::sample(
+                    &mut self.point_cache,
+                    output_pos,
+                    input_pos,
+                    view_graph.scale,
+                );
 
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
@@ -161,22 +165,21 @@ impl ConnectionUi {
                 ctx.style.connection_stroke
             };
             ctx.painter.line(
-                self.point_cache[curve.start_idx..curve.end_idx].to_vec(),
+                self.point_cache[curve.start_idx..=curve.end_idx].to_vec(),
                 stroke,
             );
         }
 
         if let Some(drag) = &self.drag {
             let (start, end) = match drag.start_port.port.kind {
-                PortKind::Output => (drag.current_pos, drag.start_port.center),
-                PortKind::Input => (drag.start_port.center, drag.current_pos),
+                PortKind::Input => (drag.current_pos, drag.start_port.center),
+                PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
 
             let (start_idx, end_idx) =
                 ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
-
             ctx.painter.line(
-                self.point_cache[start_idx..end_idx].to_vec(),
+                self.point_cache[start_idx..=end_idx].to_vec(),
                 ctx.style.temp_connection_stroke,
             );
         }

@@ -17,8 +17,8 @@ impl ConnectionBezier {
         let p3 = end;
 
         let control_offset = control_offset(p0, p3, scale);
-        let p1 = p0 + egui::vec2(-control_offset, 0.0);
-        let p2 = p3 + egui::vec2(control_offset, 0.0);
+        let p1 = p0 + egui::vec2(control_offset, 0.0);
+        let p2 = p3 + egui::vec2(-control_offset, 0.0);
 
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
