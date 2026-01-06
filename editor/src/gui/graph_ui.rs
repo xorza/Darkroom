@@ -165,32 +165,31 @@ impl GraphUi {
             InteractionState::BreakingConnections => {
                 if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
-                    return;
-                }
+                } else {
+                    for connection in self.connections.highlighted.iter() {
+                        let node = view_graph
+                            .graph
+                            .nodes
+                            .by_key_mut(&connection.input_node_id)
+                            .unwrap();
 
-                for connection in self.connections.highlighted.iter() {
-                    let node = view_graph
-                        .graph
-                        .nodes
-                        .by_key_mut(&connection.input_node_id)
-                        .unwrap();
-
-                    node.inputs[connection.input_idx].binding = Binding::None;
-                    ui_interaction.actions.push((
-                        connection.input_node_id,
-                        GraphUiAction::InputChanged {
-                            input_idx: connection.input_idx,
-                        },
-                    ));
+                        node.inputs[connection.input_idx].binding = Binding::None;
+                        ui_interaction.actions.push((
+                            connection.input_node_id,
+                            GraphUiAction::InputChanged {
+                                input_idx: connection.input_idx,
+                            },
+                        ));
+                    }
+                    self.connection_breaker.reset();
+                    self.state = InteractionState::Idle;
                 }
-                self.connection_breaker.reset();
-                self.state = InteractionState::Idle;
             }
             InteractionState::DraggingNewConnection => {
-                let snapshot = self
+                let update = self
                     .connections
                     .update_drag(ctx, pointer_pos, drag_port_info);
-                match snapshot {
+                match update {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => self.state = InteractionState::Idle,
                     ConnectionDragUpdate::FinishedWith {
