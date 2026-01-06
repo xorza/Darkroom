@@ -125,16 +125,20 @@ impl ConnectionUi {
             return;
         }
 
-        let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
+        let breaker_segments: Vec<(Pos2, Pos2)> = breaker
+            .points
+            .windows(2)
+            .map(|pair| (pair[0], pair[1]))
+            .collect();
 
         for curve in self.curves.iter() {
             let curve_segments = self.point_cache[curve.start_idx..curve.end_idx]
                 .windows(2)
                 .map(|pair| (pair[0], pair[1]));
             let mut hit = false;
-            'outer: for (a1, a2) in breaker_segments.clone() {
-                for (b1, b2) in curve_segments.clone() {
-                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+            'outer: for (b1, b2) in curve_segments {
+                for (a1, a2) in &breaker_segments {
+                    if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
                         hit = true;
                         break 'outer;
                     }

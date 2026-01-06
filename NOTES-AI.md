@@ -345,5 +345,6 @@ Graph UI now uses `ui.interact` on node rects to determine pointer-over-node sta
 checks.
 Connection breaker now encapsulates point addition/length limiting logic in `ConnectionBreaker::add_point`.
 Breaker max length is now owned by `connection_breaker.rs` rather than `graph_ui.rs`.
+Connection hit-testing now precomputes breaker segments and avoids repeated iterator cloning.
 `GraphLayout` now stores per-node `NodeLayout` values built by `compute_node_layouts` (no shared base layout), and
 layout geometry is derived from local constants inside `compute_node_layout`.
