@@ -209,6 +209,7 @@ impl ConnectionUi {
 
         for curve in self.curves.iter() {
             Bezier::sample(&mut self.point_cache, curve.start, curve.end, scale);
+
             let curve_segments = self.point_cache.windows(2).map(|pair| (pair[0], pair[1]));
             let mut hit = false;
             for (a1, a2) in breaker_segments.clone() {
