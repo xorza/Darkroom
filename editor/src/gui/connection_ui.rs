@@ -28,9 +28,6 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
-
-    start_idx: usize,
-    end_idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -49,8 +46,6 @@ impl ConnectionDrag {
             current_pos: port.center,
             start_port: port,
             end_port: None,
-            start_idx: 0,
-            end_idx: 0,
         }
     }
 }
@@ -110,10 +105,8 @@ impl ConnectionUi {
                 let start = end_layout.input_center(input_index, row_height);
                 let end = start_layout.output_center(binding.port_idx, row_height);
 
-                let start_idx = self.point_cache.len();
-                ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
-                let end_idx = self.point_cache.len();
-
+                let (start_idx, end_idx) =
+                    ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
@@ -182,9 +175,8 @@ impl ConnectionUi {
                 PortKind::Input => (drag.start_port.center, drag.current_pos),
             };
 
-            let start_idx = self.point_cache.len();
-            ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
-            let end_idx = self.point_cache.len();
+            let (start_idx, end_idx) =
+                ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
 
             ctx.painter.line(
                 self.point_cache[start_idx..end_idx].to_vec(),

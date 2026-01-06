@@ -7,7 +7,7 @@ impl ConnectionBezier {
     pub const STEPS: usize = 24;
 
     // will add points to the points
-    pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) {
+    pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) -> (usize, usize) {
         let steps = Self::STEPS;
         assert!(steps > 2, "bezier steps must be greater than 2");
 
@@ -29,6 +29,8 @@ impl ConnectionBezier {
             let y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
             points.push(Pos2::new(x, y));
         }
+
+        (points.len() - steps - 1, points.len() - 1)
     }
 
     pub fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
