@@ -64,6 +64,11 @@ impl ConnectionBreaker {
             return;
         }
 
+        debug_assert!(
+            self.segments.windows(2).all(|pair| pair[0].1 == pair[1].0),
+            "breaker segments must be contiguous"
+        );
+
         let mut points: Vec<Pos2> = Vec::with_capacity(self.segments.len() + 1);
         points.push(self.segments[0].0);
         points.extend(self.segments.iter().map(|(_, end)| end));
