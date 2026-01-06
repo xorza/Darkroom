@@ -29,13 +29,6 @@ enum PrimaryState {
     Down,
     Released,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum ZoomPanState {
-    #[default]
-    None,
-    Zoom,
-    Pan,
-}
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
@@ -45,7 +38,6 @@ pub struct GraphUi {
     connection_drag: Option<ConnectionDrag>,
     connection_renderer: ConnectionUi,
     node_ui: NodeUi,
-    zoom_pan_state: ZoomPanState,
 }
 
 #[derive(Debug, Default)]
@@ -289,26 +281,28 @@ impl GraphUi {
             }
         });
         let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
-
-        if (pinch_delta - 1.0).abs() > f32::EPSILON {
-            self.zoom_pan_state = ZoomPanState::Zoom;
-        } else if scroll_delta.length_sq() > f32::EPSILON {
-            if self.zoom_pan_state == ZoomPanState::None {
-                self.zoom_pan_state = (scroll_delta.x.abs() > f32::EPSILON)
-                    .then_else(ZoomPanState::Pan, ZoomPanState::Zoom);
+        let mut mouse_wheel_delta: f32 = 0.0;
+        ctx.ui.input(|input| {
+            for event in &input.events {
+                if let egui::Event::MouseWheel {
+                    unit: _,
+                    delta: event_delta,
+                    ..
+                } = event
+                {
+                    mouse_wheel_delta += event_delta.length();
+                }
             }
-        } else {
-            self.zoom_pan_state = ZoomPanState::None;
-            return;
-        }
+        });
 
-        let (zoom_delta, pan) = match self.zoom_pan_state {
-            ZoomPanState::None => unreachable!(),
-            ZoomPanState::Zoom => (
+        let (zoom_delta, pan) = if mouse_wheel_delta > f32::EPSILON {
+            println!("mouse_wheel_delta {}", mouse_wheel_delta);
+            ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO)
+        } else {
+            (
                 (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta,
-                Vec2::ZERO,
-            ),
-            ZoomPanState::Pan => (1.0, scroll_delta),
+                scroll_delta,
+            )
         };
 
         {
