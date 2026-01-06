@@ -67,89 +67,40 @@ impl NodeUi {
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
-            let view_node_id = view_graph.view_nodes[view_node_idx].id;
-            let mut node_layout = graph_layout.node_layout(&view_node_id).clone();
+            let node_id = view_graph.view_nodes[view_node_idx].id;
+            let mut node_layout = graph_layout.node_layout(&node_id).clone();
 
-            let node_ui_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
-            let body_response = ctx.ui.interact(
-                node_layout.rect,
-                node_ui_id,
-                egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
+            body_drag(
+                ctx,
+                view_graph,
+                graph_layout,
+                ui_interaction,
+                view_node_idx,
+                node_id,
+                &mut node_layout,
             );
 
-            let dragged = body_response.dragged_by(PointerButton::Middle)
-                || body_response.dragged_by(PointerButton::Primary);
-            if dragged {
-                view_graph.view_nodes[view_node_idx].pos +=
-                    body_response.drag_delta() / view_graph.scale;
-
-                let new_layout =
-                    compute_node_layout(ctx, view_graph, &view_node_id, graph_layout.origin);
-                graph_layout.update_node_layout(&view_node_id, new_layout.clone());
-                node_layout = new_layout;
-            }
-
-            if dragged || body_response.clicked() {
-                ui_interaction
-                    .actions
-                    .push((view_node_id, GraphUiAction::NodeSelected));
-                view_graph.selected_node_id = Some(view_node_id);
-            }
-
-            let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
+            let node = view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-            let remove_btn_id = ctx.ui.make_persistent_id(("node_remove", node.id));
-
-            let remove_response = ctx.ui.interact(
-                node_layout.remove_btn_rect,
-                remove_btn_id,
-                egui::Sense::click(),
-            );
-            if remove_response.hovered() {
-                remove_response.show_tooltip_text("Remove node");
-            }
-
-            if remove_response.clicked() {
-                ui_interaction
-                    .actions
-                    .push((view_node_id, GraphUiAction::NodeRemoved));
-                // view_graph.remove_node(&view_node_id);
-                continue;
-            }
-
             let view_node = &view_graph.view_nodes[view_node_idx];
+
             let node_drag_port_result =
                 interact_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
 
-            let view_node = &view_graph.view_nodes[view_node_idx];
+            // let view_node = &view_graph.view_nodes[view_node_idx];
 
-            let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
-            let cache_response = ctx.ui.interact(
-                node_layout.cache_button_rect,
-                cache_btn_id,
-                if !node.terminal {
-                    egui::Sense::click()
-                } else {
-                    egui::Sense::hover()
-                },
-            );
-            if !node.terminal && cache_response.clicked() {
-                node.behavior = (node.behavior == NodeBehavior::Once)
-                    .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
-                ui_interaction
-                    .actions
-                    .push((view_node_id, GraphUiAction::CacheToggled));
-            }
-
-            let is_selected = view_graph
-                .selected_node_id
-                .is_some_and(|id| id == view_node_id);
+            let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
             render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
-            render_remove_btn(ctx, &node_layout, remove_response, view_graph.scale);
-            render_cache_btn(ctx, &node_layout, node, cache_response, view_graph.scale);
+            render_remove_btn(
+                ctx,
+                ui_interaction,
+                &node_id,
+                &node_layout,
+                view_graph.scale,
+            );
+            render_cache_btn(ctx, ui_interaction, &node_layout, node, view_graph.scale);
             render_hints(ctx, &node_layout, node, func, view_graph.scale);
             render_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
             render_node_const_bindings(ctx, &node_layout, node, view_graph.scale);
@@ -157,6 +108,40 @@ impl NodeUi {
         }
 
         drag_port_info
+    }
+}
+
+fn body_drag(
+    ctx: &mut GraphContext<'_>,
+    view_graph: &mut ViewGraph,
+    graph_layout: &mut GraphLayout,
+    ui_interaction: &mut GraphUiInteraction,
+    view_node_idx: usize,
+    node_id: NodeId,
+    node_layout: &mut NodeLayout,
+) {
+    let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
+    let body_response = ctx.ui.interact(
+        node_layout.rect,
+        node_body_id,
+        egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
+    );
+
+    let dragged = body_response.dragged_by(PointerButton::Middle)
+        || body_response.dragged_by(PointerButton::Primary);
+    if dragged {
+        view_graph.view_nodes[view_node_idx].pos += body_response.drag_delta() / view_graph.scale;
+
+        let new_layout = compute_node_layout(ctx, view_graph, &node_id, graph_layout.origin);
+        graph_layout.update_node_layout(&node_id, new_layout.clone());
+        *node_layout = new_layout;
+    }
+
+    if dragged || body_response.clicked() {
+        ui_interaction
+            .actions
+            .push((node_id, GraphUiAction::NodeSelected));
+        view_graph.selected_node_id = Some(node_id);
     }
 }
 
@@ -205,11 +190,29 @@ impl PortDragInfo {
 
 fn render_cache_btn(
     ctx: &mut GraphContext,
-    layout: &NodeLayout,
-    node: &graph::prelude::Node,
-    cache_response: egui::Response,
+    ui_interaction: &mut GraphUiInteraction,
+    node_layout: &NodeLayout,
+    node: &mut Node,
     scale: f32,
 ) {
+    let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+    let cache_response = ctx.ui.interact(
+        node_layout.cache_button_rect,
+        cache_btn_id,
+        if !node.terminal {
+            egui::Sense::click()
+        } else {
+            egui::Sense::hover()
+        },
+    );
+    if !node.terminal && cache_response.clicked() {
+        node.behavior = (node.behavior == NodeBehavior::Once)
+            .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
+        ui_interaction
+            .actions
+            .push((node.id, GraphUiAction::CacheToggled));
+    }
+
     let cache_button_fill = if node.terminal {
         ctx.style.widget_noninteractive_bg_fill
     } else if node.behavior == NodeBehavior::Once {
@@ -223,7 +226,7 @@ fn render_cache_btn(
     };
     let button_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
-        layout.cache_button_rect,
+        node_layout.cache_button_rect,
         ctx.style.node_corner_radius * scale * 0.5,
         cache_button_fill,
         button_stroke,
@@ -238,7 +241,7 @@ fn render_cache_btn(
         ctx.style.widget_text_color
     };
     ctx.painter.text(
-        layout.cache_button_rect.center(),
+        node_layout.cache_button_rect.center(),
         egui::Align2::CENTER_CENTER,
         "cache",
         ctx.style.body_font.scaled(scale),
@@ -284,10 +287,29 @@ fn render_hints(
 
 fn render_remove_btn(
     ctx: &mut GraphContext,
-    layout: &NodeLayout,
-    remove_response: egui::Response,
+    ui_interaction: &mut GraphUiInteraction,
+    node_id: &NodeId,
+    node_layout: &NodeLayout,
     scale: f32,
 ) {
+    let remove_btn_id = ctx.ui.make_persistent_id(("node_remove", node_id));
+
+    let remove_response = ctx.ui.interact(
+        node_layout.remove_btn_rect,
+        remove_btn_id,
+        egui::Sense::click(),
+    );
+    if remove_response.hovered() {
+        remove_response.show_tooltip_text("Remove node");
+    }
+
+    if remove_response.clicked() {
+        ui_interaction
+            .actions
+            .push((*node_id, GraphUiAction::NodeRemoved));
+        todo!();
+    }
+
     let close_fill = if remove_response.is_pointer_button_down_on() {
         ctx.style.widget_active_bg_fill
     } else if remove_response.hovered() {
@@ -297,13 +319,13 @@ fn render_remove_btn(
     };
     let close_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
-        layout.remove_btn_rect,
+        node_layout.remove_btn_rect,
         ctx.style.node_corner_radius * scale * 0.6,
         close_fill,
         close_stroke,
         egui::StrokeKind::Inside,
     );
-    let close_rect = layout.remove_btn_rect;
+    let close_rect = node_layout.remove_btn_rect;
     let close_margin = close_rect.width() * 0.3;
     let a = egui::pos2(
         close_rect.min.x + close_margin,
