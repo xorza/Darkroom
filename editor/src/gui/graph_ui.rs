@@ -5,7 +5,7 @@ use graph::prelude::{Binding, FuncLib, PortAddress};
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
-use crate::gui::connection_ui::{ConnectionDragInfo, ConnectionUi};
+use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::graph_ctx::GraphContext, model};
@@ -191,9 +191,9 @@ impl GraphUi {
                     .connections
                     .update_drag(ctx, pointer_pos, drag_port_info);
                 match snapshot {
-                    ConnectionDragInfo::InProgress => {}
-                    ConnectionDragInfo::Finished => self.state = InteractionState::Idle,
-                    ConnectionDragInfo::FinishedWith {
+                    ConnectionDragUpdate::InProgress => {}
+                    ConnectionDragUpdate::Finished => self.state = InteractionState::Idle,
+                    ConnectionDragUpdate::FinishedWith {
                         start_port,
                         end_port,
                     } => {

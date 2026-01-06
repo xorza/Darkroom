@@ -31,7 +31,7 @@ pub(crate) struct ConnectionDrag {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum ConnectionDragInfo {
+pub(crate) enum ConnectionDragUpdate {
     InProgress,
     Finished,
     FinishedWith {
@@ -147,35 +147,40 @@ impl ConnectionUi {
         ctx: &GraphContext,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
-    ) -> ConnectionDragInfo {
+    ) -> ConnectionDragUpdate {
         let drag = self.drag.as_mut().unwrap();
         drag.current_pos = pointer_pos;
 
-        if let PortDragInfo::Hover(port_info) = &drag_port_info
-            && drag.start_port.port.kind != port_info.port.kind
-        {
-            drag.end_port = Some(*port_info);
-            drag.current_pos = port_info.center;
-        }
-
-        if matches!(drag_port_info, PortDragInfo::DragStop) {
-            let result = if let Some(end_port) = drag.end_port
-                && end_port.center.distance(drag.current_pos) < ctx.style.port_activation_radius
-            {
-                ConnectionDragInfo::FinishedWith {
-                    start_port: drag.start_port,
-                    end_port: end_port,
+        match drag_port_info {
+            PortDragInfo::None => ConnectionDragUpdate::InProgress,
+            PortDragInfo::DragStart(_) => unreachable!(),
+            PortDragInfo::Hover(port_info) => {
+                if drag.start_port.port.kind != port_info.port.kind {
+                    drag.end_port = Some(port_info);
+                    drag.current_pos = port_info.center;
                 }
-            } else {
-                ConnectionDragInfo::Finished
-            };
 
-            self.stop_drag();
+                ConnectionDragUpdate::InProgress
+            }
+            PortDragInfo::DragStop => {
+                let update = drag
+                    .end_port
+                    .filter(|end_port| {
+                        end_port.center.distance(drag.current_pos)
+                            < ctx.style.port_activation_radius
+                    })
+                    .map_or(ConnectionDragUpdate::Finished, |end_port| {
+                        ConnectionDragUpdate::FinishedWith {
+                            start_port: drag.start_port,
+                            end_port,
+                        }
+                    });
 
-            return result;
+                self.stop_drag();
+
+                update
+            }
         }
-
-        ConnectionDragInfo::InProgress
     }
 
     pub(crate) fn stop_drag(&mut self) {
