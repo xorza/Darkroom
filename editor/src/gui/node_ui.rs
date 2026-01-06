@@ -57,7 +57,7 @@ impl NodeLayout {
 }
 
 impl NodeUi {
-    pub fn process_input(
+    pub fn render_nodes(
         &mut self,
         ctx: &mut GraphContext,
         view_graph: &mut ViewGraph,
@@ -68,9 +68,7 @@ impl NodeUi {
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let node_id = view_graph.view_nodes[view_node_idx].id;
-            let node_layout = graph_layout.node_layout(&node_id).clone();
-
-            body_drag(ctx, view_graph, graph_layout, ui_interaction, &node_id);
+            let node_layout = body_drag(ctx, view_graph, graph_layout, ui_interaction, &node_id);
 
             let node = view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
