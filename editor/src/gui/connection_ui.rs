@@ -4,12 +4,12 @@ use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
 
+use crate::common::bezier::Bezier;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
-use common::Bezier;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {

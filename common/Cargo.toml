@@ -14,4 +14,3 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 mlua = { workspace = true }
-egui = { workspace = true }
