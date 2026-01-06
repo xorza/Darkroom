@@ -68,11 +68,11 @@ impl NodeUi {
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let view_node_id = view_graph.view_nodes[view_node_idx].id;
-            let node_rect = graph_layout.node_rect(&view_node_id);
+            let mut node_layout = graph_layout.node_layout(&view_node_id).clone();
 
             let node_ui_id = ctx.ui.make_persistent_id(("node_body", view_node_id));
             let body_response = ctx.ui.interact(
-                node_rect,
+                node_layout.rect,
                 node_ui_id,
                 egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
             );
@@ -85,8 +85,10 @@ impl NodeUi {
 
                 let new_layout =
                     compute_node_layout(ctx, view_graph, &view_node_id, graph_layout.origin);
-                graph_layout.update_node_layout(&view_node_id, new_layout);
+                graph_layout.update_node_layout(&view_node_id, new_layout.clone());
+                node_layout = new_layout;
             }
+
             if dragged || body_response.clicked() {
                 ui_interaction
                     .actions
@@ -94,33 +96,16 @@ impl NodeUi {
                 view_graph.selected_node_id = Some(view_node_id);
             }
 
-            let layout = graph_layout.node_layout(&view_node_id);
             let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            let close_id = ctx.ui.make_persistent_id(("node_remove", node.id));
-            let remove_response =
-                ctx.ui
-                    .interact(layout.remove_btn_rect, close_id, egui::Sense::click());
+            let remove_btn_id = ctx.ui.make_persistent_id(("node_remove", node.id));
 
-            let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
-            let cache_response = ctx.ui.interact(
-                layout.cache_button_rect,
-                cache_id,
-                if !node.terminal {
-                    egui::Sense::click()
-                } else {
-                    egui::Sense::hover()
-                },
+            let remove_response = ctx.ui.interact(
+                node_layout.remove_btn_rect,
+                remove_btn_id,
+                egui::Sense::click(),
             );
-
-            if !node.terminal && cache_response.clicked() {
-                node.behavior = (node.behavior == NodeBehavior::Once)
-                    .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
-                ui_interaction
-                    .actions
-                    .push((view_node_id, GraphUiAction::CacheToggled));
-            }
-
             if remove_response.hovered() {
                 remove_response.show_tooltip_text("Remove node");
             }
@@ -129,62 +114,49 @@ impl NodeUi {
                 ui_interaction
                     .actions
                     .push((view_node_id, GraphUiAction::NodeRemoved));
-                view_graph.remove_node(&view_node_id);
+                // view_graph.remove_node(&view_node_id);
                 continue;
             }
 
             let view_node = &view_graph.view_nodes[view_node_idx];
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
             let node_drag_port_result =
-                interact_node_ports(ctx, layout, view_node, func, view_graph.scale);
+                interact_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-        }
 
-        drag_port_info
-    }
-
-    pub fn render_nodes(
-        &mut self,
-        ctx: &mut GraphContext,
-        view_graph: &mut ViewGraph,
-        graph_layout: &mut GraphLayout,
-    ) {
-        for view_node_idx in 0..view_graph.view_nodes.len() {
             let view_node = &view_graph.view_nodes[view_node_idx];
-            let view_node_id = view_graph.view_nodes[view_node_idx].id;
-            let layout = graph_layout.node_layout(&view_node_id);
 
-            let node = view_graph.graph.by_id_mut(&view_node_id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-            let close_id = ctx.ui.make_persistent_id(("node_remove", node.id));
-            let remove_response =
-                ctx.ui
-                    .interact(layout.remove_btn_rect, close_id, egui::Sense::click());
-
-            let cache_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+            let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
             let cache_response = ctx.ui.interact(
-                layout.cache_button_rect,
-                cache_id,
+                node_layout.cache_button_rect,
+                cache_btn_id,
                 if !node.terminal {
                     egui::Sense::click()
                 } else {
                     egui::Sense::hover()
                 },
             );
+            if !node.terminal && cache_response.clicked() {
+                node.behavior = (node.behavior == NodeBehavior::Once)
+                    .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
+                ui_interaction
+                    .actions
+                    .push((view_node_id, GraphUiAction::CacheToggled));
+            }
 
             let is_selected = view_graph
                 .selected_node_id
                 .is_some_and(|id| id == view_node_id);
 
-            render_body(ctx, node, layout, is_selected, view_graph.scale);
-            render_remove_btn(ctx, layout, remove_response, view_graph.scale);
-            render_cache_btn(ctx, layout, node, cache_response, view_graph.scale);
-            render_hints(ctx, layout, node, func, view_graph.scale);
-            render_node_ports(ctx, layout, view_node, func, view_graph.scale);
-            render_node_const_bindings(ctx, layout, node, view_graph.scale);
-            render_node_labels(ctx, view_graph, layout, func);
+            render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
+            render_remove_btn(ctx, &node_layout, remove_response, view_graph.scale);
+            render_cache_btn(ctx, &node_layout, node, cache_response, view_graph.scale);
+            render_hints(ctx, &node_layout, node, func, view_graph.scale);
+            render_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
+            render_node_const_bindings(ctx, &node_layout, node, view_graph.scale);
+            render_node_labels(ctx, view_graph, &node_layout, func);
         }
+
+        drag_port_info
     }
 }
 
@@ -459,6 +431,7 @@ fn render_node_ports(
         );
     }
 }
+
 fn render_node_const_bindings(
     ctx: &mut GraphContext,
     layout: &NodeLayout,

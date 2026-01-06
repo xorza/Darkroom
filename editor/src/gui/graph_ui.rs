@@ -121,8 +121,8 @@ impl GraphUi {
             &mut self.graph_layout,
             ui_interaction,
         );
-        self.node_ui
-            .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
+        // self.node_ui
+        //     .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
 
         self.top_panel(&mut ctx, view_graph);
 
