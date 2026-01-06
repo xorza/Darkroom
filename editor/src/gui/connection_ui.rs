@@ -10,6 +10,8 @@ use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
 
+const BEZIER_STEPS: usize = 24;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
     pub(crate) input_node_id: NodeId,
@@ -60,7 +62,6 @@ impl ConnectionDrag {
             self.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
             self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
             self.current_pos,
-            24,
         );
         ctx.painter.add(egui::Shape::line(points, stroke));
     }
@@ -118,7 +119,6 @@ impl ConnectionUi {
                 curve.start + egui::vec2(control_offset, 0.0),
                 curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
-                24,
             );
             ctx.painter.add(egui::Shape::line(points, stroke));
         }
@@ -222,7 +222,6 @@ impl ConnectionUi {
                 curve.start + egui::vec2(control_offset, 0.0),
                 curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
-                24,
             );
             let curve_segments = samples.windows(2).map(|pair| (pair[0], pair[1]));
             let mut hit = false;
@@ -249,8 +248,10 @@ fn bezier_control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     (dx * 0.5).max(10.0 * scale)
 }
 
-fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
-    assert!(steps >= 2, "bezier sampling steps must be at least 2");
+fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2) -> Vec<Pos2> {
+    let steps = BEZIER_STEPS;
+    assert!(steps > 2);
+
     let mut points = Vec::with_capacity(steps + 1);
     for i in 0..=steps {
         let t = i as f32 / steps as f32;
