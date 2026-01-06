@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Id, PointerButton, Pos2, Ui, Vec2};
+use egui::{PointerButton, Pos2, Response, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
@@ -104,9 +104,14 @@ impl GraphUi {
             .ui
             .input(|input| input.pointer.hover_pos())
             .and_then(|pos| ctx.rect.contains(pos).then_else(Some(pos), None));
+        let background_response = ctx.ui.interact(
+            ctx.rect,
+            graph_bg_id,
+            egui::Sense::hover() | egui::Sense::drag(),
+        );
 
         if let Some(pointer_pos) = pointer_pos {
-            self.update_zoom_and_pan(&mut ctx, view_graph, graph_bg_id, pointer_pos);
+            self.update_zoom_and_pan(&mut ctx, view_graph, &background_response, pointer_pos);
         }
 
         self.graph_layout.update(&ctx, view_graph);
@@ -125,7 +130,7 @@ impl GraphUi {
             self.process_connections(
                 &mut ctx,
                 view_graph,
-                graph_bg_id,
+                &background_response,
                 ui_interaction,
                 pointer_pos,
                 drag_port_info,
@@ -139,7 +144,7 @@ impl GraphUi {
         &mut self,
         ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
-        graph_bg_id: Id,
+        background_response: &Response,
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
@@ -156,10 +161,7 @@ impl GraphUi {
             }
         });
 
-        let pointer_on_background = ctx
-            .ui
-            .interact(ctx.rect, graph_bg_id, egui::Sense::hover())
-            .hovered();
+        let pointer_on_background = background_response.hovered();
 
         let primary_pressed = matches!(primary_state, Some(PrimaryState::Pressed));
         let primary_down = matches!(
@@ -274,8 +276,8 @@ impl GraphUi {
         &mut self,
         ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
-        graph_bg_id: Id,
-        cursor_pos: Pos2,
+        background_response: &Response,
+        pointer_pos: Pos2,
     ) {
         let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(ctx);
         let (zoom_delta, pan) = (mouse_wheel_delta > f32::EPSILON).then_else(
@@ -291,16 +293,15 @@ impl GraphUi {
             // zoom
             let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
             let origin = ctx.rect.min;
-            let graph_pos = (cursor_pos - origin - view_graph.pan) / view_graph.scale;
+            let graph_pos = (pointer_pos - origin - view_graph.pan) / view_graph.scale;
             view_graph.scale = clamped_zoom;
-            view_graph.pan = cursor_pos - origin - graph_pos * view_graph.scale;
+            view_graph.pan = pointer_pos - origin - graph_pos * view_graph.scale;
         }
 
         view_graph.pan += pan;
 
-        let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
-        if pan_response.dragged_by(PointerButton::Middle) {
-            view_graph.pan += pan_response.drag_delta();
+        if background_response.dragged_by(PointerButton::Middle) {
+            view_graph.pan += background_response.drag_delta();
         }
     }
 }
