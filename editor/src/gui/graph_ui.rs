@@ -295,7 +295,7 @@ impl GraphUi {
         } else if scroll_delta.length_sq() > f32::EPSILON {
             if self.zoom_pan_state == ZoomPanState::None {
                 self.zoom_pan_state = (scroll_delta.x.abs() > f32::EPSILON)
-                    .then_else(ZoomPanState::Zoom, ZoomPanState::Pan);
+                    .then_else(ZoomPanState::Pan, ZoomPanState::Zoom);
             }
         } else {
             self.zoom_pan_state = ZoomPanState::None;
