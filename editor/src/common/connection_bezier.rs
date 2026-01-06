@@ -11,8 +11,6 @@ impl ConnectionBezier {
         let steps = Self::STEPS;
         assert!(steps > 2, "bezier steps must be greater than 2");
 
-        let start_idx = points.len();
-
         let p0 = start;
         let p3 = end;
 
@@ -32,7 +30,7 @@ impl ConnectionBezier {
             points.push(Pos2::new(x, y));
         }
 
-        (start_idx, points.len() - 1)
+        (points.len() - steps - 1, points.len() - 1)
     }
 
     pub fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
