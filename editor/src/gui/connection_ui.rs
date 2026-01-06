@@ -28,6 +28,9 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
+
+    start_idx: usize,
+    end_idx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -46,6 +49,8 @@ impl ConnectionDrag {
             current_pos: port.center,
             start_port: port,
             end_port: None,
+            start_idx: 0,
+            end_idx: 0,
         }
     }
 }
@@ -53,8 +58,8 @@ impl ConnectionDrag {
 #[derive(Debug, Clone)]
 struct ConnectionCurve {
     key: ConnectionKey,
-    start: Pos2,
-    end: Pos2,
+    start_idx: usize,
+    end_idx: usize,
 }
 
 #[derive(Debug, Default)]
@@ -63,6 +68,7 @@ pub(crate) struct ConnectionUi {
     pub(crate) highlighted: HashSet<ConnectionKey>,
     pub(crate) drag: Option<ConnectionDrag>,
 
+    //caches
     point_cache: Vec<Pos2>,
 }
 
@@ -74,12 +80,78 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
+        self.curves.clear();
+
         let row_height = ctx.style.node_row_height * view_graph.scale;
         self.collect_curves(graph_layout, view_graph, row_height);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
-            self.collect_highlighted(breaker, view_graph.scale);
+            self.collect_highlighted(breaker);
+        }
+    }
+
+    fn collect_curves(
+        &mut self,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        row_height: f32,
+    ) {
+        for node_view in &view_graph.view_nodes {
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+
+            for (input_index, input) in node.inputs.iter().enumerate() {
+                let Binding::Bind(binding) = &input.binding else {
+                    continue;
+                };
+                let start_layout = graph_layout.node_layout(&binding.target_id);
+                let end_layout = graph_layout.node_layout(&node.id);
+
+                let start = end_layout.input_center(input_index, row_height);
+                let end = start_layout.output_center(binding.port_idx, row_height);
+
+                let start_idx = self.point_cache.len();
+                ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+                let end_idx = self.point_cache.len();
+
+                self.curves.push(ConnectionCurve {
+                    key: ConnectionKey {
+                        input_node_id: node.id,
+                        input_idx: input_index,
+                    },
+                    start_idx,
+                    end_idx,
+                });
+            }
+        }
+    }
+
+    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
+        if breaker.points.len() < 2 {
+            return;
+        }
+
+        let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
+
+        for curve in self.curves.iter() {
+            let curve_segments = self.point_cache[curve.start_idx..curve.end_idx]
+                .windows(2)
+                .map(|pair| (pair[0], pair[1]));
+            let mut hit = false;
+            for (a1, a2) in breaker_segments.clone() {
+                for (b1, b2) in curve_segments.clone() {
+                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+                        hit = true;
+                        break;
+                    }
+                }
+                if hit {
+                    break;
+                }
+            }
+            if hit {
+                self.highlighted.insert(curve.key);
+            }
         }
     }
 
@@ -98,13 +170,10 @@ impl ConnectionUi {
             } else {
                 ctx.style.connection_stroke
             };
-            ConnectionBezier::sample(
-                &mut self.point_cache,
-                curve.start,
-                curve.end,
-                view_graph.scale,
+            ctx.painter.line(
+                self.point_cache[curve.start_idx..curve.end_idx].to_vec(),
+                stroke,
             );
-            ctx.painter.line(self.point_cache.clone(), stroke);
         }
 
         if let Some(drag) = &self.drag {
@@ -112,9 +181,15 @@ impl ConnectionUi {
                 PortKind::Output => (drag.current_pos, drag.start_port.center),
                 PortKind::Input => (drag.start_port.center, drag.current_pos),
             };
+
+            let start_idx = self.point_cache.len();
             ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
-            ctx.painter
-                .line(self.point_cache.clone(), ctx.style.temp_connection_stroke);
+            let end_idx = self.point_cache.len();
+
+            ctx.painter.line(
+                self.point_cache[start_idx..end_idx].to_vec(),
+                ctx.style.temp_connection_stroke,
+            );
         }
     }
 
@@ -165,67 +240,5 @@ impl ConnectionUi {
 
     pub(crate) fn stop_drag(&mut self) {
         self.drag = None;
-    }
-
-    fn collect_curves(
-        &mut self,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-        row_height: f32,
-    ) {
-        self.curves.clear();
-
-        for node_view in &view_graph.view_nodes {
-            let node = view_graph.graph.by_id(&node_view.id).unwrap();
-
-            for (input_index, input) in node.inputs.iter().enumerate() {
-                let Binding::Bind(binding) = &input.binding else {
-                    continue;
-                };
-                let start_layout = graph_layout.node_layout(&binding.target_id);
-                let end_layout = graph_layout.node_layout(&node.id);
-
-                let start = end_layout.input_center(input_index, row_height);
-                let end = start_layout.output_center(binding.port_idx, row_height);
-
-                self.curves.push(ConnectionCurve {
-                    key: ConnectionKey {
-                        input_node_id: node.id,
-                        input_idx: input_index,
-                    },
-                    start,
-                    end,
-                });
-            }
-        }
-    }
-
-    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker, scale: f32) {
-        if breaker.points.len() < 2 {
-            return;
-        }
-
-        let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
-
-        for curve in self.curves.iter() {
-            ConnectionBezier::sample(&mut self.point_cache, curve.start, curve.end, scale);
-
-            let curve_segments = self.point_cache.windows(2).map(|pair| (pair[0], pair[1]));
-            let mut hit = false;
-            for (a1, a2) in breaker_segments.clone() {
-                for (b1, b2) in curve_segments.clone() {
-                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
-                        hit = true;
-                        break;
-                    }
-                }
-                if hit {
-                    break;
-                }
-            }
-            if hit {
-                self.highlighted.insert(curve.key);
-            }
-        }
     }
 }

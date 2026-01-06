@@ -6,6 +6,7 @@ pub struct ConnectionBezier;
 impl ConnectionBezier {
     pub const STEPS: usize = 24;
 
+    // will add points to the points
     pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) {
         let steps = Self::STEPS;
         assert!(steps > 2, "bezier steps must be greater than 2");
@@ -17,7 +18,6 @@ impl ConnectionBezier {
         let p1 = p0 + egui::vec2(-control_offset, 0.0);
         let p2 = p3 + egui::vec2(control_offset, 0.0);
 
-        points.clear();
         for i in 0..=steps {
             let t = i as f32 / steps as f32;
             let one_minus = 1.0 - t;
