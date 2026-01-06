@@ -273,38 +273,14 @@ impl GraphUi {
         graph_bg_id: Id,
         cursor_pos: Pos2,
     ) {
-        let pinch_delta = ctx
-            .ui
-            .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta()));
-
-        let (scroll_delta, mouse_wheel_delta) = {
-            let base_scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
-            ctx.ui.input(|input| {
-                input
-                    .events
-                    .iter()
-                    .fold(
-                        (base_scroll_delta, 0.0),
-                        |(point, lines), event| match event {
-                            egui::Event::MouseWheel {
-                                unit,
-                                delta: event_delta,
-                                ..
-                            } => match unit {
-                                egui::MouseWheelUnit::Point => (point + *event_delta, lines),
-                                egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
-                                    (point, lines + event_delta.length())
-                                }
-                            },
-                            _ => (point, lines),
-                        },
-                    )
-            })
-        };
-
+        let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(ctx);
         let (zoom_delta, pan) = (mouse_wheel_delta > f32::EPSILON).then_else(
             ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO),
-            (pinch_delta, scroll_delta),
+            (
+                ctx.ui
+                    .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
+                scroll_delta,
+            ),
         );
 
         {
@@ -323,6 +299,31 @@ impl GraphUi {
             view_graph.pan += pan_response.drag_delta();
         }
     }
+}
+
+fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) {
+    let (scroll_delta, mouse_wheel_delta) = {
+        let base_scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
+        ctx.ui.input(|input| {
+            input.events.iter().fold(
+                (base_scroll_delta, 0.0),
+                |(point, lines), event| match event {
+                    egui::Event::MouseWheel {
+                        unit,
+                        delta: event_delta,
+                        ..
+                    } => match unit {
+                        egui::MouseWheelUnit::Point => (point + *event_delta, lines),
+                        egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
+                            (point, lines + event_delta.length())
+                        }
+                    },
+                    _ => (point, lines),
+                },
+            )
+        })
+    };
+    (scroll_delta, mouse_wheel_delta)
 }
 
 fn background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
