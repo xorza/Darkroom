@@ -23,6 +23,7 @@ Const input badges now clamp and validate scale to keep layout stable at extreme
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
+Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 
 ## Repository Layout
 

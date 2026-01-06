@@ -29,6 +29,13 @@ enum PrimaryState {
     Down,
     Released,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ZoomPanState {
+    #[default]
+    None,
+    Zoom,
+    Pan,
+}
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
@@ -38,6 +45,7 @@ pub struct GraphUi {
     connection_drag: Option<ConnectionDrag>,
     connection_renderer: ConnectionUi,
     node_ui: NodeUi,
+    zoom_pan_state: ZoomPanState,
 }
 
 #[derive(Debug, Default)]
@@ -87,7 +95,7 @@ impl GraphUi {
             .and_then(|pos| ctx.rect.contains(pos).then_else(Some(pos), None));
 
         if let Some(pointer_pos) = pointer_pos {
-            update_zoom_and_pan(&mut ctx, view_graph, graph_bg_id, pointer_pos);
+            self.update_zoom_and_pan(&mut ctx, view_graph, graph_bg_id, pointer_pos);
         }
 
         self.graph_layout.update(&ctx, view_graph);
@@ -265,47 +273,59 @@ impl GraphUi {
             fit_all_nodes(ctx, view_graph, &self.graph_layout);
         }
     }
-}
 
-fn update_zoom_and_pan(
-    ctx: &mut GraphContext,
-    view_graph: &mut model::ViewGraph,
-    graph_bg_id: Id,
-    cursor_pos: Pos2,
-) {
-    let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
-    let pinch_delta = ctx.ui.input(|input| {
-        if input.modifiers.command {
-            1.0
+    fn update_zoom_and_pan(
+        &mut self,
+        ctx: &mut GraphContext,
+        view_graph: &mut model::ViewGraph,
+        graph_bg_id: Id,
+        cursor_pos: Pos2,
+    ) {
+        let pinch_delta = ctx.ui.input(|input| {
+            if input.modifiers.command {
+                1.0
+            } else {
+                input.zoom_delta()
+            }
+        });
+        let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
+
+        if (pinch_delta - 1.0).abs() > f32::EPSILON {
+            self.zoom_pan_state = ZoomPanState::Zoom;
+        } else if scroll_delta.length_sq() > f32::EPSILON {
+            if self.zoom_pan_state == ZoomPanState::None {
+                self.zoom_pan_state = (scroll_delta.x.abs() > f32::EPSILON)
+                    .then_else(ZoomPanState::Zoom, ZoomPanState::Pan);
+            }
         } else {
-            input.zoom_delta()
+            self.zoom_pan_state = ZoomPanState::None;
+            return;
         }
-    });
 
-    let zoom_delta = (scroll_delta.y.abs() > f32::EPSILON).then_else(
-        (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta,
-        pinch_delta,
-    );
-    let pan =
-        (scroll_delta.x.abs() > f32::EPSILON).then_else(Vec2::new(scroll_delta.x, 0.0), Vec2::ZERO);
+        let (zoom_delta, pan) = match self.zoom_pan_state {
+            ZoomPanState::None => unreachable!(),
+            ZoomPanState::Zoom => (
+                (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta,
+                Vec2::ZERO,
+            ),
+            ZoomPanState::Pan => (1.0, scroll_delta),
+        };
 
-    if (zoom_delta - 1.0).abs() > f32::EPSILON {
-        let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-
-        if (clamped_zoom - view_graph.scale).abs() > f32::EPSILON {
+        {
+            // zoom
+            let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
             let origin = ctx.rect.min;
             let graph_pos = (cursor_pos - origin - view_graph.pan) / view_graph.scale;
-
             view_graph.scale = clamped_zoom;
             view_graph.pan = cursor_pos - origin - graph_pos * view_graph.scale;
         }
-    }
 
-    view_graph.pan += pan;
+        view_graph.pan += pan;
 
-    let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
-    if pan_response.dragged_by(PointerButton::Middle) {
-        view_graph.pan += pan_response.drag_delta();
+        let pan_response = ctx.ui.interact(ctx.rect, graph_bg_id, egui::Sense::drag());
+        if pan_response.dragged_by(PointerButton::Middle) {
+            view_graph.pan += pan_response.drag_delta();
+        }
     }
 }
 
