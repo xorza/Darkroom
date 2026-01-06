@@ -273,36 +273,32 @@ impl GraphUi {
         graph_bg_id: Id,
         cursor_pos: Pos2,
     ) {
-        let pinch_delta = ctx.ui.input(|input| {
-            if input.modifiers.command {
-                1.0
-            } else {
-                input.zoom_delta()
-            }
-        });
-        let scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
+        let pinch_delta = ctx
+            .ui
+            .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta()));
+        let mut scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
         let mut mouse_wheel_delta: f32 = 0.0;
         ctx.ui.input(|input| {
             for event in &input.events {
                 if let egui::Event::MouseWheel {
-                    unit: _,
+                    unit,
                     delta: event_delta,
                     ..
                 } = event
                 {
-                    mouse_wheel_delta += event_delta.length();
+                    match unit {
+                        egui::MouseWheelUnit::Point => scroll_delta += *event_delta,
+                        egui::MouseWheelUnit::Line => mouse_wheel_delta += event_delta.length(),
+                        egui::MouseWheelUnit::Page => mouse_wheel_delta += event_delta.length(),
+                    }
                 }
             }
         });
 
         let (zoom_delta, pan) = if mouse_wheel_delta > f32::EPSILON {
-            println!("mouse_wheel_delta {}", mouse_wheel_delta);
             ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO)
         } else {
-            (
-                (-scroll_delta.y * SCROLL_ZOOM_SPEED).exp() * pinch_delta,
-                scroll_delta,
-            )
+            (pinch_delta, scroll_delta)
         };
 
         {
