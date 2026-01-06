@@ -31,7 +31,9 @@ pub struct NodeLayout {
 }
 
 #[derive(Debug, Default)]
-pub struct NodeUi {}
+pub struct NodeUi {
+    node_ids_to_remove: Vec<NodeId>,
+}
 
 impl NodeLayout {
     pub fn input_center(&self, index: usize, row_height: f32) -> Pos2 {
@@ -64,6 +66,7 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
+        self.node_ids_to_remove.clear();
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
@@ -77,13 +80,15 @@ impl NodeUi {
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
             render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
-            render_remove_btn(
+            if render_remove_btn(
                 ctx,
                 ui_interaction,
                 &node_id,
                 &node_layout,
                 view_graph.scale,
-            );
+            ) {
+                self.node_ids_to_remove.push(node_id);
+            }
             render_cache_btn(ctx, ui_interaction, &node_layout, node, view_graph.scale);
             render_hints(ctx, &node_layout, node, func, view_graph.scale);
             let node_drag_port_result =
@@ -281,7 +286,7 @@ fn render_remove_btn(
     node_id: &NodeId,
     node_layout: &NodeLayout,
     scale: f32,
-) {
+) -> bool {
     let remove_btn_id = ctx.ui.make_persistent_id(("node_remove", node_id));
 
     let remove_response = ctx.ui.interact(
@@ -297,7 +302,7 @@ fn render_remove_btn(
         ui_interaction
             .actions
             .push((*node_id, GraphUiAction::NodeRemoved));
-        todo!();
+        return true;
     }
 
     let close_fill = if remove_response.is_pointer_button_down_on() {
@@ -337,6 +342,8 @@ fn render_remove_btn(
     let close_stroke = egui::Stroke::new(1.4 * scale, close_color);
     ctx.painter.line_segment([a, b], close_stroke);
     ctx.painter.line_segment([c, d], close_stroke);
+
+    false
 }
 
 fn render_node_ports(
