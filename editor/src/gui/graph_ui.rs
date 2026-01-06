@@ -30,6 +30,14 @@ enum PrimaryState {
     Released,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CycleError {
+    Detected {
+        input_node_id: NodeId,
+        output_node_id: NodeId,
+    },
+}
+
 #[derive(Debug, Default)]
 pub struct GraphUi {
     state: InteractionState,
@@ -195,11 +203,13 @@ impl GraphUi {
                         start_port,
                         end_port,
                     } => {
-                        let (input_node_id, input_idx) =
-                            apply_connection(view_graph, start_port.port, end_port.port);
-                        ui_interaction
-                            .actions
-                            .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                        if let Ok((input_node_id, input_idx)) =
+                            apply_connection(view_graph, start_port.port, end_port.port)
+                        {
+                            ui_interaction
+                                .actions
+                                .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                        }
 
                         self.state = InteractionState::Idle;
                     }
@@ -336,17 +346,37 @@ fn background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
 
 /// Connects an output port to an input port in `view_graph`.
 ///
-/// Returns the input node id and input port index that were updated.
+/// Returns the input node id and input port index that were updated, or a cycle error if the
+/// connection would introduce a loop.
 ///
 /// # Panics
 /// Panics if the ports are not of opposite kinds, or if the input node id
 /// is not present in the graph.
-fn apply_connection(view_graph: &mut model::ViewGraph, a: PortRef, b: PortRef) -> (NodeId, usize) {
+fn apply_connection(
+    view_graph: &mut model::ViewGraph,
+    a: PortRef,
+    b: PortRef,
+) -> Result<(NodeId, usize), CycleError> {
     let (input_port, output_port) = match (a.kind, b.kind) {
         (PortKind::Output, PortKind::Input) => (b, a),
         (PortKind::Input, PortKind::Output) => (a, b),
         _ => unreachable!("ports must be of opposite types"),
     };
+
+    if input_port.node_id == output_port.node_id {
+        return Err(CycleError::Detected {
+            input_node_id: input_port.node_id,
+            output_node_id: output_port.node_id,
+        });
+    }
+
+    let dependents = view_graph.graph.dependent_nodes(&input_port.node_id);
+    if dependents.contains(&output_port.node_id) {
+        return Err(CycleError::Detected {
+            input_node_id: input_port.node_id,
+            output_node_id: output_port.node_id,
+        });
+    }
 
     let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
     input_node.inputs[input_port.idx].binding = Binding::Bind(PortAddress {
@@ -354,7 +384,7 @@ fn apply_connection(view_graph: &mut model::ViewGraph, a: PortRef, b: PortRef) -
         port_idx: output_port.idx,
     });
 
-    (input_port.node_id, input_port.idx)
+    Ok((input_port.node_id, input_port.idx))
 }
 
 fn view_selected_node(
