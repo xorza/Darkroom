@@ -25,6 +25,7 @@ Graph UI `apply_connection` now documents its return value and panic conditions 
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
+Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
 
 ## Repository Layout
 

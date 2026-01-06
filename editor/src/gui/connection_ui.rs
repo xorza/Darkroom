@@ -7,7 +7,7 @@ use std::collections::HashSet;
 
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::GraphLayout;
+use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,6 +22,44 @@ pub(crate) enum PortKind {
     Output,
 }
 
+#[derive(Debug)]
+pub(crate) struct ConnectionDrag {
+    pub(crate) start_port: PortInfo,
+    pub(crate) end_port: Option<PortInfo>,
+    pub(crate) current_pos: Pos2,
+}
+
+impl ConnectionDrag {
+    pub(crate) fn new(port: PortInfo) -> Self {
+        Self {
+            current_pos: port.center,
+            start_port: port,
+            end_port: None,
+        }
+    }
+
+    pub(crate) fn render(&self, ctx: &GraphContext, zoom: f32) {
+        let control_offset = bezier_control_offset(self.start_port.center, self.current_pos, zoom);
+        let (start_sign, end_sign) = match self.start_port.port.kind {
+            PortKind::Output => (1.0, -1.0),
+            PortKind::Input => (-1.0, 1.0),
+        };
+        let stroke = ctx.style.temp_connection_stroke;
+        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
+            [
+                self.start_port.center,
+                self.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
+                self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
+                self.current_pos,
+            ],
+            false,
+            egui::Color32::TRANSPARENT,
+            stroke,
+        );
+        ctx.painter.add(shape);
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ConnectionCurve {
     key: ConnectionKey,
@@ -34,6 +72,7 @@ struct ConnectionCurve {
 pub(crate) struct ConnectionUi {
     curves: Vec<ConnectionCurve>,
     pub highlighted: HashSet<ConnectionKey>,
+    pub(crate) drag: Option<ConnectionDrag>,
 }
 
 impl ConnectionUi {
@@ -81,6 +120,12 @@ impl ConnectionUi {
                 stroke,
             );
             ctx.painter.add(shape);
+        }
+    }
+
+    pub(crate) fn render_drag(&self, ctx: &GraphContext, zoom: f32) {
+        if let Some(drag) = &self.drag {
+            drag.render(ctx, zoom);
         }
     }
 
