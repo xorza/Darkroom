@@ -107,8 +107,7 @@ impl ConnectionUi {
                 curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
             );
-            ctx.painter
-                .add(egui::Shape::line(self.point_cache.clone(), stroke));
+            ctx.painter.line(self.point_cache.clone(), stroke);
         }
 
         if let Some(drag) = &self.drag {
@@ -126,10 +125,7 @@ impl ConnectionUi {
                 drag.current_pos + egui::vec2(control_offset * end_sign, 0.0),
                 drag.current_pos,
             );
-            ctx.painter
-                .add(egui::Shape::line(self.point_cache.clone(), stroke));
-            // }
-            // drag.render(ctx, view_graph.scale);
+            ctx.painter.line(self.point_cache.clone(), stroke);
         }
     }
 
