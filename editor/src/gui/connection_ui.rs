@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
+use crate::gui::node_ui::PortDragInfo;
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,6 +28,16 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ConnectionDragInfo {
+    InProgress,
+    Finished,
+    FinishedWith {
+        start_port: PortInfo,
+        end_port: PortInfo,
+    },
 }
 
 impl ConnectionDrag {
@@ -121,12 +132,54 @@ impl ConnectionUi {
             );
             ctx.painter.add(shape);
         }
+
+        if let Some(drag) = &self.drag {
+            drag.render(ctx, view_graph.scale);
+        }
     }
 
-    pub(crate) fn render_drag(&self, ctx: &GraphContext, zoom: f32) {
-        if let Some(drag) = &self.drag {
-            drag.render(ctx, zoom);
+    pub(crate) fn start_drag(&mut self, port: PortInfo) {
+        self.drag = Some(ConnectionDrag::new(port));
+    }
+
+    pub(crate) fn update_drag(
+        &mut self,
+        ctx: &GraphContext,
+        pointer_pos: Pos2,
+        drag_port_info: PortDragInfo,
+    ) -> ConnectionDragInfo {
+        let drag = self.drag.as_mut().unwrap();
+        drag.current_pos = pointer_pos;
+
+        if let PortDragInfo::Hover(port_info) = &drag_port_info
+            && drag.start_port.port.kind != port_info.port.kind
+        {
+            drag.end_port = Some(*port_info);
+            drag.current_pos = port_info.center;
         }
+
+        if matches!(drag_port_info, PortDragInfo::DragStop) {
+            let result = if let Some(end_port) = drag.end_port
+                && end_port.center.distance(drag.current_pos) < ctx.style.port_activation_radius
+            {
+                ConnectionDragInfo::FinishedWith {
+                    start_port: drag.start_port,
+                    end_port: end_port,
+                }
+            } else {
+                ConnectionDragInfo::Finished
+            };
+
+            self.stop_drag();
+
+            return result;
+        }
+
+        ConnectionDragInfo::InProgress
+    }
+
+    pub(crate) fn stop_drag(&mut self) {
+        self.drag = None;
     }
 
     fn collect_curves(

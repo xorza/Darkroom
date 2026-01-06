@@ -26,6 +26,8 @@ Fit-all now computes bounds in graph space to keep repeated fit operations stabl
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
+Connection drag lifecycle now goes through `ConnectionUi` helpers (`start_drag`, `update_drag`, `stop_drag`), and
+`ConnectionUi::render` draws the active drag path.
 
 ## Repository Layout
 
