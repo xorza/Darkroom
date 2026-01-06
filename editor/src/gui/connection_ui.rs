@@ -76,7 +76,7 @@ struct ConnectionCurve {
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
     curves: Vec<ConnectionCurve>,
-    pub highlighted: HashSet<ConnectionKey>,
+    pub(crate) highlighted: HashSet<ConnectionKey>,
     pub(crate) drag: Option<ConnectionDrag>,
 }
 
