@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{PointerButton, Pos2, Response, Ui, Vec2};
+use egui::{PointerButton, Pos2, Response, Sense, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
@@ -107,8 +107,12 @@ impl GraphUi {
         let background_response = ctx.ui.interact(
             ctx.rect,
             graph_bg_id,
-            egui::Sense::hover() | egui::Sense::drag(),
+            Sense::hover() | Sense::drag() | Sense::click(),
         );
+
+        if background_response.clicked() {
+            view_graph.selected_node_id = None;
+        }
 
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(&mut ctx, view_graph, &background_response, pointer_pos);
@@ -176,7 +180,6 @@ impl GraphUi {
                         self.connections.start_drag(port_info);
                         self.state = InteractionState::DraggingNewConnection;
                     } else if pointer_on_background {
-                        view_graph.selected_node_id = None;
                         self.state = InteractionState::BreakingConnections;
                         self.connection_breaker.start(pointer_pos);
                     }
