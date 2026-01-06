@@ -109,8 +109,8 @@ impl ConnectionUi {
 
         if let Some(drag) = &self.drag {
             let (start, end) = match drag.start_port.port.kind {
-                PortKind::Input => (drag.current_pos, drag.start_port.center),
-                PortKind::Output => (drag.start_port.center, drag.current_pos),
+                PortKind::Output => (drag.current_pos, drag.start_port.center),
+                PortKind::Input => (drag.start_port.center, drag.current_pos),
             };
             Bezier::sample(&mut self.point_cache, start, end, view_graph.scale);
             ctx.painter
@@ -184,8 +184,10 @@ impl ConnectionUi {
                 };
                 let start_layout = graph_layout.node_layout(&binding.target_id);
                 let end_layout = graph_layout.node_layout(&node.id);
-                let start = start_layout.output_center(binding.port_idx, row_height);
-                let end = end_layout.input_center(input_index, row_height);
+
+                let start = end_layout.input_center(input_index, row_height);
+                let end = start_layout.output_center(binding.port_idx, row_height);
+
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
