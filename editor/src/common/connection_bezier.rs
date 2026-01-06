@@ -1,9 +1,9 @@
 use egui::Pos2;
 
 #[derive(Debug)]
-pub struct Bezier;
+pub struct ConnectionBezier;
 
-impl Bezier {
+impl ConnectionBezier {
     pub const STEPS: usize = 24;
 
     pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) {

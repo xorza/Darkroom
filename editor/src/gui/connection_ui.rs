@@ -4,7 +4,7 @@ use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
 
-use crate::common::bezier::Bezier;
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
@@ -98,7 +98,7 @@ impl ConnectionUi {
             } else {
                 ctx.style.connection_stroke
             };
-            Bezier::sample(
+            ConnectionBezier::sample(
                 &mut self.point_cache,
                 curve.start,
                 curve.end,
@@ -112,7 +112,7 @@ impl ConnectionUi {
                 PortKind::Output => (drag.current_pos, drag.start_port.center),
                 PortKind::Input => (drag.start_port.center, drag.current_pos),
             };
-            Bezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+            ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
             ctx.painter
                 .line(self.point_cache.clone(), ctx.style.temp_connection_stroke);
         }
@@ -208,13 +208,13 @@ impl ConnectionUi {
         let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
 
         for curve in self.curves.iter() {
-            Bezier::sample(&mut self.point_cache, curve.start, curve.end, scale);
+            ConnectionBezier::sample(&mut self.point_cache, curve.start, curve.end, scale);
 
             let curve_segments = self.point_cache.windows(2).map(|pair| (pair[0], pair[1]));
             let mut hit = false;
             for (a1, a2) in breaker_segments.clone() {
                 for (b1, b2) in curve_segments.clone() {
-                    if Bezier::segments_intersect(a1, a2, b1, b2) {
+                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
                         hit = true;
                         break;
                     }
