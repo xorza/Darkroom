@@ -6,11 +6,6 @@ pub struct Bezier;
 impl Bezier {
     pub const STEPS: usize = 24;
 
-    fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
-        let dx = (end.x - start.x).abs();
-        (dx * 0.5).max(10.0 * scale)
-    }
-
     pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) {
         let steps = Self::STEPS;
         assert!(steps > 2, "bezier steps must be greater than 2");
@@ -57,6 +52,11 @@ impl Bezier {
         }
 
         (o1 > 0.0) != (o2 > 0.0) && (o3 > 0.0) != (o4 > 0.0)
+    }
+
+    fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
+        let dx = (end.x - start.x).abs();
+        (dx * 0.5).max(10.0 * scale)
     }
 
     fn orient(a: Pos2, b: Pos2, c: Pos2) -> f32 {
