@@ -78,7 +78,7 @@ impl ConnectionUi {
         self.curves.clear();
 
         let row_height = ctx.style.node_row_height * view_graph.scale;
-        self.collect_curves(graph_layout, view_graph, row_height);
+        self.collect_connection_curves(graph_layout, view_graph, row_height);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
@@ -86,7 +86,7 @@ impl ConnectionUi {
         }
     }
 
-    fn collect_curves(
+    fn collect_connection_curves(
         &mut self,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
