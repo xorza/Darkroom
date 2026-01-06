@@ -88,8 +88,6 @@ impl NodeUi {
                 interact_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
 
-            // let view_node = &view_graph.view_nodes[view_node_idx];
-
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
             render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
