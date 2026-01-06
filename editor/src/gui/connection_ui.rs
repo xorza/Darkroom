@@ -107,6 +107,7 @@ impl ConnectionUi {
 
                 let (start_idx, end_idx) =
                     ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+
                 self.curves.push(ConnectionCurve {
                     key: ConnectionKey {
                         input_node_id: node.id,
