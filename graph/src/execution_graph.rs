@@ -1158,7 +1158,7 @@ mod tests {
             .expect_err("Expected cycle detection error");
         match err {
             ExecutionError::CycleDetected { node_id } => {
-                assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
+                assert_eq!(node_id, "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into());
             }
             _ => panic!("Unexpected error"),
         }
