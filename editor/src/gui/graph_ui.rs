@@ -276,23 +276,25 @@ impl GraphUi {
         let pinch_delta = ctx
             .ui
             .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta()));
-        let mut scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
-        let mut mouse_wheel_delta: f32 = 0.0;
-        ctx.ui.input(|input| {
-            for event in &input.events {
-                if let egui::Event::MouseWheel {
-                    unit,
-                    delta: event_delta,
-                    ..
-                } = event
-                {
-                    match unit {
-                        egui::MouseWheelUnit::Point => scroll_delta += *event_delta,
-                        egui::MouseWheelUnit::Line => mouse_wheel_delta += event_delta.length(),
-                        egui::MouseWheelUnit::Page => mouse_wheel_delta += event_delta.length(),
-                    }
-                }
-            }
+
+        let base_scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
+        let (scroll_delta, mouse_wheel_delta) = ctx.ui.input(|input| {
+            input.events.iter().fold(
+                (base_scroll_delta, 0.0),
+                |(point, lines), event| match event {
+                    egui::Event::MouseWheel {
+                        unit,
+                        delta: event_delta,
+                        ..
+                    } => match unit {
+                        egui::MouseWheelUnit::Point => (point + *event_delta, lines),
+                        egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
+                            (point, lines + event_delta.length())
+                        }
+                    },
+                    _ => (point, lines),
+                },
+            )
         });
 
         let (zoom_delta, pan) = (mouse_wheel_delta > f32::EPSILON).then_else(
