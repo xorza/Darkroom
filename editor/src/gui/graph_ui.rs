@@ -13,7 +13,7 @@ use common::BoolExt;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
-const SCROLL_ZOOM_SPEED: f32 = 0.0015;
+const WHEEL_ZOOM_SPEED: f32 = 0.05;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum InteractionState {
@@ -279,17 +279,24 @@ impl GraphUi {
         background_response: &Response,
         pointer_pos: Pos2,
     ) {
-        let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(ctx);
-        let (zoom_delta, pan) = (mouse_wheel_delta > f32::EPSILON).then_else(
-            ((-mouse_wheel_delta * SCROLL_ZOOM_SPEED).exp(), Vec2::ZERO),
-            (
-                ctx.ui
-                    .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
-                scroll_delta,
-            ),
-        );
+        let (zoom_delta, pan) = {
+            let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(ctx);
 
-        {
+            (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
+                ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
+                (
+                    ctx.ui
+                        .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
+                    scroll_delta,
+                ),
+            )
+        };
+
+        // if (zoom_delta - 1.0).abs() > 0.001 || pan.length() > 0.001 {
+        //     println!("zoom_delta: {}, pan {}", zoom_delta, pan);
+        // }
+
+        if (zoom_delta - 1.0).abs() > f32::EPSILON {
             // zoom
             let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
             let origin = ctx.rect.min;
@@ -312,7 +319,7 @@ impl GraphUi {
 /// steps (line/page units) are accumulated separately to keep zoom/pan heuristics stable.
 fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) {
     let (scroll_delta, mouse_wheel_delta) = {
-        let base_scroll_delta = ctx.ui.input(|input| input.smooth_scroll_delta);
+        let base_scroll_delta = ctx.ui.input(|input| input.raw_scroll_delta);
         ctx.ui.input(|input| {
             input.events.iter().fold(
                 (base_scroll_delta, 0.0),
@@ -324,7 +331,7 @@ fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) 
                     } => match unit {
                         egui::MouseWheelUnit::Point => (point + *event_delta, lines),
                         egui::MouseWheelUnit::Line | egui::MouseWheelUnit::Page => {
-                            (point, lines + event_delta.length())
+                            (point, event_delta.y)
                         }
                     },
                     _ => (point, lines),
