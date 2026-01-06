@@ -244,9 +244,9 @@ impl ConnectionUi {
     }
 }
 
-pub(crate) fn bezier_control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
+fn bezier_control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
-    (dx * 0.5).max(40.0 * scale)
+    (dx * 0.5).max(10.0 * scale)
 }
 
 fn sample_cubic_bezier(p0: Pos2, p1: Pos2, p2: Pos2, p3: Pos2, steps: usize) -> Vec<Pos2> {
