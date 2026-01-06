@@ -89,7 +89,7 @@ impl GraphUi {
         self.connections = ConnectionUi::default();
     }
 
-    pub fn process_input(
+    pub fn render(
         &mut self,
         ui: &mut Ui,
         view_graph: &mut model::ViewGraph,
@@ -129,21 +129,16 @@ impl GraphUi {
             )?;
         }
 
-        self.top_panel(&mut ctx, view_graph);
-
-        Ok(())
-    }
-
-    pub fn render(&mut self, ui: &mut Ui, view_graph: &mut model::ViewGraph, func_lib: &FuncLib) {
-        let mut ctx = GraphContext::new(ui, func_lib);
-
         background(&ctx, view_graph);
 
-        self.graph_layout.update(&ctx, view_graph);
         self.render_connections(&mut ctx, view_graph);
 
         self.node_ui
             .render_nodes(&mut ctx, view_graph, &mut self.graph_layout);
+
+        self.top_panel(&mut ctx, view_graph);
+
+        Ok(())
     }
 
     fn process_connections(

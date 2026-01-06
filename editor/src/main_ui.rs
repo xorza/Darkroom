@@ -105,7 +105,7 @@ impl MainUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let result = self.graph_ui.process_input(
+            let result = self.graph_ui.render(
                 ui,
                 &mut app_data.view_graph,
                 &app_data.func_lib,
@@ -114,8 +114,6 @@ impl MainUi {
             if let Err(err) = result {
                 app_data.status = format!("Error: {}", err);
             }
-            self.graph_ui
-                .render(ui, &mut app_data.view_graph, &app_data.func_lib);
         });
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
