@@ -1,6 +1,5 @@
 use eframe::egui;
 use egui::Pos2;
-use egui::epaint::CubicBezierShape;
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
@@ -56,18 +55,14 @@ impl ConnectionDrag {
             PortKind::Input => (-1.0, 1.0),
         };
         let stroke = ctx.style.temp_connection_stroke;
-        let shape = egui::epaint::CubicBezierShape::from_points_stroke(
-            [
-                self.start_port.center,
-                self.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
-                self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
-                self.current_pos,
-            ],
-            false,
-            egui::Color32::TRANSPARENT,
-            stroke,
+        let points = sample_cubic_bezier(
+            self.start_port.center,
+            self.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
+            self.current_pos + egui::vec2(control_offset * end_sign, 0.0),
+            self.current_pos,
+            24,
         );
-        ctx.painter.add(shape);
+        ctx.painter.add(egui::Shape::line(points, stroke));
     }
 }
 
@@ -119,18 +114,14 @@ impl ConnectionUi {
                 ctx.style.connection_stroke
             };
             let control_offset = curve.control_offset;
-            let shape = CubicBezierShape::from_points_stroke(
-                [
-                    curve.start,
-                    curve.start + egui::vec2(control_offset, 0.0),
-                    curve.end + egui::vec2(-control_offset, 0.0),
-                    curve.end,
-                ],
-                false,
-                egui::Color32::TRANSPARENT,
-                stroke,
+            let points = sample_cubic_bezier(
+                curve.start,
+                curve.start + egui::vec2(control_offset, 0.0),
+                curve.end + egui::vec2(-control_offset, 0.0),
+                curve.end,
+                24,
             );
-            ctx.painter.add(shape);
+            ctx.painter.add(egui::Shape::line(points, stroke));
         }
 
         if let Some(drag) = &self.drag {

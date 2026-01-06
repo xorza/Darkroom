@@ -28,6 +28,7 @@ Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `c
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
 Connection drag lifecycle now goes through `ConnectionUi` helpers (`start_drag`, `update_drag`, `stop_drag`), and
 `ConnectionUi::render` draws the active drag path.
+Connection curves now use sampled polylines instead of `CubicBezierShape`.
 
 ## Repository Layout
 
