@@ -31,11 +31,26 @@ enum PrimaryState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CycleError {
-    Detected {
+pub(crate) enum Error {
+    CycleDetected {
         input_node_id: NodeId,
         output_node_id: NodeId,
     },
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::CycleDetected {
+                input_node_id,
+                output_node_id,
+            } => write!(
+                f,
+                "connection would create a cycle between {} and {}",
+                input_node_id, output_node_id
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -80,7 +95,7 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-    ) -> Result<(), CycleError> {
+    ) -> Result<(), Error> {
         let mut ctx = GraphContext::new(ui, func_lib);
 
         let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
@@ -139,7 +154,7 @@ impl GraphUi {
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
-    ) -> Result<(), CycleError> {
+    ) -> Result<(), Error> {
         let primary_state = ctx.ui.input(|input| {
             if input.pointer.primary_pressed() {
                 Some(PrimaryState::Pressed)
@@ -363,7 +378,7 @@ fn apply_connection(
     view_graph: &mut model::ViewGraph,
     a: PortRef,
     b: PortRef,
-) -> Result<(NodeId, usize), CycleError> {
+) -> Result<(NodeId, usize), Error> {
     let (input_port, output_port) = match (a.kind, b.kind) {
         (PortKind::Output, PortKind::Input) => (b, a),
         (PortKind::Input, PortKind::Output) => (a, b),
@@ -371,7 +386,7 @@ fn apply_connection(
     };
 
     if input_port.node_id == output_port.node_id {
-        return Err(CycleError::Detected {
+        return Err(Error::CycleDetected {
             input_node_id: input_port.node_id,
             output_node_id: output_port.node_id,
         });
@@ -379,7 +394,7 @@ fn apply_connection(
 
     let dependents = view_graph.graph.dependent_nodes(&input_port.node_id);
     if dependents.contains(&output_port.node_id) {
-        return Err(CycleError::Detected {
+        return Err(Error::CycleDetected {
             input_node_id: input_port.node_id,
             output_node_id: output_port.node_id,
         });

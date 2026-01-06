@@ -105,12 +105,15 @@ impl MainUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let _ = self.graph_ui.process_input(
+            let result = self.graph_ui.process_input(
                 ui,
                 &mut app_data.view_graph,
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
             );
+            if let Err(err) = result {
+                app_data.status = format!("Error: {}", err);
+            }
             self.graph_ui
                 .render(ui, &mut app_data.view_graph, &app_data.func_lib);
         });

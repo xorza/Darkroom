@@ -351,5 +351,7 @@ Connection breaker rendering now builds a single polyline for `painter.line` ins
 Graph UI connection application now returns a `Result` and rejects connections that would introduce cycles.
 Execution graph now reuses a cached `processing_stack` for cycle detection instead of allocating per pass.
 Graph UI input handling now lives in `GraphUi::process_input`, with rendering split into `GraphUi::render`.
+Graph UI error type now implements `Display` so cycle errors surface in the status panel.
+Editor visuals now explicitly disable egui debug-on-hover overlays.
 `GraphLayout` now stores per-node `NodeLayout` values built by `compute_node_layouts` (no shared base layout), and
 layout geometry is derived from local constants inside `compute_node_layout`.
