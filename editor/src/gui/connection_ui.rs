@@ -98,33 +98,23 @@ impl ConnectionUi {
             } else {
                 ctx.style.connection_stroke
             };
-            let control_offset = Bezier::control_offset(curve.start, curve.end, view_graph.scale);
             Bezier::sample(
                 &mut self.point_cache,
                 curve.start,
-                curve.start + egui::vec2(control_offset, 0.0),
-                curve.end + egui::vec2(-control_offset, 0.0),
                 curve.end,
+                view_graph.scale,
             );
             ctx.painter.line(self.point_cache.clone(), stroke);
         }
 
         if let Some(drag) = &self.drag {
-            let control_offset =
-                Bezier::control_offset(drag.start_port.center, drag.current_pos, view_graph.scale);
-            let (start_sign, end_sign) = match drag.start_port.port.kind {
-                PortKind::Output => (1.0, -1.0),
-                PortKind::Input => (-1.0, 1.0),
+            let (start, end) = match drag.start_port.port.kind {
+                PortKind::Input => (drag.current_pos, drag.start_port.center),
+                PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            let stroke = ctx.style.temp_connection_stroke;
-            Bezier::sample(
-                &mut self.point_cache,
-                drag.start_port.center,
-                drag.start_port.center + egui::vec2(control_offset * start_sign, 0.0),
-                drag.current_pos + egui::vec2(control_offset * end_sign, 0.0),
-                drag.current_pos,
-            );
-            ctx.painter.line(self.point_cache.clone(), stroke);
+            Bezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+            ctx.painter
+                .line(self.point_cache.clone(), ctx.style.temp_connection_stroke);
         }
     }
 
@@ -216,14 +206,7 @@ impl ConnectionUi {
         let breaker_segments = breaker.points.windows(2).map(|pair| (pair[0], pair[1]));
 
         for curve in self.curves.iter() {
-            let control_offset = Bezier::control_offset(curve.start, curve.end, scale);
-            Bezier::sample(
-                &mut self.point_cache,
-                curve.start,
-                curve.start + egui::vec2(control_offset, 0.0),
-                curve.end + egui::vec2(-control_offset, 0.0),
-                curve.end,
-            );
+            Bezier::sample(&mut self.point_cache, curve.start, curve.end, scale);
             let curve_segments = self.point_cache.windows(2).map(|pair| (pair[0], pair[1]));
             let mut hit = false;
             for (a1, a2) in breaker_segments.clone() {
