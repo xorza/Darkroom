@@ -10,6 +10,7 @@ Editor node UI styling now pulls widget/selection colors from `Style`, with `Sty
 centralize theme values.
 Editor node layout constants (width, header/cache/row heights, padding, corner radius) now live in `Style`, and
 `NodeLayout` only keeps computed geometry.
+Node port interaction and rendering now happen in a single pass that both draws ports and returns drag/hover state.
 Node cache/remove button interactions and their side effects now run in `NodeUi::process_input`, leaving render logic
 focused on drawing.
 Port drag/hover interaction now happens in `NodeUi::process_input`, with port rendering split into a draw-only pass.
