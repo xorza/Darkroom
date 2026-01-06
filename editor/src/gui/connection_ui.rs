@@ -132,15 +132,12 @@ impl ConnectionUi {
                 .windows(2)
                 .map(|pair| (pair[0], pair[1]));
             let mut hit = false;
-            for (a1, a2) in breaker_segments.clone() {
+            'outer: for (a1, a2) in breaker_segments.clone() {
                 for (b1, b2) in curve_segments.clone() {
                     if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
                         hit = true;
-                        break;
+                        break 'outer;
                     }
-                }
-                if hit {
-                    break;
                 }
             }
             if hit {
