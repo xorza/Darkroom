@@ -133,6 +133,7 @@ impl AppData {
     pub fn load_test_graph(&mut self) {
         let mut graph = test_graph();
         graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
+        graph.by_name_mut("sum").unwrap().inputs[1].binding = Binding::Const(22455.into());
 
         self.func_lib = test_func_lib(Self::sample_test_hooks(self));
         let graph_view = ViewGraph::from_graph(&graph);

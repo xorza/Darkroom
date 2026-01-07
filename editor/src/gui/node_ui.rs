@@ -320,13 +320,11 @@ fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
 
 fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
     // todo refactor styling
-    let font = ctx.style.body_font.scaled(ctx.scale);
+    let font = ctx.style.sub_font.scaled(ctx.scale);
     let port_radius = ctx.style.node.port_radius * ctx.scale;
 
-    let badge_padding = node_layout.padding;
+    let padding = node_layout.padding;
     let row_height = node_layout.port_row_height;
-    let badge_height = row_height * 1.2;
-    let badge_gap = 6.0 * ctx.scale;
 
     for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {
@@ -335,16 +333,17 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
 
         let label = static_value_label(value);
         let label_width = text_width(&ctx.painter, &font, &label, ctx.style.text_color);
-        let badge_width = label_width + badge_padding * 2.0;
-        let center = node_layout.input_center(input_idx);
-        let badge_right = center.x - port_radius - badge_gap;
+        let badge_width = label_width + padding * 2.0;
+        let input_center = node_layout.input_center(input_idx);
+        let badge_right = input_center.x - port_radius - padding;
         let badge_rect = egui::Rect::from_min_max(
-            egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
-            egui::pos2(badge_right, center.y + badge_height * 0.5),
+            egui::pos2(badge_right - badge_width, input_center.y - row_height * 0.5),
+            egui::pos2(badge_right, input_center.y + row_height * 0.5),
         );
 
-        let link_start = egui::pos2(badge_rect.max.x, center.y);
-        let link_end = egui::pos2(center.x - port_radius, center.y);
+        let link_start = egui::pos2(badge_rect.max.x, input_center.y);
+        let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
+
         ctx.painter
             .line_segment([link_start, link_end], ctx.style.connections.stroke);
         ctx.painter.rect(
@@ -352,7 +351,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
             ctx.style.corner_radius * ctx.scale,
             ctx.style.inactive_bg_fill,
             ctx.style.node.const_stroke,
-            StrokeKind::Outside,
+            StrokeKind::Inside,
         );
         ctx.painter.text(
             badge_rect.center(),
