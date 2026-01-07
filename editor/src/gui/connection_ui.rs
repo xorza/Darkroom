@@ -77,8 +77,7 @@ impl ConnectionUi {
     ) {
         self.curves.clear();
 
-        let row_height = ctx.style.node.row_height * view_graph.scale;
-        self.collect_connection_curves(graph_layout, view_graph, row_height);
+        self.collect_connection_curves(ctx, graph_layout, view_graph);
 
         self.highlighted.clear();
         if let Some(breaker) = breaker {
@@ -88,9 +87,9 @@ impl ConnectionUi {
 
     fn collect_connection_curves(
         &mut self,
+        ctx: &GraphContext,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
-        row_height: f32,
     ) {
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
@@ -102,14 +101,14 @@ impl ConnectionUi {
                 let start_layout = graph_layout.node_layout(&binding.target_id);
                 let end_layout = graph_layout.node_layout(&node.id);
 
-                let input_pos = end_layout.input_center(input_index, row_height);
-                let output_pos = start_layout.output_center(binding.port_idx, row_height);
+                let input_pos = end_layout.input_center(input_index);
+                let output_pos = start_layout.output_center(binding.port_idx);
 
                 let (start_idx, end_idx) = ConnectionBezier::sample(
                     &mut self.point_cache,
                     output_pos,
                     input_pos,
-                    view_graph.scale,
+                    ctx.scale,
                 );
 
                 self.curves.push(ConnectionCurve {
@@ -177,7 +176,7 @@ impl ConnectionUi {
             };
 
             let (start_idx, end_idx) =
-                ConnectionBezier::sample(&mut self.point_cache, start, end, view_graph.scale);
+                ConnectionBezier::sample(&mut self.point_cache, start, end, ctx.scale);
             ctx.painter.line(
                 self.point_cache[start_idx..=end_idx].to_vec(),
                 ctx.style.temp_connection_stroke,

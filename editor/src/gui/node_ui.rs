@@ -28,6 +28,7 @@ pub struct NodeLayout {
     pub dot_first_center: Option<Pos2>,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
+    pub row_height: f32,
 }
 
 #[derive(Debug, Default)]
@@ -36,17 +37,17 @@ pub struct NodeUi {
 }
 
 impl NodeLayout {
-    pub fn input_center(&self, index: usize, row_height: f32) -> Pos2 {
+    pub fn input_center(&self, index: usize) -> Pos2 {
         egui::pos2(
             self.input_first_center.x,
-            self.input_first_center.y + row_height * index as f32,
+            self.input_first_center.y + self.row_height * index as f32,
         )
     }
 
-    pub fn output_center(&self, index: usize, row_height: f32) -> Pos2 {
+    pub fn output_center(&self, index: usize) -> Pos2 {
         egui::pos2(
             self.output_first_center.x,
-            self.output_first_center.y + row_height * index as f32,
+            self.output_first_center.y + self.row_height * index as f32,
         )
     }
 
@@ -88,7 +89,7 @@ impl NodeUi {
             let node_drag_port_result = render_node_ports(ctx, &node_layout, view_node, func);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_node_const_bindings(ctx, &node_layout, node);
-            render_node_labels(ctx, view_graph, &node_layout, func);
+            render_node_labels(ctx, &node_layout, func);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -127,7 +128,7 @@ fn body_drag(
 
     if dragged {
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-            body_response.drag_delta() / view_graph.scale;
+            body_response.drag_delta() / ctx.scale;
 
         let new_layout = compute_node_layout(ctx, view_graph, node_id, graph_layout.origin);
         graph_layout.update_node_layout(node_id, new_layout.clone());
@@ -273,7 +274,6 @@ fn render_node_ports(
     let port_radius = ctx.style.port_radius * ctx.scale;
     let port_activation_radius = ctx.style.port_activation_radius * ctx.scale;
     let port_rect_size = egui::vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
-    let row_height = ctx.style.node.row_height * ctx.scale;
 
     let draw_port = |center: Pos2,
                      kind: PortKind,
@@ -315,7 +315,7 @@ fn render_node_ports(
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
     for input_idx in 0..func.inputs.len() {
-        let center = layout.input_center(input_idx, row_height);
+        let center = layout.input_center(input_idx);
         let drag_info = draw_port(
             center,
             PortKind::Input,
@@ -327,7 +327,7 @@ fn render_node_ports(
     }
 
     for output_idx in 0..func.outputs.len() {
-        let center = layout.output_center(output_idx, row_height);
+        let center = layout.output_center(output_idx);
         let drag_info = draw_port(
             center,
             PortKind::Output,
@@ -360,7 +360,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node:
         let label = static_value_label(value);
         let label_width = text_width(&ctx.painter, &font, &label, ctx.style.text_color);
         let badge_width = label_width + badge_padding * 2.0;
-        let center = layout.input_center(input_idx, row_height);
+        let center = layout.input_center(input_idx);
         let badge_right = center.x - port_radius - badge_gap;
         let badge_rect = egui::Rect::from_min_max(
             egui::pos2(badge_right - badge_width, center.y - badge_height * 0.5),
@@ -406,33 +406,27 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(
-    ctx: &mut GraphContext,
-    view_graph: &ViewGraph,
-    layout: &NodeLayout,
-    func: &Func,
-) {
-    let row_height = ctx.style.node.row_height * view_graph.scale;
-    let padding = ctx.style.node.padding * view_graph.scale;
+fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, func: &Func) {
+    let padding = ctx.style.node.padding * ctx.scale;
 
     for (input_idx, input) in func.inputs.iter().enumerate() {
-        let text_pos = layout.input_center(input_idx, row_height) + vec2(padding, 0.0);
+        let text_pos = layout.input_center(input_idx) + vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::LEFT_CENTER,
             &input.name,
-            ctx.style.sub_font.scaled(view_graph.scale),
+            ctx.style.sub_font.scaled(ctx.scale),
             ctx.style.text_color,
         );
     }
 
     for (output_idx, output) in func.outputs.iter().enumerate() {
-        let text_pos = layout.output_center(output_idx, row_height) - vec2(padding, 0.0);
+        let text_pos = layout.output_center(output_idx) - vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::RIGHT_CENTER,
             &output.name,
-            ctx.style.sub_font.scaled(view_graph.scale),
+            ctx.style.sub_font.scaled(ctx.scale),
             ctx.style.text_color,
         );
     }
@@ -447,7 +441,7 @@ pub(crate) fn compute_node_layout(
     let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
     let node = view_graph.graph.by_id(view_node_id).unwrap();
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-    let scale = view_graph.scale;
+    let scale = ctx.scale;
 
     let node_width_base = ctx.style.node.width * scale;
     let header_height = ctx.style.node.header_height * scale;
@@ -573,6 +567,7 @@ pub(crate) fn compute_node_layout(
     let dot_first_center = dot_first_center.map(|center| center + delta);
     let input_first_center = input_first_center + delta;
     let output_first_center = output_first_center + delta;
+    let row_height = row_height * ctx.scale;
 
     NodeLayout {
         rect,
@@ -581,6 +576,7 @@ pub(crate) fn compute_node_layout(
         dot_first_center,
         input_first_center,
         output_first_center,
+        row_height,
     }
 }
 
