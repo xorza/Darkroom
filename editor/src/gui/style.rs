@@ -36,11 +36,12 @@ const DOTTED_BASE_SPACING: f32 = 24.0;
 const DOTTED_RADIUS_BASE: f32 = 1.2;
 const DOTTED_RADIUS_MIN: f32 = 0.6;
 const DOTTED_RADIUS_MAX: f32 = 2.4;
-const PORT_RADIUS: f32 = 5.5;
 const NODE_WIDTH: f32 = 180.0;
 const NODE_HEADER_HEIGHT: f32 = 22.0;
 const NODE_CACHE_HEIGHT: f32 = 20.0;
 const NODE_ROW_HEIGHT: f32 = 18.0;
+const NODE_PORT_RADIUS: f32 = NODE_ROW_HEIGHT * 0.3;
+const NODE_PORT_ACTIVATION_RADIUS: f32 = NODE_PORT_RADIUS * 1.5;
 const NODE_PADDING: f32 = 8.0;
 const NODE_CORNER_RADIUS: f32 = 6.0;
 const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
@@ -115,8 +116,8 @@ impl Style {
             widget_hover_bg_fill: WIDGET_HOVER_BG_FILL,
             widget_inactive_bg_fill: WIDGET_INACTIVE_BG_FILL,
             widget_inactive_bg_stroke: Stroke::new(STROKE_WIDTH, WIDGET_INACTIVE_BG_STROKE_COLOR),
-            port_radius: PORT_RADIUS,
-            port_activation_radius: PORT_RADIUS * 1.5,
+            port_radius: NODE_PORT_RADIUS,
+            port_activation_radius: NODE_PORT_ACTIVATION_RADIUS,
             header_text_offset: HEADER_TEXT_OFFSET,
             cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
             cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,

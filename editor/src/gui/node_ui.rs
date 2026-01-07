@@ -285,8 +285,10 @@ fn render_node_ports(
         let port_id = ctx
             .ui
             .make_persistent_id(("node_port", kind, view_node.id, idx));
-        let response = ctx.ui.interact(port_rect, port_id, Sense::drag());
-        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
+        let response = ctx
+            .ui
+            .interact(port_rect, port_id, Sense::drag() | Sense::hover());
+        let is_hovered = response.hovered();
 
         let color = is_hovered.then_else(hover_color, base_color);
         ctx.painter.circle_filled(center, port_radius, color);
