@@ -42,6 +42,7 @@ pub struct GraphBackgroundStyle {
 #[derive(Debug)]
 pub struct ConnectionStyle {
     pub stroke_width: f32,
+    //replace with color
     pub highlight_stroke: Stroke,
     pub breaker_stroke: Stroke,
 }
