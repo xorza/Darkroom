@@ -155,7 +155,7 @@ fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, sel
         layout.rect.min
             + egui::vec2(
                 ctx.style.node.padding * ctx.scale,
-                ctx.style.header_text_offset * ctx.scale,
+                ctx.style.node.padding * ctx.scale,
             ),
         egui::Align2::LEFT_TOP,
         &node.name,
@@ -449,7 +449,6 @@ pub(crate) fn compute_node_layout(
     let scale = ctx.scale;
 
     let header_height = ctx.style.node.header_height * scale;
-    let cache_height = ctx.style.node.cache_height * scale;
     let port_row_height = ctx.style.node.port_row_height * scale;
     let padding = ctx.style.node.padding * scale;
 
@@ -470,20 +469,15 @@ pub(crate) fn compute_node_layout(
         caption_width + status_width + remove_width
     };
 
-    let vertical_padding = padding * ctx.style.cache_button_vertical_pad_factor;
-    let cache_text_width = text_width(
+    let cache_button_width = text_width(
         &ctx.painter,
         &ctx.style.body_font.scaled(scale),
         "cache",
         ctx.style.text_color,
-    );
-    let cache_button_height = (cache_height - vertical_padding * 2.0)
-        .max(10.0 * scale)
-        .min(cache_height);
-    let cache_button_width = (cache_button_height * ctx.style.cache_button_width_factor)
-        .max(cache_button_height)
-        .max(cache_text_width + padding * ctx.style.cache_button_text_pad_factor * 2.0);
-    let cache_row_width = padding + cache_button_width + padding;
+    ) + padding * 2.0;
+    let cache_button_height = ctx.style.node.cache_height * scale;
+    let cache_height = cache_button_height + padding * 2.0;
+    let cache_row_width = cache_button_width + padding * 2.0;
 
     let input_count = func.inputs.len();
     let output_count = func.outputs.len();

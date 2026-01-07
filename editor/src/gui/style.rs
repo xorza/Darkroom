@@ -15,10 +15,7 @@ pub struct Style {
     pub widget_hover_bg_fill: Color32,
     pub widget_inactive_bg_fill: Color32,
     pub widget_inactive_bg_stroke: Stroke,
-    pub header_text_offset: f32,
-    pub cache_button_width_factor: f32,
-    pub cache_button_vertical_pad_factor: f32,
-    pub cache_button_text_pad_factor: f32,
+
     pub cache_active_color: Color32,
     pub cache_checked_text_color: Color32,
     pub connection_stroke: Stroke,
@@ -89,10 +86,7 @@ impl Style {
             widget_hover_bg_fill: Color32::from_rgb(50, 50, 50),
             widget_inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             widget_inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
-            header_text_offset: 4.0,
-            cache_button_width_factor: 3.1,
-            cache_button_vertical_pad_factor: 0.4,
-            cache_button_text_pad_factor: 0.5,
+
             cache_active_color: Color32::from_rgb(240, 205, 90),
             cache_checked_text_color: Color32::from_rgb(60, 50, 20),
             connection_stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
