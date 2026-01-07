@@ -96,140 +96,6 @@ pub(crate) struct ConnectionUi {
 }
 
 impl ConnectionUi {
-    pub(crate) fn rebuild(
-        &mut self,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-        breaker: Option<&ConnectionBreaker>,
-    ) {
-        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
-        let feather = 1.0 / pixels_per_point;
-
-        self.highlighted.clear();
-
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        mesh.clear();
-
-        let mut write_idx: usize = 0;
-
-        for node_view in &view_graph.view_nodes {
-            let node = view_graph.graph.by_id(&node_view.id).unwrap();
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Bind(binding) = &input.binding else {
-                    continue;
-                };
-                let connection_key = ConnectionKey {
-                    input_node_id: node.id,
-                    input_idx,
-                };
-                let idx = self
-                    .curves
-                    .compact_insert_with(&connection_key, &mut write_idx, || {
-                        ConnectionCurve::new(connection_key)
-                    });
-                let curve = &mut self.curves[idx];
-
-                let output_layout = graph_layout.node_layout(&binding.target_id);
-                let input_layout = graph_layout.node_layout(&node.id);
-
-                let input_pos = input_layout.input_center(input_idx);
-                let output_pos = output_layout.output_center(binding.port_idx);
-
-                let need_rebuild = !curve.inited
-                    || curve.output_pos.distance_sq(output_pos) > 1.0
-                    || curve.input_pos.distance_sq(input_pos) > 1.0;
-
-                if need_rebuild {
-                    curve.output_pos = output_pos;
-                    curve.input_pos = input_pos;
-                    curve.inited = true;
-
-                    curve.points.clear();
-                    let _ = ConnectionBezier::sample(
-                        &mut curve.points,
-                        output_pos,
-                        input_pos,
-                        ctx.scale,
-                    );
-                }
-
-                let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
-                    (!breaker.segments().is_empty()).then_some(breaker.segments())
-                }) {
-                    let curve_segments = curve.points.windows(2).map(|pair| (pair[0], pair[1]));
-                    let mut hit = false;
-                    'outer: for (b1, b2) in curve_segments {
-                        for (a1, a2) in segments {
-                            if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
-                                self.highlighted.insert(connection_key);
-                                hit = true;
-                                break 'outer;
-                            }
-                        }
-                    }
-
-                    hit
-                } else {
-                    false
-                };
-
-                if curve.highlighted != highlighted || need_rebuild {
-                    curve.highlighted = highlighted;
-                    curve.mesh.clear();
-
-                    if curve.highlighted {
-                        add_curve_to_mesh(
-                            &mut curve.mesh,
-                            &curve.points,
-                            ctx.style.connections.highlight_stroke.color,
-                            ctx.style.connections.highlight_stroke.color,
-                            ctx.style.connections.highlight_stroke.width,
-                            feather,
-                        );
-                    } else {
-                        add_curve_to_mesh(
-                            &mut curve.mesh,
-                            &curve.points,
-                            ctx.style.node.output_port_color,
-                            ctx.style.node.input_port_color,
-                            ctx.style.connections.stroke_width,
-                            feather,
-                        );
-                    };
-
-                    println!(
-                        "{:?} {:?}",
-                        curve.mesh.vertices.len(),
-                        curve.mesh.indices.len()
-                    );
-                }
-
-                mesh.append_ref(&curve.mesh);
-            }
-        }
-
-        self.curves.compact_finish(write_idx);
-
-        if let Some(drag) = &mut self.drag {
-            let (start, end) = match drag.start_port.port.kind {
-                PortKind::Input => (drag.current_pos, drag.start_port.center),
-                PortKind::Output => (drag.start_port.center, drag.current_pos),
-            };
-            drag.points.clear();
-            let _ = ConnectionBezier::sample(&mut drag.points, start, end, ctx.scale);
-            add_curve_to_mesh(
-                mesh,
-                &drag.points,
-                ctx.style.node.output_port_color,
-                ctx.style.node.input_port_color,
-                ctx.style.connections.stroke_width,
-                feather,
-            );
-        }
-    }
-
     pub(crate) fn render(
         &mut self,
         ctx: &GraphContext,
@@ -284,6 +150,134 @@ impl ConnectionUi {
 
     pub(crate) fn stop_drag(&mut self) {
         self.drag = None;
+    }
+
+    fn rebuild(
+        &mut self,
+        ctx: &GraphContext,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        breaker: Option<&ConnectionBreaker>,
+    ) {
+        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
+        let feather = 1.0 / pixels_per_point;
+
+        self.highlighted.clear();
+
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        mesh.clear();
+
+        let mut write_idx: usize = 0;
+
+        for node_view in &view_graph.view_nodes {
+            let node = view_graph.graph.by_id(&node_view.id).unwrap();
+
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                let Binding::Bind(binding) = &input.binding else {
+                    continue;
+                };
+                let connection_key = ConnectionKey {
+                    input_node_id: node.id,
+                    input_idx,
+                };
+                let curve_idx = self
+                    .curves
+                    .compact_insert_with(&connection_key, &mut write_idx, || {
+                        ConnectionCurve::new(connection_key)
+                    });
+                let curve = &mut self.curves[curve_idx];
+
+                let output_layout = graph_layout.node_layout(&binding.target_id);
+                let input_layout = graph_layout.node_layout(&node.id);
+
+                let input_pos = input_layout.input_center(input_idx);
+                let output_pos = output_layout.output_center(binding.port_idx);
+
+                let needs_rebuild = !curve.inited
+                    || curve.output_pos.distance_sq(output_pos) > 1.0
+                    || curve.input_pos.distance_sq(input_pos) > 1.0;
+
+                if needs_rebuild {
+                    curve.output_pos = output_pos;
+                    curve.input_pos = input_pos;
+                    curve.inited = true;
+
+                    curve.points.clear();
+                    let _ = ConnectionBezier::sample(
+                        &mut curve.points,
+                        output_pos,
+                        input_pos,
+                        ctx.scale,
+                    );
+                }
+
+                let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
+                    (!breaker.segments().is_empty()).then_some(breaker.segments())
+                }) {
+                    let curve_segments = curve.points.windows(2).map(|pair| (pair[0], pair[1]));
+                    let mut hit = false;
+                    'outer: for (b1, b2) in curve_segments {
+                        for (a1, a2) in segments {
+                            if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
+                                self.highlighted.insert(connection_key);
+                                hit = true;
+                                break 'outer;
+                            }
+                        }
+                    }
+
+                    hit
+                } else {
+                    false
+                };
+
+                if curve.highlighted != highlighted || needs_rebuild {
+                    curve.highlighted = highlighted;
+                    curve.mesh.clear();
+
+                    if curve.highlighted {
+                        add_curve_to_mesh(
+                            &mut curve.mesh,
+                            &curve.points,
+                            ctx.style.connections.highlight_stroke.color,
+                            ctx.style.connections.highlight_stroke.color,
+                            ctx.style.connections.highlight_stroke.width,
+                            feather,
+                        );
+                    } else {
+                        add_curve_to_mesh(
+                            &mut curve.mesh,
+                            &curve.points,
+                            ctx.style.node.output_port_color,
+                            ctx.style.node.input_port_color,
+                            ctx.style.connections.stroke_width,
+                            feather,
+                        );
+                    };
+                }
+
+                mesh.append_ref(&curve.mesh);
+            }
+        }
+
+        self.curves.compact_finish(write_idx);
+
+        if let Some(drag) = &mut self.drag {
+            let (start, end) = match drag.start_port.port.kind {
+                PortKind::Input => (drag.current_pos, drag.start_port.center),
+                PortKind::Output => (drag.start_port.center, drag.current_pos),
+            };
+            drag.points.clear();
+            let _ = ConnectionBezier::sample(&mut drag.points, start, end, ctx.scale);
+            add_curve_to_mesh(
+                mesh,
+                &drag.points,
+                ctx.style.node.output_port_color,
+                ctx.style.node.input_port_color,
+                ctx.style.connections.stroke_width,
+                feather,
+            );
+        }
     }
 }
 
