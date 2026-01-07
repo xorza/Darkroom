@@ -121,7 +121,7 @@ impl NodeLayout {
 
         let title_width = self.title_galley.size().x + padding * 2.0;
         let remove_size = ctx.style.node.remove_btn_size * self.scale + small_padding * 2.0;
-        let status_dot_size = ctx.style.node.status_dot_radius * 2.0;
+        let status_dot_size = ctx.style.node.status_dot_radius * self.scale * 2.0;
         let header_height = self
             .title_galley
             .size()
