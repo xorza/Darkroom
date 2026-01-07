@@ -42,8 +42,8 @@ impl Math2ArgOp {
     fn invoke(&self, inputs: &[InvokeInput]) -> anyhow::Result<DynamicValue> {
         assert_eq!(inputs.len(), 2);
 
-        let a = inputs[0].value.as_float();
-        let b = inputs[1].value.as_float();
+        let a = inputs[0].value.as_f64();
+        let b = inputs[1].value.as_f64();
 
         Ok(DynamicValue::Float(self.apply(a, b)))
     }
@@ -174,7 +174,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let op: Math2ArgOp = inputs[2].value.as_int().into();
+                let op: Math2ArgOp = inputs[2].value.as_i64().into();
 
                 op.invoke(&inputs[0..2])
                     .map(|result| outputs[0] = result)
@@ -208,7 +208,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_float();
+                let value: f64 = inputs[0].value.as_f64();
                 let result = format!("{}", value);
 
                 outputs[0] = DynamicValue::String(result);
@@ -252,8 +252,8 @@ impl Default for BasicInvoker {
 
                 let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
 
-                let min: f64 = inputs[0].value.as_float();
-                let max: f64 = inputs[1].value.as_float();
+                let min: f64 = inputs[0].value.as_f64();
+                let max: f64 = inputs[1].value.as_f64();
                 let random = rng.random::<f64>();
                 let result = min + (max - min) * random;
 
@@ -295,8 +295,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
-                let b: f64 = inputs[1].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
+                let b: f64 = inputs[1].value.as_f64();
                 let result = a + b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -337,8 +337,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
-                let b: f64 = inputs[1].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
+                let b: f64 = inputs[1].value.as_f64();
                 let result = a - b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -378,8 +378,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
-                let b: f64 = inputs[1].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
+                let b: f64 = inputs[1].value.as_f64();
                 let result = a * b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -425,8 +425,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
-                let b: f64 = inputs[1].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
+                let b: f64 = inputs[1].value.as_f64();
                 let divide = a / b;
                 let modulo = a % b;
 
@@ -469,8 +469,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
-                let b: f64 = inputs[1].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
+                let b: f64 = inputs[1].value.as_f64();
                 let power = a.powf(b);
 
                 outputs[0] = DynamicValue::Float(power);
@@ -502,7 +502,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
                 let sqrt = a.sqrt();
 
                 outputs[0] = DynamicValue::Float(sqrt);
@@ -534,7 +534,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
                 let sin = a.sin();
 
                 outputs[0] = DynamicValue::Float(sin);
@@ -566,7 +566,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
                 let cos = a.cos();
 
                 outputs[0] = DynamicValue::Float(cos);
@@ -598,7 +598,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_float();
+                let a: f64 = inputs[0].value.as_f64();
                 let tan = a.tan();
 
                 outputs[0] = DynamicValue::Float(tan);
@@ -630,7 +630,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let sin: f64 = inputs[0].value.as_float();
+                let sin: f64 = inputs[0].value.as_f64();
                 let asin = sin.asin();
 
                 outputs[0] = DynamicValue::Float(asin);
@@ -662,7 +662,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let cos: f64 = inputs[0].value.as_float();
+                let cos: f64 = inputs[0].value.as_f64();
                 let acos = cos.acos();
 
                 outputs[0] = DynamicValue::Float(acos);
@@ -694,7 +694,7 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let tan: f64 = inputs[0].value.as_float();
+                let tan: f64 = inputs[0].value.as_f64();
                 let atan = tan.atan();
 
                 outputs[0] = DynamicValue::Float(atan);
@@ -735,8 +735,8 @@ impl Default for BasicInvoker {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_float();
-                let base: f64 = inputs[1].value.as_float();
+                let value: f64 = inputs[0].value.as_f64();
+                let base: f64 = inputs[1].value.as_f64();
                 let log = value.log(base);
 
                 outputs[0] = DynamicValue::Float(log);

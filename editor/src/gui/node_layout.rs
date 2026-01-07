@@ -77,36 +77,41 @@ impl NodeLayout {
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-        self.scale = ctx.scale;
+        if !self.inited || (self.scale - ctx.scale).abs() >= common::EPSILON {
+            self.scale = ctx.scale;
+            self.inited = true;
 
-        self.title_galley = ctx.painter.layout_no_wrap(
-            node.name.to_string(),
-            ctx.style.body_font.scaled(self.scale),
-            ctx.style.text_color,
-        );
-
-        let label_font = ctx.style.sub_font.scaled(self.scale);
-
-        self.input_galleys.clear();
-        for input in &func.inputs {
-            let galley = ctx.painter.layout_no_wrap(
-                input.name.to_string(),
-                label_font.clone(),
+            self.title_galley = ctx.painter.layout_no_wrap(
+                node.name.to_string(),
+                ctx.style.body_font.scaled(self.scale),
                 ctx.style.text_color,
             );
-            self.input_galleys.push(galley);
-        }
-        self.output_galleys.clear();
-        for output in &func.outputs {
-            let galley = ctx.painter.layout_no_wrap(
-                output.name.to_string(),
-                label_font.clone(),
-                ctx.style.text_color,
-            );
-            self.output_galleys.push(galley);
+
+            let label_font = ctx.style.sub_font.scaled(self.scale);
+
+            self.input_galleys.clear();
+            for input in &func.inputs {
+                let galley = ctx.painter.layout_no_wrap(
+                    input.name.to_string(),
+                    label_font.clone(),
+                    ctx.style.text_color,
+                );
+                self.input_galleys.push(galley);
+            }
+            self.output_galleys.clear();
+            for output in &func.outputs {
+                let galley = ctx.painter.layout_no_wrap(
+                    output.name.to_string(),
+                    label_font.clone(),
+                    ctx.style.text_color,
+                );
+                self.output_galleys.push(galley);
+            }
         }
 
         // ===============
+        assert!(self.inited);
+        assert!((self.scale - ctx.scale) < common::EPSILON);
 
         let padding = ctx.style.padding * self.scale;
         let small_padding = ctx.style.small_padding * self.scale;

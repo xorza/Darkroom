@@ -133,7 +133,7 @@ impl DynamicValue {
         }
     }
 
-    pub fn as_float(&self) -> f64 {
+    pub fn as_f64(&self) -> f64 {
         match self {
             DynamicValue::Float(value) => *value,
             _ => {
@@ -141,7 +141,7 @@ impl DynamicValue {
             }
         }
     }
-    pub fn as_int(&self) -> i64 {
+    pub fn as_i64(&self) -> i64 {
         self.try_into().unwrap()
     }
     pub fn none_or_int(&self) -> Option<i64> {
@@ -199,17 +199,15 @@ impl DynamicValue {
             (DataType::Bool, DataType::Float) => DynamicValue::Float(self.as_bool() as i64 as f64),
             (DataType::Bool, DataType::String) => DynamicValue::String(self.as_bool().to_string()),
 
-            (DataType::Int, DataType::Bool) => DynamicValue::Bool(self.as_int() != 0),
-            (DataType::Int, DataType::Float) => DynamicValue::Float(self.as_int() as f64),
-            (DataType::Int, DataType::String) => DynamicValue::String(self.as_int().to_string()),
+            (DataType::Int, DataType::Bool) => DynamicValue::Bool(self.as_i64() != 0),
+            (DataType::Int, DataType::Float) => DynamicValue::Float(self.as_i64() as f64),
+            (DataType::Int, DataType::String) => DynamicValue::String(self.as_i64().to_string()),
 
             (DataType::Float, DataType::Bool) => {
-                DynamicValue::Bool(self.as_float().abs() > EPSILON)
+                DynamicValue::Bool(self.as_f64().abs() > EPSILON as f64)
             }
-            (DataType::Float, DataType::Int) => DynamicValue::Int(self.as_float() as i64),
-            (DataType::Float, DataType::String) => {
-                DynamicValue::String(self.as_float().to_string())
-            }
+            (DataType::Float, DataType::Int) => DynamicValue::Int(self.as_f64() as i64),
+            (DataType::Float, DataType::String) => DynamicValue::String(self.as_f64().to_string()),
 
             (src, dst) => {
                 panic!("Unsupported conversion from {:?} to {:?}", src, dst);

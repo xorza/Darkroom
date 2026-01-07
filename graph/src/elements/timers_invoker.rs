@@ -82,7 +82,7 @@ impl Default for TimersInvoker {
                         let frequency = inputs[0]
                             .value
                             .is_none()
-                            .then_else_with(|| 30.0, || inputs[0].value.as_float());
+                            .then_else_with(|| 30.0, || inputs[0].value.as_f64());
                         (1.0 / frequency, 1)
                     }
                 };
