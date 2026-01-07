@@ -448,12 +448,20 @@ pub(crate) fn compute_node_layout(
     let row_height = ctx.style.node.port_row_height * scale;
     let padding = ctx.style.node.padding * scale;
 
-    let header_width = text_width(
-        &ctx.painter,
-        &ctx.style.heading_font.scaled(scale),
-        &node.name,
-        ctx.style.text_color,
-    ) + padding * 2.0;
+    let header_width = {
+        let caption_width = text_width(
+            &ctx.painter,
+            &ctx.style.heading_font.scaled(scale),
+            &node.name,
+            ctx.style.text_color,
+        ) + padding * 2.0;
+        let status_width = {
+            let dot_diameter = ctx.style.node.status_dot_radius * 2.0;
+            2.0 * (padding + dot_diameter + ctx.style.node.status_item_gap)
+        };
+        caption_width + status_width
+    };
+
     let vertical_padding = padding * ctx.style.cache_button_vertical_pad_factor;
     let cache_text_width = text_width(
         &ctx.painter,
@@ -468,13 +476,6 @@ pub(crate) fn compute_node_layout(
         .max(cache_button_height)
         .max(cache_text_width + padding * ctx.style.cache_button_text_pad_factor * 2.0);
     let cache_row_width = padding + cache_button_width + padding;
-    let status_row_width = {
-        let dot_diameter = ctx.style.node.status_dot_radius * 2.0;
-        let count = 2usize;
-        let gaps = (count - 1) as f32;
-        let total = count as f32 * dot_diameter + gaps * ctx.style.node.status_item_gap;
-        padding + total + padding
-    };
 
     let input_count = func.inputs.len();
     let output_count = func.outputs.len();
@@ -506,11 +507,7 @@ pub(crate) fn compute_node_layout(
         max_row_width = max_row_width.max(row_width);
     }
 
-    let node_width = header_width
-        .max(max_row_width)
-        .max(cache_row_width)
-        .max(status_row_width);
-
+    let node_width = header_width.max(max_row_width).max(cache_row_width);
     let height = header_height + cache_height + padding + row_height * row_count as f32 + padding;
     let node_size = egui::vec2(node_width, height);
 
