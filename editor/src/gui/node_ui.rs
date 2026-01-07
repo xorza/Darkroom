@@ -189,7 +189,7 @@ fn render_hints(
     func: &graph::prelude::Func,
 ) {
     let dot_radius = ctx.scale * ctx.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + ctx.scale * ctx.style.node.status_item_gap;
+    let dot_step = (dot_radius * 2.0) + ctx.scale + ctx.style.node.padding;
 
     if node.terminal {
         let center = layout.dot_center(0, dot_step);
@@ -457,7 +457,7 @@ pub(crate) fn compute_node_layout(
         ) + padding * 2.0;
         let status_width = {
             let dot_diameter = ctx.style.node.status_dot_radius * 2.0;
-            2.0 * (padding + dot_diameter + ctx.style.node.status_item_gap)
+            2.0 * (padding + dot_diameter)
         };
         caption_width + status_width
     };
