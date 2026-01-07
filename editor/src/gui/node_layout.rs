@@ -148,10 +148,16 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
-        let cache_button_height = ctx.style.sub_font.size * self.scale + small_padding * 2.0;
+        let cache_button_height = ctx.style.sub_font.size * self.scale;
 
         let header_row_height = header_height + padding * 2.0;
-        let port_row_height = ctx.style.sub_font.size * self.scale + padding * 2.0;
+        let port_row_height = ctx
+            .style
+            .sub_font
+            .size
+            .max(ctx.style.node.port_activation_radius * 2.0)
+            * self.scale
+            + small_padding;
         let cache_row_height = cache_button_height + small_padding * 2.0;
 
         let node_width = header_width.max(max_row_width);

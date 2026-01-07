@@ -84,11 +84,11 @@ impl NodeUi {
         let font = ctx.style.sub_font.scaled(ctx.scale);
         let port_radius = ctx.style.node.port_radius * ctx.scale;
 
-        let padding = node_layout.padding;
-        let row_height = node_layout.port_row_height;
+        let padding = ctx.style.padding * ctx.scale;
+        let small_padding = ctx.style.small_padding * ctx.scale;
 
         self.input_galleys.clear();
-        let mut const_badge_width: f32 = 0.0;
+        let mut max_badge_width: f32 = 0.0;
         for input in node.inputs.iter() {
             let Binding::Const(value) = &input.binding else {
                 continue;
@@ -99,28 +99,30 @@ impl NodeUi {
                 ctx.painter
                     .layout_no_wrap(label, font.clone(), ctx.style.text_color);
             let badge_width = label_galley.size().x + padding * 2.0;
-            const_badge_width = const_badge_width.max(badge_width);
+            max_badge_width = max_badge_width.max(badge_width);
             self.input_galleys.push_back(label_galley);
         }
 
         for (input_idx, input) in node.inputs.iter().enumerate() {
-            let Binding::Const(value) = &input.binding else {
+            if !matches!(input.binding, Binding::Const(_)) {
                 continue;
-            };
+            }
 
-            // let label = static_value_label(value);
-            // let label_galley =
-            //     ctx.painter
-            //         .layout_no_wrap(label, font.clone(), ctx.style.text_color);
-            // let badge_width = label_galley.size().x + padding * 2.0;
+            let label_galley = self.input_galleys.pop_front().unwrap();
+
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding;
+            let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding ;
             let badge_rect = egui::Rect::from_min_max(
                 egui::pos2(
-                    badge_right - const_badge_width,
-                    input_center.y - row_height * 0.5,
+                    badge_right - max_badge_width,
+                    input_center.y - badge_height * 0.5,
                 ),
-                egui::pos2(badge_right, input_center.y + row_height * 0.5),
+                egui::pos2(badge_right, input_center.y + badge_height * 0.5),
+            );
+            let label_pos = egui::pos2(
+                badge_rect.max.x - padding - label_galley.size().x,
+                badge_rect.center().y - label_galley.size().y * 0.5,
             );
 
             let link_start = egui::pos2(badge_rect.max.x, input_center.y);
@@ -135,11 +137,9 @@ impl NodeUi {
                 ctx.style.node.const_stroke,
                 StrokeKind::Inside,
             );
-            ctx.painter.galley(
-                badge_rect.min + Vec2::ONE * padding,
-                self.input_galleys.pop_front().unwrap(),
-                ctx.style.text_color,
-            );
+
+            ctx.painter
+                .galley(label_pos, label_galley, ctx.style.text_color);
         }
     }
 }

@@ -39,6 +39,7 @@ rect.
 Connection UI now owns the shared bezier control-offset helper used for connection drawing and drag previews.
 Temp connection rendering now draws the full sampled bezier range including the endpoint.
 Const input badges now clamp and validate scale to keep layout stable at extreme zooms.
+Const input badge labels now right-align to the badge edge and remain vertically centered.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.

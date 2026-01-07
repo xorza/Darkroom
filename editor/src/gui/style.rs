@@ -118,10 +118,10 @@ impl Style {
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
-                cache_btn_width: 60.0,
+                cache_btn_width: 50.0,
 
                 port_radius: 18.0 * 0.3,
-                port_activation_radius: 18.0 * 0.3 * 1.5,
+                port_activation_radius: 18.0 * 0.3 * 1.3,
                 port_label_side_padding: 8.0,
 
                 input_port_color: Color32::from_rgb(70, 150, 255),
