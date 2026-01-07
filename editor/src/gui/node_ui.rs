@@ -47,7 +47,7 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
-            render_body(ctx, node, &node_layout, is_selected);
+            render_body(ctx, &node_layout, is_selected);
             if render_remove_btn(ctx, ui_interaction, &node_id, &node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
@@ -105,7 +105,7 @@ fn body_drag(
     node_layout
 }
 
-fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, selected: bool) {
+fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
     let stroke = selected.then_else(ctx.style.active_bg_stroke, ctx.style.inactive_bg_stroke);
     ctx.painter.rect(
@@ -115,13 +115,9 @@ fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, sel
         stroke,
         egui::StrokeKind::Middle,
     );
-    ctx.painter.text(
-        layout.body_rect.min + Vec2::ONE * ctx.style.node.padding * ctx.scale,
-        egui::Align2::LEFT_TOP,
-        &node.name,
-        ctx.style.heading_font.scaled(ctx.scale),
-        ctx.style.text_color,
-    );
+    let title_pos = layout.body_rect.min + Vec2::ONE * ctx.style.node.padding * ctx.scale;
+    ctx.painter
+        .galley(title_pos, layout.title_galley.clone(), ctx.style.text_color);
 }
 
 fn render_cache_btn(
@@ -306,6 +302,7 @@ fn render_node_ports(
 }
 
 fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
+    // todo refactor styling
     let font = ctx.style.body_font.scaled(ctx.scale);
     let port_radius = ctx.scale * ctx.style.node.port_radius;
     let link_inset = port_radius * 0.6;
@@ -374,25 +371,18 @@ fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout, func: &F
     let padding = ctx.style.node.port_label_side_padding * ctx.scale;
 
     for (input_idx, input) in func.inputs.iter().enumerate() {
-        let text_pos = node_layout.input_center(input_idx) + vec2(padding, 0.0);
-        ctx.painter.text(
-            text_pos,
-            egui::Align2::LEFT_CENTER,
-            &input.name,
-            ctx.style.sub_font.scaled(ctx.scale),
-            ctx.style.text_color,
-        );
+        let galley = node_layout.input_galleys[input_idx];
+        let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
+        ctx.painter
+            .galley(text_pos, galley.clone(), ctx.style.text_color);
     }
 
     for (output_idx, output) in func.outputs.iter().enumerate() {
-        let text_pos = node_layout.output_center(output_idx) - vec2(padding, 0.0);
-        ctx.painter.text(
-            text_pos,
-            egui::Align2::RIGHT_CENTER,
-            &output.name,
-            ctx.style.sub_font.scaled(ctx.scale),
-            ctx.style.text_color,
-        );
+        let galley = node_layout.output_galleys[output_idx];
+        let text_pos = node_layout.output_center(output_idx)
+            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
+        ctx.painter
+            .galley(text_pos, galley.clone(), ctx.style.text_color);
     }
 }
 

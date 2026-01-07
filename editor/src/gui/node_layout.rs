@@ -1,6 +1,7 @@
 use eframe::egui;
-use egui::{Color32, FontId, Pos2, Rect, vec2};
+use egui::{Color32, FontId, Galley, Pos2, Rect, vec2};
 use graph::graph::NodeId;
+use std::sync::Arc;
 
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_ctx::GraphContext;
@@ -16,6 +17,9 @@ pub struct NodeLayout {
     pub output_first_center: Pos2,
     pub port_row_height: f32,
     pub padding: f32,
+    pub title_galley: Arc<Galley>,
+    pub input_galleys: Vec<Arc<Galley>>,
+    pub output_galleys: Vec<Arc<Galley>>,
 }
 
 impl NodeLayout {
@@ -55,12 +59,12 @@ pub(crate) fn compute_node_layout(
     let header_height = ctx.style.heading_font.size * scale;
     let remove_btn_size = header_height;
 
-    let title_width = text_width(
-        &ctx.painter,
-        &ctx.style.heading_font.scaled(scale),
-        &node.name,
+    let title_galley = ctx.painter.layout_no_wrap(
+        node.name.to_string(),
+        ctx.style.heading_font.scaled(scale),
         ctx.style.text_color,
-    ) + padding * 2.0;
+    );
+    let title_width = title_galley.size().x + padding * 2.0;
 
     let header_width = {
         let status_width = 2.0 * (padding + ctx.style.node.status_dot_radius * 2.0);
@@ -73,22 +77,29 @@ pub(crate) fn compute_node_layout(
     let output_count = func.outputs.len();
     let row_count = input_count.max(output_count).max(1);
     let mut max_row_width: f32 = 0.0;
+    let mut input_galleys = Vec::with_capacity(func.inputs.len());
+    let mut output_galleys = Vec::with_capacity(func.outputs.len());
+    let label_font = ctx.style.sub_font.scaled(scale);
     for row in 0..row_count {
         let left = func.inputs.get(row).map_or(0.0, |input| {
-            text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(scale),
-                &input.name,
+            let galley = ctx.painter.layout_no_wrap(
+                input.name.to_string(),
+                label_font.clone(),
                 ctx.style.text_color,
-            ) + padding
+            );
+            let width = galley.size().x;
+            input_galleys.push(galley);
+            width + padding
         });
         let right = func.outputs.get(row).map_or(0.0, |output| {
-            text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(scale),
-                &output.name,
+            let galley = ctx.painter.layout_no_wrap(
+                output.name.to_string(),
+                label_font.clone(),
                 ctx.style.text_color,
-            ) + padding
+            );
+            let width = galley.size().x;
+            output_galleys.push(galley);
+            width + padding
         });
         let mut row_width = padding * 2.0 + left + right;
         if left > 0.0 && right > 0.0 {
@@ -162,6 +173,9 @@ pub(crate) fn compute_node_layout(
         output_first_center,
         port_row_height,
         padding,
+        title_galley,
+        input_galleys,
+        output_galleys,
     }
 }
 

@@ -8,6 +8,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug, Default)]
 pub struct ConnectionBreaker {
+    // todo reserve space
     segments: Vec<(Pos2, Pos2)>,
     last_point: Option<Pos2>,
 }
