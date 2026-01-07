@@ -1,54 +1,6 @@
 use eframe::egui;
 use egui::{Color32, FontId, Stroke};
 
-const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
-const STROKE_WIDTH: f32 = 1.0;
-const BODY_FONT_SIZE: f32 = 17.0;
-const HEADING_FONT_SIZE: f32 = 18.0;
-const SUB_FONT_SIZE: f32 = 15.0;
-
-const HEADER_TEXT_OFFSET: f32 = 4.0;
-const CACHE_BUTTON_WIDTH_FACTOR: f32 = 3.1;
-const CACHE_BUTTON_VERTICAL_PAD_FACTOR: f32 = 0.4;
-const CACHE_BUTTON_TEXT_PAD_FACTOR: f32 = 0.5;
-const NODE_FILL: Color32 = Color32::from_rgb(27, 27, 27);
-const CACHE_ACTIVE_COLOR: Color32 = Color32::from_rgb(240, 205, 90);
-const CACHE_CHECKED_TEXT_COLOR: Color32 = Color32::from_rgb(60, 50, 20);
-const STATUS_DOT_RADIUS: f32 = 4.0;
-const STATUS_ITEM_GAP: f32 = 6.0;
-const INPUT_PORT_COLOR: Color32 = Color32::from_rgb(70, 150, 255);
-const CONST_STROKE_COLOR: Color32 = Color32::from_rgb(70, 150, 255);
-const OUTPUT_PORT_COLOR: Color32 = Color32::from_rgb(70, 200, 200);
-const INPUT_HOVER_COLOR: Color32 = Color32::from_rgb(120, 190, 255);
-const OUTPUT_HOVER_COLOR: Color32 = Color32::from_rgb(110, 230, 210);
-const CONNECTION_STROKE_WIDTH: f32 = 2.0;
-const CONNECTION_HIGHLIGHT_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
-const TEMP_CONNECTION_COLOR: Color32 = Color32::from_rgb(170, 200, 255);
-const BREAKER_COLOR: Color32 = Color32::from_rgb(255, 120, 120);
-const SELECTED_STROKE_COLOR: Color32 = Color32::from_rgb(128, 128, 128);
-const NODE_STROKE_COLOR: Color32 = Color32::from_rgb(60, 60, 60);
-const NONINTERACTIVE_TEXT_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
-const WIDGET_NONINTERACTIVE_BG_FILL: Color32 = Color32::from_rgb(35, 35, 35);
-const WIDGET_ACTIVE_BG_FILL: Color32 = Color32::from_rgb(60, 60, 60);
-const WIDGET_HOVER_BG_FILL: Color32 = Color32::from_rgb(50, 50, 50);
-const WIDGET_INACTIVE_BG_FILL: Color32 = Color32::from_rgb(40, 40, 40);
-const WIDGET_INACTIVE_BG_STROKE_COLOR: Color32 = Color32::from_rgb(65, 65, 65);
-const STATUS_TERMINAL_COLOR: Color32 = SELECTED_STROKE_COLOR;
-const STATUS_IMPURE_COLOR: Color32 = Color32::from_rgb(255, 150, 70);
-const DOTTED_COLOR: Color32 = Color32::from_rgb(48, 48, 48);
-const DOTTED_BASE_SPACING: f32 = 24.0;
-const DOTTED_RADIUS_BASE: f32 = 1.2;
-const DOTTED_RADIUS_MIN: f32 = 0.6;
-const DOTTED_RADIUS_MAX: f32 = 2.4;
-const NODE_WIDTH: f32 = 180.0;
-const NODE_HEADER_HEIGHT: f32 = 22.0;
-const NODE_CACHE_HEIGHT: f32 = 20.0;
-const NODE_ROW_HEIGHT: f32 = 18.0;
-const NODE_PORT_RADIUS: f32 = NODE_ROW_HEIGHT * 0.3;
-const NODE_PORT_ACTIVATION_RADIUS: f32 = NODE_PORT_RADIUS * 1.5;
-const NODE_PADDING: f32 = 8.0;
-const NODE_CORNER_RADIUS: f32 = 6.0;
-
 #[derive(Debug, Clone)]
 pub struct Style {
     pub heading_font: FontId,
@@ -104,63 +56,60 @@ impl Style {
     pub fn new() -> Self {
         Self {
             heading_font: FontId {
-                size: HEADING_FONT_SIZE,
+                size: 18.0,
                 family: egui::FontFamily::Proportional,
             },
             body_font: FontId {
-                size: BODY_FONT_SIZE,
+                size: 17.0,
                 family: egui::FontFamily::Proportional,
             },
             sub_font: FontId {
-                size: SUB_FONT_SIZE,
+                size: 15.0,
                 family: egui::FontFamily::Proportional,
             },
-            text_color: TEXT_COLOR,
-            widget_text_color: TEXT_COLOR,
-            widget_noninteractive_text_color: NONINTERACTIVE_TEXT_COLOR,
-            widget_noninteractive_bg_fill: WIDGET_NONINTERACTIVE_BG_FILL,
-            widget_active_bg_fill: WIDGET_ACTIVE_BG_FILL,
-            widget_hover_bg_fill: WIDGET_HOVER_BG_FILL,
-            widget_inactive_bg_fill: WIDGET_INACTIVE_BG_FILL,
-            widget_inactive_bg_stroke: Stroke::new(STROKE_WIDTH, WIDGET_INACTIVE_BG_STROKE_COLOR),
-            port_radius: NODE_PORT_RADIUS,
-            port_activation_radius: NODE_PORT_ACTIVATION_RADIUS,
-            header_text_offset: HEADER_TEXT_OFFSET,
-            cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
-            cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,
-            cache_button_text_pad_factor: CACHE_BUTTON_TEXT_PAD_FACTOR,
-            cache_active_color: CACHE_ACTIVE_COLOR,
-            cache_checked_text_color: CACHE_CHECKED_TEXT_COLOR,
-            status_terminal_color: STATUS_TERMINAL_COLOR,
-            status_impure_color: STATUS_IMPURE_COLOR,
-            status_dot_radius: STATUS_DOT_RADIUS,
-            status_item_gap: STATUS_ITEM_GAP,
-            input_port_color: INPUT_PORT_COLOR,
-            output_port_color: OUTPUT_PORT_COLOR,
-            input_hover_color: INPUT_HOVER_COLOR,
-            output_hover_color: OUTPUT_HOVER_COLOR,
-            connection_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, INPUT_PORT_COLOR),
-            connection_highlight_stroke: Stroke::new(
-                CONNECTION_STROKE_WIDTH,
-                CONNECTION_HIGHLIGHT_COLOR,
-            ),
-            temp_connection_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, TEMP_CONNECTION_COLOR),
-            breaker_stroke: Stroke::new(CONNECTION_STROKE_WIDTH, BREAKER_COLOR),
-            dotted_color: DOTTED_COLOR,
-            dotted_base_spacing: DOTTED_BASE_SPACING,
-            dotted_radius_base: DOTTED_RADIUS_BASE,
-            dotted_radius_min: DOTTED_RADIUS_MIN,
-            dotted_radius_max: DOTTED_RADIUS_MAX,
-            node_width: NODE_WIDTH,
-            node_header_height: NODE_HEADER_HEIGHT,
-            node_cache_height: NODE_CACHE_HEIGHT,
-            node_row_height: NODE_ROW_HEIGHT,
-            node_padding: NODE_PADDING,
-            node_corner_radius: NODE_CORNER_RADIUS,
-            node_fill: NODE_FILL,
-            node_stroke: Stroke::new(STROKE_WIDTH, NODE_STROKE_COLOR),
-            selected_stroke: Stroke::new(STROKE_WIDTH, SELECTED_STROKE_COLOR),
-            const_stroke: Stroke::new(STROKE_WIDTH, CONST_STROKE_COLOR),
+            text_color: Color32::from_rgb(192, 192, 192),
+            widget_text_color: Color32::from_rgb(192, 192, 192),
+            widget_noninteractive_text_color: Color32::from_rgb(140, 140, 140),
+            widget_noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
+            widget_active_bg_fill: Color32::from_rgb(60, 60, 60),
+            widget_hover_bg_fill: Color32::from_rgb(50, 50, 50),
+            widget_inactive_bg_fill: Color32::from_rgb(40, 40, 40),
+            widget_inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
+            port_radius: 18.0 * 0.3,
+            port_activation_radius: 18.0 * 0.3 * 1.5,
+            header_text_offset: 4.0,
+            cache_button_width_factor: 3.1,
+            cache_button_vertical_pad_factor: 0.4,
+            cache_button_text_pad_factor: 0.5,
+            cache_active_color: Color32::from_rgb(240, 205, 90),
+            cache_checked_text_color: Color32::from_rgb(60, 50, 20),
+            status_terminal_color: Color32::from_rgb(128, 128, 128),
+            status_impure_color: Color32::from_rgb(255, 150, 70),
+            status_dot_radius: 4.0,
+            status_item_gap: 6.0,
+            input_port_color: Color32::from_rgb(70, 150, 255),
+            output_port_color: Color32::from_rgb(70, 200, 200),
+            input_hover_color: Color32::from_rgb(120, 190, 255),
+            output_hover_color: Color32::from_rgb(110, 230, 210),
+            connection_stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
+            connection_highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
+            temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
+            breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
+            dotted_color: Color32::from_rgb(48, 48, 48),
+            dotted_base_spacing: 24.0,
+            dotted_radius_base: 1.2,
+            dotted_radius_min: 0.6,
+            dotted_radius_max: 2.4,
+            node_width: 180.0,
+            node_header_height: 22.0,
+            node_cache_height: 20.0,
+            node_row_height: 18.0,
+            node_padding: 8.0,
+            node_corner_radius: 6.0,
+            node_fill: Color32::from_rgb(27, 27, 27),
+            node_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+            selected_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
+            const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
         }
     }
 }

@@ -317,7 +317,7 @@ insert the extra parameter.
 `graph::Node.behavior` now skips serialization when `NodeBehavior::AsFunction` via `NodeBehavior::is_default`.
 Editor node rendering now shows const input bindings as small badges to the left of input ports.
 Const-binding badges now use a dedicated stroke color in the graph style.
-Graph UI style defaults now use named constants for all fixed values in `GraphStyle::new`.
+Graph UI style defaults in `editor/src/gui/style.rs` now inline their literal values instead of named constants.
 Graph render context now pulls fonts, text color, and port radius from the shared GUI style.
 GraphLayout now exposes helpers to detect hovered ports and pointer-over-node states for graph UI interactions.
 GraphLayout and port query helpers now live in `editor/src/gui/graph_layout.rs` to keep graph UI rendering focused.
