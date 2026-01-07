@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::connection_bezier::ConnectionBezier;
-use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::connection_breaker::{self, ConnectionBreaker};
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
@@ -79,21 +79,8 @@ impl ConnectionUi {
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.curves.clear();
-
-        self.collect_connection_curves(ctx, graph_layout, view_graph);
-
         self.highlighted.clear();
-        if let Some(breaker) = breaker {
-            self.collect_highlighted(breaker);
-        }
-    }
 
-    fn collect_connection_curves(
-        &mut self,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-    ) {
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
 
@@ -122,31 +109,28 @@ impl ConnectionUi {
                     start_idx,
                     end_idx,
                 });
-            }
-        }
-    }
 
-    fn collect_highlighted(&mut self, breaker: &ConnectionBreaker) {
-        let breaker_segments = breaker.segments();
-        if breaker_segments.is_empty() {
-            return;
-        }
-
-        for curve in self.curves.iter() {
-            let curve_segments = self.point_cache[curve.start_idx..=curve.end_idx]
-                .windows(2)
-                .map(|pair| (pair[0], pair[1]));
-            let mut hit = false;
-            'outer: for (b1, b2) in curve_segments {
-                for (a1, a2) in breaker_segments {
-                    if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
-                        hit = true;
-                        break 'outer;
+                if let Some(segments) = breaker.and_then(|breaker| {
+                    (!breaker.segments().is_empty()).then_some(breaker.segments())
+                }) {
+                    for curve in self.curves.iter() {
+                        let curve_segments = self.point_cache[curve.start_idx..=curve.end_idx]
+                            .windows(2)
+                            .map(|pair| (pair[0], pair[1]));
+                        let mut hit = false;
+                        'outer: for (b1, b2) in curve_segments {
+                            for (a1, a2) in segments {
+                                if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
+                                    hit = true;
+                                    break 'outer;
+                                }
+                            }
+                        }
+                        if hit {
+                            self.highlighted.insert(curve.key);
+                        }
                     }
                 }
-            }
-            if hit {
-                self.highlighted.insert(curve.key);
             }
         }
     }
