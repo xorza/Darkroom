@@ -74,7 +74,7 @@ fn body_drag(
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
 ) -> NodeLayout {
-    let node_layout = graph_layout.node_layouts.get(node_id).unwrap();
+    let node_layout = graph_layout.node_layout(node_id);
 
     let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
     let body_response = ctx.ui.interact(
@@ -98,9 +98,7 @@ fn body_drag(
 
         let mut new_layout = node_layout.clone();
         new_layout.update(ctx, view_graph, node_id, graph_layout.origin);
-        graph_layout
-            .node_layouts
-            .insert(*node_id, new_layout.clone());
+        graph_layout.update_node_layout(node_id, new_layout.clone());
         return new_layout;
     }
     node_layout.clone()

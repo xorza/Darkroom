@@ -1,14 +1,18 @@
 use eframe::egui;
 use egui::{Color32, FontId, Galley, Pos2, Rect, vec2};
 use graph::graph::NodeId;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::ViewGraph;
+use common::key_index_vec::KeyIndexKey;
+use egui::epaint::AlphaFromCoverage;
+use egui::epaint::text::{FontDefinitions, Fonts, LayoutJob};
 
 #[derive(Debug, Clone)]
 pub struct NodeLayout {
+    pub node_id: NodeId,
     pub body_rect: Rect,
     pub remove_btn_rect: Rect,
     pub cache_button_rect: Rect,
@@ -190,6 +194,7 @@ impl NodeLayout {
         let output_first_center = output_first_center + global_offset;
 
         NodeLayout {
+            node_id: *view_node_id,
             body_rect,
             remove_btn_rect,
             cache_button_rect,
@@ -202,6 +207,12 @@ impl NodeLayout {
             input_galleys,
             output_galleys,
         }
+    }
+}
+
+impl KeyIndexKey<NodeId> for NodeLayout {
+    fn key(&self) -> &NodeId {
+        &self.node_id
     }
 }
 

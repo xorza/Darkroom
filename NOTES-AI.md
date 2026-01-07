@@ -19,6 +19,7 @@ Connection stroke styling now lives in `Style.connections` (`ConnectionStyle`).
 `NodeLayout` and its layout computation now live in `editor/src/gui/node_layout.rs`.
 Node layout now caches text galleys for titles and port labels to reuse during rendering.
 Connection breaker now reserves segment capacity based on `MAX_BREAKER_LENGTH` and `MIN_POINT_DISTANCE`.
+GraphLayout now stores node layouts directly in `KeyIndexVec` and compacts entries during updates instead of clearing.
 Graph UI context now carries the current graph scale for shared access in render helpers.
 Graph UI context now asserts valid scale inputs and exposes a `button_with` helper to render custom-shaped buttons with
 shared widget styling.

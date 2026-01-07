@@ -10,16 +10,25 @@ pub trait KeyIndexKey<K> {
     fn key(&self) -> &K;
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct KeyIndexVec<K: Copy + Eq + Hash, V: Default + KeyIndexKey<K>> {
+#[derive(Debug, Clone)]
+pub struct KeyIndexVec<K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
     pub items: Vec<V>,
     pub idx_by_key: HashMap<K, usize>,
+}
+
+impl<K: Copy + Eq + Hash, V: KeyIndexKey<K>> Default for KeyIndexVec<K, V> {
+    fn default() -> Self {
+        Self {
+            items: Vec::new(),
+            idx_by_key: HashMap::new(),
+        }
+    }
 }
 
 impl<K, V> KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K>,
+    V: KeyIndexKey<K>,
 {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -173,7 +182,7 @@ where
 impl<K, V> Index<usize> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K>,
+    V: KeyIndexKey<K>,
 {
     type Output = V;
 
@@ -186,7 +195,7 @@ where
 impl<K, V> IndexMut<usize> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K>,
+    V: KeyIndexKey<K>,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
         assert!(idx < self.items.len());
@@ -197,7 +206,7 @@ where
 impl<'a, K, V> IntoIterator for &'a KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K>,
+    V: KeyIndexKey<K>,
 {
     type Item = &'a V;
     type IntoIter = std::slice::Iter<'a, V>;
@@ -210,7 +219,7 @@ where
 impl<'a, K, V> IntoIterator for &'a mut KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K>,
+    V: KeyIndexKey<K>,
 {
     type Item = &'a mut V;
     type IntoIter = std::slice::IterMut<'a, V>;
@@ -223,7 +232,7 @@ where
 impl<K, V> Serialize for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash,
-    V: Default + KeyIndexKey<K> + Serialize,
+    V: KeyIndexKey<K> + Serialize,
 {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -235,7 +244,7 @@ where
 impl<'de, K, V> Deserialize<'de> for KeyIndexVec<K, V>
 where
     K: Copy + Eq + Hash + Deserialize<'de>,
-    V: Default + KeyIndexKey<K> + Deserialize<'de>,
+    V: KeyIndexKey<K> + Deserialize<'de>,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

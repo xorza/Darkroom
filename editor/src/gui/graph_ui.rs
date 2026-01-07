@@ -431,7 +431,7 @@ fn fit_all_nodes(
         egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
     };
 
-    let mut layouts = graph_layout.node_layouts.values();
+    let mut layouts = graph_layout.node_layouts.iter();
     let first = layouts.next().unwrap();
     let mut bounds = to_graph_rect(first.body_rect);
     for layout in layouts {
