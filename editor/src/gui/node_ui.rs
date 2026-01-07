@@ -5,7 +5,9 @@ use crate::gui::node_layout::{NodeLayout, text_width};
 
 use common::BoolExt;
 use eframe::egui;
-use egui::{PointerButton, Pos2, Sense, Vec2, vec2};
+use egui::{
+    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{Func, FuncBehavior, NodeBehavior};
@@ -80,7 +82,7 @@ fn body_drag<'a>(
     let body_response = ctx.ui.interact(
         node_layout.body_rect,
         node_body_id,
-        egui::Sense::click() | egui::Sense::hover() | egui::Sense::drag(),
+        Sense::click() | Sense::hover() | Sense::drag(),
     );
 
     let dragged = body_response.dragged_by(PointerButton::Middle)
@@ -110,7 +112,7 @@ fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) 
         corner_radius,
         ctx.style.inactive_bg_fill,
         stroke,
-        egui::StrokeKind::Middle,
+        StrokeKind::Middle,
     );
     let title_pos = layout.body_rect.min + Vec2::ONE * ctx.style.padding * ctx.scale;
     ctx.painter
@@ -156,9 +158,9 @@ fn render_hints(
         ctx.painter
             .circle_filled(center, dot_radius, ctx.style.node.status_terminal_color);
         let dot_rect =
-            egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
+            egui::Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
-        let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+        let dot_response = ctx.ui.interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("terminal");
         }
@@ -167,10 +169,9 @@ fn render_hints(
         let center = layout.dot_center(usize::from(node.terminal), dot_step);
         ctx.painter
             .circle_filled(center, dot_radius, ctx.style.node.status_impure_color);
-        let dot_rect =
-            egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
+        let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
-        let dot_response = ctx.ui.interact(dot_rect, dot_id, egui::Sense::hover());
+        let dot_response = ctx.ui.interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("impure");
         }
@@ -185,27 +186,27 @@ fn render_remove_btn(
 ) -> bool {
     let remove_rect = node_layout.remove_btn_rect;
     let remove_margin = remove_rect.width() * 0.3;
-    let a = egui::pos2(
+    let a = pos2(
         remove_rect.min.x + remove_margin,
         remove_rect.min.y + remove_margin,
     );
-    let b = egui::pos2(
+    let b = pos2(
         remove_rect.max.x - remove_margin,
         remove_rect.max.y - remove_margin,
     );
-    let c = egui::pos2(
+    let c = pos2(
         remove_rect.min.x + remove_margin,
         remove_rect.max.y - remove_margin,
     );
-    let d = egui::pos2(
+    let d = pos2(
         remove_rect.max.x - remove_margin,
         remove_rect.min.y + remove_margin,
     );
     let remove_color = ctx.style.text_color;
-    let remove_stroke = egui::Stroke::new(1.4 * ctx.scale, remove_color);
+    let remove_stroke = Stroke::new(1.4 * ctx.scale, remove_color);
     let remove_shapes = [
-        egui::Shape::line_segment([a, b], remove_stroke),
-        egui::Shape::line_segment([c, d], remove_stroke),
+        Shape::line_segment([a, b], remove_stroke),
+        Shape::line_segment([c, d], remove_stroke),
     ];
     let remove = ctx.button_with(
         remove_rect,
@@ -233,13 +234,13 @@ fn render_node_ports(
 ) -> PortDragInfo {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let port_activation_radius = ctx.style.node.port_activation_radius * ctx.scale;
-    let port_rect_size = egui::vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
+    let port_rect_size = vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
 
     let draw_port = |center: Pos2,
                      kind: PortKind,
                      idx: usize,
-                     base_color: egui::Color32,
-                     hover_color: egui::Color32|
+                     base_color: Color32,
+                     hover_color: Color32|
      -> PortDragInfo {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let port_id = ctx
@@ -336,11 +337,11 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
             badge_radius,
             ctx.style.inactive_bg_fill,
             ctx.style.node.const_stroke,
-            egui::StrokeKind::Middle,
+            StrokeKind::Middle,
         );
         ctx.painter.text(
             badge_rect.center(),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             label,
             font.clone(),
             ctx.style.text_color,
