@@ -3,12 +3,13 @@ use egui::Pos2;
 #[derive(Debug)]
 pub struct ConnectionBezier;
 
-impl ConnectionBezier {
-    pub const STEPS: usize = 24;
+const STEPS: usize = 24;
+pub const POINTS: usize = STEPS + 1;
 
+impl ConnectionBezier {
     // will add points to the points
     pub fn sample(points: &mut Vec<Pos2>, start: Pos2, end: Pos2, scale: f32) -> (usize, usize) {
-        let steps = Self::STEPS;
+        let steps = STEPS;
         assert!(steps > 2, "bezier steps must be greater than 2");
 
         let p0 = start;
