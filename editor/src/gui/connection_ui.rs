@@ -191,7 +191,6 @@ impl ConnectionUi {
 
     pub(crate) fn update_drag(
         &mut self,
-        ctx: &GraphContext,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) -> ConnectionDragUpdate {
