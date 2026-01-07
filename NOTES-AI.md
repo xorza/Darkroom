@@ -12,6 +12,7 @@ Node rendering constants now live in `Style.node` (`NodeStyle`) instead of stand
 Node header layout now accounts for the remove button width plus padding when computing header width.
 Node remove button sizing now comes from `Style.node.remove_btn_size`.
 Node corner radius now lives on `Style` instead of `Style.node`.
+Node body fill/stroke styling now lives on `Style` instead of `Style.node`.
 Graph background dotted grid styling now lives in `Style.background` (`GraphBackgroundStyle`).
 Connection stroke styling now lives in `Style.connections` (`ConnectionStyle`).
 `NodeLayout` and its layout computation now live in `editor/src/gui/node_layout.rs`.

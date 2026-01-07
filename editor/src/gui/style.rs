@@ -16,9 +16,13 @@ pub struct Style {
     pub inactive_bg_fill: Color32,
     pub inactive_bg_stroke: Stroke,
 
+    pub node_body_fill: Color32,
+    pub node_body_stroke: Stroke,
+    pub node_selected_body_stroke: Stroke,
+
     pub corner_radius: f32,
 
-    pub checked_fill_color: Color32,
+    pub checked_bg_fill_color: Color32,
     pub checked_text_color: Color32,
 
     pub background: GraphBackgroundStyle,
@@ -46,9 +50,6 @@ pub struct ConnectionStyle {
 #[derive(Debug)]
 pub struct NodeStyle {
     pub padding: f32,
-    pub body_fill: Color32,
-    pub body_stroke: Stroke,
-    pub selected_body_stroke: Stroke,
 
     pub status_terminal_color: Color32,
     pub status_impure_color: Color32,
@@ -90,9 +91,12 @@ impl Style {
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
 
-            checked_fill_color: Color32::from_rgb(240, 205, 90),
+            checked_bg_fill_color: Color32::from_rgb(240, 205, 90),
             checked_text_color: Color32::from_rgb(60, 50, 20),
             corner_radius: 4.0,
+            node_body_fill: Color32::from_rgb(27, 27, 27),
+            node_body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+            node_selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
             background: GraphBackgroundStyle {
                 dotted_color: Color32::from_rgb(48, 48, 48),
                 dotted_base_spacing: 24.0,
@@ -108,10 +112,6 @@ impl Style {
             },
             node: NodeStyle {
                 padding: 4.0,
-
-                body_fill: Color32::from_rgb(27, 27, 27),
-                body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
-                selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
 
                 const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
 
