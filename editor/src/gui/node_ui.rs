@@ -84,7 +84,7 @@ impl NodeUi {
                 self.node_ids_to_remove.push(node_id);
             }
             render_cache_btn(ctx, ui_interaction, &node_layout, node);
-            render_hints(ctx, &node_layout, node, func, view_graph.scale);
+            render_hints(ctx, &node_layout, node, func);
             let node_drag_port_result =
                 render_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
@@ -208,10 +208,9 @@ fn render_hints(
     layout: &NodeLayout,
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
-    scale: f32,
 ) {
-    let dot_radius = scale * ctx.style.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + scale * ctx.style.status_item_gap;
+    let dot_radius = ctx.scale * ctx.style.status_dot_radius;
+    let dot_step = (dot_radius * 2.0) + ctx.scale * ctx.style.status_item_gap;
 
     if node.terminal {
         let center = layout.dot_center(0, dot_step);
