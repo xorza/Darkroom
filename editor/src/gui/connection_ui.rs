@@ -135,6 +135,10 @@ impl ConnectionUi {
                     || curve.input_pos.distance_sq(input_pos) > 1.0;
 
                 if need_rebuild {
+                    curve.output_pos = output_pos;
+                    curve.input_pos = input_pos;
+                    curve.inited = true;
+
                     curve.points.clear();
                     let _ = ConnectionBezier::sample(
                         &mut curve.points,
@@ -142,10 +146,6 @@ impl ConnectionUi {
                         input_pos,
                         ctx.scale,
                     );
-
-                    curve.output_pos = output_pos;
-                    curve.input_pos = input_pos;
-                    curve.inited = true;
                 }
 
                 let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
