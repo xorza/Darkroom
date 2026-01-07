@@ -151,7 +151,7 @@ fn render_body(
         corner_radius,
         ctx.style.node_fill,
         selected.then_else(ctx.style.selected_stroke, ctx.style.node_stroke),
-        egui::StrokeKind::Inside,
+        egui::StrokeKind::Middle,
     );
     ctx.painter.text(
         layout.rect.min
@@ -164,21 +164,6 @@ fn render_body(
         ctx.style.heading_font.scaled(scale),
         ctx.style.text_color,
     );
-}
-
-impl PortDragInfo {
-    fn prio(&self) -> u32 {
-        match self {
-            PortDragInfo::None => 0,
-            PortDragInfo::Hover(_) => 5,
-            PortDragInfo::DragStart(_) => 8,
-            PortDragInfo::DragStop => 10,
-        }
-    }
-
-    fn prefer(self, other: Self) -> Self {
-        (other.prio() > self.prio()).then_else(other, self)
-    }
 }
 
 fn render_cache_btn(
@@ -403,7 +388,7 @@ fn render_node_const_bindings(
             badge_radius,
             ctx.style.node_fill,
             ctx.style.const_stroke,
-            egui::StrokeKind::Inside,
+            egui::StrokeKind::Middle,
         );
         ctx.painter.text(
             badge_rect.center(),
@@ -619,4 +604,19 @@ fn text_width(
 ) -> f32 {
     let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
     galley.size().x
+}
+
+impl PortDragInfo {
+    fn prio(&self) -> u32 {
+        match self {
+            PortDragInfo::None => 0,
+            PortDragInfo::Hover(_) => 5,
+            PortDragInfo::DragStart(_) => 8,
+            PortDragInfo::DragStop => 10,
+        }
+    }
+
+    fn prefer(self, other: Self) -> Self {
+        (other.prio() > self.prio()).then_else(other, self)
+    }
 }
