@@ -38,7 +38,6 @@ pub struct GraphBackgroundStyle {
 #[derive(Debug)]
 pub struct NodeStyle {
     pub header_height: f32,
-    pub cache_height: f32,
     pub padding: f32,
     pub corner_radius: f32,
     pub body_fill: Color32,
@@ -51,8 +50,7 @@ pub struct NodeStyle {
 
     pub port_radius: f32,
     pub port_activation_radius: f32,
-    pub port_row_height: f32,
-    pub port_label_padding: f32,
+    pub port_label_side_padding: f32,
 
     pub input_port_color: Color32,
     pub output_port_color: Color32,
@@ -109,7 +107,7 @@ impl Style {
                 selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
 
                 const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
-                cache_height: 20.0,
+
                 remove_btn_size: 12.0,
 
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
@@ -118,8 +116,7 @@ impl Style {
 
                 port_radius: 18.0 * 0.3,
                 port_activation_radius: 18.0 * 0.3 * 1.5,
-                port_row_height: 18.0,
-                port_label_padding: 8.0,
+                port_label_side_padding: 8.0,
                 input_port_color: Color32::from_rgb(70, 150, 255),
                 output_port_color: Color32::from_rgb(70, 200, 200),
                 input_hover_color: Color32::from_rgb(120, 190, 255),
