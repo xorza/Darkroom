@@ -143,8 +143,8 @@ fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, sel
     ctx.painter.rect(
         layout.rect,
         corner_radius,
-        ctx.style.node.fill,
-        selected.then_else(ctx.style.node.selected_stroke, ctx.style.node.stroke),
+        ctx.style.node.body_fill,
+        selected.then_else(ctx.style.node.selected_stroke, ctx.style.node.body_stroke),
         egui::StrokeKind::Middle,
     );
     ctx.painter.text(
@@ -373,7 +373,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node:
         ctx.painter.rect(
             badge_rect,
             badge_radius,
-            ctx.style.node.fill,
+            ctx.style.node.body_fill,
             ctx.style.node.const_stroke,
             egui::StrokeKind::Middle,
         );
