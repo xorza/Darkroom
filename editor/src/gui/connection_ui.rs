@@ -94,6 +94,9 @@ impl ConnectionUi {
 
         self.highlighted.clear();
 
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        mesh.clear();
+
         let mut write_idx: usize = 0;
 
         for node_view in &view_graph.view_nodes {
@@ -187,29 +190,12 @@ impl ConnectionUi {
                         );
                     };
                 }
+
+                mesh.append_ref(&curve.mesh);
             }
         }
 
         self.curves.compact_finish(write_idx);
-    }
-
-    pub(crate) fn render(
-        &mut self,
-        ctx: &GraphContext,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-        breaker: Option<&ConnectionBreaker>,
-    ) {
-        self.rebuild(ctx, graph_layout, view_graph, breaker);
-
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        mesh.clear();
-        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
-        let feather = 1.0 / pixels_per_point;
-
-        for curve in &self.curves {
-            mesh.append_ref(&curve.mesh);
-        }
 
         if let Some(drag) = &mut self.drag {
             let (start, end) = match drag.start_port.port.kind {
@@ -227,6 +213,23 @@ impl ConnectionUi {
                 feather,
             );
         }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        ctx: &GraphContext,
+        graph_layout: &GraphLayout,
+        view_graph: &model::ViewGraph,
+        breaker: Option<&ConnectionBreaker>,
+    ) {
+        self.rebuild(ctx, graph_layout, view_graph, breaker);
+
+        // let pixels_per_point = ctx.ui.ctx().pixels_per_point();
+        // let feather = 1.0 / pixels_per_point;
+
+        // for curve in &self.curves {
+        //     mesh.append_ref(&curve.mesh);
+        // }
 
         ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
     }
