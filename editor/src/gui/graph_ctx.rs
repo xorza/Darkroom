@@ -99,7 +99,7 @@ impl<'a> GraphContext<'a> {
         rect: Rect,
         enabled: bool,
         id_source: impl std::hash::Hash,
-        shapes: &[Shape],
+        shapes: impl IntoIterator<Item = Shape>,
         tooltip: &str,
     ) -> bool {
         let id = self.ui.make_persistent_id(id_source);
@@ -125,9 +125,7 @@ impl<'a> GraphContext<'a> {
 
         self.painter
             .rect(rect, corner_radius, fill, stroke, StrokeKind::Inside);
-        if !shapes.is_empty() {
-            self.painter.extend(shapes.iter().cloned());
-        }
+        self.painter.extend(shapes);
 
         response.clicked()
     }

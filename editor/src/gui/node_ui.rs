@@ -272,7 +272,7 @@ fn render_remove_btn(
         remove_rect,
         true,
         ("node_remove", node_id),
-        &remove_shapes,
+        remove_shapes.iter().cloned(),
         "Remove node",
     );
 

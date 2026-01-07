@@ -11,6 +11,7 @@ centralize theme values.
 Graph UI context now carries the current graph scale for shared access in render helpers.
 Graph UI context now asserts valid scale inputs and exposes a `button_with` helper to render custom-shaped buttons with
 shared widget styling.
+`button_with` now accepts any shape iterator to avoid intermediate allocations at call sites.
 Editor node layout constants (width, header/cache/row heights, padding, corner radius) now live in `Style`, and
 `NodeLayout` only keeps computed geometry.
 Node port interaction and rendering now happen in a single pass that both draws ports and returns drag/hover state.
