@@ -217,13 +217,13 @@ impl GraphUi {
                         start_port,
                         end_port,
                     } => {
+                        self.state = InteractionState::Idle;
+
                         let (input_node_id, input_idx) =
                             apply_connection(view_graph, start_port.port, end_port.port)?;
                         ui_interaction
                             .actions
                             .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
-
-                        self.state = InteractionState::Idle;
                     }
                 }
             }
