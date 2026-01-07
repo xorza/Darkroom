@@ -46,7 +46,7 @@ impl GraphLayout {
                 .node_layouts
                 .compact_insert_with(&view_node.id, &mut write_idx, || {
                     new_layout = true;
-                    node_layout::NodeLayout::new(ctx, view_graph, &view_node.id, self.origin)
+                    node_layout::NodeLayout::new(ctx, view_graph, &view_node.id)
                 });
 
             if !new_layout {

@@ -44,13 +44,8 @@ impl NodeLayout {
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 
-    pub fn new(
-        ctx: &GraphContext,
-        view_graph: &ViewGraph,
-        view_node_id: &NodeId,
-        origin: Pos2,
-    ) -> NodeLayout {
-        Self::build(ctx, view_graph, view_node_id, origin)
+    pub fn new(ctx: &GraphContext, view_graph: &ViewGraph, view_node_id: &NodeId) -> NodeLayout {
+        Self::assign_galleys(ctx, view_graph, view_node_id)
     }
 
     pub fn update(
@@ -60,15 +55,68 @@ impl NodeLayout {
         view_node_id: &NodeId,
         origin: Pos2,
     ) {
-        *self = Self::build(ctx, view_graph, view_node_id, origin);
+        self.update_layout(ctx, view_graph, view_node_id, origin);
     }
 
-    fn build(
+    fn assign_galleys(
+        ctx: &GraphContext,
+        view_graph: &ViewGraph,
+        view_node_id: &NodeId,
+    ) -> NodeLayout {
+        let node = view_graph.graph.by_id(view_node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let scale = ctx.scale;
+
+        let title_galley = ctx.painter.layout_no_wrap(
+            node.name.to_string(),
+            ctx.style.heading_font.scaled(scale),
+            ctx.style.text_color,
+        );
+
+        let mut input_galleys = Vec::with_capacity(func.inputs.len());
+        let mut output_galleys = Vec::with_capacity(func.outputs.len());
+
+        let label_font = ctx.style.sub_font.scaled(scale);
+        for input in &func.inputs {
+            let galley = ctx.painter.layout_no_wrap(
+                input.name.to_string(),
+                label_font.clone(),
+                ctx.style.text_color,
+            );
+            input_galleys.push(galley);
+        }
+        for output in &func.outputs {
+            let galley = ctx.painter.layout_no_wrap(
+                output.name.to_string(),
+                label_font.clone(),
+                ctx.style.text_color,
+            );
+            output_galleys.push(galley);
+        }
+
+        NodeLayout {
+            node_id: *view_node_id,
+            body_rect: Rect::ZERO,
+            remove_btn_rect: Rect::ZERO,
+            cache_button_rect: Rect::ZERO,
+            dot_first_center: Pos2::ZERO,
+            input_first_center: Pos2::ZERO,
+            output_first_center: Pos2::ZERO,
+            port_row_height: 0.0,
+            padding: 0.0,
+            title_galley,
+            input_galleys,
+            output_galleys,
+        }
+    }
+
+    fn update_layout(
+        &mut self,
         ctx: &GraphContext,
         view_graph: &ViewGraph,
         view_node_id: &NodeId,
         origin: Pos2,
-    ) -> NodeLayout {
+    ) {
         let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
         let node = view_graph.graph.by_id(view_node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -79,12 +127,7 @@ impl NodeLayout {
         let header_height = ctx.style.heading_font.size * scale;
         let remove_btn_size = header_height;
 
-        let title_galley = ctx.painter.layout_no_wrap(
-            node.name.to_string(),
-            ctx.style.heading_font.scaled(scale),
-            ctx.style.text_color,
-        );
-        let title_width = title_galley.size().x + padding * 2.0;
+        let title_width = self.title_galley.size().x + padding * 2.0;
 
         let header_width = {
             let status_width = 2.0 * (padding + ctx.style.node.status_dot_radius * 2.0);
@@ -93,33 +136,19 @@ impl NodeLayout {
             title_width + status_width + remove_width
         };
 
+        // todo remove func dependency
         let input_count = func.inputs.len();
         let output_count = func.outputs.len();
         let row_count = input_count.max(output_count).max(1);
         let mut max_row_width: f32 = 0.0;
-        let mut input_galleys = Vec::with_capacity(func.inputs.len());
-        let mut output_galleys = Vec::with_capacity(func.outputs.len());
-        let label_font = ctx.style.sub_font.scaled(scale);
         for row in 0..row_count {
-            let left = func.inputs.get(row).map_or(0.0, |input| {
-                let galley = ctx.painter.layout_no_wrap(
-                    input.name.to_string(),
-                    label_font.clone(),
-                    ctx.style.text_color,
-                );
-                let width = galley.size().x;
-                input_galleys.push(galley);
-                width + padding
+            let left = func.inputs.get(row).map_or(0.0, |_| {
+                let galley = &self.input_galleys[row];
+                galley.size().x + padding
             });
-            let right = func.outputs.get(row).map_or(0.0, |output| {
-                let galley = ctx.painter.layout_no_wrap(
-                    output.name.to_string(),
-                    label_font.clone(),
-                    ctx.style.text_color,
-                );
-                let width = galley.size().x;
-                output_galleys.push(galley);
-                width + padding
+            let right = func.outputs.get(row).map_or(0.0, |_| {
+                let galley = &self.output_galleys[row];
+                galley.size().x + padding
             });
             let mut row_width = padding * 2.0 + left + right;
             if left > 0.0 && right > 0.0 {
@@ -128,6 +157,7 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
+        // todo cache galley
         let cache_btn_width = text_width(
             &ctx.painter,
             &ctx.style.body_font.scaled(scale),
@@ -191,20 +221,15 @@ impl NodeLayout {
         let input_first_center = input_first_center + global_offset;
         let output_first_center = output_first_center + global_offset;
 
-        NodeLayout {
-            node_id: *view_node_id,
-            body_rect,
-            remove_btn_rect,
-            cache_button_rect,
-            dot_first_center,
-            input_first_center,
-            output_first_center,
-            port_row_height,
-            padding,
-            title_galley,
-            input_galleys,
-            output_galleys,
-        }
+        self.node_id = *view_node_id;
+        self.body_rect = body_rect;
+        self.remove_btn_rect = remove_btn_rect;
+        self.cache_button_rect = cache_button_rect;
+        self.dot_first_center = dot_first_center;
+        self.input_first_center = input_first_center;
+        self.output_first_center = output_first_center;
+        self.port_row_height = port_row_height;
+        self.padding = padding;
     }
 }
 
