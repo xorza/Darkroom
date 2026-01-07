@@ -1,14 +1,12 @@
 use eframe::egui;
 use egui::{Color32, FontId, Galley, Pos2, Rect, vec2};
 use graph::graph::NodeId;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_ctx::GraphContext;
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;
-use egui::epaint::AlphaFromCoverage;
-use egui::epaint::text::{FontDefinitions, Fonts, LayoutJob};
 
 #[derive(Debug, Clone)]
 pub struct NodeLayout {
