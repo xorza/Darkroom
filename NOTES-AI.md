@@ -43,6 +43,9 @@ Const input badge labels now right-align to the badge edge and remain vertically
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
+Fit-all now derives bounds from view-node positions and layout sizes instead of screen-space rects to prevent repeated
+fit clicks from shifting zoom/pan.
+View-selected now centers based on graph-space node position/size to avoid repeated clicks shifting the camera.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

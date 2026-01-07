@@ -407,9 +407,15 @@ fn view_selected_node(
         return;
     };
 
+    let scale = view_graph.scale;
     let rect = graph_layout.node_layout(&node_view.id).body_rect;
+    let size = rect.size() / scale;
+    let center = egui::pos2(
+        node_view.pos.x + size.x * 0.5,
+        node_view.pos.y + size.y * 0.5,
+    );
     view_graph.scale = 1.0;
-    view_graph.pan = ctx.rect.center() - ctx.rect.min - rect.center().to_vec2();
+    view_graph.pan = ctx.rect.center() - ctx.rect.min - center.to_vec2();
 }
 
 fn fit_all_nodes(
