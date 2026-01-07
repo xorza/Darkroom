@@ -48,7 +48,7 @@ impl GraphLayout {
                     NodeLayout::new(ctx, view_graph, &view_node.id)
                 });
 
-            self.node_layouts[idx].update(ctx, view_graph, &view_node.id, self.origin);
+            self.node_layouts[idx].update(ctx, view_node, self.origin);
         }
         self.node_layouts.compact_finish(write_idx);
     }

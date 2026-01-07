@@ -98,7 +98,11 @@ fn body_drag<'a>(
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / ctx.scale;
 
-        node_layout.update(ctx, view_graph, node_id, graph_layout.origin);
+        node_layout.update(
+            ctx,
+            view_graph.view_nodes.by_key(node_id).unwrap(),
+            graph_layout.origin,
+        );
     }
 
     node_layout

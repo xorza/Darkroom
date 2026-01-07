@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_ctx::GraphContext;
-use crate::model::ViewGraph;
+use crate::model::{ViewGraph, ViewNode};
 use common::key_index_vec::KeyIndexKey;
 
 #[derive(Debug, Clone)]
@@ -92,15 +92,7 @@ impl NodeLayout {
         }
     }
 
-    pub fn update(
-        &mut self,
-        ctx: &GraphContext,
-        view_graph: &ViewGraph,
-        node_id: &NodeId,
-        origin: Pos2,
-    ) {
-        let view_node = view_graph.view_nodes.by_key(node_id).unwrap();
-
+    pub fn update(&mut self, ctx: &GraphContext, view_node: &ViewNode, origin: Pos2) {
         let scale = ctx.scale;
         let padding = ctx.style.padding * scale;
         let small_padding = ctx.style.small_padding * scale;
@@ -191,7 +183,7 @@ impl NodeLayout {
         let input_first_center = input_first_center + global_offset;
         let output_first_center = output_first_center + global_offset;
 
-        self.node_id = *node_id;
+        self.node_id = view_node.id;
         self.body_rect = body_rect;
         self.remove_btn_rect = remove_btn_rect;
         self.cache_button_rect = cache_button_rect;
