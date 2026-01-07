@@ -407,7 +407,7 @@ fn view_selected_node(
         return;
     };
 
-    let rect = graph_layout.node_rect(&node_view.id);
+    let rect = graph_layout.node_layout(&node_view.id).body_rect;
     view_graph.scale = 1.0;
     view_graph.pan = ctx.rect.center() - ctx.rect.min - rect.center().to_vec2();
 }
