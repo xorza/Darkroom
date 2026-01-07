@@ -40,7 +40,7 @@ impl BackgroundRenderer {
 
     fn rebuild_mesh(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
         let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
-        assert!(spacing > 0.0);
+        assert!(spacing > 0.0, "background spacing must be positive");
 
         let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
             ctx.style.background.dotted_radius_min,
@@ -53,7 +53,9 @@ impl BackgroundRenderer {
         let start_x = ctx.rect.left() - offset_x - spacing;
         let start_y = ctx.rect.top() - offset_y - spacing;
 
-        let mesh = &mut self.mesh;
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        mesh.clear();
+
         let segments = 12;
         let mut y = start_y;
         while y <= ctx.rect.bottom() + spacing {
