@@ -414,13 +414,14 @@ fn render_node_labels(
 ) {
     let row_height = ctx.style.node_row_height * view_graph.scale;
     let padding = ctx.style.node_padding * view_graph.scale;
+
     for (input_idx, input) in func.inputs.iter().enumerate() {
         let text_pos = layout.input_center(input_idx, row_height) + vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::LEFT_CENTER,
             &input.name,
-            ctx.style.body_font.scaled(view_graph.scale),
+            ctx.style.sub_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }
@@ -431,7 +432,7 @@ fn render_node_labels(
             text_pos,
             egui::Align2::RIGHT_CENTER,
             &output.name,
-            ctx.style.body_font.scaled(view_graph.scale),
+            ctx.style.sub_font.scaled(view_graph.scale),
             ctx.style.text_color,
         );
     }

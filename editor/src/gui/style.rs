@@ -1,7 +1,12 @@
 use eframe::egui;
 use egui::{Color32, FontId, Stroke};
 
+const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
 const STROKE_WIDTH: f32 = 1.0;
+const BODY_FONT_SIZE: f32 = 17.0;
+const HEADING_FONT_SIZE: f32 = 18.0;
+const SUB_FONT_SIZE: f32 = 15.0;
+
 const HEADER_TEXT_OFFSET: f32 = 4.0;
 const CACHE_BUTTON_WIDTH_FACTOR: f32 = 3.1;
 const CACHE_BUTTON_VERTICAL_PAD_FACTOR: f32 = 0.4;
@@ -22,8 +27,7 @@ const TEMP_CONNECTION_COLOR: Color32 = Color32::from_rgb(170, 200, 255);
 const BREAKER_COLOR: Color32 = Color32::from_rgb(255, 120, 120);
 const SELECTED_STROKE_COLOR: Color32 = Color32::from_rgb(192, 222, 255);
 const NODE_STROKE_COLOR: Color32 = Color32::from_rgb(60, 60, 60);
-const WIDGET_TEXT_COLOR: Color32 = Color32::from_rgb(220, 220, 220);
-const WIDGET_NONINTERACTIVE_TEXT_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
+const NONINTERACTIVE_TEXT_COLOR: Color32 = Color32::from_rgb(140, 140, 140);
 const WIDGET_NONINTERACTIVE_BG_FILL: Color32 = Color32::from_rgb(35, 35, 35);
 const WIDGET_ACTIVE_BG_FILL: Color32 = Color32::from_rgb(60, 60, 60);
 const WIDGET_HOVER_BG_FILL: Color32 = Color32::from_rgb(50, 50, 50);
@@ -44,14 +48,13 @@ const NODE_PORT_RADIUS: f32 = NODE_ROW_HEIGHT * 0.3;
 const NODE_PORT_ACTIVATION_RADIUS: f32 = NODE_PORT_RADIUS * 1.5;
 const NODE_PADDING: f32 = 8.0;
 const NODE_CORNER_RADIUS: f32 = 6.0;
-const TEXT_COLOR: Color32 = Color32::from_rgb(192, 192, 192);
-const HEADING_FONT_SIZE: f32 = 18.0;
-const BODY_FONT_SIZE: f32 = 18.0;
 
 #[derive(Debug, Clone)]
 pub struct Style {
-    pub heading_font: egui::FontId,
-    pub body_font: egui::FontId,
+    pub heading_font: FontId,
+    pub body_font: FontId,
+    pub sub_font: FontId,
+
     pub text_color: Color32,
     pub widget_text_color: Color32,
     pub widget_noninteractive_text_color: Color32,
@@ -108,9 +111,13 @@ impl Style {
                 size: BODY_FONT_SIZE,
                 family: egui::FontFamily::Proportional,
             },
+            sub_font: FontId {
+                size: SUB_FONT_SIZE,
+                family: egui::FontFamily::Proportional,
+            },
             text_color: TEXT_COLOR,
-            widget_text_color: WIDGET_TEXT_COLOR,
-            widget_noninteractive_text_color: WIDGET_NONINTERACTIVE_TEXT_COLOR,
+            widget_text_color: TEXT_COLOR,
+            widget_noninteractive_text_color: NONINTERACTIVE_TEXT_COLOR,
             widget_noninteractive_bg_fill: WIDGET_NONINTERACTIVE_BG_FILL,
             widget_active_bg_fill: WIDGET_ACTIVE_BG_FILL,
             widget_hover_bg_fill: WIDGET_HOVER_BG_FILL,
