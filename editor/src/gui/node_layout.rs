@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontId, Galley, Pos2, Rect, vec2};
+use egui::{Color32, FontId, Galley, Pos2, Rect, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
@@ -20,7 +20,6 @@ pub struct NodeLayout {
     pub port_row_height: f32,
     pub padding: f32,
     pub title_galley: Arc<Galley>,
-    pub cache_btn_galley: Arc<Galley>,
     pub input_galleys: Vec<Arc<Galley>>,
     pub output_galleys: Vec<Arc<Galley>>,
 }
@@ -60,11 +59,6 @@ impl NodeLayout {
         let mut output_galleys = Vec::with_capacity(func.outputs.len());
 
         let label_font = ctx.style.sub_font.scaled(scale);
-        let cache_btn_galley = ctx.painter.layout_no_wrap(
-            "cache".to_string(),
-            ctx.style.body_font.scaled(scale),
-            ctx.style.text_color,
-        );
         for input in &func.inputs {
             let galley = ctx.painter.layout_no_wrap(
                 input.name.to_string(),
@@ -93,7 +87,6 @@ impl NodeLayout {
             port_row_height: 0.0,
             padding: 0.0,
             title_galley,
-            cache_btn_galley,
             input_galleys,
             output_galleys,
         }
@@ -109,7 +102,8 @@ impl NodeLayout {
         let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
 
         let scale = ctx.scale;
-        let padding = ctx.style.node.padding * scale;
+        let padding = ctx.style.padding * scale;
+        let small_padding = ctx.style.small_padding * scale;
 
         let header_height = ctx.style.heading_font.size * scale;
         let remove_btn_size = header_height;
@@ -143,15 +137,13 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
-        let cache_btn_width = self.cache_btn_galley.size().x + padding * 2.0;
-        let cache_button_height = ctx.style.body_font.size * scale + padding * 2.0;
+        let cache_button_height = ctx.style.sub_font.size * scale + small_padding * 2.0;
 
         let header_row_height = header_height + padding * 2.0;
         let port_row_height = ctx.style.sub_font.size * scale + padding * 2.0;
-        let cache_row_height = cache_button_height + padding * 2.0;
-        let cache_row_width = cache_btn_width + padding * 2.0;
+        let cache_row_height = cache_button_height + small_padding * 2.0;
 
-        let node_width = header_width.max(max_row_width).max(cache_row_width);
+        let node_width = header_width.max(max_row_width);
         let node_height = header_row_height
             + cache_row_height
             + port_row_height * row_count as f32
@@ -175,13 +167,11 @@ impl NodeLayout {
         };
 
         let cache_button_rect = Rect::from_min_size(
-            egui::pos2(
+            pos2(
                 body_rect.min.x + padding,
-                body_rect.min.y
-                    + header_row_height
-                    + (cache_row_height - cache_button_height) * 0.5,
+                body_rect.min.y + header_row_height + small_padding,
             ),
-            vec2(cache_btn_width, cache_button_height),
+            vec2(60.0, cache_button_height),
         );
 
         let base_y = body_rect.min.y

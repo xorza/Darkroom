@@ -112,7 +112,7 @@ fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) 
         stroke,
         egui::StrokeKind::Middle,
     );
-    let title_pos = layout.body_rect.min + Vec2::ONE * ctx.style.node.padding * ctx.scale;
+    let title_pos = layout.body_rect.min + Vec2::ONE * ctx.style.padding * ctx.scale;
     ctx.painter
         .galley(title_pos, layout.title_galley.clone(), ctx.style.text_color);
 }
@@ -126,24 +126,12 @@ fn render_cache_btn(
     let enabled = !node.terminal;
     let checked = node.behavior == NodeBehavior::Once;
 
-    let text_color = if !enabled {
-        ctx.style.noninteractive_text_color
-    } else if checked {
-        ctx.style.checked_text_color
-    } else {
-        ctx.style.text_color
-    };
-    let label = {
-        let text_pos =
-            node_layout.cache_button_rect.center() - node_layout.cache_btn_galley.size() * 0.5;
-        egui::Shape::galley(text_pos, node_layout.cache_btn_galley.clone(), text_color)
-    };
-    if ctx.toggle_button_with(
+    if ctx.toggle_button(
         node_layout.cache_button_rect,
         enabled,
         checked,
         (node.id, "cache"),
-        [label],
+        "cache",
         "",
     ) {
         node.behavior = (node.behavior == NodeBehavior::Once)
@@ -161,7 +149,7 @@ fn render_hints(
     func: &graph::prelude::Func,
 ) {
     let dot_radius = ctx.scale * ctx.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + ctx.scale + ctx.style.node.padding;
+    let dot_step = (dot_radius * 2.0) + ctx.scale + ctx.style.padding;
 
     if node.terminal {
         let center = layout.dot_center(0, dot_step);
