@@ -344,10 +344,12 @@ fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) 
 }
 
 fn render_background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
-    let spacing = ctx.style.dotted_base_spacing * ctx.scale;
-    let radius = (ctx.style.dotted_radius_base * ctx.scale)
-        .clamp(ctx.style.dotted_radius_min, ctx.style.dotted_radius_max);
-    let color = ctx.style.dotted_color;
+    let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
+    let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
+        ctx.style.background.dotted_radius_min,
+        ctx.style.background.dotted_radius_max,
+    );
+    let color = ctx.style.background.dotted_color;
     let origin = ctx.rect.min + view_graph.pan;
     let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
     let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);

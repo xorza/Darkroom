@@ -9,6 +9,7 @@ the core graph implementation and an editor front end.
 Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to
 centralize theme values.
 Node rendering constants now live in `Style.node` (`NodeStyle`) instead of standalone `Style` fields.
+Graph background dotted grid styling now lives in `Style.background` (`GraphBackgroundStyle`).
 Graph UI context now carries the current graph scale for shared access in render helpers.
 Graph UI context now asserts valid scale inputs and exposes a `button_with` helper to render custom-shaped buttons with
 shared widget styling.

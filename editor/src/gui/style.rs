@@ -35,12 +35,17 @@ pub struct Style {
     pub connection_highlight_stroke: Stroke,
     pub temp_connection_stroke: Stroke,
     pub breaker_stroke: Stroke,
+    pub background: GraphBackgroundStyle,
+    pub node: NodeStyle,
+}
+
+#[derive(Debug)]
+pub struct GraphBackgroundStyle {
     pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
     pub dotted_radius_base: f32,
     pub dotted_radius_min: f32,
     pub dotted_radius_max: f32,
-    pub node: NodeStyle,
 }
 
 #[derive(Debug)]
@@ -100,11 +105,13 @@ impl Style {
             connection_highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
             temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
             breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
-            dotted_color: Color32::from_rgb(48, 48, 48),
-            dotted_base_spacing: 24.0,
-            dotted_radius_base: 1.2,
-            dotted_radius_min: 0.6,
-            dotted_radius_max: 2.4,
+            background: GraphBackgroundStyle {
+                dotted_color: Color32::from_rgb(48, 48, 48),
+                dotted_base_spacing: 24.0,
+                dotted_radius_base: 1.2,
+                dotted_radius_min: 0.6,
+                dotted_radius_max: 2.4,
+            },
             node: NodeStyle {
                 width: 180.0,
                 header_height: 22.0,
