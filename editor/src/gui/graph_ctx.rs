@@ -1,9 +1,9 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Painter, Rect, Sense, Shape, StrokeKind, Ui};
+use egui::{Color32, Painter, Rect, Sense, Shape, StrokeKind, Ui};
 use graph::prelude::FuncLib;
 
-use crate::{common::font::ScaledFontId, gui::style::Style};
+use crate::gui::style::Style;
 
 pub struct GraphContext<'a> {
     pub ui: &'a mut Ui,
@@ -42,13 +42,13 @@ impl<'a> GraphContext<'a> {
         }
     }
 
-    pub fn toggle_button(
+    pub fn toggle_button_with(
         &mut self,
         rect: Rect,
-        text: &str,
         enabled: bool,
         checked: bool,
         id_source: impl std::hash::Hash,
+        shapes: impl IntoIterator<Item = impl Into<Shape>>,
         tooltip: &str,
     ) -> bool {
         let id = self.ui.make_persistent_id(id_source);

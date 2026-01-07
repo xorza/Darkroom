@@ -59,6 +59,11 @@ impl NodeLayout {
         let mut output_galleys = Vec::with_capacity(func.outputs.len());
 
         let label_font = ctx.style.sub_font.scaled(scale);
+        let cache_btn_galley = ctx.painter.layout_no_wrap(
+            "cache".to_string(),
+            ctx.style.body_font.scaled(scale),
+            ctx.style.text_color,
+        );
         for input in &func.inputs {
             let galley = ctx.painter.layout_no_wrap(
                 input.name.to_string(),
@@ -87,6 +92,7 @@ impl NodeLayout {
             port_row_height: 0.0,
             padding: 0.0,
             title_galley,
+            cache_btn_galley,
             input_galleys,
             output_galleys,
         }
@@ -136,13 +142,7 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
-        // todo cache galley
-        let cache_btn_width = text_width(
-            &ctx.painter,
-            &ctx.style.body_font.scaled(scale),
-            "cache",
-            ctx.style.text_color,
-        ) + padding * 2.0;
+        let cache_btn_width = self.cache_btn_galley.size().x + padding * 2.0;
         let cache_button_height = ctx.style.body_font.size * scale + padding * 2.0;
 
         let header_row_height = header_height + padding * 2.0;
