@@ -37,7 +37,6 @@ pub struct GraphBackgroundStyle {
 
 #[derive(Debug)]
 pub struct NodeStyle {
-    pub header_height: f32,
     pub padding: f32,
     pub corner_radius: f32,
     pub body_fill: Color32,
@@ -57,7 +56,6 @@ pub struct NodeStyle {
     pub input_hover_color: Color32,
     pub output_hover_color: Color32,
 
-    pub remove_btn_size: f32,
     pub const_stroke: Stroke,
 }
 
@@ -99,7 +97,6 @@ impl Style {
                 dotted_radius_max: 2.4,
             },
             node: NodeStyle {
-                header_height: 22.0,
                 padding: 4.0,
                 corner_radius: 6.0,
                 body_fill: Color32::from_rgb(27, 27, 27),
@@ -107,8 +104,6 @@ impl Style {
                 selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
 
                 const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
-
-                remove_btn_size: 12.0,
 
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),

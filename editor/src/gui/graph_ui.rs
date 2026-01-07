@@ -448,9 +448,9 @@ fn fit_all_nodes(
 
     let mut layouts = graph_layout.node_layouts.values();
     let first = layouts.next().unwrap();
-    let mut bounds = to_graph_rect(first.rect);
+    let mut bounds = to_graph_rect(first.body_rect);
     for layout in layouts {
-        bounds = bounds.union(to_graph_rect(layout.rect));
+        bounds = bounds.union(to_graph_rect(layout.body_rect));
     }
 
     let bounds_size = bounds.size();

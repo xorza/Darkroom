@@ -48,7 +48,7 @@ impl GraphLayout {
     }
 
     pub fn node_rect(&self, node_id: &NodeId) -> Rect {
-        self.node_layout(node_id).rect
+        self.node_layout(node_id).body_rect
     }
 
     pub fn node_layout(&self, node_id: &NodeId) -> &node_ui::NodeLayout {
