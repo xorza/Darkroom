@@ -47,16 +47,16 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
-            render_body(ctx, &node_layout, is_selected);
-            if render_remove_btn(ctx, ui_interaction, &node_id, &node_layout) {
+            render_body(ctx, node_layout, is_selected);
+            if render_remove_btn(ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
-            render_cache_btn(ctx, ui_interaction, &node_layout, node);
-            render_hints(ctx, &node_layout, node, func);
-            let node_drag_port_result = render_node_ports(ctx, &node_layout, view_node, func);
+            render_cache_btn(ctx, ui_interaction, node_layout, node);
+            render_hints(ctx, node_layout, node, func);
+            let node_drag_port_result = render_node_ports(ctx, node_layout, view_node, func);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_node_const_bindings(ctx, &node_layout, node);
-            render_node_labels(ctx, &node_layout);
+            render_node_const_bindings(ctx, node_layout, node);
+            render_node_labels(ctx, node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -67,13 +67,13 @@ impl NodeUi {
     }
 }
 
-fn body_drag(
+fn body_drag<'a>(
     ctx: &mut GraphContext<'_>,
     view_graph: &mut ViewGraph,
-    graph_layout: &mut GraphLayout,
+    graph_layout: &'a mut GraphLayout,
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
-) -> NodeLayout {
+) -> &'a NodeLayout {
     let node_layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
 
     let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
@@ -96,12 +96,10 @@ fn body_drag(
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / ctx.scale;
 
-        // let mut new_layout = node_layout.clone();
         node_layout.update(ctx, view_graph, node_id, graph_layout.origin);
-        // graph_layout.update_node_layout(node_id, new_layout.clone());
-        // return new_layout;
     }
-    node_layout.clone()
+
+    node_layout
 }
 
 fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) {
