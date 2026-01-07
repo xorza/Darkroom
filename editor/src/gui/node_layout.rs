@@ -112,7 +112,7 @@ impl NodeLayout {
 
         // ===============
         assert!(self.inited);
-        assert!((self.scale - ctx.scale) < common::EPSILON);
+        assert!((self.scale - ctx.scale).abs() < common::EPSILON);
 
         let padding = ctx.style.padding * self.scale;
         let small_padding = ctx.style.small_padding * self.scale;
@@ -168,8 +168,6 @@ impl NodeLayout {
         let node_size = vec2(node_width, node_height);
         let body_rect = Rect::from_min_size(Pos2::ZERO, node_size);
 
-        let header_rect = Rect::from_min_size(body_rect.min, vec2(title_width, header_row_height));
-
         let remove_pos = egui::pos2(
             body_rect.max.x - padding - remove_btn_size,
             body_rect.min.y + padding,
@@ -179,7 +177,7 @@ impl NodeLayout {
         let dot_radius = ctx.style.node.status_dot_radius * self.scale;
         let dot_first_center = {
             let dot_x = remove_rect.min.x - padding - dot_radius;
-            let dot_center_y = header_rect.center().y;
+            let dot_center_y = header_row_height * 0.5;
             egui::pos2(dot_x, dot_center_y)
         };
 
