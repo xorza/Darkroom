@@ -1,13 +1,15 @@
+use std::sync::Arc;
+
 use eframe::egui;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{Pos2, Vec2};
+use egui::{Pos2, Shape, Vec2};
 
 use crate::gui::graph_ctx::GraphContext;
 use crate::model;
 
 #[derive(Debug, Default)]
 pub struct BackgroundRenderer {
-    mesh: Mesh,
+    mesh: Arc<Mesh>,
     last_pan: Vec2,
     last_scale: f32,
     last_rect_size: Vec2,
@@ -33,12 +35,13 @@ impl BackgroundRenderer {
             self.inited = true;
         }
 
-        ctx.painter.add(egui::Shape::mesh(self.mesh.clone()));
+        ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
     fn rebuild_mesh(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
         let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
-        assert!(spacing > 0.0, "background spacing must be positive");
+        assert!(spacing > 0.0);
+
         let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
             ctx.style.background.dotted_radius_min,
             ctx.style.background.dotted_radius_max,
@@ -50,19 +53,17 @@ impl BackgroundRenderer {
         let start_x = ctx.rect.left() - offset_x - spacing;
         let start_y = ctx.rect.top() - offset_y - spacing;
 
-        let mut mesh = Mesh::default();
+        let mesh = &mut self.mesh;
         let segments = 12;
         let mut y = start_y;
         while y <= ctx.rect.bottom() + spacing {
             let mut x = start_x;
             while x <= ctx.rect.right() + spacing {
-                add_circle_to_mesh(&mut mesh, Pos2::new(x, y), radius, color, segments);
+                add_circle_to_mesh(mesh, Pos2::new(x, y), radius, color, segments);
                 x += spacing;
             }
             y += spacing;
         }
-
-        self.mesh = mesh;
     }
 }
 
