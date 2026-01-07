@@ -456,7 +456,7 @@ pub(crate) fn compute_node_layout(
             ctx.style.text_color,
         ) + padding * 2.0;
         let status_width = {
-            let dot_diameter = ctx.style.node.status_dot_radius * 2.0;
+            let dot_diameter = padding + ctx.style.node.status_dot_radius * 2.0;
             2.0 * (padding + dot_diameter)
         };
         caption_width + status_width
