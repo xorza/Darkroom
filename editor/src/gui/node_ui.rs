@@ -324,28 +324,28 @@ fn render_remove_btn(
         close_stroke,
         egui::StrokeKind::Inside,
     );
-    let close_rect = node_layout.remove_btn_rect;
-    let close_margin = close_rect.width() * 0.3;
+    let remove_rect = node_layout.remove_btn_rect;
+    let remove_margin = remove_rect.width() * 0.3;
     let a = egui::pos2(
-        close_rect.min.x + close_margin,
-        close_rect.min.y + close_margin,
+        remove_rect.min.x + remove_margin,
+        remove_rect.min.y + remove_margin,
     );
     let b = egui::pos2(
-        close_rect.max.x - close_margin,
-        close_rect.max.y - close_margin,
+        remove_rect.max.x - remove_margin,
+        remove_rect.max.y - remove_margin,
     );
     let c = egui::pos2(
-        close_rect.min.x + close_margin,
-        close_rect.max.y - close_margin,
+        remove_rect.min.x + remove_margin,
+        remove_rect.max.y - remove_margin,
     );
     let d = egui::pos2(
-        close_rect.max.x - close_margin,
-        close_rect.min.y + close_margin,
+        remove_rect.max.x - remove_margin,
+        remove_rect.min.y + remove_margin,
     );
-    let close_color = ctx.style.widget_text_color;
-    let close_stroke = egui::Stroke::new(1.4 * scale, close_color);
-    ctx.painter.line_segment([a, b], close_stroke);
-    ctx.painter.line_segment([c, d], close_stroke);
+    let remove_color = ctx.style.widget_text_color;
+    let remove_stroke = egui::Stroke::new(1.4 * scale, remove_color);
+    ctx.painter.line_segment([a, b], remove_stroke);
+    ctx.painter.line_segment([c, d], remove_stroke);
 
     false
 }
