@@ -3,7 +3,7 @@ use egui::Pos2;
 #[derive(Debug)]
 pub struct ConnectionBezier;
 
-const STEPS: usize = 12;
+const STEPS: usize = 24;
 pub const POINTS: usize = STEPS + 1;
 
 impl ConnectionBezier {
