@@ -1,6 +1,6 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Color32, CornerRadius, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui};
+use egui::{Painter, Rect, Sense, StrokeKind, Ui};
 use graph::prelude::FuncLib;
 
 use crate::{common::font::ScaledFontId, gui::style::Style};
@@ -68,7 +68,6 @@ impl<'a> GraphContext<'a> {
             self.style.widget_inactive_bg_fill
         };
         let stroke = self.style.widget_inactive_bg_stroke;
-
         let text_color = if !enabled {
             self.style.widget_noninteractive_text_color
         } else if checked {

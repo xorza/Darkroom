@@ -146,7 +146,7 @@ fn body_drag(
 
 fn render_body(
     ctx: &mut GraphContext<'_>,
-    node: &mut Node,
+    node: &Node,
     layout: &NodeLayout,
     selected: bool,
     scale: f32,
@@ -166,7 +166,7 @@ fn render_body(
                 scale * ctx.style.header_text_offset,
             ),
         egui::Align2::LEFT_TOP,
-        &mut node.name,
+        &node.name,
         ctx.style.heading_font.scaled(scale),
         ctx.style.text_color,
     );
