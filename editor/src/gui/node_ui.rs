@@ -55,9 +55,9 @@ impl NodeUi {
             }
             render_cache_btn(ctx, ui_interaction, node_layout, node);
             render_hints(ctx, node_layout, node, func);
+            render_node_const_bindings(ctx, node_layout, node);
             let node_drag_port_result = render_node_ports(ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_node_const_bindings(ctx, node_layout, node);
             render_node_labels(ctx, node_layout);
         }
 
@@ -321,14 +321,12 @@ fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
 fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
     // todo refactor styling
     let font = ctx.style.body_font.scaled(ctx.scale);
-    let port_radius = ctx.scale * ctx.style.node.port_radius;
-    let link_inset = port_radius * 0.6;
+    let port_radius = ctx.style.node.port_radius * ctx.scale;
+
     let badge_padding = node_layout.padding;
     let row_height = node_layout.port_row_height;
-    let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
-    let badge_radius = 6.0 * ctx.scale;
+    let badge_height = row_height * 1.2;
     let badge_gap = 6.0 * ctx.scale;
-    let stroke = ctx.style.connections.stroke;
 
     for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {
@@ -346,14 +344,15 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
         );
 
         let link_start = egui::pos2(badge_rect.max.x, center.y);
-        let link_end = egui::pos2(center.x - link_inset, center.y);
-        ctx.painter.line_segment([link_start, link_end], stroke);
+        let link_end = egui::pos2(center.x - port_radius, center.y);
+        ctx.painter
+            .line_segment([link_start, link_end], ctx.style.connections.stroke);
         ctx.painter.rect(
             badge_rect,
-            badge_radius,
+            ctx.style.corner_radius * ctx.scale,
             ctx.style.inactive_bg_fill,
             ctx.style.node.const_stroke,
-            StrokeKind::Middle,
+            StrokeKind::Outside,
         );
         ctx.painter.text(
             badge_rect.center(),

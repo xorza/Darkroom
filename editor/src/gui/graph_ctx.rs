@@ -160,10 +160,14 @@ impl<'a> GraphContext<'a> {
             self.style.inactive_bg_fill
         };
         let stroke = self.style.inactive_bg_stroke;
-        let corner_radius = self.style.corner_radius * self.scale;
 
-        self.painter
-            .rect(rect, corner_radius, fill, stroke, StrokeKind::Middle);
+        self.painter.rect(
+            rect,
+            self.style.corner_radius * self.scale,
+            fill,
+            stroke,
+            StrokeKind::Middle,
+        );
         self.painter.extend(shapes);
 
         response.clicked()
