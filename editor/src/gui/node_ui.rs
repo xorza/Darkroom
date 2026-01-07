@@ -188,13 +188,13 @@ fn render_hints(
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
 ) {
-    let dot_radius = ctx.scale * ctx.style.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + ctx.scale * ctx.style.status_item_gap;
+    let dot_radius = ctx.scale * ctx.style.node.status_dot_radius;
+    let dot_step = (dot_radius * 2.0) + ctx.scale * ctx.style.node.status_item_gap;
 
     if node.terminal {
         let center = layout.dot_center(0, dot_step);
         ctx.painter
-            .circle_filled(center, dot_radius, ctx.style.status_terminal_color);
+            .circle_filled(center, dot_radius, ctx.style.node.status_terminal_color);
         let dot_rect =
             egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
@@ -206,7 +206,7 @@ fn render_hints(
     if func.behavior == FuncBehavior::Impure {
         let center = layout.dot_center(usize::from(node.terminal), dot_step);
         ctx.painter
-            .circle_filled(center, dot_radius, ctx.style.status_impure_color);
+            .circle_filled(center, dot_radius, ctx.style.node.status_impure_color);
         let dot_rect =
             egui::Rect::from_center_size(center, egui::vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
@@ -271,8 +271,8 @@ fn render_node_ports(
     view_node: &ViewNode,
     func: &Func,
 ) -> PortDragInfo {
-    let port_radius = ctx.style.port_radius * ctx.scale;
-    let port_activation_radius = ctx.style.port_activation_radius * ctx.scale;
+    let port_radius = ctx.style.node.port_radius * ctx.scale;
+    let port_activation_radius = ctx.style.node.port_activation_radius * ctx.scale;
     let port_rect_size = egui::vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
 
     let draw_port = |center: Pos2,
@@ -320,8 +320,8 @@ fn render_node_ports(
             center,
             PortKind::Input,
             input_idx,
-            ctx.style.input_port_color,
-            ctx.style.input_hover_color,
+            ctx.style.node.input_port_color,
+            ctx.style.node.input_hover_color,
         );
         port_drag_info = port_drag_info.prefer(drag_info);
     }
@@ -332,8 +332,8 @@ fn render_node_ports(
             center,
             PortKind::Output,
             output_idx,
-            ctx.style.output_port_color,
-            ctx.style.output_hover_color,
+            ctx.style.node.output_port_color,
+            ctx.style.node.output_hover_color,
         );
         port_drag_info = port_drag_info.prefer(drag_info);
     }
@@ -343,7 +343,7 @@ fn render_node_ports(
 
 fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node: &Node) {
     let font = ctx.style.body_font.scaled(ctx.scale);
-    let port_radius = ctx.scale * ctx.style.port_radius;
+    let port_radius = ctx.scale * ctx.style.node.port_radius;
     let link_inset = port_radius * 0.6;
     let badge_padding = 4.0 * ctx.scale;
     let row_height = ctx.style.node.row_height * ctx.scale;
@@ -470,10 +470,10 @@ pub(crate) fn compute_node_layout(
         .max(cache_text_width + padding * ctx.style.cache_button_text_pad_factor * 2.0);
     let cache_row_width = padding + cache_button_width + padding;
     let status_row_width = {
-        let dot_diameter = ctx.style.status_dot_radius * 2.0;
+        let dot_diameter = ctx.style.node.status_dot_radius * 2.0;
         let count = 2usize;
         let gaps = (count - 1) as f32;
-        let total = count as f32 * dot_diameter + gaps * ctx.style.status_item_gap;
+        let total = count as f32 * dot_diameter + gaps * ctx.style.node.status_item_gap;
         padding + total + padding
     };
 
@@ -531,7 +531,7 @@ pub(crate) fn compute_node_layout(
     );
     let close_rect = egui::Rect::from_min_size(close_pos, egui::vec2(close_size, close_size));
 
-    let dot_radius = scale * ctx.style.status_dot_radius;
+    let dot_radius = scale * ctx.style.node.status_dot_radius;
     let has_terminal = node.terminal;
     let has_impure = func.behavior == FuncBehavior::Impure;
     let dot_first_center = if has_terminal || has_impure {
