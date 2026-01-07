@@ -120,7 +120,7 @@ impl Style {
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
                 cache_btn_width: 50.0,
-                remove_btn_size: 20.0,
+                remove_btn_size: 10.0,
 
                 port_radius: 18.0 * 0.3,
                 port_activation_radius: 18.0 * 0.3 * 1.3,
