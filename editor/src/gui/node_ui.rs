@@ -29,6 +29,7 @@ pub struct NodeLayout {
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub row_height: f32,
+    pub padding: f32,
 }
 
 #[derive(Debug, Default)]
@@ -144,7 +145,10 @@ fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, sel
         layout.rect,
         corner_radius,
         ctx.style.node.body_fill,
-        selected.then_else(ctx.style.node.selected_stroke, ctx.style.node.body_stroke),
+        selected.then_else(
+            ctx.style.node.selected_body_stroke,
+            ctx.style.node.body_stroke,
+        ),
         egui::StrokeKind::Middle,
     );
     ctx.painter.text(
@@ -406,11 +410,11 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, func: &Func) {
-    let padding = ctx.style.node.padding * ctx.scale;
+fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout, func: &Func) {
+    let padding = ctx.style.node.port_label_padding * ctx.scale;
 
     for (input_idx, input) in func.inputs.iter().enumerate() {
-        let text_pos = layout.input_center(input_idx) + vec2(padding, 0.0);
+        let text_pos = node_layout.input_center(input_idx) + vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::LEFT_CENTER,
@@ -421,7 +425,7 @@ fn render_node_labels(ctx: &mut GraphContext, layout: &NodeLayout, func: &Func) 
     }
 
     for (output_idx, output) in func.outputs.iter().enumerate() {
-        let text_pos = layout.output_center(output_idx) - vec2(padding, 0.0);
+        let text_pos = node_layout.output_center(output_idx) - vec2(padding, 0.0);
         ctx.painter.text(
             text_pos,
             egui::Align2::RIGHT_CENTER,
@@ -494,7 +498,7 @@ pub(crate) fn compute_node_layout(
                 &ctx.style.body_font.scaled(scale),
                 &input.name,
                 ctx.style.text_color,
-            )
+            ) + padding
         });
         let right = func.outputs.get(row).map_or(0.0, |output| {
             text_width(
@@ -502,7 +506,7 @@ pub(crate) fn compute_node_layout(
                 &ctx.style.body_font.scaled(scale),
                 &output.name,
                 ctx.style.text_color,
-            )
+            ) + padding
         });
         let mut row_width = padding * 2.0 + left + right;
         if left > 0.0 && right > 0.0 {
@@ -575,6 +579,7 @@ pub(crate) fn compute_node_layout(
         input_first_center,
         output_first_center,
         row_height,
+        padding,
     }
 }
 

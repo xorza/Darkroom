@@ -42,23 +42,28 @@ pub struct GraphBackgroundStyle {
 pub struct NodeStyle {
     pub header_height: f32,
     pub cache_height: f32,
-    pub port_row_height: f32,
     pub padding: f32,
     pub corner_radius: f32,
     pub body_fill: Color32,
     pub body_stroke: Stroke,
-    pub const_stroke: Stroke,
-    pub selected_stroke: Stroke,
-    pub port_radius: f32,
-    pub port_activation_radius: f32,
-    pub remove_btn_size: f32,
+    pub selected_body_stroke: Stroke,
+
     pub status_terminal_color: Color32,
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
+
+    pub port_radius: f32,
+    pub port_activation_radius: f32,
+    pub port_row_height: f32,
+    pub port_label_padding: f32,
+
     pub input_port_color: Color32,
     pub output_port_color: Color32,
     pub input_hover_color: Color32,
     pub output_hover_color: Color32,
+
+    pub remove_btn_size: f32,
+    pub const_stroke: Stroke,
 }
 
 impl Style {
@@ -103,20 +108,24 @@ impl Style {
             },
             node: NodeStyle {
                 header_height: 22.0,
-                cache_height: 20.0,
-                port_row_height: 18.0,
                 padding: 4.0,
                 corner_radius: 6.0,
                 body_fill: Color32::from_rgb(27, 27, 27),
                 body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
-                selected_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
+                selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
+
                 const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
-                port_radius: 18.0 * 0.3,
-                port_activation_radius: 18.0 * 0.3 * 1.5,
+                cache_height: 20.0,
                 remove_btn_size: 12.0,
+
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
                 status_dot_radius: 4.0,
+
+                port_radius: 18.0 * 0.3,
+                port_activation_radius: 18.0 * 0.3 * 1.5,
+                port_row_height: 18.0,
+                port_label_padding: 8.0,
                 input_port_color: Color32::from_rgb(70, 150, 255),
                 output_port_color: Color32::from_rgb(70, 200, 200),
                 input_hover_color: Color32::from_rgb(120, 190, 255),
