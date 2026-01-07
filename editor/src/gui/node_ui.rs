@@ -203,7 +203,7 @@ fn render_cache_btn(
             egui::Sense::hover()
         },
     );
-    if !node.terminal && cache_response.clicked() {
+    if cache_response.clicked() {
         node.behavior = (node.behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
