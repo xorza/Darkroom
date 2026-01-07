@@ -1,12 +1,12 @@
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::node_layout::{NodeLayout, text_width};
+use crate::gui::node_layout::NodeLayout;
 
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
@@ -332,8 +332,10 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
         };
 
         let label = static_value_label(value);
-        let label_width = text_width(&ctx.painter, &font, &label, ctx.style.text_color);
-        let badge_width = label_width + padding * 2.0;
+        let label_galley = ctx
+            .painter
+            .layout_no_wrap(label, font.clone(), ctx.style.text_color);
+        let badge_width = label_galley.size().x + padding * 2.0;
         let input_center = node_layout.input_center(input_idx);
         let badge_right = input_center.x - port_radius - padding;
         let badge_rect = egui::Rect::from_min_max(
@@ -353,11 +355,9 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
             ctx.style.node.const_stroke,
             StrokeKind::Inside,
         );
-        ctx.painter.text(
-            badge_rect.center(),
-            Align2::CENTER_CENTER,
-            label,
-            font.clone(),
+        ctx.painter.galley(
+            badge_rect.center() - label_galley.size() * 0.5,
+            label_galley,
             ctx.style.text_color,
         );
     }

@@ -1,6 +1,6 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Color32, FontId, Galley, Pos2, Rect, pos2, vec2};
+use egui::{Galley, Pos2, Rect, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
@@ -220,14 +220,4 @@ impl KeyIndexKey<NodeId> for NodeLayout {
     fn key(&self) -> &NodeId {
         &self.node_id
     }
-}
-
-pub(crate) fn text_width(
-    painter: &egui::Painter,
-    font: &FontId,
-    text: &str,
-    color: Color32,
-) -> f32 {
-    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
-    galley.size().x
 }
