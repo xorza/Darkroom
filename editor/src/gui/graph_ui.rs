@@ -1,4 +1,5 @@
 use eframe::egui;
+use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{PointerButton, Pos2, Response, Sense, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
@@ -330,6 +331,7 @@ fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) 
 
 fn render_background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
     let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
+    assert!(spacing > 0.0, "background spacing must be positive");
     let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
         ctx.style.background.dotted_radius_min,
         ctx.style.background.dotted_radius_max,
@@ -341,14 +343,54 @@ fn render_background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
     let start_x = ctx.rect.left() - offset_x - spacing;
     let start_y = ctx.rect.top() - offset_y - spacing;
 
+    let mut mesh = Mesh::default();
+    let segments = 4;
     let mut y = start_y;
     while y <= ctx.rect.bottom() + spacing {
         let mut x = start_x;
         while x <= ctx.rect.right() + spacing {
-            ctx.painter.circle_filled(Pos2::new(x, y), radius, color);
+            add_circle_to_mesh(&mut mesh, Pos2::new(x, y), radius, color, segments);
             x += spacing;
         }
         y += spacing;
+    }
+    ctx.painter.add(egui::Shape::mesh(mesh));
+}
+
+fn add_circle_to_mesh(
+    mesh: &mut Mesh,
+    center: Pos2,
+    radius: f32,
+    color: egui::Color32,
+    segments: usize,
+) {
+    assert!(segments >= 3, "circle mesh needs at least 3 segments");
+    let base_index = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: WHITE_UV,
+        color,
+    });
+
+    let step = std::f32::consts::TAU / segments as f32;
+    for i in 0..segments {
+        let angle = step * i as f32;
+        let pos = Pos2::new(
+            center.x + radius * angle.cos(),
+            center.y + radius * angle.sin(),
+        );
+        mesh.vertices.push(Vertex {
+            pos,
+            uv: WHITE_UV,
+            color,
+        });
+    }
+
+    for i in 0..segments {
+        let next = if i + 1 == segments { 0 } else { i + 1 };
+        mesh.indices.push(base_index);
+        mesh.indices.push(base_index + 1 + i as u32);
+        mesh.indices.push(base_index + 1 + next as u32);
     }
 }
 
