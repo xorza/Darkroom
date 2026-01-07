@@ -118,8 +118,6 @@ impl NodeLayout {
         origin: Pos2,
     ) {
         let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
-        let node = view_graph.graph.by_id(view_node_id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
         let scale = ctx.scale;
         let padding = ctx.style.node.padding * scale;
@@ -136,20 +134,19 @@ impl NodeLayout {
             title_width + status_width + remove_width
         };
 
-        // todo remove func dependency
-        let input_count = func.inputs.len();
-        let output_count = func.outputs.len();
+        let input_count = self.input_galleys.len();
+        let output_count = self.output_galleys.len();
         let row_count = input_count.max(output_count).max(1);
         let mut max_row_width: f32 = 0.0;
         for row in 0..row_count {
-            let left = func.inputs.get(row).map_or(0.0, |_| {
-                let galley = &self.input_galleys[row];
-                galley.size().x + padding
-            });
-            let right = func.outputs.get(row).map_or(0.0, |_| {
-                let galley = &self.output_galleys[row];
-                galley.size().x + padding
-            });
+            let left = self
+                .input_galleys
+                .get(row)
+                .map_or(0.0, |galley| galley.size().x + padding);
+            let right = self
+                .output_galleys
+                .get(row)
+                .map_or(0.0, |galley| galley.size().x + padding);
             let mut row_width = padding * 2.0 + left + right;
             if left > 0.0 && right > 0.0 {
                 row_width += padding;
