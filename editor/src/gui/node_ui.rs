@@ -271,7 +271,8 @@ fn render_node_ports(
     func: &Func,
 ) -> PortDragInfo {
     let port_radius = ctx.style.port_radius * ctx.scale;
-    let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
+    let port_activation_radius = ctx.style.port_activation_radius * ctx.scale;
+    let port_rect_size = egui::vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
     let row_height = ctx.style.node_row_height * ctx.scale;
 
     let draw_port = |center: Pos2,
@@ -284,10 +285,9 @@ fn render_node_ports(
         let port_id = ctx
             .ui
             .make_persistent_id(("node_port", kind, view_node.id, idx));
-        let response = ctx
-            .ui
-            .interact(port_rect, port_id, Sense::hover() | Sense::drag());
+        let response = ctx.ui.interact(port_rect, port_id, Sense::drag());
         let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
+
         let color = is_hovered.then_else(hover_color, base_color);
         ctx.painter.circle_filled(center, port_radius, color);
 

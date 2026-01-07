@@ -116,7 +116,7 @@ impl Style {
             widget_inactive_bg_fill: WIDGET_INACTIVE_BG_FILL,
             widget_inactive_bg_stroke: Stroke::new(STROKE_WIDTH, WIDGET_INACTIVE_BG_STROKE_COLOR),
             port_radius: PORT_RADIUS,
-            port_activation_radius: PORT_RADIUS * 1.6,
+            port_activation_radius: PORT_RADIUS * 1.5,
             header_text_offset: HEADER_TEXT_OFFSET,
             cache_button_width_factor: CACHE_BUTTON_WIDTH_FACTOR,
             cache_button_vertical_pad_factor: CACHE_BUTTON_VERTICAL_PAD_FACTOR,

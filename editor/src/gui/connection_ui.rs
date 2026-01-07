@@ -212,10 +212,6 @@ impl ConnectionUi {
             PortDragInfo::DragStop => {
                 let update = drag
                     .end_port
-                    .filter(|end_port| {
-                        end_port.center.distance(drag.current_pos)
-                            < ctx.style.port_activation_radius
-                    })
                     .map_or(ConnectionDragUpdate::Finished, |end_port| {
                         ConnectionDragUpdate::FinishedWith {
                             start_port: drag.start_port,
