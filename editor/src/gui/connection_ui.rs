@@ -181,9 +181,12 @@ impl ConnectionUi {
 
             let (start_idx, end_idx) =
                 ConnectionBezier::sample(&mut self.point_cache, start, end, ctx.scale);
-            ctx.painter.line(
-                self.point_cache[start_idx..=end_idx].to_vec(),
-                ctx.style.connections.temp_stroke,
+            self.draw_gradient_line(
+                ctx,
+                &self.point_cache[start_idx..=end_idx],
+                ctx.style.node.output_port_color,
+                ctx.style.node.input_port_color,
+                ctx.style.connections.stroke_width,
             );
         }
     }

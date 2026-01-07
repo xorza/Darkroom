@@ -3,7 +3,7 @@ use egui::Pos2;
 
 use crate::gui::graph_ctx::GraphContext;
 
-const MIN_POINT_DISTANCE: f32 = 2.0;
+const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug)]
