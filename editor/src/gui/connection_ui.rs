@@ -71,6 +71,20 @@ struct ConnectionCurve {
     mesh: Mesh,
 }
 
+impl ConnectionCurve {
+    fn new(key: ConnectionKey) -> Self {
+        Self {
+            key,
+            inited: false,
+            highlighted: false,
+            output_pos: Pos2::ZERO,
+            input_pos: Pos2::ZERO,
+            points: Vec::with_capacity(connection_bezier::POINTS),
+            mesh: mesh_with_capacity(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
@@ -112,15 +126,8 @@ impl ConnectionUi {
                 };
                 let idx = self
                     .curves
-                    .compact_insert_with(&connection_key, &mut write_idx, || ConnectionCurve {
-                        key: connection_key,
-                        inited: false,
-                        highlighted: false,
-                        output_pos: Pos2::ZERO,
-                        input_pos: Pos2::ZERO,
-                        points: Vec::with_capacity(connection_bezier::POINTS),
-                        // todo add capacity
-                        mesh: Mesh::default(),
+                    .compact_insert_with(&connection_key, &mut write_idx, || {
+                        ConnectionCurve::new(connection_key)
                     });
                 let curve = &mut self.curves[idx];
 
@@ -191,6 +198,12 @@ impl ConnectionUi {
                             feather,
                         );
                     };
+
+                    println!(
+                        "{:?} {:?}",
+                        curve.mesh.vertices.len(),
+                        curve.mesh.indices.len()
+                    );
                 }
 
                 mesh.append_ref(&curve.mesh);
@@ -372,6 +385,26 @@ fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
     });
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+fn mesh_with_capacity() -> Mesh {
+    let (vertex_capacity, index_capacity) = mesh_capacity(connection_bezier::POINTS);
+    let mut mesh = Mesh::default();
+    mesh.vertices.reserve(vertex_capacity);
+    mesh.indices.reserve(index_capacity);
+    mesh
+}
+
+fn mesh_capacity(points: usize) -> (usize, usize) {
+    assert!(points >= 2, "bezier point count must be at least 2");
+    let segments = points - 1;
+    let quads_per_segment = 3;
+    let vertices_per_quad = 4;
+    let indices_per_quad = 6;
+    (
+        segments * quads_per_segment * vertices_per_quad,
+        segments * quads_per_segment * indices_per_quad,
+    )
 }
 
 impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
