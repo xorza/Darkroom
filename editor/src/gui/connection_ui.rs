@@ -101,36 +101,37 @@ impl ConnectionUi {
                     ctx.scale,
                 );
 
-                self.curves.push(ConnectionCurve {
-                    key: ConnectionKey {
-                        input_node_id: node.id,
-                        input_idx: input_index,
-                    },
-                    start_idx,
-                    end_idx,
-                });
+                let connection_key = ConnectionKey {
+                    input_node_id: node.id,
+                    input_idx: input_index,
+                };
 
                 if let Some(segments) = breaker.and_then(|breaker| {
                     (!breaker.segments().is_empty()).then_some(breaker.segments())
                 }) {
-                    for curve in self.curves.iter() {
-                        let curve_segments = self.point_cache[curve.start_idx..=curve.end_idx]
-                            .windows(2)
-                            .map(|pair| (pair[0], pair[1]));
-                        let mut hit = false;
-                        'outer: for (b1, b2) in curve_segments {
-                            for (a1, a2) in segments {
-                                if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
-                                    hit = true;
-                                    break 'outer;
-                                }
+                    let curve_segments = self.point_cache[start_idx..=end_idx]
+                        .windows(2)
+                        .map(|pair| (pair[0], pair[1]));
+                    let mut hit = false;
+                    'outer: for (b1, b2) in curve_segments {
+                        for (a1, a2) in segments {
+                            if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
+                                hit = true;
+                                break 'outer;
                             }
                         }
-                        if hit {
-                            self.highlighted.insert(curve.key);
-                        }
+                    }
+                    if hit {
+                        self.highlighted.insert(connection_key);
                     }
                 }
+
+                let curve = ConnectionCurve {
+                    key: connection_key,
+                    start_idx,
+                    end_idx,
+                };
+                self.curves.push(curve.clone());
             }
         }
     }
