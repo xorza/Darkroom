@@ -58,13 +58,4 @@ impl GraphLayout {
     pub fn node_layout(&self, node_id: &NodeId) -> &NodeLayout {
         self.node_layouts.by_key(node_id).unwrap()
     }
-
-    pub fn update_node_layout(&mut self, node_id: &NodeId, layout: node_layout::NodeLayout) {
-        assert!(
-            layout.node_id == *node_id,
-            "node layout id mismatch for {:?}",
-            node_id
-        );
-        self.node_layouts.add(layout);
-    }
 }
