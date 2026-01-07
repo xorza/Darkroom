@@ -42,8 +42,7 @@ impl GraphLayout {
         self.node_layouts.clear();
 
         for view_node in view_graph.view_nodes.iter() {
-            let layout =
-                node_layout::compute_node_layout(ctx, view_graph, &view_node.id, self.origin);
+            let layout = node_layout::NodeLayout::new(ctx, view_graph, &view_node.id, self.origin);
             self.node_layouts.insert(view_node.id, layout);
         }
     }

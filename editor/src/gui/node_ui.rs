@@ -1,8 +1,7 @@
-
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::node_layout::{NodeLayout, compute_node_layout, text_width};
+use crate::gui::node_layout::{NodeLayout, text_width};
 
 use common::BoolExt;
 use eframe::egui;
@@ -97,7 +96,8 @@ fn body_drag(
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / ctx.scale;
 
-        let new_layout = compute_node_layout(ctx, view_graph, node_id, graph_layout.origin);
+        let mut new_layout = node_layout.clone();
+        new_layout.update(ctx, view_graph, node_id, graph_layout.origin);
         graph_layout
             .node_layouts
             .insert(*node_id, new_layout.clone());
