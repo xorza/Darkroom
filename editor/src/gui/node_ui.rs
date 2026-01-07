@@ -1,3 +1,4 @@
+
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
@@ -74,7 +75,7 @@ fn body_drag(
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
 ) -> NodeLayout {
-    let node_layout = graph_layout.node_layout(node_id).clone();
+    let node_layout = graph_layout.node_layouts.get(node_id).unwrap();
 
     let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
     let body_response = ctx.ui.interact(
@@ -92,17 +93,17 @@ fn body_drag(
             .push((*node_id, GraphUiAction::NodeSelected));
         view_graph.selected_node_id = Some(*node_id);
     }
-
     if dragged {
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / ctx.scale;
 
         let new_layout = compute_node_layout(ctx, view_graph, node_id, graph_layout.origin);
-        graph_layout.update_node_layout(node_id, new_layout.clone());
+        graph_layout
+            .node_layouts
+            .insert(*node_id, new_layout.clone());
         return new_layout;
     }
-
-    node_layout
+    node_layout.clone()
 }
 
 fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) {

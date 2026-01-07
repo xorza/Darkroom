@@ -57,12 +57,4 @@ impl GraphLayout {
             .get(node_id)
             .unwrap_or_else(|| panic!("node layout missing for {:?}", node_id))
     }
-
-    pub fn update_node_layout(
-        &mut self,
-        view_node_id: &NodeId,
-        new_layout: node_layout::NodeLayout,
-    ) {
-        self.node_layouts.insert(*view_node_id, new_layout);
-    }
 }
