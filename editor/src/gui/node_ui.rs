@@ -193,58 +193,71 @@ fn render_cache_btn(
     node_layout: &NodeLayout,
     node: &mut Node,
 ) {
-    let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
-    let cache_response = ctx.ui.interact(
+    // let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
+    // let cache_response = ctx.ui.interact(
+    //     node_layout.cache_button_rect,
+    //     cache_btn_id,
+    //     if !node.terminal {
+    //         egui::Sense::click()
+    //     } else {
+    //         egui::Sense::hover()
+    //     },
+    // );
+    // if cache_response.clicked() {
+    //     node.behavior = (node.behavior == NodeBehavior::Once)
+    //         .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
+    //     ui_interaction
+    //         .actions
+    //         .push((node.id, GraphUiAction::CacheToggled));
+    // }
+
+    // let cache_button_fill = if node.terminal {
+    //     ctx.style.widget_noninteractive_bg_fill
+    // } else if node.behavior == NodeBehavior::Once {
+    //     ctx.style.cache_active_color
+    // } else if cache_response.is_pointer_button_down_on() {
+    //     ctx.style.widget_active_bg_fill
+    // } else if cache_response.hovered() {
+    //     ctx.style.widget_hover_bg_fill
+    // } else {
+    //     ctx.style.widget_inactive_bg_fill
+    // };
+    // let button_stroke = ctx.style.widget_inactive_bg_stroke;
+    // ctx.painter.rect(
+    //     node_layout.cache_button_rect,
+    //     ctx.style.node_corner_radius * ctx.scale * 0.5,
+    //     cache_button_fill,
+    //     button_stroke,
+    //     egui::StrokeKind::Inside,
+    // );
+
+    // let button_text_color = if node.terminal {
+    //     ctx.style.widget_noninteractive_text_color
+    // } else if node.behavior == NodeBehavior::Once {
+    //     ctx.style.cache_checked_text_color
+    // } else {
+    //     ctx.style.widget_text_color
+    // };
+    // ctx.painter.text(
+    //     node_layout.cache_button_rect.center(),
+    //     egui::Align2::CENTER_CENTER,
+    //     "cache",
+    //     ctx.style.body_font.scaled(ctx.scale),
+    //     button_text_color,
+    // );
+
+    if ctx.toggle_button(
         node_layout.cache_button_rect,
-        cache_btn_id,
-        if !node.terminal {
-            egui::Sense::click()
-        } else {
-            egui::Sense::hover()
-        },
-    );
-    if cache_response.clicked() {
+        "cache",
+        !node.terminal,
+        node.behavior == NodeBehavior::Once,
+    ) {
         node.behavior = (node.behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
             .actions
             .push((node.id, GraphUiAction::CacheToggled));
-    }
-
-    let cache_button_fill = if node.terminal {
-        ctx.style.widget_noninteractive_bg_fill
-    } else if node.behavior == NodeBehavior::Once {
-        ctx.style.cache_active_color
-    } else if cache_response.is_pointer_button_down_on() {
-        ctx.style.widget_active_bg_fill
-    } else if cache_response.hovered() {
-        ctx.style.widget_hover_bg_fill
-    } else {
-        ctx.style.widget_inactive_bg_fill
     };
-    let button_stroke = ctx.style.widget_inactive_bg_stroke;
-    ctx.painter.rect(
-        node_layout.cache_button_rect,
-        ctx.style.node_corner_radius * ctx.scale * 0.5,
-        cache_button_fill,
-        button_stroke,
-        egui::StrokeKind::Inside,
-    );
-
-    let button_text_color = if node.terminal {
-        ctx.style.widget_noninteractive_text_color
-    } else if node.behavior == NodeBehavior::Once {
-        ctx.style.cache_checked_text_color
-    } else {
-        ctx.style.widget_text_color
-    };
-    ctx.painter.text(
-        node_layout.cache_button_rect.center(),
-        egui::Align2::CENTER_CENTER,
-        "cache",
-        ctx.style.body_font.scaled(ctx.scale),
-        button_text_color,
-    );
 }
 
 fn render_hints(
