@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::common::font::ScaledFontId;
 use crate::gui::graph_ctx::GraphContext;
-use crate::model::{ViewGraph, ViewNode};
+use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;
 
 #[derive(Debug, Clone)]
@@ -44,37 +44,12 @@ impl NodeLayout {
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 
-    pub fn new(ctx: &GraphContext, view_graph: &ViewGraph, node_id: &NodeId) -> NodeLayout {
-        let node = view_graph.graph.by_id(node_id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-        let scale = ctx.scale;
-
+    pub fn new(ctx: &GraphContext, node_id: &NodeId) -> NodeLayout {
         let title_galley = ctx.painter.layout_no_wrap(
-            node.name.to_string(),
-            ctx.style.heading_font.scaled(scale),
+            String::default(),
+            ctx.style.body_font.clone(),
             ctx.style.text_color,
         );
-
-        let mut input_galleys = Vec::with_capacity(func.inputs.len());
-        let mut output_galleys = Vec::with_capacity(func.outputs.len());
-
-        let label_font = ctx.style.sub_font.scaled(scale);
-        for input in &func.inputs {
-            let galley = ctx.painter.layout_no_wrap(
-                input.name.to_string(),
-                label_font.clone(),
-                ctx.style.text_color,
-            );
-            input_galleys.push(galley);
-        }
-        for output in &func.outputs {
-            let galley = ctx.painter.layout_no_wrap(
-                output.name.to_string(),
-                label_font.clone(),
-                ctx.style.text_color,
-            );
-            output_galleys.push(galley);
-        }
 
         NodeLayout {
             node_id: *node_id,
@@ -87,12 +62,46 @@ impl NodeLayout {
             port_row_height: 0.0,
             padding: 0.0,
             title_galley,
-            input_galleys,
-            output_galleys,
+            input_galleys: Vec::default(),
+            output_galleys: Vec::default(),
         }
     }
 
-    pub fn update(&mut self, ctx: &GraphContext, view_node: &ViewNode, origin: Pos2) {
+    pub fn update(&mut self, ctx: &GraphContext, view_graph: &ViewGraph, origin: Pos2) {
+        let view_node = view_graph.view_nodes.by_key(&self.node_id).unwrap();
+        let node = view_graph.graph.by_id(&self.node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let scale = ctx.scale;
+
+        self.title_galley = ctx.painter.layout_no_wrap(
+            node.name.to_string(),
+            ctx.style.body_font.scaled(scale),
+            ctx.style.text_color,
+        );
+
+        let label_font = ctx.style.sub_font.scaled(scale);
+
+        self.input_galleys.clear();
+        for input in &func.inputs {
+            let galley = ctx.painter.layout_no_wrap(
+                input.name.to_string(),
+                label_font.clone(),
+                ctx.style.text_color,
+            );
+            self.input_galleys.push(galley);
+        }
+        self.output_galleys.clear();
+        for output in &func.outputs {
+            let galley = ctx.painter.layout_no_wrap(
+                output.name.to_string(),
+                label_font.clone(),
+                ctx.style.text_color,
+            );
+            self.output_galleys.push(galley);
+        }
+
+        // ===============
+
         let scale = ctx.scale;
         let padding = ctx.style.padding * scale;
         let small_padding = ctx.style.small_padding * scale;
@@ -183,7 +192,6 @@ impl NodeLayout {
         let input_first_center = input_first_center + global_offset;
         let output_first_center = output_first_center + global_offset;
 
-        self.node_id = view_node.id;
         self.body_rect = body_rect;
         self.remove_btn_rect = remove_btn_rect;
         self.cache_button_rect = cache_button_rect;
