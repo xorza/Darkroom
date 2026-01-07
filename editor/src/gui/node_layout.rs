@@ -10,6 +10,9 @@ use common::key_index_vec::KeyIndexKey;
 
 #[derive(Debug, Clone)]
 pub struct NodeLayout {
+    inited: bool,
+    scale: f32,
+
     pub node_id: NodeId,
     pub body_rect: Rect,
     pub remove_btn_rect: Rect,
@@ -52,6 +55,8 @@ impl NodeLayout {
         );
 
         NodeLayout {
+            inited: false,
+            scale: 1.0,
             node_id: *node_id,
             body_rect: Rect::ZERO,
             remove_btn_rect: Rect::ZERO,
@@ -71,15 +76,16 @@ impl NodeLayout {
         let view_node = view_graph.view_nodes.by_key(&self.node_id).unwrap();
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-        let scale = ctx.scale;
+
+        self.scale = ctx.scale;
 
         self.title_galley = ctx.painter.layout_no_wrap(
             node.name.to_string(),
-            ctx.style.body_font.scaled(scale),
+            ctx.style.body_font.scaled(self.scale),
             ctx.style.text_color,
         );
 
-        let label_font = ctx.style.sub_font.scaled(scale);
+        let label_font = ctx.style.sub_font.scaled(self.scale);
 
         self.input_galleys.clear();
         for input in &func.inputs {
@@ -102,11 +108,10 @@ impl NodeLayout {
 
         // ===============
 
-        let scale = ctx.scale;
-        let padding = ctx.style.padding * scale;
-        let small_padding = ctx.style.small_padding * scale;
+        let padding = ctx.style.padding * self.scale;
+        let small_padding = ctx.style.small_padding * self.scale;
 
-        let header_height = ctx.style.heading_font.size * scale;
+        let header_height = ctx.style.heading_font.size * self.scale;
         let remove_btn_size = header_height;
 
         let title_width = self.title_galley.size().x + padding * 2.0;
@@ -138,10 +143,10 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
-        let cache_button_height = ctx.style.sub_font.size * scale + small_padding * 2.0;
+        let cache_button_height = ctx.style.sub_font.size * self.scale + small_padding * 2.0;
 
         let header_row_height = header_height + padding * 2.0;
-        let port_row_height = ctx.style.sub_font.size * scale + padding * 2.0;
+        let port_row_height = ctx.style.sub_font.size * self.scale + padding * 2.0;
         let cache_row_height = cache_button_height + small_padding * 2.0;
 
         let node_width = header_width.max(max_row_width);
@@ -160,7 +165,7 @@ impl NodeLayout {
         );
         let remove_rect = Rect::from_min_size(remove_pos, vec2(remove_btn_size, remove_btn_size));
 
-        let dot_radius = scale * ctx.style.node.status_dot_radius;
+        let dot_radius = ctx.style.node.status_dot_radius * self.scale;
         let dot_first_center = {
             let dot_x = remove_rect.min.x - padding - dot_radius;
             let dot_center_y = header_rect.center().y;
@@ -183,7 +188,7 @@ impl NodeLayout {
         let input_first_center = egui::pos2(body_rect.min.x, base_y);
         let output_first_center = egui::pos2(body_rect.min.x + node_width, base_y);
 
-        let global_offset = (origin + view_node.pos.to_vec2() * scale).to_vec2();
+        let global_offset = (origin + view_node.pos.to_vec2() * self.scale).to_vec2();
 
         let body_rect = body_rect.translate(global_offset);
         let remove_btn_rect = remove_rect.translate(global_offset);
