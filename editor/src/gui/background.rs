@@ -78,7 +78,7 @@ fn add_circle_to_mesh(
     segments: usize,
 ) {
     assert!(segments >= 3, "circle mesh needs at least 3 segments");
-    
+
     let base_index = mesh.vertices.len() as u32;
     mesh.vertices.push(Vertex {
         pos: center,
