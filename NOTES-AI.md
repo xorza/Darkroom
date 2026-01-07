@@ -14,6 +14,7 @@ Node remove button sizing now comes from `Style.node.remove_btn_size`.
 Node corner radius now lives on `Style` instead of `Style.node`.
 Graph background dotted grid styling now lives in `Style.background` (`GraphBackgroundStyle`).
 Connection stroke styling now lives in `Style.connections` (`ConnectionStyle`).
+`NodeLayout` and its layout computation now live in `editor/src/gui/node_layout.rs`.
 Graph UI context now carries the current graph scale for shared access in render helpers.
 Graph UI context now asserts valid scale inputs and exposes a `button_with` helper to render custom-shaped buttons with
 shared widget styling.

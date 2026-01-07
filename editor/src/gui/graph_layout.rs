@@ -4,7 +4,7 @@ use hashbrown::HashMap;
 
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::node_ui;
+use crate::gui::node_layout;
 use crate::model::ViewGraph;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub struct PortInfo {
 #[derive(Debug)]
 pub struct GraphLayout {
     pub origin: Pos2,
-    pub node_layouts: HashMap<NodeId, node_ui::NodeLayout>,
+    pub node_layouts: HashMap<NodeId, node_layout::NodeLayout>,
 }
 
 impl Default for GraphLayout {
@@ -42,7 +42,8 @@ impl GraphLayout {
         self.node_layouts.clear();
 
         for view_node in view_graph.view_nodes.iter() {
-            let layout = node_ui::compute_node_layout(ctx, view_graph, &view_node.id, self.origin);
+            let layout =
+                node_layout::compute_node_layout(ctx, view_graph, &view_node.id, self.origin);
             self.node_layouts.insert(view_node.id, layout);
         }
     }
@@ -51,13 +52,17 @@ impl GraphLayout {
         self.node_layout(node_id).body_rect
     }
 
-    pub fn node_layout(&self, node_id: &NodeId) -> &node_ui::NodeLayout {
+    pub fn node_layout(&self, node_id: &NodeId) -> &node_layout::NodeLayout {
         self.node_layouts
             .get(node_id)
             .unwrap_or_else(|| panic!("node layout missing for {:?}", node_id))
     }
 
-    pub fn update_node_layout(&mut self, view_node_id: &NodeId, new_layout: node_ui::NodeLayout) {
+    pub fn update_node_layout(
+        &mut self,
+        view_node_id: &NodeId,
+        new_layout: node_layout::NodeLayout,
+    ) {
         self.node_layouts.insert(*view_node_id, new_layout);
     }
 }

@@ -1,10 +1,11 @@
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
+use crate::gui::node_layout::{NodeLayout, compute_node_layout, text_width};
 
 use common::BoolExt;
 use eframe::egui;
-use egui::{PointerButton, Pos2, Rect, Sense, Vec2, vec2};
+use egui::{PointerButton, Pos2, Sense, Vec2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{Func, FuncBehavior, NodeBehavior};
@@ -20,42 +21,9 @@ pub enum PortDragInfo {
     DragStop,
 }
 
-#[derive(Debug, Clone)]
-pub struct NodeLayout {
-    pub body_rect: Rect,
-    pub remove_btn_rect: Rect,
-    pub cache_button_rect: Rect,
-    pub dot_first_center: Pos2,
-    pub input_first_center: Pos2,
-    pub output_first_center: Pos2,
-    pub port_row_height: f32,
-    pub padding: f32,
-}
-
 #[derive(Debug, Default)]
 pub struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
-}
-
-impl NodeLayout {
-    pub fn input_center(&self, index: usize) -> Pos2 {
-        egui::pos2(
-            self.input_first_center.x,
-            self.input_first_center.y + self.port_row_height * index as f32,
-        )
-    }
-
-    pub fn output_center(&self, index: usize) -> Pos2 {
-        egui::pos2(
-            self.output_first_center.x,
-            self.output_first_center.y + self.port_row_height * index as f32,
-        )
-    }
-
-    pub fn dot_center(&self, index: usize, dot_step: f32) -> Pos2 {
-        let first = self.dot_first_center;
-        egui::pos2(first.x - dot_step * index as f32, first.y)
-    }
 }
 
 impl NodeUi {
@@ -428,144 +396,6 @@ fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout, func: &F
             ctx.style.text_color,
         );
     }
-}
-
-pub(crate) fn compute_node_layout(
-    ctx: &GraphContext,
-    view_graph: &ViewGraph,
-    view_node_id: &NodeId,
-    origin: Pos2,
-) -> NodeLayout {
-    let view_node = view_graph.view_nodes.by_key(view_node_id).unwrap();
-    let node = view_graph.graph.by_id(view_node_id).unwrap();
-    let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-
-    let scale = ctx.scale;
-    let padding = ctx.style.node.padding * scale;
-
-    let header_height = ctx.style.heading_font.size * scale;
-    let remove_btn_size = header_height;
-
-    let title_width = text_width(
-        &ctx.painter,
-        &ctx.style.heading_font.scaled(scale),
-        &node.name,
-        ctx.style.text_color,
-    ) + padding * 2.0;
-
-    let header_width = {
-        let status_width = 2.0 * (padding + ctx.style.node.status_dot_radius * 2.0);
-        let remove_width = remove_btn_size + padding * 2.0;
-
-        title_width + status_width + remove_width
-    };
-
-    let input_count = func.inputs.len();
-    let output_count = func.outputs.len();
-    let row_count = input_count.max(output_count).max(1);
-    let mut max_row_width: f32 = 0.0;
-    for row in 0..row_count {
-        let left = func.inputs.get(row).map_or(0.0, |input| {
-            text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(scale),
-                &input.name,
-                ctx.style.text_color,
-            ) + padding
-        });
-        let right = func.outputs.get(row).map_or(0.0, |output| {
-            text_width(
-                &ctx.painter,
-                &ctx.style.body_font.scaled(scale),
-                &output.name,
-                ctx.style.text_color,
-            ) + padding
-        });
-        let mut row_width = padding * 2.0 + left + right;
-        if left > 0.0 && right > 0.0 {
-            row_width += padding;
-        }
-        max_row_width = max_row_width.max(row_width);
-    }
-
-    let cache_btn_width = text_width(
-        &ctx.painter,
-        &ctx.style.body_font.scaled(scale),
-        "cache",
-        ctx.style.text_color,
-    ) + padding * 2.0;
-    let cache_button_height = ctx.style.body_font.size * scale + padding * 2.0;
-
-    let header_row_height = header_height + padding * 2.0;
-    let port_row_height = ctx.style.sub_font.size * scale + padding * 2.0;
-    let cache_row_height = cache_button_height + padding * 2.0;
-    let cache_row_width = cache_btn_width + padding * 2.0;
-
-    let node_width = header_width.max(max_row_width).max(cache_row_width);
-    let node_height =
-        header_row_height + cache_row_height + port_row_height * row_count as f32 + padding * 2.0;
-    let node_size = egui::vec2(node_width, node_height);
-    let body_rect = egui::Rect::from_min_size(Pos2::ZERO, node_size);
-
-    let header_rect =
-        egui::Rect::from_min_size(body_rect.min, egui::vec2(title_width, header_row_height));
-
-    let remove_pos = egui::pos2(
-        body_rect.max.x - padding - remove_btn_size,
-        body_rect.min.y + padding,
-    );
-    let remove_rect =
-        egui::Rect::from_min_size(remove_pos, egui::vec2(remove_btn_size, remove_btn_size));
-
-    let dot_radius = scale * ctx.style.node.status_dot_radius;
-    let dot_first_center = {
-        let dot_x = remove_rect.min.x - padding - dot_radius;
-        let dot_center_y = header_rect.center().y;
-        egui::pos2(dot_x, dot_center_y)
-    };
-
-    let cache_button_rect = egui::Rect::from_min_size(
-        egui::pos2(
-            body_rect.min.x + padding,
-            body_rect.min.y + header_row_height + (cache_row_height - cache_button_height) * 0.5,
-        ),
-        egui::vec2(cache_btn_width, cache_button_height),
-    );
-
-    let base_y =
-        body_rect.min.y + header_row_height + cache_row_height + padding + port_row_height * 0.5;
-    let input_first_center = egui::pos2(body_rect.min.x, base_y);
-    let output_first_center = egui::pos2(body_rect.min.x + node_width, base_y);
-
-    let global_offset = (origin + view_node.pos.to_vec2() * scale).to_vec2();
-
-    let body_rect = body_rect.translate(global_offset);
-    let remove_btn_rect = remove_rect.translate(global_offset);
-    let cache_button_rect = cache_button_rect.translate(global_offset);
-    let dot_first_center = dot_first_center + global_offset;
-    let input_first_center = input_first_center + global_offset;
-    let output_first_center = output_first_center + global_offset;
-
-    NodeLayout {
-        body_rect,
-        remove_btn_rect,
-        cache_button_rect,
-        dot_first_center,
-        input_first_center,
-        output_first_center,
-        port_row_height,
-        padding,
-    }
-}
-
-fn text_width(
-    painter: &egui::Painter,
-    font: &egui::FontId,
-    text: &str,
-    color: egui::Color32,
-) -> f32 {
-    let galley = painter.layout_no_wrap(text.to_string(), font.clone(), color);
-    galley.size().x
 }
 
 impl PortDragInfo {
