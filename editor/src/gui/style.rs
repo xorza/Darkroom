@@ -40,7 +40,7 @@ pub struct GraphBackgroundStyle {
 
 #[derive(Debug)]
 pub struct ConnectionStyle {
-    pub stroke: Stroke,
+    pub stroke_width: f32,
     pub highlight_stroke: Stroke,
     pub temp_stroke: Stroke,
     pub breaker_stroke: Stroke,
@@ -106,7 +106,7 @@ impl Style {
                 dotted_radius_max: 2.4,
             },
             connections: ConnectionStyle {
-                stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
+                stroke_width: 1.5,
                 highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
                 temp_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
                 breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),

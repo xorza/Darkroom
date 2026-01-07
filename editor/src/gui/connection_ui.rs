@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::Pos2;
+use egui::{Color32, Pos2, Stroke};
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
@@ -158,15 +158,19 @@ impl ConnectionUi {
         self.rebuild(ctx, graph_layout, view_graph, breaker);
 
         for curve in &self.curves {
-            let stroke = if self.highlighted.contains(&curve.key) {
-                ctx.style.connections.highlight_stroke
+            let points = &self.point_cache[curve.start_idx..=curve.end_idx];
+            if self.highlighted.contains(&curve.key) {
+                ctx.painter
+                    .line(points.to_vec(), ctx.style.connections.highlight_stroke);
             } else {
-                ctx.style.connections.stroke
+                self.draw_gradient_line(
+                    ctx,
+                    points,
+                    ctx.style.node.output_port_color,
+                    ctx.style.node.input_port_color,
+                    ctx.style.connections.stroke_width,
+                );
             };
-            ctx.painter.line(
-                self.point_cache[curve.start_idx..=curve.end_idx].to_vec(),
-                stroke,
-            );
         }
 
         if let Some(drag) = &self.drag {
@@ -226,5 +230,37 @@ impl ConnectionUi {
 
     pub(crate) fn stop_drag(&mut self) {
         self.drag = None;
+    }
+
+    fn draw_gradient_line(
+        &self,
+        ctx: &GraphContext,
+        points: &[Pos2],
+        start_color: Color32,
+        end_color: Color32,
+        width: f32,
+    ) {
+        assert!(points.len() >= 2, "gradient line needs at least 2 points");
+
+        let segment_count = points.len() - 1;
+        for (idx, segment) in points.windows(2).enumerate() {
+            let t = idx as f32 / segment_count as f32;
+            let color = Self::lerp_color(start_color, end_color, t);
+            ctx.painter
+                .line_segment([segment[0], segment[1]], Stroke::new(width, color));
+        }
+    }
+
+    fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
+        let t = t.clamp(0.0, 1.0);
+        let lerp = |start: u8, end: u8| -> u8 {
+            (start as f32 + (end as f32 - start as f32) * t).round() as u8
+        };
+        Color32::from_rgba_unmultiplied(
+            lerp(a.r(), b.r()),
+            lerp(a.g(), b.g()),
+            lerp(a.b(), b.b()),
+            lerp(a.a(), b.a()),
+        )
     }
 }

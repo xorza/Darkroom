@@ -112,7 +112,7 @@ impl NodeUi {
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding;
-            let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding ;
+            let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding;
             let badge_rect = egui::Rect::from_min_max(
                 egui::pos2(
                     badge_right - max_badge_width,
@@ -128,8 +128,13 @@ impl NodeUi {
             let link_start = egui::pos2(badge_rect.max.x, input_center.y);
             let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
 
-            ctx.painter
-                .line_segment([link_start, link_end], ctx.style.connections.stroke);
+            ctx.painter.line_segment(
+                [link_start, link_end],
+                Stroke::new(
+                    ctx.style.connections.stroke_width,
+                    ctx.style.node.input_port_color,
+                ),
+            );
             ctx.painter.rect(
                 badge_rect,
                 ctx.style.corner_radius * ctx.scale,
