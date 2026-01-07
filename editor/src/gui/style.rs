@@ -8,17 +8,19 @@ pub struct Style {
     pub sub_font: FontId,
 
     pub text_color: Color32,
-    pub widget_noninteractive_text_color: Color32,
-    pub widget_noninteractive_bg_fill: Color32,
-    pub widget_active_bg_fill: Color32,
-    pub widget_hover_bg_fill: Color32,
-    pub widget_inactive_bg_fill: Color32,
-    pub widget_inactive_bg_stroke: Stroke,
+    pub noninteractive_text_color: Color32,
+
+    pub noninteractive_bg_fill: Color32,
+    pub active_bg_fill: Color32,
+    pub hover_bg_fill: Color32,
+    pub inactive_bg_fill: Color32,
+    pub inactive_bg_stroke: Stroke,
 
     pub corner_radius: f32,
 
-    pub cache_active_color: Color32,
-    pub cache_checked_text_color: Color32,
+    pub checked_fill_color: Color32,
+    pub checked_text_color: Color32,
+
     pub background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
@@ -81,15 +83,15 @@ impl Style {
             },
             text_color: Color32::from_rgb(192, 192, 192),
 
-            widget_noninteractive_text_color: Color32::from_rgb(140, 140, 140),
-            widget_noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
-            widget_active_bg_fill: Color32::from_rgb(60, 60, 60),
-            widget_hover_bg_fill: Color32::from_rgb(50, 50, 50),
-            widget_inactive_bg_fill: Color32::from_rgb(40, 40, 40),
-            widget_inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
+            noninteractive_text_color: Color32::from_rgb(140, 140, 140),
+            noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
+            active_bg_fill: Color32::from_rgb(60, 60, 60),
+            hover_bg_fill: Color32::from_rgb(50, 50, 50),
+            inactive_bg_fill: Color32::from_rgb(40, 40, 40),
+            inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
 
-            cache_active_color: Color32::from_rgb(240, 205, 90),
-            cache_checked_text_color: Color32::from_rgb(60, 50, 20),
+            checked_fill_color: Color32::from_rgb(240, 205, 90),
+            checked_text_color: Color32::from_rgb(60, 50, 20),
             corner_radius: 4.0,
             background: GraphBackgroundStyle {
                 dotted_color: Color32::from_rgb(48, 48, 48),

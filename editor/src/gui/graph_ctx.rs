@@ -62,21 +62,21 @@ impl<'a> GraphContext<'a> {
         }
 
         let fill = if !enabled {
-            self.style.widget_noninteractive_bg_fill
+            self.style.noninteractive_bg_fill
         } else if checked {
-            self.style.cache_active_color
+            self.style.checked_fill_color
         } else if response.is_pointer_button_down_on() {
-            self.style.widget_active_bg_fill
+            self.style.active_bg_fill
         } else if response.hovered() {
-            self.style.widget_hover_bg_fill
+            self.style.hover_bg_fill
         } else {
-            self.style.widget_inactive_bg_fill
+            self.style.inactive_bg_fill
         };
-        let stroke = self.style.widget_inactive_bg_stroke;
+        let stroke = self.style.inactive_bg_stroke;
         let text_color = if !enabled {
-            self.style.widget_noninteractive_text_color
+            self.style.noninteractive_text_color
         } else if checked {
-            self.style.cache_checked_text_color
+            self.style.checked_text_color
         } else {
             self.style.text_color
         };
@@ -117,15 +117,15 @@ impl<'a> GraphContext<'a> {
             response.show_tooltip_text(tooltip);
         }
         let fill = if !enabled {
-            self.style.widget_noninteractive_bg_fill
+            self.style.noninteractive_bg_fill
         } else if response.is_pointer_button_down_on() {
-            self.style.widget_active_bg_fill
+            self.style.active_bg_fill
         } else if response.hovered() {
-            self.style.widget_hover_bg_fill
+            self.style.hover_bg_fill
         } else {
-            self.style.widget_inactive_bg_fill
+            self.style.inactive_bg_fill
         };
-        let stroke = self.style.widget_inactive_bg_stroke;
+        let stroke = self.style.inactive_bg_stroke;
         let corner_radius = self.style.corner_radius * self.scale;
 
         self.painter
