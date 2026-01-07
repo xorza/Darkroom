@@ -346,7 +346,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node:
     let port_radius = ctx.scale * ctx.style.node.port_radius;
     let link_inset = port_radius * 0.6;
     let badge_padding = 4.0 * ctx.scale;
-    let row_height = ctx.style.node.row_height * ctx.scale;
+    let row_height = ctx.style.node.port_row_height * ctx.scale;
     let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
     let badge_radius = 6.0 * ctx.scale;
     let badge_gap = 6.0 * ctx.scale;
@@ -446,7 +446,7 @@ pub(crate) fn compute_node_layout(
     let node_width_base = ctx.style.node.width * scale;
     let header_height = ctx.style.node.header_height * scale;
     let cache_height = ctx.style.node.cache_height * scale;
-    let row_height = ctx.style.node.row_height * scale;
+    let row_height = ctx.style.node.port_row_height * scale;
     let padding = ctx.style.node.padding * scale;
 
     let header_width = text_width(
