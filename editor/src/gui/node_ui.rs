@@ -366,7 +366,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
 fn static_value_label(value: &StaticValue) -> String {
     match value {
         StaticValue::Null => "null".to_string(),
-        StaticValue::Float(value) => (value.fract() == 0.0)
+        StaticValue::Float(value) => (value.fract() < common::EPSILON as f64)
             .then_else_with(|| format!("{:.0}", value), || format!("{:.3}", value)),
         StaticValue::Int(value) => value.to_string(),
         StaticValue::Bool(value) => value.to_string(),
