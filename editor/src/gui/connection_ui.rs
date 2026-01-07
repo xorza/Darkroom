@@ -131,7 +131,7 @@ impl ConnectionUi {
                     start_idx,
                     end_idx,
                 };
-                self.curves.push(curve.clone());
+                self.curves.push(curve);
             }
         }
     }
