@@ -107,14 +107,12 @@ fn body_drag(
 
 fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, selected: bool) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
+    let stroke = selected.then_else(ctx.style.active_bg_stroke, ctx.style.inactive_bg_stroke);
     ctx.painter.rect(
         layout.body_rect,
         corner_radius,
-        ctx.style.node_body_fill,
-        selected.then_else(
-            ctx.style.node_selected_body_stroke,
-            ctx.style.node_body_stroke,
-        ),
+        ctx.style.inactive_bg_fill,
+        stroke,
         egui::StrokeKind::Middle,
     );
     ctx.painter.text(
@@ -339,7 +337,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
         ctx.painter.rect(
             badge_rect,
             badge_radius,
-            ctx.style.node_body_fill,
+            ctx.style.inactive_bg_fill,
             ctx.style.node.const_stroke,
             egui::StrokeKind::Middle,
         );

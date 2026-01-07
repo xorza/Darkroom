@@ -15,10 +15,7 @@ pub struct Style {
     pub hover_bg_fill: Color32,
     pub inactive_bg_fill: Color32,
     pub inactive_bg_stroke: Stroke,
-
-    pub node_body_fill: Color32,
-    pub node_body_stroke: Stroke,
-    pub node_selected_body_stroke: Stroke,
+    pub active_bg_stroke: Stroke,
 
     pub corner_radius: f32,
 
@@ -90,13 +87,11 @@ impl Style {
             hover_bg_fill: Color32::from_rgb(50, 50, 50),
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
+            active_bg_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
 
             checked_bg_fill_color: Color32::from_rgb(240, 205, 90),
             checked_text_color: Color32::from_rgb(60, 50, 20),
             corner_radius: 4.0,
-            node_body_fill: Color32::from_rgb(27, 27, 27),
-            node_body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
-            node_selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
             background: GraphBackgroundStyle {
                 dotted_color: Color32::from_rgb(48, 48, 48),
                 dotted_base_spacing: 24.0,
