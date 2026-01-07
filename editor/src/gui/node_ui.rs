@@ -80,7 +80,6 @@ impl NodeUi {
         node_layout: &NodeLayout,
         node: &Node,
     ) {
-        // todo refactor styling
         let font = ctx.style.sub_font.scaled(ctx.scale);
         let port_radius = ctx.style.node.port_radius * ctx.scale;
 
@@ -137,7 +136,7 @@ impl NodeUi {
             );
             ctx.painter.rect(
                 badge_rect,
-                ctx.style.corner_radius * ctx.scale,
+                ctx.style.small_corner_radius * ctx.scale,
                 ctx.style.inactive_bg_fill,
                 ctx.style.node.const_stroke,
                 StrokeKind::Inside,
@@ -231,7 +230,7 @@ fn render_hints(
     func: &graph::prelude::Func,
 ) {
     let dot_radius = ctx.scale * ctx.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + ctx.scale + ctx.style.padding;
+    let dot_step = (dot_radius * 2.0) + ctx.style.small_padding * ctx.scale;
 
     if node.terminal {
         let center = node_layout.dot_center(0, dot_step);

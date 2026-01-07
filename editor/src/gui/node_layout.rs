@@ -1,6 +1,6 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Galley, Pos2, Rect, pos2, vec2};
+use egui::{Galley, Pos2, Rect, Vec2, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
@@ -117,16 +117,13 @@ impl NodeLayout {
         let padding = ctx.style.padding * self.scale;
         let small_padding = ctx.style.small_padding * self.scale;
 
-        let header_height = self.title_galley.size().y;
-        let remove_btn_size = header_height;
-
         let title_width = self.title_galley.size().x + padding * 2.0;
-
+        let remove_size = ctx.style.node.remove_btn_size * self.scale + small_padding * 2.0;
+        let header_height = self.title_galley.size().y.max(remove_size);
         let header_width = {
-            let status_width = 2.0 * (padding + ctx.style.node.status_dot_radius * 2.0);
-            let remove_width = remove_btn_size + padding * 2.0;
+            let status_width = 2.0 * (small_padding + ctx.style.node.status_dot_radius * 2.0);
 
-            title_width + status_width + remove_width
+            title_width + padding + status_width + padding + remove_size + padding
         };
 
         let input_count = self.input_galleys.len();
@@ -169,10 +166,10 @@ impl NodeLayout {
         let body_rect = Rect::from_min_size(Pos2::ZERO, node_size);
 
         let remove_pos = egui::pos2(
-            body_rect.max.x - padding - remove_btn_size,
+            body_rect.max.x - padding - remove_size,
             body_rect.min.y + padding,
         );
-        let remove_rect = Rect::from_min_size(remove_pos, vec2(remove_btn_size, remove_btn_size));
+        let remove_rect = Rect::from_min_size(remove_pos, Vec2::ONE * remove_size);
 
         let dot_radius = ctx.style.node.status_dot_radius * self.scale;
         let dot_first_center = {

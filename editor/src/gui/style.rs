@@ -20,6 +20,7 @@ pub struct Style {
     pub padding: f32,
     pub small_padding: f32,
     pub corner_radius: f32,
+    pub small_corner_radius: f32,
 
     pub checked_bg_fill: Color32,
     pub checked_text_color: Color32,
@@ -52,6 +53,7 @@ pub struct NodeStyle {
     pub status_dot_radius: f32,
 
     pub cache_btn_width: f32,
+    pub remove_btn_size: f32,
 
     pub port_radius: f32,
     pub port_activation_radius: f32,
@@ -96,6 +98,7 @@ impl Style {
             padding: 4.0,
             small_padding: 2.0,
             corner_radius: 4.0,
+            small_corner_radius: 2.0,
 
             background: GraphBackgroundStyle {
                 dotted_color: Color32::from_rgb(48, 48, 48),
@@ -117,6 +120,7 @@ impl Style {
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
                 cache_btn_width: 50.0,
+                remove_btn_size: 20.0,
 
                 port_radius: 18.0 * 0.3,
                 port_activation_radius: 18.0 * 0.3 * 1.3,
