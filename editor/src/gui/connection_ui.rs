@@ -130,7 +130,7 @@ impl ConnectionUi {
         }
 
         for curve in self.curves.iter() {
-            let curve_segments = self.point_cache[curve.start_idx..curve.end_idx]
+            let curve_segments = self.point_cache[curve.start_idx..=curve.end_idx]
                 .windows(2)
                 .map(|pair| (pair[0], pair[1]));
             let mut hit = false;
