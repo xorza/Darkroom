@@ -1,6 +1,6 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Color32, Painter, Rect, Sense, Shape, StrokeKind, Ui};
+use egui::{Painter, Rect, Sense, Shape, StrokeKind, Ui};
 use graph::prelude::FuncLib;
 
 use crate::gui::style::Style;
