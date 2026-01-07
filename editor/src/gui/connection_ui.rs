@@ -124,16 +124,17 @@ impl ConnectionUi {
                     });
                 let curve = &mut self.curves[idx];
 
-                let start_layout = graph_layout.node_layout(&binding.target_id);
-                let end_layout = graph_layout.node_layout(&node.id);
+                let output_layout = graph_layout.node_layout(&binding.target_id);
+                let input_layout = graph_layout.node_layout(&node.id);
 
-                let input_pos = end_layout.input_center(input_idx);
-                let output_pos = start_layout.output_center(binding.port_idx);
+                let input_pos = input_layout.input_center(input_idx);
+                let output_pos = output_layout.output_center(binding.port_idx);
 
-                if !curve.inited
+                let need_rebuild = !curve.inited
                     || curve.output_pos.distance_sq(output_pos) > 1.0
-                    || curve.input_pos.distance_sq(input_pos) > 1.0
-                {
+                    || curve.input_pos.distance_sq(input_pos) > 1.0;
+
+                if need_rebuild {
                     curve.points.clear();
                     let _ = ConnectionBezier::sample(
                         &mut curve.points,
@@ -167,8 +168,9 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.highlighted != highlighted || curve.mesh.is_empty() {
+                if curve.highlighted != highlighted || need_rebuild {
                     curve.highlighted = highlighted;
+                    curve.mesh.clear();
 
                     if curve.highlighted {
                         add_curve_to_mesh(
@@ -223,13 +225,6 @@ impl ConnectionUi {
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.rebuild(ctx, graph_layout, view_graph, breaker);
-
-        // let pixels_per_point = ctx.ui.ctx().pixels_per_point();
-        // let feather = 1.0 / pixels_per_point;
-
-        // for curve in &self.curves {
-        //     mesh.append_ref(&curve.mesh);
-        // }
 
         ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
     }
