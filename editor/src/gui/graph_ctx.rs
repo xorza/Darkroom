@@ -49,6 +49,7 @@ impl<'a> GraphContext<'a> {
         enabled: bool,
         checked: bool,
         id_source: impl std::hash::Hash,
+        tooltip: &str,
     ) -> bool {
         let id = self.ui.make_persistent_id(id_source);
         let response = self.ui.interact(
@@ -56,6 +57,10 @@ impl<'a> GraphContext<'a> {
             id,
             enabled.then_else(Sense::click() | Sense::hover(), Sense::hover()),
         );
+        if response.hovered() && !tooltip.is_empty() {
+            response.show_tooltip_text(tooltip);
+        }
+
         let fill = if !enabled {
             self.style.widget_noninteractive_bg_fill
         } else if checked {
@@ -108,7 +113,7 @@ impl<'a> GraphContext<'a> {
             id,
             enabled.then_else(Sense::click() | Sense::hover(), Sense::hover()),
         );
-        if response.hovered() {
+        if response.hovered() && !tooltip.is_empty() {
             response.show_tooltip_text(tooltip);
         }
         let fill = if !enabled {

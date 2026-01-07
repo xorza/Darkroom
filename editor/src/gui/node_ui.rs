@@ -193,6 +193,7 @@ fn render_cache_btn(
         !node.terminal,
         node.behavior == NodeBehavior::Once,
         (node.id, "cache"),
+        "",
     ) {
         node.behavior = (node.behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
