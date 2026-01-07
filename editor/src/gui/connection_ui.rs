@@ -180,11 +180,11 @@ impl ConnectionUi {
                     input_node_id: node.id,
                     input_idx,
                 };
-                let curve_idx = self
-                    .curves
-                    .compact_insert_with(&connection_key, &mut write_idx, || {
-                        ConnectionCurve::new(connection_key)
-                    });
+                let curve_idx =
+                    self.curves
+                        .compact_insert_with(&connection_key, &mut write_idx, || {
+                            ConnectionCurve::new(connection_key)
+                        });
                 let curve = &mut self.curves[curve_idx];
 
                 let output_layout = graph_layout.node_layout(&binding.target_id);
@@ -299,7 +299,7 @@ fn add_curve_to_mesh(
         let a = segment[0];
         let b = segment[1];
         let dir = b - a;
-        if dir.length_sq() <= f32::EPSILON {
+        if dir.length_sq() <= common::EPSILON {
             continue;
         }
         let normal = dir.normalized().rot90();
