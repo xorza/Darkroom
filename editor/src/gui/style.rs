@@ -21,7 +21,7 @@ pub struct Style {
     pub small_padding: f32,
     pub corner_radius: f32,
 
-    pub checked_bg_fill_color: Color32,
+    pub checked_bg_fill: Color32,
     pub checked_text_color: Color32,
 
     pub background: GraphBackgroundStyle,
@@ -80,16 +80,17 @@ impl Style {
                 family: egui::FontFamily::Proportional,
             },
             text_color: Color32::from_rgb(192, 192, 192),
-
             noninteractive_text_color: Color32::from_rgb(140, 140, 140),
+
             noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
-            active_bg_fill: Color32::from_rgb(60, 60, 60),
+
             hover_bg_fill: Color32::from_rgb(50, 50, 50),
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
             active_bg_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
+            active_bg_fill: Color32::from_rgb(60, 60, 60),
 
-            checked_bg_fill_color: Color32::from_rgb(240, 205, 90),
+            checked_bg_fill: Color32::from_rgb(240, 205, 90),
             checked_text_color: Color32::from_rgb(60, 50, 20),
 
             padding: 4.0,
@@ -112,13 +113,14 @@ impl Style {
             node: NodeStyle {
                 const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
 
+                status_dot_radius: 4.0,
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
-                status_dot_radius: 4.0,
 
                 port_radius: 18.0 * 0.3,
                 port_activation_radius: 18.0 * 0.3 * 1.5,
                 port_label_side_padding: 8.0,
+
                 input_port_color: Color32::from_rgb(70, 150, 255),
                 output_port_color: Color32::from_rgb(70, 200, 200),
                 input_hover_color: Color32::from_rgb(120, 190, 255),

@@ -71,7 +71,7 @@ impl<'a> GraphContext<'a> {
         let fill = if !enabled {
             self.style.noninteractive_bg_fill
         } else if checked {
-            self.style.checked_bg_fill_color
+            self.style.checked_bg_fill
         } else if response.is_pointer_button_down_on() {
             self.style.active_bg_fill
         } else if response.hovered() {
@@ -121,7 +121,7 @@ impl<'a> GraphContext<'a> {
         let fill = if !enabled {
             self.style.noninteractive_bg_fill
         } else if checked {
-            self.style.checked_bg_fill_color
+            self.style.checked_bg_fill
         } else if response.is_pointer_button_down_on() {
             self.style.active_bg_fill
         } else if response.hovered() {
