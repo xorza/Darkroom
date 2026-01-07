@@ -56,7 +56,7 @@ impl NodeUi {
             let node_drag_port_result = render_node_ports(ctx, &node_layout, view_node, func);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_node_const_bindings(ctx, &node_layout, node);
-            render_node_labels(ctx, &node_layout, func);
+            render_node_labels(ctx, &node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -367,18 +367,16 @@ fn static_value_label(value: &StaticValue) -> String {
     }
 }
 
-fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout, func: &Func) {
+fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
     let padding = ctx.style.node.port_label_side_padding * ctx.scale;
 
-    for (input_idx, input) in func.inputs.iter().enumerate() {
-        let galley = &node_layout.input_galleys[input_idx];
+    for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
         let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
         ctx.painter
             .galley(text_pos, galley.clone(), ctx.style.text_color);
     }
 
-    for (output_idx, output) in func.outputs.iter().enumerate() {
-        let galley = &node_layout.output_galleys[output_idx];
+    for (output_idx, galley) in node_layout.output_galleys.iter().enumerate() {
         let text_pos = node_layout.output_center(output_idx)
             + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
         ctx.painter
