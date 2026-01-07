@@ -57,6 +57,8 @@ struct ConnectionCurve {
     key: ConnectionKey,
     start_idx: usize,
     end_idx: usize,
+    start_pos: Pos2,
+    end_pos: Pos2,
 }
 
 #[derive(Debug, Default)]
@@ -130,6 +132,8 @@ impl ConnectionUi {
                     key: connection_key,
                     start_idx,
                     end_idx,
+                    start_pos: output_pos,
+                    end_pos: input_pos,
                 };
                 self.curves.push(curve);
             }
