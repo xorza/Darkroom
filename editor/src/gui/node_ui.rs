@@ -348,7 +348,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
     let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
     let badge_radius = 6.0 * ctx.scale;
     let badge_gap = 6.0 * ctx.scale;
-    let stroke = ctx.style.connection_stroke;
+    let stroke = ctx.style.connections.stroke;
 
     for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {

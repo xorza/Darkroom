@@ -73,7 +73,8 @@ impl ConnectionBreaker {
         points.push(self.segments[0].0);
         points.extend(self.segments.iter().map(|(_, end)| end));
 
-        ctx.painter.line(points, ctx.style.breaker_stroke);
+        ctx.painter
+            .line(points, ctx.style.connections.breaker_stroke);
     }
 
     fn path_length(&self) -> f32 {

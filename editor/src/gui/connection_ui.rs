@@ -159,9 +159,9 @@ impl ConnectionUi {
 
         for curve in &self.curves {
             let stroke = if self.highlighted.contains(&curve.key) {
-                ctx.style.connection_highlight_stroke
+                ctx.style.connections.highlight_stroke
             } else {
-                ctx.style.connection_stroke
+                ctx.style.connections.stroke
             };
             ctx.painter.line(
                 self.point_cache[curve.start_idx..=curve.end_idx].to_vec(),
@@ -179,7 +179,7 @@ impl ConnectionUi {
                 ConnectionBezier::sample(&mut self.point_cache, start, end, ctx.scale);
             ctx.painter.line(
                 self.point_cache[start_idx..=end_idx].to_vec(),
-                ctx.style.temp_connection_stroke,
+                ctx.style.connections.temp_stroke,
             );
         }
     }

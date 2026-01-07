@@ -15,16 +15,12 @@ pub struct Style {
     pub widget_inactive_bg_fill: Color32,
     pub widget_inactive_bg_stroke: Stroke,
 
+    pub corner_radius: f32,
+
     pub cache_active_color: Color32,
     pub cache_checked_text_color: Color32,
-    
-    pub corner_radius: f32,
-    pub connection_stroke: Stroke,
-    pub connection_highlight_stroke: Stroke,
-    pub temp_connection_stroke: Stroke,
-    pub breaker_stroke: Stroke,
-    
     pub background: GraphBackgroundStyle,
+    pub connections: ConnectionStyle,
     pub node: NodeStyle,
 }
 
@@ -35,6 +31,14 @@ pub struct GraphBackgroundStyle {
     pub dotted_radius_base: f32,
     pub dotted_radius_min: f32,
     pub dotted_radius_max: f32,
+}
+
+#[derive(Debug)]
+pub struct ConnectionStyle {
+    pub stroke: Stroke,
+    pub highlight_stroke: Stroke,
+    pub temp_stroke: Stroke,
+    pub breaker_stroke: Stroke,
 }
 
 #[derive(Debug)]
@@ -87,16 +91,18 @@ impl Style {
             cache_active_color: Color32::from_rgb(240, 205, 90),
             cache_checked_text_color: Color32::from_rgb(60, 50, 20),
             corner_radius: 4.0,
-            connection_stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
-            connection_highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
-            temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
-            breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
             background: GraphBackgroundStyle {
                 dotted_color: Color32::from_rgb(48, 48, 48),
                 dotted_base_spacing: 24.0,
                 dotted_radius_base: 1.2,
                 dotted_radius_min: 0.6,
                 dotted_radius_max: 2.4,
+            },
+            connections: ConnectionStyle {
+                stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
+                highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
+                temp_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
+                breaker_stroke: Stroke::new(2.0, Color32::from_rgb(255, 120, 120)),
             },
             node: NodeStyle {
                 padding: 4.0,
