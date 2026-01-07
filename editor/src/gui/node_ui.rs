@@ -110,7 +110,7 @@ fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) 
     ctx.painter.rect(
         layout.body_rect,
         corner_radius,
-        ctx.style.inactive_bg_fill,
+        ctx.style.noninteractive_bg_fill,
         stroke,
         StrokeKind::Middle,
     );
@@ -301,6 +301,23 @@ fn render_node_ports(
     port_drag_info
 }
 
+fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
+    let padding = ctx.style.node.port_label_side_padding * ctx.scale;
+
+    for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
+        let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
+        ctx.painter
+            .galley(text_pos, galley.clone(), ctx.style.text_color);
+    }
+
+    for (output_idx, galley) in node_layout.output_galleys.iter().enumerate() {
+        let text_pos = node_layout.output_center(output_idx)
+            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
+        ctx.painter
+            .galley(text_pos, galley.clone(), ctx.style.text_color);
+    }
+}
+
 fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
     // todo refactor styling
     let font = ctx.style.body_font.scaled(ctx.scale);
@@ -364,23 +381,6 @@ fn static_value_label(value: &StaticValue) -> String {
                 format!("{}...", truncated)
             }
         }
-    }
-}
-
-fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
-    let padding = ctx.style.node.port_label_side_padding * ctx.scale;
-
-    for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
-        let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
-        ctx.painter
-            .galley(text_pos, galley.clone(), ctx.style.text_color);
-    }
-
-    for (output_idx, galley) in node_layout.output_galleys.iter().enumerate() {
-        let text_pos = node_layout.output_center(output_idx)
-            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
-        ctx.painter
-            .galley(text_pos, galley.clone(), ctx.style.text_color);
     }
 }
 
