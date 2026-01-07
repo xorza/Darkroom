@@ -6,11 +6,19 @@ use crate::gui::graph_ctx::GraphContext;
 const MIN_POINT_DISTANCE: f32 = 2.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ConnectionBreaker {
-    // todo reserve space
     segments: Vec<(Pos2, Pos2)>,
     last_point: Option<Pos2>,
+}
+
+impl Default for ConnectionBreaker {
+    fn default() -> Self {
+        Self {
+            segments: Vec::with_capacity(max_segments_capacity()),
+            last_point: None,
+        }
+    }
 }
 
 impl ConnectionBreaker {
@@ -84,4 +92,8 @@ impl ConnectionBreaker {
             .map(|(start, end)| start.distance(*end))
             .sum()
     }
+}
+
+fn max_segments_capacity() -> usize {
+    (MAX_BREAKER_LENGTH / MIN_POINT_DISTANCE).ceil() as usize
 }

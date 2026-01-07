@@ -38,21 +38,6 @@ pub(crate) enum Error {
     },
 }
 
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::CycleDetected {
-                input_node_id,
-                output_node_id,
-            } => write!(
-                f,
-                "connection would create a cycle between {} and {}",
-                input_node_id, output_node_id
-            ),
-        }
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct GraphUi {
     state: InteractionState,
@@ -464,4 +449,19 @@ fn fit_all_nodes(
     view_graph.scale = target_zoom;
     let bounds_center = bounds.center().to_vec2();
     view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * view_graph.scale;
+}
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::CycleDetected {
+                input_node_id,
+                output_node_id,
+            } => write!(
+                f,
+                "connection would create a cycle between {} and {}",
+                input_node_id, output_node_id
+            ),
+        }
+    }
 }
