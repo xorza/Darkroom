@@ -1,3 +1,4 @@
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Pos2, Shape};
@@ -63,7 +64,7 @@ struct ConnectionCurve {
 
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
-    curves: Vec<ConnectionCurve>,
+    curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     pub(crate) highlighted: HashSet<ConnectionKey>,
     pub(crate) drag: Option<ConnectionDrag>,
 
@@ -135,7 +136,7 @@ impl ConnectionUi {
                     start_pos: output_pos,
                     end_pos: input_pos,
                 };
-                self.curves.push(curve);
+                self.curves.add(curve);
             }
         }
     }
@@ -341,4 +342,10 @@ fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
     });
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
+    fn key(&self) -> &ConnectionKey {
+        &self.key
+    }
 }
