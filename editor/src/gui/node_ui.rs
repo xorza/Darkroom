@@ -183,19 +183,26 @@ fn body_drag<'a>(
     node_layout
 }
 
-fn render_body(ctx: &mut GraphContext<'_>, layout: &NodeLayout, selected: bool) {
+fn render_body(ctx: &mut GraphContext<'_>, node_layout: &NodeLayout, selected: bool) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
     let stroke = selected.then_else(ctx.style.active_bg_stroke, ctx.style.inactive_bg_stroke);
     ctx.painter.rect(
-        layout.body_rect,
+        node_layout.body_rect,
         corner_radius,
         ctx.style.noninteractive_bg_fill,
         stroke,
         StrokeKind::Middle,
     );
-    let title_pos = layout.body_rect.min + Vec2::ONE * ctx.style.padding * ctx.scale;
-    ctx.painter
-        .galley(title_pos, layout.title_galley.clone(), ctx.style.text_color);
+    let title_pos = node_layout.body_rect.min
+        + vec2(
+            ctx.style.padding * ctx.scale,
+            (node_layout.header_row_height - node_layout.title_galley.size().y) * 0.5,
+        );
+    ctx.painter.galley(
+        title_pos,
+        node_layout.title_galley.clone(),
+        ctx.style.text_color,
+    );
 }
 
 fn render_cache_btn(

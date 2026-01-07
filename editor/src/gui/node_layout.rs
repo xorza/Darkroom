@@ -23,6 +23,7 @@ pub struct NodeLayout {
     pub output_first_center: Pos2,
     pub port_row_height: f32,
     pub port_activation_radius: f32,
+    pub header_row_height: f32,
     pub title_galley: Arc<Galley>,
     pub input_galleys: Vec<Arc<Galley>>,
     pub output_galleys: Vec<Arc<Galley>>,
@@ -67,6 +68,7 @@ impl NodeLayout {
             output_first_center: Pos2::ZERO,
             port_row_height: 0.0,
             port_activation_radius: 0.0,
+            header_row_height: 0.0,
             title_galley,
             input_galleys: Vec::default(),
             output_galleys: Vec::default(),
@@ -119,9 +121,16 @@ impl NodeLayout {
 
         let title_width = self.title_galley.size().x + padding * 2.0;
         let remove_size = ctx.style.node.remove_btn_size * self.scale + small_padding * 2.0;
-        let header_height = self.title_galley.size().y.max(remove_size);
+        let status_dot_size = ctx.style.node.status_dot_radius * 2.0;
+        let header_height = self
+            .title_galley
+            .size()
+            .y
+            .max(remove_size)
+            .max(status_dot_size);
+
         let header_width = {
-            let status_width = 2.0 * (small_padding + ctx.style.node.status_dot_radius * 2.0);
+            let status_width = 2.0 * (small_padding + status_dot_size);
 
             title_width + padding + status_width + padding + remove_size + padding
         };
@@ -214,6 +223,7 @@ impl NodeLayout {
         self.output_first_center = output_first_center;
         self.port_row_height = port_row_height;
         self.port_activation_radius = port_row_height * 0.5;
+        self.header_row_height = header_row_height;
     }
 }
 
