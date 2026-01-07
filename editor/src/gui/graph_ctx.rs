@@ -129,7 +129,7 @@ impl<'a> GraphContext<'a> {
         let corner_radius = self.style.node_corner_radius * self.scale;
 
         self.painter
-            .rect(rect, corner_radius, fill, stroke, StrokeKind::Inside);
+            .rect(rect, corner_radius, fill, stroke, StrokeKind::Middle);
         self.painter.extend(shapes);
 
         response.clicked()
