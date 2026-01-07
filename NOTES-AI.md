@@ -46,7 +46,8 @@ Fit-all now computes bounds in graph space to keep repeated fit operations stabl
 Fit-all now derives bounds from view-node positions and layout sizes instead of screen-space rects to prevent repeated
 fit clicks from shifting zoom/pan.
 View-selected now centers based on graph-space node position/size to avoid repeated clicks shifting the camera.
-Graph background dots now render via a single mesh of tessellated circles.
+Graph background rendering now lives in `gui/background.rs`, caches its mesh, and only rebuilds on pan/scale/rect size
+changes.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

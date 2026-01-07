@@ -1,3 +1,4 @@
+pub mod background;
 pub mod connection_breaker;
 pub mod connection_ui;
 pub mod graph_ctx;

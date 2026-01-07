@@ -1,9 +1,9 @@
 use eframe::egui;
-use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{PointerButton, Pos2, Response, Sense, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, FuncLib, PortAddress};
 
+use crate::gui::background::BackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -46,6 +46,7 @@ pub struct GraphUi {
     connection_breaker: ConnectionBreaker,
     connections: ConnectionUi,
     node_ui: NodeUi,
+    background: BackgroundRenderer,
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +74,7 @@ impl GraphUi {
         self.graph_layout = GraphLayout::default();
         self.connection_breaker.reset();
         self.connections = ConnectionUi::default();
+        self.background = BackgroundRenderer::default();
     }
 
     pub fn render(
@@ -106,7 +108,7 @@ impl GraphUi {
 
         self.graph_layout.update(&ctx, view_graph);
 
-        render_background(&ctx, view_graph);
+        self.background.render(&ctx, view_graph);
 
         self.render_connections(&mut ctx, view_graph);
 
@@ -327,71 +329,6 @@ fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) 
         })
     };
     (scroll_delta, mouse_wheel_delta)
-}
-
-fn render_background(ctx: &GraphContext, view_graph: &model::ViewGraph) {
-    let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
-    assert!(spacing > 0.0, "background spacing must be positive");
-    let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
-        ctx.style.background.dotted_radius_min,
-        ctx.style.background.dotted_radius_max,
-    );
-    let color = ctx.style.background.dotted_color;
-    let origin = ctx.rect.min + view_graph.pan;
-    let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
-    let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);
-    let start_x = ctx.rect.left() - offset_x - spacing;
-    let start_y = ctx.rect.top() - offset_y - spacing;
-
-    let mut mesh = Mesh::default();
-    let segments = 4;
-    let mut y = start_y;
-    while y <= ctx.rect.bottom() + spacing {
-        let mut x = start_x;
-        while x <= ctx.rect.right() + spacing {
-            add_circle_to_mesh(&mut mesh, Pos2::new(x, y), radius, color, segments);
-            x += spacing;
-        }
-        y += spacing;
-    }
-    ctx.painter.add(egui::Shape::mesh(mesh));
-}
-
-fn add_circle_to_mesh(
-    mesh: &mut Mesh,
-    center: Pos2,
-    radius: f32,
-    color: egui::Color32,
-    segments: usize,
-) {
-    assert!(segments >= 3, "circle mesh needs at least 3 segments");
-    let base_index = mesh.vertices.len() as u32;
-    mesh.vertices.push(Vertex {
-        pos: center,
-        uv: WHITE_UV,
-        color,
-    });
-
-    let step = std::f32::consts::TAU / segments as f32;
-    for i in 0..segments {
-        let angle = step * i as f32;
-        let pos = Pos2::new(
-            center.x + radius * angle.cos(),
-            center.y + radius * angle.sin(),
-        );
-        mesh.vertices.push(Vertex {
-            pos,
-            uv: WHITE_UV,
-            color,
-        });
-    }
-
-    for i in 0..segments {
-        let next = if i + 1 == segments { 0 } else { i + 1 };
-        mesh.indices.push(base_index);
-        mesh.indices.push(base_index + 1 + i as u32);
-        mesh.indices.push(base_index + 1 + next as u32);
-    }
 }
 
 /// Connects an output port to an input port in `view_graph`.
