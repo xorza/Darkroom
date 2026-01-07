@@ -96,7 +96,7 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) -> Result<(), Error> {
-        let mut ctx = GraphContext::new(ui, func_lib);
+        let mut ctx = GraphContext::new(ui, func_lib, view_graph.scale);
 
         let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
 
@@ -301,10 +301,11 @@ impl GraphUi {
 
         if (zoom_delta - 1.0).abs() > f32::EPSILON {
             // zoom
-            let clamped_zoom = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+            let clamped_scale = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
             let origin = ctx.rect.min;
             let graph_pos = (pointer_pos - origin - view_graph.pan) / view_graph.scale;
-            view_graph.scale = clamped_zoom;
+            view_graph.scale = clamped_scale;
+            ctx.scale = clamped_scale;
             view_graph.pan = pointer_pos - origin - graph_pos * view_graph.scale;
         }
 

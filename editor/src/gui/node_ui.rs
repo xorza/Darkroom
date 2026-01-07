@@ -89,7 +89,7 @@ impl NodeUi {
             ) {
                 self.node_ids_to_remove.push(node_id);
             }
-            render_cache_btn(ctx, ui_interaction, &node_layout, node, view_graph.scale);
+            render_cache_btn(ctx, ui_interaction, &node_layout, node);
             render_hints(ctx, &node_layout, node, func, view_graph.scale);
             let node_drag_port_result =
                 render_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
@@ -192,7 +192,6 @@ fn render_cache_btn(
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
     node: &mut Node,
-    scale: f32,
 ) {
     let cache_btn_id = ctx.ui.make_persistent_id(("node_cache", node.id));
     let cache_response = ctx.ui.interact(
@@ -226,7 +225,7 @@ fn render_cache_btn(
     let button_stroke = ctx.style.widget_inactive_bg_stroke;
     ctx.painter.rect(
         node_layout.cache_button_rect,
-        ctx.style.node_corner_radius * scale * 0.5,
+        ctx.style.node_corner_radius * ctx.scale * 0.5,
         cache_button_fill,
         button_stroke,
         egui::StrokeKind::Inside,
@@ -243,7 +242,7 @@ fn render_cache_btn(
         node_layout.cache_button_rect.center(),
         egui::Align2::CENTER_CENTER,
         "cache",
-        ctx.style.body_font.scaled(scale),
+        ctx.style.body_font.scaled(ctx.scale),
         button_text_color,
     );
 }
