@@ -3,7 +3,7 @@ use graph::graph::NodeId;
 
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::node_layout;
+use crate::gui::node_layout::{self, NodeLayout};
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexVec;
 
@@ -55,7 +55,7 @@ impl GraphLayout {
         self.node_layout(node_id).body_rect
     }
 
-    pub fn node_layout(&self, node_id: &NodeId) -> &node_layout::NodeLayout {
+    pub fn node_layout(&self, node_id: &NodeId) -> &NodeLayout {
         self.node_layouts.by_key(node_id).unwrap()
     }
 
