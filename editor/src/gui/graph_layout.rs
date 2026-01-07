@@ -1,4 +1,4 @@
-use egui::{Pos2, Rect};
+use egui::Pos2;
 use graph::graph::NodeId;
 
 use crate::gui::connection_ui::PortKind;
@@ -40,13 +40,18 @@ impl GraphLayout {
         let rect = ctx.ui.available_rect_before_wrap();
         self.origin = rect.min + view_graph.pan;
         let mut write_idx = 0;
+        let mut new_layout = false;
         for view_node in view_graph.view_nodes.iter() {
             let idx = self
                 .node_layouts
                 .compact_insert_with(&view_node.id, &mut write_idx, || {
+                    new_layout = true;
                     node_layout::NodeLayout::new(ctx, view_graph, &view_node.id, self.origin)
                 });
-            self.node_layouts.items[idx].update(ctx, view_graph, &view_node.id, self.origin);
+
+            if !new_layout {
+                self.node_layouts.items[idx].update(ctx, view_graph, &view_node.id, self.origin);
+            }
         }
         self.node_layouts.compact_finish(write_idx);
     }
