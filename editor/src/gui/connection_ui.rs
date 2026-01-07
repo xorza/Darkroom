@@ -243,7 +243,7 @@ impl ConnectionUi {
         end_color: Color32,
         width: f32,
     ) {
-        assert!(points.len() >= 2, "gradient line needs at least 2 points");
+        assert!(points.len() >= 2);
 
         let segment_count = points.len() - 1;
         for (idx, segment) in points.windows(2).enumerate() {
