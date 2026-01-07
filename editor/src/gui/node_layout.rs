@@ -22,7 +22,7 @@ pub struct NodeLayout {
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub port_row_height: f32,
-    pub padding: f32,
+    pub port_activation_radius: f32,
     pub title_galley: Arc<Galley>,
     pub input_galleys: Vec<Arc<Galley>>,
     pub output_galleys: Vec<Arc<Galley>>,
@@ -66,7 +66,7 @@ impl NodeLayout {
             input_first_center: Pos2::ZERO,
             output_first_center: Pos2::ZERO,
             port_row_height: 0.0,
-            padding: 0.0,
+            port_activation_radius: 0.0,
             title_galley,
             input_galleys: Vec::default(),
             output_galleys: Vec::default(),
@@ -155,7 +155,7 @@ impl NodeLayout {
             .style
             .sub_font
             .size
-            .max(ctx.style.node.port_activation_radius * 2.0)
+            .max(ctx.style.node.port_radius * 2.0)
             * self.scale
             + small_padding;
         let cache_row_height = cache_button_height + small_padding * 2.0;
@@ -218,7 +218,7 @@ impl NodeLayout {
         self.input_first_center = input_first_center;
         self.output_first_center = output_first_center;
         self.port_row_height = port_row_height;
-        self.padding = padding;
+        self.port_activation_radius = port_row_height * 0.5;
     }
 }
 

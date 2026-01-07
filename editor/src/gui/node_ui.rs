@@ -312,8 +312,7 @@ fn render_node_ports(
     view_node: &ViewNode,
 ) -> PortDragInfo {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
-    let port_activation_radius = ctx.style.node.port_activation_radius * ctx.scale;
-    let port_rect_size = vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
+    let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
     let draw_port = |center: Pos2,
                      kind: PortKind,
