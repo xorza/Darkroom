@@ -1,6 +1,6 @@
 use common::BoolExt;
 use eframe::egui;
-use egui::{Painter, Rect, Sense, StrokeKind, Ui};
+use egui::{Painter, Rect, Sense, Shape, StrokeKind, Ui};
 use graph::prelude::FuncLib;
 
 use crate::{common::font::ScaledFontId, gui::style::Style};
@@ -48,9 +48,9 @@ impl<'a> GraphContext<'a> {
         text: &str,
         enabled: bool,
         checked: bool,
-        id: impl std::hash::Hash,
+        id_source: impl std::hash::Hash,
     ) -> bool {
-        let id = self.ui.auto_id_with(id);
+        let id = self.ui.make_persistent_id(id_source);
         let response = self.ui.interact(
             rect,
             id,
@@ -90,6 +90,44 @@ impl<'a> GraphContext<'a> {
             self.style.body_font.scaled(self.scale),
             text_color,
         );
+
+        response.clicked()
+    }
+
+    pub fn button_with(
+        &mut self,
+        rect: Rect,
+        enabled: bool,
+        id_source: impl std::hash::Hash,
+        shapes: &[Shape],
+        tooltip: &str,
+    ) -> bool {
+        let id = self.ui.make_persistent_id(id_source);
+        let response = self.ui.interact(
+            rect,
+            id,
+            enabled.then_else(Sense::click() | Sense::hover(), Sense::hover()),
+        );
+        if response.hovered() {
+            response.show_tooltip_text(tooltip);
+        }
+        let fill = if !enabled {
+            self.style.widget_noninteractive_bg_fill
+        } else if response.is_pointer_button_down_on() {
+            self.style.widget_active_bg_fill
+        } else if response.hovered() {
+            self.style.widget_hover_bg_fill
+        } else {
+            self.style.widget_inactive_bg_fill
+        };
+        let stroke = self.style.widget_inactive_bg_stroke;
+        let corner_radius = self.style.node_corner_radius * self.scale;
+
+        self.painter
+            .rect(rect, corner_radius, fill, stroke, StrokeKind::Inside);
+        if !shapes.is_empty() {
+            self.painter.extend(shapes.iter().cloned());
+        }
 
         response.clicked()
     }

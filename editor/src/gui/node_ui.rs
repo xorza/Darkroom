@@ -80,13 +80,7 @@ impl NodeUi {
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
             render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
-            if render_remove_btn(
-                ctx,
-                ui_interaction,
-                &node_id,
-                &node_layout,
-                view_graph.scale,
-            ) {
+            if render_remove_btn(ctx, ui_interaction, &node_id, &node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             render_cache_btn(ctx, ui_interaction, &node_layout, node);
@@ -249,41 +243,7 @@ fn render_remove_btn(
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
     node_layout: &NodeLayout,
-    scale: f32,
 ) -> bool {
-    let remove_btn_id = ctx.ui.make_persistent_id(("node_remove", node_id));
-
-    let remove_response = ctx.ui.interact(
-        node_layout.remove_btn_rect,
-        remove_btn_id,
-        egui::Sense::click(),
-    );
-    if remove_response.hovered() {
-        remove_response.show_tooltip_text("Remove node");
-    }
-
-    if remove_response.clicked() {
-        ui_interaction
-            .actions
-            .push((*node_id, GraphUiAction::NodeRemoved));
-        return true;
-    }
-
-    let close_fill = if remove_response.is_pointer_button_down_on() {
-        ctx.style.widget_active_bg_fill
-    } else if remove_response.hovered() {
-        ctx.style.widget_hover_bg_fill
-    } else {
-        ctx.style.widget_inactive_bg_fill
-    };
-    let close_stroke = ctx.style.widget_inactive_bg_stroke;
-    ctx.painter.rect(
-        node_layout.remove_btn_rect,
-        ctx.style.node_corner_radius * scale * 0.6,
-        close_fill,
-        close_stroke,
-        egui::StrokeKind::Inside,
-    );
     let remove_rect = node_layout.remove_btn_rect;
     let remove_margin = remove_rect.width() * 0.3;
     let a = egui::pos2(
@@ -303,9 +263,25 @@ fn render_remove_btn(
         remove_rect.min.y + remove_margin,
     );
     let remove_color = ctx.style.widget_text_color;
-    let remove_stroke = egui::Stroke::new(1.4 * scale, remove_color);
-    ctx.painter.line_segment([a, b], remove_stroke);
-    ctx.painter.line_segment([c, d], remove_stroke);
+    let remove_stroke = egui::Stroke::new(1.4 * ctx.scale, remove_color);
+    let remove_shapes = [
+        egui::Shape::line_segment([a, b], remove_stroke),
+        egui::Shape::line_segment([c, d], remove_stroke),
+    ];
+    let remove = ctx.button_with(
+        remove_rect,
+        true,
+        ("node_remove", node_id),
+        &remove_shapes,
+        "Remove node",
+    );
+
+    if remove {
+        ui_interaction
+            .actions
+            .push((*node_id, GraphUiAction::NodeRemoved));
+        return true;
+    }
 
     false
 }
