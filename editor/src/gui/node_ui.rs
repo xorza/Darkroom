@@ -10,7 +10,7 @@ use egui::{
 };
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
-use graph::prelude::{Func, FuncBehavior, NodeBehavior};
+use graph::prelude::{FuncBehavior, NodeBehavior};
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
 use crate::model::{ViewGraph, ViewNode};
@@ -55,7 +55,7 @@ impl NodeUi {
             }
             render_cache_btn(ctx, ui_interaction, node_layout, node);
             render_hints(ctx, node_layout, node, func);
-            let node_drag_port_result = render_node_ports(ctx, node_layout, view_node, func);
+            let node_drag_port_result = render_node_ports(ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_node_const_bindings(ctx, node_layout, node);
             render_node_labels(ctx, node_layout);
@@ -146,7 +146,7 @@ fn render_cache_btn(
 
 fn render_hints(
     ctx: &mut GraphContext,
-    layout: &NodeLayout,
+    node_layout: &NodeLayout,
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
 ) {
@@ -154,7 +154,7 @@ fn render_hints(
     let dot_step = (dot_radius * 2.0) + ctx.scale + ctx.style.padding;
 
     if node.terminal {
-        let center = layout.dot_center(0, dot_step);
+        let center = node_layout.dot_center(0, dot_step);
         ctx.painter
             .circle_filled(center, dot_radius, ctx.style.node.status_terminal_color);
         let dot_rect =
@@ -165,8 +165,8 @@ fn render_hints(
             dot_response.show_tooltip_text("terminal");
         }
     }
-    if func.behavior == FuncBehavior::Impure {
-        let center = layout.dot_center(usize::from(node.terminal), dot_step);
+    if node.behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
+        let center = node_layout.dot_center(usize::from(node.terminal), dot_step);
         ctx.painter
             .circle_filled(center, dot_radius, ctx.style.node.status_impure_color);
         let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
@@ -228,9 +228,8 @@ fn render_remove_btn(
 
 fn render_node_ports(
     ctx: &GraphContext,
-    layout: &NodeLayout,
+    node_layout: &NodeLayout,
     view_node: &ViewNode,
-    func: &Func,
 ) -> PortDragInfo {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let port_activation_radius = ctx.style.node.port_activation_radius * ctx.scale;
@@ -275,8 +274,8 @@ fn render_node_ports(
 
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
-    for input_idx in 0..func.inputs.len() {
-        let center = layout.input_center(input_idx);
+    for input_idx in 0..node_layout.input_galleys.len() {
+        let center = node_layout.input_center(input_idx);
         let drag_info = draw_port(
             center,
             PortKind::Input,
@@ -287,8 +286,8 @@ fn render_node_ports(
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 
-    for output_idx in 0..func.outputs.len() {
-        let center = layout.output_center(output_idx);
+    for output_idx in 0..node_layout.output_galleys.len() {
+        let center = node_layout.output_center(output_idx);
         let drag_info = draw_port(
             center,
             PortKind::Output,
