@@ -79,16 +79,15 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
-            render_body(ctx, node, &node_layout, is_selected, view_graph.scale);
+            render_body(ctx, node, &node_layout, is_selected);
             if render_remove_btn(ctx, ui_interaction, &node_id, &node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             render_cache_btn(ctx, ui_interaction, &node_layout, node);
             render_hints(ctx, &node_layout, node, func);
-            let node_drag_port_result =
-                render_node_ports(ctx, &node_layout, view_node, func, view_graph.scale);
+            let node_drag_port_result = render_node_ports(ctx, &node_layout, view_node, func);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_node_const_bindings(ctx, &node_layout, node, view_graph.scale);
+            render_node_const_bindings(ctx, &node_layout, node);
             render_node_labels(ctx, view_graph, &node_layout, func);
         }
 
@@ -138,14 +137,8 @@ fn body_drag(
     node_layout
 }
 
-fn render_body(
-    ctx: &mut GraphContext<'_>,
-    node: &Node,
-    layout: &NodeLayout,
-    selected: bool,
-    scale: f32,
-) {
-    let corner_radius = ctx.style.node_corner_radius * scale;
+fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, selected: bool) {
+    let corner_radius = ctx.style.node_corner_radius * ctx.scale;
     ctx.painter.rect(
         layout.rect,
         corner_radius,
@@ -156,12 +149,12 @@ fn render_body(
     ctx.painter.text(
         layout.rect.min
             + egui::vec2(
-                ctx.style.node_padding * scale,
-                scale * ctx.style.header_text_offset,
+                ctx.style.node_padding * ctx.scale,
+                ctx.style.header_text_offset * ctx.scale,
             ),
         egui::Align2::LEFT_TOP,
         &node.name,
-        ctx.style.heading_font.scaled(scale),
+        ctx.style.heading_font.scaled(ctx.scale),
         ctx.style.text_color,
     );
 }
@@ -276,13 +269,10 @@ fn render_node_ports(
     layout: &NodeLayout,
     view_node: &ViewNode,
     func: &Func,
-    scale: f32,
 ) -> PortDragInfo {
-    assert!(scale > 0.0, "node port scale must be positive");
-
-    let port_radius = scale * ctx.style.port_radius;
+    let port_radius = ctx.style.port_radius * ctx.scale;
     let port_rect_size = egui::vec2(port_radius * 2.0, port_radius * 2.0);
-    let row_height = ctx.style.node_row_height * scale;
+    let row_height = ctx.style.node_row_height * ctx.scale;
 
     let draw_port = |center: Pos2,
                      kind: PortKind,
@@ -349,20 +339,15 @@ fn render_node_ports(
     port_drag_info
 }
 
-fn render_node_const_bindings(
-    ctx: &mut GraphContext,
-    layout: &NodeLayout,
-    node: &Node,
-    scale: f32,
-) {
-    let font = ctx.style.body_font.scaled(scale);
-    let port_radius = scale * ctx.style.port_radius;
+fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node: &Node) {
+    let font = ctx.style.body_font.scaled(ctx.scale);
+    let port_radius = ctx.scale * ctx.style.port_radius;
     let link_inset = port_radius * 0.6;
-    let badge_padding = 4.0 * scale;
-    let row_height = ctx.style.node_row_height * scale;
-    let badge_height = (row_height * 1.2).max(10.0 * scale);
-    let badge_radius = 6.0 * scale;
-    let badge_gap = 6.0 * scale;
+    let badge_padding = 4.0 * ctx.scale;
+    let row_height = ctx.style.node_row_height * ctx.scale;
+    let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
+    let badge_radius = 6.0 * ctx.scale;
+    let badge_gap = 6.0 * ctx.scale;
     let stroke = ctx.style.connection_stroke;
 
     for (input_idx, input) in node.inputs.iter().enumerate() {
