@@ -20,6 +20,7 @@ impl BackgroundRenderer {
     pub fn render(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
         let scale = view_graph.scale;
         assert!(scale > 0.0, "view graph scale must be positive");
+
         let rect_size = ctx.rect.size();
         let pan = view_graph.pan;
 
@@ -56,7 +57,7 @@ impl BackgroundRenderer {
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
 
-        let segments = 12;
+        let segments = 5;
         let mut y = start_y;
         while y <= ctx.rect.bottom() + spacing {
             let mut x = start_x;
