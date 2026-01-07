@@ -79,19 +79,18 @@ impl Style {
                 size: 13.0,
                 family: egui::FontFamily::Proportional,
             },
+
             text_color: Color32::from_rgb(192, 192, 192),
             noninteractive_text_color: Color32::from_rgb(140, 140, 140),
-
+            checked_text_color: Color32::from_rgb(60, 50, 20),
+            
             noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
-
             hover_bg_fill: Color32::from_rgb(50, 50, 50),
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
             inactive_bg_stroke: Stroke::new(1.0, Color32::from_rgb(65, 65, 65)),
             active_bg_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
             active_bg_fill: Color32::from_rgb(60, 60, 60),
-
             checked_bg_fill: Color32::from_rgb(240, 205, 90),
-            checked_text_color: Color32::from_rgb(60, 50, 20),
 
             padding: 4.0,
             small_padding: 2.0,
