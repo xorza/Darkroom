@@ -138,18 +138,18 @@ fn body_drag(
 }
 
 fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, selected: bool) {
-    let corner_radius = ctx.style.node_corner_radius * ctx.scale;
+    let corner_radius = ctx.style.node.corner_radius * ctx.scale;
     ctx.painter.rect(
         layout.rect,
         corner_radius,
-        ctx.style.node_fill,
-        selected.then_else(ctx.style.selected_stroke, ctx.style.node_stroke),
+        ctx.style.node.fill,
+        selected.then_else(ctx.style.node.selected_stroke, ctx.style.node.stroke),
         egui::StrokeKind::Middle,
     );
     ctx.painter.text(
         layout.rect.min
             + egui::vec2(
-                ctx.style.node_padding * ctx.scale,
+                ctx.style.node.padding * ctx.scale,
                 ctx.style.header_text_offset * ctx.scale,
             ),
         egui::Align2::LEFT_TOP,
@@ -273,7 +273,7 @@ fn render_node_ports(
     let port_radius = ctx.style.port_radius * ctx.scale;
     let port_activation_radius = ctx.style.port_activation_radius * ctx.scale;
     let port_rect_size = egui::vec2(port_activation_radius * 2.0, port_activation_radius * 2.0);
-    let row_height = ctx.style.node_row_height * ctx.scale;
+    let row_height = ctx.style.node.row_height * ctx.scale;
 
     let draw_port = |center: Pos2,
                      kind: PortKind,
@@ -346,7 +346,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node:
     let port_radius = ctx.scale * ctx.style.port_radius;
     let link_inset = port_radius * 0.6;
     let badge_padding = 4.0 * ctx.scale;
-    let row_height = ctx.style.node_row_height * ctx.scale;
+    let row_height = ctx.style.node.row_height * ctx.scale;
     let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
     let badge_radius = 6.0 * ctx.scale;
     let badge_gap = 6.0 * ctx.scale;
@@ -373,8 +373,8 @@ fn render_node_const_bindings(ctx: &mut GraphContext, layout: &NodeLayout, node:
         ctx.painter.rect(
             badge_rect,
             badge_radius,
-            ctx.style.node_fill,
-            ctx.style.const_stroke,
+            ctx.style.node.fill,
+            ctx.style.node.const_stroke,
             egui::StrokeKind::Middle,
         );
         ctx.painter.text(
@@ -412,8 +412,8 @@ fn render_node_labels(
     layout: &NodeLayout,
     func: &Func,
 ) {
-    let row_height = ctx.style.node_row_height * view_graph.scale;
-    let padding = ctx.style.node_padding * view_graph.scale;
+    let row_height = ctx.style.node.row_height * view_graph.scale;
+    let padding = ctx.style.node.padding * view_graph.scale;
 
     for (input_idx, input) in func.inputs.iter().enumerate() {
         let text_pos = layout.input_center(input_idx, row_height) + vec2(padding, 0.0);
@@ -449,11 +449,11 @@ pub(crate) fn compute_node_layout(
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
     let scale = view_graph.scale;
 
-    let node_width_base = ctx.style.node_width * scale;
-    let header_height = ctx.style.node_header_height * scale;
-    let cache_height = ctx.style.node_cache_height * scale;
-    let row_height = ctx.style.node_row_height * scale;
-    let padding = ctx.style.node_padding * scale;
+    let node_width_base = ctx.style.node.width * scale;
+    let header_height = ctx.style.node.header_height * scale;
+    let cache_height = ctx.style.node.cache_height * scale;
+    let row_height = ctx.style.node.row_height * scale;
+    let padding = ctx.style.node.padding * scale;
 
     let header_width = text_width(
         &ctx.painter,

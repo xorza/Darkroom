@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{Color32, FontId, Stroke};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Style {
     pub heading_font: FontId,
     pub body_font: FontId,
@@ -40,14 +40,19 @@ pub struct Style {
     pub dotted_radius_base: f32,
     pub dotted_radius_min: f32,
     pub dotted_radius_max: f32,
-    pub node_width: f32,
-    pub node_header_height: f32,
-    pub node_cache_height: f32,
-    pub node_row_height: f32,
-    pub node_padding: f32,
-    pub node_corner_radius: f32,
-    pub node_fill: Color32,
-    pub node_stroke: Stroke,
+    pub node: NodeStyle,
+}
+
+#[derive(Debug)]
+pub struct NodeStyle {
+    pub width: f32,
+    pub header_height: f32,
+    pub cache_height: f32,
+    pub row_height: f32,
+    pub padding: f32,
+    pub corner_radius: f32,
+    pub fill: Color32,
+    pub stroke: Stroke,
     pub const_stroke: Stroke,
     pub selected_stroke: Stroke,
 }
@@ -100,16 +105,18 @@ impl Style {
             dotted_radius_base: 1.2,
             dotted_radius_min: 0.6,
             dotted_radius_max: 2.4,
-            node_width: 180.0,
-            node_header_height: 22.0,
-            node_cache_height: 20.0,
-            node_row_height: 18.0,
-            node_padding: 8.0,
-            node_corner_radius: 6.0,
-            node_fill: Color32::from_rgb(27, 27, 27),
-            node_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
-            selected_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
-            const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
+            node: NodeStyle {
+                width: 180.0,
+                header_height: 22.0,
+                cache_height: 20.0,
+                row_height: 18.0,
+                padding: 8.0,
+                corner_radius: 6.0,
+                fill: Color32::from_rgb(27, 27, 27),
+                stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
+                selected_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
+                const_stroke: Stroke::new(1.0, Color32::from_rgb(70, 150, 255)),
+            },
         }
     }
 }

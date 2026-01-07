@@ -77,7 +77,7 @@ impl ConnectionUi {
     ) {
         self.curves.clear();
 
-        let row_height = ctx.style.node_row_height * view_graph.scale;
+        let row_height = ctx.style.node.row_height * view_graph.scale;
         self.collect_connection_curves(graph_layout, view_graph, row_height);
 
         self.highlighted.clear();
