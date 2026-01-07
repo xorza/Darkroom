@@ -65,11 +65,11 @@ impl Style {
                 family: egui::FontFamily::Proportional,
             },
             body_font: FontId {
-                size: 17.0,
+                size: 15.0,
                 family: egui::FontFamily::Proportional,
             },
             sub_font: FontId {
-                size: 15.0,
+                size: 13.0,
                 family: egui::FontFamily::Proportional,
             },
             text_color: Color32::from_rgb(192, 192, 192),
