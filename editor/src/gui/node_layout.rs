@@ -44,8 +44,8 @@ impl NodeLayout {
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 
-    pub fn new(ctx: &GraphContext, view_graph: &ViewGraph, view_node_id: &NodeId) -> NodeLayout {
-        let node = view_graph.graph.by_id(view_node_id).unwrap();
+    pub fn new(ctx: &GraphContext, view_graph: &ViewGraph, node_id: &NodeId) -> NodeLayout {
+        let node = view_graph.graph.by_id(node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
         let scale = ctx.scale;
 
@@ -77,7 +77,7 @@ impl NodeLayout {
         }
 
         NodeLayout {
-            node_id: *view_node_id,
+            node_id: *node_id,
             body_rect: Rect::ZERO,
             remove_btn_rect: Rect::ZERO,
             cache_button_rect: Rect::ZERO,

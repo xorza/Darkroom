@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontId, Stroke};
+use egui::{Color32, FontFamily, FontId, Stroke};
 
 #[derive(Debug)]
 pub struct Style {
@@ -69,21 +69,21 @@ impl Style {
         Self {
             heading_font: FontId {
                 size: 18.0,
-                family: egui::FontFamily::Proportional,
+                family: FontFamily::Proportional,
             },
             body_font: FontId {
                 size: 15.0,
-                family: egui::FontFamily::Proportional,
+                family: FontFamily::Proportional,
             },
             sub_font: FontId {
                 size: 13.0,
-                family: egui::FontFamily::Proportional,
+                family: FontFamily::Proportional,
             },
 
             text_color: Color32::from_rgb(192, 192, 192),
             noninteractive_text_color: Color32::from_rgb(140, 140, 140),
             checked_text_color: Color32::from_rgb(60, 50, 20),
-            
+
             noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
             hover_bg_fill: Color32::from_rgb(50, 50, 50),
             inactive_bg_fill: Color32::from_rgb(40, 40, 40),
