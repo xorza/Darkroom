@@ -292,7 +292,7 @@ fn render_node_ports(
         let response = ctx
             .ui
             .interact(port_rect, port_id, Sense::drag() | Sense::hover());
-        let is_hovered = response.hovered();
+        let is_hovered = response.hovered() | ctx.ui.rect_contains_pointer(port_rect);
 
         let color = is_hovered.then_else(hover_color, base_color);
         ctx.painter.circle_filled(center, port_radius, color);
@@ -349,7 +349,7 @@ fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, 
     let font = ctx.style.body_font.scaled(ctx.scale);
     let port_radius = ctx.scale * ctx.style.node.port_radius;
     let link_inset = port_radius * 0.6;
-    let badge_padding = 4.0 * ctx.scale;
+    let badge_padding = node_layout.padding;
     let row_height = node_layout.port_row_height;
     let badge_height = (row_height * 1.2).max(10.0 * ctx.scale);
     let badge_radius = 6.0 * ctx.scale;
