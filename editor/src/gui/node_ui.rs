@@ -239,7 +239,7 @@ fn render_remove_btn(
         remove_rect.max.x - remove_margin,
         remove_rect.min.y + remove_margin,
     );
-    let remove_color = ctx.style.widget_text_color;
+    let remove_color = ctx.style.text_color;
     let remove_stroke = egui::Stroke::new(1.4 * ctx.scale, remove_color);
     let remove_shapes = [
         egui::Shape::line_segment([a, b], remove_stroke),

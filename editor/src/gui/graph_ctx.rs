@@ -78,7 +78,7 @@ impl<'a> GraphContext<'a> {
         } else if checked {
             self.style.cache_checked_text_color
         } else {
-            self.style.widget_text_color
+            self.style.text_color
         };
 
         self.painter.rect(

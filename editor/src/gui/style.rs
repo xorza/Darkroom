@@ -8,7 +8,6 @@ pub struct Style {
     pub sub_font: FontId,
 
     pub text_color: Color32,
-    pub widget_text_color: Color32,
     pub widget_noninteractive_text_color: Color32,
     pub widget_noninteractive_bg_fill: Color32,
     pub widget_active_bg_fill: Color32,
@@ -75,7 +74,7 @@ impl Style {
                 family: egui::FontFamily::Proportional,
             },
             text_color: Color32::from_rgb(192, 192, 192),
-            widget_text_color: Color32::from_rgb(192, 192, 192),
+
             widget_noninteractive_text_color: Color32::from_rgb(140, 140, 140),
             widget_noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
             widget_active_bg_fill: Color32::from_rgb(60, 60, 60),
@@ -98,7 +97,8 @@ impl Style {
             },
             node: NodeStyle {
                 padding: 4.0,
-                corner_radius: 6.0,
+                corner_radius: 4.0,
+
                 body_fill: Color32::from_rgb(27, 27, 27),
                 body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
                 selected_body_stroke: Stroke::new(1.0, Color32::from_rgb(128, 128, 128)),
