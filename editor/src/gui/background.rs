@@ -19,15 +19,15 @@ pub struct BackgroundRenderer {
 impl BackgroundRenderer {
     pub fn render(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
         let scale = view_graph.scale;
-        assert!(scale > 0.0, "view graph scale must be positive");
+        assert!(scale > common::EPSILON, "view graph scale must be positive");
 
         let rect_size = ctx.rect.size();
         let pan = view_graph.pan;
 
         if !self.inited
-            || (self.last_scale - scale).abs() >= common::EPSILON
-            || (self.last_pan - pan).length() >= common::EPSILON
-            || (self.last_rect_size - rect_size).length() >= common::EPSILON
+            || (self.last_scale / scale).abs() >= common::EPSILON
+            || (self.last_pan - pan).length_sq() >= 1.0
+            || (self.last_rect_size - rect_size).length_sq() >= 1.0
         {
             self.rebuild_mesh(ctx, view_graph);
             self.last_scale = scale;
