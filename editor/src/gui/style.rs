@@ -40,7 +40,6 @@ pub struct GraphBackgroundStyle {
 
 #[derive(Debug)]
 pub struct NodeStyle {
-    pub width: f32,
     pub header_height: f32,
     pub cache_height: f32,
     pub port_row_height: f32,
@@ -103,7 +102,6 @@ impl Style {
                 dotted_radius_max: 2.4,
             },
             node: NodeStyle {
-                width: 180.0,
                 header_height: 22.0,
                 cache_height: 20.0,
                 port_row_height: 18.0,

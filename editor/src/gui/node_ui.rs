@@ -443,7 +443,6 @@ pub(crate) fn compute_node_layout(
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
     let scale = ctx.scale;
 
-    let node_width_base = ctx.style.node.width * scale;
     let header_height = ctx.style.node.header_height * scale;
     let cache_height = ctx.style.node.cache_height * scale;
     let row_height = ctx.style.node.port_row_height * scale;
@@ -507,8 +506,7 @@ pub(crate) fn compute_node_layout(
         max_row_width = max_row_width.max(row_width);
     }
 
-    let node_width = node_width_base
-        .max(header_width)
+    let node_width = header_width
         .max(max_row_width)
         .max(cache_row_width)
         .max(status_row_width);
