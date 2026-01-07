@@ -83,7 +83,7 @@ impl<'a> GraphContext<'a> {
 
         self.painter.rect(
             rect,
-            self.style.node.corner_radius * self.scale,
+            self.style.corner_radius * self.scale,
             fill,
             stroke,
             StrokeKind::Middle,
@@ -126,7 +126,7 @@ impl<'a> GraphContext<'a> {
             self.style.widget_inactive_bg_fill
         };
         let stroke = self.style.widget_inactive_bg_stroke;
-        let corner_radius = self.style.node.corner_radius * self.scale;
+        let corner_radius = self.style.corner_radius * self.scale;
 
         self.painter
             .rect(rect, corner_radius, fill, stroke, StrokeKind::Middle);

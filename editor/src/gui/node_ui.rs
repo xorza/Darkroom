@@ -138,7 +138,7 @@ fn body_drag(
 }
 
 fn render_body(ctx: &mut GraphContext<'_>, node: &Node, layout: &NodeLayout, selected: bool) {
-    let corner_radius = ctx.style.node.corner_radius * ctx.scale;
+    let corner_radius = ctx.style.corner_radius * ctx.scale;
     ctx.painter.rect(
         layout.body_rect,
         corner_radius,

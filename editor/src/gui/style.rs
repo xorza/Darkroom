@@ -17,10 +17,13 @@ pub struct Style {
 
     pub cache_active_color: Color32,
     pub cache_checked_text_color: Color32,
+    
+    pub corner_radius: f32,
     pub connection_stroke: Stroke,
     pub connection_highlight_stroke: Stroke,
     pub temp_connection_stroke: Stroke,
     pub breaker_stroke: Stroke,
+    
     pub background: GraphBackgroundStyle,
     pub node: NodeStyle,
 }
@@ -37,7 +40,6 @@ pub struct GraphBackgroundStyle {
 #[derive(Debug)]
 pub struct NodeStyle {
     pub padding: f32,
-    pub corner_radius: f32,
     pub body_fill: Color32,
     pub body_stroke: Stroke,
     pub selected_body_stroke: Stroke,
@@ -84,6 +86,7 @@ impl Style {
 
             cache_active_color: Color32::from_rgb(240, 205, 90),
             cache_checked_text_color: Color32::from_rgb(60, 50, 20),
+            corner_radius: 4.0,
             connection_stroke: Stroke::new(2.0, Color32::from_rgb(70, 150, 255)),
             connection_highlight_stroke: Stroke::new(2.0, Color32::from_rgb(255, 90, 90)),
             temp_connection_stroke: Stroke::new(2.0, Color32::from_rgb(170, 200, 255)),
@@ -97,7 +100,6 @@ impl Style {
             },
             node: NodeStyle {
                 padding: 4.0,
-                corner_radius: 4.0,
 
                 body_fill: Color32::from_rgb(27, 27, 27),
                 body_stroke: Stroke::new(1.0, Color32::from_rgb(60, 60, 60)),
