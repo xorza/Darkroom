@@ -52,6 +52,8 @@ pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
+    pub cache_btn_width: f32,
+
     pub port_radius: f32,
     pub port_activation_radius: f32,
     pub port_label_side_padding: f32,
@@ -115,6 +117,8 @@ impl Style {
                 status_dot_radius: 4.0,
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
+
+                cache_btn_width: 60.0,
 
                 port_radius: 18.0 * 0.3,
                 port_activation_radius: 18.0 * 0.3 * 1.5,

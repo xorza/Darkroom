@@ -1,3 +1,4 @@
+use common::BoolExt;
 use eframe::egui;
 use egui::{Color32, FontId, Galley, Pos2, Rect, pos2, vec2};
 use graph::graph::NodeId;
@@ -116,7 +117,7 @@ impl NodeLayout {
         let padding = ctx.style.padding * self.scale;
         let small_padding = ctx.style.small_padding * self.scale;
 
-        let header_height = ctx.style.heading_font.size * self.scale;
+        let header_height = self.title_galley.size().y;
         let remove_btn_size = header_height;
 
         let title_width = self.title_galley.size().x + padding * 2.0;
@@ -131,20 +132,19 @@ impl NodeLayout {
         let input_count = self.input_galleys.len();
         let output_count = self.output_galleys.len();
         let row_count = input_count.max(output_count).max(1);
+        let port_label_side_padding = ctx.style.node.port_label_side_padding * self.scale;
         let mut max_row_width: f32 = 0.0;
         for row in 0..row_count {
             let left = self
                 .input_galleys
                 .get(row)
-                .map_or(0.0, |galley| galley.size().x + padding);
+                .map_or(0.0, |galley| galley.size().x + port_label_side_padding);
             let right = self
                 .output_galleys
                 .get(row)
-                .map_or(0.0, |galley| galley.size().x + padding);
-            let mut row_width = padding * 2.0 + left + right;
-            if left > 0.0 && right > 0.0 {
-                row_width += padding;
-            }
+                .map_or(0.0, |galley| galley.size().x + port_label_side_padding);
+
+            let row_width = left + right + (left > 0.0 && right > 0.0).then_else(padding, 0.0);
             max_row_width = max_row_width.max(row_width);
         }
 
@@ -182,7 +182,10 @@ impl NodeLayout {
                 body_rect.min.x + padding,
                 body_rect.min.y + header_row_height + small_padding,
             ),
-            vec2(60.0, cache_button_height),
+            vec2(
+                ctx.style.node.cache_btn_width * self.scale,
+                cache_button_height,
+            ),
         );
 
         let base_y = body_rect.min.y
