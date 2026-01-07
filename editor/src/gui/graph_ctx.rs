@@ -1,5 +1,6 @@
+use common::BoolExt;
 use eframe::egui;
-use egui::{Color32, CornerRadius, FontId, Painter, Rect, Response, Stroke, StrokeKind, Ui};
+use egui::{Color32, CornerRadius, FontId, Painter, Rect, Response, Sense, Stroke, StrokeKind, Ui};
 use graph::prelude::FuncLib;
 
 use crate::{common::font::ScaledFontId, gui::style::Style};
@@ -53,11 +54,7 @@ impl<'a> GraphContext<'a> {
         let response = self.ui.interact(
             rect,
             id,
-            if enabled {
-                egui::Sense::click()
-            } else {
-                egui::Sense::hover()
-            },
+            enabled.then_else(Sense::click() | Sense::hover(), Sense::hover()),
         );
         let fill = if !enabled {
             self.style.widget_noninteractive_bg_fill
@@ -72,6 +69,14 @@ impl<'a> GraphContext<'a> {
         };
         let stroke = self.style.widget_inactive_bg_stroke;
 
+        let text_color = if !enabled {
+            self.style.widget_noninteractive_text_color
+        } else if checked {
+            self.style.cache_checked_text_color
+        } else {
+            self.style.widget_text_color
+        };
+
         self.painter.rect(
             rect,
             self.style.node_corner_radius * self.scale,
@@ -79,20 +84,12 @@ impl<'a> GraphContext<'a> {
             stroke,
             StrokeKind::Middle,
         );
-
-        let button_text_color = if !enabled {
-            self.style.widget_noninteractive_text_color
-        } else if checked {
-            self.style.cache_checked_text_color
-        } else {
-            self.style.widget_text_color
-        };
         self.painter.text(
             rect.center(),
             egui::Align2::CENTER_CENTER,
             text,
             self.style.body_font.scaled(self.scale),
-            button_text_color,
+            text_color,
         );
 
         response.clicked()
