@@ -1,3 +1,6 @@
+use std::collections::VecDeque;
+use std::sync::Arc;
+
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
@@ -6,7 +9,7 @@ use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Color32, Galley, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
@@ -26,6 +29,9 @@ pub enum PortDragInfo {
 #[derive(Debug, Default)]
 pub struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
+
+    //cache
+    input_galleys: VecDeque<Arc<Galley>>,
 }
 
 impl NodeUi {
@@ -55,7 +61,7 @@ impl NodeUi {
             }
             render_cache_btn(ctx, ui_interaction, node_layout, node);
             render_hints(ctx, node_layout, node, func);
-            render_node_const_bindings(ctx, node_layout, node);
+            self.render_node_const_bindings(ctx, node_layout, node);
             let node_drag_port_result = render_node_ports(ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_node_labels(ctx, node_layout);
@@ -66,6 +72,75 @@ impl NodeUi {
         }
 
         drag_port_info
+    }
+
+    fn render_node_const_bindings(
+        &mut self,
+        ctx: &mut GraphContext,
+        node_layout: &NodeLayout,
+        node: &Node,
+    ) {
+        // todo refactor styling
+        let font = ctx.style.sub_font.scaled(ctx.scale);
+        let port_radius = ctx.style.node.port_radius * ctx.scale;
+
+        let padding = node_layout.padding;
+        let row_height = node_layout.port_row_height;
+
+        self.input_galleys.clear();
+        let mut const_badge_width: f32 = 0.0;
+        for input in node.inputs.iter() {
+            let Binding::Const(value) = &input.binding else {
+                continue;
+            };
+
+            let label = static_value_label(value);
+            let label_galley =
+                ctx.painter
+                    .layout_no_wrap(label, font.clone(), ctx.style.text_color);
+            let badge_width = label_galley.size().x + padding * 2.0;
+            const_badge_width = const_badge_width.max(badge_width);
+            self.input_galleys.push_back(label_galley);
+        }
+
+        for (input_idx, input) in node.inputs.iter().enumerate() {
+            let Binding::Const(value) = &input.binding else {
+                continue;
+            };
+
+            // let label = static_value_label(value);
+            // let label_galley =
+            //     ctx.painter
+            //         .layout_no_wrap(label, font.clone(), ctx.style.text_color);
+            // let badge_width = label_galley.size().x + padding * 2.0;
+            let input_center = node_layout.input_center(input_idx);
+            let badge_right = input_center.x - port_radius - padding;
+            let badge_rect = egui::Rect::from_min_max(
+                egui::pos2(
+                    badge_right - const_badge_width,
+                    input_center.y - row_height * 0.5,
+                ),
+                egui::pos2(badge_right, input_center.y + row_height * 0.5),
+            );
+
+            let link_start = egui::pos2(badge_rect.max.x, input_center.y);
+            let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
+
+            ctx.painter
+                .line_segment([link_start, link_end], ctx.style.connections.stroke);
+            ctx.painter.rect(
+                badge_rect,
+                ctx.style.corner_radius * ctx.scale,
+                ctx.style.inactive_bg_fill,
+                ctx.style.node.const_stroke,
+                StrokeKind::Inside,
+            );
+            ctx.painter.galley(
+                badge_rect.min + Vec2::ONE * padding,
+                self.input_galleys.pop_front().unwrap(),
+                ctx.style.text_color,
+            );
+        }
     }
 }
 
@@ -315,51 +390,6 @@ fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
             + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
         ctx.painter
             .galley(text_pos, galley.clone(), ctx.style.text_color);
-    }
-}
-
-fn render_node_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
-    // todo refactor styling
-    let font = ctx.style.sub_font.scaled(ctx.scale);
-    let port_radius = ctx.style.node.port_radius * ctx.scale;
-
-    let padding = node_layout.padding;
-    let row_height = node_layout.port_row_height;
-
-    for (input_idx, input) in node.inputs.iter().enumerate() {
-        let Binding::Const(value) = &input.binding else {
-            continue;
-        };
-
-        let label = static_value_label(value);
-        let label_galley = ctx
-            .painter
-            .layout_no_wrap(label, font.clone(), ctx.style.text_color);
-        let badge_width = label_galley.size().x + padding * 2.0;
-        let input_center = node_layout.input_center(input_idx);
-        let badge_right = input_center.x - port_radius - padding;
-        let badge_rect = egui::Rect::from_min_max(
-            egui::pos2(badge_right - badge_width, input_center.y - row_height * 0.5),
-            egui::pos2(badge_right, input_center.y + row_height * 0.5),
-        );
-
-        let link_start = egui::pos2(badge_rect.max.x, input_center.y);
-        let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
-
-        ctx.painter
-            .line_segment([link_start, link_end], ctx.style.connections.stroke);
-        ctx.painter.rect(
-            badge_rect,
-            ctx.style.corner_radius * ctx.scale,
-            ctx.style.inactive_bg_fill,
-            ctx.style.node.const_stroke,
-            StrokeKind::Inside,
-        );
-        ctx.painter.galley(
-            badge_rect.center() - label_galley.size() * 0.5,
-            label_galley,
-            ctx.style.text_color,
-        );
     }
 }
 
