@@ -20,6 +20,7 @@ pub struct NodeLayout {
     pub port_row_height: f32,
     pub padding: f32,
     pub title_galley: Arc<Galley>,
+    pub cache_btn_galley: Arc<Galley>,
     pub input_galleys: Vec<Arc<Galley>>,
     pub output_galleys: Vec<Arc<Galley>>,
 }

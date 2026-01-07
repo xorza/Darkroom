@@ -73,13 +73,6 @@ impl<'a> GraphContext<'a> {
             self.style.inactive_bg_fill
         };
         let stroke = self.style.inactive_bg_stroke;
-        let text_color = if !enabled {
-            self.style.noninteractive_text_color
-        } else if checked {
-            self.style.checked_text_color
-        } else {
-            self.style.text_color
-        };
 
         self.painter.rect(
             rect,
@@ -88,13 +81,8 @@ impl<'a> GraphContext<'a> {
             stroke,
             StrokeKind::Middle,
         );
-        self.painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            text,
-            self.style.body_font.scaled(self.scale),
-            text_color,
-        );
+        let shapes = shapes.into_iter().map(Into::into);
+        self.painter.extend(shapes);
 
         response.clicked()
     }

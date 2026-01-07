@@ -123,12 +123,27 @@ fn render_cache_btn(
     node_layout: &NodeLayout,
     node: &mut Node,
 ) {
-    if ctx.toggle_button(
+    let enabled = !node.terminal;
+    let checked = node.behavior == NodeBehavior::Once;
+
+    let text_color = if !enabled {
+        ctx.style.noninteractive_text_color
+    } else if checked {
+        ctx.style.checked_text_color
+    } else {
+        ctx.style.text_color
+    };
+    let label = {
+        let text_pos =
+            node_layout.cache_button_rect.center() - node_layout.cache_btn_galley.size() * 0.5;
+        egui::Shape::galley(text_pos, node_layout.cache_btn_galley.clone(), text_color)
+    };
+    if ctx.toggle_button_with(
         node_layout.cache_button_rect,
-        "cache",
-        !node.terminal,
-        node.behavior == NodeBehavior::Once,
+        enabled,
+        checked,
         (node.id, "cache"),
+        [label],
         "",
     ) {
         node.behavior = (node.behavior == NodeBehavior::Once)
