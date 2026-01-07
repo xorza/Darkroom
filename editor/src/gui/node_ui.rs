@@ -25,7 +25,7 @@ pub struct NodeLayout {
     pub rect: Rect,
     pub remove_btn_rect: Rect,
     pub cache_button_rect: Rect,
-    pub dot_first_center: Option<Pos2>,
+    pub dot_first_center: Pos2,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
     pub port_row_height: f32,
@@ -53,9 +53,7 @@ impl NodeLayout {
     }
 
     pub fn dot_center(&self, index: usize, dot_step: f32) -> Pos2 {
-        let first = self
-            .dot_first_center
-            .expect("dot center missing when dots are present");
+        let first = self.dot_first_center;
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 }
@@ -447,35 +445,23 @@ pub(crate) fn compute_node_layout(
     let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
     let scale = ctx.scale;
-
     let padding = ctx.style.node.padding * scale;
 
-    let remove_size = ctx.style.node.remove_btn_size * scale;
+    let remove_btn_size = ctx.style.node.remove_btn_size * scale;
 
-    let header_width = {
-        let caption_width = text_width(
-            &ctx.painter,
-            &ctx.style.heading_font.scaled(scale),
-            &node.name,
-            ctx.style.text_color,
-        ) + padding * 2.0;
-        let status_width = {
-            let dot_diameter = padding + ctx.style.node.status_dot_radius * 2.0;
-            2.0 * (padding + dot_diameter)
-        };
-        let remove_width = remove_size + padding * 2.0;
-        caption_width + status_width + remove_width
-    };
-
-    let cache_button_width = text_width(
+    let title_width = text_width(
         &ctx.painter,
-        &ctx.style.body_font.scaled(scale),
-        "cache",
+        &ctx.style.heading_font.scaled(scale),
+        &node.name,
         ctx.style.text_color,
     ) + padding * 2.0;
-    let cache_button_height = ctx.style.body_font.size * scale + padding * 2.0;
-    let cache_row_height = cache_button_height + padding * 2.0;
-    let cache_row_width = cache_button_width + padding * 2.0;
+
+    let header_width = {
+        let status_width = 2.0 * (padding + ctx.style.node.status_dot_radius * 2.0);
+        let remove_width = remove_btn_size + padding * 2.0;
+
+        title_width + status_width + remove_width
+    };
 
     let input_count = func.inputs.len();
     let output_count = func.outputs.len();
@@ -505,65 +491,63 @@ pub(crate) fn compute_node_layout(
         max_row_width = max_row_width.max(row_width);
     }
 
+    let cache_btn_width = text_width(
+        &ctx.painter,
+        &ctx.style.body_font.scaled(scale),
+        "cache",
+        ctx.style.text_color,
+    ) + padding * 2.0;
+    let cache_button_height = ctx.style.body_font.size * scale + padding * 2.0;
+
     let header_height = ctx.style.node.header_height * scale;
     let port_row_height = ctx.style.sub_font.size * scale + padding * 2.0;
+    let cache_row_height = cache_button_height + padding * 2.0;
+    let cache_row_width = cache_btn_width + padding * 2.0;
 
     let node_width = header_width.max(max_row_width).max(cache_row_width);
     let node_height =
-        header_height + cache_row_height + padding + port_row_height * row_count as f32 + padding;
+        header_height + cache_row_height + port_row_height * row_count as f32 + padding * 2.0;
     let node_size = egui::vec2(node_width, node_height);
     let node_rect = egui::Rect::from_min_size(Pos2::ZERO, node_size);
 
     let header_rect =
-        egui::Rect::from_min_size(node_rect.min, egui::vec2(node_rect.width(), header_height));
-    let cache_rect = egui::Rect::from_min_size(
-        node_rect.min + egui::vec2(0.0, header_height),
-        egui::vec2(node_rect.width(), cache_row_height),
-    );
+        egui::Rect::from_min_size(node_rect.min, egui::vec2(title_width, header_height));
+
     let remove_pos = egui::pos2(
-        node_rect.max.x - padding - remove_size,
+        node_rect.max.x - padding - remove_btn_size,
         node_rect.min.y + padding,
     );
-    let remove_rect = egui::Rect::from_min_size(remove_pos, egui::vec2(remove_size, remove_size));
+    let remove_rect =
+        egui::Rect::from_min_size(remove_pos, egui::vec2(remove_btn_size, remove_btn_size));
 
     let dot_radius = scale * ctx.style.node.status_dot_radius;
-    let has_terminal = node.terminal;
-    let has_impure = func.behavior == FuncBehavior::Impure;
-    let dot_first_center = if has_terminal || has_impure {
+    let dot_first_center = {
         let dot_x = remove_rect.min.x - padding - dot_radius;
         let dot_center_y = header_rect.center().y;
-        Some(egui::pos2(dot_x, dot_center_y))
-    } else {
-        None
+        egui::pos2(dot_x, dot_center_y)
     };
 
-    let cache_button_rect = if cache_row_height > 0.0 {
-        let cache_button_pos = egui::pos2(
-            cache_rect.min.x + padding,
-            cache_rect.min.y + (cache_row_height - cache_button_height) * 0.5,
-        );
-        egui::Rect::from_min_size(
-            cache_button_pos,
-            egui::vec2(cache_button_width, cache_button_height),
-        )
-    } else {
-        egui::Rect::from_min_size(cache_rect.min, egui::Vec2::ZERO)
-    };
+    let cache_button_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            node_rect.min.x + padding,
+            node_rect.min.y + header_height + (cache_row_height - cache_button_height) * 0.5,
+        ),
+        egui::vec2(cache_btn_width, cache_button_height),
+    );
 
     let base_y =
         node_rect.min.y + header_height + cache_row_height + padding + port_row_height * 0.5;
     let input_first_center = egui::pos2(node_rect.min.x, base_y);
     let output_first_center = egui::pos2(node_rect.min.x + node_width, base_y);
 
-    let offset = origin + view_node.pos.to_vec2() * scale;
-    let delta = offset.to_vec2();
-    let rect = node_rect.translate(delta);
-    let remove_btn_rect = remove_rect.translate(delta);
-    let cache_button_rect = cache_button_rect.translate(delta);
-    let dot_first_center = dot_first_center.map(|center| center + delta);
-    let input_first_center = input_first_center + delta;
-    let output_first_center = output_first_center + delta;
-    let port_row_height = port_row_height * ctx.scale;
+    let offset = (origin + view_node.pos.to_vec2() * scale).to_vec2();
+
+    let rect = node_rect.translate(offset);
+    let remove_btn_rect = remove_rect.translate(offset);
+    let cache_button_rect = cache_button_rect.translate(offset);
+    let dot_first_center = dot_first_center + offset;
+    let input_first_center = input_first_center + offset;
+    let output_first_center = output_first_center + offset;
 
     NodeLayout {
         rect,
