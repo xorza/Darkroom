@@ -56,6 +56,7 @@ Connection drag lifecycle now goes through `ConnectionUi` helpers (`start_drag`,
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.
+Connection bezier sampling now eases parameterization to add detail near endpoints while reducing mid-curve density.
 
 ## Repository Layout
 

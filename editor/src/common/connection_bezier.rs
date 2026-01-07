@@ -3,7 +3,7 @@ use egui::Pos2;
 #[derive(Debug)]
 pub struct ConnectionBezier;
 
-const STEPS: usize = 24;
+const STEPS: usize = 12;
 pub const POINTS: usize = STEPS + 1;
 
 impl ConnectionBezier {
@@ -20,7 +20,8 @@ impl ConnectionBezier {
         let p2 = p3 + egui::vec2(-control_offset, 0.0);
 
         for i in 0..=steps {
-            let t = i as f32 / steps as f32;
+            let t_linear = i as f32 / steps as f32;
+            let t = 0.5 - 0.5 * (std::f32::consts::PI * t_linear).cos();
             let one_minus = 1.0 - t;
             let a = one_minus * one_minus * one_minus;
             let b = 3.0 * one_minus * one_minus * t;
