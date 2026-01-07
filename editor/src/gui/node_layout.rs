@@ -45,24 +45,6 @@ impl NodeLayout {
     }
 
     pub fn new(ctx: &GraphContext, view_graph: &ViewGraph, view_node_id: &NodeId) -> NodeLayout {
-        Self::assign_galleys(ctx, view_graph, view_node_id)
-    }
-
-    pub fn update(
-        &mut self,
-        ctx: &GraphContext,
-        view_graph: &ViewGraph,
-        view_node_id: &NodeId,
-        origin: Pos2,
-    ) {
-        self.update_layout(ctx, view_graph, view_node_id, origin);
-    }
-
-    fn assign_galleys(
-        ctx: &GraphContext,
-        view_graph: &ViewGraph,
-        view_node_id: &NodeId,
-    ) -> NodeLayout {
         let node = view_graph.graph.by_id(view_node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
         let scale = ctx.scale;
@@ -110,7 +92,7 @@ impl NodeLayout {
         }
     }
 
-    fn update_layout(
+    pub fn update(
         &mut self,
         ctx: &GraphContext,
         view_graph: &ViewGraph,
