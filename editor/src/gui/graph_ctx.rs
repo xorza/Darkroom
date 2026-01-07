@@ -41,8 +41,15 @@ impl<'a> GraphContext<'a> {
         }
     }
 
-    pub fn toggle_button(&mut self, rect: Rect, text: &str, enabled: bool, checked: bool) -> bool {
-        let id = self.ui.id();
+    pub fn toggle_button(
+        &mut self,
+        rect: Rect,
+        text: &str,
+        enabled: bool,
+        checked: bool,
+        id: impl std::hash::Hash,
+    ) -> bool {
+        let id = self.ui.auto_id_with(id);
         let response = self.ui.interact(
             rect,
             id,
@@ -52,7 +59,7 @@ impl<'a> GraphContext<'a> {
                 egui::Sense::hover()
             },
         );
-        let fill = if enabled {
+        let fill = if !enabled {
             self.style.widget_noninteractive_bg_fill
         } else if checked {
             self.style.cache_active_color
@@ -73,7 +80,7 @@ impl<'a> GraphContext<'a> {
             StrokeKind::Middle,
         );
 
-        let button_text_color = if enabled {
+        let button_text_color = if !enabled {
             self.style.widget_noninteractive_text_color
         } else if checked {
             self.style.cache_checked_text_color
