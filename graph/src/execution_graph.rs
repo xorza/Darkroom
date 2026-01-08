@@ -554,37 +554,6 @@ impl ExecutionGraph {
         }
     }
 
-    fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
-        let mut executed_nodes: Vec<ExecutedNodeStats> = Vec::default();
-        let mut nodes_with_missing_inputs: Vec<NodeId> = Vec::default();
-        let mut cached_nodes: Vec<NodeId> = Vec::default();
-
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
-            executed_nodes.push(ExecutedNodeStats {
-                node_id: e_node.id,
-                elapsed_secs: e_node.run_time,
-            });
-        }
-
-        for e_node_idx in self.e_node_process_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
-            if e_node.missing_required_inputs {
-                nodes_with_missing_inputs.push(e_node.id);
-            }
-            // if e_node.missing_required_inputs {
-            //      cached_nodes.push(e_node.id);
-            // }
-        }
-
-        ExecutionStats {
-            elapsed_secs: start.elapsed().as_secs_f64(),
-            executed_nodes,
-            nodes_with_missing_inputs,
-            cached_nodes,
-        }
-    }
-
     fn pre_execute(&mut self) -> Result<()> {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
@@ -653,7 +622,9 @@ impl ExecutionGraph {
             } else {
                 e_node.cached = match e_node.behavior {
                     ExecutionBehavior::Impure => false,
-                    ExecutionBehavior::Pure => e_node.output_values.is_some() && !e_node.inputs_updated,
+                    ExecutionBehavior::Pure => {
+                        e_node.output_values.is_some() && !e_node.inputs_updated
+                    }
                     ExecutionBehavior::Once => e_node.output_values.is_some(),
                 };
                 e_node.wants_execute = !e_node.cached;
@@ -728,6 +699,37 @@ impl ExecutionGraph {
         }
 
         Ok(())
+    }
+
+    fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
+        let mut executed_nodes: Vec<ExecutedNodeStats> = Vec::default();
+        let mut nodes_with_missing_inputs: Vec<NodeId> = Vec::default();
+        let mut cached_nodes: Vec<NodeId> = Vec::default();
+
+        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+            executed_nodes.push(ExecutedNodeStats {
+                node_id: e_node.id,
+                elapsed_secs: e_node.run_time,
+            });
+        }
+
+        for e_node_idx in self.e_node_process_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+            if e_node.missing_required_inputs {
+                nodes_with_missing_inputs.push(e_node.id);
+            }
+            if e_node.cached {
+                cached_nodes.push(e_node.id);
+            }
+        }
+
+        ExecutionStats {
+            elapsed_secs: start.elapsed().as_secs_f64(),
+            executed_nodes,
+            nodes_with_missing_inputs,
+            cached_nodes,
+        }
     }
 
     fn validate_with(&self, graph: &Graph, func_lib: &FuncLib) {
