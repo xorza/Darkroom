@@ -1140,6 +1140,44 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn once_node_recomputes_on_binding_change() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 3),
+            get_b: Arc::new(move || 55),
+            print: Arc::new(move |_| {}),
+        });
+        let mut execution_graph = ExecutionGraph::default();
+
+        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
+        );
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+
+        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(2.into());
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
+
+        Ok(())
+    }
+
     #[test]
     fn cycle_detection_returns_error() {
         let mut graph = test_graph();
