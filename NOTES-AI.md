@@ -230,6 +230,7 @@ Execution graph invalidation is now exposed as `invalidate_recursively` (typo fi
 callers.
 Execution graph invalidation now uses a `Vec<bool>` visited map instead of a `HashSet` for faster dense traversals.
 Execution graph execution collects stats via `ExecutionGraph::collect_execution_stats`.
+Node UI derives per-node execution info and uses it to render colored shadows (executed/cached/missing inputs).
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.

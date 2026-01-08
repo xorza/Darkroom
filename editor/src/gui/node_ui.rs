@@ -7,7 +7,7 @@ use common::BumpVecDeque;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Color32, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -59,9 +59,9 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
-            let _node_execution_info = node_execution_info(node_id, execution_stats);
+            let node_execution_info = node_execution_info(node_id, execution_stats);
 
-            render_body(ctx, node_layout, is_selected);
+            render_body(ctx, node_layout, is_selected, &node_execution_info);
             if render_remove_btn(ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
@@ -78,32 +78,6 @@ impl NodeUi {
         }
 
         drag_port_info
-    }
-}
-
-fn node_execution_info<'a>(
-    node_id: NodeId,
-    execution_stats: Option<&'a ExecutionStats>,
-) -> NodeExecutionInfo<'a> {
-    let Some(execution_stats) = execution_stats else {
-        return NodeExecutionInfo {
-            cached: false,
-            has_missing_inputs: false,
-            executed: None,
-        };
-    };
-
-    let executed = execution_stats
-        .executed_nodes
-        .iter()
-        .find(|stats| stats.node_id == node_id);
-    let cached = execution_stats.cached_nodes.contains(&node_id);
-    let has_missing_inputs = execution_stats.nodes_with_missing_inputs.contains(&node_id);
-
-    NodeExecutionInfo {
-        cached,
-        has_missing_inputs,
-        executed,
     }
 }
 
@@ -142,8 +116,35 @@ fn body_drag<'a>(
     node_layout
 }
 
-fn render_body(ctx: &mut GraphContext<'_>, node_layout: &NodeLayout, selected: bool) {
+fn render_body(
+    ctx: &mut GraphContext<'_>,
+    node_layout: &NodeLayout,
+    selected: bool,
+    node_execution_info: &NodeExecutionInfo<'_>,
+) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
+
+    let shadow_color = if node_execution_info.has_missing_inputs {
+        Some(Color32::from_rgb(220, 60, 60))
+    } else if node_execution_info.executed.is_some() {
+        Some(Color32::from_rgb(60, 200, 120))
+    } else if node_execution_info.cached {
+        Some(Color32::from_rgb(230, 200, 70))
+    } else {
+        None
+    };
+
+    if let Some(shadow_color) = shadow_color {
+        let shadow = Shadow {
+            offset: [0, 0],
+            blur: 6,
+            spread: 2,
+            color: shadow_color,
+        };
+        ctx.painter.add(Shape::Rect(
+            shadow.as_shape(node_layout.body_rect, corner_radius),
+        ));
+    }
 
     ctx.painter.rect(
         node_layout.body_rect,
@@ -471,6 +472,32 @@ fn static_value_label(value: &StaticValue) -> String {
                 format!("{}...", truncated)
             }
         }
+    }
+}
+
+fn node_execution_info<'a>(
+    node_id: NodeId,
+    execution_stats: Option<&'a ExecutionStats>,
+) -> NodeExecutionInfo<'a> {
+    let Some(execution_stats) = execution_stats else {
+        return NodeExecutionInfo {
+            cached: false,
+            has_missing_inputs: false,
+            executed: None,
+        };
+    };
+
+    let executed = execution_stats
+        .executed_nodes
+        .iter()
+        .find(|stats| stats.node_id == node_id);
+    let cached = execution_stats.cached_nodes.contains(&node_id);
+    let has_missing_inputs = execution_stats.nodes_with_missing_inputs.contains(&node_id);
+
+    NodeExecutionInfo {
+        cached,
+        has_missing_inputs,
+        executed,
     }
 }
 
