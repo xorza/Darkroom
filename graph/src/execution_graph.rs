@@ -391,16 +391,6 @@ impl ExecutionGraph {
                     };
                 }
 
-                // let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                //     target_id: e_port_address.target_id,
-                //     target_idx: output_e_node_idx,
-                //     port_idx: e_port_address.port_idx,
-                // });
-                // if e_input.binding != desired_binding {
-                //     e_input.binding_changed = true;
-                //     e_input.binding = desired_binding;
-                // }
-
                 assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
             }
         }
@@ -990,8 +980,8 @@ mod tests {
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(!execution_graph.by_name("mult").unwrap().inputs_updated);
-        assert_eq!(mult.inputs[0].binding_changed, false);
-        assert_eq!(mult.inputs[1].binding_changed, false);
+        assert!(!mult.inputs[0].binding_changed);
+        assert!(!mult.inputs[1].binding_changed);
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib)?;
@@ -1005,8 +995,8 @@ mod tests {
             ["mult", "print"]
         );
 
-        assert_eq!(mult.inputs[0].binding_changed, true);
-        assert_eq!(mult.inputs[1].binding_changed, false);
+        assert!(mult.inputs[0].binding_changed);
+        assert!(!mult.inputs[1].binding_changed);
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
         assert!(mult.inputs_updated);
