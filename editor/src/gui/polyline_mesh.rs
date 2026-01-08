@@ -3,20 +3,30 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct PolylineMesh {
     mesh: Arc<Mesh>,
+    points: Vec<Pos2>,
 }
 
 impl PolylineMesh {
     pub fn with_point_capacity(points: usize) -> Self {
         Self {
             mesh: Arc::new(polyline_mesh_with_capacity(points)),
+            points: vec![Pos2::ZERO; points],
         }
     }
 
     pub fn mesh(&self) -> &Mesh {
         &self.mesh
+    }
+
+    pub fn points(&self) -> &[Pos2] {
+        self.points.as_slice()
+    }
+
+    pub fn points_mut(&mut self) -> &mut Vec<Pos2> {
+        &mut self.points
     }
 
     pub fn build_curve(
@@ -27,6 +37,19 @@ impl PolylineMesh {
         width: f32,
         feather: f32,
     ) {
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        mesh.clear();
+        add_curve_to_mesh(mesh, points, start_color, end_color, width, feather);
+    }
+
+    pub fn build_curve_from_points(
+        &mut self,
+        start_color: Color32,
+        end_color: Color32,
+        width: f32,
+        feather: f32,
+    ) {
+        let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
         add_curve_to_mesh(mesh, points, start_color, end_color, width, feather);

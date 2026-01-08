@@ -66,7 +66,6 @@ struct ConnectionCurve {
     output_pos: Pos2,
     input_pos: Pos2,
 
-    points: [Pos2; POINTS],
     mesh: PolylineMesh,
 }
 
@@ -78,7 +77,6 @@ impl ConnectionCurve {
             highlighted: false,
             output_pos: Pos2::ZERO,
             input_pos: Pos2::ZERO,
-            points: [Pos2::ZERO; POINTS],
             mesh: PolylineMesh::with_point_capacity(POINTS),
         }
     }
@@ -214,7 +212,12 @@ impl ConnectionUi {
                     curve.input_pos = input_pos;
                     curve.inited = true;
 
-                    ConnectionBezier::sample(&mut curve.points, output_pos, input_pos, ctx.scale);
+                    ConnectionBezier::sample(
+                        curve.mesh.points_mut().as_mut_slice(),
+                        output_pos,
+                        input_pos,
+                        ctx.scale,
+                    );
                 }
 
                 let highlighted = if let Some(segments) =
@@ -222,7 +225,11 @@ impl ConnectionUi {
                 {
                     let mut hit = false;
                     'outer: for (b1, b2) in segments {
-                        let curve_segments = curve.points.windows(2).map(|pair| (pair[0], pair[1]));
+                        let curve_segments = curve
+                            .mesh
+                            .points()
+                            .windows(2)
+                            .map(|pair| (pair[0], pair[1]));
 
                         for (a1, a2) in curve_segments {
                             if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
@@ -242,16 +249,14 @@ impl ConnectionUi {
                     curve.highlighted = highlighted;
 
                     if curve.highlighted {
-                        curve.mesh.build_curve(
-                            &curve.points,
+                        curve.mesh.build_curve_from_points(
                             ctx.style.connections.highlight_stroke.color,
                             ctx.style.connections.highlight_stroke.color,
                             ctx.style.connections.highlight_stroke.width,
                             feather,
                         );
                     } else {
-                        curve.mesh.build_curve(
-                            &curve.points,
+                        curve.mesh.build_curve_from_points(
                             ctx.style.node.output_port_color,
                             ctx.style.node.input_port_color,
                             ctx.style.connections.stroke_width,
