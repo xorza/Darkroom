@@ -1244,7 +1244,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn aszasdasd() -> anyhow::Result<()> {
+    async fn once_node_recomputes_on_binding_change_with_cached_inputs() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 3),
@@ -1576,7 +1576,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn asd() -> anyhow::Result<()> {
+    async fn cached_upstream_output_reused_after_rebinding() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
