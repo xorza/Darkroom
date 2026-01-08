@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align2, Color32, FontId, Rect, Response, Sense, Ui};
+use egui::{Align2, Color32, FontId, Pos2, Response, Sense, Ui};
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
@@ -26,10 +26,17 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn show(self, ui: &mut Ui, rect: Rect) -> Response {
-        assert!(rect.width().is_finite() && rect.height().is_finite());
+    pub fn show(self, ui: &mut Ui, pos: Pos2, align: Align2) -> Response {
         assert!(self.speed.is_finite());
 
+        let value_text = self.value.to_string();
+        let galley = ui
+            .painter()
+            .layout_no_wrap(value_text.clone(), self.font.clone(), self.color);
+        let size = galley.size();
+        assert!(size.x.is_finite() && size.y.is_finite());
+
+        let rect = align.anchor_size(pos, size);
         let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
 
         if response.drag_started() {
@@ -55,13 +62,7 @@ impl<'a> DragValue<'a> {
             ui.data_mut(|data| data.remove::<i64>(self.id));
         }
 
-        ui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            self.value.to_string(),
-            self.font,
-            self.color,
-        );
+        ui.painter().galley(rect.min, galley, self.color);
 
         response
     }

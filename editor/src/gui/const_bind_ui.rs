@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Stroke, StrokeKind, TextEdit, UiBuilder, Vec2, pos2};
+use egui::{Align, Align2, Stroke, TextEdit, UiBuilder, Vec2, pos2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -27,20 +27,11 @@ pub fn render_const_bindings(
 
         let input_center = node_layout.input_center(input_idx);
         let label = const_input_text(ctx, node.id, input_idx, value);
-        let char_count = label.chars().count().max(1);
-        let label_width = mono_font.size.max(1.0) * char_count as f32;
-        let badge_width = label_width + padding * 2.0;
-        let badge_right = input_center.x - port_radius - padding * 2.0;
-        let badge_height = mono_font.size;
-        let badge_rect = egui::Rect::from_min_max(
-            pos2(
-                badge_right - badge_width,
-                input_center.y - badge_height * 0.5,
-            ),
-            pos2(badge_right, input_center.y + badge_height * 0.5),
-        );
 
-        let link_start = pos2(badge_rect.max.x, input_center.y);
+        let badge_right = input_center.x - port_radius - 10.0 - padding * 2.0;
+        let badge_height = mono_font.size;
+
+        let link_start = pos2(badge_right, input_center.y);
         let link_end = pos2(input_center.x - port_radius, input_center.y);
 
         ctx.painter.line_segment(
@@ -50,16 +41,13 @@ pub fn render_const_bindings(
                 ctx.style.node.input_port_color,
             ),
         );
-        ctx.painter.rect(
-            badge_rect,
-            ctx.style.small_corner_radius * ctx.scale,
-            ctx.style.inactive_bg_fill,
-            ctx.style.node.const_stroke,
-            StrokeKind::Outside,
-        );
-
-        let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
-        text_ui.set_clip_rect(badge_rect);
+        // ctx.painter.rect(
+        //     badge_rect,
+        //     ctx.style.small_corner_radius * ctx.scale,
+        //     ctx.style.inactive_bg_fill,
+        //     ctx.style.node.const_stroke,
+        //     StrokeKind::Outside,
+        // );
 
         if let StaticValue::Int(value) = value {
             let drag_id = ctx
@@ -67,17 +55,24 @@ pub fn render_const_bindings(
                 .make_persistent_id(("const_int_drag", node.id, input_idx));
             let response = DragValue::new(value, drag_id, mono_font.clone(), ctx.style.text_color)
                 .speed(1.0)
-                .show(&mut text_ui, badge_rect);
+                .show(ctx.ui, link_start, Align2::RIGHT_CENTER);
             if response.changed() {
                 ui_interaction
                     .actions
                     .push((node.id, GraphUiAction::InputChanged { input_idx }));
             }
         } else {
+            let badge_rect = egui::Rect::from_min_max(
+                pos2(badge_right - 120.0, input_center.y - badge_height * 0.5),
+                pos2(badge_right, input_center.y + badge_height * 0.5),
+            );
+            let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
+            text_ui.set_clip_rect(badge_rect);
+
             let text_id = ctx
                 .ui
                 .make_persistent_id(("const_input_text", node.id, input_idx));
-            let mut text = const_input_text(ctx, node.id, input_idx, value);
+            let mut text = label;
             let text_edit = TextEdit::singleline(&mut text)
                 .id(text_id)
                 .font(mono_font.clone())
