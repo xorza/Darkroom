@@ -10,6 +10,7 @@ use egui::{
     Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
+use graph::execution_graph::ExecutedNodeStats;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
@@ -27,6 +28,13 @@ pub enum PortDragInfo {
 #[derive(Debug, Default)]
 pub struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
+}
+
+#[derive(Debug)]
+struct NodeExecutionInfo<'a> {
+    cached: bool,
+    has_missing_inputs: bool,
+    executed: Option<&'a ExecutedNodeStats>,
 }
 
 impl NodeUi {
@@ -51,14 +59,7 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
-            let execute_stats = if let Some(execution_stats) = execution_stats {
-                execution_stats
-                    .executed_nodes
-                    .iter()
-                    .find(|b| b.node_id == node_id)
-            } else {
-                None
-            };
+            let _node_execution_info = node_execution_info(node_id, execution_stats);
 
             render_body(ctx, node_layout, is_selected);
             if render_remove_btn(ctx, ui_interaction, &node_id, node_layout) {
@@ -77,6 +78,32 @@ impl NodeUi {
         }
 
         drag_port_info
+    }
+}
+
+fn node_execution_info<'a>(
+    node_id: NodeId,
+    execution_stats: Option<&'a ExecutionStats>,
+) -> NodeExecutionInfo<'a> {
+    let Some(execution_stats) = execution_stats else {
+        return NodeExecutionInfo {
+            cached: false,
+            has_missing_inputs: false,
+            executed: None,
+        };
+    };
+
+    let executed = execution_stats
+        .executed_nodes
+        .iter()
+        .find(|stats| stats.node_id == node_id);
+    let cached = execution_stats.cached_nodes.contains(&node_id);
+    let has_missing_inputs = execution_stats.nodes_with_missing_inputs.contains(&node_id);
+
+    NodeExecutionInfo {
+        cached,
+        has_missing_inputs,
+        executed,
     }
 }
 
