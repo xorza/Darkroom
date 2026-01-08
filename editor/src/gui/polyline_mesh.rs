@@ -13,7 +13,7 @@ impl PolylineMesh {
     pub fn with_point_capacity(points: usize) -> Self {
         Self {
             mesh: Arc::new(polyline_mesh_with_capacity(points)),
-            points: vec![Pos2::ZERO; points],
+            points: Vec::with_capacity(points),
         }
     }
 

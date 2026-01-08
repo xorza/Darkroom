@@ -212,6 +212,8 @@ impl ConnectionUi {
                     curve.input_pos = input_pos;
                     curve.inited = true;
 
+                    curve.mesh.points_mut().clear();
+                    curve.mesh.points_mut().resize(POINTS, Pos2::ZERO); // Reserve space for points
                     ConnectionBezier::sample(
                         curve.mesh.points_mut().as_mut_slice(),
                         output_pos,
@@ -277,6 +279,7 @@ impl ConnectionUi {
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
 
+            // todo use poluline mesh
             let mut points = [Pos2::default(); POINTS];
             ConnectionBezier::sample(&mut points, start, end, ctx.scale);
             add_curve_to_mesh(
