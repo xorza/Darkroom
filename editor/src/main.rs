@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+mod app_data;
 mod common;
 mod gui;
 mod init;
@@ -11,8 +12,8 @@ use eframe::{NativeOptions, egui};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::app_data::AppData;
 use crate::main_ui::MainUi;
-use crate::model::AppData;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -1,5 +1,5 @@
+use crate::app_data::AppData;
 use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
-use crate::model::AppData;
 use eframe::egui;
 
 #[derive(Clone, Debug)]
