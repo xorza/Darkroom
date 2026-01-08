@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Stroke, StrokeKind, TextEdit, UiBuilder, pos2};
+use egui::{Align, DragValue, Stroke, StrokeKind, TextEdit, UiBuilder, Vec2, pos2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -17,7 +17,6 @@ pub fn render_const_bindings(
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let padding = ctx.style.small_padding * ctx.scale;
-    let _small_padding = ctx.style.small_padding * ctx.scale;
     let font = ctx.style.sub_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -59,33 +58,63 @@ pub fn render_const_bindings(
             StrokeKind::Outside,
         );
 
-        let text_id = ctx
-            .ui
-            .make_persistent_id(("const_input_text", node.id, input_idx));
-        let mut text = const_input_text(ctx, node.id, input_idx, value);
-        let text_edit = TextEdit::singleline(&mut text)
-            .id(text_id)
-            .font(font.clone())
-            .desired_width(badge_rect.width())
-            .vertical_align(Align::Center)
-            .horizontal_align(Align::Center)
-            .margin(0.0)
-            .clip_text(true)
-            .frame(false);
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
-        let response = text_ui.add_sized(badge_rect.size(), text_edit);
 
-        if response.changed()
-            && let Some(parsed) = parse_static_value(&text, value)
-            && *value != parsed
-        {
-            *value = parsed;
-            ui_interaction
-                .actions
-                .push((node.id, GraphUiAction::InputChanged { input_idx }));
+        if let StaticValue::Int(value) = value {
+            let mut new_value = *value;
+            let drag = DragValue::new(&mut new_value)
+                .speed(1.0)
+                .custom_formatter(|value, _| format!("{value:.0}"));
+            let prev_style = text_ui.style().clone();
+            let mut style = (*prev_style).clone();
+            style.override_font_id = Some(font.clone());
+            let mut visuals = style.visuals.clone();
+            visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.inactive.bg_stroke = Stroke::NONE;
+            visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+            visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.active.bg_stroke = Stroke::NONE;
+            visuals.widgets.open.bg_fill = egui::Color32::TRANSPARENT;
+            visuals.widgets.open.bg_stroke = Stroke::NONE;
+            style.visuals = visuals;
+            text_ui.set_style(style);
+            let response = text_ui.add_sized(badge_rect.size(), drag);
+            text_ui.set_style(prev_style);
+            if response.changed() && new_value != *value {
+                *value = new_value;
+                ui_interaction
+                    .actions
+                    .push((node.id, GraphUiAction::InputChanged { input_idx }));
+            }
+        } else {
+            let text_id = ctx
+                .ui
+                .make_persistent_id(("const_input_text", node.id, input_idx));
+            let mut text = const_input_text(ctx, node.id, input_idx, value);
+            let text_edit = TextEdit::singleline(&mut text)
+                .id(text_id)
+                .font(font.clone())
+                .desired_width(badge_rect.width())
+                .vertical_align(Align::Center)
+                .horizontal_align(Align::Center)
+                .margin(Vec2::ZERO)
+                .clip_text(true)
+                .frame(false);
+            let response = text_ui.add_sized(badge_rect.size(), text_edit);
+
+            if response.changed()
+                && let Some(parsed) = parse_static_value(&text, value)
+                && *value != parsed
+            {
+                *value = parsed;
+                ui_interaction
+                    .actions
+                    .push((node.id, GraphUiAction::InputChanged { input_idx }));
+            }
+            ctx.ui.data_mut(|data| data.insert_temp(text_id, text));
         }
-        ctx.ui.data_mut(|data| data.insert_temp(text_id, text));
     }
 }
 
