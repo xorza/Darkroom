@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use eframe::egui;
-use egui::Pos2;
+use egui::{Mesh, Pos2, Shape};
 
 use crate::gui::graph_ctx::GraphContext;
 
@@ -10,6 +12,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 pub struct ConnectionBreaker {
     segments: Vec<(Pos2, Pos2)>,
     last_point: Option<Pos2>,
+    mesh: Arc<Mesh>,
 }
 
 impl Default for ConnectionBreaker {
@@ -17,6 +20,7 @@ impl Default for ConnectionBreaker {
         Self {
             segments: Vec::with_capacity(max_segments_capacity()),
             last_point: None,
+            mesh: Arc::default(),
         }
     }
 }
@@ -25,10 +29,12 @@ impl ConnectionBreaker {
     pub fn reset(&mut self) {
         self.segments.clear();
         self.last_point = None;
+
+        Arc::get_mut(&mut self.mesh).unwrap().clear();
     }
 
     pub fn start(&mut self, point: Pos2) {
-        self.segments.clear();
+        self.reset();
         self.last_point = Some(point);
     }
 
@@ -84,6 +90,8 @@ impl ConnectionBreaker {
 
         ctx.painter
             .line(points, ctx.style.connections.breaker_stroke);
+
+        // ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
     fn path_length(&self) -> f32 {

@@ -69,7 +69,7 @@ struct ConnectionCurve {
 
 impl ConnectionCurve {
     fn new(key: ConnectionKey) -> Self {
-        let (vertex_capacity, index_capacity) = bezier_mesh_capacity(connection_bezier::POINTS);
+        let (vertex_capacity, index_capacity) = polyline_mesh_capacity(connection_bezier::POINTS);
         let mut mesh = Mesh::default();
         mesh.vertices.reserve(vertex_capacity);
         mesh.indices.reserve(index_capacity);
@@ -98,7 +98,7 @@ pub(crate) struct ConnectionUi {
 
 impl Default for ConnectionUi {
     fn default() -> Self {
-        let (vertex_capacity, index_capacity) = bezier_mesh_capacity(connection_bezier::POINTS);
+        let (vertex_capacity, index_capacity) = polyline_mesh_capacity(connection_bezier::POINTS);
         let mut mesh = Mesh::default();
         mesh.vertices.reserve(10 * vertex_capacity);
         mesh.indices.reserve(10 * index_capacity);
@@ -393,7 +393,7 @@ fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-fn bezier_mesh_capacity(points: usize) -> (usize, usize) {
+fn polyline_mesh_capacity(points: usize) -> (usize, usize) {
     assert!(points >= 2, "bezier point count must be at least 2");
     let segments = points - 1;
     let quads_per_segment = 3;
