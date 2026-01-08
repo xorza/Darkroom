@@ -109,6 +109,7 @@ pub struct ExecutionNode {
     pub terminal: bool,
     pub missing_required_inputs: bool,
     pub wants_execute: bool,
+    pub cached: bool,
     pub inputs_updated: bool,
     pub bindings_changed: bool,
     pub behavior: ExecutionBehavior,
@@ -566,6 +567,16 @@ impl ExecutionGraph {
             });
         }
 
+        for e_node_idx in self.e_node_process_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+            if e_node.missing_required_inputs {
+                nodes_with_missing_inputs.push(e_node.id);
+            }
+            // if e_node.missing_required_inputs {
+            //      cached_nodes.push(e_node.id);
+            // }
+        }
+
         ExecutionStats {
             elapsed_secs: start.elapsed().as_secs_f64(),
             executed_nodes,
@@ -632,15 +643,21 @@ impl ExecutionGraph {
             e_node.inputs_updated = inputs_updated;
             e_node.bindings_changed = bindings_changed;
             e_node.missing_required_inputs = missing_required_inputs;
-            e_node.wants_execute = !e_node.missing_required_inputs
-                && (e_node.bindings_changed
-                    || match e_node.behavior {
-                        ExecutionBehavior::Impure => true,
-                        ExecutionBehavior::Pure => {
-                            e_node.output_values.is_none() || e_node.inputs_updated
-                        }
-                        ExecutionBehavior::Once => e_node.output_values.is_none(),
-                    });
+
+            if e_node.missing_required_inputs {
+                e_node.wants_execute = false;
+                e_node.cached = false;
+            } else if e_node.bindings_changed {
+                e_node.wants_execute = true;
+                e_node.cached = false;
+            } else {
+                e_node.cached = match e_node.behavior {
+                    ExecutionBehavior::Impure => false,
+                    ExecutionBehavior::Pure => e_node.output_values.is_some() && !e_node.inputs_updated,
+                    ExecutionBehavior::Once => e_node.output_values.is_some(),
+                };
+                e_node.wants_execute = !e_node.cached;
+            }
         }
     }
 
