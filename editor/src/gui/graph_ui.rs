@@ -25,7 +25,7 @@ enum InteractionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrimaryState {
+enum PointerButtonState {
     Pressed,
     Down,
     Released,
@@ -144,22 +144,23 @@ impl GraphUi {
     ) -> Result<(), Error> {
         let primary_state = ctx.ui.input(|input| {
             if input.pointer.primary_pressed() {
-                Some(PrimaryState::Pressed)
+                Some(PointerButtonState::Pressed)
             } else if input.pointer.primary_released() {
-                Some(PrimaryState::Released)
+                Some(PointerButtonState::Released)
             } else if input.pointer.primary_down() {
-                Some(PrimaryState::Down)
+                Some(PointerButtonState::Down)
             } else {
                 None
             }
         });
+        let secondary_pressed = ctx.ui.input(|input| input.pointer.secondary_pressed());
 
         let pointer_on_background = background_response.hovered();
 
-        let primary_pressed = matches!(primary_state, Some(PrimaryState::Pressed));
+        let primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
         let primary_down = matches!(
             primary_state,
-            Some(PrimaryState::Pressed | PrimaryState::Down)
+            Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
 
         match self.state {
@@ -175,7 +176,10 @@ impl GraphUi {
                 }
             }
             InteractionState::BreakingConnections => {
-                if primary_down {
+                if secondary_pressed {
+                    self.connection_breaker.reset();
+                    self.state = InteractionState::Idle;
+                } else if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
                     for connection in self.connections.highlighted.iter() {
