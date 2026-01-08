@@ -68,12 +68,13 @@ struct Visit {
     e_node_idx: usize,
     cause: VisitCause,
 }
-#[derive(Clone, Default, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionPortAddress {
+    pub target_id: NodeId,
     pub target_idx: usize,
     pub port_idx: usize,
 }
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub enum ExecutionBinding {
     #[default]
     Undefined,
@@ -365,17 +366,42 @@ impl ExecutionGraph {
                     },
                 );
 
+                //todo simplify
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                    target_idx: output_e_node_idx,
-                    port_idx: port_address.port_idx,
-                });
-                if e_input.binding != desired_binding {
+                let ExecutionBinding::Bind(e_port_address) = &mut e_input.binding else {
                     e_input.binding_changed = true;
-                    e_input.binding = desired_binding;
+                    e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                        target_id: port_address.target_id,
+                        target_idx: output_e_node_idx,
+                        port_idx: port_address.port_idx,
+                    });
+                    continue;
+                };
+
+                if e_port_address.target_id == port_address.target_id
+                    && e_port_address.port_idx == port_address.port_idx
+                {
+                    e_port_address.target_idx = output_e_node_idx;
+                } else {
+                    e_input.binding_changed = true;
+                    *e_port_address = ExecutionPortAddress {
+                        target_id: port_address.target_id,
+                        target_idx: output_e_node_idx,
+                        port_idx: port_address.port_idx,
+                    };
                 }
 
-                assert_ne!(e_input.binding, ExecutionBinding::Undefined);
+                // let desired_binding = ExecutionBinding::Bind(ExecutionPortAddress {
+                //     target_id: e_port_address.target_id,
+                //     target_idx: output_e_node_idx,
+                //     port_idx: e_port_address.port_idx,
+                // });
+                // if e_input.binding != desired_binding {
+                //     e_input.binding_changed = true;
+                //     e_input.binding = desired_binding;
+                // }
+
+                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
             }
         }
 
@@ -512,9 +538,9 @@ impl ExecutionGraph {
             e_node.run_time = start.elapsed().as_secs_f64();
 
             // after node execution assume unchanged
-            e_node.inputs.iter_mut().for_each(|input| {
-                assert_ne!(input.binding, ExecutionBinding::Undefined);
-                input.binding_changed = false;
+            e_node.inputs.iter_mut().for_each(|e_input| {
+                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
+                e_input.binding_changed = false;
             });
 
             if let Err(err) = invoke_result {
@@ -764,7 +790,7 @@ impl ExecutionGraph {
             }
 
             for e_input in e_node.inputs.iter() {
-                assert_ne!(e_input.binding, ExecutionBinding::Undefined);
+                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
 
                 if let ExecutionBinding::Bind(port_address) = &e_input.binding {
                     assert!(port_address.target_idx < self.e_nodes.len());
