@@ -22,10 +22,19 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
+pub struct ExecutedNodeStats {
+    pub node_id: NodeId,
+    pub elapsed_secs: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct ExecutionStats {
     pub elapsed_secs: f64,
-    pub executed_nodes: usize,
+
+    pub executed_nodes: Vec<ExecutedNodeStats>,
+    pub nodes_with_missing_inputs: Vec<NodeId>,
+    pub cached_nodes: Vec<NodeId>,
 }
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
