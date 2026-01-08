@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{PointerButton, Pos2, Response, Sense, Ui, Vec2};
 use graph::graph::NodeId;
-use graph::prelude::{Binding, FuncLib, PortAddress};
+use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::gui::background::BackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -81,6 +81,7 @@ impl GraphUi {
         &mut self,
         ui: &mut Ui,
         view_graph: &mut model::ViewGraph,
+        execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
         arena: &bumpalo::Bump,

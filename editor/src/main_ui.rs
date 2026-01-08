@@ -111,6 +111,7 @@ impl MainUi {
             let result = self.graph_ui.render(
                 ui,
                 &mut app_data.view_graph,
+                app_data.execution_stats.as_ref(),
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
                 &self.arena,
