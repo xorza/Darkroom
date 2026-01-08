@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Layout, Stroke, StrokeKind, TextEdit, UiBuilder, pos2};
+use egui::{Align, Layout, Stroke, StrokeKind, TextEdit, UiBuilder, pos2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -67,6 +67,7 @@ pub fn render_const_bindings(
             .id(text_id)
             .font(font.clone())
             .desired_width(badge_rect.width())
+            .vertical_align(Align::Min)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
