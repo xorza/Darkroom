@@ -157,6 +157,8 @@ impl<'bump, T: 'bump> Drop for BumpVecDeque<'bump, T> {
 #[cfg(test)]
 mod tests {
     use super::BumpVecDeque;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn push_pop_preserves_order() {
@@ -206,5 +208,37 @@ mod tests {
         assert!(deque.is_empty());
         deque.push_back(9);
         assert_eq!(deque.pop_front(), 9);
+    }
+
+    #[test]
+    fn drop_drops_all_items() {
+        #[derive(Debug)]
+        struct DropCounter {
+            drops: Arc<AtomicUsize>,
+        }
+
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.drops.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let drops = Arc::new(AtomicUsize::new(0));
+        {
+            let bump = bumpalo::Bump::new();
+            let mut deque = BumpVecDeque::new_in(&bump);
+            deque.push_back(DropCounter {
+                drops: drops.clone(),
+            });
+            deque.push_back(DropCounter {
+                drops: drops.clone(),
+            });
+            deque.push_back(DropCounter {
+                drops: drops.clone(),
+            });
+            assert_eq!(deque.len(), 3);
+        }
+
+        assert_eq!(drops.load(Ordering::SeqCst), 3);
     }
 }
