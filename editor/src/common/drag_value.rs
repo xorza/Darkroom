@@ -40,7 +40,10 @@ impl<'a> DragValue<'a> {
             let start_value = ui
                 .data_mut(|data| data.get_temp::<i64>(self.id))
                 .unwrap_or(*self.value);
-            let delta = response.drag_delta().x;
+            let delta = response
+                .total_drag_delta()
+                .expect("dragged response should have total delta")
+                .x;
             let new_value = start_value + (delta * self.speed).round() as i64;
             if new_value != *self.value {
                 *self.value = new_value;
