@@ -1168,7 +1168,8 @@ mod tests {
         // nothing changed in uppdate so nothing should recompute
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
-        graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(2.into());
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = mult.inputs[1].binding.clone();
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
@@ -1176,6 +1177,62 @@ mod tests {
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
             ["mult", "print"]
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn aszasdasd() -> anyhow::Result<()> {
+        let mut graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 3),
+            get_b: Arc::new(move || 55),
+            print: Arc::new(move |_| {}),
+        });
+        let mut execution_graph = ExecutionGraph::default();
+
+        graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph)[2..],
+            ["sum", "mult", "print"]
+        );
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        // nothing changed in uppdate so nothing should recompute
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        let old_binding0 = mult.inputs[0].binding.clone();
+        let old_binding1 = mult.inputs[1].binding.clone();
+        mult.inputs[0].binding = Binding::Const(2.into());
+        mult.inputs[1].binding = Binding::Const(22.into());
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"]
+        );
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = old_binding1;
+        mult.inputs[1].binding = old_binding0;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["mult", "print"],
+            "mult bindings changed, but all dependency nodes already have cached outputs, so onlu mult and print should recompute"
         );
 
         Ok(())
