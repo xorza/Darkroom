@@ -67,7 +67,10 @@ pub fn render_const_bindings(
             .id(text_id)
             .font(font.clone())
             .desired_width(badge_rect.width())
-            .vertical_align(Align::Min)
+            .vertical_align(Align::Center)
+            .horizontal_align(Align::Center)
+            .margin(0.0)
+            .clip_text(true)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
