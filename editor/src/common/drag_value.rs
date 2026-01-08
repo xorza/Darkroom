@@ -1,5 +1,8 @@
 use eframe::egui;
-use egui::{Align2, Color32, FontId, Pos2, Response, Sense, Stroke, StrokeKind, Ui, Vec2};
+use egui::{
+    Align, Align2, Color32, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind, TextEdit, Ui,
+    Vec2,
+};
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
@@ -63,7 +66,11 @@ impl<'a> DragValue<'a> {
         assert!(size.x.is_finite() && size.y.is_finite());
 
         let rect = align.anchor_size(pos, size);
-        let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
+        let edit_id = self.id.with("edit");
+        let edit_text_id = self.id.with("edit_text");
+        let mut edit_active = ui
+            .data_mut(|data| data.get_temp::<bool>(edit_id))
+            .unwrap_or(false);
 
         if self.background_enabled {
             ui.painter().rect(
@@ -73,6 +80,58 @@ impl<'a> DragValue<'a> {
                 self.background_stroke,
                 StrokeKind::Outside,
             );
+        }
+
+        if edit_active {
+            let mut edit_text = ui
+                .data_mut(|data| data.get_temp::<String>(edit_text_id))
+                .unwrap_or_else(|| self.value.to_string());
+            let text_edit = TextEdit::singleline(&mut edit_text)
+                .id(edit_id)
+                .font(self.font.clone())
+                .desired_width(rect.width())
+                .vertical_align(Align::Center)
+                .horizontal_align(align.x())
+                .margin(self.padding)
+                .clip_text(true)
+                .frame(false);
+            let mut response = ui.put(rect, text_edit);
+
+            if response.lost_focus()
+                && ui.input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click())
+            {
+                if let Ok(parsed) = edit_text.trim().parse::<i64>()
+                    && parsed != *self.value
+                {
+                    *self.value = parsed;
+                    response.mark_changed();
+                }
+                edit_active = false;
+            } else if response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape)) {
+                edit_active = false;
+            }
+
+            ui.data_mut(|data| {
+                if edit_active {
+                    data.insert_temp(edit_id, true);
+                    data.insert_temp(edit_text_id, edit_text);
+                } else {
+                    data.remove::<bool>(edit_id);
+                    data.remove::<String>(edit_text_id);
+                }
+            });
+
+            return response;
+        }
+
+        let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
+
+        if response.clicked() {
+            ui.data_mut(|data| {
+                data.insert_temp(edit_id, true);
+                data.insert_temp(edit_text_id, self.value.to_string());
+            });
+            ui.memory_mut(|memory| memory.request_focus(edit_id));
         }
 
         if response.drag_started() {

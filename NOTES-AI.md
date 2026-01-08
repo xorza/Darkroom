@@ -48,6 +48,7 @@ dedicated monospaced font from Style.
 `DragValue` now accepts position/alignment only, deriving its interaction rect from the value text galley size.
 `DragValue` can render its own background fill/stroke and is used for const int badges.
 `DragValue` now supports configurable padding around the text for sizing and alignment.
+`DragValue` now supports click-to-edit inline text input, committing on Enter or focus loss and canceling with Escape.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
