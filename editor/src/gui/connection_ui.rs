@@ -246,7 +246,7 @@ impl ConnectionUi {
                 }
 
                 let highlighted =
-                    if let Some(segments) = breaker.and_then(|breaker| Some(breaker.segments())) {
+                    if let Some(segments) = breaker.map(|breaker| breaker.segments()) {
                         let mut hit = false;
                         'outer: for (b1, b2) in segments {
                             let curve_segments = curve

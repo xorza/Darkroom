@@ -9,7 +9,7 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NodeLayout {
     inited: bool,
     scale: f32,
