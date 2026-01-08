@@ -7,7 +7,8 @@ use common::BumpVecDeque;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Color32, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke, StrokeKind, Vec2,
+    pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -153,6 +154,20 @@ fn render_body(
         ctx.style.inactive_bg_stroke,
         StrokeKind::Middle,
     );
+    if let Some(executed) = node_execution_info.executed {
+        let text_pos = pos2(
+            node_layout.body_rect.min.x,
+            node_layout.body_rect.max.y + ctx.style.small_padding * ctx.scale,
+        );
+        let label = format!("{:.1} ms", executed.elapsed_secs * 1000.0);
+        ctx.painter.text(
+            text_pos,
+            Align2::LEFT_TOP,
+            label,
+            ctx.style.sub_font.scaled(ctx.scale),
+            ctx.style.noninteractive_text_color,
+        );
+    }
     if selected {
         let mut header_rect = node_layout.body_rect;
         header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
