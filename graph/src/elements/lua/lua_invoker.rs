@@ -428,7 +428,7 @@ mod tests {
     use crate::{
         context::ContextManager,
         execution_graph::OutputUsage,
-        prelude::{InputState, InvokeCache, InvokeInput},
+        prelude::{InvokeCache, InvokeInput},
     };
 
     #[test]
@@ -502,11 +502,11 @@ mod tests {
 
         let inputs = vec![
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(3),
             },
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(5),
             },
         ];
@@ -573,11 +573,11 @@ mod tests {
 
         let inputs = vec![
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(6),
             },
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(7),
             },
         ];

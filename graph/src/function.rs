@@ -6,7 +6,6 @@ use std::sync::Arc;
 
 use crate::context::{ContextManager, ContextType};
 use crate::execution_graph::OutputUsage;
-use crate::prelude::InputState;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
@@ -33,7 +32,7 @@ pub type InvokeResult<T> = Result<T, InvokeError>;
 
 #[derive(Debug)]
 pub struct InvokeInput {
-    pub state: InputState,
+    pub changed: bool,
     pub value: DynamicValue,
 }
 
@@ -519,7 +518,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
-    use crate::execution_graph::{InputState, OutputUsage};
+    use crate::execution_graph::OutputUsage;
     use crate::function::{InvokeCache, InvokeInput, TestFuncHooks, test_func_lib};
     use common::FileFormat;
 
@@ -546,11 +545,11 @@ mod tests {
         let mut cache = InvokeCache::default();
         let mut inputs = vec![
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(2),
             },
             InvokeInput {
-                state: InputState::Changed,
+                changed: true,
                 value: DynamicValue::Int(4),
             },
         ];
