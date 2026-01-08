@@ -59,13 +59,8 @@ impl ConnectionDrag {
 #[derive(Debug, Clone)]
 struct ConnectionCurve {
     key: ConnectionKey,
-
-    inited: bool,
     highlighted: bool,
-
-    output_pos: Pos2,
-    input_pos: Pos2,
-
+    endpoints: ConnectionEndpoints,
     mesh: PolylineMesh,
 }
 
@@ -73,12 +68,41 @@ impl ConnectionCurve {
     fn new(key: ConnectionKey) -> Self {
         Self {
             key,
-            inited: false,
             highlighted: false,
-            output_pos: Pos2::ZERO,
-            input_pos: Pos2::ZERO,
+            endpoints: ConnectionEndpoints::default(),
             mesh: PolylineMesh::with_point_capacity(POINTS),
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConnectionEndpoints {
+    inited: bool,
+    output_pos: Pos2,
+    input_pos: Pos2,
+}
+
+impl Default for ConnectionEndpoints {
+    fn default() -> Self {
+        Self {
+            inited: false,
+            output_pos: Pos2::ZERO,
+            input_pos: Pos2::ZERO,
+        }
+    }
+}
+
+impl ConnectionEndpoints {
+    fn update(&mut self, output_pos: Pos2, input_pos: Pos2) -> bool {
+        let needs_rebuild = !self.inited
+            || crate::common::pos_changed(self.output_pos, output_pos)
+            || crate::common::pos_changed(self.input_pos, input_pos);
+        if needs_rebuild {
+            self.inited = true;
+            self.output_pos = output_pos;
+            self.input_pos = input_pos;
+        }
+        needs_rebuild
     }
 }
 
@@ -88,9 +112,11 @@ pub(crate) struct ConnectionUi {
     pub(crate) highlighted: HashSet<ConnectionKey>,
     pub(crate) drag: Option<ConnectionDrag>,
 
+    temp_connection: PolylineMesh,
+    temp_connection_endpoints: ConnectionEndpoints,
+
     //caches
     mesh: Arc<Mesh>,
-    temp_connection: PolylineMesh,
 }
 
 impl Default for ConnectionUi {
@@ -103,6 +129,7 @@ impl Default for ConnectionUi {
             drag: None,
             mesh: Arc::new(mesh),
             temp_connection: PolylineMesh::with_point_capacity(POINTS),
+            temp_connection_endpoints: ConnectionEndpoints::default(),
         }
     }
 }
@@ -205,15 +232,8 @@ impl ConnectionUi {
                 let input_pos = input_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding.port_idx);
 
-                let needs_rebuild = !curve.inited
-                    || crate::common::pos_changed(curve.output_pos, output_pos)
-                    || crate::common::pos_changed(curve.input_pos, input_pos);
-
+                let needs_rebuild = curve.endpoints.update(output_pos, input_pos);
                 if needs_rebuild {
-                    curve.output_pos = output_pos;
-                    curve.input_pos = input_pos;
-                    curve.inited = true;
-
                     let points = curve.mesh.points_mut();
                     points.clear();
                     points.resize(POINTS, Pos2::ZERO); // Reserve space for points
@@ -281,16 +301,20 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            let points = self.temp_connection.points_mut();
-            points.clear();
-            points.resize(POINTS, Pos2::ZERO);
-            ConnectionBezier::sample(points.as_mut_slice(), start, end, ctx.scale);
-            self.temp_connection.rebuild(
-                ctx.style.node.output_port_color,
-                ctx.style.node.input_port_color,
-                ctx.style.connections.stroke_width,
-                feather,
-            );
+            let needs_rebuild = self.temp_connection_endpoints.update(start, end);
+            if needs_rebuild {
+                let points = self.temp_connection.points_mut();
+                if points.len() != POINTS {
+                    points.resize(POINTS, Pos2::ZERO);
+                }
+                ConnectionBezier::sample(points.as_mut_slice(), start, end, ctx.scale);
+                self.temp_connection.rebuild(
+                    ctx.style.node.output_port_color,
+                    ctx.style.node.input_port_color,
+                    ctx.style.connections.stroke_width,
+                    feather,
+                );
+            }
             mesh.append_ref(self.temp_connection.mesh());
         }
     }
