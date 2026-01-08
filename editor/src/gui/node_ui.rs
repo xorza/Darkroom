@@ -5,8 +5,8 @@ use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align, Align2, Color32, Layout, PointerButton, Pos2, Rect, Sense, Shape, Stroke,
-    StrokeKind, TextEdit, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Color32, Layout, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind,
+    TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -354,6 +354,7 @@ fn render_const_bindings(
         let text_edit = TextEdit::singleline(&mut text)
             .id(text_id)
             .font(font.clone())
+            .horizontal_align(egui::Align::Center)
             .desired_width(badge_rect.width() - padding * 2.0)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(
