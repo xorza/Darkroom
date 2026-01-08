@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod macros;
 pub mod bool_ext;
+pub mod bump_vec_deque;
 pub mod constants;
 pub mod debug;
 pub mod file_format;
@@ -15,6 +16,7 @@ pub mod toggle;
 pub mod yaml_format;
 
 pub use bool_ext::BoolExt;
+pub use bump_vec_deque::BumpVecDeque;
 pub use constants::EPSILON;
 pub use debug::is_debug;
 pub use file_format::{FileExtensionError, FileFormat, FileFormatResult, get_file_extension};

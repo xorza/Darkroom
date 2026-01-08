@@ -58,7 +58,8 @@ Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.
 Connection bezier sampling now eases parameterization to add detail near endpoints while reducing mid-curve density.
 Connection curve mesh allocation now reserves vertex/index capacity based on bezier point count.
-Const input badge layout now uses `bumpalo::collections::Vec` with a bump-backed index cursor instead of a deque.
+`common::BumpVecDeque` is a bump-backed deque built on `bumpalo::collections::Vec<MaybeUninit<T>>` for arena-friendly
+push/pop without std allocator usage.
 
 ## Repository Layout
 

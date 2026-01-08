@@ -2,7 +2,7 @@ use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
-use bumpalo::collections::Vec as BumpVec;
+use common::BumpVecDeque;
 
 use common::BoolExt;
 use eframe::egui;
@@ -81,7 +81,7 @@ impl NodeUi {
         let padding = ctx.style.padding * ctx.scale;
         let small_padding = ctx.style.small_padding * ctx.scale;
 
-        let mut input_galleys = BumpVec::new_in(ctx.arena);
+        let mut input_galleys = BumpVecDeque::new_in(ctx.arena);
 
         let mut max_badge_width: f32 = 0.0;
         for input in node.inputs.iter() {
@@ -95,17 +95,15 @@ impl NodeUi {
                     .layout_no_wrap(label, font.clone(), ctx.style.text_color);
             let badge_width = label_galley.size().x + padding * 2.0;
             max_badge_width = max_badge_width.max(badge_width);
-            input_galleys.push(label_galley);
+            input_galleys.push_back(label_galley);
         }
 
-        let mut input_galley_idx: usize = 0;
         for (input_idx, input) in node.inputs.iter().enumerate() {
             if !matches!(input.binding, Binding::Const(_)) {
                 continue;
             }
 
-            let label_galley = input_galleys.get(input_galley_idx).unwrap().clone();
-            input_galley_idx += 1;
+            let label_galley = input_galleys.pop_front();
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding;
@@ -144,7 +142,7 @@ impl NodeUi {
                 .galley(label_pos, label_galley, ctx.style.text_color);
         }
 
-        assert_eq!(input_galley_idx, input_galleys.len());
+        assert!(input_galleys.is_empty());
     }
 }
 
