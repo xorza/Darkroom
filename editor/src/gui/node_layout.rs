@@ -80,7 +80,7 @@ impl NodeLayout {
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-        let label_font = ctx.style.sub_font.scaled(self.scale);
+        let label_font = ctx.style.sub_font.scaled(ctx.scale);
 
         if !self.inited || crate::common::scale_changed(self.scale, ctx.scale) {
             self.scale = ctx.scale;

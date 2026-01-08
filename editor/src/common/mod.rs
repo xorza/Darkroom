@@ -7,6 +7,7 @@ pub mod font;
 pub fn scale_changed(old: f32, new: f32) -> bool {
     let diff = (old - new).abs();
     let scale = old.abs().max(new.abs()).max(1.0);
+
     diff / scale > 0.001
 }
 

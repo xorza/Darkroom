@@ -18,7 +18,7 @@ pub fn render_const_bindings(
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let padding = ctx.style.padding * ctx.scale;
-    let small_padding = ctx.style.small_padding * ctx.scale;
+    let _small_padding = ctx.style.small_padding * ctx.scale;
     let mono_font = ctx.style.mono_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
