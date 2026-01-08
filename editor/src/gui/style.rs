@@ -124,21 +124,21 @@ impl Style {
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
                 executed_shadow: Shadow {
-                    color: Color32::from_rgb(41, 135, 81),
+                    color: Color32::from_rgb(66, 216, 130),
                     offset: [0, 0],
-                    blur: 6,
+                    blur: 5,
                     spread: 2,
                 },
                 cached_shadow: Shadow {
-                    color: Color32::from_rgb(155, 135, 47),
+                    color: Color32::from_rgb(248, 216, 75),
                     offset: [0, 0],
-                    blur: 6,
+                    blur: 5,
                     spread: 2,
                 },
                 missing_inputs_shadow: Shadow {
-                    color: Color32::from_rgb(149, 41, 41),
+                    color: Color32::from_rgb(238, 66, 66),
                     offset: [0, 0],
-                    blur: 6,
+                    blur: 5,
                     spread: 2,
                 },
 
