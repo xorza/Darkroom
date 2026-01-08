@@ -52,6 +52,10 @@ pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
+    pub executed_shadow_color: Color32,
+    pub cached_shadow_color: Color32,
+    pub missing_inputs_shadow_color: Color32,
+
     pub cache_btn_width: f32,
     pub remove_btn_size: f32,
 
@@ -118,6 +122,10 @@ impl Style {
                 status_dot_radius: 4.0,
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
+
+                executed_shadow_color: Color32::from_rgb(60, 200, 120),
+                cached_shadow_color: Color32::from_rgb(230, 200, 70),
+                missing_inputs_shadow_color: Color32::from_rgb(220, 60, 60),
 
                 cache_btn_width: 50.0,
                 remove_btn_size: 10.0,

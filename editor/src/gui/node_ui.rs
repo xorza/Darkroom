@@ -125,11 +125,11 @@ fn render_body(
     let corner_radius = ctx.style.corner_radius * ctx.scale;
 
     let shadow_color = if node_execution_info.has_missing_inputs {
-        Some(Color32::from_rgb(220, 60, 60))
+        Some(ctx.style.node.missing_inputs_shadow_color)
     } else if node_execution_info.executed.is_some() {
-        Some(Color32::from_rgb(60, 200, 120))
+        Some(ctx.style.node.executed_shadow_color)
     } else if node_execution_info.cached {
-        Some(Color32::from_rgb(230, 200, 70))
+        Some(ctx.style.node.cached_shadow_color)
     } else {
         None
     };
