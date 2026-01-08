@@ -42,6 +42,7 @@ pub enum OutputUsage {
 pub struct ExecutionInput {
     pub state: InputState,
     pub required: bool,
+    pub dependency_wants_execute: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
@@ -98,7 +99,8 @@ pub struct ExecutionNode {
     pub terminal: bool,
     pub missing_required_inputs: bool,
     pub wants_execute: bool,
-    pub changed_inputs: bool,
+    pub inputs_updated: bool,
+    pub bindings_changed: bool,
     pub behavior: ExecutionBehavior,
 
     pub inputs: Vec<ExecutionInput>,
@@ -167,7 +169,7 @@ impl ExecutionNode {
     }
     fn reset_for_execution(&mut self) {
         self.wants_execute = false;
-        self.changed_inputs = false;
+        self.inputs_updated = false;
         self.missing_required_inputs = false;
         self.run_time = 0.0;
         self.error = None;
@@ -547,7 +549,8 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &mut self.e_nodes[e_node_idx];
 
-            let mut changed_inputs = false;
+            let mut inputs_updated = false;
+            let mut bindings_changed = false;
             let mut missing_required_inputs = false;
 
             assert_ne!(e_node.process_state, ProcessState::None);
@@ -576,21 +579,25 @@ impl ExecutionGraph {
                 };
 
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                changed_inputs |= e_input.state == InputState::Changed;
+                inputs_updated |=
+                    e_input.state == InputState::Changed || e_input.dependency_wants_execute;
+                bindings_changed |= e_input.state == InputState::Changed
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
             e_node.process_state = ProcessState::Forward;
-            e_node.changed_inputs = changed_inputs;
+            e_node.inputs_updated = inputs_updated;
+            e_node.bindings_changed = bindings_changed;
             e_node.missing_required_inputs = missing_required_inputs;
             e_node.wants_execute = !e_node.missing_required_inputs
-                && match e_node.behavior {
-                    ExecutionBehavior::Impure => true,
-                    ExecutionBehavior::Pure => {
-                        e_node.output_values.is_none() || e_node.changed_inputs
-                    }
-                    ExecutionBehavior::Once => e_node.output_values.is_none(),
-                };
+                && (e_node.bindings_changed
+                    || match e_node.behavior {
+                        ExecutionBehavior::Impure => true,
+                        ExecutionBehavior::Pure => {
+                            e_node.output_values.is_none() || e_node.inputs_updated
+                        }
+                        ExecutionBehavior::Once => e_node.output_values.is_none(),
+                    });
         }
     }
 
@@ -853,11 +860,11 @@ mod tests {
         assert_eq!(sum.outputs[0].usage_count, 1);
         assert_eq!(mult.outputs[0].usage_count, 1);
 
-        assert!(!get_a.changed_inputs);
-        assert!(!get_b.changed_inputs);
-        assert!(sum.changed_inputs);
-        assert!(mult.changed_inputs);
-        assert!(print.changed_inputs);
+        assert!(!get_a.inputs_updated);
+        assert!(!get_b.inputs_updated);
+        assert!(sum.inputs_updated);
+        assert!(mult.inputs_updated);
+        assert!(print.inputs_updated);
 
         assert!(print.terminal);
 
@@ -941,7 +948,7 @@ mod tests {
         );
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(mult.changed_inputs);
+        assert!(mult.inputs_updated);
         assert_eq!(mult.inputs[0].state, InputState::Changed);
         assert_eq!(mult.inputs[1].state, InputState::Changed);
 
@@ -954,7 +961,7 @@ mod tests {
         );
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(!execution_graph.by_name("mult").unwrap().changed_inputs);
+        assert!(!execution_graph.by_name("mult").unwrap().inputs_updated);
         assert_eq!(mult.inputs[0].state, InputState::Unchanged);
         assert_eq!(mult.inputs[1].state, InputState::Unchanged);
 
@@ -974,8 +981,8 @@ mod tests {
         assert_eq!(mult.inputs[1].state, InputState::Unchanged);
         assert!(!mult.missing_required_inputs);
         assert!(!print.missing_required_inputs);
-        assert!(mult.changed_inputs);
-        assert!(print.changed_inputs);
+        assert!(mult.inputs_updated);
+        assert!(print.inputs_updated);
 
         Ok(())
     }
