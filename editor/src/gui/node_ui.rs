@@ -56,10 +56,10 @@ impl NodeUi {
             }
             render_cache_btn(ctx, ui_interaction, node_layout, node);
             render_hints(ctx, node_layout, node, func);
-            self.render_node_const_bindings(ctx, node_layout, node);
-            let node_drag_port_result = render_node_ports(ctx, node_layout, view_node);
+            render_const_bindings(ctx, node_layout, node);
+            let node_drag_port_result = render_ports(ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_node_labels(ctx, node_layout);
+            render_port_labels(ctx, node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -67,82 +67,6 @@ impl NodeUi {
         }
 
         drag_port_info
-    }
-
-    fn render_node_const_bindings(
-        &mut self,
-        ctx: &mut GraphContext,
-        node_layout: &NodeLayout,
-        node: &Node,
-    ) {
-        let font = ctx.style.sub_font.scaled(ctx.scale);
-        let port_radius = ctx.style.node.port_radius * ctx.scale;
-
-        let padding = ctx.style.padding * ctx.scale;
-        let small_padding = ctx.style.small_padding * ctx.scale;
-
-        let mut input_galleys = BumpVecDeque::new_in(ctx.arena);
-
-        let mut max_badge_width: f32 = 0.0;
-        for input in node.inputs.iter() {
-            let Binding::Const(value) = &input.binding else {
-                continue;
-            };
-
-            let label = static_value_label(value);
-            let label_galley =
-                ctx.painter
-                    .layout_no_wrap(label, font.clone(), ctx.style.text_color);
-            let badge_width = label_galley.size().x + padding * 2.0;
-            max_badge_width = max_badge_width.max(badge_width);
-            input_galleys.push_back(label_galley);
-        }
-
-        for (input_idx, input) in node.inputs.iter().enumerate() {
-            if !matches!(input.binding, Binding::Const(_)) {
-                continue;
-            }
-
-            let label_galley = input_galleys.pop_front();
-
-            let input_center = node_layout.input_center(input_idx);
-            let badge_right = input_center.x - port_radius - padding;
-            let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding;
-            let badge_rect = egui::Rect::from_min_max(
-                egui::pos2(
-                    badge_right - max_badge_width,
-                    input_center.y - badge_height * 0.5,
-                ),
-                egui::pos2(badge_right, input_center.y + badge_height * 0.5),
-            );
-            let label_pos = egui::pos2(
-                badge_rect.max.x - padding - label_galley.size().x,
-                badge_rect.center().y - label_galley.size().y * 0.5,
-            );
-
-            let link_start = egui::pos2(badge_rect.max.x, input_center.y);
-            let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
-
-            ctx.painter.line_segment(
-                [link_start, link_end],
-                Stroke::new(
-                    ctx.style.connections.stroke_width,
-                    ctx.style.node.input_port_color,
-                ),
-            );
-            ctx.painter.rect(
-                badge_rect,
-                ctx.style.small_corner_radius * ctx.scale,
-                ctx.style.inactive_bg_fill,
-                ctx.style.node.const_stroke,
-                StrokeKind::Inside,
-            );
-
-            ctx.painter
-                .galley(label_pos, label_galley, ctx.style.text_color);
-        }
-
-        assert!(input_galleys.is_empty());
     }
 }
 
@@ -310,7 +234,78 @@ fn render_remove_btn(
     false
 }
 
-fn render_node_ports(
+fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
+    let font = ctx.style.sub_font.scaled(ctx.scale);
+    let port_radius = ctx.style.node.port_radius * ctx.scale;
+
+    let padding = ctx.style.padding * ctx.scale;
+    let small_padding = ctx.style.small_padding * ctx.scale;
+
+    let mut input_galleys = BumpVecDeque::new_in(ctx.arena);
+
+    let mut max_badge_width: f32 = 0.0;
+    for input in node.inputs.iter() {
+        let Binding::Const(value) = &input.binding else {
+            continue;
+        };
+
+        let label = static_value_label(value);
+        let label_galley = ctx
+            .painter
+            .layout_no_wrap(label, font.clone(), ctx.style.text_color);
+        let badge_width = label_galley.size().x + padding * 2.0;
+        max_badge_width = max_badge_width.max(badge_width);
+        input_galleys.push_back(label_galley);
+    }
+
+    for (input_idx, input) in node.inputs.iter().enumerate() {
+        if !matches!(input.binding, Binding::Const(_)) {
+            continue;
+        }
+
+        let label_galley = input_galleys.pop_front();
+
+        let input_center = node_layout.input_center(input_idx);
+        let badge_right = input_center.x - port_radius - padding;
+        let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding;
+        let badge_rect = egui::Rect::from_min_max(
+            egui::pos2(
+                badge_right - max_badge_width,
+                input_center.y - badge_height * 0.5,
+            ),
+            egui::pos2(badge_right, input_center.y + badge_height * 0.5),
+        );
+        let label_pos = egui::pos2(
+            badge_rect.max.x - padding - label_galley.size().x,
+            badge_rect.center().y - label_galley.size().y * 0.5,
+        );
+
+        let link_start = egui::pos2(badge_rect.max.x, input_center.y);
+        let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
+
+        ctx.painter.line_segment(
+            [link_start, link_end],
+            Stroke::new(
+                ctx.style.connections.stroke_width,
+                ctx.style.node.input_port_color,
+            ),
+        );
+        ctx.painter.rect(
+            badge_rect,
+            ctx.style.small_corner_radius * ctx.scale,
+            ctx.style.inactive_bg_fill,
+            ctx.style.node.const_stroke,
+            StrokeKind::Inside,
+        );
+
+        ctx.painter
+            .galley(label_pos, label_galley, ctx.style.text_color);
+    }
+
+    assert!(input_galleys.is_empty());
+}
+
+fn render_ports(
     ctx: &GraphContext,
     node_layout: &NodeLayout,
     view_node: &ViewNode,
@@ -384,7 +379,7 @@ fn render_node_ports(
     port_drag_info
 }
 
-fn render_node_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
+fn render_port_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
     let padding = ctx.style.node.port_label_side_padding * ctx.scale;
 
     for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
