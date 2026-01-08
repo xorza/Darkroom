@@ -5,7 +5,7 @@ use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align, Align2, Color32, Direction, Layout, PointerButton, Pos2, Rect, Sense, Shape, Stroke,
+    Align, Align2, Color32, Layout, PointerButton, Pos2, Rect, Sense, Shape, Stroke,
     StrokeKind, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
