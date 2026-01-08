@@ -8,15 +8,15 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug)]
 pub struct ConnectionBreaker {
-    last_point: Option<Pos2>,
     mesh: PolylineMesh,
+    built_len: usize,
 }
 
 impl Default for ConnectionBreaker {
     fn default() -> Self {
         Self {
-            last_point: None,
             mesh: PolylineMesh::with_point_capacity(max_capacity()),
+            built_len: 0,
         }
     }
 }
@@ -24,13 +24,14 @@ impl Default for ConnectionBreaker {
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
         self.mesh.points_mut().clear();
-        self.last_point = None;
+        self.mesh.clear_mesh();
+        self.built_len = 0;
     }
 
     pub fn start(&mut self, point: Pos2) {
         self.reset();
-        self.last_point = Some(point);
         self.mesh.points_mut().push(point);
+        self.built_len = 1;
     }
 
     pub fn segments(&self) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
@@ -38,10 +39,12 @@ impl ConnectionBreaker {
     }
 
     pub fn add_point(&mut self, point: Pos2) {
-        let Some(last_pos) = self.last_point else {
-            self.last_point = Some(point);
-            return;
-        };
+        let last_pos = self
+            .mesh
+            .points()
+            .last()
+            .copied()
+            .expect("ConnectionBreaker should be started before adding points");
         if last_pos.distance(point) <= MIN_POINT_DISTANCE {
             return;
         }
@@ -66,7 +69,6 @@ impl ConnectionBreaker {
             )
         };
         self.mesh.points_mut().push(clamped);
-        self.last_point = Some(clamped);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -74,18 +76,34 @@ impl ConnectionBreaker {
     }
 
     pub fn render(&mut self, ctx: &GraphContext) {
-        if self.mesh.points().len() < 2 {
+        let point_len = self.mesh.points().len();
+        if point_len < 2 {
+            self.mesh.clear_mesh();
+            self.built_len = point_len;
             return;
         }
 
         let pixels_per_point = ctx.ui.ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
-        self.mesh.rebuild(
-            ctx.style.connections.breaker_stroke.color,
-            ctx.style.connections.breaker_stroke.color,
-            ctx.style.connections.breaker_stroke.width,
-            feather,
-        );
+        let color = ctx.style.connections.breaker_stroke.color;
+        if self.built_len == 0 || self.built_len > point_len {
+            self.mesh.rebuild(
+                color,
+                color,
+                ctx.style.connections.breaker_stroke.width,
+                feather,
+            );
+            self.built_len = point_len;
+        } else if point_len > self.built_len {
+            let start_segment = self.built_len.saturating_sub(1);
+            self.mesh.append_segments_from_points(
+                start_segment,
+                color,
+                ctx.style.connections.breaker_stroke.width,
+                feather,
+            );
+            self.built_len = point_len;
+        }
 
         self.mesh.render(&ctx.painter);
     }

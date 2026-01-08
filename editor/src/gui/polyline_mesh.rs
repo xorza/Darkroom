@@ -49,6 +49,23 @@ impl PolylineMesh {
         add_curve_to_mesh(mesh, points, start_color, end_color, width, feather);
     }
 
+    pub fn append_segments_from_points(
+        &mut self,
+        start_segment: usize,
+        color: Color32,
+        width: f32,
+        feather: f32,
+    ) {
+        let points = self.points.as_slice();
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        add_curve_segments_to_mesh(mesh, points, start_segment, color, width, feather);
+    }
+
+    pub fn clear_mesh(&mut self) {
+        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
+        mesh.clear();
+    }
+
     pub fn render(&self, painter: &Painter) {
         painter.add(Shape::mesh(Arc::clone(&self.mesh)));
     }
@@ -169,4 +186,56 @@ fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
     });
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+}
+
+pub fn add_curve_segments_to_mesh(
+    mesh: &mut Mesh,
+    points: &[Pos2],
+    start_segment: usize,
+    color: Color32,
+    width: f32,
+    feather: f32,
+) {
+    assert!(points.len() >= 2);
+    assert!(width > 0.0);
+    assert!(feather >= 0.0);
+    assert!(start_segment < points.len() - 1);
+
+    let half_width = width * 0.5;
+    for segment in points[start_segment..].windows(2) {
+        let a = segment[0];
+        let b = segment[1];
+        let dir = b - a;
+        if dir.length_sq() <= common::EPSILON {
+            continue;
+        }
+        let normal = dir.normalized().rot90();
+        let outer = half_width + feather;
+        let color_outer = set_alpha(color, 0);
+
+        let inner_plus0 = a + normal * half_width;
+        let inner_minus0 = a - normal * half_width;
+        let inner_plus1 = b + normal * half_width;
+        let inner_minus1 = b - normal * half_width;
+        let outer_plus0 = a + normal * outer;
+        let outer_minus0 = a - normal * outer;
+        let outer_plus1 = b + normal * outer;
+        let outer_minus1 = b - normal * outer;
+
+        add_quad(
+            mesh,
+            [inner_plus0, inner_minus0, inner_minus1, inner_plus1],
+            [color, color, color, color],
+        );
+        add_quad(
+            mesh,
+            [outer_plus0, inner_plus0, inner_plus1, outer_plus1],
+            [color_outer, color, color, color_outer],
+        );
+        add_quad(
+            mesh,
+            [inner_minus0, outer_minus0, outer_minus1, inner_minus1],
+            [color, color_outer, color_outer, color],
+        );
+    }
 }
