@@ -26,8 +26,8 @@ impl BackgroundRenderer {
 
         if !self.inited
             || crate::common::scale_changed(self.last_scale, scale)
-            || crate::common::pan_changed(self.last_pan, pan)
-            || crate::common::pan_changed(self.last_rect_size, rect_size)
+            || crate::common::vec_changed(self.last_pan, pan)
+            || crate::common::vec_changed(self.last_rect_size, rect_size)
         {
             self.rebuild_mesh(ctx, view_graph);
             self.last_scale = scale;

@@ -211,8 +211,8 @@ impl ConnectionUi {
                 let output_pos = output_layout.output_center(binding.port_idx);
 
                 let needs_rebuild = !curve.inited
-                    || curve.output_pos.distance_sq(output_pos) > 1.0
-                    || curve.input_pos.distance_sq(input_pos) > 1.0;
+                    || crate::common::pos_changed(curve.output_pos, output_pos)
+                    || crate::common::pos_changed(curve.input_pos, input_pos);
 
                 if needs_rebuild {
                     curve.output_pos = output_pos;
