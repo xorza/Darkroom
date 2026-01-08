@@ -8,7 +8,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug)]
 pub struct ConnectionBreaker {
-    segments: Vec<(Pos2, Pos2)>,
+    points: Vec<Pos2>,
     last_point: Option<Pos2>,
     mesh: PolylineMesh,
 }
@@ -16,7 +16,7 @@ pub struct ConnectionBreaker {
 impl Default for ConnectionBreaker {
     fn default() -> Self {
         Self {
-            segments: Vec::with_capacity(max_segments_capacity()),
+            points: Vec::with_capacity(max_segments_capacity()),
             last_point: None,
             mesh: PolylineMesh::with_point_capacity(max_segments_capacity()),
         }
@@ -25,17 +25,18 @@ impl Default for ConnectionBreaker {
 
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
-        self.segments.clear();
+        self.points.clear();
         self.last_point = None;
     }
 
     pub fn start(&mut self, point: Pos2) {
         self.reset();
         self.last_point = Some(point);
+        self.points.push(point);
     }
 
-    pub fn segments(&self) -> &[(Pos2, Pos2)] {
-        &self.segments
+    pub fn segments(&self) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
+        self.points.windows(2).map(|pair| (pair[0], pair[1]))
     }
 
     pub fn add_point(&mut self, point: Pos2) {
@@ -66,28 +67,23 @@ impl ConnectionBreaker {
                 last_pos.y + (point.y - last_pos.y) * t,
             )
         };
-        self.segments.push((last_pos, clamped));
+        self.points.push(clamped);
         self.last_point = Some(clamped);
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+
     pub fn render(&mut self, ctx: &GraphContext) {
-        if self.segments.is_empty() {
+        if self.points.len() < 2 {
             return;
         }
-
-        debug_assert!(
-            self.segments.windows(2).all(|pair| pair[0].1 == pair[1].0),
-            "breaker segments must be contiguous"
-        );
-
-        let mut points: Vec<Pos2> = Vec::with_capacity(self.segments.len() + 1);
-        points.push(self.segments[0].0);
-        points.extend(self.segments.iter().map(|(_, end)| end));
 
         let pixels_per_point = ctx.ui.ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
         self.mesh.build_curve(
-            &points,
+            &self.points,
             ctx.style.connections.breaker_stroke.color,
             ctx.style.connections.breaker_stroke.color,
             ctx.style.connections.breaker_stroke.width,
@@ -98,9 +94,9 @@ impl ConnectionBreaker {
     }
 
     fn path_length(&self) -> f32 {
-        self.segments
-            .iter()
-            .map(|(start, end)| start.distance(*end))
+        self.points
+            .windows(2)
+            .map(|pair| pair[0].distance(pair[1]))
             .sum()
     }
 }

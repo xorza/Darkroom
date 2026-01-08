@@ -218,14 +218,15 @@ impl ConnectionUi {
                     ConnectionBezier::sample(&mut curve.points, output_pos, input_pos, ctx.scale);
                 }
 
-                let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
-                    (!breaker.segments().is_empty()).then_some(breaker.segments())
-                }) {
-                    let curve_segments = curve.points.windows(2).map(|pair| (pair[0], pair[1]));
+                let highlighted = if let Some(segments) =
+                    breaker.and_then(|breaker| (!breaker.is_empty()).then_some(breaker.segments()))
+                {
                     let mut hit = false;
-                    'outer: for (b1, b2) in curve_segments {
-                        for (a1, a2) in segments {
-                            if ConnectionBezier::segments_intersect(*a1, *a2, b1, b2) {
+                    'outer: for (b1, b2) in segments {
+                        let curve_segments = curve.points.windows(2).map(|pair| (pair[0], pair[1]));
+
+                        for (a1, a2) in curve_segments {
+                            if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
                                 self.highlighted.insert(connection_key);
                                 hit = true;
                                 break 'outer;
