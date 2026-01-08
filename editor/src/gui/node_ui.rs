@@ -154,16 +154,6 @@ fn render_body(
         StrokeKind::Middle,
     );
     if selected {
-        // let shadow = Shadow {
-        //     offset: [0, 0],
-        //     blur: 3,
-        //     spread: 3,
-        //     color: Color32::from_white_alpha(50),
-        // };
-
-        // ctx.painter.add(Shape::Rect(
-        //     shadow.as_shape(node_layout.body_rect, corner_radius),
-        // ));
         let mut header_rect = node_layout.body_rect;
         header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
 
