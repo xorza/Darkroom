@@ -549,10 +549,28 @@ impl ExecutionGraph {
 
         match error {
             Some(err) => Err(err),
-            None => Ok(ExecutionStats {
-                elapsed_secs: start.elapsed().as_secs_f64(),
-                executed_nodes: self.e_node_invoke_order.len(),
-            }),
+            None => Ok(self.collect_execution_stats(start)),
+        }
+    }
+
+    fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
+        let mut executed_nodes: Vec<ExecutedNodeStats> = Vec::default();
+        let mut nodes_with_missing_inputs: Vec<NodeId> = Vec::default();
+        let mut cached_nodes: Vec<NodeId> = Vec::default();
+
+        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+            executed_nodes.push(ExecutedNodeStats {
+                node_id: e_node.id,
+                elapsed_secs: e_node.run_time,
+            });
+        }
+
+        ExecutionStats {
+            elapsed_secs: start.elapsed().as_secs_f64(),
+            executed_nodes,
+            nodes_with_missing_inputs,
+            cached_nodes,
         }
     }
 

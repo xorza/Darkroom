@@ -59,7 +59,8 @@ impl AppData {
                     let print_output = print_output.swap(None);
                     let summary = format!(
                         "({} nodes, {:.0}s)",
-                        stats.executed_nodes, stats.elapsed_secs
+                        stats.executed_nodes.len(),
+                        stats.elapsed_secs
                     );
                     let message = if let Some(print_output) = print_output {
                         format!("Compute output: {print_output} {summary}")

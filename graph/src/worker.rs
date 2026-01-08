@@ -1,5 +1,5 @@
 use crate::event::EventId;
-use crate::execution_graph::{ExecutionGraph, Result, ExecutionStats};
+use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::Shared;
@@ -225,7 +225,7 @@ mod tests {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed.executed_nodes, 3);
+        assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
         worker.event();
@@ -236,7 +236,7 @@ mod tests {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed.executed_nodes, 3);
+        assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["2"]);
 
         worker.event();
@@ -247,7 +247,7 @@ mod tests {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        assert_eq!(executed.executed_nodes, 3);
+        assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["3"]);
 
         worker.exit();
