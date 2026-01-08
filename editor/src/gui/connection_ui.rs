@@ -220,6 +220,8 @@ impl ConnectionUi {
                     curve.inited = true;
 
                     ConnectionBezier::sample(&mut curve.points, output_pos, input_pos, ctx.scale);
+
+                    tracing::debug!("Rebuilt connection bezier");
                 }
 
                 let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
@@ -265,6 +267,8 @@ impl ConnectionUi {
                             feather,
                         );
                     };
+
+                    tracing::debug!("Rebuilt connection bezier mesh");
                 }
 
                 mesh.append_ref(&curve.mesh);

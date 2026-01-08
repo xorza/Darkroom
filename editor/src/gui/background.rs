@@ -19,21 +19,23 @@ pub struct BackgroundRenderer {
 impl BackgroundRenderer {
     pub fn render(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
         let scale = view_graph.scale;
+        let pan = view_graph.pan;
+        let rect_size = ctx.rect.size();
+
         assert!(scale > common::EPSILON, "view graph scale must be positive");
 
-        let rect_size = ctx.rect.size();
-        let pan = view_graph.pan;
-
         if !self.inited
-            || (self.last_scale / scale).abs() >= common::EPSILON
-            || (self.last_pan - pan).length_sq() >= 1.0
-            || (self.last_rect_size - rect_size).length_sq() >= 1.0
+            || crate::common::scale_changed(self.last_scale, scale)
+            || crate::common::pan_changed(self.last_pan, pan)
+            || crate::common::pan_changed(self.last_rect_size, rect_size)
         {
             self.rebuild_mesh(ctx, view_graph);
             self.last_scale = scale;
             self.last_pan = pan;
             self.last_rect_size = rect_size;
             self.inited = true;
+
+            tracing::debug!("Rebuilt background mesh");
         }
 
         ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
