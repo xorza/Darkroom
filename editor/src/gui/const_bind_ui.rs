@@ -1,5 +1,7 @@
 use eframe::egui;
-use egui::{Align, DragValue, Stroke, StrokeKind, TextEdit, UiBuilder, Vec2, pos2};
+use egui::{
+    Align, DragValue, Stroke, StrokeKind, TextEdit, UiBuilder, Vec2, Widget, WidgetInfo, pos2,
+};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -58,30 +60,36 @@ pub fn render_const_bindings(
             StrokeKind::Outside,
         );
 
+        let prev_style = ctx.ui.style().clone();
+        let mut style = (*prev_style).clone();
+        style.override_font_id = Some(font.clone());
+        let mut visuals = style.visuals.clone();
+        visuals.extreme_bg_color = egui::Color32::TRANSPARENT;
+        visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.inactive.bg_stroke = Stroke::NONE;
+        visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+        visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.active.bg_stroke = Stroke::NONE;
+        visuals.widgets.open.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.open.bg_stroke = Stroke::NONE;
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::TRANSPARENT;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::NONE;
+        style.visuals = visuals;
+        ctx.ui.set_style(style);
+
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
 
         if let StaticValue::Int(value) = value {
             let mut new_value = *value;
+
             let drag = DragValue::new(&mut new_value)
                 .speed(1.0)
                 .custom_formatter(|value, _| format!("{value:.0}"));
-            let prev_style = text_ui.style().clone();
-            let mut style = (*prev_style).clone();
-            style.override_font_id = Some(font.clone());
-            let mut visuals = style.visuals.clone();
-            visuals.widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-            visuals.widgets.hovered.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-            visuals.widgets.active.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.active.bg_stroke = Stroke::NONE;
-            visuals.widgets.open.bg_fill = egui::Color32::TRANSPARENT;
-            visuals.widgets.open.bg_stroke = Stroke::NONE;
-            style.visuals = visuals;
-            text_ui.set_style(style);
+
             let response = text_ui.add_sized(badge_rect.size(), drag);
-            text_ui.set_style(prev_style);
+
             if response.changed() && new_value != *value {
                 *value = new_value;
                 ui_interaction
@@ -115,6 +123,8 @@ pub fn render_const_bindings(
             }
             ctx.ui.data_mut(|data| data.insert_temp(text_id, text));
         }
+
+        ctx.ui.set_style(prev_style);
     }
 }
 
