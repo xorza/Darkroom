@@ -46,6 +46,8 @@ Const int drag updates now use the total drag delta to keep values stable across
 Const int badge widths now derive from label symbol count times a monospaced font size, and static value editors use a
 dedicated monospaced font from Style.
 `DragValue` now accepts position/alignment only, deriving its interaction rect from the value text galley size.
+`DragValue` can render its own background fill/stroke and is used for const int badges.
+`DragValue` now supports configurable padding around the text for sizing and alignment.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.

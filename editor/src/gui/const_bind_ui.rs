@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Align2, Stroke, TextEdit, UiBuilder, Vec2, pos2};
+use egui::{Align, Align2, Stroke, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -17,7 +17,8 @@ pub fn render_const_bindings(
     node: &mut Node,
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
-    let padding = ctx.style.small_padding * ctx.scale;
+    let padding = ctx.style.padding * ctx.scale;
+    let small_padding = ctx.style.small_padding * ctx.scale;
     let mono_font = ctx.style.mono_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -55,6 +56,12 @@ pub fn render_const_bindings(
                 .make_persistent_id(("const_int_drag", node.id, input_idx));
             let response = DragValue::new(value, drag_id, mono_font.clone(), ctx.style.text_color)
                 .speed(1.0)
+                .background(
+                    ctx.style.inactive_bg_fill,
+                    ctx.style.node.const_stroke,
+                    ctx.style.small_corner_radius * ctx.scale,
+                )
+                .padding(vec2(padding, 0.0))
                 .show(ctx.ui, link_start, Align2::RIGHT_CENTER);
             if response.changed() {
                 ui_interaction
