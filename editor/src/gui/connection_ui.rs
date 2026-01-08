@@ -12,7 +12,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
-use crate::gui::polyline_mesh::{PolylineMesh, add_curve_to_mesh, polyline_mesh_with_capacity};
+use crate::gui::polyline_mesh::{PolylineMesh, polyline_mesh_with_capacity};
 use crate::model;
 
 pub const POINTS: usize = 25;
@@ -90,6 +90,7 @@ pub(crate) struct ConnectionUi {
 
     //caches
     mesh: Arc<Mesh>,
+    temp_connection: PolylineMesh,
 }
 
 impl Default for ConnectionUi {
@@ -101,6 +102,7 @@ impl Default for ConnectionUi {
             highlighted: HashSet::default(),
             drag: None,
             mesh: Arc::new(mesh),
+            temp_connection: PolylineMesh::with_point_capacity(POINTS),
         }
     }
 }
@@ -280,17 +282,19 @@ impl ConnectionUi {
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
 
-            // todo use poluline mesh
-            let mut points = [Pos2::default(); POINTS];
-            ConnectionBezier::sample(&mut points, start, end, ctx.scale);
-            add_curve_to_mesh(
-                mesh,
-                &points,
+            ConnectionBezier::sample(
+                self.temp_connection.points_mut().as_mut_slice(),
+                start,
+                end,
+                ctx.scale,
+            );
+            self.temp_connection.rebuild(
                 ctx.style.node.output_port_color,
                 ctx.style.node.input_port_color,
                 ctx.style.connections.stroke_width,
                 feather,
             );
+            mesh.append_ref(self.temp_connection.mesh());
         }
     }
 }
