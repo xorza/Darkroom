@@ -5,6 +5,7 @@ use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::drag_value::DragValue;
 use crate::common::font::ScaledFontId;
+use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
@@ -18,7 +19,7 @@ pub fn render_const_bindings(
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let padding = ctx.style.padding * ctx.scale;
-    let _small_padding = ctx.style.small_padding * ctx.scale;
+    let small_padding = ctx.style.small_padding * ctx.scale;
     let mono_font = ctx.style.mono_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -54,17 +55,20 @@ pub fn render_const_bindings(
             let drag_id = ctx
                 .ui
                 .make_persistent_id(("const_int_drag", node.id, input_idx));
-            let response = DragValue::new(value, drag_id)
-                .font(mono_font.clone())
-                .color(ctx.style.text_color)
-                .speed(1.0)
-                .background(
-                    ctx.style.inactive_bg_fill,
-                    ctx.style.node.const_stroke,
-                    ctx.style.small_corner_radius * ctx.scale,
-                )
-                .padding(vec2(padding, 0.0))
-                .show(ctx.ui, link_start, Align2::RIGHT_CENTER);
+            let response = {
+                let mut gui = Gui::new(ctx.ui, &ctx.style);
+                DragValue::new(value, drag_id)
+                    .font(mono_font.clone())
+                    .color(ctx.style.text_color)
+                    .speed(1.0)
+                    .background(
+                        ctx.style.inactive_bg_fill,
+                        ctx.style.node.const_stroke,
+                        ctx.style.small_corner_radius * ctx.scale,
+                    )
+                    .padding(vec2(padding, small_padding))
+                    .show(&mut gui, link_start, Align2::RIGHT_CENTER)
+            };
             if response.changed() {
                 ui_interaction
                     .actions

@@ -1,21 +1,27 @@
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
-    TextEdit, Ui, Vec2,
+    TextEdit, Vec2,
 };
+
+use crate::gui::Gui;
+
+#[derive(Debug, Clone, Copy)]
+struct DragValueBackground {
+    fill: Color32,
+    stroke: Stroke,
+    radius: f32,
+}
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
     value: &'a mut i64,
     speed: f32,
-    font: FontId,
-    color: Color32,
+    font: Option<FontId>,
+    color: Option<Color32>,
     id: egui::Id,
-    background_enabled: bool,
-    background_fill: Color32,
-    background_stroke: Stroke,
-    background_radius: f32,
-    padding: Vec2,
+    background: Option<DragValueBackground>,
+    padding: Option<Vec2>,
 }
 
 impl<'a> DragValue<'a> {
@@ -23,14 +29,11 @@ impl<'a> DragValue<'a> {
         Self {
             value,
             speed: 1.0,
-            font: FontId::default(),
-            color: Color32::WHITE,
+            font: None,
+            color: None,
             id,
-            background_enabled: false,
-            background_fill: Color32::TRANSPARENT,
-            background_stroke: Stroke::NONE,
-            background_radius: 0.0,
-            padding: Vec2::ZERO,
+            background: None,
+            padding: None,
         }
     }
 
@@ -40,39 +43,55 @@ impl<'a> DragValue<'a> {
     }
 
     pub fn font(mut self, font: FontId) -> Self {
-        self.font = font;
+        self.font = Some(font);
         self
     }
 
     pub fn color(mut self, color: Color32) -> Self {
-        self.color = color;
+        self.color = Some(color);
         self
     }
 
     pub fn background(mut self, fill: Color32, stroke: Stroke, radius: f32) -> Self {
         assert!(radius.is_finite());
-        self.background_enabled = true;
-        self.background_fill = fill;
-        self.background_stroke = stroke;
-        self.background_radius = radius;
+        self.background = Some(DragValueBackground {
+            fill,
+            stroke,
+            radius,
+        });
         self
     }
 
     pub fn padding(mut self, padding: Vec2) -> Self {
         assert!(padding.x.is_finite() && padding.y.is_finite());
         assert!(padding.x >= 0.0 && padding.y >= 0.0);
-        self.padding = padding;
+        self.padding = Some(padding);
         self
     }
 
-    pub fn show(self, ui: &mut Ui, pos: Pos2, align: Align2) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, pos: Pos2, align: Align2) -> Response {
         assert!(self.speed.is_finite());
 
+        let font = self.font.unwrap_or_else(|| gui.style.mono_font.clone());
+        let color = self.color.unwrap_or(gui.style.text_color);
+        let padding = self
+            .padding
+            .unwrap_or_else(|| Vec2::splat(gui.style.small_padding));
+        assert!(padding.x.is_finite() && padding.y.is_finite());
+        assert!(padding.x >= 0.0 && padding.y >= 0.0);
+        let background = self.background.unwrap_or(DragValueBackground {
+            fill: gui.style.inactive_bg_fill,
+            stroke: gui.style.inactive_bg_stroke,
+            radius: gui.style.small_corner_radius,
+        });
+        assert!(background.radius.is_finite());
+
+        let ui = gui.ui();
         let value_text = self.value.to_string();
         let galley = ui
             .painter()
-            .layout_no_wrap(value_text.clone(), self.font.clone(), self.color);
-        let size = galley.size() + self.padding * 2.0;
+            .layout_no_wrap(value_text.clone(), font.clone(), color);
+        let size = galley.size() + padding * 2.0;
         assert!(size.x.is_finite() && size.y.is_finite());
 
         let rect = align.anchor_size(pos, size);
@@ -82,15 +101,13 @@ impl<'a> DragValue<'a> {
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
-        if self.background_enabled {
-            ui.painter().rect(
-                rect,
-                self.background_radius,
-                self.background_fill,
-                self.background_stroke,
-                StrokeKind::Outside,
-            );
-        }
+        ui.painter().rect(
+            rect,
+            background.radius,
+            background.fill,
+            background.stroke,
+            StrokeKind::Outside,
+        );
 
         if edit_active {
             let mut edit_text = ui
@@ -98,11 +115,11 @@ impl<'a> DragValue<'a> {
                 .unwrap_or_else(|| self.value.to_string());
             let text_edit = TextEdit::singleline(&mut edit_text)
                 .id(edit_id)
-                .font(self.font.clone())
+                .font(font.clone())
                 .desired_width(rect.width())
                 .vertical_align(Align::Center)
                 .horizontal_align(align.x())
-                .margin(self.padding)
+                .margin(padding)
                 .clip_text(true)
                 .frame(false);
             let mut response = ui.put(rect, text_edit);
@@ -169,10 +186,10 @@ impl<'a> DragValue<'a> {
             ui.data_mut(|data| data.remove::<i64>(self.id));
         }
 
-        let inner_rect = rect.shrink2(self.padding);
+        let inner_rect = rect.shrink2(padding);
         let text_anchor = align.pos_in_rect(&inner_rect);
         let text_rect = align.anchor_size(text_anchor, galley.size());
-        ui.painter().galley(text_rect.min, galley, self.color);
+        ui.painter().galley(text_rect.min, galley, color);
 
         response
     }

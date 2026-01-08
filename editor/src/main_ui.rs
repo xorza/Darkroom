@@ -108,6 +108,8 @@ impl MainUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            //
+
             let result = self.graph_ui.render(
                 ui,
                 &mut app_data.view_graph,

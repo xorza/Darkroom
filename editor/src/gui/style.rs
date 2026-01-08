@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Style {
     pub heading_font: FontId,
     pub body_font: FontId,
@@ -31,7 +31,7 @@ pub struct Style {
     pub node: NodeStyle,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GraphBackgroundStyle {
     pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
@@ -40,14 +40,14 @@ pub struct GraphBackgroundStyle {
     pub dotted_radius_max: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConnectionStyle {
     pub stroke_width: f32,
     pub highlight_stroke: Stroke,
     pub breaker_stroke: Stroke,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NodeStyle {
     pub status_terminal_color: Color32,
     pub status_impure_color: Color32,
