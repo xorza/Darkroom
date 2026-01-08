@@ -212,10 +212,11 @@ impl ConnectionUi {
                     curve.input_pos = input_pos;
                     curve.inited = true;
 
-                    curve.mesh.points_mut().clear();
-                    curve.mesh.points_mut().resize(POINTS, Pos2::ZERO); // Reserve space for points
+                    let points = curve.mesh.points_mut();
+                    points.clear();
+                    points.resize(POINTS, Pos2::ZERO); // Reserve space for points
                     ConnectionBezier::sample(
-                        curve.mesh.points_mut().as_mut_slice(),
+                        points.as_mut_slice(),
                         output_pos,
                         input_pos,
                         ctx.scale,
@@ -251,14 +252,14 @@ impl ConnectionUi {
                     curve.highlighted = highlighted;
 
                     if curve.highlighted {
-                        curve.mesh.build_curve_from_points(
+                        curve.mesh.rebuild(
                             ctx.style.connections.highlight_stroke.color,
                             ctx.style.connections.highlight_stroke.color,
                             ctx.style.connections.highlight_stroke.width,
                             feather,
                         );
                     } else {
-                        curve.mesh.build_curve_from_points(
+                        curve.mesh.rebuild(
                             ctx.style.node.output_port_color,
                             ctx.style.node.input_port_color,
                             ctx.style.connections.stroke_width,
