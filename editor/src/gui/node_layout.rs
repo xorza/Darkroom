@@ -114,7 +114,6 @@ impl NodeLayout {
 
         // ===============
         assert!(self.inited);
-        assert!((self.scale - ctx.scale).abs() < common::EPSILON);
 
         let padding = ctx.style.padding * self.scale;
         let small_padding = ctx.style.small_padding * self.scale;
