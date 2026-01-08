@@ -64,7 +64,7 @@ impl MainUi {
     }
 
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
-        app_data.pre_render_update();
+        app_data.update_status();
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {

@@ -141,7 +141,7 @@ impl AppData {
         }
     }
 
-    pub fn pre_render_update(&mut self) {
+    pub fn update_status(&mut self) {
         let mut shared_status = self.shared_status.try_lock().unwrap();
         let print_out = shared_status.print_output.take();
 
