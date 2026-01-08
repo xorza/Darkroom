@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{
-    Align, Align2, Color32, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind, TextEdit, Ui,
-    Vec2,
+    Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
+    TextEdit, Ui, Vec2,
 };
 
 #[derive(Debug)]
@@ -124,7 +124,9 @@ impl<'a> DragValue<'a> {
             return response;
         }
 
-        let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
+        let mut response = ui
+            .allocate_rect(rect, Sense::click_and_drag())
+            .on_hover_cursor(CursorIcon::ResizeHorizontal);
 
         if response.clicked() {
             ui.data_mut(|data| {
