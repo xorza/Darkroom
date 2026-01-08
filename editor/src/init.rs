@@ -20,6 +20,7 @@ fn init_trace() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter("debug")
         .with_writer(non_blocking)
+        .with_writer(std::io::stdout)
         .init();
 
     Ok(())
