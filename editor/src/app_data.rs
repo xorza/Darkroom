@@ -1,7 +1,7 @@
 use crate::gui::graph_ui::GraphUiInteraction;
 use anyhow::Result;
-use arc_swap::ArcSwapOption;
 use common::{FileFormat, Shared};
+use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::Binding;
 use graph::prelude::{ExecutionStats, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
@@ -13,7 +13,13 @@ use std::sync::Arc;
 use crate::main_ui::UiContext;
 use crate::model::ViewGraph;
 
-type SharedExecutionUpdate = Shared<Option<graph::execution_graph::Result<ExecutionStats>>>;
+#[derive(Debug, Default)]
+pub struct Status {
+    execution_stats: Option<ExecutionGraphResult<ExecutionStats>>,
+    print_output: Option<String>,
+}
+
+pub type SharedStatus = Shared<Status>;
 
 #[derive(Debug)]
 pub struct AppData {
@@ -26,14 +32,14 @@ pub struct AppData {
     pub status: String,
     pub _ui_context: UiContext,
 
-    pub execution_update: SharedExecutionUpdate,
+    pub shared_status: SharedStatus,
 }
 
 impl AppData {
     pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
-        let execution_update = Shared::default();
+        let shared_status = Shared::default();
 
-        let worker = Self::create_worker(execution_update.clone(), ui_context.clone());
+        let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
 
         Self {
             worker,
@@ -45,14 +51,14 @@ impl AppData {
             status: String::new(),
             _ui_context: ui_context,
 
-            execution_update,
+            shared_status,
         }
     }
 
-    fn create_worker(execution_update: SharedExecutionUpdate, ui_refresh: UiContext) -> Worker {
+    fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
         Worker::new(move |result| {
-            let mut execution_update = execution_update.try_lock().unwrap();
-            *execution_update = Some(result);
+            let mut shared_status = shared_status.try_lock().unwrap();
+            shared_status.execution_stats = Some(result);
 
             ui_refresh.request_redraw();
         })
@@ -124,43 +130,43 @@ impl AppData {
     }
 
     fn sample_test_hooks(app_data: &AppData) -> TestFuncHooks {
+        let shared_status = app_data.shared_status.clone();
         TestFuncHooks {
             get_a: Arc::new(|| 21),
             get_b: Arc::new(|| 2),
             print: Arc::new(move |value| {
-                // todo!()
-                // print_output.store(Some(Arc::new(value.to_string())));
+                let mut shared_status = shared_status.try_lock().unwrap();
+                shared_status.print_output = Some(value.to_string());
             }),
         }
     }
 
     pub fn pre_render_update(&mut self) {
-        // let updated_status = self.updated_status.swap(None);
-        // if let Some(updated_status) = updated_status {
-        //     self.set_status(updated_status.as_ref());
-        // }
-        //
-        let execution_update = self.execution_update.try_lock().unwrap().take();
-        if execution_update.is_none(){
-            return;
-        }
-        match execution_update.unwrap() {
-            Ok(execution_stats) => {
-                let summary = format!(
-                    "({} nodes, {:.0}s)",
-                    execution_stats.executed_nodes.len(),
-                    execution_stats.elapsed_secs
-                );
-                // let message = if let Some(print_output) = print_output {
-                //     format!("Compute output: {print_output} {summary}")
-                // } else {
-                let message = format!("Compute finished {summary}");
-                // };
+        let mut shared_status = self.shared_status.try_lock().unwrap();
+        let print_out = shared_status.print_output.take();
 
-                self.status = message;
-            }
-            Err(err) => {
-                self.status = format!("Compute failed: {err}");
+        if let Some(execution_stats) = shared_status.execution_stats.take() {
+            match execution_stats {
+                Ok(execution_stats) => {
+                    self.execution_stats = Some(execution_stats);
+
+                    let summary = format!(
+                        "({} nodes, {:.0}s)",
+                        self.execution_stats.as_ref().unwrap().executed_nodes.len(),
+                        self.execution_stats.as_ref().unwrap().elapsed_secs
+                    );
+
+                    let message = if let Some(print_output) = print_out {
+                        format!("Compute output: {print_output} {summary}")
+                    } else {
+                        format!("Compute finished {summary}")
+                    };
+
+                    self.status = message;
+                }
+                Err(err) => {
+                    self.status = format!("Compute failed: {err}");
+                }
             }
         }
     }
