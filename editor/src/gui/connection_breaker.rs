@@ -99,6 +99,7 @@ impl ConnectionBreaker {
             self.mesh.append_segments_from_points(
                 start_segment,
                 color,
+                color,
                 ctx.style.connections.breaker_stroke.width,
                 feather,
             );

@@ -240,6 +240,7 @@ Connection UI stores connection endpoints in a shared `ConnectionEndpoints` stru
 Connection breaker now reuses `PolylineMesh` for its point storage.
 Connection breaker no longer tracks a separate last-point field.
 Connection breaker incrementally appends mesh segments as new points arrive.
+Polyline mesh no longer exposes `add_curve_to_mesh`; segment appends handle full rebuilds too.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.
