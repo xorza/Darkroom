@@ -354,20 +354,14 @@ fn render_const_bindings(
         let text_edit = TextEdit::singleline(&mut text)
             .id(text_id)
             .font(font.clone())
-            .horizontal_align(egui::Align::Center)
-            .desired_width(badge_rect.width() - padding * 2.0)
+            .horizontal_align(Align::Center)
+            .vertical_align(Align::Min)
             .frame(false);
-        let mut text_ui = ctx.ui.new_child(
-            UiBuilder::new()
-                .max_rect(badge_rect)
-                .layout(Layout::left_to_right(Align::Center)),
-        );
+        let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
         let response = text_ui.add_sized(badge_rect.size(), text_edit);
         if response.lost_focus() || response.changed() {
             let parsed = parse_static_value(&text, value);
-
-            println!("value thanged to {:?}", parsed);
 
             if let Some(parsed) = parsed {
                 *value = parsed;
