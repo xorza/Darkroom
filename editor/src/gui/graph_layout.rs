@@ -2,8 +2,8 @@ use egui::Pos2;
 use graph::graph::NodeId;
 
 use crate::gui::connection_ui::PortKind;
-use crate::gui::graph_ctx::GraphContext;
 use crate::gui::node_layout::{self, NodeLayout};
+use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexVec;
 
@@ -36,19 +36,18 @@ impl Default for GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, ctx: &GraphContext, view_graph: &ViewGraph) {
-        let rect = ctx.ui.available_rect_before_wrap();
-        self.origin = rect.min + view_graph.pan;
+    pub fn update(&mut self, ctx: &GraphContext, gui: &Gui<'_>, view_graph: &ViewGraph) {
+        self.origin = gui.rect.min + view_graph.pan;
         let mut write_idx = 0;
 
         for view_node in view_graph.view_nodes.iter() {
             let idx = self
                 .node_layouts
                 .compact_insert_with(&view_node.id, &mut write_idx, || {
-                    NodeLayout::new(ctx, &view_node.id)
+                    NodeLayout::new(ctx, gui, &view_node.id)
                 });
 
-            self.node_layouts[idx].update(ctx, view_graph, self.origin);
+            self.node_layouts[idx].update(ctx, gui, view_graph, self.origin);
         }
         self.node_layouts.compact_finish(write_idx);
     }

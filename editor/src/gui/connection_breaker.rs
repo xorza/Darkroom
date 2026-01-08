@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::Pos2;
 
-use crate::gui::{graph_ctx::GraphContext, polyline_mesh::PolylineMesh};
+use crate::gui::{Gui, graph_ctx::GraphContext, polyline_mesh::PolylineMesh};
 
 const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
@@ -73,29 +73,29 @@ impl ConnectionBreaker {
         self.mesh.points_mut().push(clamped);
     }
 
-    pub fn render(&mut self, ctx: &GraphContext) {
+    pub fn render(&mut self, _ctx: &GraphContext, gui: &mut Gui<'_>) {
         let point_len = self.mesh.points().len();
         if self.reset || point_len < self.built_len {
             self.mesh.clear_mesh();
             self.reset = false;
         }
 
-        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
+        let pixels_per_point = gui.ui().ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
-        let color = ctx.style.connections.breaker_stroke.color;
+        let color = gui.style.connections.breaker_stroke.color;
         if point_len > self.built_len {
             let start_segment = self.built_len.saturating_sub(1);
             self.mesh.append_segments_from_points(
                 start_segment,
                 color,
                 color,
-                ctx.style.connections.breaker_stroke.width,
+                gui.style.connections.breaker_stroke.width,
                 feather,
             );
             self.built_len = point_len;
         }
 
-        self.mesh.render(&ctx.painter);
+        self.mesh.render(&gui.painter());
     }
 
     fn path_length(&self) -> f32 {

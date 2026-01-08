@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Area, Id, PointerButton, Pos2, Response, Sense, Ui, Vec2};
+use egui::{Area, Id, PointerButton, Pos2, Response, Sense, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -9,7 +9,7 @@ use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
-use crate::{gui::graph_ctx::GraphContext, model};
+use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
 
 const MIN_ZOOM: f32 = 0.2;
@@ -79,23 +79,24 @@ impl GraphUi {
 
     pub fn render(
         &mut self,
-        ui: &mut Ui,
+        gui: &mut Gui<'_>,
         view_graph: &mut model::ViewGraph,
         execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-        arena: &bumpalo::Bump,
+        _arena: &bumpalo::Bump,
     ) -> Result<(), Error> {
-        let mut ctx = GraphContext::new(arena, ui, func_lib, view_graph.scale);
+        let mut ctx = GraphContext::new(func_lib);
 
-        let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
+        let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
 
-        let pointer_pos = ctx
-            .ui
+        let rect = gui.rect;
+        let pointer_pos = gui
+            .ui()
             .input(|input| input.pointer.hover_pos())
-            .and_then(|pos| ctx.rect.contains(pos).then_else(Some(pos), None));
-        let background_response = ctx.ui.interact(
-            ctx.rect,
+            .and_then(|pos| rect.contains(pos).then_else(Some(pos), None));
+        let background_response = gui.ui().interact(
+            rect,
             graph_bg_id,
             Sense::hover() | Sense::drag() | Sense::click(),
         );
@@ -105,16 +106,17 @@ impl GraphUi {
         }
 
         if let Some(pointer_pos) = pointer_pos {
-            self.update_zoom_and_pan(&mut ctx, view_graph, &background_response, pointer_pos);
+            self.update_zoom_and_pan(gui, &mut ctx, view_graph, &background_response, pointer_pos);
         }
 
-        self.graph_layout.update(&ctx, view_graph);
+        self.graph_layout.update(&ctx, gui, view_graph);
 
-        self.background.render(&ctx, view_graph);
+        self.background.render(&ctx, gui, view_graph);
 
-        self.render_connections(&mut ctx, view_graph);
+        self.render_connections(gui, &mut ctx, view_graph);
 
         let drag_port_info = self.node_ui.render_nodes(
+            gui,
             &mut ctx,
             view_graph,
             &mut self.graph_layout,
@@ -122,10 +124,11 @@ impl GraphUi {
             execution_stats,
         );
 
-        self.top_panel(&mut ctx, view_graph);
+        self.top_panel(gui, &mut ctx, view_graph);
 
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
+                gui,
                 &mut ctx,
                 view_graph,
                 &background_response,
@@ -138,16 +141,18 @@ impl GraphUi {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_connections(
         &mut self,
-        ctx: &mut GraphContext,
+        gui: &mut Gui<'_>,
+        _ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
         background_response: &Response,
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) -> Result<(), Error> {
-        let primary_state = ctx.ui.input(|input| {
+        let primary_state = gui.ui().input(|input| {
             if input.pointer.primary_pressed() {
                 Some(PointerButtonState::Pressed)
             } else if input.pointer.primary_released() {
@@ -158,7 +163,7 @@ impl GraphUi {
                 None
             }
         });
-        let secondary_pressed = ctx.ui.input(|input| input.pointer.secondary_pressed());
+        let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
 
         let pointer_on_background = background_response.hovered();
 
@@ -230,9 +235,15 @@ impl GraphUi {
         Ok(())
     }
 
-    fn render_connections(&mut self, ctx: &mut GraphContext, view_graph: &model::ViewGraph) {
+    fn render_connections(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext,
+        view_graph: &model::ViewGraph,
+    ) {
         self.connections.render(
             ctx,
+            gui,
             &self.graph_layout,
             view_graph,
             if self.state == InteractionState::BreakingConnections {
@@ -245,19 +256,24 @@ impl GraphUi {
         match self.state {
             InteractionState::Idle => {}
             InteractionState::DraggingNewConnection => {}
-            InteractionState::BreakingConnections => self.connection_breaker.render(ctx),
+            InteractionState::BreakingConnections => self.connection_breaker.render(ctx, gui),
         }
     }
 
-    fn top_panel(&self, ctx: &mut GraphContext, view_graph: &mut model::ViewGraph) {
+    fn top_panel(
+        &self,
+        gui: &mut Gui<'_>,
+        _ctx: &mut GraphContext,
+        view_graph: &mut model::ViewGraph,
+    ) {
         let mut fit_all = false;
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let panel_pos = ctx.rect.min + Vec2::splat(ctx.style.padding);
+        let panel_pos = gui.rect.min + Vec2::splat(gui.style.padding);
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
-            .show(ctx.ui.ctx(), |ui| {
+            .show(gui.ui().ctx(), |ui| {
                 ui.horizontal(|ui| {
                     fit_all = ui.button("Fit all").clicked();
                     view_selected = ui.button("View selected").clicked();
@@ -270,27 +286,28 @@ impl GraphUi {
             view_graph.pan = Vec2::ZERO;
         }
         if view_selected {
-            view_selected_node(ctx, view_graph, &self.graph_layout);
+            view_selected_node(gui, view_graph, &self.graph_layout);
         }
         if fit_all {
-            fit_all_nodes(ctx, view_graph, &self.graph_layout);
+            fit_all_nodes(gui, view_graph, &self.graph_layout);
         }
     }
 
     fn update_zoom_and_pan(
         &mut self,
-        ctx: &mut GraphContext,
+        gui: &mut Gui<'_>,
+        _ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
         background_response: &Response,
         pointer_pos: Pos2,
     ) {
         let (zoom_delta, pan) = {
-            let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(ctx);
+            let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
 
             (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
                 ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
                 (
-                    ctx.ui
+                    gui.ui()
                         .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
                     scroll_delta,
                 ),
@@ -304,10 +321,10 @@ impl GraphUi {
         if (zoom_delta - 1.0).abs() > f32::EPSILON {
             // zoom
             let clamped_scale = (view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-            let origin = ctx.rect.min;
+            let origin = gui.rect.min;
             let graph_pos = (pointer_pos - origin - view_graph.pan) / view_graph.scale;
             view_graph.scale = clamped_scale;
-            ctx.scale = clamped_scale;
+            gui.scale = clamped_scale;
             view_graph.pan = pointer_pos - origin - graph_pos * view_graph.scale;
         }
 
@@ -323,10 +340,10 @@ impl GraphUi {
 ///
 /// Trackpad/gesture scrolling is folded into the returned `Vec2`, while mouse wheel
 /// steps (line/page units) are accumulated separately to keep zoom/pan heuristics stable.
-fn collect_scroll_mouse_wheel_deltas(ctx: &mut GraphContext<'_>) -> (Vec2, f32) {
+fn collect_scroll_mouse_wheel_deltas(gui: &mut Gui<'_>) -> (Vec2, f32) {
     let (scroll_delta, mouse_wheel_delta) = {
-        let base_scroll_delta = ctx.ui.input(|input| input.raw_scroll_delta);
-        ctx.ui.input(|input| {
+        let base_scroll_delta = gui.ui().input(|input| input.raw_scroll_delta);
+        gui.ui().input(|input| {
             input.events.iter().fold(
                 (base_scroll_delta, 0.0),
                 |(point, lines), event| match event {
@@ -392,7 +409,7 @@ fn apply_connection(
 }
 
 fn view_selected_node(
-    ctx: &mut GraphContext,
+    gui: &mut Gui<'_>,
     view_graph: &mut model::ViewGraph,
     graph_layout: &GraphLayout,
 ) {
@@ -411,14 +428,10 @@ fn view_selected_node(
         node_view.pos.y + size.y * 0.5,
     );
     view_graph.scale = 1.0;
-    view_graph.pan = ctx.rect.center() - ctx.rect.min - center.to_vec2();
+    view_graph.pan = gui.rect.center() - gui.rect.min - center.to_vec2();
 }
 
-fn fit_all_nodes(
-    ctx: &mut GraphContext,
-    view_graph: &mut model::ViewGraph,
-    graph_layout: &GraphLayout,
-) {
+fn fit_all_nodes(gui: &mut Gui<'_>, view_graph: &mut model::ViewGraph, graph_layout: &GraphLayout) {
     if view_graph.view_nodes.is_empty() {
         view_graph.scale = 1.0;
         view_graph.pan = egui::Vec2::ZERO;
@@ -443,14 +456,14 @@ fn fit_all_nodes(
     let bounds_size = bounds.size();
 
     let padding = 24.0;
-    let available = ctx.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
+    let available = gui.rect.size() - egui::vec2(padding * 2.0, padding * 2.0);
     let zoom_x = (bounds_size.x > 0.0).then_else(available.x / bounds_size.x, 1.0);
     let zoom_y = (bounds_size.y > 0.0).then_else(available.y / bounds_size.y, 1.0);
 
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     view_graph.scale = target_zoom;
     let bounds_center = bounds.center().to_vec2();
-    view_graph.pan = ctx.rect.center() - ctx.rect.min - bounds_center * view_graph.scale;
+    view_graph.pan = gui.rect.center() - gui.rect.min - bounds_center * view_graph.scale;
 }
 
 impl std::fmt::Display for Error {

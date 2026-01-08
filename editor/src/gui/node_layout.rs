@@ -5,7 +5,7 @@ use graph::graph::NodeId;
 use std::sync::Arc;
 
 use crate::common::font::ScaledFontId;
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;
 
@@ -49,11 +49,11 @@ impl NodeLayout {
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 
-    pub fn new(ctx: &GraphContext, node_id: &NodeId) -> NodeLayout {
-        let title_galley = ctx.painter.layout_no_wrap(
+    pub fn new(_ctx: &GraphContext, gui: &Gui<'_>, node_id: &NodeId) -> NodeLayout {
+        let title_galley = gui.painter().layout_no_wrap(
             String::default(),
-            ctx.style.body_font.clone(),
-            ctx.style.text_color,
+            gui.style.body_font.clone(),
+            gui.style.text_color,
         );
 
         NodeLayout {
@@ -75,38 +75,44 @@ impl NodeLayout {
         }
     }
 
-    pub fn update(&mut self, ctx: &GraphContext, view_graph: &ViewGraph, origin: Pos2) {
+    pub fn update(
+        &mut self,
+        _ctx: &GraphContext,
+        gui: &Gui<'_>,
+        view_graph: &ViewGraph,
+        origin: Pos2,
+    ) {
         let view_node = view_graph.view_nodes.by_key(&self.node_id).unwrap();
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
+        let func = _ctx.func_lib.by_id(&node.func_id).unwrap();
 
-        let label_font = ctx.style.sub_font.scaled(ctx.scale);
+        let label_font = gui.style.sub_font.scaled(gui.scale);
 
-        if !self.inited || crate::common::scale_changed(self.scale, ctx.scale) {
-            self.scale = ctx.scale;
+        if !self.inited || crate::common::scale_changed(self.scale, gui.scale) {
+            self.scale = gui.scale;
             self.inited = true;
 
-            self.title_galley = ctx.painter.layout_no_wrap(
+            self.title_galley = gui.painter().layout_no_wrap(
                 node.name.to_string(),
-                ctx.style.body_font.scaled(self.scale),
-                ctx.style.text_color,
+                gui.style.body_font.scaled(self.scale),
+                gui.style.text_color,
             );
 
             self.input_galleys.clear();
             for input in &func.inputs {
-                let galley = ctx.painter.layout_no_wrap(
+                let galley = gui.painter().layout_no_wrap(
                     input.name.to_string(),
                     label_font.clone(),
-                    ctx.style.text_color,
+                    gui.style.text_color,
                 );
                 self.input_galleys.push(galley);
             }
             self.output_galleys.clear();
             for output in &func.outputs {
-                let galley = ctx.painter.layout_no_wrap(
+                let galley = gui.painter().layout_no_wrap(
                     output.name.to_string(),
                     label_font.clone(),
-                    ctx.style.text_color,
+                    gui.style.text_color,
                 );
                 self.output_galleys.push(galley);
             }
@@ -115,12 +121,12 @@ impl NodeLayout {
         // ===============
         assert!(self.inited);
 
-        let padding = ctx.style.padding * self.scale;
-        let small_padding = ctx.style.small_padding * self.scale;
+        let padding = gui.style.padding * self.scale;
+        let small_padding = gui.style.small_padding * self.scale;
 
         let title_width = self.title_galley.size().x + padding * 2.0;
-        let remove_size = ctx.style.node.remove_btn_size * self.scale + small_padding * 2.0;
-        let status_dot_size = ctx.style.node.status_dot_radius * self.scale * 2.0;
+        let remove_size = gui.style.node.remove_btn_size * self.scale + small_padding * 2.0;
+        let status_dot_size = gui.style.node.status_dot_radius * self.scale * 2.0;
         let header_height = self
             .title_galley
             .size()
@@ -137,7 +143,7 @@ impl NodeLayout {
         let input_count = self.input_galleys.len();
         let output_count = self.output_galleys.len();
         let row_count = input_count.max(output_count).max(1);
-        let port_label_side_padding = ctx.style.node.port_label_side_padding * self.scale;
+        let port_label_side_padding = gui.style.node.port_label_side_padding * self.scale;
         let mut max_row_width: f32 = 0.0;
         let mut max_row_height: f32 = 0.0;
         for row in 0..row_count {
@@ -160,13 +166,13 @@ impl NodeLayout {
             max_row_height = max_row_height.max(row_height);
         }
 
-        let cache_button_height = ctx.style.sub_font.size * self.scale;
+        let cache_button_height = gui.style.sub_font.size * self.scale;
 
         let header_row_height = header_height + small_padding * 2.0;
         let port_row_height = label_font
             .size
             .max(max_row_height)
-            .max(ctx.style.node.port_radius * 2.0 * self.scale);
+            .max(gui.style.node.port_radius * 2.0 * self.scale);
         let cache_row_height = cache_button_height + padding * 2.0;
 
         let node_width = header_width.max(max_row_width);
@@ -183,7 +189,7 @@ impl NodeLayout {
         );
         let remove_rect = Rect::from_min_size(remove_pos, Vec2::ONE * remove_size);
 
-        let dot_radius = ctx.style.node.status_dot_radius * self.scale;
+        let dot_radius = gui.style.node.status_dot_radius * self.scale;
         let dot_first_center = {
             let dot_x = remove_rect.min.x - padding - dot_radius;
             let dot_center_y = header_row_height * 0.5;
@@ -196,7 +202,7 @@ impl NodeLayout {
                 body_rect.min.y + header_row_height + padding,
             ),
             vec2(
-                ctx.style.node.cache_btn_width * self.scale,
+                gui.style.node.cache_btn_width * self.scale,
                 cache_button_height,
             ),
         );

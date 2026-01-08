@@ -9,10 +9,10 @@ use std::sync::Arc;
 
 use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::gui::polyline_mesh::{PolylineMesh, polyline_mesh_with_capacity};
+use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model;
 
 pub const POINTS: usize = 25;
@@ -138,13 +138,14 @@ impl ConnectionUi {
     pub(crate) fn render(
         &mut self,
         ctx: &GraphContext,
+        gui: &mut Gui<'_>,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(ctx, graph_layout, view_graph, breaker);
+        self.rebuild(ctx, gui, graph_layout, view_graph, breaker);
 
-        ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
+        gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
     pub(crate) fn start_drag(&mut self, port: PortInfo) {
@@ -193,12 +194,13 @@ impl ConnectionUi {
 
     fn rebuild(
         &mut self,
-        ctx: &GraphContext,
+        _ctx: &GraphContext,
+        gui: &mut Gui<'_>,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
+        let pixels_per_point = gui.ui().ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
 
         self.highlighted.clear();
@@ -241,7 +243,7 @@ impl ConnectionUi {
                         points.as_mut_slice(),
                         output_pos,
                         input_pos,
-                        ctx.scale,
+                        gui.scale,
                     );
                 }
 
@@ -274,16 +276,16 @@ impl ConnectionUi {
 
                     if curve.highlighted {
                         curve.mesh.rebuild(
-                            ctx.style.connections.highlight_stroke.color,
-                            ctx.style.connections.highlight_stroke.color,
-                            ctx.style.connections.highlight_stroke.width,
+                            gui.style.connections.highlight_stroke.color,
+                            gui.style.connections.highlight_stroke.color,
+                            gui.style.connections.highlight_stroke.width,
                             feather,
                         );
                     } else {
                         curve.mesh.rebuild(
-                            ctx.style.node.output_port_color,
-                            ctx.style.node.input_port_color,
-                            ctx.style.connections.stroke_width,
+                            gui.style.node.output_port_color,
+                            gui.style.node.input_port_color,
+                            gui.style.connections.stroke_width,
                             feather,
                         );
                     };
@@ -306,11 +308,11 @@ impl ConnectionUi {
                 if points.len() != POINTS {
                     points.resize(POINTS, Pos2::ZERO);
                 }
-                ConnectionBezier::sample(points.as_mut_slice(), start, end, ctx.scale);
+                ConnectionBezier::sample(points.as_mut_slice(), start, end, gui.scale);
                 self.temp_connection.rebuild(
-                    ctx.style.node.output_port_color,
-                    ctx.style.node.input_port_color,
-                    ctx.style.connections.stroke_width,
+                    gui.style.node.output_port_color,
+                    gui.style.node.input_port_color,
+                    gui.style.connections.stroke_width,
                     feather,
                 );
             }

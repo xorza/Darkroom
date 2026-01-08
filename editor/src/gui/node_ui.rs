@@ -12,7 +12,9 @@ use graph::graph::{Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::render_const_bindings;
-use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
+use crate::gui::{
+    Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction,
+};
 use crate::model::{ViewGraph, ViewNode};
 
 #[derive(Debug, Clone)]
@@ -39,6 +41,7 @@ enum NodeExecutionInfo<'a> {
 impl NodeUi {
     pub fn render_nodes(
         &mut self,
+        gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
@@ -50,7 +53,8 @@ impl NodeUi {
 
         for view_node_idx in 0..view_graph.view_nodes.len() {
             let node_id = view_graph.view_nodes[view_node_idx].id;
-            let node_layout = body_drag(ctx, view_graph, graph_layout, ui_interaction, &node_id);
+            let node_layout =
+                body_drag(gui, ctx, view_graph, graph_layout, ui_interaction, &node_id);
 
             let node = view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -60,16 +64,16 @@ impl NodeUi {
 
             let node_execution_info = node_execution_info(node_id, execution_stats);
 
-            render_body(ctx, node_layout, is_selected, &node_execution_info);
-            if render_remove_btn(ctx, ui_interaction, &node_id, node_layout) {
+            render_body(gui, ctx, node_layout, is_selected, &node_execution_info);
+            if render_remove_btn(gui, ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
-            render_cache_btn(ctx, ui_interaction, node_layout, node);
-            render_hints(ctx, node_layout, node, func);
-            render_const_bindings(ctx, ui_interaction, node_layout, node);
-            let node_drag_port_result = render_ports(ctx, node_layout, view_node);
+            render_cache_btn(gui, ctx, ui_interaction, node_layout, node);
+            render_hints(gui, ctx, node_layout, node, func);
+            render_const_bindings(ctx, gui, ui_interaction, node_layout, node);
+            let node_drag_port_result = render_ports(gui, ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_port_labels(ctx, node_layout);
+            render_port_labels(gui, ctx, node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -81,7 +85,8 @@ impl NodeUi {
 }
 
 fn body_drag<'a>(
-    ctx: &mut GraphContext<'_>,
+    gui: &mut Gui<'_>,
+    _ctx: &mut GraphContext<'_>,
     view_graph: &mut ViewGraph,
     graph_layout: &'a mut GraphLayout,
     ui_interaction: &mut GraphUiInteraction,
@@ -89,8 +94,8 @@ fn body_drag<'a>(
 ) -> &'a NodeLayout {
     let node_layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
 
-    let node_body_id = ctx.ui.make_persistent_id(("node_body", node_id));
-    let body_response = ctx.ui.interact(
+    let node_body_id = gui.ui().make_persistent_id(("node_body", node_id));
+    let body_response = gui.ui().interact(
         node_layout.body_rect,
         node_body_id,
         Sense::click() | Sense::hover() | Sense::drag(),
@@ -107,81 +112,83 @@ fn body_drag<'a>(
     }
     if dragged {
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-            body_response.drag_delta() / ctx.scale;
+            body_response.drag_delta() / gui.scale;
 
-        node_layout.update(ctx, view_graph, graph_layout.origin);
+        node_layout.update(_ctx, gui, view_graph, graph_layout.origin);
     }
 
     node_layout
 }
 
 fn render_body(
-    ctx: &mut GraphContext<'_>,
+    gui: &Gui<'_>,
+    _ctx: &mut GraphContext<'_>,
     node_layout: &NodeLayout,
     selected: bool,
     node_execution_info: &NodeExecutionInfo<'_>,
 ) {
-    let corner_radius = ctx.style.corner_radius * ctx.scale;
+    let corner_radius = gui.style.corner_radius * gui.scale;
 
     let shadow = match *node_execution_info {
-        NodeExecutionInfo::MissingInputs => Some(&ctx.style.node.missing_inputs_shadow),
-        NodeExecutionInfo::Executed(_) => Some(&ctx.style.node.executed_shadow),
-        NodeExecutionInfo::Cached => Some(&ctx.style.node.cached_shadow),
+        NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
+        NodeExecutionInfo::Executed(_) => Some(&gui.style.node.executed_shadow),
+        NodeExecutionInfo::Cached => Some(&gui.style.node.cached_shadow),
         NodeExecutionInfo::None => None,
     };
 
     if let Some(shadow) = shadow {
-        ctx.painter.add(Shape::Rect(
+        gui.painter().add(Shape::Rect(
             shadow.as_shape(node_layout.body_rect, corner_radius),
         ));
     }
 
-    ctx.painter.rect(
+    gui.painter().rect(
         node_layout.body_rect,
         corner_radius,
-        ctx.style.noninteractive_bg_fill,
-        ctx.style.inactive_bg_stroke,
+        gui.style.noninteractive_bg_fill,
+        gui.style.inactive_bg_stroke,
         StrokeKind::Middle,
     );
     if let NodeExecutionInfo::Executed(executed) = *node_execution_info {
         let text_pos = pos2(
             node_layout.body_rect.min.x,
-            node_layout.body_rect.max.y + ctx.style.small_padding * ctx.scale,
+            node_layout.body_rect.max.y + gui.style.small_padding * gui.scale,
         );
         let label = format!("{:.1} ms", executed.elapsed_secs * 1000.0);
-        ctx.painter.text(
+        gui.painter().text(
             text_pos,
             Align2::LEFT_TOP,
             label,
-            ctx.style.sub_font.scaled(ctx.scale),
-            ctx.style.noninteractive_text_color,
+            gui.style.sub_font.scaled(gui.scale),
+            gui.style.noninteractive_text_color,
         );
     }
     if selected {
         let mut header_rect = node_layout.body_rect;
         header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
 
-        ctx.painter.rect(
+        gui.painter().rect(
             header_rect,
             corner_radius,
-            ctx.style.active_bg_fill,
+            gui.style.active_bg_fill,
             Stroke::NONE,
             StrokeKind::Middle,
         );
     }
     let title_pos = node_layout.body_rect.min
         + vec2(
-            ctx.style.padding * ctx.scale,
+            gui.style.padding * gui.scale,
             (node_layout.header_row_height - node_layout.title_galley.size().y) * 0.5,
         );
-    ctx.painter.galley(
+    gui.painter().galley(
         title_pos,
         node_layout.title_galley.clone(),
-        ctx.style.text_color,
+        gui.style.text_color,
     );
 }
 
 fn render_cache_btn(
+    gui: &mut Gui<'_>,
     ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
@@ -191,6 +198,7 @@ fn render_cache_btn(
     let checked = node.behavior == NodeBehavior::Once;
 
     if ctx.toggle_button(
+        gui,
         node_layout.cache_button_rect,
         enabled,
         checked,
@@ -207,33 +215,36 @@ fn render_cache_btn(
 }
 
 fn render_hints(
-    ctx: &mut GraphContext,
+    gui: &mut Gui<'_>,
+    _ctx: &mut GraphContext,
     node_layout: &NodeLayout,
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
 ) {
-    let dot_radius = ctx.scale * ctx.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + ctx.style.small_padding * ctx.scale;
+    let dot_radius = gui.scale * gui.style.node.status_dot_radius;
+    let dot_step = (dot_radius * 2.0) + gui.style.small_padding * gui.scale;
 
     if node.terminal {
         let center = node_layout.dot_center(0, dot_step);
-        ctx.painter
-            .circle_filled(center, dot_radius, ctx.style.node.status_terminal_color);
+        gui.painter()
+            .circle_filled(center, dot_radius, gui.style.node.status_terminal_color);
         let dot_rect =
             egui::Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-        let dot_id = ctx.ui.make_persistent_id(("node_status_terminal", node.id));
-        let dot_response = ctx.ui.interact(dot_rect, dot_id, Sense::hover());
+        let dot_id = gui
+            .ui()
+            .make_persistent_id(("node_status_terminal", node.id));
+        let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("terminal");
         }
     }
     if node.behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
         let center = node_layout.dot_center(usize::from(node.terminal), dot_step);
-        ctx.painter
-            .circle_filled(center, dot_radius, ctx.style.node.status_impure_color);
+        gui.painter()
+            .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
         let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-        let dot_id = ctx.ui.make_persistent_id(("node_status_impure", node.id));
-        let dot_response = ctx.ui.interact(dot_rect, dot_id, Sense::hover());
+        let dot_id = gui.ui().make_persistent_id(("node_status_impure", node.id));
+        let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("impure");
         }
@@ -241,6 +252,7 @@ fn render_hints(
 }
 
 fn render_remove_btn(
+    gui: &mut Gui<'_>,
     ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
@@ -264,13 +276,14 @@ fn render_remove_btn(
         remove_rect.max.x - remove_margin,
         remove_rect.min.y + remove_margin,
     );
-    let remove_color = ctx.style.text_color;
-    let remove_stroke = Stroke::new(1.4 * ctx.scale, remove_color);
+    let remove_color = gui.style.text_color;
+    let remove_stroke = Stroke::new(1.4 * gui.scale, remove_color);
     let remove_shapes = [
         Shape::line_segment([a, b], remove_stroke),
         Shape::line_segment([c, d], remove_stroke),
     ];
     let remove = ctx.button_with(
+        gui,
         remove_rect,
         true,
         ("node_remove", node_id),
@@ -289,30 +302,33 @@ fn render_remove_btn(
 }
 
 fn render_ports(
-    ctx: &GraphContext,
+    gui: &mut Gui<'_>,
+    _ctx: &GraphContext,
     node_layout: &NodeLayout,
     view_node: &ViewNode,
 ) -> PortDragInfo {
-    let port_radius = ctx.style.node.port_radius * ctx.scale;
+    let port_radius = gui.style.node.port_radius * gui.scale;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
-    let draw_port = |center: Pos2,
-                     kind: PortKind,
-                     idx: usize,
-                     base_color: Color32,
-                     hover_color: Color32|
+    let input_base = gui.style.node.input_port_color;
+    let input_hover = gui.style.node.input_hover_color;
+    let output_base = gui.style.node.output_port_color;
+    let output_hover = gui.style.node.output_hover_color;
+
+    let mut draw_port = |center: Pos2,
+                         kind: PortKind,
+                         idx: usize,
+                         base_color: Color32,
+                         hover_color: Color32|
      -> PortDragInfo {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
-        let port_id = ctx
-            .ui
-            .make_persistent_id(("node_port", kind, view_node.id, idx));
-        let response = ctx
-            .ui
-            .interact(port_rect, port_id, Sense::drag() | Sense::hover());
-        let is_hovered = ctx.ui.rect_contains_pointer(port_rect);
+        let ui = gui.ui();
+        let port_id = ui.make_persistent_id(("node_port", kind, view_node.id, idx));
+        let response = ui.interact(port_rect, port_id, Sense::drag() | Sense::hover());
+        let is_hovered = ui.rect_contains_pointer(port_rect);
 
         let color = is_hovered.then_else(hover_color, base_color);
-        ctx.painter.circle_filled(center, port_radius, color);
+        gui.painter().circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
             port: PortRef {
@@ -337,13 +353,7 @@ fn render_ports(
 
     for input_idx in 0..node_layout.input_galleys.len() {
         let center = node_layout.input_center(input_idx);
-        let drag_info = draw_port(
-            center,
-            PortKind::Input,
-            input_idx,
-            ctx.style.node.input_port_color,
-            ctx.style.node.input_hover_color,
-        );
+        let drag_info = draw_port(center, PortKind::Input, input_idx, input_base, input_hover);
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 
@@ -353,8 +363,8 @@ fn render_ports(
             center,
             PortKind::Output,
             output_idx,
-            ctx.style.node.output_port_color,
-            ctx.style.node.output_hover_color,
+            output_base,
+            output_hover,
         );
         port_drag_info = port_drag_info.prefer(drag_info);
     }
@@ -362,20 +372,20 @@ fn render_ports(
     port_drag_info
 }
 
-fn render_port_labels(ctx: &mut GraphContext, node_layout: &NodeLayout) {
-    let padding = ctx.style.node.port_label_side_padding * ctx.scale;
+fn render_port_labels(gui: &Gui<'_>, _ctx: &mut GraphContext, node_layout: &NodeLayout) {
+    let padding = gui.style.node.port_label_side_padding * gui.scale;
 
     for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
         let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
-        ctx.painter
-            .galley(text_pos, galley.clone(), ctx.style.text_color);
+        gui.painter()
+            .galley(text_pos, galley.clone(), gui.style.text_color);
     }
 
     for (output_idx, galley) in node_layout.output_galleys.iter().enumerate() {
         let text_pos = node_layout.output_center(output_idx)
             + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
-        ctx.painter
-            .galley(text_pos, galley.clone(), ctx.style.text_color);
+        gui.painter()
+            .galley(text_pos, galley.clone(), gui.style.text_color);
     }
 }
 

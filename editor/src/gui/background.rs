@@ -4,7 +4,7 @@ use eframe::egui;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Pos2, Shape, Vec2};
 
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model;
 
 #[derive(Debug, Default)]
@@ -17,10 +17,10 @@ pub struct BackgroundRenderer {
 }
 
 impl BackgroundRenderer {
-    pub fn render(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
+    pub fn render(&mut self, _ctx: &GraphContext, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
         let scale = view_graph.scale;
         let pan = view_graph.pan;
-        let rect_size = ctx.rect.size();
+        let rect_size = gui.rect.size();
 
         assert!(scale > common::EPSILON, "view graph scale must be positive");
 
@@ -29,39 +29,39 @@ impl BackgroundRenderer {
             || crate::common::vec_changed(self.last_pan, pan)
             || crate::common::vec_changed(self.last_rect_size, rect_size)
         {
-            self.rebuild_mesh(ctx, view_graph);
+            self.rebuild_mesh(_ctx, gui, view_graph);
             self.last_scale = scale;
             self.last_pan = pan;
             self.last_rect_size = rect_size;
             self.inited = true;
         }
 
-        ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
+        gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
-    fn rebuild_mesh(&mut self, ctx: &GraphContext, view_graph: &model::ViewGraph) {
-        let spacing = ctx.style.background.dotted_base_spacing * ctx.scale;
+    fn rebuild_mesh(&mut self, _ctx: &GraphContext, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
+        let spacing = gui.style.background.dotted_base_spacing * gui.scale;
         assert!(spacing > 0.0, "background spacing must be positive");
 
-        let radius = (ctx.style.background.dotted_radius_base * ctx.scale).clamp(
-            ctx.style.background.dotted_radius_min,
-            ctx.style.background.dotted_radius_max,
+        let radius = (gui.style.background.dotted_radius_base * gui.scale).clamp(
+            gui.style.background.dotted_radius_min,
+            gui.style.background.dotted_radius_max,
         );
-        let color = ctx.style.background.dotted_color;
-        let origin = ctx.rect.min + view_graph.pan;
-        let offset_x = (ctx.rect.left() - origin.x).rem_euclid(spacing);
-        let offset_y = (ctx.rect.top() - origin.y).rem_euclid(spacing);
-        let start_x = ctx.rect.left() - offset_x - spacing;
-        let start_y = ctx.rect.top() - offset_y - spacing;
+        let color = gui.style.background.dotted_color;
+        let origin = gui.rect.min + view_graph.pan;
+        let offset_x = (gui.rect.left() - origin.x).rem_euclid(spacing);
+        let offset_y = (gui.rect.top() - origin.y).rem_euclid(spacing);
+        let start_x = gui.rect.left() - offset_x - spacing;
+        let start_y = gui.rect.top() - offset_y - spacing;
 
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
 
         let segments = 5;
         let mut y = start_y;
-        while y <= ctx.rect.bottom() + spacing {
+        while y <= gui.rect.bottom() + spacing {
             let mut x = start_x;
-            while x <= ctx.rect.right() + spacing {
+            while x <= gui.rect.right() + spacing {
                 add_circle_to_mesh(mesh, Pos2::new(x, y), radius, color, segments);
                 x += spacing;
             }
