@@ -80,7 +80,7 @@ impl NodeLayout {
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-        if !self.inited || (self.scale - ctx.scale).abs() >= common::EPSILON {
+        if !self.inited || crate::common::scale_changed(self.scale, ctx.scale) {
             self.scale = ctx.scale;
             self.inited = true;
 
