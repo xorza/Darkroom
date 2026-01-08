@@ -245,30 +245,29 @@ impl ConnectionUi {
                     );
                 }
 
-                let highlighted = if let Some(segments) =
-                    breaker.and_then(|breaker| (!breaker.is_empty()).then_some(breaker.segments()))
-                {
-                    let mut hit = false;
-                    'outer: for (b1, b2) in segments {
-                        let curve_segments = curve
-                            .mesh
-                            .points()
-                            .windows(2)
-                            .map(|pair| (pair[0], pair[1]));
+                let highlighted =
+                    if let Some(segments) = breaker.and_then(|breaker| Some(breaker.segments())) {
+                        let mut hit = false;
+                        'outer: for (b1, b2) in segments {
+                            let curve_segments = curve
+                                .mesh
+                                .points()
+                                .windows(2)
+                                .map(|pair| (pair[0], pair[1]));
 
-                        for (a1, a2) in curve_segments {
-                            if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
-                                self.highlighted.insert(connection_key);
-                                hit = true;
-                                break 'outer;
+                            for (a1, a2) in curve_segments {
+                                if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+                                    self.highlighted.insert(connection_key);
+                                    hit = true;
+                                    break 'outer;
+                                }
                             }
                         }
-                    }
 
-                    hit
-                } else {
-                    false
-                };
+                        hit
+                    } else {
+                        false
+                    };
 
                 if curve.highlighted != highlighted || needs_rebuild {
                     curve.highlighted = highlighted;

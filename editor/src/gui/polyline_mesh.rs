@@ -136,6 +136,9 @@ fn add_curve_segments_to_mesh(
     width: f32,
     feather: f32,
 ) {
+    if points.len() < 2 {
+        return;
+    }
     assert!(points.len() >= 2);
     assert!(width > 0.0);
     assert!(feather >= 0.0);

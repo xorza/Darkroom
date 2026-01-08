@@ -10,6 +10,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 pub struct ConnectionBreaker {
     mesh: PolylineMesh,
     built_len: usize,
+    reset: bool,
 }
 
 impl Default for ConnectionBreaker {
@@ -17,6 +18,7 @@ impl Default for ConnectionBreaker {
         Self {
             mesh: PolylineMesh::with_point_capacity(max_capacity()),
             built_len: 0,
+            reset: false,
         }
     }
 }
@@ -24,14 +26,13 @@ impl Default for ConnectionBreaker {
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
         self.mesh.points_mut().clear();
-        self.mesh.clear_mesh();
         self.built_len = 0;
+        self.reset = true;
     }
 
     pub fn start(&mut self, point: Pos2) {
         self.reset();
         self.mesh.points_mut().push(point);
-        self.built_len = 1;
     }
 
     pub fn segments(&self) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
@@ -68,33 +69,21 @@ impl ConnectionBreaker {
                 last_pos.y + (point.y - last_pos.y) * t,
             )
         };
-        self.mesh.points_mut().push(clamped);
-    }
 
-    pub fn is_empty(&self) -> bool {
-        self.mesh.points().is_empty()
+        self.mesh.points_mut().push(clamped);
     }
 
     pub fn render(&mut self, ctx: &GraphContext) {
         let point_len = self.mesh.points().len();
-        if point_len < 2 {
+        if self.reset || point_len < self.built_len {
             self.mesh.clear_mesh();
-            self.built_len = point_len;
-            return;
+            self.reset = false;
         }
 
         let pixels_per_point = ctx.ui.ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
         let color = ctx.style.connections.breaker_stroke.color;
-        if self.built_len == 0 || self.built_len > point_len {
-            self.mesh.rebuild(
-                color,
-                color,
-                ctx.style.connections.breaker_stroke.width,
-                feather,
-            );
-            self.built_len = point_len;
-        } else if point_len > self.built_len {
+        if point_len > self.built_len {
             let start_segment = self.built_len.saturating_sub(1);
             self.mesh.append_segments_from_points(
                 start_segment,
