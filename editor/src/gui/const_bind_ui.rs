@@ -69,7 +69,7 @@ pub fn render_const_bindings(
             .desired_width(badge_rect.width())
             .vertical_align(Align::Center)
             .horizontal_align(Align::Center)
-            .margin(0.0)
+            .margin(Vec2::ZERO)
             .clip_text(true)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
