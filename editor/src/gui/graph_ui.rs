@@ -84,7 +84,6 @@ impl GraphUi {
         execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-        _arena: &bumpalo::Bump,
     ) -> Result<(), Error> {
         let mut ctx = GraphContext::new(func_lib);
 
@@ -106,14 +105,14 @@ impl GraphUi {
         }
 
         if let Some(pointer_pos) = pointer_pos {
-            self.update_zoom_and_pan(gui, &mut ctx, view_graph, &background_response, pointer_pos);
+            self.update_zoom_and_pan(gui, view_graph, &background_response, pointer_pos);
         }
 
         self.graph_layout.update(&ctx, gui, view_graph);
 
-        self.background.render(&ctx, gui, view_graph);
+        self.background.render(gui, view_graph);
 
-        self.render_connections(gui, &mut ctx, view_graph);
+        self.render_connections(gui, view_graph);
 
         let drag_port_info = self.node_ui.render_nodes(
             gui,
@@ -124,12 +123,11 @@ impl GraphUi {
             execution_stats,
         );
 
-        self.top_panel(gui, &mut ctx, view_graph);
+        self.top_panel(gui, view_graph);
 
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
                 gui,
-                &mut ctx,
                 view_graph,
                 &background_response,
                 ui_interaction,
@@ -145,7 +143,6 @@ impl GraphUi {
     fn process_connections(
         &mut self,
         gui: &mut Gui<'_>,
-        _ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
         background_response: &Response,
         ui_interaction: &mut GraphUiInteraction,
@@ -235,14 +232,8 @@ impl GraphUi {
         Ok(())
     }
 
-    fn render_connections(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext,
-        view_graph: &model::ViewGraph,
-    ) {
+    fn render_connections(&mut self, gui: &mut Gui<'_>, view_graph: &model::ViewGraph) {
         self.connections.render(
-            ctx,
             gui,
             &self.graph_layout,
             view_graph,
@@ -256,16 +247,11 @@ impl GraphUi {
         match self.state {
             InteractionState::Idle => {}
             InteractionState::DraggingNewConnection => {}
-            InteractionState::BreakingConnections => self.connection_breaker.render(ctx, gui),
+            InteractionState::BreakingConnections => self.connection_breaker.render(gui),
         }
     }
 
-    fn top_panel(
-        &self,
-        gui: &mut Gui<'_>,
-        _ctx: &mut GraphContext,
-        view_graph: &mut model::ViewGraph,
-    ) {
+    fn top_panel(&self, gui: &mut Gui<'_>, view_graph: &mut model::ViewGraph) {
         let mut fit_all = false;
         let mut view_selected = false;
         let mut reset_view = false;
@@ -296,7 +282,6 @@ impl GraphUi {
     fn update_zoom_and_pan(
         &mut self,
         gui: &mut Gui<'_>,
-        _ctx: &mut GraphContext,
         view_graph: &mut model::ViewGraph,
         background_response: &Response,
         pointer_pos: Pos2,

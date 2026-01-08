@@ -49,7 +49,7 @@ impl NodeLayout {
         egui::pos2(first.x - dot_step * index as f32, first.y)
     }
 
-    pub fn new(_ctx: &GraphContext, gui: &Gui<'_>, node_id: &NodeId) -> NodeLayout {
+    pub fn new(gui: &Gui<'_>, node_id: &NodeId) -> NodeLayout {
         let title_galley = gui.painter().layout_no_wrap(
             String::default(),
             gui.style.body_font.clone(),
@@ -77,14 +77,14 @@ impl NodeLayout {
 
     pub fn update(
         &mut self,
-        _ctx: &GraphContext,
+        ctx: &GraphContext,
         gui: &Gui<'_>,
         view_graph: &ViewGraph,
         origin: Pos2,
     ) {
         let view_node = view_graph.view_nodes.by_key(&self.node_id).unwrap();
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
-        let func = _ctx.func_lib.by_id(&node.func_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
         let label_font = gui.style.sub_font.scaled(gui.scale);
 

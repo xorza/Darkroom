@@ -6,13 +6,11 @@ use graph::graph::{Binding, Node, NodeId};
 use crate::common::drag_value::DragValue;
 use crate::common::font::ScaledFontId;
 use crate::gui::Gui;
-use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 
 pub fn render_const_bindings(
-    _ctx: &mut GraphContext,
     gui: &mut Gui<'_>,
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,

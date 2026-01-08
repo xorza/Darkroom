@@ -118,7 +118,6 @@ impl MainUi {
                 app_data.execution_stats.as_ref(),
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
-                &self.arena,
             );
             if let Err(err) = result {
                 app_data.status = format!("Error: {}", err);

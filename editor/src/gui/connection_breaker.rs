@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::Pos2;
 
-use crate::gui::{Gui, graph_ctx::GraphContext, polyline_mesh::PolylineMesh};
+use crate::gui::{Gui, polyline_mesh::PolylineMesh};
 
 const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
@@ -73,7 +73,7 @@ impl ConnectionBreaker {
         self.mesh.points_mut().push(clamped);
     }
 
-    pub fn render(&mut self, _ctx: &GraphContext, gui: &mut Gui<'_>) {
+    pub fn render(&mut self, gui: &mut Gui<'_>) {
         let point_len = self.mesh.points().len();
         if self.reset || point_len < self.built_len {
             self.mesh.clear_mesh();

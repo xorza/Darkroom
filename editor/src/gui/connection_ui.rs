@@ -8,11 +8,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::connection_bezier::ConnectionBezier;
+use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::gui::polyline_mesh::{PolylineMesh, polyline_mesh_with_capacity};
-use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model;
 
 pub const POINTS: usize = 25;
@@ -137,13 +137,12 @@ impl Default for ConnectionUi {
 impl ConnectionUi {
     pub(crate) fn render(
         &mut self,
-        ctx: &GraphContext,
         gui: &mut Gui<'_>,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(ctx, gui, graph_layout, view_graph, breaker);
+        self.rebuild(gui, graph_layout, view_graph, breaker);
 
         gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
     }
@@ -194,7 +193,6 @@ impl ConnectionUi {
 
     fn rebuild(
         &mut self,
-        _ctx: &GraphContext,
         gui: &mut Gui<'_>,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,

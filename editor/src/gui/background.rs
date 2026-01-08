@@ -4,7 +4,7 @@ use eframe::egui;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Pos2, Shape, Vec2};
 
-use crate::gui::{Gui, graph_ctx::GraphContext};
+use crate::gui::Gui;
 use crate::model;
 
 #[derive(Debug, Default)]
@@ -17,7 +17,7 @@ pub struct BackgroundRenderer {
 }
 
 impl BackgroundRenderer {
-    pub fn render(&mut self, _ctx: &GraphContext, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
+    pub fn render(&mut self, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
         let scale = view_graph.scale;
         let pan = view_graph.pan;
         let rect_size = gui.rect.size();
@@ -29,7 +29,7 @@ impl BackgroundRenderer {
             || crate::common::vec_changed(self.last_pan, pan)
             || crate::common::vec_changed(self.last_rect_size, rect_size)
         {
-            self.rebuild_mesh(_ctx, gui, view_graph);
+            self.rebuild_mesh(gui, view_graph);
             self.last_scale = scale;
             self.last_pan = pan;
             self.last_rect_size = rect_size;
@@ -39,7 +39,7 @@ impl BackgroundRenderer {
         gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
-    fn rebuild_mesh(&mut self, _ctx: &GraphContext, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
+    fn rebuild_mesh(&mut self, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
         let spacing = gui.style.background.dotted_base_spacing * gui.scale;
         assert!(spacing > 0.0, "background spacing must be positive");
 

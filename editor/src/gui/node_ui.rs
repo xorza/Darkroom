@@ -64,16 +64,16 @@ impl NodeUi {
 
             let node_execution_info = node_execution_info(node_id, execution_stats);
 
-            render_body(gui, ctx, node_layout, is_selected, &node_execution_info);
+            render_body(gui, node_layout, is_selected, &node_execution_info);
             if render_remove_btn(gui, ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             render_cache_btn(gui, ctx, ui_interaction, node_layout, node);
-            render_hints(gui, ctx, node_layout, node, func);
-            render_const_bindings(ctx, gui, ui_interaction, node_layout, node);
-            let node_drag_port_result = render_ports(gui, ctx, node_layout, view_node);
+            render_hints(gui, node_layout, node, func);
+            render_const_bindings(gui, ui_interaction, node_layout, node);
+            let node_drag_port_result = render_ports(gui, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
-            render_port_labels(gui, ctx, node_layout);
+            render_port_labels(gui, node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
@@ -86,7 +86,7 @@ impl NodeUi {
 
 fn body_drag<'a>(
     gui: &mut Gui<'_>,
-    _ctx: &mut GraphContext<'_>,
+    ctx: &mut GraphContext<'_>,
     view_graph: &mut ViewGraph,
     graph_layout: &'a mut GraphLayout,
     ui_interaction: &mut GraphUiInteraction,
@@ -114,7 +114,7 @@ fn body_drag<'a>(
         view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / gui.scale;
 
-        node_layout.update(_ctx, gui, view_graph, graph_layout.origin);
+        node_layout.update(ctx, gui, view_graph, graph_layout.origin);
     }
 
     node_layout
@@ -122,7 +122,6 @@ fn body_drag<'a>(
 
 fn render_body(
     gui: &Gui<'_>,
-    _ctx: &mut GraphContext<'_>,
     node_layout: &NodeLayout,
     selected: bool,
     node_execution_info: &NodeExecutionInfo<'_>,
@@ -216,7 +215,6 @@ fn render_cache_btn(
 
 fn render_hints(
     gui: &mut Gui<'_>,
-    _ctx: &mut GraphContext,
     node_layout: &NodeLayout,
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
@@ -301,12 +299,7 @@ fn render_remove_btn(
     false
 }
 
-fn render_ports(
-    gui: &mut Gui<'_>,
-    _ctx: &GraphContext,
-    node_layout: &NodeLayout,
-    view_node: &ViewNode,
-) -> PortDragInfo {
+fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNode) -> PortDragInfo {
     let port_radius = gui.style.node.port_radius * gui.scale;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
@@ -372,7 +365,7 @@ fn render_ports(
     port_drag_info
 }
 
-fn render_port_labels(gui: &Gui<'_>, _ctx: &mut GraphContext, node_layout: &NodeLayout) {
+fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
     let padding = gui.style.node.port_label_side_padding * gui.scale;
 
     for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {

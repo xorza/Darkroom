@@ -44,7 +44,7 @@ impl GraphLayout {
             let idx = self
                 .node_layouts
                 .compact_insert_with(&view_node.id, &mut write_idx, || {
-                    NodeLayout::new(ctx, gui, &view_node.id)
+                    NodeLayout::new(gui, &view_node.id)
                 });
 
             self.node_layouts[idx].update(ctx, gui, view_graph, self.origin);
