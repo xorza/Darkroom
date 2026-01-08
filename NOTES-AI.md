@@ -50,6 +50,7 @@ dedicated monospaced font from Style.
 `DragValue` now supports configurable padding around the text for sizing and alignment.
 `DragValue` now supports click-to-edit inline text input, committing on Enter or focus loss and canceling with Escape.
 `DragValue` now sets a horizontal resize cursor on hover in drag mode.
+`DragValue` now configures font and color via builder methods instead of constructor args.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.

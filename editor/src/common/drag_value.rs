@@ -19,12 +19,12 @@ pub struct DragValue<'a> {
 }
 
 impl<'a> DragValue<'a> {
-    pub fn new(value: &'a mut i64, id: egui::Id, font: FontId, color: Color32) -> Self {
+    pub fn new(value: &'a mut i64, id: egui::Id) -> Self {
         Self {
             value,
             speed: 1.0,
-            font,
-            color,
+            font: FontId::default(),
+            color: Color32::WHITE,
             id,
             background_enabled: false,
             background_fill: Color32::TRANSPARENT,
@@ -36,6 +36,16 @@ impl<'a> DragValue<'a> {
 
     pub fn speed(mut self, speed: f32) -> Self {
         self.speed = speed;
+        self
+    }
+
+    pub fn font(mut self, font: FontId) -> Self {
+        self.font = font;
+        self
+    }
+
+    pub fn color(mut self, color: Color32) -> Self {
+        self.color = color;
         self
     }
 

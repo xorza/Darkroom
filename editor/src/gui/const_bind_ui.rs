@@ -54,7 +54,9 @@ pub fn render_const_bindings(
             let drag_id = ctx
                 .ui
                 .make_persistent_id(("const_int_drag", node.id, input_idx));
-            let response = DragValue::new(value, drag_id, mono_font.clone(), ctx.style.text_color)
+            let response = DragValue::new(value, drag_id)
+                .font(mono_font.clone())
+                .color(ctx.style.text_color)
                 .speed(1.0)
                 .background(
                     ctx.style.inactive_bg_fill,
