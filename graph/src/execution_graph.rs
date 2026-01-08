@@ -1142,8 +1142,9 @@ mod tests {
             ["sum", "mult", "print"]
         );
 
-        execution_graph.execute().await?;
+        let exe_stats = execution_graph.execute().await?;
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
+        assert_eq!(exe_stats.cached_nodes.len(), 4);
 
         Ok(())
     }
