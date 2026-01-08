@@ -107,14 +107,36 @@ fn body_drag<'a>(
 
 fn render_body(ctx: &mut GraphContext<'_>, node_layout: &NodeLayout, selected: bool) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
-    let stroke = selected.then_else(ctx.style.active_bg_stroke, ctx.style.inactive_bg_stroke);
+
     ctx.painter.rect(
         node_layout.body_rect,
         corner_radius,
         ctx.style.noninteractive_bg_fill,
-        stroke,
+        ctx.style.inactive_bg_stroke,
         StrokeKind::Middle,
     );
+    if selected {
+        // let shadow = Shadow {
+        //     offset: [0, 0],
+        //     blur: 3,
+        //     spread: 3,
+        //     color: Color32::from_white_alpha(50),
+        // };
+
+        // ctx.painter.add(Shape::Rect(
+        //     shadow.as_shape(node_layout.body_rect, corner_radius),
+        // ));
+        let mut header_rect = node_layout.body_rect;
+        header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
+
+        ctx.painter.rect(
+            header_rect,
+            corner_radius,
+            ctx.style.active_bg_fill,
+            Stroke::NONE,
+            StrokeKind::Middle,
+        );
+    }
     let title_pos = node_layout.body_rect.min
         + vec2(
             ctx.style.padding * ctx.scale,

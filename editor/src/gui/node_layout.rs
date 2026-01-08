@@ -155,7 +155,7 @@ impl NodeLayout {
 
         let cache_button_height = ctx.style.sub_font.size * self.scale;
 
-        let header_row_height = header_height + padding * 2.0;
+        let header_row_height = header_height + small_padding * 2.0;
         let port_row_height = ctx
             .style
             .sub_font
@@ -163,7 +163,7 @@ impl NodeLayout {
             .max(ctx.style.node.port_radius * 2.0)
             * self.scale
             + small_padding;
-        let cache_row_height = cache_button_height + small_padding * 2.0;
+        let cache_row_height = cache_button_height + padding * 2.0;
 
         let node_width = header_width.max(max_row_width);
         let node_height = header_row_height
@@ -189,7 +189,7 @@ impl NodeLayout {
         let cache_button_rect = Rect::from_min_size(
             pos2(
                 body_rect.min.x + padding,
-                body_rect.min.y + header_row_height + small_padding,
+                body_rect.min.y + header_row_height + padding,
             ),
             vec2(
                 ctx.style.node.cache_btn_width * self.scale,
