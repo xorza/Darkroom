@@ -31,10 +31,11 @@ pub struct NodeUi {
 }
 
 #[derive(Debug)]
-struct NodeExecutionInfo<'a> {
-    cached: bool,
-    has_missing_inputs: bool,
-    executed: Option<&'a ExecutedNodeStats>,
+enum NodeExecutionInfo<'a> {
+    MissingInputs,
+    Executed(&'a ExecutedNodeStats),
+    Cached,
+    None,
 }
 
 impl NodeUi {
@@ -124,14 +125,11 @@ fn render_body(
 ) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
 
-    let shadow = if node_execution_info.has_missing_inputs {
-        Some(&ctx.style.node.missing_inputs_shadow)
-    } else if node_execution_info.executed.is_some() {
-        Some(&ctx.style.node.executed_shadow)
-    } else if node_execution_info.cached {
-        Some(&ctx.style.node.cached_shadow)
-    } else {
-        None
+    let shadow = match *node_execution_info {
+        NodeExecutionInfo::MissingInputs => Some(&ctx.style.node.missing_inputs_shadow),
+        NodeExecutionInfo::Executed(_) => Some(&ctx.style.node.executed_shadow),
+        NodeExecutionInfo::Cached => Some(&ctx.style.node.cached_shadow),
+        NodeExecutionInfo::None => None,
     };
 
     if let Some(shadow) = shadow {
@@ -147,7 +145,7 @@ fn render_body(
         ctx.style.inactive_bg_stroke,
         StrokeKind::Middle,
     );
-    if let Some(executed) = node_execution_info.executed {
+    if let NodeExecutionInfo::Executed(executed) = *node_execution_info {
         let text_pos = pos2(
             node_layout.body_rect.min.x,
             node_layout.body_rect.max.y + ctx.style.small_padding * ctx.scale,
@@ -478,25 +476,26 @@ fn node_execution_info<'a>(
     execution_stats: Option<&'a ExecutionStats>,
 ) -> NodeExecutionInfo<'a> {
     let Some(execution_stats) = execution_stats else {
-        return NodeExecutionInfo {
-            cached: false,
-            has_missing_inputs: false,
-            executed: None,
-        };
+        return NodeExecutionInfo::None;
     };
 
-    let executed = execution_stats
+    if execution_stats.nodes_with_missing_inputs.contains(&node_id) {
+        return NodeExecutionInfo::MissingInputs;
+    }
+
+    if let Some(executed) = execution_stats
         .executed_nodes
         .iter()
-        .find(|stats| stats.node_id == node_id);
-    let cached = execution_stats.cached_nodes.contains(&node_id);
-    let has_missing_inputs = execution_stats.nodes_with_missing_inputs.contains(&node_id);
-
-    NodeExecutionInfo {
-        cached,
-        has_missing_inputs,
-        executed,
+        .find(|stats| stats.node_id == node_id)
+    {
+        return NodeExecutionInfo::Executed(executed);
     }
+
+    if execution_stats.cached_nodes.contains(&node_id) {
+        return NodeExecutionInfo::Cached;
+    }
+
+    NodeExecutionInfo::None
 }
 
 impl PortDragInfo {
