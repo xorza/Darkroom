@@ -47,20 +47,18 @@ impl Worker {
     }
 
     pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
-        self.tx
-            .send(WorkerMessage::Update { graph, func_lib })
-            .unwrap();
+        self.send(WorkerMessage::Update { graph, func_lib });
     }
 
     pub fn exit(&mut self) {
-        self.tx.send(WorkerMessage::Exit).unwrap();
+        self.send(WorkerMessage::Exit);
 
         if let Some(_thread_handle) = self.thread_handle.take() {
             // thread_handle.await.expect("Worker thread failed to join");
         }
     }
     pub fn event(&mut self) {
-        self.tx.send(WorkerMessage::Event).unwrap();
+        self.send(WorkerMessage::Event);
     }
 }
 
