@@ -6,6 +6,7 @@ pub struct Style {
     pub heading_font: FontId,
     pub body_font: FontId,
     pub sub_font: FontId,
+    pub mono_font: FontId,
 
     pub text_color: Color32,
     pub noninteractive_text_color: Color32,
@@ -85,6 +86,10 @@ impl Style {
             sub_font: FontId {
                 size: 13.0,
                 family: FontFamily::Proportional,
+            },
+            mono_font: FontId {
+                size: 13.0,
+                family: FontFamily::Monospace,
             },
 
             text_color: Color32::from_rgb(192, 192, 192),

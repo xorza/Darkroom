@@ -18,7 +18,7 @@ pub fn render_const_bindings(
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let padding = ctx.style.small_padding * ctx.scale;
-    let font = ctx.style.sub_font.scaled(ctx.scale);
+    let mono_font = ctx.style.mono_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
         let Binding::Const(value) = &mut input.binding else {
@@ -27,12 +27,11 @@ pub fn render_const_bindings(
 
         let input_center = node_layout.input_center(input_idx);
         let label = const_input_text(ctx, node.id, input_idx, value);
-        let label_galley = ctx
-            .painter
-            .layout_no_wrap(label, font.clone(), ctx.style.text_color);
-        let badge_width = label_galley.size().x + padding * 2.0;
+        let char_count = label.chars().count().max(1);
+        let label_width = mono_font.size.max(1.0) * char_count as f32;
+        let badge_width = label_width + padding * 2.0;
         let badge_right = input_center.x - port_radius - padding * 2.0;
-        let badge_height = label_galley.size().y;
+        let badge_height = mono_font.size;
         let badge_rect = egui::Rect::from_min_max(
             pos2(
                 badge_right - badge_width,
@@ -66,7 +65,7 @@ pub fn render_const_bindings(
             let drag_id = ctx
                 .ui
                 .make_persistent_id(("const_int_drag", node.id, input_idx));
-            let response = DragValue::new(value, drag_id, font.clone(), ctx.style.text_color)
+            let response = DragValue::new(value, drag_id, mono_font.clone(), ctx.style.text_color)
                 .speed(1.0)
                 .show(&mut text_ui, badge_rect);
             if response.changed() {
@@ -81,7 +80,7 @@ pub fn render_const_bindings(
             let mut text = const_input_text(ctx, node.id, input_idx, value);
             let text_edit = TextEdit::singleline(&mut text)
                 .id(text_id)
-                .font(font.clone())
+                .font(mono_font.clone())
                 .desired_width(badge_rect.width())
                 .vertical_align(Align::Center)
                 .horizontal_align(Align::Center)

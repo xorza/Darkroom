@@ -43,6 +43,8 @@ Const input badge labels now right-align to the badge edge and remain vertically
 Const int input badges now use a custom editor `DragValue` widget that renders text-only and handles drag updates
 without egui background styling.
 Const int drag updates now use the total drag delta to keep values stable across frames while dragging.
+Const int badge widths now derive from label symbol count times a monospaced font size, and static value editors use a
+dedicated monospaced font from Style.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.
