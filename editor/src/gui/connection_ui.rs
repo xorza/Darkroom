@@ -12,7 +12,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
-use crate::gui::polyline_mesh::{PolylineMesh, add_curve_to_mesh, polyline_mesh_capacity};
+use crate::gui::polyline_mesh::{PolylineMesh, add_curve_to_mesh, polyline_mesh_with_capacity};
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -94,10 +94,7 @@ pub(crate) struct ConnectionUi {
 
 impl Default for ConnectionUi {
     fn default() -> Self {
-        let (vertex_capacity, index_capacity) = polyline_mesh_capacity(connection_bezier::POINTS);
-        let mut mesh = Mesh::default();
-        mesh.vertices.reserve(10 * vertex_capacity);
-        mesh.indices.reserve(10 * index_capacity);
+        let mesh = polyline_mesh_with_capacity(10 * connection_bezier::POINTS);
 
         Self {
             curves: KeyIndexVec::default(),

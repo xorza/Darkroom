@@ -10,13 +10,8 @@ pub struct PolylineMesh {
 
 impl PolylineMesh {
     pub fn with_point_capacity(points: usize) -> Self {
-        let (vertex_capacity, index_capacity) = polyline_mesh_capacity(points);
-        let mut mesh = Mesh::default();
-        mesh.vertices.reserve(vertex_capacity);
-        mesh.indices.reserve(index_capacity);
-
         Self {
-            mesh: Arc::new(mesh),
+            mesh: Arc::new(polyline_mesh_with_capacity(points)),
         }
     }
 
@@ -99,16 +94,21 @@ pub fn add_curve_to_mesh(
     }
 }
 
-pub fn polyline_mesh_capacity(points: usize) -> (usize, usize) {
+pub fn polyline_mesh_with_capacity(points: usize) -> Mesh {
     assert!(points >= 2, "bezier point count must be at least 2");
     let segments = points - 1;
     let quads_per_segment = 3;
     let vertices_per_quad = 4;
     let indices_per_quad = 6;
-    (
+    let (vertex_capacity, index_capacity) = (
         segments * quads_per_segment * vertices_per_quad,
         segments * quads_per_segment * indices_per_quad,
-    )
+    );
+
+    let mut mesh = Mesh::default();
+    mesh.vertices.reserve(vertex_capacity);
+    mesh.indices.reserve(index_capacity);
+    mesh
 }
 
 fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
