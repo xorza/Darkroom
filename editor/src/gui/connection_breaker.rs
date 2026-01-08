@@ -3,7 +3,7 @@ use std::sync::Arc;
 use eframe::egui;
 use egui::{Mesh, Pos2, Shape};
 
-use crate::gui::graph_ctx::GraphContext;
+use crate::gui::{graph_ctx::GraphContext, polyline_mesh::PolylineMesh};
 
 const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
@@ -12,7 +12,7 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 pub struct ConnectionBreaker {
     segments: Vec<(Pos2, Pos2)>,
     last_point: Option<Pos2>,
-    mesh: Arc<Mesh>,
+    mesh: PolylineMesh,
 }
 
 impl Default for ConnectionBreaker {
@@ -20,7 +20,7 @@ impl Default for ConnectionBreaker {
         Self {
             segments: Vec::with_capacity(max_segments_capacity()),
             last_point: None,
-            mesh: Arc::default(),
+            mesh: PolylineMesh::with_point_capacity(max_segments_capacity()),
         }
     }
 }
@@ -29,8 +29,6 @@ impl ConnectionBreaker {
     pub fn reset(&mut self) {
         self.segments.clear();
         self.last_point = None;
-
-        Arc::get_mut(&mut self.mesh).unwrap().clear();
     }
 
     pub fn start(&mut self, point: Pos2) {
@@ -74,7 +72,7 @@ impl ConnectionBreaker {
         self.last_point = Some(clamped);
     }
 
-    pub fn render(&self, ctx: &GraphContext) {
+    pub fn render(&mut self, ctx: &GraphContext) {
         if self.segments.is_empty() {
             return;
         }
@@ -87,11 +85,24 @@ impl ConnectionBreaker {
         let mut points: Vec<Pos2> = Vec::with_capacity(self.segments.len() + 1);
         points.push(self.segments[0].0);
         points.extend(self.segments.iter().map(|(_, end)| end));
+        // ctx.painter
+        //     .line(points, ctx.style.connections.breaker_stroke);
 
-        ctx.painter
-            .line(points, ctx.style.connections.breaker_stroke);
+        // Arc::get_mut(&mut self.mesh).unwrap().clear();
 
         // ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
+
+        let pixels_per_point = ctx.ui.ctx().pixels_per_point();
+        let feather = 1.0 / pixels_per_point;
+        self.mesh.build_curve(
+            &points,
+            ctx.style.connections.breaker_stroke.color,
+            ctx.style.connections.breaker_stroke.color,
+            ctx.style.connections.breaker_stroke.width,
+            feather,
+        );
+
+        self.mesh.render(&ctx.painter);
     }
 
     fn path_length(&self) -> f32 {
