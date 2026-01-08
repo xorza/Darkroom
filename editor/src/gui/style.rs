@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontFamily, FontId, Stroke};
+use egui::{Color32, FontFamily, FontId, Shadow, Stroke};
 
 #[derive(Debug)]
 pub struct Style {
@@ -52,9 +52,9 @@ pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
-    pub executed_shadow_color: Color32,
-    pub cached_shadow_color: Color32,
-    pub missing_inputs_shadow_color: Color32,
+    pub executed_shadow: Shadow,
+    pub cached_shadow: Shadow,
+    pub missing_inputs_shadow: Shadow,
 
     pub cache_btn_width: f32,
     pub remove_btn_size: f32,
@@ -123,9 +123,24 @@ impl Style {
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
-                executed_shadow_color: Color32::from_rgb(41, 135, 81),
-                cached_shadow_color: Color32::from_rgb(155, 135, 47),
-                missing_inputs_shadow_color: Color32::from_rgb(149, 41, 41),
+                executed_shadow: Shadow {
+                    color: Color32::from_rgb(41, 135, 81),
+                    offset: [0, 0],
+                    blur: 6,
+                    spread: 2,
+                },
+                cached_shadow: Shadow {
+                    color: Color32::from_rgb(155, 135, 47),
+                    offset: [0, 0],
+                    blur: 6,
+                    spread: 2,
+                },
+                missing_inputs_shadow: Shadow {
+                    color: Color32::from_rgb(149, 41, 41),
+                    offset: [0, 0],
+                    blur: 6,
+                    spread: 2,
+                },
 
                 cache_btn_width: 50.0,
                 remove_btn_size: 10.0,

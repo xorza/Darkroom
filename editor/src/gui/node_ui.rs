@@ -7,8 +7,7 @@ use common::BumpVecDeque;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke, StrokeKind, Vec2,
-    pos2, vec2,
+    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -125,23 +124,17 @@ fn render_body(
 ) {
     let corner_radius = ctx.style.corner_radius * ctx.scale;
 
-    let shadow_color = if node_execution_info.has_missing_inputs {
-        Some(ctx.style.node.missing_inputs_shadow_color)
+    let shadow = if node_execution_info.has_missing_inputs {
+        Some(&ctx.style.node.missing_inputs_shadow)
     } else if node_execution_info.executed.is_some() {
-        Some(ctx.style.node.executed_shadow_color)
+        Some(&ctx.style.node.executed_shadow)
     } else if node_execution_info.cached {
-        Some(ctx.style.node.cached_shadow_color)
+        Some(&ctx.style.node.cached_shadow)
     } else {
         None
     };
 
-    if let Some(shadow_color) = shadow_color {
-        let shadow = Shadow {
-            offset: [0, 0],
-            blur: 6,
-            spread: 2,
-            color: shadow_color,
-        };
+    if let Some(shadow) = shadow {
         ctx.painter.add(Shape::Rect(
             shadow.as_shape(node_layout.body_rect, corner_radius),
         ));
