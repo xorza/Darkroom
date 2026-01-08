@@ -290,7 +290,7 @@ impl ConnectionUi {
             };
 
             let mut points = [Pos2::default(); connection_bezier::POINTS];
-            let _ = ConnectionBezier::sample(&mut points, start, end, ctx.scale);
+            ConnectionBezier::sample(&mut points, start, end, ctx.scale);
             add_curve_to_mesh(
                 mesh,
                 &points,
