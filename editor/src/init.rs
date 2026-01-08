@@ -18,7 +18,7 @@ fn init_trace() -> Result<()> {
         .expect("failed to initialize log appender");
     let (non_blocking, _log_guard) = appender.get_non_blocking_appender();
     tracing_subscriber::fmt()
-        .with_env_filter("debug")
+        .with_env_filter("info")
         .with_writer(non_blocking)
         .with_writer(std::io::stdout)
         .init();

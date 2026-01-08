@@ -1,15 +1,13 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-
 use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
+use bumpalo::collections::Vec as BumpVec;
 
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Color32, Galley, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
@@ -29,9 +27,6 @@ pub enum PortDragInfo {
 #[derive(Debug, Default)]
 pub struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
-
-    //cache
-    input_galleys: VecDeque<Arc<Galley>>,
 }
 
 impl NodeUi {
@@ -86,7 +81,8 @@ impl NodeUi {
         let padding = ctx.style.padding * ctx.scale;
         let small_padding = ctx.style.small_padding * ctx.scale;
 
-        self.input_galleys.clear();
+        let mut input_galleys = BumpVec::new_in(ctx.arena);
+
         let mut max_badge_width: f32 = 0.0;
         for input in node.inputs.iter() {
             let Binding::Const(value) = &input.binding else {
@@ -99,15 +95,17 @@ impl NodeUi {
                     .layout_no_wrap(label, font.clone(), ctx.style.text_color);
             let badge_width = label_galley.size().x + padding * 2.0;
             max_badge_width = max_badge_width.max(badge_width);
-            self.input_galleys.push_back(label_galley);
+            input_galleys.push(label_galley);
         }
 
+        let mut input_galley_idx: usize = 0;
         for (input_idx, input) in node.inputs.iter().enumerate() {
             if !matches!(input.binding, Binding::Const(_)) {
                 continue;
             }
 
-            let label_galley = self.input_galleys.pop_front().unwrap();
+            let label_galley = input_galleys.get(input_galley_idx).unwrap().clone();
+            input_galley_idx += 1;
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding;
@@ -145,6 +143,8 @@ impl NodeUi {
             ctx.painter
                 .galley(label_pos, label_galley, ctx.style.text_color);
         }
+
+        assert_eq!(input_galley_idx, input_galleys.len());
     }
 }
 

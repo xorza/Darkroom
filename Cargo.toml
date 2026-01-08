@@ -50,7 +50,7 @@ lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 criterion = { version = "*" }
 arc-swap = { version = "*" }
-bumpalo = { version = "*", features = ["collections"] }
+bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 
 
 [profile.bench]
