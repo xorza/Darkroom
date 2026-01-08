@@ -3,7 +3,7 @@ use anyhow::Result;
 use arc_swap::ArcSwapOption;
 use common::FileFormat;
 use graph::graph::Binding;
-use graph::prelude::FuncLib;
+use graph::prelude::{ExecutionStats, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::Worker;
 use graph::worker::WorkerMessage;
@@ -18,6 +18,7 @@ pub struct AppData {
     pub worker: Worker,
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
+    pub execution_stats: Option<ExecutionStats>,
     pub graph_updated: bool,
     pub current_path: PathBuf,
     pub print_output: Arc<ArcSwapOption<String>>,
@@ -36,6 +37,7 @@ impl AppData {
             worker,
             func_lib: FuncLib::default(),
             view_graph: ViewGraph::default(),
+            execution_stats: None,
             graph_updated: false,
             current_path,
             print_output,
@@ -55,12 +57,12 @@ impl AppData {
 
         Worker::new(move |result| {
             match result {
-                Ok(stats) => {
+                Ok(execution_stats) => {
                     let print_output = print_output.swap(None);
                     let summary = format!(
                         "({} nodes, {:.0}s)",
-                        stats.executed_nodes.len(),
-                        stats.elapsed_secs
+                        execution_stats.executed_nodes.len(),
+                        execution_stats.elapsed_secs
                     );
                     let message = if let Some(print_output) = print_output {
                         format!("Compute output: {print_output} {summary}")
