@@ -13,14 +13,14 @@ use crate::prelude::{FuncId, FuncLambda};
 use common::{BoolExt, FileFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
-pub enum ExecutionError {
+pub enum Error {
     #[error("Function invocation failed for function {func_id:?}: {message}")]
     Invoke { func_id: FuncId, message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
 }
 
-pub type ExecutionResult<T> = std::result::Result<T, ExecutionError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ExecutionStats {
@@ -110,7 +110,7 @@ pub struct ExecutionNode {
     pub func_id: FuncId,
 
     pub run_time: f64,
-    pub error: Option<ExecutionError>,
+    pub error: Option<Error>,
 
     #[serde(skip)]
     pub(crate) cache: InvokeCache,
@@ -293,7 +293,7 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution-node caches and schedule data from the current graph/func library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> ExecutionResult<()> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> Result<()> {
         graph.validate_with(func_lib);
 
         self.e_node_invoke_order.clear();
@@ -397,7 +397,7 @@ impl ExecutionGraph {
     }
 
     // Walk backward from terminal nodes to collect process order and detect cycles.
-    fn backward1(&mut self) -> ExecutionResult<()> {
+    fn backward1(&mut self) -> Result<()> {
         let stack = &mut self.stack;
         stack.clear();
 
@@ -430,7 +430,7 @@ impl ExecutionGraph {
             match e_node.process_state {
                 ProcessState::None => unreachable!("should be Forward"),
                 ProcessState::Processing => {
-                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
+                    return Err(Error::CycleDetected { node_id: e_node.id });
                 }
                 ProcessState::Backward => continue,
                 ProcessState::Forward => {}
@@ -457,14 +457,14 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub async fn execute(&mut self) -> ExecutionResult<ExecutionStats> {
+    pub async fn execute(&mut self) -> Result<ExecutionStats> {
         self.pre_execute()?;
 
         let start = std::time::Instant::now();
 
         let mut inputs: Vec<InvokeInput> = Vec::default();
         let mut output_usage: Vec<OutputUsage> = Vec::default();
-        let mut error: Option<ExecutionError> = None;
+        let mut error: Option<Error> = None;
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
@@ -518,7 +518,7 @@ impl ExecutionGraph {
                     outputs.as_mut_slice(),
                 )
                 .await
-                .map_err(|source| ExecutionError::Invoke {
+                .map_err(|source| Error::Invoke {
                     func_id: e_node.func_id,
                     message: source.to_string(),
                 });
@@ -547,7 +547,7 @@ impl ExecutionGraph {
         }
     }
 
-    fn pre_execute(&mut self) -> ExecutionResult<()> {
+    fn pre_execute(&mut self) -> Result<()> {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
@@ -618,7 +618,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect the execution order.
-    fn backward2(&mut self) -> ExecutionResult<()> {
+    fn backward2(&mut self) -> Result<()> {
         self.e_node_invoke_order.clear();
         self.e_node_invoke_order
             .reserve(self.e_node_process_order.len());
@@ -650,7 +650,7 @@ impl ExecutionGraph {
 
             match e_node.process_state {
                 ProcessState::Processing => {
-                    return Err(ExecutionError::CycleDetected { node_id: e_node.id });
+                    return Err(Error::CycleDetected { node_id: e_node.id });
                 }
                 ProcessState::None => unreachable!("Node should have been processed in forward()"),
                 ProcessState::Forward => {}
@@ -1266,7 +1266,7 @@ mod tests {
             .update(&graph, &func_lib)
             .expect_err("Expected cycle detection error");
         match err {
-            ExecutionError::CycleDetected { node_id } => {
+            Error::CycleDetected { node_id } => {
                 assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
             }
             _ => panic!("Unexpected error"),
@@ -1276,7 +1276,7 @@ mod tests {
             .pre_execute()
             .expect_err("Expected cycle detection error");
         match err {
-            ExecutionError::CycleDetected { node_id } => {
+            Error::CycleDetected { node_id } => {
                 assert_eq!(node_id, "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into());
             }
             _ => panic!("Unexpected error"),

@@ -1,5 +1,5 @@
 use crate::event::EventId;
-use crate::execution_graph::{ExecutionGraph, ExecutionResult, ExecutionStats};
+use crate::execution_graph::{ExecutionGraph, Result, ExecutionStats};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::Shared;
@@ -28,7 +28,7 @@ pub struct Worker {
 impl Worker {
     pub fn new<Callback>(callback: Callback) -> Self
     where
-        Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
+        Callback: Fn(Result<ExecutionStats>) + Send + 'static,
     {
         let callback: Shared<Callback> = Shared::new(callback);
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
@@ -74,7 +74,7 @@ impl Drop for Worker {
 
 async fn worker_loop<Callback>(mut rx: UnboundedReceiver<WorkerMessage>, callback: Shared<Callback>)
 where
-    Callback: Fn(ExecutionResult<ExecutionStats>) + Send + 'static,
+    Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
     let mut execution_graph = ExecutionGraph::default();
     let mut msgs: Vec<WorkerMessage> = Vec::default();
