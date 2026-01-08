@@ -4,7 +4,9 @@ pub mod connection_bezier;
 pub mod font;
 
 pub fn scale_changed(old: f32, new: f32) -> bool {
-    (old / new - 1.0).abs() > 0.01
+    let diff = (old - new).abs();
+    let scale = old.abs().max(new.abs()).max(1.0);
+    diff / scale > 0.01
 }
 
 pub fn vec_changed(old: Vec2, new: Vec2) -> bool {
