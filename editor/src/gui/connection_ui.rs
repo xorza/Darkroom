@@ -31,9 +31,6 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
-
-    //cache
-    points: Vec<Pos2>,
 }
 
 #[derive(Debug, Clone)]
@@ -52,7 +49,6 @@ impl ConnectionDrag {
             current_pos: port.center,
             start_port: port,
             end_port: None,
-            points: Vec::with_capacity(connection_bezier::POINTS),
         }
     }
 }
@@ -73,6 +69,11 @@ struct ConnectionCurve {
 
 impl ConnectionCurve {
     fn new(key: ConnectionKey) -> Self {
+        let (vertex_capacity, index_capacity) = bezier_mesh_capacity(connection_bezier::POINTS);
+        let mut mesh = Mesh::default();
+        mesh.vertices.reserve(vertex_capacity);
+        mesh.indices.reserve(index_capacity);
+
         Self {
             key,
             inited: false,
@@ -80,12 +81,12 @@ impl ConnectionCurve {
             output_pos: Pos2::ZERO,
             input_pos: Pos2::ZERO,
             points: Vec::with_capacity(connection_bezier::POINTS),
-            mesh: mesh_with_capacity(),
+            mesh,
         }
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     pub(crate) highlighted: HashSet<ConnectionKey>,
@@ -93,6 +94,24 @@ pub(crate) struct ConnectionUi {
 
     //caches
     mesh: Arc<Mesh>,
+    points: Vec<Pos2>,
+}
+
+impl Default for ConnectionUi {
+    fn default() -> Self {
+        let (vertex_capacity, index_capacity) = bezier_mesh_capacity(connection_bezier::POINTS);
+        let mut mesh = Mesh::default();
+        mesh.vertices.reserve(10 * vertex_capacity);
+        mesh.indices.reserve(10 * index_capacity);
+
+        Self {
+            curves: KeyIndexVec::default(),
+            highlighted: HashSet::default(),
+            drag: None,
+            mesh: Arc::new(mesh),
+            points: Vec::with_capacity(connection_bezier::POINTS),
+        }
+    }
 }
 
 impl ConnectionUi {
@@ -267,11 +286,11 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            drag.points.clear();
-            let _ = ConnectionBezier::sample(&mut drag.points, start, end, ctx.scale);
+            self.points.clear();
+            let _ = ConnectionBezier::sample(&mut self.points, start, end, ctx.scale);
             add_curve_to_mesh(
                 mesh,
-                &drag.points,
+                &self.points,
                 ctx.style.node.output_port_color,
                 ctx.style.node.input_port_color,
                 ctx.style.connections.stroke_width,
@@ -381,15 +400,7 @@ fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
-fn mesh_with_capacity() -> Mesh {
-    let (vertex_capacity, index_capacity) = mesh_capacity(connection_bezier::POINTS);
-    let mut mesh = Mesh::default();
-    mesh.vertices.reserve(vertex_capacity);
-    mesh.indices.reserve(index_capacity);
-    mesh
-}
-
-fn mesh_capacity(points: usize) -> (usize, usize) {
+fn bezier_mesh_capacity(points: usize) -> (usize, usize) {
     assert!(points >= 2, "bezier point count must be at least 2");
     let segments = points - 1;
     let quads_per_segment = 3;
