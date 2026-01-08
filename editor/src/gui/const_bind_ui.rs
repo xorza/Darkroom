@@ -31,8 +31,8 @@ pub fn render_const_bindings(
             .painter
             .layout_no_wrap(label, font.clone(), ctx.style.text_color);
         let badge_width = label_galley.size().x + padding * 2.0;
-        let badge_right = input_center.x - port_radius - padding;
-        let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding;
+        let badge_right = input_center.x - port_radius - padding * 2.0;
+        let badge_height = font.size;
         let badge_rect = egui::Rect::from_min_max(
             pos2(
                 badge_right - badge_width,
@@ -56,8 +56,9 @@ pub fn render_const_bindings(
             ctx.style.small_corner_radius * ctx.scale,
             ctx.style.inactive_bg_fill,
             ctx.style.node.const_stroke,
-            StrokeKind::Inside,
+            StrokeKind::Outside,
         );
+
         let text_id = ctx
             .ui
             .make_persistent_id(("const_input_text", node.id, input_idx));
@@ -65,18 +66,13 @@ pub fn render_const_bindings(
         let text_edit = TextEdit::singleline(&mut text)
             .id(text_id)
             .font(font.clone())
-            .horizontal_align(egui::Align::Center)
-            .desired_width(badge_rect.width() - padding * 2.0)
+            .desired_width(badge_rect.width())
             .frame(false);
-        let mut text_ui = ctx.ui.new_child(
-            UiBuilder::new()
-                .max_rect(badge_rect)
-                .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
-        );
+        let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
         text_ui.set_clip_rect(badge_rect);
         let response = text_ui.add_sized(badge_rect.size(), text_edit);
-        if response.lost_focus()
-            && response.changed()
+
+        if response.changed()
             && let Some(parsed) = parse_static_value(&text, value)
             && *value != parsed
         {
