@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{PointerButton, Pos2, Response, Sense, Ui, Vec2};
+use egui::{Area, Id, PointerButton, Pos2, Response, Sense, Ui, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -252,16 +252,23 @@ impl GraphUi {
     fn top_panel(&self, ctx: &mut GraphContext, view_graph: &mut model::ViewGraph) {
         let mut fit_all = false;
         let mut view_selected = false;
+        let mut reset_view = false;
 
-        ctx.ui.horizontal(|ui| {
-            fit_all = ui.button("Fit all").clicked();
-            view_selected = ui.button("View selected").clicked();
-            let reset_view = ui.button("Reset view").clicked();
-            if reset_view {
-                view_graph.scale = 1.0;
-                view_graph.pan = egui::Vec2::ZERO;
-            }
-        });
+        let panel_pos = ctx.rect.min + Vec2::splat(ctx.style.padding);
+        Area::new(Id::new("graph_top_buttons"))
+            .fixed_pos(panel_pos)
+            .show(ctx.ui.ctx(), |ui| {
+                ui.horizontal(|ui| {
+                    fit_all = ui.button("Fit all").clicked();
+                    view_selected = ui.button("View selected").clicked();
+                    reset_view = ui.button("Reset view").clicked();
+                });
+            });
+
+        if reset_view {
+            view_graph.scale = 1.0;
+            view_graph.pan = Vec2::ZERO;
+        }
         if view_selected {
             view_selected_node(ctx, view_graph, &self.graph_layout);
         }
