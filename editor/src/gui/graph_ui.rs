@@ -114,9 +114,13 @@ impl GraphUi {
 
         self.render_connections(&mut ctx, view_graph);
 
-        let drag_port_info =
-            self.node_ui
-                .render_nodes(&mut ctx, view_graph, &mut self.graph_layout, ui_interaction);
+        let drag_port_info = self.node_ui.render_nodes(
+            &mut ctx,
+            view_graph,
+            &mut self.graph_layout,
+            ui_interaction,
+            execution_stats,
+        );
 
         self.top_panel(&mut ctx, view_graph);
 

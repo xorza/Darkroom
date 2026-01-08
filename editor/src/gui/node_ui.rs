@@ -11,7 +11,7 @@ use egui::{
 };
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
-use graph::prelude::{FuncBehavior, NodeBehavior};
+use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
 use crate::gui::{graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction};
 use crate::model::{ViewGraph, ViewNode};
@@ -36,6 +36,7 @@ impl NodeUi {
         view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
+        execution_stats: Option<&ExecutionStats>,
     ) -> PortDragInfo {
         self.node_ids_to_remove.clear();
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
