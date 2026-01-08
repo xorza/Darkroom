@@ -7,13 +7,15 @@ use graph::prelude::Binding;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::common::connection_bezier::{self, ConnectionBezier};
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::gui::polyline_mesh::{PolylineMesh, add_curve_to_mesh, polyline_mesh_with_capacity};
 use crate::model;
+
+pub const POINTS: usize = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
@@ -64,7 +66,7 @@ struct ConnectionCurve {
     output_pos: Pos2,
     input_pos: Pos2,
 
-    points: [Pos2; connection_bezier::POINTS],
+    points: [Pos2; POINTS],
     mesh: PolylineMesh,
 }
 
@@ -76,8 +78,8 @@ impl ConnectionCurve {
             highlighted: false,
             output_pos: Pos2::ZERO,
             input_pos: Pos2::ZERO,
-            points: [Pos2::ZERO; connection_bezier::POINTS],
-            mesh: PolylineMesh::with_point_capacity(connection_bezier::POINTS),
+            points: [Pos2::ZERO; POINTS],
+            mesh: PolylineMesh::with_point_capacity(POINTS),
         }
     }
 }
@@ -94,7 +96,7 @@ pub(crate) struct ConnectionUi {
 
 impl Default for ConnectionUi {
     fn default() -> Self {
-        let mesh = polyline_mesh_with_capacity(10 * connection_bezier::POINTS);
+        let mesh = polyline_mesh_with_capacity(10 * POINTS);
 
         Self {
             curves: KeyIndexVec::default(),
@@ -270,7 +272,7 @@ impl ConnectionUi {
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
 
-            let mut points = [Pos2::default(); connection_bezier::POINTS];
+            let mut points = [Pos2::default(); POINTS];
             ConnectionBezier::sample(&mut points, start, end, ctx.scale);
             add_curve_to_mesh(
                 mesh,
