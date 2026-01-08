@@ -80,6 +80,8 @@ impl NodeLayout {
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
+        let label_font = ctx.style.sub_font.scaled(self.scale);
+
         if !self.inited || crate::common::scale_changed(self.scale, ctx.scale) {
             self.scale = ctx.scale;
             self.inited = true;
@@ -89,8 +91,6 @@ impl NodeLayout {
                 ctx.style.body_font.scaled(self.scale),
                 ctx.style.text_color,
             );
-
-            let label_font = ctx.style.sub_font.scaled(self.scale);
 
             self.input_galleys.clear();
             for input in &func.inputs {
@@ -139,30 +139,34 @@ impl NodeLayout {
         let row_count = input_count.max(output_count).max(1);
         let port_label_side_padding = ctx.style.node.port_label_side_padding * self.scale;
         let mut max_row_width: f32 = 0.0;
+        let mut max_row_height: f32 = 0.0;
         for row in 0..row_count {
-            let left = self
+            let (left, left_height) = self
                 .input_galleys
                 .get(row)
-                .map_or(0.0, |galley| galley.size().x + port_label_side_padding);
-            let right = self
+                .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
+            let (right, right_height) = self
                 .output_galleys
                 .get(row)
-                .map_or(0.0, |galley| galley.size().x + port_label_side_padding);
+                .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
 
-            let row_width = left + right + (left > 0.0 && right > 0.0).then_else(padding, 0.0);
+            let row_width = port_label_side_padding
+                + left
+                + right
+                + (left > 0.0 && right > 0.0).then_else(padding, 0.0);
             max_row_width = max_row_width.max(row_width);
+
+            let row_height = left_height.max(right_height) + small_padding;
+            max_row_height = max_row_height.max(row_height);
         }
 
         let cache_button_height = ctx.style.sub_font.size * self.scale;
 
         let header_row_height = header_height + small_padding * 2.0;
-        let port_row_height = ctx
-            .style
-            .sub_font
+        let port_row_height = label_font
             .size
-            .max(ctx.style.node.port_radius * 2.0)
-            * self.scale
-            + small_padding;
+            .max(max_row_height)
+            .max(ctx.style.node.port_radius * 2.0 * self.scale);
         let cache_row_height = cache_button_height + padding * 2.0;
 
         let node_width = header_width.max(max_row_width);

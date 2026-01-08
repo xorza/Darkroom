@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Layout, Stroke, StrokeKind, TextEdit, UiBuilder, pos2};
+use egui::{Align, Stroke, StrokeKind, TextEdit, UiBuilder, pos2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -17,7 +17,7 @@ pub fn render_const_bindings(
 ) {
     let port_radius = ctx.style.node.port_radius * ctx.scale;
     let padding = ctx.style.small_padding * ctx.scale;
-    let small_padding = ctx.style.small_padding * ctx.scale;
+    let _small_padding = ctx.style.small_padding * ctx.scale;
     let font = ctx.style.sub_font.scaled(ctx.scale);
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -32,7 +32,7 @@ pub fn render_const_bindings(
             .layout_no_wrap(label, font.clone(), ctx.style.text_color);
         let badge_width = label_galley.size().x + padding * 2.0;
         let badge_right = input_center.x - port_radius - padding * 2.0;
-        let badge_height = font.size;
+        let badge_height = label_galley.size().y;
         let badge_rect = egui::Rect::from_min_max(
             pos2(
                 badge_right - badge_width,
@@ -69,7 +69,7 @@ pub fn render_const_bindings(
             .desired_width(badge_rect.width())
             .vertical_align(Align::Center)
             .horizontal_align(Align::Center)
-            .margin(Vec2::ZERO)
+            .margin(0.0)
             .clip_text(true)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(UiBuilder::new().max_rect(badge_rect));
