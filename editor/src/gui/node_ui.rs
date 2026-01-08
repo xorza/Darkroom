@@ -5,8 +5,8 @@ use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, TextEdit, Vec2,
-    pos2, vec2,
+    Align, Align2, Color32, Direction, Layout, PointerButton, Pos2, Rect, Sense, Shape, Stroke,
+    StrokeKind, TextEdit, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -67,7 +67,7 @@ impl NodeUi {
             }
             render_cache_btn(ctx, ui_interaction, node_layout, node);
             render_hints(ctx, node_layout, node, func);
-            render_const_bindings(ctx, node_layout, node);
+            render_const_bindings(ctx, ui_interaction, node_layout, node);
             let node_drag_port_result = render_ports(ctx, node_layout, view_node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_port_labels(ctx, node_layout);
@@ -289,7 +289,12 @@ fn render_remove_btn(
     false
 }
 
-fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &mut Node) {
+fn render_const_bindings(
+    ctx: &mut GraphContext,
+    ui_interaction: &mut GraphUiInteraction,
+    node_layout: &NodeLayout,
+    node: &mut Node,
+) {
     let font = ctx.style.sub_font.scaled(ctx.scale);
     let port_radius = ctx.style.node.port_radius * ctx.scale;
 
@@ -317,16 +322,16 @@ fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node:
 
         let input_center = node_layout.input_center(input_idx);
         let badge_right = input_center.x - port_radius - padding;
-        let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding;
+        let badge_height = ctx.style.sub_font.size * ctx.scale + small_padding * 2.0;
         let badge_rect = egui::Rect::from_min_max(
-            egui::pos2(
+            pos2(
                 badge_right - max_badge_width,
                 input_center.y - badge_height * 0.5,
             ),
-            egui::pos2(badge_right, input_center.y + badge_height * 0.5),
+            pos2(badge_right, input_center.y + badge_height * 0.5),
         );
-        let link_start = egui::pos2(badge_rect.max.x, input_center.y);
-        let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
+        let link_start = pos2(badge_rect.max.x, input_center.y);
+        let link_end = pos2(input_center.x - port_radius, input_center.y);
 
         ctx.painter.line_segment(
             [link_start, link_end],
@@ -352,17 +357,23 @@ fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node:
             .desired_width(badge_rect.width() - padding * 2.0)
             .frame(false);
         let mut text_ui = ctx.ui.new_child(
-            egui::UiBuilder::new()
+            UiBuilder::new()
                 .max_rect(badge_rect)
-                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                .layout(Layout::left_to_right(Align::Center)),
         );
         text_ui.set_clip_rect(badge_rect);
         let response = text_ui.add_sized(badge_rect.size(), text_edit);
-        if response.lost_focus()
-            && response.changed()
-            && let Some(parsed) = parse_static_value(&text, value)
-        {
-            *value = parsed;
+        if response.lost_focus() || response.changed() {
+            let parsed = parse_static_value(&text, value);
+
+            println!("value thanged to {:?}", parsed);
+
+            if let Some(parsed) = parsed {
+                *value = parsed;
+                ui_interaction
+                    .actions
+                    .push((node.id, GraphUiAction::InputChanged { input_idx }));
+            }
         }
         ctx.ui.data_mut(|data| data.insert_temp(text_id, text));
     }
