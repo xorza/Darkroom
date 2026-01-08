@@ -98,4 +98,7 @@ impl eframe::App for ScenariumEditor {
         let _ = frame;
         self.main_ui.render(&mut self.app_data, ctx);
     }
+    fn on_exit(&mut self) {
+        self.app_data.worker.exit();
+    }
 }
