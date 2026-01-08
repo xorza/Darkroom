@@ -123,9 +123,9 @@ impl Style {
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
                 status_impure_color: Color32::from_rgb(255, 150, 70),
 
-                executed_shadow_color: Color32::from_rgb(60, 200, 120),
-                cached_shadow_color: Color32::from_rgb(230, 200, 70),
-                missing_inputs_shadow_color: Color32::from_rgb(220, 60, 60),
+                executed_shadow_color: Color32::from_rgb(41, 135, 81),
+                cached_shadow_color: Color32::from_rgb(155, 135, 47),
+                missing_inputs_shadow_color: Color32::from_rgb(149, 41, 41),
 
                 cache_btn_width: 50.0,
                 remove_btn_size: 10.0,
