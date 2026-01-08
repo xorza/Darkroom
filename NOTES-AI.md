@@ -237,6 +237,7 @@ Polyline mesh now owns its connection points buffer as a `Vec<Pos2>`.
 Connection UI uses a reusable temporary `PolylineMesh` for drag previews.
 Connection UI only rebuilds the drag preview mesh when the drag endpoints change.
 Connection UI stores connection endpoints in a shared `ConnectionEndpoints` struct for curves and drag preview.
+Connection breaker now reuses `PolylineMesh` for its point storage.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.

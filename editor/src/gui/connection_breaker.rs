@@ -8,7 +8,6 @@ const MAX_BREAKER_LENGTH: f32 = 900.0;
 
 #[derive(Debug)]
 pub struct ConnectionBreaker {
-    points: Vec<Pos2>,
     last_point: Option<Pos2>,
     mesh: PolylineMesh,
 }
@@ -16,27 +15,26 @@ pub struct ConnectionBreaker {
 impl Default for ConnectionBreaker {
     fn default() -> Self {
         Self {
-            points: Vec::with_capacity(max_segments_capacity()),
             last_point: None,
-            mesh: PolylineMesh::with_point_capacity(max_segments_capacity()),
+            mesh: PolylineMesh::with_point_capacity(max_capacity()),
         }
     }
 }
 
 impl ConnectionBreaker {
     pub fn reset(&mut self) {
-        self.points.clear();
+        self.mesh.points_mut().clear();
         self.last_point = None;
     }
 
     pub fn start(&mut self, point: Pos2) {
         self.reset();
         self.last_point = Some(point);
-        self.points.push(point);
+        self.mesh.points_mut().push(point);
     }
 
     pub fn segments(&self) -> impl Iterator<Item = (Pos2, Pos2)> + '_ {
-        self.points.windows(2).map(|pair| (pair[0], pair[1]))
+        self.mesh.points().windows(2).map(|pair| (pair[0], pair[1]))
     }
 
     pub fn add_point(&mut self, point: Pos2) {
@@ -67,23 +65,22 @@ impl ConnectionBreaker {
                 last_pos.y + (point.y - last_pos.y) * t,
             )
         };
-        self.points.push(clamped);
+        self.mesh.points_mut().push(clamped);
         self.last_point = Some(clamped);
     }
 
     pub fn is_empty(&self) -> bool {
-        self.points.is_empty()
+        self.mesh.points().is_empty()
     }
 
     pub fn render(&mut self, ctx: &GraphContext) {
-        if self.points.len() < 2 {
+        if self.mesh.points().len() < 2 {
             return;
         }
 
         let pixels_per_point = ctx.ui.ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
-        self.mesh.build_curve(
-            &self.points,
+        self.mesh.rebuild(
             ctx.style.connections.breaker_stroke.color,
             ctx.style.connections.breaker_stroke.color,
             ctx.style.connections.breaker_stroke.width,
@@ -94,13 +91,14 @@ impl ConnectionBreaker {
     }
 
     fn path_length(&self) -> f32 {
-        self.points
+        self.mesh
+            .points()
             .windows(2)
             .map(|pair| pair[0].distance(pair[1]))
             .sum()
     }
 }
 
-fn max_segments_capacity() -> usize {
+fn max_capacity() -> usize {
     (MAX_BREAKER_LENGTH / MIN_POINT_DISTANCE).ceil() as usize
 }
