@@ -2,12 +2,11 @@ use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
-use common::BumpVecDeque;
-
 use common::BoolExt;
 use eframe::egui;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, TextEdit, Vec2,
+    pos2, vec2,
 };
 use graph::data::StaticValue;
 use graph::execution_graph::ExecutedNodeStats;
@@ -290,36 +289,31 @@ fn render_remove_btn(
     false
 }
 
-fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &Node) {
+fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node: &mut Node) {
     let font = ctx.style.sub_font.scaled(ctx.scale);
     let port_radius = ctx.style.node.port_radius * ctx.scale;
 
     let padding = ctx.style.padding * ctx.scale;
     let small_padding = ctx.style.small_padding * ctx.scale;
 
-    let mut input_galleys = BumpVecDeque::new_in(ctx.arena);
-
     let mut max_badge_width: f32 = 0.0;
-    for input in node.inputs.iter() {
+    for (input_idx, input) in node.inputs.iter().enumerate() {
         let Binding::Const(value) = &input.binding else {
             continue;
         };
 
-        let label = static_value_label(value);
+        let label = const_input_text(ctx, node.id, input_idx, value);
         let label_galley = ctx
             .painter
             .layout_no_wrap(label, font.clone(), ctx.style.text_color);
         let badge_width = label_galley.size().x + padding * 2.0;
         max_badge_width = max_badge_width.max(badge_width);
-        input_galleys.push_back(label_galley);
     }
 
-    for (input_idx, input) in node.inputs.iter().enumerate() {
-        if !matches!(input.binding, Binding::Const(_)) {
+    for (input_idx, input) in node.inputs.iter_mut().enumerate() {
+        let Binding::Const(value) = &mut input.binding else {
             continue;
-        }
-
-        let label_galley = input_galleys.pop_front();
+        };
 
         let input_center = node_layout.input_center(input_idx);
         let badge_right = input_center.x - port_radius - padding;
@@ -331,11 +325,6 @@ fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node:
             ),
             egui::pos2(badge_right, input_center.y + badge_height * 0.5),
         );
-        let label_pos = egui::pos2(
-            badge_rect.max.x - padding - label_galley.size().x,
-            badge_rect.center().y - label_galley.size().y * 0.5,
-        );
-
         let link_start = egui::pos2(badge_rect.max.x, input_center.y);
         let link_end = egui::pos2(input_center.x - port_radius, input_center.y);
 
@@ -353,12 +342,30 @@ fn render_const_bindings(ctx: &mut GraphContext, node_layout: &NodeLayout, node:
             ctx.style.node.const_stroke,
             StrokeKind::Inside,
         );
-
-        ctx.painter
-            .galley(label_pos, label_galley, ctx.style.text_color);
+        let text_id = ctx
+            .ui
+            .make_persistent_id(("const_input_text", node.id, input_idx));
+        let mut text = const_input_text(ctx, node.id, input_idx, value);
+        let text_edit = TextEdit::singleline(&mut text)
+            .id(text_id)
+            .font(font.clone())
+            .desired_width(badge_rect.width() - padding * 2.0)
+            .frame(false);
+        let mut text_ui = ctx.ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(badge_rect)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        text_ui.set_clip_rect(badge_rect);
+        let response = text_ui.add_sized(badge_rect.size(), text_edit);
+        if response.lost_focus()
+            && response.changed()
+            && let Some(parsed) = parse_static_value(&text, value)
+        {
+            *value = parsed;
+        }
+        ctx.ui.data_mut(|data| data.insert_temp(text_id, text));
     }
-
-    assert!(input_galleys.is_empty());
 }
 
 fn render_ports(
@@ -468,6 +475,36 @@ fn static_value_label(value: &StaticValue) -> String {
                 format!("{}...", truncated)
             }
         }
+    }
+}
+
+fn const_input_text(
+    ctx: &GraphContext,
+    node_id: NodeId,
+    input_idx: usize,
+    value: &StaticValue,
+) -> String {
+    let id = ctx
+        .ui
+        .make_persistent_id(("const_input_text", node_id, input_idx));
+    ctx.ui
+        .data_mut(|data| data.get_temp::<String>(id))
+        .unwrap_or_else(|| static_value_label(value))
+}
+
+fn parse_static_value(text: &str, current: &StaticValue) -> Option<StaticValue> {
+    match current {
+        StaticValue::Null => text
+            .eq_ignore_ascii_case("null")
+            .then_some(StaticValue::Null),
+        StaticValue::Float(_) => text.parse::<f64>().ok().map(StaticValue::Float),
+        StaticValue::Int(_) => text.parse::<i64>().ok().map(StaticValue::Int),
+        StaticValue::Bool(_) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" => Some(StaticValue::Bool(true)),
+            "false" => Some(StaticValue::Bool(false)),
+            _ => None,
+        },
+        StaticValue::String(_) => Some(StaticValue::String(text.to_string())),
     }
 }
 

@@ -241,6 +241,9 @@ Connection breaker now reuses `PolylineMesh` for its point storage.
 Connection breaker no longer tracks a separate last-point field.
 Connection breaker incrementally appends mesh segments as new points arrive.
 Polyline mesh no longer exposes `add_curve_to_mesh`; segment appends handle full rebuilds too.
+Const input badges are now editable and update their bindings on commit.
+Const input edits now render inside a clipped child UI to avoid overflow.
+Graph UI top panel renders its buttons in a fixed-position area.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.
