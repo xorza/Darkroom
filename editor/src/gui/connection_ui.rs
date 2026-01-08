@@ -63,7 +63,7 @@ struct ConnectionCurve {
     output_pos: Pos2,
     input_pos: Pos2,
 
-    points: Vec<Pos2>,
+    points: [Pos2; connection_bezier::POINTS],
     mesh: Mesh,
 }
 
@@ -74,16 +74,13 @@ impl ConnectionCurve {
         mesh.vertices.reserve(vertex_capacity);
         mesh.indices.reserve(index_capacity);
 
-        let mut points = Vec::default();
-        points.resize(connection_bezier::POINTS, Pos2::ZERO);
-
         Self {
             key,
             inited: false,
             highlighted: false,
             output_pos: Pos2::ZERO,
             input_pos: Pos2::ZERO,
-            points,
+            points: [Pos2::ZERO; connection_bezier::POINTS],
             mesh,
         }
     }
@@ -222,14 +219,7 @@ impl ConnectionUi {
                     curve.input_pos = input_pos;
                     curve.inited = true;
 
-                    ConnectionBezier::sample(
-                        (&mut curve.points[0..connection_bezier::POINTS])
-                            .try_into()
-                            .unwrap(),
-                        output_pos,
-                        input_pos,
-                        ctx.scale,
-                    );
+                    ConnectionBezier::sample(&mut curve.points, output_pos, input_pos, ctx.scale);
                 }
 
                 let highlighted = if let Some(segments) = breaker.and_then(|breaker| {
