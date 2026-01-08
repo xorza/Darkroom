@@ -6,8 +6,8 @@ pub struct ConnectionBezier;
 impl ConnectionBezier {
     // will put points to the points
     pub fn sample(points: &mut [Pos2], start: Pos2, end: Pos2, scale: f32) {
+        assert!(points.len() >= 3, "bezier steps must be greater than 2");
         let steps = points.len() - 1;
-        assert!(steps > 2, "bezier steps must be greater than 2");
 
         let p0 = start;
         let p3 = end;
