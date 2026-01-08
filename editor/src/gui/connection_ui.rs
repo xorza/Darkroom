@@ -74,13 +74,16 @@ impl ConnectionCurve {
         mesh.vertices.reserve(vertex_capacity);
         mesh.indices.reserve(index_capacity);
 
+        let mut points = Vec::default();
+        points.resize(connection_bezier::POINTS, Pos2::ZERO);
+
         Self {
             key,
             inited: false,
             highlighted: false,
             output_pos: Pos2::ZERO,
             input_pos: Pos2::ZERO,
-            points: Vec::with_capacity(connection_bezier::POINTS),
+            points,
             mesh,
         }
     }
@@ -94,7 +97,6 @@ pub(crate) struct ConnectionUi {
 
     //caches
     mesh: Arc<Mesh>,
-    points: Vec<Pos2>,
 }
 
 impl Default for ConnectionUi {
@@ -109,7 +111,6 @@ impl Default for ConnectionUi {
             highlighted: HashSet::default(),
             drag: None,
             mesh: Arc::new(mesh),
-            points: Vec::with_capacity(connection_bezier::POINTS),
         }
     }
 }
@@ -221,9 +222,10 @@ impl ConnectionUi {
                     curve.input_pos = input_pos;
                     curve.inited = true;
 
-                    curve.points.clear();
-                    let _ = ConnectionBezier::sample(
-                        &mut curve.points,
+                    ConnectionBezier::sample(
+                        (&mut curve.points[0..connection_bezier::POINTS])
+                            .try_into()
+                            .unwrap(),
                         output_pos,
                         input_pos,
                         ctx.scale,
@@ -286,11 +288,12 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            self.points.clear();
-            let _ = ConnectionBezier::sample(&mut self.points, start, end, ctx.scale);
+
+            let mut points = [Pos2::default(); connection_bezier::POINTS];
+            let _ = ConnectionBezier::sample(&mut points, start, end, ctx.scale);
             add_curve_to_mesh(
                 mesh,
-                &self.points,
+                &points,
                 ctx.style.node.output_port_color,
                 ctx.style.node.input_port_color,
                 ctx.style.connections.stroke_width,
