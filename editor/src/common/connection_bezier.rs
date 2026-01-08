@@ -19,7 +19,7 @@ impl ConnectionBezier {
         let p1 = p0 + egui::vec2(control_offset, 0.0);
         let p2 = p3 + egui::vec2(-control_offset, 0.0);
 
-        for i in 0..=steps {
+        for (i, point) in points.iter_mut().enumerate().take(steps + 1) {
             let t_linear = i as f32 / steps as f32;
             let t = 0.5 - 0.5 * (std::f32::consts::PI * t_linear).cos();
             let one_minus = 1.0 - t;
@@ -29,7 +29,7 @@ impl ConnectionBezier {
             let d = t * t * t;
             let x = a * p0.x + b * p1.x + c * p2.x + d * p3.x;
             let y = a * p0.y + b * p1.y + c * p2.y + d * p3.y;
-            points[i] = Pos2::new(x, y);
+            *point = Pos2::new(x, y);
         }
     }
 
