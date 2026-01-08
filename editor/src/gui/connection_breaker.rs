@@ -1,7 +1,5 @@
-use std::sync::Arc;
-
 use eframe::egui;
-use egui::{Mesh, Pos2, Shape};
+use egui::Pos2;
 
 use crate::gui::{graph_ctx::GraphContext, polyline_mesh::PolylineMesh};
 
@@ -85,12 +83,6 @@ impl ConnectionBreaker {
         let mut points: Vec<Pos2> = Vec::with_capacity(self.segments.len() + 1);
         points.push(self.segments[0].0);
         points.extend(self.segments.iter().map(|(_, end)| end));
-        // ctx.painter
-        //     .line(points, ctx.style.connections.breaker_stroke);
-
-        // Arc::get_mut(&mut self.mesh).unwrap().clear();
-
-        // ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
 
         let pixels_per_point = ctx.ui.ctx().pixels_per_point();
         let feather = 1.0 / pixels_per_point;
