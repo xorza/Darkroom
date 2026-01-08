@@ -51,6 +51,15 @@ impl NodeUi {
 
             let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
 
+            let execute_stats = if let Some(execution_stats) = execution_stats {
+                execution_stats
+                    .executed_nodes
+                    .iter()
+                    .find(|b| b.node_id == node_id)
+            } else {
+                None
+            };
+
             render_body(ctx, node_layout, is_selected);
             if render_remove_btn(ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
