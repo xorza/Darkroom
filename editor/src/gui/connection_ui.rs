@@ -281,13 +281,10 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-
-            ConnectionBezier::sample(
-                self.temp_connection.points_mut().as_mut_slice(),
-                start,
-                end,
-                ctx.scale,
-            );
+            let points = self.temp_connection.points_mut();
+            points.clear();
+            points.resize(POINTS, Pos2::ZERO);
+            ConnectionBezier::sample(points.as_mut_slice(), start, end, ctx.scale);
             self.temp_connection.rebuild(
                 ctx.style.node.output_port_color,
                 ctx.style.node.input_port_color,
