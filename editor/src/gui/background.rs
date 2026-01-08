@@ -34,8 +34,6 @@ impl BackgroundRenderer {
             self.last_pan = pan;
             self.last_rect_size = rect_size;
             self.inited = true;
-
-            tracing::debug!("Rebuilt background mesh");
         }
 
         ctx.painter.add(Shape::mesh(Arc::clone(&self.mesh)));
