@@ -102,6 +102,7 @@ impl AppData {
         self.view_graph = view_graph;
         self.worker.send(WorkerMessage::Clear);
         self.graph_updated = true;
+        self.execution_stats = None;
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
