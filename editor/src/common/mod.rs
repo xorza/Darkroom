@@ -1,6 +1,7 @@
 use egui::{Pos2, Vec2};
 
 pub mod connection_bezier;
+pub mod drag_value;
 pub mod font;
 
 pub fn scale_changed(old: f32, new: f32) -> bool {
