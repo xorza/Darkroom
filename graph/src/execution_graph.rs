@@ -366,29 +366,27 @@ impl ExecutionGraph {
                     },
                 );
 
-                //todo simplify
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                let ExecutionBinding::Bind(e_port_address) = &mut e_input.binding else {
-                    e_input.binding_changed = true;
-                    e_input.binding = ExecutionBinding::Bind(ExecutionPortAddress {
-                        target_id: port_address.target_id,
-                        target_idx: output_e_node_idx,
-                        port_idx: port_address.port_idx,
-                    });
-                    continue;
+                let desired = ExecutionPortAddress {
+                    target_id: port_address.target_id,
+                    target_idx: output_e_node_idx,
+                    port_idx: port_address.port_idx,
                 };
-
-                if e_port_address.target_id == port_address.target_id
-                    && e_port_address.port_idx == port_address.port_idx
-                {
-                    e_port_address.target_idx = output_e_node_idx;
-                } else {
-                    e_input.binding_changed = true;
-                    *e_port_address = ExecutionPortAddress {
-                        target_id: port_address.target_id,
-                        target_idx: output_e_node_idx,
-                        port_idx: port_address.port_idx,
-                    };
+                match &mut e_input.binding {
+                    ExecutionBinding::Bind(existing)
+                        if existing.target_id == desired.target_id
+                            && existing.port_idx == desired.port_idx =>
+                    {
+                        existing.target_idx = desired.target_idx;
+                    }
+                    ExecutionBinding::Bind(existing) => {
+                        e_input.binding_changed = true;
+                        *existing = desired;
+                    }
+                    _ => {
+                        e_input.binding_changed = true;
+                        e_input.binding = ExecutionBinding::Bind(desired);
+                    }
                 }
 
                 assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
