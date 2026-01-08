@@ -6,6 +6,7 @@ use graph::prelude::FuncLib;
 use crate::{common::font::ScaledFontId, gui::style::Style};
 
 pub struct GraphContext<'a> {
+    pub arena: &'a bumpalo::Bump,
     pub ui: &'a mut Ui,
     pub painter: Painter,
     pub rect: Rect,
@@ -16,12 +17,18 @@ pub struct GraphContext<'a> {
 }
 
 impl<'a> GraphContext<'a> {
-    pub fn new(ui: &'a mut Ui, func_lib: &'a FuncLib, scale: f32) -> Self {
+    pub fn new(
+        arena: &'a bumpalo::Bump,
+        ui: &'a mut Ui,
+        func_lib: &'a FuncLib,
+        scale: f32,
+    ) -> Self {
         let style = Style::new();
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter_at(rect);
 
         Self {
+            arena,
             ui,
             painter,
             rect,

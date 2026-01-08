@@ -83,9 +83,9 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-        _arena: &bumpalo::Bump,
+        arena: &bumpalo::Bump,
     ) -> Result<(), Error> {
-        let mut ctx = GraphContext::new(ui, func_lib, view_graph.scale);
+        let mut ctx = GraphContext::new(arena, ui, func_lib, view_graph.scale);
 
         let graph_bg_id = ctx.ui.make_persistent_id("graph_bg");
 
