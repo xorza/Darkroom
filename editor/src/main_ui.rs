@@ -22,6 +22,8 @@ pub struct MainUi {
     pub graph_ui: GraphUi,
     pub ui_context: UiContext,
     pub graph_ui_interaction: GraphUiInteraction,
+
+    pub arena: bumpalo::Bump,
 }
 
 impl MainUi {
@@ -30,6 +32,7 @@ impl MainUi {
             graph_ui: GraphUi::default(),
             ui_context: UiContext::new(ctx),
             graph_ui_interaction: GraphUiInteraction::default(),
+            arena: bumpalo::Bump::new(),
         }
     }
 
@@ -110,6 +113,7 @@ impl MainUi {
                 &mut app_data.view_graph,
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
+                &self.arena,
             );
             if let Err(err) = result {
                 app_data.status = format!("Error: {}", err);
@@ -131,5 +135,6 @@ impl MainUi {
         app_data.handle_graph_ui_actions(&self.graph_ui_interaction);
 
         self.graph_ui_interaction.clear();
+        self.arena.reset();
     }
 }

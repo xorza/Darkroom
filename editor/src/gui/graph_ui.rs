@@ -83,6 +83,7 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
+        _arena: &bumpalo::Bump,
     ) -> Result<(), Error> {
         let mut ctx = GraphContext::new(ui, func_lib, view_graph.scale);
 

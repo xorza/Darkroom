@@ -13,8 +13,6 @@ pub struct GraphContext<'a> {
     pub scale: f32,
 
     pub func_lib: &'a FuncLib,
-
-    pub arena: bumpalo::Bump,
 }
 
 impl<'a> GraphContext<'a> {
@@ -30,7 +28,6 @@ impl<'a> GraphContext<'a> {
             style,
             scale,
             func_lib,
-            arena: bumpalo::Bump::new(),
         }
     }
 
