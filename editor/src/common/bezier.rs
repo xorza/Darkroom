@@ -1,8 +1,7 @@
 use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
-use crate::common::connection_bezier::ConnectionBezier;
-use crate::common::{pos_changed, scale_changed};
+use crate::common::{bezier_helper, pos_changed, scale_changed};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
@@ -59,7 +58,7 @@ impl Bezier {
         if points.len() != Self::DEFAULT_POINTS {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
         }
-        ConnectionBezier::sample(points.as_mut_slice(), start, end, scale);
+        bezier_helper::sample(points.as_mut_slice(), start, end, scale);
         true
     }
 
@@ -95,7 +94,7 @@ impl Bezier {
         for (b1, b2) in breaker.segments() {
             let curve_segments = points.windows(2).map(|pair| (pair[0], pair[1]));
             for (a1, a2) in curve_segments {
-                if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+                if bezier_helper::segments_intersect(a1, a2, b1, b2) {
                     return true;
                 }
             }
