@@ -2,9 +2,17 @@ use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::{bezier_helper, pos_changed, scale_changed};
-use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
+use crate::gui::{Gui, style};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+// todo imple eq
+pub(crate) struct ConnectionBezierStyle {
+    pub(crate) start_color: Color32,
+    pub(crate) end_color: Color32,
+    pub(crate) stroke_width: f32,
+}
 
 #[derive(Debug, Clone)]
 pub struct ConnectionBezier {
@@ -14,6 +22,10 @@ pub struct ConnectionBezier {
     end: Pos2,
     scale: f32,
     inited: bool,
+    style: ConnectionBezierStyle,
+    hovered: bool,
+    broke: bool,
+    points_dirty: bool,
 }
 
 impl Default for ConnectionBezier {
@@ -25,6 +37,14 @@ impl Default for ConnectionBezier {
             end: Pos2::ZERO,
             scale: 1.0,
             inited: false,
+            style: ConnectionBezierStyle {
+                start_color: Color32::TRANSPARENT,
+                end_color: Color32::TRANSPARENT,
+                stroke_width: 0.0,
+            },
+            hovered: false,
+            broke: false,
+            points_dirty: false,
         }
     }
 }
@@ -40,35 +60,62 @@ impl ConnectionBezier {
         self.polyline.points()
     }
 
-    pub fn update(&mut self, start: Pos2, end: Pos2, scale: f32) -> bool {
+    pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         let needs_rebuild = !self.inited
             || pos_changed(self.start, start)
             || pos_changed(self.end, end)
             || scale_changed(self.scale, scale);
         if !needs_rebuild {
-            return false;
+            return;
         }
 
         self.inited = true;
         self.start = start;
         self.end = end;
         self.scale = scale;
+        self.points_dirty = true;
 
         let points = self.polyline.points_mut();
         if points.len() != Self::DEFAULT_POINTS {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
         }
         bezier_helper::sample(points.as_mut_slice(), start, end, scale);
-        true
     }
 
-    pub fn build_mesh(&mut self, start_color: Color32, end_color: Color32, width: f32) {
-        assert!(width.is_finite() && width >= 0.0);
-        self.stroke_width = width;
-        self.polyline.rebuild(start_color, end_color, width);
-    }
-
-    pub fn show(&self, gui: &mut Gui<'_>, sense: Sense, id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(
+        &mut self,
+        gui: &mut Gui<'_>,
+        sense: Sense,
+        id_salt: impl std::hash::Hash,
+        hovered: bool,
+        broke: bool,
+    ) -> Response {
+        let style = if broke {
+            ConnectionBezierStyle {
+                start_color: gui.style.connections.broke_clr,
+                end_color: gui.style.connections.broke_clr,
+                stroke_width: gui.style.connections.stroke_width,
+            }
+        } else if hovered {
+            ConnectionBezierStyle {
+                start_color: style::brighten(
+                    gui.style.node.output_port_color,
+                    gui.style.connections.hover_brighten,
+                ),
+                end_color: style::brighten(
+                    gui.style.node.input_port_color,
+                    gui.style.connections.hover_brighten,
+                ),
+                stroke_width: gui.style.connections.stroke_width,
+            }
+        } else {
+            ConnectionBezierStyle {
+                start_color: gui.style.node.output_port_color,
+                end_color: gui.style.node.input_port_color,
+                stroke_width: gui.style.connections.stroke_width,
+            }
+        };
+        self.rebuild_mesh_if_needed(style, hovered, broke);
         let hover_scale = gui.style.connections.hover_distance_scale;
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
         let hit = pointer_pos.is_some_and(|pos| self.hit_test(pos, hover_scale));
@@ -117,6 +164,23 @@ impl ConnectionBezier {
         points
             .windows(2)
             .any(|segment| distance_sq_point_segment(pos, segment[0], segment[1]) <= threshold_sq)
+    }
+
+    fn rebuild_mesh_if_needed(&mut self, style: ConnectionBezierStyle, hovered: bool, broke: bool) {
+        let style_changed = self.style != style || self.hovered != hovered || self.broke != broke;
+        if !self.points_dirty && !style_changed {
+            return;
+        }
+
+        assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
+
+        self.style = style;
+        self.hovered = hovered;
+        self.broke = broke;
+        self.stroke_width = style.stroke_width;
+        self.polyline
+            .rebuild(style.start_color, style.end_color, style.stroke_width);
+        self.points_dirty = false;
     }
 }
 

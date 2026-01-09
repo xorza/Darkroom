@@ -7,10 +7,10 @@ use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
+use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
-use crate::gui::{Gui, style};
 use common::BoolExt;
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 
@@ -217,46 +217,16 @@ impl<'a> ConstBindFrame<'a> {
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
 
-        let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
-        let is_hovered = *self.hovered_link == Some(link_key);
-        let is_broken = link.bezier.intersects_breaker(breaker);
-
-        if should_rebuild || link.hovered != is_hovered || link.broke != is_broken {
-            link.hovered = is_hovered;
-            link.broke = is_broken;
-
-            let (start_color, end_color, width) = if link.broke {
-                (
-                    gui.style.connections.broke_clr,
-                    gui.style.connections.broke_clr,
-                    gui.style.connections.stroke_width,
-                )
-            } else if link.hovered {
-                (
-                    style::brighten(
-                        gui.style.node.output_port_color,
-                        gui.style.connections.hover_brighten,
-                    ),
-                    style::brighten(
-                        gui.style.node.input_port_color,
-                        gui.style.connections.hover_brighten,
-                    ),
-                    gui.style.connections.stroke_width,
-                )
-            } else {
-                (
-                    gui.style.node.output_port_color,
-                    gui.style.node.input_port_color,
-                    gui.style.connections.stroke_width,
-                )
-            };
-            link.bezier.build_mesh(start_color, end_color, width);
-        }
+        link.bezier.update_points(link_start, link_end, gui.scale);
+        link.hovered = *self.hovered_link == Some(link_key);
+        link.broke = link.bezier.intersects_breaker(breaker);
 
         let response = link.bezier.show(
             gui,
             Sense::click() | Sense::hover(),
             ("const_link", node_id, input_idx),
+            link.hovered,
+            link.broke,
         );
 
         if response.hovered() {

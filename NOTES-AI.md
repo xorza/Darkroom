@@ -475,3 +475,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConstBindUi now exposes broke_iter() over ConstLinkKey and ConstLinkKey is pub(crate).
 
 - Const link mesh build now deduces colors/width once before calling build_mesh.
+
+- ConnectionBezier::show now deduces style internally from hover/broke and gui style; callers pass hover/broke only.

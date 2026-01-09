@@ -11,9 +11,9 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
-use crate::gui::style;
 use crate::model;
 
+// todo merge with constBindUI
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
     pub(crate) input_node_id: NodeId,
@@ -129,6 +129,8 @@ impl ConnectionUi {
                 gui,
                 Sense::click() | Sense::hover(),
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
+                curve.hovered,
+                curve.broke,
             );
 
             if breaker.is_some() {
@@ -155,7 +157,7 @@ impl ConnectionUi {
         }
         if self.temp_connection.is_some() {
             self.temp_connection_bezier
-                .show(gui, Sense::hover(), "temp_connection");
+                .show(gui, Sense::hover(), "temp_connection", false, false);
         }
     }
 
@@ -242,41 +244,10 @@ impl ConnectionUi {
                 let input_pos = input_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding.port_idx);
 
-                let needs_rebuild = curve.bezier.update(output_pos, input_pos, gui.scale);
+                curve.bezier.update_points(output_pos, input_pos, gui.scale);
 
-                let broke = curve.bezier.intersects_breaker(breaker);
-
-                if needs_rebuild || curve.broke != broke || curve.hovered != curve.new_hovered {
-                    curve.broke = broke;
-                    curve.hovered = curve.new_hovered;
-
-                    let (start_color, end_color, width) = if curve.broke {
-                        (
-                            gui.style.connections.broke_clr,
-                            gui.style.connections.broke_clr,
-                            gui.style.connections.stroke_width,
-                        )
-                    } else if curve.hovered {
-                        (
-                            style::brighten(
-                                gui.style.node.output_port_color,
-                                gui.style.connections.hover_brighten,
-                            ),
-                            style::brighten(
-                                gui.style.node.input_port_color,
-                                gui.style.connections.hover_brighten,
-                            ),
-                            gui.style.connections.stroke_width,
-                        )
-                    } else {
-                        (
-                            gui.style.node.output_port_color,
-                            gui.style.node.input_port_color,
-                            gui.style.connections.stroke_width,
-                        )
-                    };
-                    curve.bezier.build_mesh(start_color, end_color, width);
-                }
+                curve.broke = curve.bezier.intersects_breaker(breaker);
+                curve.hovered = curve.new_hovered;
             }
         }
 
@@ -286,13 +257,8 @@ impl ConnectionUi {
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
 
-            if self.temp_connection_bezier.update(start, end, gui.scale) {
-                self.temp_connection_bezier.build_mesh(
-                    gui.style.node.output_port_color,
-                    gui.style.node.input_port_color,
-                    gui.style.connections.stroke_width,
-                );
-            }
+            self.temp_connection_bezier
+                .update_points(start, end, gui.scale);
         }
     }
 }
