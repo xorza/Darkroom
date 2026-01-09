@@ -1,6 +1,6 @@
 use crate::app_data::AppData;
+use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
-use crate::gui::{Gui, style::Style};
 use eframe::egui;
 
 #[derive(Clone, Debug)]
@@ -109,8 +109,7 @@ impl MainUi {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            let style = Style::new();
-            let mut gui = Gui::new(ui, style, app_data.view_graph.scale);
+            let mut gui = Gui::new(ui, app_data.view_graph.scale);
 
             let result = self.graph_ui.render(
                 &mut gui,
