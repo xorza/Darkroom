@@ -186,27 +186,51 @@ impl ConnectionUi {
                 ConnectionDragUpdate::InProgress
             }
             PortDragInfo::DragStop => {
-                let update = drag
-                    .end_port
-                    .map_or(ConnectionDragUpdate::Finished, |end_port| {
-                        let (input_port, output_port) =
-                            match (drag.start_port.port.kind, end_port.port.kind) {
-                                (PortKind::Output, PortKind::Input) => {
-                                    (end_port.port, drag.start_port.port)
-                                }
-                                (PortKind::Input, PortKind::Output) => {
-                                    (drag.start_port.port, end_port.port)
-                                }
-                                _ => unreachable!("ports must be of opposite types"),
-                            };
+                let update = if let Some(port_info) = drag.end_port {
+                    let (input_port, output_port) =
+                        match (drag.start_port.port.kind, port_info.port.kind) {
+                            (PortKind::Output, PortKind::Input) => {
+                                (port_info.port, drag.start_port.port)
+                            }
+                            (PortKind::Input, PortKind::Output) => {
+                                (drag.start_port.port, port_info.port)
+                            }
+                            _ => unreachable!("ports must be of opposite types"),
+                        };
 
-                        ConnectionDragUpdate::FinishedWith {
-                            input_port,
-                            output_port,
-                        }
-                    });
+                    ConnectionDragUpdate::FinishedWith {
+                        input_port,
+                        output_port,
+                    }
+                } else if drag.start_port.port.kind == PortKind::Input {
+                    ConnectionDragUpdate::FinishedWithEmptyOutput {
+                        input_port: drag.start_port.port,
+                    }
+                } else {
+                    ConnectionDragUpdate::Finished
+                };
 
                 self.stop_drag();
+
+                // let update = drag
+                //     .end_port
+                //     .map_or(ConnectionDragUpdate::Finished, |end_port| {
+                //         let (input_port, output_port) =
+                //             match (drag.start_port.port.kind, end_port.port.kind) {
+                //                 (PortKind::Output, PortKind::Input) => {
+                //                     (end_port.port, drag.start_port.port)
+                //                 }
+                //                 (PortKind::Input, PortKind::Output) => {
+                //                     (drag.start_port.port, end_port.port)
+                //                 }
+                //                 _ => unreachable!("ports must be of opposite types"),
+                //             };
+
+                //         ConnectionDragUpdate::FinishedWith {
+                //             input_port,
+                //             output_port,
+                //         }
+                //     });
 
                 update
             }

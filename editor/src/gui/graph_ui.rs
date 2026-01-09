@@ -241,6 +241,8 @@ impl GraphUi {
                         self.state = InteractionState::Idle;
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
+                        self.state = InteractionState::Idle;
+
                         let input_node =
                             ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
                         input_node.inputs[input_port.port_idx].binding = Binding::Const(0.into());
