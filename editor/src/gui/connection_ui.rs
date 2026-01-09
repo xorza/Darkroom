@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use crate::common::bezier::Bezier;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
@@ -118,11 +119,11 @@ impl ConnectionUi {
     pub(crate) fn render(
         &mut self,
         gui: &mut Gui<'_>,
+        ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(gui, graph_layout, view_graph, breaker);
+        self.rebuild(gui, graph_layout, ctx.view_graph, breaker);
 
         for curve in self.curves.iter_mut() {
             let response = curve.bezier.show(
