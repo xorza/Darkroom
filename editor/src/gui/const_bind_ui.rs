@@ -43,11 +43,11 @@ pub struct ConstBindFrame<'a> {
 impl<'a> ConstBindFrame<'a> {
     fn new(
         polyline_mesh: &'a mut KeyIndexVec<ConnectionKey, ConnectionCurve>,
-        hovered_link: &'a mut Option<ConnectionKey>,
+        hovered_connection: &'a mut Option<ConnectionKey>,
     ) -> Self {
         Self {
             compact: polyline_mesh.compact_insert_start(),
-            hovered_connection: hovered_link,
+            hovered_connection,
             currently_hovered_connection: None,
         }
     }
@@ -75,6 +75,10 @@ impl<'a> ConstBindFrame<'a> {
                 input_idx,
             };
             let mut hovered = *self.hovered_connection == Some(connection_key);
+
+            if hovered {
+                println!("Hovered {:?}", connection_key);
+            }
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
