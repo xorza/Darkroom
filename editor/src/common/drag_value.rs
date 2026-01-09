@@ -14,8 +14,8 @@ pub struct DragValue<'a> {
     color: Option<Color32>,
     background: Option<DragValueStyle>,
     padding: Option<Vec2>,
-    pos: Option<Pos2>,
-    align: Option<Align2>,
+    pos: Pos2,
+    align: Align2,
     hover: bool,
 }
 
@@ -28,8 +28,8 @@ impl<'a> DragValue<'a> {
             color: None,
             background: None,
             padding: None,
-            pos: None,
-            align: None,
+            pos: Pos2::ZERO,
+            align: Align2::CENTER_CENTER,
             hover: true,
         }
     }
@@ -64,12 +64,12 @@ impl<'a> DragValue<'a> {
 
     pub fn pos(mut self, pos: Pos2) -> Self {
         assert!(pos.x.is_finite() && pos.y.is_finite());
-        self.pos = Some(pos);
+        self.pos = pos;
         self
     }
 
     pub fn align(mut self, align: Align2) -> Self {
-        self.align = Some(align);
+        self.align = align;
         self
     }
 
@@ -88,9 +88,6 @@ impl<'a> DragValue<'a> {
             .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
-        let pos = self.pos.expect("DragValue requires a position");
-        let align = self.align.expect("DragValue requires an alignment");
-
         let ui = gui.ui();
         let value_text = self.value.to_string();
         let galley = ui
@@ -99,7 +96,7 @@ impl<'a> DragValue<'a> {
         let size = galley.size() + padding * 2.0;
         assert!(size.x.is_finite() && size.y.is_finite());
 
-        let mut rect = align.anchor_size(pos, size);
+        let mut rect = self.align.anchor_size(self.pos, size);
 
         let id = ui.make_persistent_id(id_salt);
         let edit_id = id.with("edit");
@@ -127,7 +124,7 @@ impl<'a> DragValue<'a> {
                 .font(font.clone())
                 .desired_width(rect.width())
                 .vertical_align(Align::Center)
-                .horizontal_align(align.x())
+                .horizontal_align(self.align.x())
                 .margin(padding)
                 .clip_text(true)
                 .frame(false);
@@ -194,8 +191,8 @@ impl<'a> DragValue<'a> {
         }
 
         let inner_rect = rect.shrink2(padding);
-        let text_anchor = align.pos_in_rect(&inner_rect);
-        let text_rect = align.anchor_size(text_anchor, galley.size());
+        let text_anchor = self.align.pos_in_rect(&inner_rect);
+        let text_rect = self.align.anchor_size(text_anchor, galley.size());
         ui.painter().galley(text_rect.min, galley, color);
 
         response
