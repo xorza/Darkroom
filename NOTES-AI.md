@@ -8,6 +8,8 @@ Scenarium collects the tooling required to build node based applications. The re
 the core graph implementation and an editor front end.
 Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to
 centralize theme values.
+`Style::new` now takes a `scale` argument and scales font sizes, padding, radii, stroke widths, and other size
+constants for UI sizing control.
 Node rendering constants now live in `Style.node` (`NodeStyle`) instead of standalone `Style` fields (including node status dots, port colors, and port sizing).
 Node header layout now accounts for the remove button width plus padding when computing header width.
 Node remove button sizing now comes from `Style.node.remove_btn_size`.
