@@ -112,7 +112,7 @@ impl GraphUi {
 
         self.background.render(gui, &ctx);
 
-        self.render_connections(gui, &mut ctx);
+        self.render_connections(gui, &mut ctx, ui_interaction);
 
         let drag_port_info =
             self.node_ui
@@ -229,11 +229,17 @@ impl GraphUi {
         Ok(())
     }
 
-    fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>) {
+    fn render_connections(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext<'_>,
+        ui_interaction: &mut GraphUiInteraction,
+    ) {
         self.connections.render(
             gui,
             ctx,
             &self.graph_layout,
+            ui_interaction,
             if self.state == InteractionState::BreakingConnections {
                 Some(&self.connection_breaker)
             } else {

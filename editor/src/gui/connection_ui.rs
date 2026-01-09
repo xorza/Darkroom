@@ -10,6 +10,7 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
+use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
 
@@ -121,6 +122,7 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
+        ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.rebuild(gui, graph_layout, ctx.view_graph, breaker);
@@ -136,7 +138,19 @@ impl ConnectionUi {
                 curve.new_hovered = false;
             } else {
                 if response.double_clicked_by(PointerButton::Primary) {
-                    todo!()
+                    let node = ctx
+                        .view_graph
+                        .graph
+                        .by_id_mut(&curve.key.input_node_id)
+                        .unwrap();
+                    node.inputs[curve.key.input_idx].binding = Binding::None;
+                    ui_interaction.actions.push((
+                        curve.key.input_node_id,
+                        GraphUiAction::InputChanged {
+                            input_idx: curve.key.input_idx,
+                        },
+                    ));
+                    curve.new_hovered = false;
                 }
 
                 curve.new_hovered = response.hovered();
