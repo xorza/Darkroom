@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Align2, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Align2, PointerButton, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -128,6 +128,9 @@ impl ConstBindUi {
 
                 if response.hovered() {
                     self.currently_hovered_link = Some(link_key);
+                }
+                if response.double_clicked_by(PointerButton::Primary) {
+                    //todo
                 }
             }
 
