@@ -29,7 +29,6 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
-    endpoints: ConnectionEndpoints,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +47,6 @@ impl ConnectionDrag {
             current_pos: port.center,
             start_port: port,
             end_port: None,
-            endpoints: ConnectionEndpoints::default(),
         }
     }
 }
@@ -287,9 +285,8 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            let needs_rebuild = drag.endpoints.update(start, end);
-            if needs_rebuild {
-                self.temp_connection_bezier.update(start, end, gui.scale);
+
+            if self.temp_connection_bezier.update(start, end, gui.scale) {
                 self.temp_connection_bezier.build_mesh(
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
