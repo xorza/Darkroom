@@ -447,3 +447,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - CompactInsert now exposes item_mut() and finish(), and tests cover finish() behavior.
 
 - CompactInsert now implements Index/IndexMut for direct access to items during compaction.
+
+- Added CompactInsert index/index_mut test coverage in common/src/key_index_vec.rs.

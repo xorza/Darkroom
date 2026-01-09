@@ -452,4 +452,22 @@ mod tests {
         assert!(vec.by_key(&10).is_none());
         assert!(vec.by_key(&30).is_none());
     }
+
+    #[test]
+    fn compact_insert_start_index_access() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        {
+            let mut compact = vec.compact_insert_start();
+            let idx = compact.insert_with(&2, || TestItem { id: 2, value: 0 });
+            assert_eq!(compact[idx].id, 2);
+            compact[idx].value = 33;
+        }
+
+        assert_eq!(vec.items.len(), 1);
+        assert_eq!(vec.idx_by_key.len(), 1);
+        assert_eq!(vec.by_key(&2).unwrap().value, 33);
+    }
 }
