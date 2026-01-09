@@ -1,13 +1,17 @@
 use eframe::egui;
-use egui::{Align, Align2, Stroke, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Align2, Pos2, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
+use crate::gui::polyline_mesh::PolylineMesh;
 use common::BoolExt;
+
+const CONST_LINK_POINTS: usize = 25;
 
 pub fn render_const_bindings(
     gui: &mut Gui<'_>,
@@ -15,10 +19,14 @@ pub fn render_const_bindings(
     node_layout: &NodeLayout,
     node: &mut Node,
 ) {
+    let pixels_per_point = gui.ui().ctx().pixels_per_point();
+    let feather = 1.0 / pixels_per_point;
     let port_radius = gui.style.node.port_radius;
     let padding = gui.style.padding;
     let _small_padding = gui.style.small_padding;
     let mono_font = gui.style.mono_font.clone();
+
+    let painter = gui.painter();
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
         let Binding::Const(value) = &mut input.binding else {
@@ -34,13 +42,21 @@ pub fn render_const_bindings(
         let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
         let link_end = pos2(input_center.x - port_radius, input_center.y);
 
-        gui.painter().line_segment(
-            [link_start, link_end],
-            Stroke::new(
-                gui.style.connections.stroke_width,
+        {
+            let mut link_mesh = PolylineMesh::with_point_capacity(CONST_LINK_POINTS);
+            let points = link_mesh.points_mut();
+            if points.len() != CONST_LINK_POINTS {
+                points.resize(CONST_LINK_POINTS, Pos2::ZERO);
+            }
+            ConnectionBezier::sample(points.as_mut_slice(), link_start, link_end, gui.scale);
+            link_mesh.rebuild(
                 gui.style.node.input_port_color,
-            ),
-        );
+                gui.style.node.input_port_color,
+                gui.style.connections.stroke_width,
+                feather,
+            );
+            link_mesh.render(&painter);
+        }
         // ctx.painter.rect(
         //     badge_rect,
         //     ctx.style.small_corner_radius * ctx.scale,
