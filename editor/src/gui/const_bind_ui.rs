@@ -116,6 +116,7 @@ impl<'a> ConstBindFrame<'a> {
             };
 
             if let StaticValue::Int(value) = value {
+                let mut breaker_hit = false;
                 let mut const_bind_style = gui.style.node.const_bind_style.clone();
                 if broke {
                     const_bind_style.stroke.color = gui.style.connections.breaker_stroke.color;
@@ -136,6 +137,13 @@ impl<'a> ConstBindFrame<'a> {
                         .style(const_bind_style)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
+
+                if let Some(breaker) = breaker {
+                    breaker_hit = breaker.intersects_rect(response.rect);
+                }
+                if breaker_hit {
+                    curve.broke = true;
+                }
 
                 currently_hovered |= response.hovered();
 

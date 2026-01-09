@@ -491,3 +491,7 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Style::new now uses DEFAULT_BG_STROKE_WIDTH for background/hover strokes.
 
 - DragValue now uses pointer hover to pick hover stroke when hover is enabled.
+
+- Const bind DragValue now checks breaker intersection with its rect and marks curve as broke.
+
+- ConnectionBreaker now exposes intersects_rect(); const bind uses it.

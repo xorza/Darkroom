@@ -1,6 +1,7 @@
 use eframe::egui;
-use egui::Pos2;
+use egui::{Pos2, Rect};
 
+use crate::common::bezier_helper;
 use crate::gui::{Gui, polyline_mesh::PolylineMesh};
 
 const MIN_POINT_DISTANCE: f32 = 4.0;
@@ -93,6 +94,30 @@ impl ConnectionBreaker {
         }
 
         self.mesh.render(&gui.painter());
+    }
+
+    pub fn intersects_rect(&self, rect: Rect) -> bool {
+        if self
+            .segments()
+            .any(|(b1, b2)| rect.contains(b1) || rect.contains(b2))
+        {
+            return true;
+        }
+
+        let min = rect.min;
+        let max = rect.max;
+        let edges = [
+            (Pos2::new(min.x, min.y), Pos2::new(max.x, min.y)),
+            (Pos2::new(max.x, min.y), Pos2::new(max.x, max.y)),
+            (Pos2::new(max.x, max.y), Pos2::new(min.x, max.y)),
+            (Pos2::new(min.x, max.y), Pos2::new(min.x, min.y)),
+        ];
+
+        self.segments().any(|(b1, b2)| {
+            edges
+                .iter()
+                .any(|(e1, e2)| bezier_helper::segments_intersect(b1, b2, *e1, *e2))
+        })
     }
 
     fn path_length(&self) -> f32 {
