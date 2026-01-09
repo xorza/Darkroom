@@ -121,6 +121,8 @@ impl<'a> ConstBindFrame<'a> {
                     const_bind_style.stroke.color = gui.style.connections.breaker_stroke.color;
                 } else if prev_hovered || currently_hovered {
                     const_bind_style.stroke.color = gui.style.node.output_hover_color;
+                } else {
+                    const_bind_style.stroke.color = gui.style.node.output_port_color;
                 }
 
                 let response = {

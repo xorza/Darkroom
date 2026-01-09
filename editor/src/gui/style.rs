@@ -81,11 +81,11 @@ pub struct NodeStyle {
     pub output_hover_color: Color32,
 
     pub const_stroke_width: f32,
-    pub const_bind_style: ConstBindStyle,
+    pub const_bind_style: DragValueStyle,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ConstBindStyle {
+pub(crate) struct DragValueStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
     pub(crate) radius: f32,
@@ -130,6 +130,9 @@ impl Style {
         const SMALL_CORNER_RADIUS: f32 = 2.0;
         const DEFAULT_BG_STROKE_WIDTH: f32 = 1.0;
 
+        let inactive_bg_stroke =
+            Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_INACTIVE);
+
         Self {
             heading_font: FontId {
                 size: scaled(18.0),
@@ -155,7 +158,7 @@ impl Style {
             noninteractive_bg_fill: COLOR_BG_NONINTERACTIVE,
             hover_bg_fill: COLOR_BG_HOVER,
             inactive_bg_fill: COLOR_BG_INACTIVE,
-            inactive_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_INACTIVE),
+            inactive_bg_stroke,
             active_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_ACTIVE),
             active_bg_fill: COLOR_BG_ACTIVE,
             checked_bg_fill: COLOR_BG_CHECKED,
@@ -217,9 +220,9 @@ impl Style {
                 input_hover_color: COLOR_PORT_INPUT_HOVER,
                 output_hover_color: COLOR_PORT_OUTPUT_HOVER,
 
-                const_bind_style: ConstBindStyle {
+                const_bind_style: DragValueStyle {
                     fill: COLOR_BG_INACTIVE,
-                    stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT),
+                    stroke: inactive_bg_stroke,
                     radius: scaled(SMALL_CORNER_RADIUS),
                 },
             },

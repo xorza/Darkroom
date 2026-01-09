@@ -4,7 +4,7 @@ use egui::{
     TextEdit, Vec2,
 };
 
-use crate::gui::{Gui, style::ConstBindStyle};
+use crate::gui::{Gui, style::DragValueStyle};
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
@@ -12,7 +12,7 @@ pub struct DragValue<'a> {
     speed: f32,
     font: Option<FontId>,
     color: Option<Color32>,
-    background: Option<ConstBindStyle>,
+    background: Option<DragValueStyle>,
     padding: Option<Vec2>,
     pos: Option<Pos2>,
     align: Option<Align2>,
@@ -49,7 +49,7 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn style(mut self, style: ConstBindStyle) -> Self {
+    pub fn style(mut self, style: DragValueStyle) -> Self {
         assert!(style.radius.is_finite());
         self.background = Some(style);
         self
