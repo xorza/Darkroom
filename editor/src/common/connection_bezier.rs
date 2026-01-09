@@ -9,7 +9,7 @@ use crate::gui::polyline_mesh::PolylineMesh;
 #[derive(Debug, Clone)]
 pub struct ConnectionBezier {
     polyline: PolylineMesh,
-    last_width: f32,
+    stroke_width: f32,
     start: Pos2,
     end: Pos2,
     scale: f32,
@@ -20,7 +20,7 @@ impl Default for ConnectionBezier {
     fn default() -> Self {
         Self {
             polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
-            last_width: 0.0,
+            stroke_width: 0.0,
             start: Pos2::ZERO,
             end: Pos2::ZERO,
             scale: 1.0,
@@ -64,7 +64,7 @@ impl ConnectionBezier {
 
     pub fn build_mesh(&mut self, start_color: Color32, end_color: Color32, width: f32) {
         assert!(width.is_finite() && width >= 0.0);
-        self.last_width = width;
+        self.stroke_width = width;
         self.polyline.rebuild(start_color, end_color, width);
     }
 
@@ -76,7 +76,7 @@ impl ConnectionBezier {
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
             let rect = points_bounds(self.polyline.points())
-                .map(|rect| rect.expand(self.last_width * 0.5))
+                .map(|rect| rect.expand(self.stroke_width * 0.5))
                 .unwrap_or(Rect::NOTHING);
             gui.ui().interact(rect, id, sense)
         } else {
@@ -103,7 +103,7 @@ impl ConnectionBezier {
     }
 
     fn hit_test(&self, pos: Pos2, hover_scale: f32) -> bool {
-        let width = self.last_width;
+        let width = self.stroke_width;
         if width <= 0.0 {
             return false;
         }
