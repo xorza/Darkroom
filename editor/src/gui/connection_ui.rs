@@ -162,15 +162,20 @@ impl ConnectionUi {
         }
     }
 
-    pub(crate) fn start_drag(&mut self, port: PortInfo) {
-        self.temp_connection = Some(ConnectionDrag::new(port));
-    }
-
     pub(crate) fn update_drag(
         &mut self,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) -> ConnectionDragUpdate {
+        if let PortDragInfo::DragStart(port_info) = drag_port_info {
+            self.temp_connection = Some(ConnectionDrag::new(port_info));
+            return ConnectionDragUpdate::InProgress;
+        }
+
+        if self.temp_connection.is_none() {
+            return ConnectionDragUpdate::Finished;
+        }
+
         let drag = self.temp_connection.as_mut().unwrap();
         drag.current_pos = pointer_pos;
 

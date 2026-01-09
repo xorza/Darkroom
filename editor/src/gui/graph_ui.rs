@@ -174,11 +174,13 @@ impl GraphUi {
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
 
+        let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
+
         match self.state {
             InteractionState::Idle => {
                 if primary_pressed {
-                    if let PortDragInfo::DragStart(port_info) = drag_port_info {
-                        self.connections.start_drag(port_info);
+                    if let PortDragInfo::DragStart(_) = drag_port_info {
+                        self.connections.update_drag(pointer_pos, drag_port_info);
                         self.state = InteractionState::DraggingNewConnection;
                     } else if pointer_on_background {
                         self.state = InteractionState::BreakingConnections;
@@ -187,8 +189,6 @@ impl GraphUi {
                 }
             }
             InteractionState::BreakingConnections => {
-                let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
-
                 if secondary_pressed || esc_pressed {
                     self.connection_breaker.reset();
                     self.state = InteractionState::Idle;
@@ -198,7 +198,12 @@ impl GraphUi {
                     self.connection_breaker.reset();
                     self.state = InteractionState::Idle;
 
-                    for connection in self.connections.broke_iter() {
+                    let iter = self
+                        .connections
+                        .broke_iter()
+                        .chain(self.node_ui.const_bind_ui.broke_iter());
+
+                    for connection in iter {
                         let node = ctx
                             .view_graph
                             .graph
@@ -214,26 +219,14 @@ impl GraphUi {
                             },
                         ));
                     }
-
-                    for link_key in self.node_ui.const_bind_ui.broke_iter() {
-                        let node = ctx
-                            .view_graph
-                            .graph
-                            .nodes
-                            .by_key_mut(&link_key.input_node_id)
-                            .unwrap();
-
-                        node.inputs[link_key.input_idx].binding = Binding::None;
-                        ui_interaction.actions.push((
-                            link_key.input_node_id,
-                            GraphUiAction::InputChanged {
-                                input_idx: link_key.input_idx,
-                            },
-                        ));
-                    }
                 }
             }
             InteractionState::DraggingNewConnection => {
+                if esc_pressed {
+                    self.state = InteractionState::Idle;
+                    self.connections.stop_drag();
+                }
+
                 let update = self.connections.update_drag(pointer_pos, drag_port_info);
                 match update {
                     ConnectionDragUpdate::InProgress => {}
