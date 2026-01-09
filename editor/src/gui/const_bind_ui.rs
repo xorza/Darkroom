@@ -227,9 +227,9 @@ impl<'a> ConstBindFrame<'a> {
 
             let (start_color, end_color, width) = if link.broke {
                 (
-                    gui.style.connections.broke_stroke.color,
-                    gui.style.connections.broke_stroke.color,
-                    gui.style.connections.broke_stroke.width,
+                    gui.style.connections.broke_clr,
+                    gui.style.connections.broke_clr,
+                    gui.style.connections.stroke_width,
                 )
             } else if link.hovered {
                 (

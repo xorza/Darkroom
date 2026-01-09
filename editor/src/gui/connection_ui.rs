@@ -252,9 +252,9 @@ impl ConnectionUi {
 
                     let (start_color, end_color, width) = if curve.broke {
                         (
-                            gui.style.connections.broke_stroke.color,
-                            gui.style.connections.broke_stroke.color,
-                            gui.style.connections.broke_stroke.width,
+                            gui.style.connections.broke_clr,
+                            gui.style.connections.broke_clr,
+                            gui.style.connections.stroke_width,
                         )
                     } else if curve.hovered {
                         (
