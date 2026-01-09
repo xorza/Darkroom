@@ -129,10 +129,7 @@ impl Style {
         const COLOR_DOTTED: Color32 = Color32::from_rgb(48, 48, 48);
         const CORNER_RADIUS: f32 = 4.0;
         const SMALL_CORNER_RADIUS: f32 = 2.0;
-
-        let inactive_bg_fill = COLOR_BG_INACTIVE;
-        let inactive_bg_stroke = Stroke::new(scaled(1.0), COLOR_STROKE_INACTIVE);
-        let active_bg_stroke = Stroke::new(scaled(1.0), COLOR_STROKE_ACTIVE);
+        const DEFAULT_BG_STROKE_WIDTH: f32 = 1.0;
 
         Self {
             heading_font: FontId {
@@ -158,9 +155,9 @@ impl Style {
 
             noninteractive_bg_fill: COLOR_BG_NONINTERACTIVE,
             hover_bg_fill: COLOR_BG_HOVER,
-            inactive_bg_fill,
-            inactive_bg_stroke,
-            active_bg_stroke,
+            inactive_bg_fill: COLOR_BG_INACTIVE,
+            inactive_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_INACTIVE),
+            active_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_ACTIVE),
             active_bg_fill: COLOR_BG_ACTIVE,
             checked_bg_fill: COLOR_BG_CHECKED,
 
@@ -222,9 +219,12 @@ impl Style {
                 output_hover_color: COLOR_PORT_OUTPUT_HOVER,
 
                 const_bind_style: ConstBindStyle {
-                    fill: inactive_bg_fill,
+                    fill: COLOR_BG_INACTIVE,
                     stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT),
-                    hover_stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT_HOVER),
+                    hover_stroke: Stroke::new(
+                        scaled(DEFAULT_BG_STROKE_WIDTH),
+                        COLOR_PORT_OUTPUT_HOVER,
+                    ),
                     radius: scaled(SMALL_CORNER_RADIUS),
                 },
             },
