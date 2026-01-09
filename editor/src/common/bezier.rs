@@ -1,5 +1,5 @@
 use egui::epaint::Mesh;
-use egui::{Color32, Id, Pos2, Rect, Response, Sense};
+use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::Gui;

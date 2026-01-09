@@ -1,11 +1,9 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
-use egui::epaint::Mesh;
-use egui::{Pos2, Shape};
+use egui::Pos2;
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
-use std::sync::Arc;
 
 use crate::common::bezier::Bezier;
 use crate::gui::Gui;
