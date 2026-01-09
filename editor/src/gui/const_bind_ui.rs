@@ -33,8 +33,6 @@ impl ConstBindUi {
         let _small_padding = gui.style.small_padding;
         let mono_font = gui.style.mono_font.clone();
 
-        let painter = gui.painter();
-
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
             let Binding::Const(value) = &mut input.binding else {
                 continue;
@@ -61,7 +59,7 @@ impl ConstBindUi {
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,
                 );
-                link_mesh.render(&painter);
+                link_mesh.show(gui);
             }
 
             if let StaticValue::Int(value) = value {
