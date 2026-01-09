@@ -4,7 +4,6 @@ use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::drag_value::DragValue;
-use crate::common::font::ScaledFontId;
 use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;

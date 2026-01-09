@@ -4,7 +4,6 @@ use egui::{Galley, Pos2, Rect, Vec2, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
-use crate::common::font::ScaledFontId;
 use crate::gui::{Gui, graph_ctx::GraphContext};
 use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;

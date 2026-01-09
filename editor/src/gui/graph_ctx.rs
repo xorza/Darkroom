@@ -3,7 +3,7 @@ use eframe::egui;
 use egui::{Align2, Rect, Sense, Shape, StrokeKind};
 use graph::prelude::FuncLib;
 
-use crate::{common::font::ScaledFontId, gui::Gui};
+use crate::gui::Gui;
 
 pub struct GraphContext<'a> {
     pub func_lib: &'a FuncLib,
