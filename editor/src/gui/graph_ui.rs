@@ -210,6 +210,13 @@ impl GraphUi {
                         ));
                     }
                     self.connection_breaker.reset();
+
+                    // if let Some() = self.node_ui.const_bind_ui.hovered_link {
+                    //     //
+
+                    //     //
+                    // }
+
                     self.state = InteractionState::Idle;
                 }
             }

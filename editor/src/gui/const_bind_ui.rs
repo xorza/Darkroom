@@ -15,11 +15,11 @@ use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 #[derive(Debug, Default)]
 pub(crate) struct ConstBindUi {
     const_link_bezier_cache: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
-    pub(crate) hovered_link: Option<ConstLinkKey>,
+    hovered_link: Option<ConstLinkKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ConstLinkKey {
+struct ConstLinkKey {
     node_id: NodeId,
     input_idx: usize,
 }

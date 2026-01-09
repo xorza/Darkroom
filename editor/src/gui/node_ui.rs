@@ -27,9 +27,9 @@ pub enum PortDragInfo {
 }
 
 #[derive(Debug, Default)]
-pub struct NodeUi {
+pub(crate) struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
-    const_bind_ui: ConstBindUi,
+    pub(crate) const_bind_ui: ConstBindUi,
 }
 
 #[derive(Debug)]
