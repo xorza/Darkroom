@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontFamily, FontId, Shadow, Stroke};
+use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct Style {
@@ -63,6 +63,7 @@ pub struct NodeStyle {
     pub port_radius: f32,
     pub port_activation_radius: f32,
     pub port_label_side_padding: f32,
+    pub const_badge_offset: Vec2,
 
     pub input_port_color: Color32,
     pub output_port_color: Color32,
@@ -164,6 +165,7 @@ impl Style {
                 port_radius: scaled(18.0 * 0.3),
                 port_activation_radius: scaled(18.0 * 0.3 * 1.3),
                 port_label_side_padding: scaled(8.0),
+                const_badge_offset: Vec2::new(scaled(-10.0), scaled(-10.0)),
 
                 input_port_color: Color32::from_rgb(70, 150, 255),
                 output_port_color: Color32::from_rgb(70, 200, 200),

@@ -59,6 +59,7 @@ GUI helpers now include a `Gui` wrapper that pairs `Style` with `egui::Ui`, and 
 font/color/background/padding when not explicitly set.
 `Gui` now owns a cloned `Style` to avoid borrowing it from callers.
 `Gui` now exposes `set_scale` to update scale and recreate `Style` when zoom changes.
+`Style.node` now carries `const_badge_offset` for const input badge positioning.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.

@@ -28,10 +28,10 @@ pub fn render_const_bindings(
         let input_center = node_layout.input_center(input_idx);
         let label = const_input_text(gui, node.id, input_idx, value);
 
-        let badge_right = input_center.x - port_radius - 10.0 - padding * 2.0;
+        let badge_right = input_center.x - port_radius - padding * 2.0;
         let badge_height = mono_font.size;
 
-        let link_start = pos2(badge_right, input_center.y);
+        let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
         let link_end = pos2(input_center.x - port_radius, input_center.y);
 
         gui.painter().line_segment(
