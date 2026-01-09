@@ -53,7 +53,7 @@ impl ConstBindUi {
                 }
                 let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
                 self.polyline_mesh_idx += 1;
-                link_mesh.build_points(link_start, link_end, gui.scale);
+                link_mesh.update(link_start, link_end, gui.scale);
                 link_mesh.build_mesh(
                     gui.style.node.input_port_color,
                     gui.style.node.input_port_color,

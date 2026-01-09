@@ -91,6 +91,7 @@ Polyline mesh construction helpers now live in `editor/src/gui/polyline_mesh.rs`
 connection rendering.
 Bezier rendering now uses `common::bezier::Bezier`, which wraps `PolylineMesh` and owns bezier sampling.
 `Bezier::show` now returns an egui response so callers can detect hover/click.
+`Bezier` now caches its endpoints and scale to skip redundant point rebuilds.
 `common::BumpVecDeque` is a bump-backed deque built on `bumpalo::collections::Vec<MaybeUninit<T>>` for arena-friendly
 push/pop without std allocator usage.
 

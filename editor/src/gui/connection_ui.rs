@@ -59,7 +59,6 @@ struct ConnectionCurve {
     broke: bool,
     hovered: bool,
     new_hovered: bool,
-    endpoints: ConnectionEndpoints,
     bezier: Bezier,
 }
 
@@ -70,7 +69,6 @@ impl ConnectionCurve {
             broke: false,
             hovered: false,
             new_hovered: false,
-            endpoints: ConnectionEndpoints::default(),
             bezier: Bezier::default(),
         }
     }
@@ -230,10 +228,7 @@ impl ConnectionUi {
                 let input_pos = input_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding.port_idx);
 
-                let needs_rebuild = curve.endpoints.update(output_pos, input_pos);
-                if needs_rebuild {
-                    curve.bezier.build_points(output_pos, input_pos, gui.scale);
-                }
+                let needs_rebuild = curve.bezier.update(output_pos, input_pos, gui.scale);
 
                 let broke = if let Some(segments) = breaker.map(|breaker| breaker.segments()) {
                     let mut hit = false;
@@ -258,7 +253,7 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.broke != broke || needs_rebuild || curve.hovered != curve.new_hovered {
+                if needs_rebuild || curve.broke != broke || curve.hovered != curve.new_hovered {
                     curve.broke = broke;
                     curve.hovered = curve.new_hovered;
 
@@ -294,8 +289,7 @@ impl ConnectionUi {
             };
             let needs_rebuild = drag.endpoints.update(start, end);
             if needs_rebuild {
-                self.temp_connection_bezier
-                    .build_points(start, end, gui.scale);
+                self.temp_connection_bezier.update(start, end, gui.scale);
                 self.temp_connection_bezier.build_mesh(
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,

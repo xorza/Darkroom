@@ -2,6 +2,7 @@ use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::connection_bezier::ConnectionBezier;
+use crate::common::{pos_changed, scale_changed};
 use crate::gui::Gui;
 use crate::gui::polyline_mesh::PolylineMesh;
 
@@ -9,6 +10,10 @@ use crate::gui::polyline_mesh::PolylineMesh;
 pub struct Bezier {
     mesh: PolylineMesh,
     last_width: f32,
+    start: Pos2,
+    end: Pos2,
+    scale: f32,
+    inited: bool,
 }
 
 impl Default for Bezier {
@@ -16,6 +21,10 @@ impl Default for Bezier {
         Self {
             mesh: PolylineMesh::with_point_capacity(Bezier::DEFAULT_POINTS),
             last_width: 0.0,
+            start: Pos2::ZERO,
+            end: Pos2::ZERO,
+            scale: 1.0,
+            inited: false,
         }
     }
 }
@@ -31,12 +40,26 @@ impl Bezier {
         self.mesh.points()
     }
 
-    pub fn build_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
+    pub fn update(&mut self, start: Pos2, end: Pos2, scale: f32) -> bool {
+        let needs_rebuild = !self.inited
+            || pos_changed(self.start, start)
+            || pos_changed(self.end, end)
+            || scale_changed(self.scale, scale);
+        if !needs_rebuild {
+            return false;
+        }
+
+        self.inited = true;
+        self.start = start;
+        self.end = end;
+        self.scale = scale;
+
         let points = self.mesh.points_mut();
         if points.len() != Self::DEFAULT_POINTS {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
         }
         ConnectionBezier::sample(points.as_mut_slice(), start, end, scale);
+        true
     }
 
     pub fn build_mesh(&mut self, start_color: Color32, end_color: Color32, width: f32) {
