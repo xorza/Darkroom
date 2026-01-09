@@ -178,7 +178,7 @@ impl Style {
                 port_radius: scaled(18.0 * 0.3),
                 port_activation_radius: scaled(18.0 * 0.3 * 1.3),
                 port_label_side_padding: scaled(8.0),
-                const_badge_offset: Vec2::new(scaled(-10.0), scaled(-10.0)),
+                const_badge_offset: Vec2::new(scaled(-15.0), scaled(-25.0)),
 
                 input_port_color: Color32::from_rgb(70, 150, 255),
                 output_port_color: Color32::from_rgb(70, 200, 200),
