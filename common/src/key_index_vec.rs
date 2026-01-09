@@ -342,7 +342,7 @@ mod tests {
     use super::*;
     use crate::{FileFormat, deserialize, serialize};
 
-    #[derive(Debug, Default, Serialize, Deserialize)]
+    #[derive(Debug, Default, Serialize, Deserialize, Clone)]
     struct TestItem {
         id: u32,
         value: i32,
@@ -470,5 +470,19 @@ mod tests {
         assert_eq!(vec.items.len(), 1);
         assert_eq!(vec.idx_by_key.len(), 1);
         assert_eq!(vec.by_key(&2).unwrap().value, 33);
+    }
+
+    #[test]
+    #[should_panic(expected = "compact insert index out of range")]
+    fn compact_insert_start_index_panics_after_write_idx() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+
+        let mut compact = vec.compact_insert_start();
+        let (idx, _item) = compact.insert_with(&1, || TestItem { id: 1, value: 0 });
+        assert_eq!(idx, 0);
+
+        let item = &compact[1];
+        println!("Inserted item {:?}", item);
     }
 }
