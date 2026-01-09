@@ -3,6 +3,8 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape};
 
+pub const DEFAULT_BEZIER_POINTS: usize = 25;
+
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
     mesh: Arc<Mesh>,
@@ -10,8 +12,6 @@ pub struct PolylineMesh {
 }
 
 impl PolylineMesh {
-    pub const DEFAULT_BEZIER_POINTS: usize = 25;
-
     pub fn with_point_capacity(points: usize) -> Self {
         Self {
             mesh: Arc::new(polyline_mesh_with_capacity(points)),
@@ -20,8 +20,8 @@ impl PolylineMesh {
     }
     pub fn with_bezier_capacity() -> Self {
         Self {
-            mesh: Arc::new(polyline_mesh_with_capacity(Self::DEFAULT_BEZIER_POINTS)),
-            points: Vec::with_capacity(Self::DEFAULT_BEZIER_POINTS),
+            mesh: Arc::new(polyline_mesh_with_capacity(DEFAULT_BEZIER_POINTS)),
+            points: Vec::with_capacity(DEFAULT_BEZIER_POINTS),
         }
     }
 
@@ -38,7 +38,7 @@ impl PolylineMesh {
     }
 
     pub fn build_bezier(&mut self, start: Pos2, end: Pos2, scale: f32) {
-        let point_count = Self::DEFAULT_BEZIER_POINTS;
+        let point_count = DEFAULT_BEZIER_POINTS;
         assert!(point_count >= 2, "bezier point count must be at least 2");
         let points = &mut self.points;
         if points.len() != point_count {

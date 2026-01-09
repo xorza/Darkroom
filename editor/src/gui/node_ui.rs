@@ -1,3 +1,4 @@
+use crate::common::button::Button;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
@@ -68,7 +69,7 @@ impl NodeUi {
             let node_execution_info = node_execution_info(node_id, ctx);
 
             render_body(gui, node_layout, is_selected, &node_execution_info);
-            if render_remove_btn(gui, ctx, ui_interaction, &node_id, node_layout) {
+            if render_remove_btn(gui, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             let cache_behavior = render_cache_btn(
@@ -276,7 +277,6 @@ fn render_hints(
 
 fn render_remove_btn(
     gui: &mut Gui<'_>,
-    ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
     node_layout: &NodeLayout,
@@ -305,14 +305,11 @@ fn render_remove_btn(
         Shape::line_segment([a, b], remove_stroke),
         Shape::line_segment([c, d], remove_stroke),
     ];
-    let remove = ctx.button_with(
-        gui,
-        remove_rect,
-        true,
-        ("node_remove", node_id),
-        remove_shapes.iter().cloned(),
-        "Remove node",
-    );
+    let remove = Button::new(gui.ui().make_persistent_id(("node_remove", node_id)))
+        .enabled(true)
+        .tooltip("Remove node")
+        .show(gui, remove_rect, remove_shapes.iter().cloned())
+        .clicked();
 
     if remove {
         ui_interaction
