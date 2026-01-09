@@ -343,7 +343,7 @@ impl ExecutionGraph {
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
-                e_input.binding_changed = match (&input.binding, &e_input.binding) {
+                e_input.binding_changed |= match (&input.binding, &e_input.binding) {
                     (Binding::None, ExecutionBinding::None) => false,
                     (Binding::None, _) => {
                         e_input.binding = ExecutionBinding::None;
@@ -990,10 +990,14 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn const_binding() -> anyhow::Result<()> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn const_binding() -> anyhow::Result<()> {
         let mut graph = test_graph();
-        let func_lib = test_func_lib(TestFuncHooks::default());
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_| {}),
+        });
         let mut execution_graph = ExecutionGraph::default();
 
         // this excludes get_a, get_b and sum from graph
@@ -1002,7 +1006,12 @@ mod tests {
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute()?;
+
+        let mult = execution_graph.by_name("mult").unwrap();
+        assert!(mult.inputs[0].binding_changed);
+        assert!(mult.inputs[1].binding_changed);
+
+        execution_graph.execute().await?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -1011,19 +1020,18 @@ mod tests {
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(mult.inputs_updated);
-        assert!(mult.inputs[0].binding_changed);
-        assert!(mult.inputs[1].binding_changed);
+        assert!(!mult.inputs[0].binding_changed);
+        assert!(!mult.inputs[0].dependency_wants_execute);
+        assert!(!mult.inputs[1].binding_changed);
+        assert!(!mult.inputs[1].dependency_wants_execute);
 
         execution_graph.update(&graph, &func_lib)?;
-        execution_graph.pre_execute()?;
+        execution_graph.execute().await?;
 
-        assert_eq!(
-            execution_node_names_in_order(&execution_graph),
-            ["mult", "print"]
-        );
+        assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         let mult = execution_graph.by_name("mult").unwrap();
-        assert!(!execution_graph.by_name("mult").unwrap().inputs_updated);
+        assert!(!mult.inputs_updated);
         assert!(!mult.inputs[0].binding_changed);
         assert!(!mult.inputs[1].binding_changed);
 
