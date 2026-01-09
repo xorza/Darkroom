@@ -233,6 +233,8 @@ impl GraphUi {
                         self.state = InteractionState::Idle;
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
+                        assert_eq!(input_port.kind, PortKind::Input);
+
                         self.state = InteractionState::Idle;
 
                         let input_node =
@@ -243,6 +245,9 @@ impl GraphUi {
                         input_port,
                         output_port,
                     } => {
+                        assert_eq!(input_port.kind, PortKind::Input);
+                        assert_eq!(output_port.kind, PortKind::Output);
+
                         self.state = InteractionState::Idle;
 
                         let (input_node_id, input_idx) =
