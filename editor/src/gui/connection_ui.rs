@@ -58,6 +58,7 @@ struct ConnectionCurve {
     key: ConnectionKey,
     broke: bool,
     hovered: bool,
+    new_hovered: bool,
     endpoints: ConnectionEndpoints,
     bezier: Bezier,
 }
@@ -68,6 +69,7 @@ impl ConnectionCurve {
             key,
             broke: false,
             hovered: false,
+            new_hovered: false,
             endpoints: ConnectionEndpoints::default(),
             bezier: Bezier::default(),
         }
@@ -134,13 +136,13 @@ impl ConnectionUi {
             );
 
             if breaker.is_some() {
-                curve.hovered = false;
+                curve.new_hovered = false;
             } else {
                 if response.double_clicked_by(PointerButton::Primary) {
                     todo!()
                 }
 
-                curve.hovered = response.hovered();
+                curve.new_hovered = response.hovered();
             }
         }
         if self.temp_connection.is_some() {
@@ -256,8 +258,9 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.broke != broke || needs_rebuild || curve.hovered {
+                if curve.broke != broke || needs_rebuild || curve.hovered != curve.new_hovered {
                     curve.broke = broke;
+                    curve.hovered = curve.new_hovered;
 
                     if curve.broke {
                         curve.bezier.build_mesh(
