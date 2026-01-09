@@ -6,8 +6,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::{Gui, style};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-// todo imple eq
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct ConnectionBezierStyle {
     pub(crate) start_color: Color32,
     pub(crate) end_color: Color32,
@@ -22,31 +21,9 @@ pub struct ConnectionBezier {
     end: Pos2,
     scale: f32,
     inited: bool,
-    style: ConnectionBezierStyle,
     hovered: bool,
     broke: bool,
     points_dirty: bool,
-}
-
-impl Default for ConnectionBezier {
-    fn default() -> Self {
-        Self {
-            polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
-            stroke_width: 0.0,
-            start: Pos2::ZERO,
-            end: Pos2::ZERO,
-            scale: 1.0,
-            inited: false,
-            style: ConnectionBezierStyle {
-                start_color: Color32::TRANSPARENT,
-                end_color: Color32::TRANSPARENT,
-                stroke_width: 0.0,
-            },
-            hovered: false,
-            broke: false,
-            points_dirty: false,
-        }
-    }
 }
 
 impl ConnectionBezier {
@@ -167,14 +144,13 @@ impl ConnectionBezier {
     }
 
     fn rebuild_mesh_if_needed(&mut self, style: ConnectionBezierStyle, hovered: bool, broke: bool) {
-        let style_changed = self.style != style || self.hovered != hovered || self.broke != broke;
+        let style_changed = self.hovered != hovered || self.broke != broke;
         if !self.points_dirty && !style_changed {
             return;
         }
 
         assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
 
-        self.style = style;
         self.hovered = hovered;
         self.broke = broke;
         self.stroke_width = style.stroke_width;
@@ -209,4 +185,29 @@ fn distance_sq_point_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {
     let t = (ap.dot(ab) / ab_len_sq).clamp(0.0, 1.0);
     let closest = a + ab * t;
     (point - closest).length_sq()
+}
+
+impl Default for ConnectionBezier {
+    fn default() -> Self {
+        Self {
+            polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
+            stroke_width: 0.0,
+            start: Pos2::ZERO,
+            end: Pos2::ZERO,
+            scale: 1.0,
+            inited: false,
+
+            hovered: false,
+            broke: false,
+            points_dirty: false,
+        }
+    }
+}
+
+impl PartialEq for ConnectionBezierStyle {
+    fn eq(&self, other: &Self) -> bool {
+        self.start_color == other.start_color
+            && self.end_color == other.end_color
+            && !scale_changed(self.stroke_width, other.stroke_width)
+    }
 }
