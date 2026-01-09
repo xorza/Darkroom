@@ -53,7 +53,7 @@ impl ConnectionDrag {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ConnectionCurve {
     key: ConnectionKey,
     broke: bool,
@@ -243,7 +243,6 @@ impl ConnectionUi {
                 let output_pos = output_layout.output_center(binding.port_idx);
 
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
-
                 curve.broke = curve.bezier.intersects_breaker(breaker);
             }
         }
