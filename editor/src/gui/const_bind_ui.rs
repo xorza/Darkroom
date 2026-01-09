@@ -71,14 +71,7 @@ impl<'a> ConstBindFrame<'a> {
             }
 
             let input_center = node_layout.input_center(input_idx);
-            let label = match &input.binding {
-                Binding::Const(value) => const_input_text(gui, node.id, input_idx, value),
-                _ => unreachable!("const binding should be present"),
-            };
-
             let badge_right = input_center.x - port_radius - padding * 2.0;
-            let badge_height = mono_font.size;
-
             let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
             let link_end = pos2(input_center.x - port_radius, input_center.y);
 
@@ -124,39 +117,6 @@ impl<'a> ConstBindFrame<'a> {
                         .actions
                         .push((node.id, GraphUiAction::InputChanged { input_idx }));
                 }
-            } else {
-                let badge_rect = egui::Rect::from_min_max(
-                    pos2(badge_right - 120.0, input_center.y - badge_height * 0.5),
-                    pos2(badge_right, input_center.y + badge_height * 0.5),
-                );
-                let mut text_ui = gui.ui().new_child(UiBuilder::new().max_rect(badge_rect));
-                text_ui.set_clip_rect(badge_rect);
-
-                let text_id = gui
-                    .ui()
-                    .make_persistent_id(("const_input_text", node.id, input_idx));
-                let mut text = label;
-                let text_edit = TextEdit::singleline(&mut text)
-                    .id(text_id)
-                    .font(mono_font.clone())
-                    .desired_width(badge_rect.width())
-                    .vertical_align(Align::Center)
-                    .horizontal_align(Align::Center)
-                    .margin(Vec2::ZERO)
-                    .clip_text(true)
-                    .frame(false);
-                let response = text_ui.add_sized(badge_rect.size(), text_edit);
-
-                if response.changed()
-                    && let Some(parsed) = parse_static_value(&text, value)
-                    && *value != parsed
-                {
-                    *value = parsed;
-                    ui_interaction
-                        .actions
-                        .push((node.id, GraphUiAction::InputChanged { input_idx }));
-                }
-                gui.ui().data_mut(|data| data.insert_temp(text_id, text));
             }
         }
     }
