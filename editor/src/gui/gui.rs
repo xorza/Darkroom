@@ -3,6 +3,7 @@ use std::ptr::NonNull;
 
 use egui::{Painter, Rect, Ui};
 
+use crate::common::scale_changed;
 use crate::gui::style::Style;
 
 #[derive(Clone)]
@@ -47,5 +48,18 @@ impl<'a> Gui<'a> {
 
     pub fn painter(&self) -> Painter {
         self.painter.0.clone()
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        assert!(scale.is_finite(), "gui scale must be finite");
+        assert!(scale > 0.0, "gui scale must be greater than 0");
+
+        if !scale_changed(self.scale, scale) {
+            self.scale = scale;
+            return;
+        }
+
+        self.scale = scale;
+        self.style = Style::new(scale);
     }
 }

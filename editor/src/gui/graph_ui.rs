@@ -269,6 +269,7 @@ impl GraphUi {
 
         if reset_view {
             view_graph.scale = 1.0;
+            gui.set_scale(view_graph.scale);
             view_graph.pan = Vec2::ZERO;
         }
         if view_selected {
@@ -309,7 +310,7 @@ impl GraphUi {
             let origin = gui.rect.min;
             let graph_pos = (pointer_pos - origin - view_graph.pan) / view_graph.scale;
             view_graph.scale = clamped_scale;
-            gui.scale = clamped_scale;
+            gui.set_scale(clamped_scale);
             view_graph.pan = pointer_pos - origin - graph_pos * view_graph.scale;
         }
 
@@ -413,12 +414,14 @@ fn view_selected_node(
         node_view.pos.y + size.y * 0.5,
     );
     view_graph.scale = 1.0;
+    gui.set_scale(view_graph.scale);
     view_graph.pan = gui.rect.center() - gui.rect.min - center.to_vec2();
 }
 
 fn fit_all_nodes(gui: &mut Gui<'_>, view_graph: &mut model::ViewGraph, graph_layout: &GraphLayout) {
     if view_graph.view_nodes.is_empty() {
         view_graph.scale = 1.0;
+        gui.set_scale(view_graph.scale);
         view_graph.pan = egui::Vec2::ZERO;
         return;
     }
@@ -447,6 +450,7 @@ fn fit_all_nodes(gui: &mut Gui<'_>, view_graph: &mut model::ViewGraph, graph_lay
 
     let target_zoom = zoom_x.min(zoom_y).clamp(MIN_ZOOM, MAX_ZOOM);
     view_graph.scale = target_zoom;
+    gui.set_scale(view_graph.scale);
     let bounds_center = bounds.center().to_vec2();
     view_graph.pan = gui.rect.center() - gui.rect.min - bounds_center * view_graph.scale;
 }
