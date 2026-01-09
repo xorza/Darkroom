@@ -193,6 +193,9 @@ impl GraphUi {
                 } else if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
+                    self.connection_breaker.reset();
+                    self.state = InteractionState::Idle;
+
                     for connection in self.connections.broke_iter() {
                         let node = ctx
                             .view_graph
@@ -209,15 +212,23 @@ impl GraphUi {
                             },
                         ));
                     }
-                    self.connection_breaker.reset();
 
-                    // if let Some() = self.node_ui.const_bind_ui.hovered_link {
-                    //     //
+                    for link_key in self.node_ui.const_bind_ui.broke_iter() {
+                        let node = ctx
+                            .view_graph
+                            .graph
+                            .nodes
+                            .by_key_mut(&link_key.input_node_id)
+                            .unwrap();
 
-                    //     //
-                    // }
-
-                    self.state = InteractionState::Idle;
+                        node.inputs[link_key.input_idx].binding = Binding::None;
+                        ui_interaction.actions.push((
+                            link_key.input_node_id,
+                            GraphUiAction::InputChanged {
+                                input_idx: link_key.input_idx,
+                            },
+                        ));
+                    }
                 }
             }
             InteractionState::DraggingNewConnection => {

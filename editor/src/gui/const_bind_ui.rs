@@ -20,7 +20,7 @@ pub(crate) struct ConstBindUi {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConstLinkKey {
-    pub(crate) node_id: NodeId,
+    pub(crate) input_node_id: NodeId,
     pub(crate) input_idx: usize,
 }
 
@@ -204,7 +204,10 @@ impl<'a> ConstBindFrame<'a> {
         binding: &mut Binding,
         breaker: Option<&ConnectionBreaker>,
     ) -> bool {
-        let link_key = ConstLinkKey { node_id, input_idx };
+        let link_key = ConstLinkKey {
+            input_node_id: node_id,
+            input_idx,
+        };
         let (_idx, link) = self
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
