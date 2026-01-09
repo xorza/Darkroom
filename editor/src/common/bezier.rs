@@ -2,6 +2,7 @@ use egui::epaint::Mesh;
 use egui::{Color32, Painter, Pos2};
 
 use crate::common::connection_bezier::ConnectionBezier;
+use crate::gui::Gui;
 use crate::gui::polyline_mesh::PolylineMesh;
 
 #[derive(Debug, Clone)]
@@ -38,7 +39,7 @@ impl Bezier {
         self.mesh.rebuild(start_color, end_color, width);
     }
 
-    pub fn render(&self, painter: &Painter) {
-        self.mesh.render(painter);
+    pub fn render(&self, gui: &Gui) {
+        self.mesh.render(&gui.painter());
     }
 }
