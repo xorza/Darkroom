@@ -29,7 +29,8 @@ impl PolylineMesh {
         &mut self.points
     }
 
-    pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32, feather: f32) {
+    pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {
+        let feather = 1.0;
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
@@ -42,8 +43,8 @@ impl PolylineMesh {
         start_color: Color32,
         end_color: Color32,
         width: f32,
-        feather: f32,
     ) {
+        let feather = 1.0;
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         add_curve_segments_to_mesh(

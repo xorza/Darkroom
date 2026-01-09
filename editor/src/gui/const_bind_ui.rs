@@ -19,8 +19,6 @@ pub fn render_const_bindings(
     node_layout: &NodeLayout,
     node: &mut Node,
 ) {
-    let pixels_per_point = gui.ui().ctx().pixels_per_point();
-    let feather = 1.0 / pixels_per_point;
     let port_radius = gui.style.node.port_radius;
     let padding = gui.style.padding;
     let _small_padding = gui.style.small_padding;
@@ -53,7 +51,6 @@ pub fn render_const_bindings(
                 gui.style.node.input_port_color,
                 gui.style.node.input_port_color,
                 gui.style.connections.stroke_width,
-                feather,
             );
             link_mesh.render(&painter);
         }

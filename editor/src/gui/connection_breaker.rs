@@ -80,8 +80,6 @@ impl ConnectionBreaker {
             self.reset = false;
         }
 
-        let pixels_per_point = gui.ui().ctx().pixels_per_point();
-        let feather = 1.0 / pixels_per_point;
         let color = gui.style.connections.breaker_stroke.color;
         if point_len > self.built_len {
             let start_segment = self.built_len.saturating_sub(1);
@@ -90,7 +88,6 @@ impl ConnectionBreaker {
                 color,
                 color,
                 gui.style.connections.breaker_stroke.width,
-                feather,
             );
             self.built_len = point_len;
         }

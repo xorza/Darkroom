@@ -198,9 +198,6 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        let pixels_per_point = gui.ui().ctx().pixels_per_point();
-        let feather = 1.0 / pixels_per_point;
-
         self.highlighted.clear();
 
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
@@ -277,14 +274,12 @@ impl ConnectionUi {
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.width,
-                            feather,
                         );
                     } else {
                         curve.mesh.rebuild(
                             gui.style.node.output_port_color,
                             gui.style.node.input_port_color,
                             gui.style.connections.stroke_width,
-                            feather,
                         );
                     };
                 }
@@ -311,7 +306,6 @@ impl ConnectionUi {
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,
-                    feather,
                 );
             }
             mesh.append_ref(self.temp_connection.mesh());
