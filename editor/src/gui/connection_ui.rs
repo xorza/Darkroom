@@ -220,7 +220,7 @@ impl ConnectionUi {
     ) {
         self.broke.clear();
 
-        let mut write_idx: usize = 0;
+        let mut compact = self.curves.compact_insert_start();
 
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
@@ -233,12 +233,8 @@ impl ConnectionUi {
                     input_node_id: node.id,
                     input_idx,
                 };
-                let curve_idx =
-                    self.curves
-                        .compact_insert_with(&connection_key, &mut write_idx, || {
-                            ConnectionCurve::new(connection_key)
-                        });
-                let curve = &mut self.curves[curve_idx];
+                let (_curve_idx, curve) =
+                    compact.insert_with(&connection_key, || ConnectionCurve::new(connection_key));
 
                 let output_layout = graph_layout.node_layout(&binding.target_id);
                 let input_layout = graph_layout.node_layout(&node.id);
@@ -303,8 +299,6 @@ impl ConnectionUi {
                 }
             }
         }
-
-        self.curves.compact_finish(write_idx);
 
         if let Some(drag) = &mut self.temp_connection {
             let (start, end) = match drag.start_port.port.kind {
