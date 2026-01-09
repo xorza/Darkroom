@@ -3,8 +3,6 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape};
 
-pub const DEFAULT_BEZIER_POINTS: usize = 25;
-
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
     mesh: Arc<Mesh>,
@@ -18,13 +16,6 @@ impl PolylineMesh {
             points: Vec::with_capacity(points),
         }
     }
-    pub fn with_bezier_capacity() -> Self {
-        Self {
-            mesh: Arc::new(polyline_mesh_with_capacity(DEFAULT_BEZIER_POINTS)),
-            points: Vec::with_capacity(DEFAULT_BEZIER_POINTS),
-        }
-    }
-
     pub fn mesh(&self) -> &Mesh {
         &self.mesh
     }
@@ -35,21 +26,6 @@ impl PolylineMesh {
 
     pub fn points_mut(&mut self) -> &mut Vec<Pos2> {
         &mut self.points
-    }
-
-    pub fn build_bezier(&mut self, start: Pos2, end: Pos2, scale: f32) {
-        let point_count = DEFAULT_BEZIER_POINTS;
-        assert!(point_count >= 2, "bezier point count must be at least 2");
-        let points = &mut self.points;
-        if points.len() != point_count {
-            points.resize(point_count, Pos2::ZERO);
-        }
-        crate::common::connection_bezier::ConnectionBezier::sample(
-            points.as_mut_slice(),
-            start,
-            end,
-            scale,
-        );
     }
 
     pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {
@@ -91,6 +67,7 @@ impl PolylineMesh {
     }
 }
 
+// todo make private or remove
 pub fn polyline_mesh_with_capacity(points: usize) -> Mesh {
     assert!(points >= 2, "bezier point count must be at least 2");
     let segments = points - 1;

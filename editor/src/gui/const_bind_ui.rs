@@ -3,17 +3,17 @@ use egui::{Align, Align2, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
+use crate::common::bezier::Bezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
-use crate::gui::polyline_mesh::PolylineMesh;
 use common::BoolExt;
 
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
     polyline_mesh_idx: usize,
-    polyline_mesh: Vec<PolylineMesh>,
+    polyline_mesh: Vec<Bezier>,
 }
 
 impl ConstBindUi {
@@ -51,12 +51,11 @@ impl ConstBindUi {
 
             {
                 if self.polyline_mesh_idx >= self.polyline_mesh.len() {
-                    self.polyline_mesh
-                        .push(PolylineMesh::with_bezier_capacity());
+                    self.polyline_mesh.push(Bezier::new());
                 }
                 let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
                 self.polyline_mesh_idx += 1;
-                link_mesh.build_bezier(link_start, link_end, gui.scale);
+                link_mesh.build(link_start, link_end, gui.scale);
                 link_mesh.rebuild(
                     gui.style.node.input_port_color,
                     gui.style.node.input_port_color,
