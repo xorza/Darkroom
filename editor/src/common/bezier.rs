@@ -11,15 +11,17 @@ pub struct Bezier {
     last_width: f32,
 }
 
-impl Bezier {
-    pub const DEFAULT_POINTS: usize = 25;
-
-    pub fn new() -> Self {
+impl Default for Bezier {
+    fn default() -> Self {
         Self {
-            mesh: PolylineMesh::with_point_capacity(Self::DEFAULT_POINTS),
+            mesh: PolylineMesh::with_point_capacity(Bezier::DEFAULT_POINTS),
             last_width: 0.0,
         }
     }
+}
+
+impl Bezier {
+    pub const DEFAULT_POINTS: usize = 25;
 
     pub fn mesh(&self) -> &Mesh {
         self.mesh.mesh()

@@ -49,7 +49,7 @@ impl ConstBindUi {
 
             {
                 if self.polyline_mesh_idx >= self.polyline_mesh.len() {
-                    self.polyline_mesh.push(Bezier::new());
+                    self.polyline_mesh.push(Bezier::default());
                 }
                 let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
                 self.polyline_mesh_idx += 1;

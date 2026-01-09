@@ -56,7 +56,8 @@ impl ConnectionDrag {
 #[derive(Debug, Clone)]
 struct ConnectionCurve {
     key: ConnectionKey,
-    highlighted: bool,
+    broke: bool,
+    hovered: bool,
     endpoints: ConnectionEndpoints,
     bezier: Bezier,
 }
@@ -65,9 +66,10 @@ impl ConnectionCurve {
     fn new(key: ConnectionKey) -> Self {
         Self {
             key,
-            highlighted: false,
+            broke: false,
+            hovered: false,
             endpoints: ConnectionEndpoints::default(),
-            bezier: Bezier::new(),
+            bezier: Bezier::default(),
         }
     }
 }
@@ -103,27 +105,15 @@ impl ConnectionEndpoints {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
-    pub(crate) broke: HashSet<ConnectionKey>,
 
-    hovered: HashSet<ConnectionKey>,
+    // todo remove
+    pub(crate) broke: HashSet<ConnectionKey>,
 
     temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: Bezier,
-}
-
-impl Default for ConnectionUi {
-    fn default() -> Self {
-        Self {
-            curves: KeyIndexVec::default(),
-            broke: HashSet::default(),
-            hovered: HashSet::default(),
-            temp_connection: None,
-            temp_connection_bezier: Bezier::new(),
-        }
-    }
 }
 
 impl ConnectionUi {
@@ -136,7 +126,7 @@ impl ConnectionUi {
     ) {
         self.rebuild(gui, graph_layout, view_graph, breaker);
 
-        for curve in &self.curves {
+        for curve in self.curves.iter_mut() {
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
@@ -144,11 +134,9 @@ impl ConnectionUi {
             );
             if response.double_clicked_by(PointerButton::Primary) {
                 todo!()
-                // self.broke.insert(curve.key);
             }
-            if response.hovered() {
-                self.hovered.insert(curve.key);
-            }
+
+            curve.hovered = response.hovered();
         }
         if self.temp_connection.is_some() {
             self.temp_connection_bezier
@@ -264,10 +252,10 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.highlighted != highlighted || needs_rebuild {
-                    curve.highlighted = highlighted;
+                if curve.broke != highlighted || needs_rebuild {
+                    curve.broke = highlighted;
 
-                    if curve.highlighted {
+                    if curve.broke {
                         curve.bezier.build_mesh(
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.color,
