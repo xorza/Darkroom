@@ -223,7 +223,7 @@ impl Style {
 
                 const_bind_style: ConstBindStyle {
                     fill: inactive_bg_fill,
-                    stroke: inactive_bg_stroke,
+                    stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT),
                     hover_stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT_HOVER),
                     radius: scaled(SMALL_CORNER_RADIUS),
                 },
