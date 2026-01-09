@@ -10,10 +10,18 @@ pub struct PolylineMesh {
 }
 
 impl PolylineMesh {
+    pub const DEFAULT_BEZIER_POINTS: usize = 25;
+
     pub fn with_point_capacity(points: usize) -> Self {
         Self {
             mesh: Arc::new(polyline_mesh_with_capacity(points)),
             points: Vec::with_capacity(points),
+        }
+    }
+    pub fn with_bezier_capacity() -> Self {
+        Self {
+            mesh: Arc::new(polyline_mesh_with_capacity(Self::DEFAULT_BEZIER_POINTS)),
+            points: Vec::with_capacity(Self::DEFAULT_BEZIER_POINTS),
         }
     }
 
@@ -27,6 +35,21 @@ impl PolylineMesh {
 
     pub fn points_mut(&mut self) -> &mut Vec<Pos2> {
         &mut self.points
+    }
+
+    pub fn build_bezier(&mut self, start: Pos2, end: Pos2, scale: f32) {
+        let point_count = Self::DEFAULT_BEZIER_POINTS;
+        assert!(point_count >= 2, "bezier point count must be at least 2");
+        let points = &mut self.points;
+        if points.len() != point_count {
+            points.resize(point_count, Pos2::ZERO);
+        }
+        crate::common::connection_bezier::ConnectionBezier::sample(
+            points.as_mut_slice(),
+            start,
+            end,
+            scale,
+        );
     }
 
     pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {

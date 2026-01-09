@@ -1,17 +1,14 @@
 use eframe::egui;
-use egui::{Align, Align2, Pos2, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Align2, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
-use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::polyline_mesh::PolylineMesh;
 use common::BoolExt;
-
-const CONST_LINK_POINTS: usize = 25;
 
 pub fn render_const_bindings(
     gui: &mut Gui<'_>,
@@ -41,12 +38,8 @@ pub fn render_const_bindings(
         let link_end = pos2(input_center.x - port_radius, input_center.y);
 
         {
-            let mut link_mesh = PolylineMesh::with_point_capacity(CONST_LINK_POINTS);
-            let points = link_mesh.points_mut();
-            if points.len() != CONST_LINK_POINTS {
-                points.resize(CONST_LINK_POINTS, Pos2::ZERO);
-            }
-            ConnectionBezier::sample(points.as_mut_slice(), link_start, link_end, gui.scale);
+            let mut link_mesh = PolylineMesh::with_bezier_capacity();
+            link_mesh.build_bezier(link_start, link_end, gui.scale);
             link_mesh.rebuild(
                 gui.style.node.input_port_color,
                 gui.style.node.input_port_color,

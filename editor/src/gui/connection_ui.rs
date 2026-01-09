@@ -7,15 +7,12 @@ use graph::prelude::Binding;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
 use crate::gui::polyline_mesh::{PolylineMesh, polyline_mesh_with_capacity};
 use crate::model;
-
-pub const POINTS: usize = 25;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
@@ -70,7 +67,7 @@ impl ConnectionCurve {
             key,
             highlighted: false,
             endpoints: ConnectionEndpoints::default(),
-            mesh: PolylineMesh::with_point_capacity(POINTS),
+            mesh: PolylineMesh::with_bezier_capacity(),
         }
     }
 }
@@ -121,14 +118,14 @@ pub(crate) struct ConnectionUi {
 
 impl Default for ConnectionUi {
     fn default() -> Self {
-        let mesh = polyline_mesh_with_capacity(10 * POINTS);
+        let mesh = polyline_mesh_with_capacity(10 * PolylineMesh::DEFAULT_BEZIER_POINTS);
 
         Self {
             curves: KeyIndexVec::default(),
             highlighted: HashSet::default(),
             drag: None,
             mesh: Arc::new(mesh),
-            temp_connection: PolylineMesh::with_point_capacity(POINTS),
+            temp_connection: PolylineMesh::with_bezier_capacity(),
             temp_connection_endpoints: ConnectionEndpoints::default(),
         }
     }
@@ -231,15 +228,7 @@ impl ConnectionUi {
 
                 let needs_rebuild = curve.endpoints.update(output_pos, input_pos);
                 if needs_rebuild {
-                    let points = curve.mesh.points_mut();
-                    points.clear();
-                    points.resize(POINTS, Pos2::ZERO); // Reserve space for points
-                    ConnectionBezier::sample(
-                        points.as_mut_slice(),
-                        output_pos,
-                        input_pos,
-                        gui.scale,
-                    );
+                    curve.mesh.build_bezier(output_pos, input_pos, gui.scale);
                 }
 
                 let highlighted = if let Some(segments) = breaker.map(|breaker| breaker.segments())
@@ -297,11 +286,7 @@ impl ConnectionUi {
             };
             let needs_rebuild = self.temp_connection_endpoints.update(start, end);
             if needs_rebuild {
-                let points = self.temp_connection.points_mut();
-                if points.len() != POINTS {
-                    points.resize(POINTS, Pos2::ZERO);
-                }
-                ConnectionBezier::sample(points.as_mut_slice(), start, end, gui.scale);
+                self.temp_connection.build_bezier(start, end, gui.scale);
                 self.temp_connection.rebuild(
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
@@ -318,3 +303,4 @@ impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
         &self.key
     }
 }
+use crate::common::connection_bezier::ConnectionBezier;
