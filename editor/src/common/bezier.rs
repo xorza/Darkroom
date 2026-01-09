@@ -51,8 +51,6 @@ impl Bezier {
 
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
-            println!("Hit detected!");
-
             let rect = mesh_bounds(self.mesh.mesh())
                 .map(|rect| rect.expand(self.last_width * 0.5))
                 .unwrap_or(Rect::NOTHING);

@@ -132,11 +132,19 @@ impl ConnectionUi {
                 Sense::click() | Sense::hover(),
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
             );
-            if response.double_clicked_by(PointerButton::Primary) {
-                todo!()
-            }
 
-            curve.hovered = response.hovered();
+            if breaker.is_some() {
+                curve.hovered = false;
+            } else {
+                if response.double_clicked_by(PointerButton::Primary) {
+                    todo!()
+                }
+
+                if response.hovered() {
+                    println!("ConnectionUi::render: hovered = {}", response.hovered());
+                }
+                curve.hovered = response.hovered();
+            }
         }
         if self.temp_connection.is_some() {
             self.temp_connection_bezier
@@ -251,14 +259,20 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.broke != broke || needs_rebuild {
+                if curve.broke != broke || needs_rebuild || curve.hovered {
                     curve.broke = broke;
 
                     if curve.broke {
                         curve.bezier.build_mesh(
-                            gui.style.connections.highlight_stroke.color,
-                            gui.style.connections.highlight_stroke.color,
-                            gui.style.connections.highlight_stroke.width,
+                            gui.style.connections.broke_stroke.color,
+                            gui.style.connections.broke_stroke.color,
+                            gui.style.connections.broke_stroke.width,
+                        );
+                    } else if curve.hovered {
+                        curve.bezier.build_mesh(
+                            gui.style.connections.hover_stroke.color,
+                            gui.style.connections.hover_stroke.color,
+                            gui.style.connections.hover_stroke.width,
                         );
                     } else {
                         curve.bezier.build_mesh(

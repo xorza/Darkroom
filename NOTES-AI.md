@@ -84,6 +84,7 @@ Temp connection endpoints now live on `ConnectionDrag`.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.
+Connection style now includes a hover stroke for hovered connections.
 Connection bezier sampling now eases parameterization to add detail near endpoints while reducing mid-curve density.
 Connection curve mesh allocation now reserves vertex/index capacity based on bezier point count.
 Polyline mesh construction helpers now live in `editor/src/gui/polyline_mesh.rs` with a `PolylineMesh` wrapper used by

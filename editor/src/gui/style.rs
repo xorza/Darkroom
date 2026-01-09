@@ -43,7 +43,8 @@ pub struct GraphBackgroundStyle {
 #[derive(Debug, Clone)]
 pub struct ConnectionStyle {
     pub stroke_width: f32,
-    pub highlight_stroke: Stroke,
+    pub hover_stroke: Stroke,
+    pub broke_stroke: Stroke,
     pub breaker_stroke: Stroke,
 }
 
@@ -130,8 +131,9 @@ impl Style {
             },
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),
-                highlight_stroke: Stroke::new(scaled(1.5), Color32::from_rgb(255, 90, 90)),
-                breaker_stroke: Stroke::new(scaled(1.5), Color32::from_rgb(255, 120, 120)),
+                hover_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 200, 255)),
+                broke_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 90, 90)),
+                breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
             },
             node: NodeStyle {
                 const_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(70, 150, 255)),
