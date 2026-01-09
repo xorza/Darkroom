@@ -63,7 +63,7 @@ pub fn render_const_bindings(
                         gui.style.node.const_stroke,
                         gui.style.small_corner_radius,
                     )
-                    .padding(vec2(padding, small_padding))
+                    .padding(vec2(padding, 0.0))
                     .show(gui, link_start, Align2::RIGHT_CENTER)
             };
             if response.changed() {
