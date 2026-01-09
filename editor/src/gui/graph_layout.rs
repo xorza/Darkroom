@@ -38,18 +38,14 @@ impl GraphLayout {
     pub fn update(&mut self, gui: &Gui<'_>, ctx: &GraphContext) {
         let view_graph = &ctx.view_graph;
         self.origin = gui.rect.min + view_graph.pan;
-        let mut write_idx = 0;
+        let mut compact = self.node_layouts.compact_insert_start();
 
         for view_node in view_graph.view_nodes.iter() {
-            let idx = self
-                .node_layouts
-                .compact_insert_with(&view_node.id, &mut write_idx, || {
-                    NodeLayout::new(gui, &view_node.id)
-                });
+            let (_idx, node_layout) =
+                compact.insert_with(&view_node.id, || NodeLayout::new(gui, &view_node.id));
 
-            self.node_layouts[idx].update(ctx, gui, self.origin);
+            node_layout.update(ctx, gui, self.origin);
         }
-        self.node_layouts.compact_finish(write_idx);
     }
 
     pub fn node_layout(&self, node_id: &NodeId) -> &NodeLayout {

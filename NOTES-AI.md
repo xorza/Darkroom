@@ -455,3 +455,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Added CompactInsert index panic test when accessing beyond write_idx.
 
 - CompactInsert now centralizes index validation in validate_index().
+
+- GraphLayout now uses compact_insert_start guard for node_layouts compaction.
