@@ -74,11 +74,7 @@ impl<'a> ConstBindFrame<'a> {
                 input_node_id: node.id,
                 input_idx,
             };
-            let mut hovered = *self.hovered_connection == Some(connection_key);
-
-            if hovered {
-                println!("Hovered {:?}", connection_key);
-            }
+            let was_hovered = *self.hovered_connection == Some(connection_key);
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
@@ -100,11 +96,11 @@ impl<'a> ConstBindFrame<'a> {
                 gui,
                 Sense::click() | Sense::hover(),
                 ("const_link", node.id, input_idx),
-                hovered,
+                was_hovered,
                 curve.broke,
             );
 
-            hovered |= response.hovered();
+            let mut currently_hovered = response.hovered();
 
             if response.double_clicked_by(PointerButton::Primary) {
                 input.binding = Binding::None;
@@ -127,24 +123,24 @@ impl<'a> ConstBindFrame<'a> {
                         .padding(vec2(padding, 0.0))
                         .pos(connection_start)
                         .align(Align2::RIGHT_CENTER)
-                        .hover(hovered)
+                        .hover(was_hovered | currently_hovered)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
 
-                hovered |= response.hovered();
+                currently_hovered |= response.hovered();
 
                 if response.changed() {
-                    hovered = true;
+                    currently_hovered = true;
                     ui_interaction
                         .actions
                         .push((node.id, GraphUiAction::InputChanged { input_idx }));
                 }
             }
 
-            if hovered {
+            if currently_hovered {
                 self.currently_hovered_connection = Some(connection_key);
             }
-            curve.hovered = hovered;
+            curve.hovered = currently_hovered;
         }
     }
 }
