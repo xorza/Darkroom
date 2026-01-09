@@ -51,7 +51,7 @@ impl Bezier {
 
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
-            let rect = mesh_bounds(self.mesh.mesh())
+            let rect = points_bounds(self.mesh.points())
                 .map(|rect| rect.expand(self.last_width * 0.5))
                 .unwrap_or(Rect::NOTHING);
             gui.ui().interact(rect, id, sense)
@@ -79,17 +79,19 @@ impl Bezier {
     }
 }
 
-fn mesh_bounds(mesh: &Mesh) -> Option<Rect> {
-    let mut rect = Rect::EVERYTHING;
-
-    for vertex in &mesh.vertices {
-        rect.min.x = rect.min.x.min(vertex.pos.x);
-        rect.min.y = rect.min.y.min(vertex.pos.y);
-        rect.max.x = rect.max.x.max(vertex.pos.x);
-        rect.max.y = rect.max.y.max(vertex.pos.y);
+fn points_bounds(points: &[Pos2]) -> Option<Rect> {
+    if points.is_empty() {
+        return None;
     }
-
-    if rect.is_finite() { Some(rect) } else { None }
+    let mut min = points[0];
+    let mut max = points[0];
+    for point in points.iter().skip(1) {
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+    }
+    Some(Rect::from_min_max(min, max))
 }
 
 fn distance_sq_point_segment(point: Pos2, a: Pos2, b: Pos2) -> f32 {

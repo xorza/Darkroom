@@ -140,9 +140,6 @@ impl ConnectionUi {
                     todo!()
                 }
 
-                if response.hovered() {
-                    println!("ConnectionUi::render: hovered = {}", response.hovered());
-                }
                 curve.hovered = response.hovered();
             }
         }
