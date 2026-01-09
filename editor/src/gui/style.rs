@@ -54,6 +54,7 @@ pub struct ConnectionStyle {
     pub stroke_width: f32,
     pub broke_stroke: Stroke,
     pub hover_brighten: f32,
+    pub hover_distance_scale: f32,
     pub breaker_stroke: Stroke,
 }
 
@@ -142,6 +143,7 @@ impl Style {
                 stroke_width: scaled(1.5),
                 broke_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 90, 90)),
                 hover_brighten: 0.35,
+                hover_distance_scale: 8.0,
                 breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
             },
             node: NodeStyle {

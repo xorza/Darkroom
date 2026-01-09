@@ -8,7 +8,7 @@ use crate::gui::polyline_mesh::PolylineMesh;
 
 #[derive(Debug, Clone)]
 pub struct Bezier {
-    mesh: PolylineMesh,
+    polyline: PolylineMesh,
     last_width: f32,
     start: Pos2,
     end: Pos2,
@@ -19,7 +19,7 @@ pub struct Bezier {
 impl Default for Bezier {
     fn default() -> Self {
         Self {
-            mesh: PolylineMesh::with_point_capacity(Bezier::DEFAULT_POINTS),
+            polyline: PolylineMesh::with_point_capacity(Bezier::DEFAULT_POINTS),
             last_width: 0.0,
             start: Pos2::ZERO,
             end: Pos2::ZERO,
@@ -33,11 +33,11 @@ impl Bezier {
     pub const DEFAULT_POINTS: usize = 25;
 
     pub fn mesh(&self) -> &Mesh {
-        self.mesh.mesh()
+        self.polyline.mesh()
     }
 
     pub fn points(&self) -> &[Pos2] {
-        self.mesh.points()
+        self.polyline.points()
     }
 
     pub fn update(&mut self, start: Pos2, end: Pos2, scale: f32) -> bool {
@@ -54,7 +54,7 @@ impl Bezier {
         self.end = end;
         self.scale = scale;
 
-        let points = self.mesh.points_mut();
+        let points = self.polyline.points_mut();
         if points.len() != Self::DEFAULT_POINTS {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
         }
@@ -65,37 +65,39 @@ impl Bezier {
     pub fn build_mesh(&mut self, start_color: Color32, end_color: Color32, width: f32) {
         assert!(width.is_finite() && width >= 0.0);
         self.last_width = width;
-        self.mesh.rebuild(start_color, end_color, width);
+        self.polyline.rebuild(start_color, end_color, width);
     }
 
     pub fn show(&self, gui: &mut Gui<'_>, sense: Sense, id_salt: impl std::hash::Hash) -> Response {
+        let hover_scale = gui.style.connections.hover_distance_scale;
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
-        let hit = pointer_pos.is_some_and(|pos| self.hit_test(pos));
+        let hit = pointer_pos.is_some_and(|pos| self.hit_test(pos, hover_scale));
 
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
-            let rect = points_bounds(self.mesh.points())
+            let rect = points_bounds(self.polyline.points())
                 .map(|rect| rect.expand(self.last_width * 0.5))
                 .unwrap_or(Rect::NOTHING);
             gui.ui().interact(rect, id, sense)
         } else {
             gui.ui().interact(Rect::NOTHING, id, Sense::hover())
         };
-        self.mesh.render(&gui.painter());
+        self.polyline.render(&gui.painter());
         response
     }
 
-    fn hit_test(&self, pos: Pos2) -> bool {
+    fn hit_test(&self, pos: Pos2, hover_scale: f32) -> bool {
         let width = self.last_width;
         if width <= 0.0 {
             return false;
         }
-        let points = self.mesh.points();
+        assert!(hover_scale.is_finite() && hover_scale >= 0.0);
+        let points = self.polyline.points();
         if points.len() < 2 {
             return false;
         }
 
-        let threshold_sq = width * width * 4.0;
+        let threshold_sq = width * width * hover_scale;
         points
             .windows(2)
             .any(|segment| distance_sq_point_segment(pos, segment[0], segment[1]) <= threshold_sq)
