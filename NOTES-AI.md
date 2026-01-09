@@ -80,6 +80,7 @@ Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `c
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
 Connection drag lifecycle now goes through `ConnectionUi` helpers (`start_drag`, `update_drag`, `stop_drag`), and
 `ConnectionUi::render` draws the active drag path.
+Temp connection endpoints now live on `ConnectionDrag`.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.

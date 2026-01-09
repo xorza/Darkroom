@@ -29,6 +29,7 @@ pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
     pub(crate) end_port: Option<PortInfo>,
     pub(crate) current_pos: Pos2,
+    endpoints: ConnectionEndpoints,
 }
 
 #[derive(Debug, Clone)]
@@ -47,6 +48,7 @@ impl ConnectionDrag {
             current_pos: port.center,
             start_port: port,
             end_port: None,
+            endpoints: ConnectionEndpoints::default(),
         }
     }
 }
@@ -108,7 +110,6 @@ pub(crate) struct ConnectionUi {
 
     pub(crate) drag: Option<ConnectionDrag>,
     temp_connection: Bezier,
-    temp_connection_endpoints: ConnectionEndpoints,
 }
 
 impl Default for ConnectionUi {
@@ -118,7 +119,6 @@ impl Default for ConnectionUi {
             highlighted: HashSet::default(),
             drag: None,
             temp_connection: Bezier::new(),
-            temp_connection_endpoints: ConnectionEndpoints::default(),
         }
     }
 }
@@ -133,9 +133,8 @@ impl ConnectionUi {
     ) {
         self.rebuild(gui, graph_layout, view_graph, breaker);
 
-        // gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
         for curve in &self.curves {
-            curve.mesh.show(
+            let _response = curve.mesh.show(
                 gui,
                 Sense::click() | Sense::hover(),
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
@@ -282,7 +281,7 @@ impl ConnectionUi {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
-            let needs_rebuild = self.temp_connection_endpoints.update(start, end);
+            let needs_rebuild = drag.endpoints.update(start, end);
             if needs_rebuild {
                 self.temp_connection.build_points(start, end, gui.scale);
                 self.temp_connection.build_mesh(
