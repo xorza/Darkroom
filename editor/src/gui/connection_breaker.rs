@@ -73,7 +73,7 @@ impl ConnectionBreaker {
         self.mesh.points_mut().push(clamped);
     }
 
-    pub fn render(&mut self, gui: &mut Gui<'_>) {
+    pub fn show(&mut self, gui: &mut Gui<'_>) {
         let point_len = self.mesh.points().len();
         if self.reset || point_len < self.built_len {
             self.mesh.clear_mesh();

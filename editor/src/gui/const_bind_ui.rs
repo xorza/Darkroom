@@ -59,7 +59,8 @@ impl ConstBindUi {
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,
                 );
-                link_mesh.show(gui);
+
+                link_mesh.show(gui, ("const_link", node.id, input_idx));
             }
 
             if let StaticValue::Int(value) = value {

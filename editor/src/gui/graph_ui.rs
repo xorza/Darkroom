@@ -243,7 +243,7 @@ impl GraphUi {
         match self.state {
             InteractionState::Idle => {}
             InteractionState::DraggingNewConnection => {}
-            InteractionState::BreakingConnections => self.connection_breaker.render(gui),
+            InteractionState::BreakingConnections => self.connection_breaker.show(gui),
         }
     }
 

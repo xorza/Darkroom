@@ -88,6 +88,7 @@ Connection curve mesh allocation now reserves vertex/index capacity based on bez
 Polyline mesh construction helpers now live in `editor/src/gui/polyline_mesh.rs` with a `PolylineMesh` wrapper used by
 connection rendering.
 Bezier rendering now uses `common::bezier::Bezier`, which wraps `PolylineMesh` and owns bezier sampling.
+`Bezier::show` now returns an egui response so callers can detect hover/click.
 `common::BumpVecDeque` is a bump-backed deque built on `bumpalo::collections::Vec<MaybeUninit<T>>` for arena-friendly
 push/pop without std allocator usage.
 

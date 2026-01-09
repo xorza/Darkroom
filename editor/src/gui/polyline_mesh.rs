@@ -67,8 +67,7 @@ impl PolylineMesh {
     }
 }
 
-// todo make private or remove
-pub fn polyline_mesh_with_capacity(points: usize) -> Mesh {
+fn polyline_mesh_with_capacity(points: usize) -> Mesh {
     assert!(points >= 2, "bezier point count must be at least 2");
     let segments = points - 1;
     let quads_per_segment = 3;

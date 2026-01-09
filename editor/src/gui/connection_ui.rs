@@ -12,7 +12,6 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
-use crate::gui::polyline_mesh::polyline_mesh_with_capacity;
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -108,24 +107,18 @@ impl ConnectionEndpoints {
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     pub(crate) highlighted: HashSet<ConnectionKey>,
-    pub(crate) drag: Option<ConnectionDrag>,
 
+    pub(crate) drag: Option<ConnectionDrag>,
     temp_connection: Bezier,
     temp_connection_endpoints: ConnectionEndpoints,
-
-    //caches
-    mesh: Arc<Mesh>,
 }
 
 impl Default for ConnectionUi {
     fn default() -> Self {
-        let mesh = polyline_mesh_with_capacity(10 * Bezier::DEFAULT_POINTS);
-
         Self {
             curves: KeyIndexVec::default(),
             highlighted: HashSet::default(),
             drag: None,
-            mesh: Arc::new(mesh),
             temp_connection: Bezier::new(),
             temp_connection_endpoints: ConnectionEndpoints::default(),
         }
@@ -142,7 +135,16 @@ impl ConnectionUi {
     ) {
         self.rebuild(gui, graph_layout, view_graph, breaker);
 
-        gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
+        // gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
+        for curve in &self.curves {
+            curve.mesh.show(
+                gui,
+                ("connection", curve.key.input_node_id, curve.key.input_idx),
+            );
+        }
+        if self.drag.is_some() {
+            self.temp_connection.show(gui, ("temp_connection",));
+        }
     }
 
     pub(crate) fn start_drag(&mut self, port: PortInfo) {
@@ -197,9 +199,6 @@ impl ConnectionUi {
         breaker: Option<&ConnectionBreaker>,
     ) {
         self.highlighted.clear();
-
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        mesh.clear();
 
         let mut write_idx: usize = 0;
 
@@ -273,8 +272,6 @@ impl ConnectionUi {
                         );
                     };
                 }
-
-                mesh.append_ref(curve.mesh.mesh());
             }
         }
 
@@ -294,7 +291,6 @@ impl ConnectionUi {
                     gui.style.connections.stroke_width,
                 );
             }
-            mesh.append_ref(self.temp_connection.mesh());
         }
     }
 }
