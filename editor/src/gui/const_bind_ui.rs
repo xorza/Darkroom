@@ -75,17 +75,35 @@ impl<'a> ConstBindFrame<'a> {
             let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
             let link_end = pos2(input_center.x - port_radius, input_center.y);
 
-            if self.handle_const_link(
-                gui,
-                ui_interaction,
-                node.id,
+            let link_key = ConnectionKey {
+                input_node_id: node.id,
                 input_idx,
-                link_start,
-                link_end,
-                &mut input.binding,
-                breaker,
-            ) {
-                continue;
+            };
+            let (_idx, curve) = self
+                .compact
+                .insert_with(&link_key, || ConnectionCurve::new(link_key));
+
+            curve.bezier.update_points(link_start, link_end, gui.scale);
+            curve.hovered = *self.hovered_link == Some(link_key);
+            curve.broke = curve.bezier.intersects_breaker(breaker);
+
+            let response = curve.bezier.show(
+                gui,
+                Sense::click() | Sense::hover(),
+                ("const_link", node.id, input_idx),
+                curve.hovered,
+                curve.broke,
+            );
+
+            if response.hovered() {
+                self.currently_hovered_link = Some(link_key);
+            }
+            if response.double_clicked_by(PointerButton::Primary) {
+                input.binding = Binding::None;
+                ui_interaction
+                    .actions
+                    .push((node.id, GraphUiAction::InputChanged { input_idx }));
+                return;
             }
 
             let Binding::Const(value) = &mut input.binding else {
@@ -119,52 +137,6 @@ impl<'a> ConstBindFrame<'a> {
                 }
             }
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn handle_const_link(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ui_interaction: &mut GraphUiInteraction,
-        node_id: NodeId,
-        input_idx: usize,
-        link_start: Pos2,
-        link_end: Pos2,
-        binding: &mut Binding,
-        breaker: Option<&ConnectionBreaker>,
-    ) -> bool {
-        let link_key = ConnectionKey {
-            input_node_id: node_id,
-            input_idx,
-        };
-        let (_idx, curve) = self
-            .compact
-            .insert_with(&link_key, || ConnectionCurve::new(link_key));
-
-        curve.bezier.update_points(link_start, link_end, gui.scale);
-        curve.hovered = *self.hovered_link == Some(link_key);
-        curve.broke = curve.bezier.intersects_breaker(breaker);
-
-        let response = curve.bezier.show(
-            gui,
-            Sense::click() | Sense::hover(),
-            ("const_link", node_id, input_idx),
-            curve.hovered,
-            curve.broke,
-        );
-
-        if response.hovered() {
-            self.currently_hovered_link = Some(link_key);
-        }
-        if response.double_clicked_by(PointerButton::Primary) {
-            *binding = Binding::None;
-            ui_interaction
-                .actions
-                .push((node_id, GraphUiAction::InputChanged { input_idx }));
-            return true;
-        }
-
-        false
     }
 }
 
