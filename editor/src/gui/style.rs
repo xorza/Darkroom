@@ -104,9 +104,35 @@ impl Style {
             );
             scaled_value as u8
         };
-        let inactive_bg_fill = Color32::from_rgb(40, 40, 40);
-        let inactive_bg_stroke = Stroke::new(scaled(1.0), Color32::from_rgb(65, 65, 65));
-        let active_bg_stroke = Stroke::new(scaled(1.0), Color32::from_rgb(128, 128, 128));
+
+        const COLOR_BG_NONINTERACTIVE: Color32 = Color32::from_rgb(35, 35, 35);
+        const COLOR_BG_INACTIVE: Color32 = Color32::from_rgb(40, 40, 40);
+        const COLOR_BG_HOVER: Color32 = Color32::from_rgb(50, 50, 50);
+        const COLOR_BG_ACTIVE: Color32 = Color32::from_rgb(60, 60, 60);
+        const COLOR_BG_CHECKED: Color32 = Color32::from_rgb(240, 205, 90);
+        const COLOR_STROKE_INACTIVE: Color32 = Color32::from_rgb(65, 65, 65);
+        const COLOR_STROKE_ACTIVE: Color32 = Color32::from_rgb(128, 128, 128);
+        const COLOR_PORT_INPUT: Color32 = Color32::from_rgb(70, 150, 255);
+        const COLOR_PORT_OUTPUT: Color32 = Color32::from_rgb(70, 200, 200);
+        const COLOR_PORT_INPUT_HOVER: Color32 = Color32::from_rgb(120, 190, 255);
+        const COLOR_PORT_OUTPUT_HOVER: Color32 = Color32::from_rgb(110, 230, 210);
+        const COLOR_STROKE_BREAKER: Color32 = Color32::from_rgb(255, 120, 120);
+        const COLOR_STROKE_BROKE: Color32 = Color32::from_rgb(255, 90, 90);
+        const COLOR_TEXT: Color32 = Color32::from_rgb(192, 192, 192);
+        const COLOR_TEXT_NONINTERACTIVE: Color32 = Color32::from_rgb(140, 140, 140);
+        const COLOR_TEXT_CHECKED: Color32 = Color32::from_rgb(60, 50, 20);
+        const COLOR_DOT_TERMINAL: Color32 = Color32::from_rgb(128, 128, 128);
+        const COLOR_DOT_IMPURE: Color32 = Color32::from_rgb(255, 150, 70);
+        const COLOR_SHADOW_EXECUTED: Color32 = Color32::from_rgb(66, 216, 130);
+        const COLOR_SHADOW_CACHED: Color32 = Color32::from_rgb(248, 216, 75);
+        const COLOR_SHADOW_MISSING: Color32 = Color32::from_rgb(238, 66, 66);
+        const COLOR_DOTTED: Color32 = Color32::from_rgb(48, 48, 48);
+        const CORNER_RADIUS: f32 = 4.0;
+        const SMALL_CORNER_RADIUS: f32 = 2.0;
+
+        let inactive_bg_fill = COLOR_BG_INACTIVE;
+        let inactive_bg_stroke = Stroke::new(scaled(1.0), COLOR_STROKE_INACTIVE);
+        let active_bg_stroke = Stroke::new(scaled(1.0), COLOR_STROKE_ACTIVE);
 
         Self {
             heading_font: FontId {
@@ -126,25 +152,25 @@ impl Style {
                 family: FontFamily::Monospace,
             },
 
-            text_color: Color32::from_rgb(192, 192, 192),
-            noninteractive_text_color: Color32::from_rgb(140, 140, 140),
-            checked_text_color: Color32::from_rgb(60, 50, 20),
+            text_color: COLOR_TEXT,
+            noninteractive_text_color: COLOR_TEXT_NONINTERACTIVE,
+            checked_text_color: COLOR_TEXT_CHECKED,
 
-            noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
-            hover_bg_fill: Color32::from_rgb(50, 50, 50),
+            noninteractive_bg_fill: COLOR_BG_NONINTERACTIVE,
+            hover_bg_fill: COLOR_BG_HOVER,
             inactive_bg_fill,
             inactive_bg_stroke,
             active_bg_stroke,
-            active_bg_fill: Color32::from_rgb(60, 60, 60),
-            checked_bg_fill: Color32::from_rgb(240, 205, 90),
+            active_bg_fill: COLOR_BG_ACTIVE,
+            checked_bg_fill: COLOR_BG_CHECKED,
 
             padding: scaled(4.0),
             small_padding: scaled(2.0),
-            corner_radius: scaled(4.0),
-            small_corner_radius: scaled(2.0),
+            corner_radius: scaled(CORNER_RADIUS),
+            small_corner_radius: scaled(SMALL_CORNER_RADIUS),
 
             background: GraphBackgroundStyle {
-                dotted_color: Color32::from_rgb(48, 48, 48),
+                dotted_color: COLOR_DOTTED,
                 dotted_base_spacing: scaled(24.0),
                 dotted_radius_base: scaled(1.2),
                 dotted_radius_min: scaled(0.6),
@@ -152,31 +178,31 @@ impl Style {
             },
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),
-                broke_clr: Color32::from_rgb(255, 90, 90),
+                broke_clr: COLOR_STROKE_BROKE,
                 hover_distance_scale: 6.0,
-                breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
+                breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
             },
             node: NodeStyle {
                 const_stroke_width: scaled(1.0),
 
                 status_dot_radius: scaled(4.0),
-                status_terminal_color: Color32::from_rgb(128, 128, 128),
-                status_impure_color: Color32::from_rgb(255, 150, 70),
+                status_terminal_color: COLOR_DOT_TERMINAL,
+                status_impure_color: COLOR_DOT_IMPURE,
 
                 executed_shadow: Shadow {
-                    color: Color32::from_rgb(66, 216, 130),
+                    color: COLOR_SHADOW_EXECUTED,
                     offset: [0, 0],
                     blur: scaled_u8(5),
                     spread: scaled_u8(2),
                 },
                 cached_shadow: Shadow {
-                    color: Color32::from_rgb(248, 216, 75),
+                    color: COLOR_SHADOW_CACHED,
                     offset: [0, 0],
                     blur: scaled_u8(5),
                     spread: scaled_u8(2),
                 },
                 missing_inputs_shadow: Shadow {
-                    color: Color32::from_rgb(238, 66, 66),
+                    color: COLOR_SHADOW_MISSING,
                     offset: [0, 0],
                     blur: scaled_u8(5),
                     spread: scaled_u8(2),
@@ -190,16 +216,16 @@ impl Style {
                 port_label_side_padding: scaled(8.0),
                 const_badge_offset: Vec2::new(scaled(-15.0), scaled(-25.0)),
 
-                input_port_color: Color32::from_rgb(70, 150, 255),
-                output_port_color: Color32::from_rgb(70, 200, 200),
-                input_hover_color: Color32::from_rgb(120, 190, 255),
-                output_hover_color: Color32::from_rgb(110, 230, 210),
+                input_port_color: COLOR_PORT_INPUT,
+                output_port_color: COLOR_PORT_OUTPUT,
+                input_hover_color: COLOR_PORT_INPUT_HOVER,
+                output_hover_color: COLOR_PORT_OUTPUT_HOVER,
 
                 const_bind_style: ConstBindStyle {
                     fill: inactive_bg_fill,
                     stroke: inactive_bg_stroke,
-                    hover_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(110, 230, 210)),
-                    radius: scaled(2.0),
+                    hover_stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT_HOVER),
+                    radius: scaled(SMALL_CORNER_RADIUS),
                 },
             },
         }

@@ -483,3 +483,7 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - DragValue now supports hover(bool) to control hover cursor; const int uses hover(true).
 
 - NodeStyle now includes DragValueStyle with defaults matching inactive bg and hover stroke.
+
+- Style::new now uses shared color constants to avoid duplicated values.
+
+- Style::new now uses CORNER_RADIUS and SMALL_CORNER_RADIUS constants for corner sizes.
