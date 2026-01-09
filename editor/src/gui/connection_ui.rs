@@ -58,7 +58,6 @@ struct ConnectionCurve {
     key: ConnectionKey,
     broke: bool,
     hovered: bool,
-    new_hovered: bool,
     bezier: ConnectionBezier,
 }
 
@@ -68,7 +67,6 @@ impl ConnectionCurve {
             key,
             broke: false,
             hovered: false,
-            new_hovered: false,
             bezier: ConnectionBezier::default(),
         }
     }
@@ -134,7 +132,7 @@ impl ConnectionUi {
             );
 
             if breaker.is_some() {
-                curve.new_hovered = false;
+                curve.hovered = false;
             } else {
                 if response.double_clicked_by(PointerButton::Primary) {
                     let node = ctx
@@ -149,10 +147,10 @@ impl ConnectionUi {
                             input_idx: curve.key.input_idx,
                         },
                     ));
-                    curve.new_hovered = false;
+                    curve.hovered = false;
                 }
 
-                curve.new_hovered = response.hovered();
+                curve.hovered = response.hovered();
             }
         }
         if self.temp_connection.is_some() {
@@ -247,7 +245,6 @@ impl ConnectionUi {
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
 
                 curve.broke = curve.bezier.intersects_breaker(breaker);
-                curve.hovered = curve.new_hovered;
             }
         }
 
