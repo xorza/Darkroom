@@ -495,3 +495,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Const bind DragValue now checks breaker intersection with its rect and marks curve as broke.
 
 - ConnectionBreaker now exposes intersects_rect(); const bind uses it.
+
+- Simplified DragValue rect expansion using Rect::expand.

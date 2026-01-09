@@ -116,8 +116,7 @@ impl<'a> DragValue<'a> {
             StrokeKind::Outside,
         );
 
-        rect.min -= vec2(background.stroke.width, background.stroke.width);
-        rect.max += vec2(background.stroke.width, background.stroke.width);
+        rect = rect.expand(background.stroke.width);
 
         if edit_active {
             let mut edit_text = ui
