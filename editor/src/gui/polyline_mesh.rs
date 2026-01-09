@@ -3,7 +3,7 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape, Vec2};
 
-const FEATHER: f32 = 2.0;
+const FEATHER: f32 = 0.8;
 
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {

@@ -95,7 +95,7 @@ impl Bezier {
             return false;
         }
 
-        let threshold_sq = half_width * half_width;
+        let threshold_sq = half_width * half_width * 8.0;
         points
             .windows(2)
             .any(|segment| distance_sq_point_segment(pos, segment[0], segment[1]) <= threshold_sq)
