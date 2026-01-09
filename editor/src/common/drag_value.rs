@@ -4,15 +4,7 @@ use egui::{
     TextEdit, Vec2,
 };
 
-use crate::gui::{Gui, style::brighten};
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct DragValueStyle {
-    fill: Color32,
-    stroke: Stroke,
-    hover_stroke: Stroke,
-    radius: f32,
-}
+use crate::gui::{Gui, style::ConstBindStyle};
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
@@ -20,7 +12,7 @@ pub struct DragValue<'a> {
     speed: f32,
     font: Option<FontId>,
     color: Option<Color32>,
-    background: Option<DragValueStyle>,
+    background: Option<ConstBindStyle>,
     padding: Option<Vec2>,
     pos: Option<Pos2>,
     align: Option<Align2>,
@@ -57,7 +49,7 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn style(mut self, style: DragValueStyle) -> Self {
+    pub fn style(mut self, style: ConstBindStyle) -> Self {
         assert!(style.radius.is_finite());
         self.background = Some(style);
         self
@@ -96,15 +88,9 @@ impl<'a> DragValue<'a> {
             .unwrap_or_else(|| Vec2::splat(gui.style.small_padding));
         assert!(padding.x.is_finite() && padding.y.is_finite());
         assert!(padding.x >= 0.0 && padding.y >= 0.0);
-        let background = self.background.unwrap_or(DragValueStyle {
-            fill: gui.style.inactive_bg_fill,
-            stroke: gui.style.inactive_bg_stroke,
-            radius: gui.style.small_corner_radius,
-            hover_stroke: Stroke {
-                color: gui.style.node.output_hover_color,
-                width: gui.style.active_bg_stroke.width,
-            },
-        });
+        let background = self
+            .background
+            .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
         let pos = self.pos.expect("DragValue requires a position");

@@ -53,7 +53,6 @@ pub struct GraphBackgroundStyle {
 pub struct ConnectionStyle {
     pub stroke_width: f32,
     pub broke_clr: Color32,
-    pub hover_brighten: f32,
     pub hover_distance_scale: f32,
     pub breaker_stroke: Stroke,
 }
@@ -82,6 +81,15 @@ pub struct NodeStyle {
     pub output_hover_color: Color32,
 
     pub const_stroke_width: f32,
+    pub const_bind_style: ConstBindStyle,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ConstBindStyle {
+    pub(crate) fill: Color32,
+    pub(crate) stroke: Stroke,
+    pub(crate) hover_stroke: Stroke,
+    pub(crate) radius: f32,
 }
 
 impl Style {
@@ -96,6 +104,9 @@ impl Style {
             );
             scaled_value as u8
         };
+        let inactive_bg_fill = Color32::from_rgb(40, 40, 40);
+        let inactive_bg_stroke = Stroke::new(scaled(1.0), Color32::from_rgb(65, 65, 65));
+        let active_bg_stroke = Stroke::new(scaled(1.0), Color32::from_rgb(128, 128, 128));
 
         Self {
             heading_font: FontId {
@@ -121,9 +132,9 @@ impl Style {
 
             noninteractive_bg_fill: Color32::from_rgb(35, 35, 35),
             hover_bg_fill: Color32::from_rgb(50, 50, 50),
-            inactive_bg_fill: Color32::from_rgb(40, 40, 40),
-            inactive_bg_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(65, 65, 65)),
-            active_bg_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(128, 128, 128)),
+            inactive_bg_fill,
+            inactive_bg_stroke,
+            active_bg_stroke,
             active_bg_fill: Color32::from_rgb(60, 60, 60),
             checked_bg_fill: Color32::from_rgb(240, 205, 90),
 
@@ -142,7 +153,6 @@ impl Style {
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),
                 broke_clr: Color32::from_rgb(255, 90, 90),
-                hover_brighten: 0.35,
                 hover_distance_scale: 6.0,
                 breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
             },
@@ -184,6 +194,13 @@ impl Style {
                 output_port_color: Color32::from_rgb(70, 200, 200),
                 input_hover_color: Color32::from_rgb(120, 190, 255),
                 output_hover_color: Color32::from_rgb(110, 230, 210),
+
+                const_bind_style: ConstBindStyle {
+                    fill: inactive_bg_fill,
+                    stroke: inactive_bg_stroke,
+                    hover_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(110, 230, 210)),
+                    radius: scaled(2.0),
+                },
             },
         }
     }

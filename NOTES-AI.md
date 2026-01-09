@@ -481,3 +481,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - DragValue now has pos()/align() setters and show() uses stored position/alignment.
 
 - DragValue now supports hover(bool) to control hover cursor; const int uses hover(true).
+
+- NodeStyle now includes DragValueStyle with defaults matching inactive bg and hover stroke.

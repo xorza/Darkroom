@@ -75,14 +75,8 @@ impl ConnectionBezier {
             }
         } else if hovered {
             ConnectionBezierStyle {
-                start_color: style::brighten(
-                    gui.style.node.output_port_color,
-                    gui.style.connections.hover_brighten,
-                ),
-                end_color: style::brighten(
-                    gui.style.node.input_port_color,
-                    gui.style.connections.hover_brighten,
-                ),
+                start_color: gui.style.node.output_hover_color,
+                end_color: gui.style.node.input_hover_color,
                 stroke_width: gui.style.connections.stroke_width,
             }
         } else {
