@@ -5,7 +5,7 @@ use egui::{
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
-use crate::common::bezier::Bezier;
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
@@ -35,7 +35,7 @@ impl KeyIndexKey<ConstLinkKey> for ConstLinkKey {
 #[derive(Debug)]
 struct ConstLinkBezier {
     key: ConstLinkKey,
-    bezier: Bezier,
+    bezier: ConnectionBezier,
     hovered: bool,
     broke: bool,
 }
@@ -44,7 +44,7 @@ impl ConstLinkBezier {
     fn new(key: ConstLinkKey) -> Self {
         Self {
             key,
-            bezier: Bezier::default(),
+            bezier: ConnectionBezier::default(),
             hovered: false,
             broke: false,
         }

@@ -7,7 +7,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 
 #[derive(Debug, Clone)]
-pub struct Bezier {
+pub struct ConnectionBezier {
     polyline: PolylineMesh,
     last_width: f32,
     start: Pos2,
@@ -16,10 +16,10 @@ pub struct Bezier {
     inited: bool,
 }
 
-impl Default for Bezier {
+impl Default for ConnectionBezier {
     fn default() -> Self {
         Self {
-            polyline: PolylineMesh::with_point_capacity(Bezier::DEFAULT_POINTS),
+            polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
             last_width: 0.0,
             start: Pos2::ZERO,
             end: Pos2::ZERO,
@@ -29,7 +29,7 @@ impl Default for Bezier {
     }
 }
 
-impl Bezier {
+impl ConnectionBezier {
     pub const DEFAULT_POINTS: usize = 25;
 
     pub fn mesh(&self) -> &Mesh {

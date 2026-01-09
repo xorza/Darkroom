@@ -4,7 +4,7 @@ use egui::{PointerButton, Pos2, Sense};
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 
-use crate::common::bezier::Bezier;
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
@@ -59,7 +59,7 @@ struct ConnectionCurve {
     broke: bool,
     hovered: bool,
     new_hovered: bool,
-    bezier: Bezier,
+    bezier: ConnectionBezier,
 }
 
 impl ConnectionCurve {
@@ -69,7 +69,7 @@ impl ConnectionCurve {
             broke: false,
             hovered: false,
             new_hovered: false,
-            bezier: Bezier::default(),
+            bezier: ConnectionBezier::default(),
         }
     }
 }
@@ -110,7 +110,7 @@ pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
     temp_connection: Option<ConnectionDrag>,
-    temp_connection_bezier: Bezier,
+    temp_connection_bezier: ConnectionBezier,
 }
 
 impl ConnectionUi {

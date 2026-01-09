@@ -1,8 +1,8 @@
 use egui::{Pos2, Vec2};
 
-pub mod bezier;
 pub mod bezier_helper;
 pub mod button;
+pub mod connection_bezier;
 pub mod drag_value;
 pub mod font;
 pub mod toggle_button;
