@@ -108,7 +108,7 @@ impl GraphUi {
             self.update_zoom_and_pan(gui, &mut ctx, &background_response, pointer_pos);
         }
 
-        self.graph_layout.update(&ctx, gui);
+        self.graph_layout.update(gui, &ctx);
 
         self.background.render(gui, &ctx);
 
