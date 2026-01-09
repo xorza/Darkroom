@@ -11,9 +11,16 @@ use crate::gui::polyline_mesh::PolylineMesh;
 use common::BoolExt;
 
 #[derive(Debug, Default)]
-pub struct ConstBindUi;
+pub struct ConstBindUi {
+    polyline_mesh_idx: usize,
+    polyline_mesh: Vec<PolylineMesh>,
+}
 
 impl ConstBindUi {
+    pub fn start(&mut self) {
+        self.polyline_mesh_idx = 0;
+    }
+
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,
@@ -43,7 +50,12 @@ impl ConstBindUi {
             let link_end = pos2(input_center.x - port_radius, input_center.y);
 
             {
-                let mut link_mesh = PolylineMesh::with_bezier_capacity();
+                if self.polyline_mesh_idx >= self.polyline_mesh.len() {
+                    self.polyline_mesh
+                        .push(PolylineMesh::with_bezier_capacity());
+                }
+                let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
+                self.polyline_mesh_idx += 1;
                 link_mesh.build_bezier(link_start, link_end, gui.scale);
                 link_mesh.rebuild(
                     gui.style.node.input_port_color,
@@ -52,13 +64,6 @@ impl ConstBindUi {
                 );
                 link_mesh.render(&painter);
             }
-            // ctx.painter.rect(
-            //     badge_rect,
-            //     ctx.style.small_corner_radius * ctx.scale,
-            //     ctx.style.inactive_bg_fill,
-            //     ctx.style.node.const_stroke,
-            //     StrokeKind::Outside,
-            // );
 
             if let StaticValue::Int(value) = value {
                 let drag_id = gui
