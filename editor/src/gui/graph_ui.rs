@@ -176,6 +176,13 @@ impl GraphUi {
 
         let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
 
+        if secondary_pressed || esc_pressed {
+            self.connection_breaker.reset();
+            self.state = InteractionState::Idle;
+            self.connections.stop_drag();
+            return Ok(());
+        }
+
         match self.state {
             InteractionState::Idle => {
                 if primary_pressed {
@@ -189,10 +196,7 @@ impl GraphUi {
                 }
             }
             InteractionState::BreakingConnections => {
-                if secondary_pressed || esc_pressed {
-                    self.connection_breaker.reset();
-                    self.state = InteractionState::Idle;
-                } else if primary_down {
+                if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
                     self.connection_breaker.reset();
@@ -222,11 +226,6 @@ impl GraphUi {
                 }
             }
             InteractionState::DraggingNewConnection => {
-                if esc_pressed {
-                    self.state = InteractionState::Idle;
-                    self.connections.stop_drag();
-                }
-
                 let update = self.connections.update_drag(pointer_pos, drag_port_info);
                 match update {
                     ConnectionDragUpdate::InProgress => {}
