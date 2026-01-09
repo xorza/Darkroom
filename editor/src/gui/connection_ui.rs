@@ -228,8 +228,7 @@ impl ConnectionUi {
                     curve.bezier.build_points(output_pos, input_pos, gui.scale);
                 }
 
-                let highlighted = if let Some(segments) = breaker.map(|breaker| breaker.segments())
-                {
+                let broke = if let Some(segments) = breaker.map(|breaker| breaker.segments()) {
                     let mut hit = false;
                     'outer: for (b1, b2) in segments {
                         let curve_segments = curve
@@ -252,8 +251,8 @@ impl ConnectionUi {
                     false
                 };
 
-                if curve.broke != highlighted || needs_rebuild {
-                    curve.broke = highlighted;
+                if curve.broke != broke || needs_rebuild {
+                    curve.broke = broke;
 
                     if curve.broke {
                         curve.bezier.build_mesh(
