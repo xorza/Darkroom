@@ -250,14 +250,14 @@ impl ConnectionUi {
                     curve.broke = broke;
                     curve.hovered = curve.new_hovered;
 
-                    if curve.broke {
-                        curve.bezier.build_mesh(
+                    let (start_color, end_color, width) = if curve.broke {
+                        (
                             gui.style.connections.broke_stroke.color,
                             gui.style.connections.broke_stroke.color,
                             gui.style.connections.broke_stroke.width,
-                        );
+                        )
                     } else if curve.hovered {
-                        curve.bezier.build_mesh(
+                        (
                             style::brighten(
                                 gui.style.node.output_port_color,
                                 gui.style.connections.hover_brighten,
@@ -267,14 +267,15 @@ impl ConnectionUi {
                                 gui.style.connections.hover_brighten,
                             ),
                             gui.style.connections.stroke_width,
-                        );
+                        )
                     } else {
-                        curve.bezier.build_mesh(
+                        (
                             gui.style.node.output_port_color,
                             gui.style.node.input_port_color,
                             gui.style.connections.stroke_width,
-                        );
+                        )
                     };
+                    curve.bezier.build_mesh(start_color, end_color, width);
                 }
             }
         }

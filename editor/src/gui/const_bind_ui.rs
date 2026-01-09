@@ -225,14 +225,14 @@ impl<'a> ConstBindFrame<'a> {
             link.hovered = is_hovered;
             link.broke = is_broken;
 
-            if link.broke {
-                link.bezier.build_mesh(
+            let (start_color, end_color, width) = if link.broke {
+                (
                     gui.style.connections.broke_stroke.color,
                     gui.style.connections.broke_stroke.color,
                     gui.style.connections.broke_stroke.width,
-                );
+                )
             } else if link.hovered {
-                link.bezier.build_mesh(
+                (
                     style::brighten(
                         gui.style.node.output_port_color,
                         gui.style.connections.hover_brighten,
@@ -242,14 +242,15 @@ impl<'a> ConstBindFrame<'a> {
                         gui.style.connections.hover_brighten,
                     ),
                     gui.style.connections.stroke_width,
-                );
+                )
             } else {
-                link.bezier.build_mesh(
+                (
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,
-                );
+                )
             };
+            link.bezier.build_mesh(start_color, end_color, width);
         }
 
         let response = link.bezier.show(
