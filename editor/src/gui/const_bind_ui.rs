@@ -13,6 +13,7 @@ use common::BoolExt;
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
     polyline_mesh_idx: usize,
+    // todo use KeyIndexVec
     polyline_mesh: Vec<Bezier>,
     hovered_link: Option<ConstLinkKey>,
     currently_hovered_link: Option<ConstLinkKey>,
