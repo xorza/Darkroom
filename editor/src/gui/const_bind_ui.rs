@@ -18,7 +18,7 @@ pub struct ConstBindUi {
     currently_hovered_link: Option<ConstLinkKey>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ConstLinkKey {
     node_id: NodeId,
     input_idx: usize,
