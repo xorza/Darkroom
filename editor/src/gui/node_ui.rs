@@ -10,7 +10,7 @@ use graph::execution_graph::ExecutedNodeStats;
 use graph::graph::NodeId;
 use graph::prelude::{FuncBehavior, NodeBehavior};
 
-use crate::gui::const_bind_ui::render_const_bindings;
+use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::{
     Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction,
 };
@@ -26,6 +26,7 @@ pub enum PortDragInfo {
 #[derive(Debug, Default)]
 pub struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
+    const_bind_ui: ConstBindUi,
 }
 
 #[derive(Debug)]
@@ -85,7 +86,8 @@ impl NodeUi {
             render_hints(gui, node_layout, node_id, is_terminal, node_behavior, func);
             {
                 let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
-                render_const_bindings(gui, ui_interaction, node_layout, node);
+                self.const_bind_ui
+                    .render(gui, ui_interaction, node_layout, node);
             }
             let node_drag_port_result = render_ports(gui, node_layout, node_id);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
