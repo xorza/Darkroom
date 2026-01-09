@@ -215,6 +215,10 @@ where
         let item = &mut self.vec.items[idx];
         (idx, item)
     }
+
+    fn validate_index(&self, idx: usize) {
+        assert!(idx < self.write_idx, "compact insert index out of range");
+    }
 }
 
 impl<K, V> Drop for CompactInsert<'_, K, V>
@@ -237,7 +241,7 @@ where
     type Output = V;
 
     fn index(&self, idx: usize) -> &Self::Output {
-        assert!(idx < self.write_idx, "compact insert index out of range");
+        self.validate_index(idx);
         &self.vec.items[idx]
     }
 }
@@ -248,7 +252,7 @@ where
     V: KeyIndexKey<K>,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-        assert!(idx < self.write_idx, "compact insert index out of range");
+        self.validate_index(idx);
         &mut self.vec.items[idx]
     }
 }

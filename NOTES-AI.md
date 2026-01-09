@@ -453,3 +453,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - CompactInsert::insert_with now returns (index, &mut item); updated const bind and tests.
 
 - Added CompactInsert index panic test when accessing beyond write_idx.
+
+- CompactInsert now centralizes index validation in validate_index().
