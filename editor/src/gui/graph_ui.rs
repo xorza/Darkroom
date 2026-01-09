@@ -157,7 +157,8 @@ impl GraphUi {
         });
         let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
 
-        let pointer_on_background = background_response.hovered();
+        let pointer_on_background =
+            background_response.hovered() && !self.connections.any_hovered();
 
         let primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
         let primary_down = matches!(

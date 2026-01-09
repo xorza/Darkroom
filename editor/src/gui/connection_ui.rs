@@ -191,6 +191,10 @@ impl ConnectionUi {
         self.temp_connection = None;
     }
 
+    pub(crate) fn any_hovered(&self) -> bool {
+        self.curves.iter().any(|c| c.hovered)
+    }
+
     fn rebuild(
         &mut self,
         gui: &mut Gui<'_>,
