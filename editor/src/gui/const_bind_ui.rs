@@ -9,20 +9,47 @@ use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::{Gui, style};
 use common::BoolExt;
+use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
     polyline_mesh_idx: usize,
-    // todo use KeyIndexVec
-    polyline_mesh: Vec<Bezier>,
+    polyline_mesh: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
     hovered_link: Option<ConstLinkKey>,
     currently_hovered_link: Option<ConstLinkKey>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ConstLinkKey {
     node_id: NodeId,
     input_idx: usize,
+}
+
+impl KeyIndexKey<ConstLinkKey> for ConstLinkKey {
+    fn key(&self) -> &ConstLinkKey {
+        self
+    }
+}
+
+#[derive(Debug)]
+struct ConstLinkBezier {
+    key: ConstLinkKey,
+    bezier: Bezier,
+}
+
+impl ConstLinkBezier {
+    fn new(key: ConstLinkKey) -> Self {
+        Self {
+            key,
+            bezier: Bezier::default(),
+        }
+    }
+}
+
+impl KeyIndexKey<ConstLinkKey> for ConstLinkBezier {
+    fn key(&self) -> &ConstLinkKey {
+        &self.key
+    }
 }
 
 impl ConstBindUi {
@@ -32,6 +59,8 @@ impl ConstBindUi {
     }
     pub fn finish(&mut self) {
         self.hovered_link = self.currently_hovered_link.take();
+        self.polyline_mesh.compact_finish(self.polyline_mesh_idx);
+        self.polyline_mesh_idx = 0;
     }
 
     pub fn render(
@@ -61,23 +90,18 @@ impl ConstBindUi {
             let link_end = pos2(input_center.x - port_radius, input_center.y);
 
             {
-                if self.polyline_mesh_idx >= self.polyline_mesh.len() {
-                    self.polyline_mesh.push(Bezier::default());
-                }
-
                 let link_key = ConstLinkKey {
                     node_id: node.id,
                     input_idx,
                 };
-
-                let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
-                self.polyline_mesh_idx += 1;
+                let idx = self.polyline_mesh.compact_insert_with(
+                    &link_key,
+                    &mut self.polyline_mesh_idx,
+                    || ConstLinkBezier::new(link_key),
+                );
+                let link_mesh = &mut self.polyline_mesh[idx].bezier;
                 link_mesh.update(link_start, link_end, gui.scale);
-                let is_hovered = self.hovered_link
-                    == Some(ConstLinkKey {
-                        node_id: node.id,
-                        input_idx,
-                    });
+                let is_hovered = self.hovered_link == Some(link_key);
                 let base_color = gui.style.node.input_port_color;
                 let link_color = if is_hovered {
                     style::brighten(base_color, gui.style.connections.hover_brighten)
