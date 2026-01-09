@@ -113,7 +113,8 @@ impl<'a> DragValue<'a> {
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
-        let stroke = if self.hover {
+        let hover_active = self.hover || ui.rect_contains_pointer(rect);
+        let stroke = if hover_active {
             background.hover_stroke
         } else {
             background.stroke
@@ -169,7 +170,7 @@ impl<'a> DragValue<'a> {
             return response;
         }
 
-        let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
+        let mut response = ui.allocate_rect(rect, Sense::click_and_drag() | Sense::hover());
 
         if response.clicked() {
             ui.data_mut(|data| {

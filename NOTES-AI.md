@@ -489,3 +489,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Style::new now uses CORNER_RADIUS and SMALL_CORNER_RADIUS constants for corner sizes.
 
 - Style::new now uses DEFAULT_BG_STROKE_WIDTH for background/hover strokes.
+
+- DragValue now uses pointer hover to pick hover stroke when hover is enabled.

@@ -36,8 +36,8 @@ impl ConstBindUi {
 #[derive(Debug)]
 pub struct ConstBindFrame<'a> {
     compact: CompactInsert<'a, ConnectionKey, ConnectionCurve>,
-    hovered_link: &'a mut Option<ConnectionKey>,
-    currently_hovered_link: Option<ConnectionKey>,
+    hovered_connection: &'a mut Option<ConnectionKey>,
+    currently_hovered_connection: Option<ConnectionKey>,
 }
 
 impl<'a> ConstBindFrame<'a> {
@@ -47,8 +47,8 @@ impl<'a> ConstBindFrame<'a> {
     ) -> Self {
         Self {
             compact: polyline_mesh.compact_insert_start(),
-            hovered_link,
-            currently_hovered_link: None,
+            hovered_connection: hovered_link,
+            currently_hovered_connection: None,
         }
     }
 
@@ -74,7 +74,7 @@ impl<'a> ConstBindFrame<'a> {
                 input_node_id: node.id,
                 input_idx,
             };
-            let hovered = *self.hovered_link == Some(connection_key);
+            let mut hovered = *self.hovered_connection == Some(connection_key);
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
@@ -89,20 +89,19 @@ impl<'a> ConstBindFrame<'a> {
             curve
                 .bezier
                 .update_points(connection_start, connection_end, gui.scale);
-            curve.hovered = hovered;
+
             curve.broke = curve.bezier.intersects_breaker(breaker);
 
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
                 ("const_link", node.id, input_idx),
-                curve.hovered,
+                hovered,
                 curve.broke,
             );
 
-            if response.hovered() {
-                self.currently_hovered_link = Some(connection_key);
-            }
+            hovered |= response.hovered();
+
             if response.double_clicked_by(PointerButton::Primary) {
                 input.binding = Binding::None;
                 ui_interaction
@@ -127,19 +126,28 @@ impl<'a> ConstBindFrame<'a> {
                         .hover(hovered)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
+
+                hovered |= response.hovered();
+
                 if response.changed() {
+                    hovered = true;
                     ui_interaction
                         .actions
                         .push((node.id, GraphUiAction::InputChanged { input_idx }));
                 }
             }
+
+            if hovered {
+                self.currently_hovered_connection = Some(connection_key);
+            }
+            curve.hovered = hovered;
         }
     }
 }
 
 impl Drop for ConstBindFrame<'_> {
     fn drop(&mut self) {
-        *self.hovered_link = self.currently_hovered_link.take();
+        *self.hovered_connection = self.currently_hovered_connection.take();
     }
 }
 
