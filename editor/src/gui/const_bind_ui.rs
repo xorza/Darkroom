@@ -124,6 +124,7 @@ impl<'a> ConstBindFrame<'a> {
                         .padding(vec2(padding, 0.0))
                         .pos(connection_start)
                         .align(Align2::RIGHT_CENTER)
+                        .hover(hovered)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
                 if response.changed() {

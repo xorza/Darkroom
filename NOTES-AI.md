@@ -479,3 +479,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConnectionBezier::show now deduces style internally from hover/broke and gui style; callers pass hover/broke only.
 
 - DragValue now has pos()/align() setters and show() uses stored position/alignment.
+
+- DragValue now supports hover(bool) to control hover cursor; const int uses hover(true).

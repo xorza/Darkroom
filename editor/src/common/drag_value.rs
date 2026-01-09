@@ -4,12 +4,13 @@ use egui::{
     TextEdit, Vec2,
 };
 
-use crate::gui::Gui;
+use crate::gui::{Gui, style::brighten};
 
 #[derive(Debug, Clone, Copy)]
-struct DragValueBackground {
+pub(crate) struct DragValueStyle {
     fill: Color32,
     stroke: Stroke,
+    hover_stroke: Stroke,
     radius: f32,
 }
 
@@ -19,10 +20,11 @@ pub struct DragValue<'a> {
     speed: f32,
     font: Option<FontId>,
     color: Option<Color32>,
-    background: Option<DragValueBackground>,
+    background: Option<DragValueStyle>,
     padding: Option<Vec2>,
     pos: Option<Pos2>,
     align: Option<Align2>,
+    hover: bool,
 }
 
 impl<'a> DragValue<'a> {
@@ -36,6 +38,7 @@ impl<'a> DragValue<'a> {
             padding: None,
             pos: None,
             align: None,
+            hover: true,
         }
     }
 
@@ -54,13 +57,9 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn background(mut self, fill: Color32, stroke: Stroke, radius: f32) -> Self {
-        assert!(radius.is_finite());
-        self.background = Some(DragValueBackground {
-            fill,
-            stroke,
-            radius,
-        });
+    pub fn style(mut self, style: DragValueStyle) -> Self {
+        assert!(style.radius.is_finite());
+        self.background = Some(style);
         self
     }
 
@@ -82,6 +81,11 @@ impl<'a> DragValue<'a> {
         self
     }
 
+    pub fn hover(mut self, hover: bool) -> Self {
+        self.hover = hover;
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
         assert!(self.speed.is_finite());
 
@@ -92,10 +96,14 @@ impl<'a> DragValue<'a> {
             .unwrap_or_else(|| Vec2::splat(gui.style.small_padding));
         assert!(padding.x.is_finite() && padding.y.is_finite());
         assert!(padding.x >= 0.0 && padding.y >= 0.0);
-        let background = self.background.unwrap_or(DragValueBackground {
+        let background = self.background.unwrap_or(DragValueStyle {
             fill: gui.style.inactive_bg_fill,
             stroke: gui.style.inactive_bg_stroke,
             radius: gui.style.small_corner_radius,
+            hover_stroke: Stroke {
+                color: gui.style.node.output_hover_color,
+                width: gui.style.active_bg_stroke.width,
+            },
         });
         assert!(background.radius.is_finite());
 
@@ -119,11 +127,17 @@ impl<'a> DragValue<'a> {
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
+        let stroke = if self.hover {
+            background.hover_stroke
+        } else {
+            background.stroke
+        };
+
         ui.painter().rect(
             rect,
             background.radius,
             background.fill,
-            background.stroke,
+            stroke,
             StrokeKind::Outside,
         );
 
@@ -169,9 +183,7 @@ impl<'a> DragValue<'a> {
             return response;
         }
 
-        let mut response = ui
-            .allocate_rect(rect, Sense::click_and_drag())
-            .on_hover_cursor(CursorIcon::ResizeHorizontal);
+        let mut response = ui.allocate_rect(rect, Sense::click_and_drag());
 
         if response.clicked() {
             ui.data_mut(|data| {
