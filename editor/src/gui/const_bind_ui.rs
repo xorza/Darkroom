@@ -35,6 +35,7 @@ impl KeyIndexKey<ConstLinkKey> for ConstLinkKey {
 struct ConstLinkBezier {
     key: ConstLinkKey,
     bezier: Bezier,
+    hovered: bool,
 }
 
 impl ConstLinkBezier {
@@ -42,6 +43,7 @@ impl ConstLinkBezier {
         Self {
             key,
             bezier: Bezier::default(),
+            hovered: false,
         }
     }
 }
@@ -99,18 +101,26 @@ impl ConstBindUi {
                     &mut self.polyline_mesh_idx,
                     || ConstLinkBezier::new(link_key),
                 );
-                let link_mesh = &mut self.polyline_mesh[idx].bezier;
-                link_mesh.update(link_start, link_end, gui.scale);
+                let link = &mut self.polyline_mesh[idx];
+                let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
                 let is_hovered = self.hovered_link == Some(link_key);
-                let base_color = gui.style.node.input_port_color;
-                let link_color = if is_hovered {
-                    style::brighten(base_color, gui.style.connections.hover_brighten)
-                } else {
-                    base_color
-                };
-                link_mesh.build_mesh(link_color, link_color, gui.style.connections.stroke_width);
 
-                let response = link_mesh.show(
+                if should_rebuild || link.hovered != is_hovered {
+                    let base_color = gui.style.node.input_port_color;
+                    let link_color = if is_hovered {
+                        style::brighten(base_color, gui.style.connections.hover_brighten)
+                    } else {
+                        base_color
+                    };
+                    link.hovered = is_hovered;
+                    link.bezier.build_mesh(
+                        link_color,
+                        link_color,
+                        gui.style.connections.stroke_width,
+                    );
+                }
+
+                let response = link.bezier.show(
                     gui,
                     Sense::click() | Sense::hover(),
                     ("const_link", node.id, input_idx),
