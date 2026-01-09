@@ -78,12 +78,15 @@ impl ConstBindUi {
         let mono_font = gui.style.mono_font.clone();
 
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
-            let Binding::Const(value) = &mut input.binding else {
+            if !matches!(input.binding, Binding::Const(_)) {
                 continue;
-            };
+            }
 
             let input_center = node_layout.input_center(input_idx);
-            let label = const_input_text(gui, node.id, input_idx, value);
+            let label = match &input.binding {
+                Binding::Const(value) => const_input_text(gui, node.id, input_idx, value),
+                _ => unreachable!("const binding should be present"),
+            };
 
             let badge_right = input_center.x - port_radius - padding * 2.0;
             let badge_height = mono_font.size;
@@ -130,9 +133,17 @@ impl ConstBindUi {
                     self.currently_hovered_link = Some(link_key);
                 }
                 if response.double_clicked_by(PointerButton::Primary) {
-                    //todo
+                    input.binding = Binding::None;
+                    ui_interaction
+                        .actions
+                        .push((node.id, GraphUiAction::InputChanged { input_idx }));
+                    continue;
                 }
             }
+
+            let Binding::Const(value) = &mut input.binding else {
+                continue;
+            };
 
             if let StaticValue::Int(value) = value {
                 let drag_id = gui
