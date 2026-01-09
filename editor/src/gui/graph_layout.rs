@@ -4,7 +4,6 @@ use graph::graph::NodeId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::node_layout::{self, NodeLayout};
 use crate::gui::{Gui, graph_ctx::GraphContext};
-use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexVec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +35,8 @@ impl Default for GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, ctx: &GraphContext, gui: &Gui<'_>, view_graph: &ViewGraph) {
+    pub fn update(&mut self, ctx: &GraphContext, gui: &Gui<'_>) {
+        let view_graph = &ctx.view_graph;
         self.origin = gui.rect.min + view_graph.pan;
         let mut write_idx = 0;
 
@@ -47,7 +47,7 @@ impl GraphLayout {
                     NodeLayout::new(gui, &view_node.id)
                 });
 
-            self.node_layouts[idx].update(ctx, gui, view_graph, self.origin);
+            self.node_layouts[idx].update(ctx, gui, self.origin);
         }
         self.node_layouts.compact_finish(write_idx);
     }

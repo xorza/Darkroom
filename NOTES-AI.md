@@ -24,6 +24,8 @@ Cache button text now uses a cached galley in `NodeLayout` for rendering.
 Connection breaker now reserves segment capacity based on `MAX_BREAKER_LENGTH` and `MIN_POINT_DISTANCE`.
 GraphLayout now stores node layouts directly in `KeyIndexVec` and compacts entries during updates instead of clearing.
 Graph UI context now carries the current graph scale for shared access in render helpers.
+Graph UI context now owns `&mut ViewGraph` and optional execution stats, so graph UI helpers read shared state from
+`GraphContext` instead of passing view/exec data through every call.
 Graph UI context now asserts valid scale inputs and exposes a `button_with` helper to render custom-shaped buttons with
 shared widget styling.
 `button_with` now accepts any shape iterator to avoid intermediate allocations at call sites.

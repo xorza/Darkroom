@@ -1,17 +1,29 @@
 use common::BoolExt;
 use eframe::egui;
 use egui::{Align2, Rect, Sense, Shape, StrokeKind};
-use graph::prelude::FuncLib;
+use graph::prelude::{ExecutionStats, FuncLib};
 
 use crate::gui::Gui;
+use crate::model::ViewGraph;
 
+#[derive(Debug)]
 pub struct GraphContext<'a> {
     pub func_lib: &'a FuncLib,
+    pub view_graph: &'a mut ViewGraph,
+    pub execution_stats: Option<&'a ExecutionStats>,
 }
 
 impl<'a> GraphContext<'a> {
-    pub fn new(func_lib: &'a FuncLib) -> Self {
-        Self { func_lib }
+    pub fn new(
+        func_lib: &'a FuncLib,
+        view_graph: &'a mut ViewGraph,
+        execution_stats: Option<&'a ExecutionStats>,
+    ) -> Self {
+        Self {
+            func_lib,
+            view_graph,
+            execution_stats,
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -159,13 +171,5 @@ impl<'a> GraphContext<'a> {
         gui.painter().extend(shapes);
 
         response.clicked()
-    }
-}
-
-impl<'a> std::fmt::Debug for GraphContext<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GraphContext")
-            .field("func_lib", &"FuncLib")
-            .finish()
     }
 }

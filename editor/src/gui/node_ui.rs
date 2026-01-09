@@ -7,14 +7,13 @@ use egui::{
     Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::execution_graph::ExecutedNodeStats;
-use graph::graph::{Node, NodeId};
-use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
+use graph::graph::NodeId;
+use graph::prelude::{FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::render_const_bindings;
 use crate::gui::{
     Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction,
 };
-use crate::model::{ViewGraph, ViewNode};
 
 #[derive(Debug, Clone)]
 pub enum PortDragInfo {
@@ -42,41 +41,59 @@ impl NodeUi {
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
-        view_graph: &mut ViewGraph,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
-        execution_stats: Option<&ExecutionStats>,
     ) -> PortDragInfo {
         self.node_ids_to_remove.clear();
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
 
-        for view_node_idx in 0..view_graph.view_nodes.len() {
-            let node_id = view_graph.view_nodes[view_node_idx].id;
-            let node_layout =
-                body_drag(gui, ctx, view_graph, graph_layout, ui_interaction, &node_id);
+        let view_node_count = ctx.view_graph.view_nodes.len();
+        for view_node_idx in 0..view_node_count {
+            let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+            let node_layout = body_drag(gui, ctx, graph_layout, ui_interaction, &node_id);
 
-            let node = view_graph.graph.by_id_mut(&node_id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
-            let view_node = &view_graph.view_nodes[view_node_idx];
+            let (func_id, is_terminal, node_behavior) = {
+                let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+                (node.func_id, node.terminal, node.behavior)
+            };
+            let func = ctx.func_lib.by_id(&func_id).unwrap();
 
-            let is_selected = view_graph.selected_node_id.is_some_and(|id| id == node_id);
+            let is_selected = ctx
+                .view_graph
+                .selected_node_id
+                .is_some_and(|id| id == node_id);
 
-            let node_execution_info = node_execution_info(node_id, execution_stats);
+            let node_execution_info = node_execution_info(node_id, ctx);
 
             render_body(gui, node_layout, is_selected, &node_execution_info);
             if render_remove_btn(gui, ctx, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
-            render_cache_btn(gui, ctx, ui_interaction, node_layout, node);
-            render_hints(gui, node_layout, node, func);
-            render_const_bindings(gui, ui_interaction, node_layout, node);
-            let node_drag_port_result = render_ports(gui, node_layout, view_node);
+            let cache_behavior = render_cache_btn(
+                gui,
+                ctx,
+                ui_interaction,
+                node_layout,
+                node_id,
+                is_terminal,
+                node_behavior,
+            );
+            if let Some(new_behavior) = cache_behavior {
+                let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+                node.behavior = new_behavior;
+            }
+            render_hints(gui, node_layout, node_id, is_terminal, node_behavior, func);
+            {
+                let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+                render_const_bindings(gui, ui_interaction, node_layout, node);
+            }
+            let node_drag_port_result = render_ports(gui, node_layout, node_id);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_port_labels(gui, node_layout);
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
-            view_graph.remove_node(&node_id);
+            ctx.view_graph.remove_node(&node_id);
         }
 
         drag_port_info
@@ -86,7 +103,6 @@ impl NodeUi {
 fn body_drag<'a>(
     gui: &mut Gui<'_>,
     ctx: &mut GraphContext<'_>,
-    view_graph: &mut ViewGraph,
     graph_layout: &'a mut GraphLayout,
     ui_interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
@@ -107,13 +123,13 @@ fn body_drag<'a>(
         ui_interaction
             .actions
             .push((*node_id, GraphUiAction::NodeSelected));
-        view_graph.selected_node_id = Some(*node_id);
+        ctx.view_graph.selected_node_id = Some(*node_id);
     }
     if dragged {
-        view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
+        ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
             body_response.drag_delta() / gui.scale;
 
-        node_layout.update(ctx, gui, view_graph, graph_layout.origin);
+        node_layout.update(ctx, gui, graph_layout.origin);
     }
 
     node_layout
@@ -190,38 +206,45 @@ fn render_cache_btn(
     ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
-    node: &mut Node,
-) {
-    let enabled = !node.terminal;
-    let checked = node.behavior == NodeBehavior::Once;
+    node_id: NodeId,
+    is_terminal: bool,
+    node_behavior: NodeBehavior,
+) -> Option<NodeBehavior> {
+    let enabled = !is_terminal;
+    let checked = node_behavior == NodeBehavior::Once;
 
     if ctx.toggle_button(
         gui,
         node_layout.cache_button_rect,
         enabled,
         checked,
-        (node.id, "cache"),
+        (node_id, "cache"),
         "cache",
         "",
     ) {
-        node.behavior = (node.behavior == NodeBehavior::Once)
+        let new_behavior = (node_behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
             .actions
-            .push((node.id, GraphUiAction::CacheToggled));
-    };
+            .push((node_id, GraphUiAction::CacheToggled));
+        return Some(new_behavior);
+    }
+
+    None
 }
 
 fn render_hints(
     gui: &mut Gui<'_>,
     node_layout: &NodeLayout,
-    node: &graph::prelude::Node,
+    node_id: NodeId,
+    is_terminal: bool,
+    node_behavior: NodeBehavior,
     func: &graph::prelude::Func,
 ) {
     let dot_radius = gui.style.node.status_dot_radius;
     let dot_step = (dot_radius * 2.0) + gui.style.small_padding;
 
-    if node.terminal {
+    if is_terminal {
         let center = node_layout.dot_center(0, dot_step);
         gui.painter()
             .circle_filled(center, dot_radius, gui.style.node.status_terminal_color);
@@ -229,18 +252,18 @@ fn render_hints(
             egui::Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
         let dot_id = gui
             .ui()
-            .make_persistent_id(("node_status_terminal", node.id));
+            .make_persistent_id(("node_status_terminal", node_id));
         let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("terminal");
         }
     }
-    if node.behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
-        let center = node_layout.dot_center(usize::from(node.terminal), dot_step);
+    if node_behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
+        let center = node_layout.dot_center(usize::from(is_terminal), dot_step);
         gui.painter()
             .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
         let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-        let dot_id = gui.ui().make_persistent_id(("node_status_impure", node.id));
+        let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
         let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
         if dot_response.hovered() {
             dot_response.show_tooltip_text("impure");
@@ -298,7 +321,7 @@ fn render_remove_btn(
     false
 }
 
-fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNode) -> PortDragInfo {
+fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) -> PortDragInfo {
     let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
@@ -315,7 +338,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNod
      -> PortDragInfo {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let ui = gui.ui();
-        let port_id = ui.make_persistent_id(("node_port", kind, view_node.id, idx));
+        let port_id = ui.make_persistent_id(("node_port", kind, node_id, idx));
         let response = ui.interact(port_rect, port_id, Sense::drag() | Sense::hover());
         let is_hovered = ui.rect_contains_pointer(port_rect);
 
@@ -323,11 +346,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNod
         gui.painter().circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
-            port: PortRef {
-                node_id: view_node.id,
-                idx,
-                kind,
-            },
+            port: PortRef { node_id, idx, kind },
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {
@@ -381,11 +400,8 @@ fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
     }
 }
 
-fn node_execution_info<'a>(
-    node_id: NodeId,
-    execution_stats: Option<&'a ExecutionStats>,
-) -> NodeExecutionInfo<'a> {
-    let Some(execution_stats) = execution_stats else {
+fn node_execution_info<'a>(node_id: NodeId, ctx: &'a GraphContext<'_>) -> NodeExecutionInfo<'a> {
+    let Some(execution_stats) = ctx.execution_stats else {
         return NodeExecutionInfo::None;
     };
 

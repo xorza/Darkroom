@@ -5,7 +5,6 @@ use graph::graph::NodeId;
 use std::sync::Arc;
 
 use crate::gui::{Gui, graph_ctx::GraphContext};
-use crate::model::ViewGraph;
 use common::key_index_vec::KeyIndexKey;
 
 #[derive(Debug)]
@@ -74,15 +73,9 @@ impl NodeLayout {
         }
     }
 
-    pub fn update(
-        &mut self,
-        ctx: &GraphContext,
-        gui: &Gui<'_>,
-        view_graph: &ViewGraph,
-        origin: Pos2,
-    ) {
-        let view_node = view_graph.view_nodes.by_key(&self.node_id).unwrap();
-        let node = view_graph.graph.by_id(&self.node_id).unwrap();
+    pub fn update(&mut self, ctx: &GraphContext, gui: &Gui<'_>, origin: Pos2) {
+        let view_node = ctx.view_graph.view_nodes.by_key(&self.node_id).unwrap();
+        let node = ctx.view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
         let label_font = gui.style.sub_font.clone();

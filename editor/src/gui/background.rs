@@ -5,7 +5,7 @@ use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Pos2, Shape, Vec2};
 
 use crate::gui::Gui;
-use crate::model;
+use crate::gui::graph_ctx::GraphContext;
 
 #[derive(Debug, Default)]
 pub struct BackgroundRenderer {
@@ -17,9 +17,9 @@ pub struct BackgroundRenderer {
 }
 
 impl BackgroundRenderer {
-    pub fn render(&mut self, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
-        let scale = view_graph.scale;
-        let pan = view_graph.pan;
+    pub fn render(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
+        let scale = ctx.view_graph.scale;
+        let pan = ctx.view_graph.pan;
         let rect_size = gui.rect.size();
 
         assert!(scale > common::EPSILON, "view graph scale must be positive");
@@ -29,7 +29,7 @@ impl BackgroundRenderer {
             || crate::common::vec_changed(self.last_pan, pan)
             || crate::common::vec_changed(self.last_rect_size, rect_size)
         {
-            self.rebuild_mesh(gui, view_graph);
+            self.rebuild_mesh(gui, ctx);
             self.last_scale = scale;
             self.last_pan = pan;
             self.last_rect_size = rect_size;
@@ -39,7 +39,7 @@ impl BackgroundRenderer {
         gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
     }
 
-    fn rebuild_mesh(&mut self, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
+    fn rebuild_mesh(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
         let spacing = gui.style.background.dotted_base_spacing;
         assert!(spacing > 0.0, "background spacing must be positive");
 
@@ -48,7 +48,7 @@ impl BackgroundRenderer {
             gui.style.background.dotted_radius_max,
         );
         let color = gui.style.background.dotted_color;
-        let origin = gui.rect.min + view_graph.pan;
+        let origin = gui.rect.min + ctx.view_graph.pan;
         let offset_x = (gui.rect.left() - origin.x).rem_euclid(spacing);
         let offset_y = (gui.rect.top() - origin.y).rem_euclid(spacing);
         let start_x = gui.rect.left() - offset_x - spacing;
