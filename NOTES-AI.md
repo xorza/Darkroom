@@ -465,3 +465,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Bezier now exposes intersects_breaker() and const link break detection uses it.
 
 - Bezier::intersects_breaker now accepts Option<&ConnectionBreaker>.
+
+- ConnectionUi break detection now uses Bezier::intersects_breaker.

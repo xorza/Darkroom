@@ -244,28 +244,10 @@ impl ConnectionUi {
 
                 let needs_rebuild = curve.bezier.update(output_pos, input_pos, gui.scale);
 
-                let broke = if let Some(segments) = breaker.map(|breaker| breaker.segments()) {
-                    let mut hit = false;
-                    'outer: for (b1, b2) in segments {
-                        let curve_segments = curve
-                            .bezier
-                            .points()
-                            .windows(2)
-                            .map(|pair| (pair[0], pair[1]));
-
-                        for (a1, a2) in curve_segments {
-                            if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
-                                self.broke.insert(connection_key);
-                                hit = true;
-                                break 'outer;
-                            }
-                        }
-                    }
-
-                    hit
-                } else {
-                    false
-                };
+                let broke = curve.bezier.intersects_breaker(breaker);
+                if broke {
+                    self.broke.insert(connection_key);
+                }
 
                 if needs_rebuild || curve.broke != broke || curve.hovered != curve.new_hovered {
                     curve.broke = broke;
@@ -322,4 +304,3 @@ impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
         &self.key
     }
 }
-use crate::common::connection_bezier::ConnectionBezier;
