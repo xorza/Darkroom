@@ -47,9 +47,9 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
     ) -> PortDragInfo {
-        self.const_bind_ui.start();
         self.node_ids_to_remove.clear();
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
+        let mut const_bind_frame = self.const_bind_ui.start();
 
         let view_node_count = ctx.view_graph.view_nodes.len();
         for view_node_idx in 0..view_node_count {
@@ -80,8 +80,7 @@ impl NodeUi {
                 func,
             );
             render_cache_btn(gui, ui_interaction, node_layout, node);
-            self.const_bind_ui
-                .render(gui, ui_interaction, node_layout, node);
+            const_bind_frame.render(gui, ui_interaction, node_layout, node);
 
             let node_drag_port_result = render_ports(gui, node_layout, node_id);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
@@ -91,8 +90,6 @@ impl NodeUi {
         while let Some(node_id) = self.node_ids_to_remove.pop() {
             ctx.view_graph.remove_node(&node_id);
         }
-
-        self.const_bind_ui.finish();
 
         drag_port_info
     }

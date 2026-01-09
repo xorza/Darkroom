@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Align2, PointerButton, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Align2, PointerButton, Pos2, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -9,14 +9,12 @@ use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::{Gui, style};
 use common::BoolExt;
-use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
+use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
-    polyline_mesh_idx: usize,
     polyline_mesh: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
     hovered_link: Option<ConstLinkKey>,
-    currently_hovered_link: Option<ConstLinkKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,14 +53,31 @@ impl KeyIndexKey<ConstLinkKey> for ConstLinkBezier {
 }
 
 impl ConstBindUi {
-    pub fn start(&mut self) {
-        self.polyline_mesh_idx = 0;
-        self.currently_hovered_link = None;
+    pub fn start(&mut self) -> ConstBindFrame<'_> {
+        ConstBindFrame::new(&mut self.polyline_mesh, &mut self.hovered_link)
     }
-    pub fn finish(&mut self) {
-        self.hovered_link = self.currently_hovered_link.take();
-        self.polyline_mesh.compact_finish(self.polyline_mesh_idx);
-        self.polyline_mesh_idx = 0;
+}
+
+#[derive(Debug)]
+pub struct ConstBindFrame<'a> {
+    compact: CompactInsert<'a, ConstLinkKey, ConstLinkBezier>,
+    hovered_link: &'a mut Option<ConstLinkKey>,
+    prev_hovered_link: Option<ConstLinkKey>,
+    currently_hovered_link: Option<ConstLinkKey>,
+}
+
+impl<'a> ConstBindFrame<'a> {
+    fn new(
+        polyline_mesh: &'a mut KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
+        hovered_link: &'a mut Option<ConstLinkKey>,
+    ) -> Self {
+        let prev_hovered_link = *hovered_link;
+        Self {
+            compact: polyline_mesh.compact_insert_start(),
+            hovered_link,
+            prev_hovered_link,
+            currently_hovered_link: None,
+        }
     }
 
     pub fn render(
@@ -94,51 +109,16 @@ impl ConstBindUi {
             let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
             let link_end = pos2(input_center.x - port_radius, input_center.y);
 
-            {
-                let link_key = ConstLinkKey {
-                    node_id: node.id,
-                    input_idx,
-                };
-                let idx = self.polyline_mesh.compact_insert_with(
-                    &link_key,
-                    &mut self.polyline_mesh_idx,
-                    || ConstLinkBezier::new(link_key),
-                );
-                let link = &mut self.polyline_mesh[idx];
-                let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
-                let is_hovered = self.hovered_link == Some(link_key);
-
-                if should_rebuild || link.hovered != is_hovered {
-                    let base_color = gui.style.node.input_port_color;
-                    let link_color = if is_hovered {
-                        style::brighten(base_color, gui.style.connections.hover_brighten)
-                    } else {
-                        base_color
-                    };
-                    link.hovered = is_hovered;
-                    link.bezier.build_mesh(
-                        link_color,
-                        link_color,
-                        gui.style.connections.stroke_width,
-                    );
-                }
-
-                let response = link.bezier.show(
-                    gui,
-                    Sense::click() | Sense::hover(),
-                    ("const_link", node.id, input_idx),
-                );
-
-                if response.hovered() {
-                    self.currently_hovered_link = Some(link_key);
-                }
-                if response.double_clicked_by(PointerButton::Primary) {
-                    input.binding = Binding::None;
-                    ui_interaction
-                        .actions
-                        .push((node.id, GraphUiAction::InputChanged { input_idx }));
-                    continue;
-                }
+            if self.handle_const_link(
+                gui,
+                ui_interaction,
+                node.id,
+                input_idx,
+                link_start,
+                link_end,
+                &mut input.binding,
+            ) {
+                continue;
             }
 
             let Binding::Const(value) = &mut input.binding else {
@@ -202,6 +182,63 @@ impl ConstBindUi {
                 gui.ui().data_mut(|data| data.insert_temp(text_id, text));
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_const_link(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ui_interaction: &mut GraphUiInteraction,
+        node_id: NodeId,
+        input_idx: usize,
+        link_start: Pos2,
+        link_end: Pos2,
+        binding: &mut Binding,
+    ) -> bool {
+        let link_key = ConstLinkKey { node_id, input_idx };
+        let idx = self
+            .compact
+            .insert_with(&link_key, || ConstLinkBezier::new(link_key));
+        let link = self.compact.item_mut(idx);
+        let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
+        let is_hovered = self.prev_hovered_link == Some(link_key);
+
+        if should_rebuild || link.hovered != is_hovered {
+            let base_color = gui.style.node.input_port_color;
+            let link_color = if is_hovered {
+                style::brighten(base_color, gui.style.connections.hover_brighten)
+            } else {
+                base_color
+            };
+            link.hovered = is_hovered;
+            link.bezier
+                .build_mesh(link_color, link_color, gui.style.connections.stroke_width);
+        }
+
+        let response = link.bezier.show(
+            gui,
+            Sense::click() | Sense::hover(),
+            ("const_link", node_id, input_idx),
+        );
+
+        if response.hovered() {
+            self.currently_hovered_link = Some(link_key);
+        }
+        if response.double_clicked_by(PointerButton::Primary) {
+            *binding = Binding::None;
+            ui_interaction
+                .actions
+                .push((node_id, GraphUiAction::InputChanged { input_idx }));
+            return true;
+        }
+
+        false
+    }
+}
+
+impl Drop for ConstBindFrame<'_> {
+    fn drop(&mut self) {
+        *self.hovered_link = self.currently_hovered_link.take();
     }
 }
 

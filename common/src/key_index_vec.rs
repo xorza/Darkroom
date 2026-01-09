@@ -208,6 +208,14 @@ where
         self.vec
             .compact_insert_with(key, &mut self.write_idx, create)
     }
+
+    pub fn item_mut(&mut self, idx: usize) -> &mut V {
+        assert!(
+            idx < self.vec.items.len(),
+            "compact insert index out of range"
+        );
+        &mut self.vec.items[idx]
+    }
 }
 
 impl<K, V> Drop for CompactInsert<'_, K, V>

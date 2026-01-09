@@ -441,3 +441,7 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Added KeyIndexVec::compact_insert_start() with CompactInsert guard that auto-calls compact_finish on drop.
 
 - Added tests for compact_insert_start drop/finish behavior in common/src/key_index_vec.rs.
+
+- ConstBindUi now returns a ConstBindFrame from start(), which owns a CompactInsert guard and handles hover + auto-compact on drop; NodeUi uses the frame for rendering.
+
+- CompactInsert now exposes item_mut() and finish(), and tests cover finish() behavior.
