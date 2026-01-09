@@ -204,9 +204,16 @@ where
         }
     }
 
-    pub fn insert_with(&mut self, key: &K, create: impl FnOnce() -> V) -> usize {
-        self.vec
-            .compact_insert_with(key, &mut self.write_idx, create)
+    pub fn insert_with(&mut self, key: &K, create: impl FnOnce() -> V) -> (usize, &mut V) {
+        let idx = self
+            .vec
+            .compact_insert_with(key, &mut self.write_idx, create);
+        assert!(
+            idx < self.vec.items.len(),
+            "compact insert index out of range"
+        );
+        let item = &mut self.vec.items[idx];
+        (idx, item)
     }
 }
 
@@ -230,10 +237,7 @@ where
     type Output = V;
 
     fn index(&self, idx: usize) -> &Self::Output {
-        assert!(
-            idx < self.vec.items.len(),
-            "compact insert index out of range"
-        );
+        assert!(idx < self.write_idx, "compact insert index out of range");
         &self.vec.items[idx]
     }
 }
@@ -244,10 +248,7 @@ where
     V: KeyIndexKey<K>,
 {
     fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-        assert!(
-            idx < self.vec.items.len(),
-            "compact insert index out of range"
-        );
+        assert!(idx < self.write_idx, "compact insert index out of range");
         &mut self.vec.items[idx]
     }
 }
@@ -443,7 +444,7 @@ mod tests {
 
         {
             let mut compact = vec.compact_insert_start();
-            compact.insert_with(&20, || TestItem { id: 20, value: 0 });
+            let (_idx, _item) = compact.insert_with(&20, || TestItem { id: 20, value: 0 });
         }
 
         assert_eq!(vec.items.len(), 1);
@@ -461,7 +462,7 @@ mod tests {
 
         {
             let mut compact = vec.compact_insert_start();
-            let idx = compact.insert_with(&2, || TestItem { id: 2, value: 0 });
+            let (idx, _item) = compact.insert_with(&2, || TestItem { id: 2, value: 0 });
             assert_eq!(compact[idx].id, 2);
             compact[idx].value = 33;
         }

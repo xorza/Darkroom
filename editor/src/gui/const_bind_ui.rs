@@ -196,10 +196,9 @@ impl<'a> ConstBindFrame<'a> {
         binding: &mut Binding,
     ) -> bool {
         let link_key = ConstLinkKey { node_id, input_idx };
-        let idx = self
+        let (_idx, link) = self
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
-        let link = &mut self.compact[idx];
         let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
         let is_hovered = self.prev_hovered_link == Some(link_key);
 
