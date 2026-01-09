@@ -193,7 +193,7 @@ impl GraphUi {
                 } else if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
-                    for connection in self.connections.broke.iter() {
+                    for connection in self.connections.broke_iter() {
                         let node = ctx
                             .view_graph
                             .graph

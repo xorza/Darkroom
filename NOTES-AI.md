@@ -467,3 +467,7 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Bezier::intersects_breaker now accepts Option<&ConnectionBreaker>.
 
 - ConnectionUi break detection now uses Bezier::intersects_breaker.
+
+- ConnectionUi now exposes broke_iter() for broken connections.
+
+- ConnectionUi broke_iter now derives from curves instead of a HashSet.

@@ -3,7 +3,6 @@ use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
 use graph::graph::NodeId;
 use graph::prelude::Binding;
-use std::collections::HashSet;
 
 use crate::common::bezier::Bezier;
 use crate::gui::Gui;
@@ -110,9 +109,6 @@ impl ConnectionEndpoints {
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
-    // todo remove
-    pub(crate) broke: HashSet<ConnectionKey>,
-
     temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: Bezier,
 }
@@ -211,6 +207,12 @@ impl ConnectionUi {
         self.curves.iter().any(|c| c.hovered)
     }
 
+    pub(crate) fn broke_iter(&self) -> impl Iterator<Item = &ConnectionKey> {
+        self.curves
+            .iter()
+            .filter_map(|curve| curve.broke.then_some(&curve.key))
+    }
+
     fn rebuild(
         &mut self,
         gui: &mut Gui<'_>,
@@ -218,8 +220,6 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.broke.clear();
-
         let mut compact = self.curves.compact_insert_start();
 
         for node_view in &view_graph.view_nodes {
@@ -245,9 +245,6 @@ impl ConnectionUi {
                 let needs_rebuild = curve.bezier.update(output_pos, input_pos, gui.scale);
 
                 let broke = curve.bezier.intersects_breaker(breaker);
-                if broke {
-                    self.broke.insert(connection_key);
-                }
 
                 if needs_rebuild || curve.broke != broke || curve.hovered != curve.new_hovered {
                     curve.broke = broke;
