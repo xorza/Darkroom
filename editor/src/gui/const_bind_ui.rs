@@ -70,16 +70,18 @@ impl<'a> ConstBindFrame<'a> {
                 continue;
             }
 
+            let connection_key = ConnectionKey {
+                input_node_id: node.id,
+                input_idx,
+            };
+            let hovered = *self.hovered_link == Some(connection_key);
+
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
             let connection_start =
                 pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
             let connection_end = pos2(input_center.x - port_radius, input_center.y);
 
-            let connection_key = ConnectionKey {
-                input_node_id: node.id,
-                input_idx,
-            };
             let (_idx, curve) = self
                 .compact
                 .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
@@ -87,7 +89,7 @@ impl<'a> ConstBindFrame<'a> {
             curve
                 .bezier
                 .update_points(connection_start, connection_end, gui.scale);
-            curve.hovered = *self.hovered_link == Some(connection_key);
+            curve.hovered = hovered;
             curve.broke = curve.bezier.intersects_breaker(breaker);
 
             let response = curve.bezier.show(
@@ -114,24 +116,18 @@ impl<'a> ConstBindFrame<'a> {
             };
 
             if let StaticValue::Int(value) = value {
-                let drag_id = gui
-                    .ui()
-                    .make_persistent_id(("const_int_drag", node.id, input_idx));
                 let response = {
-                    DragValue::new(value, drag_id)
+                    DragValue::new(value)
                         .font(mono_font.clone())
                         .color(gui.style.text_color)
                         .speed(1.0)
-                        .background(
-                            gui.style.inactive_bg_fill,
-                            Stroke {
-                                width: gui.style.node.const_stroke_width,
-                                color: gui.style.node.output_port_color,
-                            },
-                            gui.style.small_corner_radius,
-                        )
                         .padding(vec2(padding, 0.0))
-                        .show(gui, connection_start, Align2::RIGHT_CENTER)
+                        .show(
+                            gui,
+                            connection_start,
+                            Align2::RIGHT_CENTER,
+                            ("const_int_drag", node.id, input_idx),
+                        )
                 };
                 if response.changed() {
                     ui_interaction

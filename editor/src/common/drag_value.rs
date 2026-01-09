@@ -19,19 +19,17 @@ pub struct DragValue<'a> {
     speed: f32,
     font: Option<FontId>,
     color: Option<Color32>,
-    id: egui::Id,
     background: Option<DragValueBackground>,
     padding: Option<Vec2>,
 }
 
 impl<'a> DragValue<'a> {
-    pub fn new(value: &'a mut i64, id: egui::Id) -> Self {
+    pub fn new(value: &'a mut i64) -> Self {
         Self {
             value,
             speed: 1.0,
             font: None,
             color: None,
-            id,
             background: None,
             padding: None,
         }
@@ -69,7 +67,13 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, pos: Pos2, align: Align2) -> Response {
+    pub fn show(
+        self,
+        gui: &mut Gui<'_>,
+        pos: Pos2,
+        align: Align2,
+        id_salt: impl std::hash::Hash,
+    ) -> Response {
         assert!(self.speed.is_finite());
 
         let font = self.font.unwrap_or_else(|| gui.style.mono_font.clone());
@@ -95,8 +99,10 @@ impl<'a> DragValue<'a> {
         assert!(size.x.is_finite() && size.y.is_finite());
 
         let rect = align.anchor_size(pos, size);
-        let edit_id = self.id.with("edit");
-        let edit_text_id = self.id.with("edit_text");
+
+        let id = ui.make_persistent_id(id_salt);
+        let edit_id = id.with("edit");
+        let edit_text_id = id.with("edit_text");
         let mut edit_active = ui
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
@@ -164,12 +170,12 @@ impl<'a> DragValue<'a> {
         }
 
         if response.drag_started() {
-            ui.data_mut(|data| data.insert_temp(self.id, *self.value));
+            ui.data_mut(|data| data.insert_temp(id, *self.value));
         }
 
         if response.dragged() {
             let start_value = ui
-                .data_mut(|data| data.get_temp::<i64>(self.id))
+                .data_mut(|data| data.get_temp::<i64>(id))
                 .unwrap_or(*self.value);
             let delta = response
                 .total_drag_delta()
@@ -183,7 +189,7 @@ impl<'a> DragValue<'a> {
         }
 
         if response.drag_stopped() {
-            ui.data_mut(|data| data.remove::<i64>(self.id));
+            ui.data_mut(|data| data.remove::<i64>(id));
         }
 
         let inner_rect = rect.shrink2(padding);
