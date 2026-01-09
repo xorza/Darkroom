@@ -208,14 +208,6 @@ where
         self.vec
             .compact_insert_with(key, &mut self.write_idx, create)
     }
-
-    pub fn item_mut(&mut self, idx: usize) -> &mut V {
-        assert!(
-            idx < self.vec.items.len(),
-            "compact insert index out of range"
-        );
-        &mut self.vec.items[idx]
-    }
 }
 
 impl<K, V> Drop for CompactInsert<'_, K, V>
@@ -227,6 +219,36 @@ where
         if !self.finished {
             self.vec.compact_finish(self.write_idx);
         }
+    }
+}
+
+impl<K, V> Index<usize> for CompactInsert<'_, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K>,
+{
+    type Output = V;
+
+    fn index(&self, idx: usize) -> &Self::Output {
+        assert!(
+            idx < self.vec.items.len(),
+            "compact insert index out of range"
+        );
+        &self.vec.items[idx]
+    }
+}
+
+impl<K, V> IndexMut<usize> for CompactInsert<'_, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K>,
+{
+    fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
+        assert!(
+            idx < self.vec.items.len(),
+            "compact insert index out of range"
+        );
+        &mut self.vec.items[idx]
     }
 }
 

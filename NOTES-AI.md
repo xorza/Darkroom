@@ -445,3 +445,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConstBindUi now returns a ConstBindFrame from start(), which owns a CompactInsert guard and handles hover + auto-compact on drop; NodeUi uses the frame for rendering.
 
 - CompactInsert now exposes item_mut() and finish(), and tests cover finish() behavior.
+
+- CompactInsert now implements Index/IndexMut for direct access to items during compaction.

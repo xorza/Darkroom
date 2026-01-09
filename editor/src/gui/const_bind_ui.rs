@@ -199,7 +199,7 @@ impl<'a> ConstBindFrame<'a> {
         let idx = self
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
-        let link = self.compact.item_mut(idx);
+        let link = &mut self.compact[idx];
         let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
         let is_hovered = self.prev_hovered_link == Some(link_key);
 
