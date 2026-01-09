@@ -437,3 +437,7 @@ Graph UI error type now implements `Display` so cycle errors surface in the stat
 Editor visuals now explicitly disable egui debug-on-hover overlays.
 `GraphLayout` now stores per-node `NodeLayout` values built by `compute_node_layouts` (no shared base layout), and
 layout geometry is derived from local constants inside `compute_node_layout`.
+
+- Added KeyIndexVec::compact_insert_start() with CompactInsert guard that auto-calls compact_finish on drop.
+
+- Added tests for compact_insert_start drop/finish behavior in common/src/key_index_vec.rs.

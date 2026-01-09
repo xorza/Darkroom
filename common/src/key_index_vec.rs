@@ -30,6 +30,10 @@ where
     K: Copy + Eq + Hash,
     V: KeyIndexKey<K>,
 {
+    pub fn compact_insert_start(&mut self) -> CompactInsert<'_, K, V> {
+        CompactInsert::new(self)
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             items: Vec::with_capacity(capacity),
@@ -176,6 +180,44 @@ where
             for (idx, v) in self.items.iter().enumerate() {
                 assert_eq!(idx, self.index_of_key(v.key()).unwrap());
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct CompactInsert<'a, K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
+    vec: &'a mut KeyIndexVec<K, V>,
+    write_idx: usize,
+    finished: bool,
+}
+
+impl<'a, K, V> CompactInsert<'a, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K>,
+{
+    fn new(vec: &'a mut KeyIndexVec<K, V>) -> Self {
+        Self {
+            vec,
+            write_idx: 0,
+            finished: false,
+        }
+    }
+
+    pub fn insert_with(&mut self, key: &K, create: impl FnOnce() -> V) -> usize {
+        self.vec
+            .compact_insert_with(key, &mut self.write_idx, create)
+    }
+}
+
+impl<K, V> Drop for CompactInsert<'_, K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K>,
+{
+    fn drop(&mut self) {
+        if !self.finished {
+            self.vec.compact_finish(self.write_idx);
         }
     }
 }
@@ -360,5 +402,24 @@ mod tests {
         assert_eq!(vec.by_key(&10).unwrap().value, 100);
         assert_eq!(vec.by_key(&30).unwrap().value, 300);
         assert_eq!(vec.by_key(&40).unwrap().value, 400);
+    }
+
+    #[test]
+    fn compact_insert_start_finishes_on_drop() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 10, value: 100 });
+        vec.add(TestItem { id: 20, value: 200 });
+        vec.add(TestItem { id: 30, value: 300 });
+
+        {
+            let mut compact = vec.compact_insert_start();
+            compact.insert_with(&20, || TestItem { id: 20, value: 0 });
+        }
+
+        assert_eq!(vec.items.len(), 1);
+        assert_eq!(vec.idx_by_key.len(), 1);
+        assert_eq!(vec.index_of_key(&20), Some(0));
+        assert!(vec.by_key(&10).is_none());
+        assert!(vec.by_key(&30).is_none());
     }
 }
