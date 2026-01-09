@@ -12,6 +12,7 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::node_ui::PortDragInfo;
+use crate::gui::polyline_mesh::polyline_mesh_with_capacity;
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -228,7 +229,7 @@ impl ConnectionUi {
 
                 let needs_rebuild = curve.endpoints.update(output_pos, input_pos);
                 if needs_rebuild {
-                    curve.mesh.build(output_pos, input_pos, gui.scale);
+                    curve.mesh.build_points(output_pos, input_pos, gui.scale);
                 }
 
                 let highlighted = if let Some(segments) = breaker.map(|breaker| breaker.segments())
@@ -259,13 +260,13 @@ impl ConnectionUi {
                     curve.highlighted = highlighted;
 
                     if curve.highlighted {
-                        curve.mesh.rebuild(
+                        curve.mesh.build_mesh(
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.width,
                         );
                     } else {
-                        curve.mesh.rebuild(
+                        curve.mesh.build_mesh(
                             gui.style.node.output_port_color,
                             gui.style.node.input_port_color,
                             gui.style.connections.stroke_width,
@@ -286,8 +287,8 @@ impl ConnectionUi {
             };
             let needs_rebuild = self.temp_connection_endpoints.update(start, end);
             if needs_rebuild {
-                self.temp_connection.build(start, end, gui.scale);
-                self.temp_connection.rebuild(
+                self.temp_connection.build_points(start, end, gui.scale);
+                self.temp_connection.build_mesh(
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,

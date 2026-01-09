@@ -26,7 +26,7 @@ impl Bezier {
         self.mesh.points()
     }
 
-    pub fn build(&mut self, start: Pos2, end: Pos2, scale: f32) {
+    pub fn build_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         let points = self.mesh.points_mut();
         if points.len() != Self::DEFAULT_POINTS {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
@@ -34,7 +34,7 @@ impl Bezier {
         ConnectionBezier::sample(points.as_mut_slice(), start, end, scale);
     }
 
-    pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {
+    pub fn build_mesh(&mut self, start_color: Color32, end_color: Color32, width: f32) {
         self.mesh.rebuild(start_color, end_color, width);
     }
 
