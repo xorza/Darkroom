@@ -132,8 +132,7 @@ where
         Some(&mut self.items[idx])
     }
 
-    // todo implement some reutrn struct to use while compacting, so it automatically finishes when droped
-    pub fn compact_insert_with(
+    fn compact_insert_with(
         &mut self,
         key: &K,
         write_idx: &mut usize,
@@ -167,7 +166,7 @@ where
         *write_idx - 1
     }
 
-    pub fn compact_finish(&mut self, write_idx: usize) {
+    fn compact_finish(&mut self, write_idx: usize) {
         assert!(write_idx <= self.items.len());
 
         self.items.truncate(write_idx);
