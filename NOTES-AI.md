@@ -477,3 +477,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Const link mesh build now deduces colors/width once before calling build_mesh.
 
 - ConnectionBezier::show now deduces style internally from hover/broke and gui style; callers pass hover/broke only.
+
+- DragValue now has pos()/align() setters and show() uses stored position/alignment.

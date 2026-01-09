@@ -122,12 +122,9 @@ impl<'a> ConstBindFrame<'a> {
                         .color(gui.style.text_color)
                         .speed(1.0)
                         .padding(vec2(padding, 0.0))
-                        .show(
-                            gui,
-                            connection_start,
-                            Align2::RIGHT_CENTER,
-                            ("const_int_drag", node.id, input_idx),
-                        )
+                        .pos(connection_start)
+                        .align(Align2::RIGHT_CENTER)
+                        .show(gui, ("const_int_drag", node.id, input_idx))
                 };
                 if response.changed() {
                     ui_interaction

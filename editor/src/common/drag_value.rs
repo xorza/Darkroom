@@ -21,6 +21,8 @@ pub struct DragValue<'a> {
     color: Option<Color32>,
     background: Option<DragValueBackground>,
     padding: Option<Vec2>,
+    pos: Option<Pos2>,
+    align: Option<Align2>,
 }
 
 impl<'a> DragValue<'a> {
@@ -32,6 +34,8 @@ impl<'a> DragValue<'a> {
             color: None,
             background: None,
             padding: None,
+            pos: None,
+            align: None,
         }
     }
 
@@ -67,13 +71,18 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn show(
-        self,
-        gui: &mut Gui<'_>,
-        pos: Pos2,
-        align: Align2,
-        id_salt: impl std::hash::Hash,
-    ) -> Response {
+    pub fn pos(mut self, pos: Pos2) -> Self {
+        assert!(pos.x.is_finite() && pos.y.is_finite());
+        self.pos = Some(pos);
+        self
+    }
+
+    pub fn align(mut self, align: Align2) -> Self {
+        self.align = Some(align);
+        self
+    }
+
+    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
         assert!(self.speed.is_finite());
 
         let font = self.font.unwrap_or_else(|| gui.style.mono_font.clone());
@@ -89,6 +98,9 @@ impl<'a> DragValue<'a> {
             radius: gui.style.small_corner_radius,
         });
         assert!(background.radius.is_finite());
+
+        let pos = self.pos.expect("DragValue requires a position");
+        let align = self.align.expect("DragValue requires an alignment");
 
         let ui = gui.ui();
         let value_text = self.value.to_string();
