@@ -110,6 +110,7 @@ impl AppData {
             return;
         }
 
+        self.execution_stats = None;
         self.graph_updated = true;
     }
 
