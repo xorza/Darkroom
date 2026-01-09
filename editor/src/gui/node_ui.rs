@@ -3,7 +3,6 @@ use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
-use crate::model::ViewGraph;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
