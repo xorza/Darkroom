@@ -237,15 +237,22 @@ impl GraphUi {
                 let update = self.connections.update_drag(pointer_pos, drag_port_info);
                 match update {
                     ConnectionDragUpdate::InProgress => {}
-                    ConnectionDragUpdate::Finished => self.state = InteractionState::Idle,
+                    ConnectionDragUpdate::Finished => {
+                        self.state = InteractionState::Idle;
+                    }
+                    ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
+                        let input_node =
+                            ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+                        input_node.inputs[input_port.port_idx].binding = Binding::Const(0.into());
+                    }
                     ConnectionDragUpdate::FinishedWith {
-                        start_port,
-                        end_port,
+                        input_port,
+                        output_port,
                     } => {
                         self.state = InteractionState::Idle;
 
                         let (input_node_id, input_idx) =
-                            apply_connection(ctx.view_graph, start_port.port, end_port.port)?;
+                            apply_connection(ctx.view_graph, input_port, output_port)?;
                         ui_interaction
                             .actions
                             .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
@@ -392,15 +399,9 @@ fn collect_scroll_mouse_wheel_deltas(gui: &mut Gui<'_>) -> (Vec2, f32) {
 /// is not present in the graph.
 fn apply_connection(
     view_graph: &mut model::ViewGraph,
-    a: PortRef,
-    b: PortRef,
+    input_port: PortRef,
+    output_port: PortRef,
 ) -> Result<(NodeId, usize), Error> {
-    let (input_port, output_port) = match (a.kind, b.kind) {
-        (PortKind::Output, PortKind::Input) => (b, a),
-        (PortKind::Input, PortKind::Output) => (a, b),
-        _ => unreachable!("ports must be of opposite types"),
-    };
-
     if input_port.node_id == output_port.node_id {
         return Err(Error::CycleDetected {
             input_node_id: input_port.node_id,
@@ -417,12 +418,12 @@ fn apply_connection(
     }
 
     let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-    input_node.inputs[input_port.idx].binding = Binding::Bind(PortAddress {
+    input_node.inputs[input_port.port_idx].binding = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
-        port_idx: output_port.idx,
+        port_idx: output_port.port_idx,
     });
 
-    Ok((input_port.node_id, input_port.idx))
+    Ok((input_port.node_id, input_port.port_idx))
 }
 
 fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {

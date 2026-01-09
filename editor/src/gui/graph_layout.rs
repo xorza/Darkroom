@@ -9,7 +9,7 @@ use common::key_index_vec::KeyIndexVec;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
     pub node_id: NodeId,
-    pub idx: usize,
+    pub port_idx: usize,
     pub kind: PortKind,
 }
 

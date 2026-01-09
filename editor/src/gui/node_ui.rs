@@ -330,7 +330,11 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
         gui.painter().circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
-            port: PortRef { node_id, idx, kind },
+            port: PortRef {
+                node_id,
+                port_idx: idx,
+                kind,
+            },
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {

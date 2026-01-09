@@ -8,7 +8,7 @@ use crate::common::connection_bezier::ConnectionBezier;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_layout::{GraphLayout, PortInfo};
+use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
@@ -37,9 +37,12 @@ pub(crate) struct ConnectionDrag {
 pub(crate) enum ConnectionDragUpdate {
     InProgress,
     Finished,
+    FinishedWithEmptyOutput {
+        input_port: PortRef,
+    },
     FinishedWith {
-        start_port: PortInfo,
-        end_port: PortInfo,
+        input_port: PortRef,
+        output_port: PortRef,
     },
 }
 
@@ -107,7 +110,7 @@ impl ConnectionEndpoints {
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
-    temp_connection: Option<ConnectionDrag>,
+    pub(crate) temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -186,9 +189,20 @@ impl ConnectionUi {
                 let update = drag
                     .end_port
                     .map_or(ConnectionDragUpdate::Finished, |end_port| {
+                        let (input_port, output_port) =
+                            match (drag.start_port.port.kind, end_port.port.kind) {
+                                (PortKind::Output, PortKind::Input) => {
+                                    (end_port.port, drag.start_port.port)
+                                }
+                                (PortKind::Input, PortKind::Output) => {
+                                    (drag.start_port.port, end_port.port)
+                                }
+                                _ => unreachable!("ports must be of opposite types"),
+                            };
+
                         ConnectionDragUpdate::FinishedWith {
-                            start_port: drag.start_port,
-                            end_port,
+                            input_port,
+                            output_port,
                         }
                     });
 
