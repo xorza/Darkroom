@@ -64,6 +64,7 @@ Const int drag widgets now render directly on the main UI instead of using a chi
 Const input badge link now renders as a bezier polyline mesh instead of a straight line.
 Const input badge rendering is owned by `ConstBindUi` on `NodeUi`.
 Custom-shaped buttons now use the `common::button::Button` helper instead of `GraphContext`.
+Toggle buttons now use the `common::toggle_button::ToggleButton` helper instead of `GraphContext`.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.

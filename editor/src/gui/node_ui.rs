@@ -1,4 +1,5 @@
 use crate::common::button::Button;
+use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
@@ -74,7 +75,6 @@ impl NodeUi {
             }
             let cache_behavior = render_cache_btn(
                 gui,
-                ctx,
                 ui_interaction,
                 node_layout,
                 node_id,
@@ -207,7 +207,6 @@ fn render_body(
 
 fn render_cache_btn(
     gui: &mut Gui<'_>,
-    ctx: &mut GraphContext,
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
     node_id: NodeId,
@@ -217,15 +216,12 @@ fn render_cache_btn(
     let enabled = !is_terminal;
     let checked = node_behavior == NodeBehavior::Once;
 
-    if ctx.toggle_button(
-        gui,
-        node_layout.cache_button_rect,
-        enabled,
-        checked,
-        (node_id, "cache"),
-        "cache",
-        "",
-    ) {
+    let response = ToggleButton::new(gui.ui().make_persistent_id((node_id, "cache")), "cache")
+        .enabled(enabled)
+        .checked(checked)
+        .show(gui, node_layout.cache_button_rect);
+
+    if response.clicked() {
         let new_behavior = (node_behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
@@ -308,7 +304,7 @@ fn render_remove_btn(
     let remove = Button::new(gui.ui().make_persistent_id(("node_remove", node_id)))
         .enabled(true)
         .tooltip("Remove node")
-        .show(gui, remove_rect, remove_shapes.iter().cloned())
+        .show(gui, remove_rect, remove_shapes)
         .clicked();
 
     if remove {

@@ -1,10 +1,5 @@
-use common::BoolExt;
-use eframe::egui;
-use egui::{Align2, Rect, Sense, StrokeKind};
-use graph::prelude::{ExecutionStats, FuncLib};
-
-use crate::gui::Gui;
 use crate::model::ViewGraph;
+use graph::prelude::{ExecutionStats, FuncLib};
 
 #[derive(Debug)]
 pub struct GraphContext<'a> {
@@ -24,64 +19,5 @@ impl<'a> GraphContext<'a> {
             view_graph,
             execution_stats,
         }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn toggle_button(
-        &mut self,
-        gui: &mut Gui<'_>,
-        rect: Rect,
-        enabled: bool,
-        checked: bool,
-        id_source: impl std::hash::Hash,
-        text: &str,
-        tooltip: &str,
-    ) -> bool {
-        let id = gui.ui().make_persistent_id(id_source);
-        let response = gui.ui().interact(
-            rect,
-            id,
-            enabled.then_else(Sense::click() | Sense::hover(), Sense::hover()),
-        );
-        if response.hovered() && !tooltip.is_empty() {
-            response.show_tooltip_text(tooltip);
-        }
-
-        let text_color = if !enabled {
-            gui.style.noninteractive_text_color
-        } else if checked {
-            gui.style.checked_text_color
-        } else {
-            gui.style.text_color
-        };
-        let fill = if !enabled {
-            gui.style.noninteractive_bg_fill
-        } else if checked {
-            gui.style.checked_bg_fill
-        } else if response.is_pointer_button_down_on() {
-            gui.style.active_bg_fill
-        } else if response.hovered() {
-            gui.style.hover_bg_fill
-        } else {
-            gui.style.inactive_bg_fill
-        };
-        let stroke = gui.style.inactive_bg_stroke;
-
-        gui.painter().rect(
-            rect,
-            gui.style.small_corner_radius,
-            fill,
-            stroke,
-            StrokeKind::Middle,
-        );
-        gui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            gui.style.sub_font.clone(),
-            text_color,
-        );
-
-        response.clicked()
     }
 }
