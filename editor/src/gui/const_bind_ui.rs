@@ -90,7 +90,8 @@ impl<'a> ConstBindFrame<'a> {
                 .bezier
                 .update_points(connection_start, connection_end, gui.scale);
 
-            let broke = curve.broke | curve.bezier.intersects_breaker(breaker);
+            let broke =
+                breaker.is_some() && (curve.broke || curve.bezier.intersects_breaker(breaker));
             curve.broke = broke;
 
             let response = curve.bezier.show(
