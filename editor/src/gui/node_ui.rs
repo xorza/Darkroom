@@ -1,4 +1,3 @@
-use crate::common::font::ScaledFontId;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
@@ -126,7 +125,7 @@ fn render_body(
     selected: bool,
     node_execution_info: &NodeExecutionInfo<'_>,
 ) {
-    let corner_radius = gui.style.corner_radius * gui.scale;
+    let corner_radius = gui.style.corner_radius;
 
     let shadow = match *node_execution_info {
         NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
@@ -151,14 +150,14 @@ fn render_body(
     if let NodeExecutionInfo::Executed(executed) = *node_execution_info {
         let text_pos = pos2(
             node_layout.body_rect.min.x,
-            node_layout.body_rect.max.y + gui.style.small_padding * gui.scale,
+            node_layout.body_rect.max.y + gui.style.small_padding,
         );
         let label = format!("{:.1} ms", executed.elapsed_secs * 1000.0);
         gui.painter().text(
             text_pos,
             Align2::LEFT_TOP,
             label,
-            gui.style.sub_font.scaled(gui.scale),
+            gui.style.sub_font.clone(),
             gui.style.noninteractive_text_color,
         );
     }
@@ -176,7 +175,7 @@ fn render_body(
     }
     let title_pos = node_layout.body_rect.min
         + vec2(
-            gui.style.padding * gui.scale,
+            gui.style.padding,
             (node_layout.header_row_height - node_layout.title_galley.size().y) * 0.5,
         );
     gui.painter().galley(
@@ -219,8 +218,8 @@ fn render_hints(
     node: &graph::prelude::Node,
     func: &graph::prelude::Func,
 ) {
-    let dot_radius = gui.scale * gui.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + gui.style.small_padding * gui.scale;
+    let dot_radius = gui.style.node.status_dot_radius;
+    let dot_step = (dot_radius * 2.0) + gui.style.small_padding;
 
     if node.terminal {
         let center = node_layout.dot_center(0, dot_step);
@@ -300,7 +299,7 @@ fn render_remove_btn(
 }
 
 fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNode) -> PortDragInfo {
-    let port_radius = gui.style.node.port_radius * gui.scale;
+    let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
     let input_base = gui.style.node.input_port_color;
@@ -366,7 +365,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, view_node: &ViewNod
 }
 
 fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
-    let padding = gui.style.node.port_label_side_padding * gui.scale;
+    let padding = gui.style.node.port_label_side_padding;
 
     for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
         let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);

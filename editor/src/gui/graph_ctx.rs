@@ -57,7 +57,7 @@ impl<'a> GraphContext<'a> {
 
         gui.painter().rect(
             rect,
-            gui.style.small_corner_radius * gui.scale,
+            gui.style.small_corner_radius,
             fill,
             stroke,
             StrokeKind::Middle,
@@ -66,7 +66,7 @@ impl<'a> GraphContext<'a> {
             rect.center(),
             Align2::CENTER_CENTER,
             text,
-            gui.style.sub_font.scaled(gui.scale),
+            gui.style.sub_font.clone(),
             text_color,
         );
 
@@ -109,7 +109,7 @@ impl<'a> GraphContext<'a> {
 
         gui.painter().rect(
             rect,
-            gui.style.small_corner_radius * gui.scale,
+            gui.style.small_corner_radius,
             fill,
             stroke,
             StrokeKind::Middle,
@@ -151,7 +151,7 @@ impl<'a> GraphContext<'a> {
 
         gui.painter().rect(
             rect,
-            gui.style.small_corner_radius * gui.scale,
+            gui.style.small_corner_radius,
             fill,
             stroke,
             StrokeKind::Middle,

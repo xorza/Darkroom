@@ -16,10 +16,10 @@ pub fn render_const_bindings(
     node_layout: &NodeLayout,
     node: &mut Node,
 ) {
-    let port_radius = gui.style.node.port_radius * gui.scale;
-    let padding = gui.style.padding * gui.scale;
-    let small_padding = gui.style.small_padding * gui.scale;
-    let mono_font = gui.style.mono_font.scaled(gui.scale);
+    let port_radius = gui.style.node.port_radius;
+    let padding = gui.style.padding;
+    let small_padding = gui.style.small_padding;
+    let mono_font = gui.style.mono_font.clone();
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {
         let Binding::Const(value) = &mut input.binding else {
@@ -62,7 +62,7 @@ pub fn render_const_bindings(
                     .background(
                         gui.style.inactive_bg_fill,
                         gui.style.node.const_stroke,
-                        gui.style.small_corner_radius * gui.scale,
+                        gui.style.small_corner_radius,
                     )
                     .padding(vec2(padding, small_padding))
                     .show(gui, link_start, Align2::RIGHT_CENTER)

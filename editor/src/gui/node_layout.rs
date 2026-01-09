@@ -86,7 +86,7 @@ impl NodeLayout {
         let node = view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-        let label_font = gui.style.sub_font.scaled(gui.scale);
+        let label_font = gui.style.sub_font.clone();
 
         if !self.inited || crate::common::scale_changed(self.scale, gui.scale) {
             self.scale = gui.scale;
@@ -94,7 +94,7 @@ impl NodeLayout {
 
             self.title_galley = gui.painter().layout_no_wrap(
                 node.name.to_string(),
-                gui.style.body_font.scaled(self.scale),
+                gui.style.body_font.clone(),
                 gui.style.text_color,
             );
 
@@ -121,12 +121,12 @@ impl NodeLayout {
         // ===============
         assert!(self.inited);
 
-        let padding = gui.style.padding * self.scale;
-        let small_padding = gui.style.small_padding * self.scale;
+        let padding = gui.style.padding;
+        let small_padding = gui.style.small_padding;
 
         let title_width = self.title_galley.size().x + padding * 2.0;
-        let remove_size = gui.style.node.remove_btn_size * self.scale + small_padding * 2.0;
-        let status_dot_size = gui.style.node.status_dot_radius * self.scale * 2.0;
+        let remove_size = gui.style.node.remove_btn_size + small_padding * 2.0;
+        let status_dot_size = gui.style.node.status_dot_radius * 2.0;
         let header_height = self
             .title_galley
             .size()
@@ -143,7 +143,7 @@ impl NodeLayout {
         let input_count = self.input_galleys.len();
         let output_count = self.output_galleys.len();
         let row_count = input_count.max(output_count).max(1);
-        let port_label_side_padding = gui.style.node.port_label_side_padding * self.scale;
+        let port_label_side_padding = gui.style.node.port_label_side_padding;
         let mut max_row_width: f32 = 0.0;
         let mut max_row_height: f32 = 0.0;
         for row in 0..row_count {
@@ -166,13 +166,13 @@ impl NodeLayout {
             max_row_height = max_row_height.max(row_height);
         }
 
-        let cache_button_height = gui.style.sub_font.size * self.scale;
+        let cache_button_height = gui.style.sub_font.size;
 
         let header_row_height = header_height + small_padding * 2.0;
         let port_row_height = label_font
             .size
             .max(max_row_height)
-            .max(gui.style.node.port_radius * 2.0 * self.scale);
+            .max(gui.style.node.port_radius * 2.0);
         let cache_row_height = cache_button_height + padding * 2.0;
 
         let node_width = header_width.max(max_row_width);
@@ -189,7 +189,7 @@ impl NodeLayout {
         );
         let remove_rect = Rect::from_min_size(remove_pos, Vec2::ONE * remove_size);
 
-        let dot_radius = gui.style.node.status_dot_radius * self.scale;
+        let dot_radius = gui.style.node.status_dot_radius;
         let dot_first_center = {
             let dot_x = remove_rect.min.x - padding - dot_radius;
             let dot_center_y = header_row_height * 0.5;
@@ -201,10 +201,7 @@ impl NodeLayout {
                 body_rect.min.x + padding,
                 body_rect.min.y + header_row_height + padding,
             ),
-            vec2(
-                gui.style.node.cache_btn_width * self.scale,
-                cache_button_height,
-            ),
+            vec2(gui.style.node.cache_btn_width, cache_button_height),
         );
 
         let base_y = body_rect.min.y

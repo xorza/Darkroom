@@ -28,7 +28,7 @@ impl<'a> Gui<'a> {
     pub fn new(ui: &'a mut Ui, scale: f32) -> Self {
         assert!(scale.is_finite());
 
-        let style = Style::new(1.0);
+        let style = Style::new(scale);
         let rect = ui.available_rect_before_wrap();
         let painter = GuiPainter(ui.painter_at(rect));
         Self {

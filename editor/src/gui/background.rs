@@ -40,10 +40,10 @@ impl BackgroundRenderer {
     }
 
     fn rebuild_mesh(&mut self, gui: &Gui<'_>, view_graph: &model::ViewGraph) {
-        let spacing = gui.style.background.dotted_base_spacing * gui.scale;
+        let spacing = gui.style.background.dotted_base_spacing;
         assert!(spacing > 0.0, "background spacing must be positive");
 
-        let radius = (gui.style.background.dotted_radius_base * gui.scale).clamp(
+        let radius = (gui.style.background.dotted_radius_base).clamp(
             gui.style.background.dotted_radius_min,
             gui.style.background.dotted_radius_max,
         );
