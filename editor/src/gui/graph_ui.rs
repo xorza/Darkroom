@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Area, Id, PointerButton, Pos2, Response, Sense, Vec2};
+use egui::{Area, Id, Key, PointerButton, Pos2, Response, Sense, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -187,7 +187,9 @@ impl GraphUi {
                 }
             }
             InteractionState::BreakingConnections => {
-                if secondary_pressed {
+                let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
+
+                if secondary_pressed || esc_pressed {
                     self.connection_breaker.reset();
                     self.state = InteractionState::Idle;
                 } else if primary_down {
