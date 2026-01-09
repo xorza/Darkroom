@@ -92,6 +92,8 @@ impl NodeUi {
             ctx.view_graph.remove_node(&node_id);
         }
 
+        self.const_bind_ui.finish();
+
         drag_port_info
     }
 }

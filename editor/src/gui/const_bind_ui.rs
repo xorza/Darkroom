@@ -5,20 +5,32 @@ use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::bezier::Bezier;
 use crate::common::drag_value::DragValue;
-use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
+use crate::gui::{Gui, style};
 use common::BoolExt;
 
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
     polyline_mesh_idx: usize,
     polyline_mesh: Vec<Bezier>,
+    hovered_link: Option<ConstLinkKey>,
+    currently_hovered_link: Option<ConstLinkKey>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ConstLinkKey {
+    node_id: NodeId,
+    input_idx: usize,
 }
 
 impl ConstBindUi {
     pub fn start(&mut self) {
         self.polyline_mesh_idx = 0;
+        self.currently_hovered_link = None;
+    }
+    pub fn finish(&mut self) {
+        self.hovered_link = self.currently_hovered_link.take();
     }
 
     pub fn render(
@@ -54,17 +66,31 @@ impl ConstBindUi {
                 let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
                 self.polyline_mesh_idx += 1;
                 link_mesh.update(link_start, link_end, gui.scale);
-                link_mesh.build_mesh(
-                    gui.style.node.input_port_color,
-                    gui.style.node.input_port_color,
-                    gui.style.connections.stroke_width,
-                );
+                let is_highlighted = self.hovered_link
+                    == Some(ConstLinkKey {
+                        node_id: node.id,
+                        input_idx,
+                    });
+                let base_color = gui.style.node.input_port_color;
+                let link_color = if is_highlighted {
+                    style::brighten(base_color, gui.style.connections.hover_brighten)
+                } else {
+                    base_color
+                };
+                link_mesh.build_mesh(link_color, link_color, gui.style.connections.stroke_width);
 
-                link_mesh.show(
+                let response = link_mesh.show(
                     gui,
                     Sense::click() | Sense::hover(),
                     ("const_link", node.id, input_idx),
                 );
+
+                if response.hovered() {
+                    self.currently_hovered_link = Some(ConstLinkKey {
+                        node_id: node.id,
+                        input_idx,
+                    });
+                }
             }
 
             if let StaticValue::Int(value) = value {
