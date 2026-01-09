@@ -1,5 +1,7 @@
 use eframe::egui;
-use egui::{Align, Align2, PointerButton, Pos2, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{
+    Align, Align2, PointerButton, Pos2, Sense, Stroke, TextEdit, UiBuilder, Vec2, pos2, vec2,
+};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -144,7 +146,10 @@ impl<'a> ConstBindFrame<'a> {
                         .speed(1.0)
                         .background(
                             gui.style.inactive_bg_fill,
-                            gui.style.node.const_stroke,
+                            Stroke {
+                                width: gui.style.node.const_stroke_width,
+                                color: gui.style.node.output_port_color,
+                            },
                             gui.style.small_corner_radius,
                         )
                         .padding(vec2(padding, 0.0))
@@ -217,18 +222,34 @@ impl<'a> ConstBindFrame<'a> {
         let is_broken = link.bezier.intersects_breaker(breaker);
 
         if should_rebuild || link.hovered != is_hovered || link.broke != is_broken {
-            let base_color = gui.style.node.input_port_color;
-            let link_color = if is_broken {
-                gui.style.connections.breaker_stroke.color
-            } else if is_hovered {
-                style::brighten(base_color, gui.style.connections.hover_brighten)
-            } else {
-                base_color
-            };
             link.hovered = is_hovered;
             link.broke = is_broken;
-            link.bezier
-                .build_mesh(link_color, link_color, gui.style.connections.stroke_width);
+
+            if link.broke {
+                link.bezier.build_mesh(
+                    gui.style.connections.broke_stroke.color,
+                    gui.style.connections.broke_stroke.color,
+                    gui.style.connections.broke_stroke.width,
+                );
+            } else if link.hovered {
+                link.bezier.build_mesh(
+                    style::brighten(
+                        gui.style.node.output_port_color,
+                        gui.style.connections.hover_brighten,
+                    ),
+                    style::brighten(
+                        gui.style.node.input_port_color,
+                        gui.style.connections.hover_brighten,
+                    ),
+                    gui.style.connections.stroke_width,
+                );
+            } else {
+                link.bezier.build_mesh(
+                    gui.style.node.output_port_color,
+                    gui.style.node.input_port_color,
+                    gui.style.connections.stroke_width,
+                );
+            };
         }
 
         let response = link.bezier.show(

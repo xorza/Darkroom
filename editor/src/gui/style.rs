@@ -81,7 +81,7 @@ pub struct NodeStyle {
     pub input_hover_color: Color32,
     pub output_hover_color: Color32,
 
-    pub const_stroke: Stroke,
+    pub const_stroke_width: f32,
 }
 
 impl Style {
@@ -147,7 +147,7 @@ impl Style {
                 breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
             },
             node: NodeStyle {
-                const_stroke: Stroke::new(scaled(1.0), Color32::from_rgb(70, 150, 255)),
+                const_stroke_width: scaled(1.0),
 
                 status_dot_radius: scaled(4.0),
                 status_terminal_color: Color32::from_rgb(128, 128, 128),
