@@ -1,6 +1,15 @@
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
+pub fn brighten(color: Color32, amount: f32) -> Color32 {
+    let t = amount.clamp(0.0, 1.0);
+    let lerp = |c: u8| -> u8 {
+        let c = c as f32;
+        (c + (255.0 - c) * t).round().clamp(0.0, 255.0) as u8
+    };
+    Color32::from_rgba_unmultiplied(lerp(color.r()), lerp(color.g()), lerp(color.b()), color.a())
+}
+
 #[derive(Debug, Clone)]
 pub struct Style {
     pub heading_font: FontId,
@@ -43,8 +52,8 @@ pub struct GraphBackgroundStyle {
 #[derive(Debug, Clone)]
 pub struct ConnectionStyle {
     pub stroke_width: f32,
-    pub hover_stroke: Stroke,
     pub broke_stroke: Stroke,
+    pub hover_brighten: f32,
     pub breaker_stroke: Stroke,
 }
 
@@ -131,8 +140,8 @@ impl Style {
             },
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),
-                hover_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 200, 255)),
                 broke_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 90, 90)),
+                hover_brighten: 0.35,
                 breaker_stroke: Stroke::new(scaled(2.0), Color32::from_rgb(255, 120, 120)),
             },
             node: NodeStyle {

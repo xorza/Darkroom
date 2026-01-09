@@ -12,6 +12,7 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo};
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
+use crate::gui::style;
 use crate::model;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -282,9 +283,15 @@ impl ConnectionUi {
                         );
                     } else if curve.hovered {
                         curve.bezier.build_mesh(
-                            gui.style.connections.hover_stroke.color,
-                            gui.style.connections.hover_stroke.color,
-                            gui.style.connections.hover_stroke.width,
+                            style::brighten(
+                                gui.style.node.output_port_color,
+                                gui.style.connections.hover_brighten,
+                            ),
+                            style::brighten(
+                                gui.style.node.input_port_color,
+                                gui.style.connections.hover_brighten,
+                            ),
+                            gui.style.connections.stroke_width,
                         );
                     } else {
                         curve.bezier.build_mesh(
