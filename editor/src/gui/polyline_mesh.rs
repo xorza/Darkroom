@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{Color32, Painter, Pos2, Shape};
+use egui::{Color32, Painter, Pos2, Shape, Vec2};
 
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
@@ -121,6 +121,7 @@ fn add_curve_segments_to_mesh(
 
     let segment_count = points.len() - 1;
     let half_width = width * 0.5;
+    let normals = compute_vertex_normals(points);
     for (idx, segment) in points[start_segment..].windows(2).enumerate() {
         let segment_idx = start_segment + idx;
         let a = segment[0];
@@ -129,7 +130,8 @@ fn add_curve_segments_to_mesh(
         if dir.length_sq() <= common::EPSILON {
             continue;
         }
-        let normal = dir.normalized().rot90();
+        let normal0 = normals[segment_idx];
+        let normal1 = normals[segment_idx + 1];
         let outer = half_width + feather;
         let t0 = segment_idx as f32 / segment_count as f32;
         let t1 = (segment_idx + 1) as f32 / segment_count as f32;
@@ -138,14 +140,14 @@ fn add_curve_segments_to_mesh(
         let color0_outer = set_alpha(color0, 0);
         let color1_outer = set_alpha(color1, 0);
 
-        let inner_plus0 = a + normal * half_width;
-        let inner_minus0 = a - normal * half_width;
-        let inner_plus1 = b + normal * half_width;
-        let inner_minus1 = b - normal * half_width;
-        let outer_plus0 = a + normal * outer;
-        let outer_minus0 = a - normal * outer;
-        let outer_plus1 = b + normal * outer;
-        let outer_minus1 = b - normal * outer;
+        let inner_plus0 = a + normal0 * half_width;
+        let inner_minus0 = a - normal0 * half_width;
+        let inner_plus1 = b + normal1 * half_width;
+        let inner_minus1 = b - normal1 * half_width;
+        let outer_plus0 = a + normal0 * outer;
+        let outer_minus0 = a - normal0 * outer;
+        let outer_plus1 = b + normal1 * outer;
+        let outer_minus1 = b - normal1 * outer;
 
         add_quad(
             mesh,
@@ -163,6 +165,43 @@ fn add_curve_segments_to_mesh(
             [color0, color0_outer, color1_outer, color1],
         );
     }
+}
+
+fn compute_vertex_normals(points: &[Pos2]) -> Vec<Vec2> {
+    let mut normals = Vec::with_capacity(points.len());
+    if points.len() < 2 {
+        return normals;
+    }
+
+    for idx in 0..points.len() {
+        let prev = if idx > 0 { Some(points[idx - 1]) } else { None };
+        let next = if idx + 1 < points.len() {
+            Some(points[idx + 1])
+        } else {
+            None
+        };
+
+        let normal = match (prev, next) {
+            (Some(a), Some(b)) => {
+                let dir0 = (points[idx] - a).normalized();
+                let dir1 = (b - points[idx]).normalized();
+                let n0 = dir0.rot90();
+                let n1 = dir1.rot90();
+                let sum = n0 + n1;
+                if sum.length_sq() <= common::EPSILON {
+                    n1
+                } else {
+                    sum.normalized()
+                }
+            }
+            (Some(a), None) => (points[idx] - a).normalized().rot90(),
+            (None, Some(b)) => (b - points[idx]).normalized().rot90(),
+            (None, None) => Vec2::ZERO,
+        };
+        normals.push(normal);
+    }
+
+    normals
 }
 
 fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
