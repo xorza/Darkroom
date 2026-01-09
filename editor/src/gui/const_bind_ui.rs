@@ -62,7 +62,6 @@ impl ConstBindUi {
 pub struct ConstBindFrame<'a> {
     compact: CompactInsert<'a, ConstLinkKey, ConstLinkBezier>,
     hovered_link: &'a mut Option<ConstLinkKey>,
-    prev_hovered_link: Option<ConstLinkKey>,
     currently_hovered_link: Option<ConstLinkKey>,
 }
 
@@ -71,11 +70,9 @@ impl<'a> ConstBindFrame<'a> {
         polyline_mesh: &'a mut KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
         hovered_link: &'a mut Option<ConstLinkKey>,
     ) -> Self {
-        let prev_hovered_link = *hovered_link;
         Self {
             compact: polyline_mesh.compact_insert_start(),
             hovered_link,
-            prev_hovered_link,
             currently_hovered_link: None,
         }
     }
@@ -200,7 +197,7 @@ impl<'a> ConstBindFrame<'a> {
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
         let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
-        let is_hovered = self.prev_hovered_link == Some(link_key);
+        let is_hovered = *self.hovered_link == Some(link_key);
 
         if should_rebuild || link.hovered != is_hovered {
             let base_color = gui.style.node.input_port_color;
