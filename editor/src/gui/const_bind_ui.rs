@@ -9,6 +9,7 @@ use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey};
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
@@ -16,45 +17,8 @@ use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 
 #[derive(Debug, Default)]
 pub(crate) struct ConstBindUi {
-    const_link_bezier_cache: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
-    hovered_link: Option<ConstLinkKey>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ConstLinkKey {
-    pub(crate) input_node_id: NodeId,
-    pub(crate) input_idx: usize,
-}
-
-impl KeyIndexKey<ConstLinkKey> for ConstLinkKey {
-    fn key(&self) -> &ConstLinkKey {
-        self
-    }
-}
-
-#[derive(Debug)]
-struct ConstLinkBezier {
-    key: ConstLinkKey,
-    bezier: ConnectionBezier,
-    hovered: bool,
-    broke: bool,
-}
-
-impl ConstLinkBezier {
-    fn new(key: ConstLinkKey) -> Self {
-        Self {
-            key,
-            bezier: ConnectionBezier::default(),
-            hovered: false,
-            broke: false,
-        }
-    }
-}
-
-impl KeyIndexKey<ConstLinkKey> for ConstLinkBezier {
-    fn key(&self) -> &ConstLinkKey {
-        &self.key
-    }
+    const_link_bezier_cache: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    hovered_link: Option<ConnectionKey>,
 }
 
 impl ConstBindUi {
@@ -62,7 +26,7 @@ impl ConstBindUi {
         ConstBindFrame::new(&mut self.const_link_bezier_cache, &mut self.hovered_link)
     }
 
-    pub(crate) fn broke_iter(&self) -> impl Iterator<Item = &ConstLinkKey> {
+    pub(crate) fn broke_iter(&self) -> impl Iterator<Item = &ConnectionKey> {
         self.const_link_bezier_cache
             .iter()
             .filter_map(|link| link.broke.then_some(&link.key))
@@ -71,15 +35,15 @@ impl ConstBindUi {
 
 #[derive(Debug)]
 pub struct ConstBindFrame<'a> {
-    compact: CompactInsert<'a, ConstLinkKey, ConstLinkBezier>,
-    hovered_link: &'a mut Option<ConstLinkKey>,
-    currently_hovered_link: Option<ConstLinkKey>,
+    compact: CompactInsert<'a, ConnectionKey, ConnectionCurve>,
+    hovered_link: &'a mut Option<ConnectionKey>,
+    currently_hovered_link: Option<ConnectionKey>,
 }
 
 impl<'a> ConstBindFrame<'a> {
     fn new(
-        polyline_mesh: &'a mut KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
-        hovered_link: &'a mut Option<ConstLinkKey>,
+        polyline_mesh: &'a mut KeyIndexVec<ConnectionKey, ConnectionCurve>,
+        hovered_link: &'a mut Option<ConnectionKey>,
     ) -> Self {
         Self {
             compact: polyline_mesh.compact_insert_start(),
@@ -209,24 +173,24 @@ impl<'a> ConstBindFrame<'a> {
         binding: &mut Binding,
         breaker: Option<&ConnectionBreaker>,
     ) -> bool {
-        let link_key = ConstLinkKey {
+        let link_key = ConnectionKey {
             input_node_id: node_id,
             input_idx,
         };
-        let (_idx, link) = self
+        let (_idx, curve) = self
             .compact
-            .insert_with(&link_key, || ConstLinkBezier::new(link_key));
+            .insert_with(&link_key, || ConnectionCurve::new(link_key));
 
-        link.bezier.update_points(link_start, link_end, gui.scale);
-        link.hovered = *self.hovered_link == Some(link_key);
-        link.broke = link.bezier.intersects_breaker(breaker);
+        curve.bezier.update_points(link_start, link_end, gui.scale);
+        curve.hovered = *self.hovered_link == Some(link_key);
+        curve.broke = curve.bezier.intersects_breaker(breaker);
 
-        let response = link.bezier.show(
+        let response = curve.bezier.show(
             gui,
             Sense::click() | Sense::hover(),
             ("const_link", node_id, input_idx),
-            link.hovered,
-            link.broke,
+            curve.hovered,
+            curve.broke,
         );
 
         if response.hovered() {

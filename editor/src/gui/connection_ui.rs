@@ -54,15 +54,15 @@ impl ConnectionDrag {
 }
 
 #[derive(Debug)]
-struct ConnectionCurve {
-    key: ConnectionKey,
-    broke: bool,
-    hovered: bool,
-    bezier: ConnectionBezier,
+pub(crate) struct ConnectionCurve {
+    pub(crate) key: ConnectionKey,
+    pub(crate) broke: bool,
+    pub(crate) hovered: bool,
+    pub(crate) bezier: ConnectionBezier,
 }
 
 impl ConnectionCurve {
-    fn new(key: ConnectionKey) -> Self {
+    pub(crate) fn new(key: ConnectionKey) -> Self {
         Self {
             key,
             broke: false,
