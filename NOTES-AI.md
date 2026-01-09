@@ -66,6 +66,7 @@ Const input badge rendering is owned by `ConstBindUi` on `NodeUi`.
 Custom-shaped buttons now use the `common::button::Button` helper instead of `GraphContext`.
 Toggle buttons now use the `common::toggle_button::ToggleButton` helper instead of `GraphContext`.
 `ToggleButton` now supports optional background styling with default theme values.
+Node cache toggle updates now happen directly inside the cache button renderer.
 Port drag selection now uses a helper to prefer the highest-priority drag state.
 Graph UI `apply_connection` now documents its return value and panic conditions via rustdoc comments.
 Fit-all now computes bounds in graph space to keep repeated fit operations stable across zoom levels.

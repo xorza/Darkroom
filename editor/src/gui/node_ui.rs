@@ -3,14 +3,15 @@ use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
+use crate::model::ViewGraph;
 use common::BoolExt;
 use eframe::egui;
 use egui::{
     Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::execution_graph::ExecutedNodeStats;
-use graph::graph::NodeId;
-use graph::prelude::{FuncBehavior, NodeBehavior};
+use graph::graph::{Node, NodeId};
+use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::{
@@ -54,43 +55,35 @@ impl NodeUi {
         let view_node_count = ctx.view_graph.view_nodes.len();
         for view_node_idx in 0..view_node_count {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
+
             let node_layout = body_drag(gui, ctx, graph_layout, ui_interaction, &node_id);
 
-            let (func_id, is_terminal, node_behavior) = {
-                let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-                (node.func_id, node.terminal, node.behavior)
-            };
-            let func = ctx.func_lib.by_id(&func_id).unwrap();
+            let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let is_selected = ctx
                 .view_graph
                 .selected_node_id
                 .is_some_and(|id| id == node_id);
 
-            let node_execution_info = node_execution_info(node_id, ctx);
+            let node_execution_info = node_execution_info(ctx.execution_stats, node_id);
 
             render_body(gui, node_layout, is_selected, &node_execution_info);
             if render_remove_btn(gui, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
-            let cache_behavior = render_cache_btn(
+            render_hints(
                 gui,
-                ui_interaction,
                 node_layout,
                 node_id,
-                is_terminal,
-                node_behavior,
+                node.terminal,
+                node.behavior,
+                func,
             );
-            if let Some(new_behavior) = cache_behavior {
-                let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
-                node.behavior = new_behavior;
-            }
-            render_hints(gui, node_layout, node_id, is_terminal, node_behavior, func);
-            {
-                let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
-                self.const_bind_ui
-                    .render(gui, ui_interaction, node_layout, node);
-            }
+            render_cache_btn(gui, ui_interaction, node_layout, node);
+            self.const_bind_ui
+                .render(gui, ui_interaction, node_layout, node);
+
             let node_drag_port_result = render_ports(gui, node_layout, node_id);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_port_labels(gui, node_layout);
@@ -209,28 +202,23 @@ fn render_cache_btn(
     gui: &mut Gui<'_>,
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
-    node_id: NodeId,
-    is_terminal: bool,
-    node_behavior: NodeBehavior,
-) -> Option<NodeBehavior> {
-    let enabled = !is_terminal;
-    let checked = node_behavior == NodeBehavior::Once;
+    node: &mut Node,
+) {
+    let enabled = !node.terminal;
+    let checked = node.behavior == NodeBehavior::Once;
 
-    let response = ToggleButton::new(gui.ui().make_persistent_id((node_id, "cache")), "cache")
+    let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
         .enabled(enabled)
         .checked(checked)
         .show(gui, node_layout.cache_button_rect);
 
     if response.clicked() {
-        let new_behavior = (node_behavior == NodeBehavior::Once)
+        node.behavior = (node.behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
             .actions
-            .push((node_id, GraphUiAction::CacheToggled));
-        return Some(new_behavior);
+            .push((node.id, GraphUiAction::CacheToggled));
     }
-
-    None
 }
 
 fn render_hints(
@@ -396,8 +384,11 @@ fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
     }
 }
 
-fn node_execution_info<'a>(node_id: NodeId, ctx: &'a GraphContext<'_>) -> NodeExecutionInfo<'a> {
-    let Some(execution_stats) = ctx.execution_stats else {
+fn node_execution_info<'a>(
+    execution_stats: Option<&'a ExecutionStats>,
+    node_id: NodeId,
+) -> NodeExecutionInfo<'a> {
+    let Some(execution_stats) = execution_stats else {
         return NodeExecutionInfo::None;
     };
 
