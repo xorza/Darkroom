@@ -36,7 +36,7 @@ impl ConstBindUi {
 #[derive(Debug)]
 pub struct ConstBindFrame<'a> {
     compact: CompactInsert<'a, ConnectionKey, ConnectionCurve>,
-    hovered_connection: &'a mut Option<ConnectionKey>,
+    prev_hovered_connection: &'a mut Option<ConnectionKey>,
     currently_hovered_connection: Option<ConnectionKey>,
 }
 
@@ -47,7 +47,7 @@ impl<'a> ConstBindFrame<'a> {
     ) -> Self {
         Self {
             compact: polyline_mesh.compact_insert_start(),
-            hovered_connection,
+            prev_hovered_connection: hovered_connection,
             currently_hovered_connection: None,
         }
     }
@@ -74,7 +74,7 @@ impl<'a> ConstBindFrame<'a> {
                 input_node_id: node.id,
                 input_idx,
             };
-            let was_hovered = *self.hovered_connection == Some(connection_key);
+            let prev_hovered = *self.prev_hovered_connection == Some(connection_key);
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
@@ -96,7 +96,7 @@ impl<'a> ConstBindFrame<'a> {
                 gui,
                 Sense::click() | Sense::hover(),
                 ("const_link", node.id, input_idx),
-                was_hovered,
+                prev_hovered,
                 curve.broke,
             );
 
@@ -123,7 +123,7 @@ impl<'a> ConstBindFrame<'a> {
                         .padding(vec2(padding, 0.0))
                         .pos(connection_start)
                         .align(Align2::RIGHT_CENTER)
-                        .hover(was_hovered | currently_hovered)
+                        .hover(prev_hovered | currently_hovered)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
 
@@ -147,7 +147,7 @@ impl<'a> ConstBindFrame<'a> {
 
 impl Drop for ConstBindFrame<'_> {
     fn drop(&mut self) {
-        *self.hovered_connection = self.currently_hovered_connection.take();
+        *self.prev_hovered_connection = self.currently_hovered_connection.take();
     }
 }
 
