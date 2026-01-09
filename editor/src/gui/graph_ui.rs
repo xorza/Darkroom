@@ -114,9 +114,17 @@ impl GraphUi {
 
         self.render_connections(gui, &mut ctx, ui_interaction);
 
-        let drag_port_info =
-            self.node_ui
-                .render_nodes(gui, &mut ctx, &mut self.graph_layout, ui_interaction);
+        let drag_port_info = self.node_ui.render_nodes(
+            gui,
+            &mut ctx,
+            &mut self.graph_layout,
+            ui_interaction,
+            if self.state == InteractionState::BreakingConnections {
+                Some(&self.connection_breaker)
+            } else {
+                None
+            },
+        );
 
         self.top_panel(gui, &mut ctx);
 

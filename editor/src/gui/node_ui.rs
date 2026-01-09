@@ -1,5 +1,6 @@
 use crate::common::button::Button;
 use crate::common::toggle_button::ToggleButton;
+use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
@@ -46,6 +47,7 @@ impl NodeUi {
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
+        breaker: Option<&ConnectionBreaker>,
     ) -> PortDragInfo {
         self.node_ids_to_remove.clear();
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
@@ -80,7 +82,7 @@ impl NodeUi {
                 func,
             );
             render_cache_btn(gui, ui_interaction, node_layout, node);
-            const_bind_frame.render(gui, ui_interaction, node_layout, node);
+            const_bind_frame.render(gui, ui_interaction, node_layout, node, breaker);
 
             let node_drag_port_result = render_ports(gui, node_layout, node_id);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);

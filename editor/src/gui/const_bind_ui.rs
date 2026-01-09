@@ -4,7 +4,9 @@ use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::bezier::Bezier;
+use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
+use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use crate::gui::{Gui, style};
@@ -34,6 +36,7 @@ struct ConstLinkBezier {
     key: ConstLinkKey,
     bezier: Bezier,
     hovered: bool,
+    broke: bool,
 }
 
 impl ConstLinkBezier {
@@ -42,6 +45,7 @@ impl ConstLinkBezier {
             key,
             bezier: Bezier::default(),
             hovered: false,
+            broke: false,
         }
     }
 }
@@ -83,6 +87,7 @@ impl<'a> ConstBindFrame<'a> {
         ui_interaction: &mut GraphUiInteraction,
         node_layout: &NodeLayout,
         node: &mut Node,
+        breaker: Option<&ConnectionBreaker>,
     ) {
         let port_radius = gui.style.node.port_radius;
         let padding = gui.style.padding;
@@ -114,6 +119,7 @@ impl<'a> ConstBindFrame<'a> {
                 link_start,
                 link_end,
                 &mut input.binding,
+                breaker,
             ) {
                 continue;
             }
@@ -191,6 +197,7 @@ impl<'a> ConstBindFrame<'a> {
         link_start: Pos2,
         link_end: Pos2,
         binding: &mut Binding,
+        breaker: Option<&ConnectionBreaker>,
     ) -> bool {
         let link_key = ConstLinkKey { node_id, input_idx };
         let (_idx, link) = self
@@ -198,15 +205,38 @@ impl<'a> ConstBindFrame<'a> {
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
         let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
         let is_hovered = *self.hovered_link == Some(link_key);
+        let is_broken = if let Some(breaker) = breaker {
+            let mut hit = false;
+            'outer: for (b1, b2) in breaker.segments() {
+                let curve_segments = link
+                    .bezier
+                    .points()
+                    .windows(2)
+                    .map(|pair| (pair[0], pair[1]));
 
-        if should_rebuild || link.hovered != is_hovered {
+                for (a1, a2) in curve_segments {
+                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+                        hit = true;
+                        break 'outer;
+                    }
+                }
+            }
+            hit
+        } else {
+            false
+        };
+
+        if should_rebuild || link.hovered != is_hovered || link.broke != is_broken {
             let base_color = gui.style.node.input_port_color;
-            let link_color = if is_hovered {
+            let link_color = if is_broken {
+                gui.style.connections.breaker_stroke.color
+            } else if is_hovered {
                 style::brighten(base_color, gui.style.connections.hover_brighten)
             } else {
                 base_color
             };
             link.hovered = is_hovered;
+            link.broke = is_broken;
             link.bezier
                 .build_mesh(link_color, link_color, gui.style.connections.stroke_width);
         }

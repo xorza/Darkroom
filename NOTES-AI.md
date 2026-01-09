@@ -459,3 +459,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - GraphLayout now uses compact_insert_start guard for node_layouts compaction.
 
 - ConnectionUi rebuild now uses compact_insert_start guard for curves.
+
+- ConstBindUi now accepts an optional ConnectionBreaker and highlights const links when breaker segments intersect.
