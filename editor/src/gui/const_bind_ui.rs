@@ -63,16 +63,22 @@ impl ConstBindUi {
                 if self.polyline_mesh_idx >= self.polyline_mesh.len() {
                     self.polyline_mesh.push(Bezier::default());
                 }
+
+                let link_key = ConstLinkKey {
+                    node_id: node.id,
+                    input_idx,
+                };
+
                 let link_mesh = &mut self.polyline_mesh[self.polyline_mesh_idx];
                 self.polyline_mesh_idx += 1;
                 link_mesh.update(link_start, link_end, gui.scale);
-                let is_highlighted = self.hovered_link
+                let is_hovered = self.hovered_link
                     == Some(ConstLinkKey {
                         node_id: node.id,
                         input_idx,
                     });
                 let base_color = gui.style.node.input_port_color;
-                let link_color = if is_highlighted {
+                let link_color = if is_hovered {
                     style::brighten(base_color, gui.style.connections.hover_brighten)
                 } else {
                     base_color
@@ -86,10 +92,7 @@ impl ConstBindUi {
                 );
 
                 if response.hovered() {
-                    self.currently_hovered_link = Some(ConstLinkKey {
-                        node_id: node.id,
-                        input_idx,
-                    });
+                    self.currently_hovered_link = Some(link_key);
                 }
             }
 

@@ -128,6 +128,7 @@ where
         Some(&mut self.items[idx])
     }
 
+    // todo implement some reutrn struct to use while compacting, so it automatically finishes when droped
     pub fn compact_insert_with(
         &mut self,
         key: &K,
