@@ -4,7 +4,6 @@ use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
 use crate::common::bezier::Bezier;
-use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::drag_value::DragValue;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
@@ -203,28 +202,10 @@ impl<'a> ConstBindFrame<'a> {
         let (_idx, link) = self
             .compact
             .insert_with(&link_key, || ConstLinkBezier::new(link_key));
+        
         let should_rebuild = link.bezier.update(link_start, link_end, gui.scale);
         let is_hovered = *self.hovered_link == Some(link_key);
-        let is_broken = if let Some(breaker) = breaker {
-            let mut hit = false;
-            'outer: for (b1, b2) in breaker.segments() {
-                let curve_segments = link
-                    .bezier
-                    .points()
-                    .windows(2)
-                    .map(|pair| (pair[0], pair[1]));
-
-                for (a1, a2) in curve_segments {
-                    if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
-                        hit = true;
-                        break 'outer;
-                    }
-                }
-            }
-            hit
-        } else {
-            false
-        };
+        let is_broken = link.bezier.intersects_breaker(breaker);
 
         if should_rebuild || link.hovered != is_hovered || link.broke != is_broken {
             let base_color = gui.style.node.input_port_color;

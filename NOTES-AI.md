@@ -461,3 +461,7 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConnectionUi rebuild now uses compact_insert_start guard for curves.
 
 - ConstBindUi now accepts an optional ConnectionBreaker and highlights const links when breaker segments intersect.
+
+- Bezier now exposes intersects_breaker() and const link break detection uses it.
+
+- Bezier::intersects_breaker now accepts Option<&ConnectionBreaker>.

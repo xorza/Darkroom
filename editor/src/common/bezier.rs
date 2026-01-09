@@ -4,6 +4,7 @@ use egui::{Color32, Pos2, Rect, Response, Sense};
 use crate::common::connection_bezier::ConnectionBezier;
 use crate::common::{pos_changed, scale_changed};
 use crate::gui::Gui;
+use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,22 @@ impl Bezier {
         };
         self.polyline.render(&gui.painter());
         response
+    }
+
+    pub fn intersects_breaker(&self, breaker: Option<&ConnectionBreaker>) -> bool {
+        let Some(breaker) = breaker else {
+            return false;
+        };
+        let points = self.polyline.points();
+        for (b1, b2) in breaker.segments() {
+            let curve_segments = points.windows(2).map(|pair| (pair[0], pair[1]));
+            for (a1, a2) in curve_segments {
+                if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     fn hit_test(&self, pos: Pos2, hover_scale: f32) -> bool {
