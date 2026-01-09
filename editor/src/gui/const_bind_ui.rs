@@ -19,9 +19,9 @@ pub(crate) struct ConstBindUi {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ConstLinkKey {
-    node_id: NodeId,
-    input_idx: usize,
+pub(crate) struct ConstLinkKey {
+    pub(crate) node_id: NodeId,
+    pub(crate) input_idx: usize,
 }
 
 impl KeyIndexKey<ConstLinkKey> for ConstLinkKey {
@@ -58,6 +58,12 @@ impl KeyIndexKey<ConstLinkKey> for ConstLinkBezier {
 impl ConstBindUi {
     pub fn start(&mut self) -> ConstBindFrame<'_> {
         ConstBindFrame::new(&mut self.const_link_bezier_cache, &mut self.hovered_link)
+    }
+
+    pub(crate) fn broke_iter(&self) -> impl Iterator<Item = &ConstLinkKey> {
+        self.const_link_bezier_cache
+            .iter()
+            .filter_map(|link| link.broke.then_some(&link.key))
     }
 }
 

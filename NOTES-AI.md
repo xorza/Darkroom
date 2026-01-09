@@ -471,3 +471,5 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConnectionUi now exposes broke_iter() for broken connections.
 
 - ConnectionUi broke_iter now derives from curves instead of a HashSet.
+
+- ConstBindUi now exposes broke_iter() over ConstLinkKey and ConstLinkKey is pub(crate).
