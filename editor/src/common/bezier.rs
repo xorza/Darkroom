@@ -43,16 +43,18 @@ impl Bezier {
         self.mesh.rebuild(start_color, end_color, width);
     }
 
-    pub fn show(&self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(&self, gui: &mut Gui<'_>, sense: Sense, id_salt: impl std::hash::Hash) -> Response {
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
         let hit = pointer_pos.is_some_and(|pos| self.hit_test(pos));
-        let rect = mesh_bounds(self.mesh.mesh())
-            .map(|rect| rect.expand(self.last_width * 0.5))
-            .unwrap_or(Rect::NOTHING);
+
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
             println!("Hit detected!");
-            gui.ui().interact(rect, id, Sense::click() | Sense::hover())
+
+            let rect = mesh_bounds(self.mesh.mesh())
+                .map(|rect| rect.expand(self.last_width * 0.5))
+                .unwrap_or(Rect::NOTHING);
+            gui.ui().interact(rect, id, sense)
         } else {
             gui.ui().interact(Rect::NOTHING, id, Sense::hover())
         };

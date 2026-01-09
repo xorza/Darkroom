@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align, Align2, TextEdit, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Align2, Sense, TextEdit, UiBuilder, Vec2, pos2, vec2};
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -60,7 +60,11 @@ impl ConstBindUi {
                     gui.style.connections.stroke_width,
                 );
 
-                link_mesh.show(gui, ("const_link", node.id, input_idx));
+                link_mesh.show(
+                    gui,
+                    Sense::click() | Sense::hover(),
+                    ("const_link", node.id, input_idx),
+                );
             }
 
             if let StaticValue::Int(value) = value {

@@ -1,6 +1,6 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
-use egui::Pos2;
+use egui::{Pos2, Sense};
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
@@ -137,11 +137,13 @@ impl ConnectionUi {
         for curve in &self.curves {
             curve.mesh.show(
                 gui,
+                Sense::click() | Sense::hover(),
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
             );
         }
         if self.drag.is_some() {
-            self.temp_connection.show(gui, ("temp_connection",));
+            self.temp_connection
+                .show(gui, Sense::hover(), ("temp_connection",));
         }
     }
 
