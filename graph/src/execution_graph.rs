@@ -183,8 +183,13 @@ impl ExecutionNode {
         self.inputs_updated = false;
         self.bindings_changed = false;
         self.missing_required_inputs = false;
+        self.cached = false;
         self.run_time = 0.0;
         self.error = None;
+
+        for e_input in self.inputs.iter_mut() {
+            e_input.dependency_wants_execute = false;
+        }
     }
     fn reset(&mut self, node: &Node, func: &Func) {
         assert_eq!(self.id, node.id);
@@ -1652,6 +1657,9 @@ mod tests {
 
         execution_graph.update(&graph, &func_lib)?;
         execution_graph.execute().await?;
+
+        let sum = execution_graph.by_name("sum").unwrap();
+        assert!(!sum.cached);
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
