@@ -17,7 +17,7 @@ pub fn render_const_bindings(
 ) {
     let port_radius = gui.style.node.port_radius;
     let padding = gui.style.padding;
-    let small_padding = gui.style.small_padding;
+    let _small_padding = gui.style.small_padding;
     let mono_font = gui.style.mono_font.clone();
 
     for (input_idx, input) in node.inputs.iter_mut().enumerate() {

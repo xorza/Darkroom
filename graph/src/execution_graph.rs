@@ -1618,4 +1618,51 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn asdasds() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::Const(2.into());
+        sum.inputs[1].binding = Binding::Const(21.into());
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        let sum = graph.by_name_mut("sum").unwrap();
+        sum.inputs[0].binding = Binding::Const(12.into());
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.behavior = NodeBehavior::Once;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["print"],
+            "mult cached, so sum wont compute"
+        );
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.behavior = NodeBehavior::AsFunction;
+
+        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.execute().await?;
+
+        assert_eq!(
+            execution_node_names_in_order(&execution_graph),
+            ["sum", "mult", "print"],
+            "now sum should be used again"
+        );
+
+        Ok(())
+    }
 }
