@@ -72,19 +72,22 @@ impl<'a> ConstBindFrame<'a> {
 
             let input_center = node_layout.input_center(input_idx);
             let badge_right = input_center.x - port_radius - padding * 2.0;
-            let link_start = pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
-            let link_end = pos2(input_center.x - port_radius, input_center.y);
+            let connection_start =
+                pos2(badge_right, input_center.y) + gui.style.node.const_badge_offset;
+            let connection_end = pos2(input_center.x - port_radius, input_center.y);
 
-            let link_key = ConnectionKey {
+            let connection_key = ConnectionKey {
                 input_node_id: node.id,
                 input_idx,
             };
             let (_idx, curve) = self
                 .compact
-                .insert_with(&link_key, || ConnectionCurve::new(link_key));
+                .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
 
-            curve.bezier.update_points(link_start, link_end, gui.scale);
-            curve.hovered = *self.hovered_link == Some(link_key);
+            curve
+                .bezier
+                .update_points(connection_start, connection_end, gui.scale);
+            curve.hovered = *self.hovered_link == Some(connection_key);
             curve.broke = curve.bezier.intersects_breaker(breaker);
 
             let response = curve.bezier.show(
@@ -96,7 +99,7 @@ impl<'a> ConstBindFrame<'a> {
             );
 
             if response.hovered() {
-                self.currently_hovered_link = Some(link_key);
+                self.currently_hovered_link = Some(connection_key);
             }
             if response.double_clicked_by(PointerButton::Primary) {
                 input.binding = Binding::None;
@@ -128,7 +131,7 @@ impl<'a> ConstBindFrame<'a> {
                             gui.style.small_corner_radius,
                         )
                         .padding(vec2(padding, 0.0))
-                        .show(gui, link_start, Align2::RIGHT_CENTER)
+                        .show(gui, connection_start, Align2::RIGHT_CENTER)
                 };
                 if response.changed() {
                     ui_interaction
