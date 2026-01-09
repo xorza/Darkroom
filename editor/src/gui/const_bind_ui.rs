@@ -90,7 +90,8 @@ impl<'a> ConstBindFrame<'a> {
                 .bezier
                 .update_points(connection_start, connection_end, gui.scale);
 
-            curve.broke = curve.bezier.intersects_breaker(breaker);
+            let broke = curve.bezier.intersects_breaker(breaker);
+            curve.broke = broke;
 
             let response = curve.bezier.show(
                 gui,
@@ -115,6 +116,13 @@ impl<'a> ConstBindFrame<'a> {
             };
 
             if let StaticValue::Int(value) = value {
+                let mut const_bind_style = gui.style.node.const_bind_style.clone();
+                if broke {
+                    const_bind_style.stroke.color = gui.style.connections.breaker_stroke.color;
+                } else if prev_hovered || currently_hovered {
+                    const_bind_style.stroke.color = gui.style.node.output_hover_color;
+                }
+
                 let response = {
                     DragValue::new(value)
                         .font(mono_font.clone())
@@ -123,7 +131,7 @@ impl<'a> ConstBindFrame<'a> {
                         .padding(vec2(padding, 0.0))
                         .pos(connection_start)
                         .align(Align2::RIGHT_CENTER)
-                        .hover(prev_hovered | currently_hovered)
+                        .style(const_bind_style)
                         .show(gui, ("const_int_drag", node.id, input_idx))
                 };
 

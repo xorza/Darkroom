@@ -73,11 +73,6 @@ impl<'a> DragValue<'a> {
         self
     }
 
-    pub fn hover(mut self, hover: bool) -> Self {
-        self.hover = hover;
-        self
-    }
-
     pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
         assert!(self.speed.is_finite());
 
@@ -113,18 +108,11 @@ impl<'a> DragValue<'a> {
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
-        let hover_active = self.hover || ui.rect_contains_pointer(rect);
-        let stroke = if hover_active {
-            background.hover_stroke
-        } else {
-            background.stroke
-        };
-
         ui.painter().rect(
             rect,
             background.radius,
             background.fill,
-            stroke,
+            background.stroke,
             StrokeKind::Outside,
         );
 

@@ -88,7 +88,6 @@ pub struct NodeStyle {
 pub(crate) struct ConstBindStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
-    pub(crate) hover_stroke: Stroke,
     pub(crate) radius: f32,
 }
 
@@ -221,10 +220,6 @@ impl Style {
                 const_bind_style: ConstBindStyle {
                     fill: COLOR_BG_INACTIVE,
                     stroke: Stroke::new(scaled(1.0), COLOR_PORT_OUTPUT),
-                    hover_stroke: Stroke::new(
-                        scaled(DEFAULT_BG_STROKE_WIDTH),
-                        COLOR_PORT_OUTPUT_HOVER,
-                    ),
                     radius: scaled(SMALL_CORNER_RADIUS),
                 },
             },
