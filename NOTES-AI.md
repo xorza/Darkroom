@@ -106,6 +106,7 @@ The editor loads `test_func_lib` to name view-node inputs/outputs based on core 
 Editor view tests now derive their graph view from `test_graph` + `test_func_lib` instead of a standalone view fixture.
 Execution graph tests now verify that impure functions execute without input changes, pure functions do not, and Output
 behaviors panic unless nodes are Terminal.
+Execution graph tests include coverage for toggling a Once node back to AsFunction to refresh upstream execution.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 

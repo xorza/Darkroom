@@ -1628,7 +1628,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn asdasds() -> anyhow::Result<()> {
+    async fn once_node_toggle_refreshes_upstream_execution() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
             get_a: Arc::new(move || 1),
             get_b: Arc::new(move || 11),
