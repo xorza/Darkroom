@@ -14,7 +14,7 @@ use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 
 #[derive(Debug, Default)]
 pub struct ConstBindUi {
-    polyline_mesh: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
+    const_link_bezier_cache: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
     hovered_link: Option<ConstLinkKey>,
 }
 
@@ -57,7 +57,7 @@ impl KeyIndexKey<ConstLinkKey> for ConstLinkBezier {
 
 impl ConstBindUi {
     pub fn start(&mut self) -> ConstBindFrame<'_> {
-        ConstBindFrame::new(&mut self.polyline_mesh, &mut self.hovered_link)
+        ConstBindFrame::new(&mut self.const_link_bezier_cache, &mut self.hovered_link)
     }
 }
 
