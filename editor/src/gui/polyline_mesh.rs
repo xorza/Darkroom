@@ -3,6 +3,8 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape, Vec2};
 
+const FEATHER: f32 = 2.0;
+
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
     mesh: Arc<Mesh>,
@@ -29,11 +31,10 @@ impl PolylineMesh {
     }
 
     pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {
-        let feather = 1.0;
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
-        add_curve_segments_to_mesh(mesh, points, 0, start_color, end_color, width, feather);
+        add_curve_segments_to_mesh(mesh, points, 0, start_color, end_color, width);
     }
 
     pub fn append_segments_from_points(
@@ -43,18 +44,9 @@ impl PolylineMesh {
         end_color: Color32,
         width: f32,
     ) {
-        let feather = 1.0;
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        add_curve_segments_to_mesh(
-            mesh,
-            points,
-            start_point,
-            start_color,
-            end_color,
-            width,
-            feather,
-        );
+        add_curve_segments_to_mesh(mesh, points, start_point, start_color, end_color, width);
     }
 
     pub fn clear_mesh(&mut self) {
@@ -69,6 +61,7 @@ impl PolylineMesh {
 
 fn polyline_mesh_with_capacity(points: usize) -> Mesh {
     assert!(points >= 2, "bezier point count must be at least 2");
+
     let segments = points - 1;
     let quads_per_segment = 3;
     let vertices_per_quad = 4;
@@ -108,11 +101,12 @@ fn add_curve_segments_to_mesh(
     start_color: Color32,
     end_color: Color32,
     width: f32,
-    feather: f32,
 ) {
     if points.len() < 2 {
         return;
     }
+
+    let feather = FEATHER;
 
     assert!(points.len() >= 2);
     assert!(width > 0.0);
