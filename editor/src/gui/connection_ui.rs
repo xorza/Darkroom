@@ -108,8 +108,8 @@ pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     pub(crate) highlighted: HashSet<ConnectionKey>,
 
-    pub(crate) drag: Option<ConnectionDrag>,
-    temp_connection: Bezier,
+    temp_connection: Option<ConnectionDrag>,
+    temp_connection_bezier: Bezier,
 }
 
 impl Default for ConnectionUi {
@@ -117,8 +117,8 @@ impl Default for ConnectionUi {
         Self {
             curves: KeyIndexVec::default(),
             highlighted: HashSet::default(),
-            drag: None,
-            temp_connection: Bezier::new(),
+            temp_connection: None,
+            temp_connection_bezier: Bezier::new(),
         }
     }
 }
@@ -140,14 +140,14 @@ impl ConnectionUi {
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
             );
         }
-        if self.drag.is_some() {
-            self.temp_connection
+        if self.temp_connection.is_some() {
+            self.temp_connection_bezier
                 .show(gui, Sense::hover(), "temp_connection");
         }
     }
 
     pub(crate) fn start_drag(&mut self, port: PortInfo) {
-        self.drag = Some(ConnectionDrag::new(port));
+        self.temp_connection = Some(ConnectionDrag::new(port));
     }
 
     pub(crate) fn update_drag(
@@ -155,7 +155,7 @@ impl ConnectionUi {
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) -> ConnectionDragUpdate {
-        let drag = self.drag.as_mut().unwrap();
+        let drag = self.temp_connection.as_mut().unwrap();
         drag.current_pos = pointer_pos;
 
         match drag_port_info {
@@ -187,7 +187,7 @@ impl ConnectionUi {
     }
 
     pub(crate) fn stop_drag(&mut self) {
-        self.drag = None;
+        self.temp_connection = None;
     }
 
     fn rebuild(
@@ -276,15 +276,16 @@ impl ConnectionUi {
 
         self.curves.compact_finish(write_idx);
 
-        if let Some(drag) = &mut self.drag {
+        if let Some(drag) = &mut self.temp_connection {
             let (start, end) = match drag.start_port.port.kind {
                 PortKind::Input => (drag.current_pos, drag.start_port.center),
                 PortKind::Output => (drag.start_port.center, drag.current_pos),
             };
             let needs_rebuild = drag.endpoints.update(start, end);
             if needs_rebuild {
-                self.temp_connection.build_points(start, end, gui.scale);
-                self.temp_connection.build_mesh(
+                self.temp_connection_bezier
+                    .build_points(start, end, gui.scale);
+                self.temp_connection_bezier.build_mesh(
                     gui.style.node.output_port_color,
                     gui.style.node.input_port_color,
                     gui.style.connections.stroke_width,
