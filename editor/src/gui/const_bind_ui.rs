@@ -13,13 +13,13 @@ use common::BoolExt;
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 
 #[derive(Debug, Default)]
-pub struct ConstBindUi {
+pub(crate) struct ConstBindUi {
     const_link_bezier_cache: KeyIndexVec<ConstLinkKey, ConstLinkBezier>,
-    hovered_link: Option<ConstLinkKey>,
+    pub(crate) hovered_link: Option<ConstLinkKey>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct ConstLinkKey {
+pub(crate) struct ConstLinkKey {
     node_id: NodeId,
     input_idx: usize,
 }
