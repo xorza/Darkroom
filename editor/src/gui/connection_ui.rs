@@ -143,7 +143,7 @@ impl ConnectionUi {
         }
         if self.drag.is_some() {
             self.temp_connection
-                .show(gui, Sense::hover(), ("temp_connection"));
+                .show(gui, Sense::hover(), "temp_connection");
         }
     }
 

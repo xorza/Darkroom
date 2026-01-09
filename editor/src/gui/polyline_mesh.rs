@@ -101,32 +101,6 @@ fn set_alpha(color: Color32, alpha: u8) -> Color32 {
     Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
 }
 
-fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
-    let base = mesh.vertices.len() as u32;
-    mesh.vertices.push(Vertex {
-        pos: positions[0],
-        uv: WHITE_UV,
-        color: colors[0],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[1],
-        uv: WHITE_UV,
-        color: colors[1],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[2],
-        uv: WHITE_UV,
-        color: colors[2],
-    });
-    mesh.vertices.push(Vertex {
-        pos: positions[3],
-        uv: WHITE_UV,
-        color: colors[3],
-    });
-    mesh.indices
-        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-}
-
 fn add_curve_segments_to_mesh(
     mesh: &mut Mesh,
     points: &[Pos2],
@@ -189,4 +163,30 @@ fn add_curve_segments_to_mesh(
             [color0, color0_outer, color1_outer, color1],
         );
     }
+}
+
+fn add_quad(mesh: &mut Mesh, positions: [Pos2; 4], colors: [Color32; 4]) {
+    let base = mesh.vertices.len() as u32;
+    mesh.vertices.push(Vertex {
+        pos: positions[0],
+        uv: WHITE_UV,
+        color: colors[0],
+    });
+    mesh.vertices.push(Vertex {
+        pos: positions[1],
+        uv: WHITE_UV,
+        color: colors[1],
+    });
+    mesh.vertices.push(Vertex {
+        pos: positions[2],
+        uv: WHITE_UV,
+        color: colors[2],
+    });
+    mesh.vertices.push(Vertex {
+        pos: positions[3],
+        uv: WHITE_UV,
+        color: colors[3],
+    });
+    mesh.indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
