@@ -1,6 +1,6 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
-use egui::{Pos2, Sense};
+use egui::{PointerButton, Pos2, Sense};
 use graph::graph::NodeId;
 use graph::prelude::Binding;
 use std::collections::HashSet;
@@ -58,7 +58,7 @@ struct ConnectionCurve {
     key: ConnectionKey,
     highlighted: bool,
     endpoints: ConnectionEndpoints,
-    mesh: Bezier,
+    bezier: Bezier,
 }
 
 impl ConnectionCurve {
@@ -67,7 +67,7 @@ impl ConnectionCurve {
             key,
             highlighted: false,
             endpoints: ConnectionEndpoints::default(),
-            mesh: Bezier::new(),
+            bezier: Bezier::new(),
         }
     }
 }
@@ -106,7 +106,9 @@ impl ConnectionEndpoints {
 #[derive(Debug)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
-    pub(crate) highlighted: HashSet<ConnectionKey>,
+    pub(crate) broke: HashSet<ConnectionKey>,
+
+    hovered: HashSet<ConnectionKey>,
 
     temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: Bezier,
@@ -116,7 +118,8 @@ impl Default for ConnectionUi {
     fn default() -> Self {
         Self {
             curves: KeyIndexVec::default(),
-            highlighted: HashSet::default(),
+            broke: HashSet::default(),
+            hovered: HashSet::default(),
             temp_connection: None,
             temp_connection_bezier: Bezier::new(),
         }
@@ -134,11 +137,18 @@ impl ConnectionUi {
         self.rebuild(gui, graph_layout, view_graph, breaker);
 
         for curve in &self.curves {
-            let _response = curve.mesh.show(
+            let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
                 ("connection", curve.key.input_node_id, curve.key.input_idx),
             );
+            if response.double_clicked_by(PointerButton::Primary) {
+                todo!()
+                // self.broke.insert(curve.key);
+            }
+            if response.hovered() {
+                self.hovered.insert(curve.key);
+            }
         }
         if self.temp_connection.is_some() {
             self.temp_connection_bezier
@@ -197,7 +207,7 @@ impl ConnectionUi {
         view_graph: &model::ViewGraph,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.highlighted.clear();
+        self.broke.clear();
 
         let mut write_idx: usize = 0;
 
@@ -227,7 +237,7 @@ impl ConnectionUi {
 
                 let needs_rebuild = curve.endpoints.update(output_pos, input_pos);
                 if needs_rebuild {
-                    curve.mesh.build_points(output_pos, input_pos, gui.scale);
+                    curve.bezier.build_points(output_pos, input_pos, gui.scale);
                 }
 
                 let highlighted = if let Some(segments) = breaker.map(|breaker| breaker.segments())
@@ -235,14 +245,14 @@ impl ConnectionUi {
                     let mut hit = false;
                     'outer: for (b1, b2) in segments {
                         let curve_segments = curve
-                            .mesh
+                            .bezier
                             .points()
                             .windows(2)
                             .map(|pair| (pair[0], pair[1]));
 
                         for (a1, a2) in curve_segments {
                             if ConnectionBezier::segments_intersect(a1, a2, b1, b2) {
-                                self.highlighted.insert(connection_key);
+                                self.broke.insert(connection_key);
                                 hit = true;
                                 break 'outer;
                             }
@@ -258,13 +268,13 @@ impl ConnectionUi {
                     curve.highlighted = highlighted;
 
                     if curve.highlighted {
-                        curve.mesh.build_mesh(
+                        curve.bezier.build_mesh(
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.color,
                             gui.style.connections.highlight_stroke.width,
                         );
                     } else {
-                        curve.mesh.build_mesh(
+                        curve.bezier.build_mesh(
                             gui.style.node.output_port_color,
                             gui.style.node.input_port_color,
                             gui.style.connections.stroke_width,
