@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
-    TextEdit, Vec2,
+    TextEdit, Vec2, vec2,
 };
 
 use crate::gui::{Gui, style::DragValueStyle};
@@ -99,7 +99,7 @@ impl<'a> DragValue<'a> {
         let size = galley.size() + padding * 2.0;
         assert!(size.x.is_finite() && size.y.is_finite());
 
-        let rect = align.anchor_size(pos, size);
+        let mut rect = align.anchor_size(pos, size);
 
         let id = ui.make_persistent_id(id_salt);
         let edit_id = id.with("edit");
@@ -115,6 +115,9 @@ impl<'a> DragValue<'a> {
             background.stroke,
             StrokeKind::Outside,
         );
+
+        rect.min -= vec2(background.stroke.width, background.stroke.width);
+        rect.max += vec2(background.stroke.width, background.stroke.width);
 
         if edit_active {
             let mut edit_text = ui
