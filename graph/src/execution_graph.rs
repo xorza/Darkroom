@@ -329,17 +329,14 @@ impl ExecutionGraph {
             .iter_mut()
             .for_each(|e_node| e_node.process_state = ProcessState::None);
 
-        let mut write_idx = 0;
+        let mut compact_insert = self.e_nodes.compact_insert_start();
 
         for node in graph.nodes.iter() {
-            let e_node_idx = self
-                .e_nodes
-                .compact_insert_with(&node.id, &mut write_idx, || ExecutionNode {
-                    id: node.id,
-                    ..Default::default()
-                });
+            let (e_node_idx, e_node) = compact_insert.insert_with(&node.id, || ExecutionNode {
+                id: node.id,
+                ..Default::default()
+            });
 
-            let e_node = &mut self.e_nodes[e_node_idx];
             assert_eq!(e_node.process_state, ProcessState::None);
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
@@ -347,7 +344,7 @@ impl ExecutionGraph {
             e_node.process_state = ProcessState::Forward;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
-                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                let e_input = &mut compact_insert[e_node_idx].inputs[input_idx];
                 e_input.binding_changed |= match (&input.binding, &e_input.binding) {
                     (Binding::None, ExecutionBinding::None) => false,
                     (Binding::None, _) => {
@@ -372,16 +369,13 @@ impl ExecutionGraph {
                 let Binding::Bind(port_address) = &input.binding else {
                     continue;
                 };
-                let output_e_node_idx = self.e_nodes.compact_insert_with(
-                    &port_address.target_id,
-                    &mut write_idx,
-                    || ExecutionNode {
+                let (output_e_node_idx, _e_node) =
+                    compact_insert.insert_with(&port_address.target_id, || ExecutionNode {
                         id: port_address.target_id,
                         ..Default::default()
-                    },
-                );
+                    });
 
-                let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
+                let e_input = &mut compact_insert[e_node_idx].inputs[input_idx];
                 let desired = ExecutionPortAddress {
                     target_id: port_address.target_id,
                     target_idx: output_e_node_idx,
@@ -407,8 +401,6 @@ impl ExecutionGraph {
                 assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
             }
         }
-
-        self.e_nodes.compact_finish(write_idx);
     }
 
     // Walk backward from terminal nodes to collect process order and detect cycles.
