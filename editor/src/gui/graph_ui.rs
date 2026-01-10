@@ -75,6 +75,7 @@ pub enum GraphUiAction {
     CacheToggled { node_id: NodeId },
     InputChanged { node_id: NodeId, input_idx: usize },
     NodeRemoved { node_id: NodeId },
+    NodeMoved { node_id: NodeId },
     NodeSelected { node_id: Option<NodeId> },
     ZoomPanChanged,
 }

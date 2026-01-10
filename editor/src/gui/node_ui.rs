@@ -136,6 +136,12 @@ fn body_drag<'a>(
         node_layout.update(ctx, gui, graph_layout.origin);
     }
 
+    if body_response.drag_stopped() {
+        ui_interaction
+            .actions
+            .push(GraphUiAction::NodeMoved { node_id: *node_id });
+    }
+
     node_layout
 }
 
