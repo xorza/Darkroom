@@ -6,6 +6,8 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::{Gui, style};
 
+const DEFAULT_FEATHER: f32 = 0.8;
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ConnectionBezierStyle {
     pub(crate) start_color: Color32,
@@ -16,7 +18,7 @@ pub(crate) struct ConnectionBezierStyle {
 #[derive(Debug, Clone)]
 pub struct ConnectionBezier {
     polyline: PolylineMesh,
-    stroke_width: f32,
+    pub(crate) stroke_width: f32,
     start: Pos2,
     end: Pos2,
     scale: f32,
@@ -206,7 +208,7 @@ impl Default for ConnectionBezier {
             hovered: false,
             broke: false,
             points_dirty: false,
-            feather: 0.0,
+            feather: DEFAULT_FEATHER,
         }
     }
 }

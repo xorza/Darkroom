@@ -128,6 +128,19 @@ impl ConnectionUi {
         self.rebuild(gui, graph_layout, ctx.view_graph, breaker);
 
         for curve in self.curves.iter_mut() {
+            // let missing_curve = self.missing_curves.by_key_mut(&curve.key).unwrap();
+            // missing_curve.bezier.show(
+            //     gui,
+            //     Sense::hover(),
+            //     (
+            //         "connection_highlight",
+            //         curve.key.input_node_id,
+            //         curve.key.input_idx,
+            //     ),
+            //     false,
+            //     false,
+            // );
+
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
@@ -244,6 +257,7 @@ impl ConnectionUi {
         breaker: Option<&ConnectionBreaker>,
     ) {
         let mut compact = self.curves.compact_insert_start();
+        let mut _missing_compact = self.missing_curves.compact_insert_start();
 
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
@@ -267,6 +281,23 @@ impl ConnectionUi {
 
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
                 curve.broke = curve.bezier.intersects_breaker(breaker);
+
+                // todo update
+                // let (_curve_idx, missing_curve) =
+                //     missing_compact.insert_with(&connection_key, || {
+                //         let bezier = ConnectionBezier::new(6.0);
+
+                //         ConnectionCurve {
+                //             key: connection_key,
+                //             broke: false,
+                //             hovered: false,
+                //             bezier,
+                //         }
+                //     });
+
+                // missing_curve
+                //     .bezier
+                //     .update_points(output_pos, input_pos, gui.scale);
             }
         }
 
