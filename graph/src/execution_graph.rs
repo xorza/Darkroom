@@ -52,6 +52,7 @@ pub struct ExecutionInput {
     pub required: bool,
     pub binding_changed: bool,
     pub dependency_wants_execute: bool,
+    pub missing: bool,
     pub binding: ExecutionBinding,
     pub data_type: DataType,
 }
@@ -578,30 +579,29 @@ impl ExecutionGraph {
 
             for input_idx in 0..self.e_nodes[e_node_idx].inputs.len() {
                 let e_input = &self.e_nodes[e_node_idx].inputs[input_idx];
-                let dependency_wants_execute = match &e_input.binding {
+                let (dependency_wants_execute, missing_input) = match &e_input.binding {
                     ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
-                    ExecutionBinding::None => {
-                        missing_required_inputs |= e_input.required;
-                        false
-                    }
-                    ExecutionBinding::Const(_) => false,
+                    ExecutionBinding::None => (false, e_input.required),
+                    ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(port_address) => {
                         let output_e_node = &self.e_nodes[port_address.target_idx];
 
                         assert_eq!(output_e_node.process_state, ProcessState::Forward);
                         assert!(port_address.port_idx < output_e_node.outputs.len());
 
-                        missing_required_inputs |=
-                            e_input.required && output_e_node.missing_required_inputs;
-
-                        output_e_node.wants_execute
+                        (
+                            output_e_node.wants_execute,
+                            e_input.required && output_e_node.missing_required_inputs,
+                        )
                     }
                 };
 
                 let e_input = &mut self.e_nodes[e_node_idx].inputs[input_idx];
                 e_input.dependency_wants_execute = dependency_wants_execute;
+                e_input.missing = missing_input;
                 inputs_updated |= e_input.binding_changed || e_input.dependency_wants_execute;
-                bindings_changed |= e_input.binding_changed
+                bindings_changed |= e_input.binding_changed;
+                missing_required_inputs |= e_input.missing;
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
