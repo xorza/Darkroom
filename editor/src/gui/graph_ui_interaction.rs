@@ -1,4 +1,4 @@
-use graph::graph::NodeId;
+use graph::graph::{NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
 
@@ -13,11 +13,23 @@ pub(crate) struct GraphUiInteraction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GraphUiAction {
-    CacheToggled { node_id: NodeId },
-    InputChanged { node_id: NodeId, input_idx: usize },
-    NodeRemoved { node_id: NodeId },
-    NodeMoved { node_id: NodeId },
-    NodeSelected { node_id: Option<NodeId> },
+    CacheToggled {
+        node_id: NodeId,
+        behavior: NodeBehavior,
+    },
+    InputChanged {
+        node_id: NodeId,
+        input_idx: usize,
+    },
+    NodeRemoved {
+        node_id: NodeId,
+    },
+    NodeMoved {
+        node_id: NodeId,
+    },
+    NodeSelected {
+        node_id: Option<NodeId>,
+    },
     ZoomPanChanged,
 }
 

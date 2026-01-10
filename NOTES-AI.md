@@ -124,6 +124,7 @@ KeyIndexVec equality now has a unit test covering order independence and value c
 Undo history now uses a `UndoStack` trait with a `FullSerdeUndoStack` implementation that stores full serialized snapshots.
 `FullSerdeUndoStack` now lives in `editor/src/common/undo_stack/full_serde_undo_stack.rs`.
 `FullSerdeUndoStack` now clears redo history on new snapshot pushes.
+Cache toggle actions now carry the final `NodeBehavior` in `GraphUiAction::CacheToggled`.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.

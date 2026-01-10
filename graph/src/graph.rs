@@ -36,7 +36,7 @@ pub struct Event {
     pub subscribers: Vec<NodeId>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum NodeBehavior {
     #[default]
     AsFunction,
