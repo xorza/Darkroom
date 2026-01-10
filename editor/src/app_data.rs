@@ -105,7 +105,7 @@ impl AppData {
     }
 
     pub fn undo(&mut self) {
-        if self.undo_stack.is_empty() {
+        if self.undo_stack.len() < 2 {
             return;
         }
 
@@ -114,12 +114,15 @@ impl AppData {
         let current = self.view_graph.serialize(UNDO_FILE_FORMAT);
         self.redo_stack.push(current);
 
+        self.undo_stack.pop();
         let snapshot = self.undo_stack.pop().unwrap();
         self.apply_graph(
             ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
                 .expect("Failed to deserialize undo snapshot"),
             false,
         );
+
+        self.undo_stack.push(snapshot);
 
         println!("Undid stack size: {}", self.undo_stack.len());
     }
@@ -159,6 +162,7 @@ impl AppData {
         if reset_undo {
             self.undo_stack.clear();
             self.redo_stack.clear();
+            self.push_undo();
         }
     }
 
