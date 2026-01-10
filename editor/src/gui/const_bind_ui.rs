@@ -90,19 +90,18 @@ impl<'a> ConstBindFrame<'a> {
                 .bezier
                 .update_points(connection_start, connection_end, gui.scale);
 
-            let broke =
-                breaker.is_some() && (curve.broke || curve.bezier.intersects_breaker(breaker));
-            curve.broke = broke;
+            let prev_broke = breaker.is_some() && curve.broke;
 
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
                 ("const_link", node.id, input_idx),
                 prev_hovered,
-                curve.broke,
+                prev_broke,
             );
 
             let mut currently_hovered = response.hovered();
+            let mut currently_broke = curve.bezier.intersects_breaker(breaker);
 
             if response.double_clicked_by(PointerButton::Primary) {
                 input.binding = Binding::None;
@@ -117,9 +116,8 @@ impl<'a> ConstBindFrame<'a> {
             };
 
             if let StaticValue::Int(value) = value {
-                let mut breaker_hit = false;
                 let mut const_bind_style = gui.style.node.const_bind_style.clone();
-                if broke {
+                if prev_broke || currently_broke {
                     const_bind_style.stroke.color = gui.style.connections.breaker_stroke.color;
                 } else if prev_hovered || currently_hovered {
                     const_bind_style.stroke.color = gui.style.node.output_hover_color;
@@ -140,10 +138,7 @@ impl<'a> ConstBindFrame<'a> {
                 };
 
                 if let Some(breaker) = breaker {
-                    breaker_hit = breaker.intersects_rect(response.rect);
-                }
-                if breaker_hit {
-                    curve.broke = true;
+                    currently_broke |= breaker.intersects_rect(response.rect);
                 }
 
                 currently_hovered |= response.hovered();
@@ -160,6 +155,7 @@ impl<'a> ConstBindFrame<'a> {
                 self.currently_hovered_connection = Some(connection_key);
             }
             curve.hovered = currently_hovered;
+            curve.broke = currently_broke;
         }
     }
 }
