@@ -13,7 +13,7 @@ pub(crate) struct GraphUiInteraction {
     pending_actions: Vec<GraphUiAction>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum GraphUiAction {
     CacheToggled {
         node_id: NodeId,
@@ -35,9 +35,15 @@ pub enum GraphUiAction {
         after: Vec2,
     },
     NodeSelected {
+        before: Option<NodeId>,
         after: Option<NodeId>,
     },
-    ZoomPanChanged,
+    ZoomPanChanged {
+        before_pan: Vec2,
+        before_scale: f32,
+        after_pan: Vec2,
+        after_scale: f32,
+    },
 }
 
 impl GraphUiInteraction {
@@ -89,7 +95,7 @@ impl GraphUiAction {
 
             GraphUiAction::NodeMoved { .. }
             | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::ZoomPanChanged => false,
+            | GraphUiAction::ZoomPanChanged { .. } => false,
         }
     }
     pub fn immediate(&self) -> bool {
@@ -98,7 +104,7 @@ impl GraphUiAction {
             | GraphUiAction::InputChanged { .. }
             | GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::NodeSelected { .. } => true,
-            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged => false,
+            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
         }
     }
 }

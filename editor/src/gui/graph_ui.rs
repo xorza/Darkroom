@@ -113,9 +113,12 @@ impl GraphUi {
         );
 
         if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
+            let before = ctx.view_graph.selected_node_id;
             ctx.view_graph.selected_node_id = None;
-            self.interaction
-                .add_action(GraphUiAction::NodeSelected { after: None });
+            self.interaction.add_action(GraphUiAction::NodeSelected {
+                before,
+                after: None,
+            });
         }
 
         self.top_panel(&mut gui, &mut ctx);
@@ -399,6 +402,7 @@ impl GraphUi {
     ) {
         let prev_scale = ctx.view_graph.scale;
         let prev_pan = ctx.view_graph.pan;
+        
         let (zoom_delta, pan) = {
             let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
 
@@ -429,7 +433,12 @@ impl GraphUi {
 
         if !prev_scale.ui_equals(&ctx.view_graph.scale) || !prev_pan.ui_equals(&ctx.view_graph.pan)
         {
-            self.interaction.add_action(GraphUiAction::ZoomPanChanged);
+            self.interaction.add_action(GraphUiAction::ZoomPanChanged {
+                before_pan: prev_pan,
+                before_scale: prev_scale,
+                after_pan: ctx.view_graph.pan,
+                after_scale: ctx.view_graph.scale,
+            });
         }
     }
 }

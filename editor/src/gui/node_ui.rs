@@ -141,7 +141,9 @@ fn body_drag<'a>(
     }
 
     if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
+        let before = ctx.view_graph.selected_node_id;
         ui_interaction.add_action(GraphUiAction::NodeSelected {
+            before,
             after: Some(*node_id),
         });
 
