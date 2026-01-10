@@ -96,7 +96,7 @@ impl GraphUi {
         gui.painter().rect(
             rect,
             gui.style.corner_radius,
-            gui.style.inactive_bg_fill,
+            gui.style.graph_background.bg_color,
             gui.style.inactive_bg_stroke,
             StrokeKind::Outside,
         );

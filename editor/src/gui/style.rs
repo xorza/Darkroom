@@ -36,13 +36,14 @@ pub struct Style {
     pub checked_bg_fill: Color32,
     pub checked_text_color: Color32,
 
-    pub background: GraphBackgroundStyle,
+    pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
 }
 
 #[derive(Debug, Clone)]
 pub struct GraphBackgroundStyle {
+    pub bg_color: Color32,
     pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
     pub dotted_radius_base: f32,
@@ -107,6 +108,7 @@ impl Style {
 
         const COLOR_BG_NONINTERACTIVE: Color32 = Color32::from_rgb(35, 35, 35);
         const COLOR_BG_INACTIVE: Color32 = Color32::from_rgb(40, 40, 40);
+        const COLOR_BG_GRAPH: Color32 = Color32::from_rgb(16, 16, 16);
         const COLOR_BG_HOVER: Color32 = Color32::from_rgb(50, 50, 50);
         const COLOR_BG_ACTIVE: Color32 = Color32::from_rgb(60, 60, 60);
         const COLOR_BG_CHECKED: Color32 = Color32::from_rgb(240, 205, 90);
@@ -170,12 +172,13 @@ impl Style {
             corner_radius: scaled(CORNER_RADIUS),
             small_corner_radius: scaled(SMALL_CORNER_RADIUS),
 
-            background: GraphBackgroundStyle {
+            graph_background: GraphBackgroundStyle {
                 dotted_color: COLOR_DOTTED,
                 dotted_base_spacing: scaled(24.0),
                 dotted_radius_base: scaled(1.2),
                 dotted_radius_min: scaled(0.6),
                 dotted_radius_max: scaled(2.4),
+                bg_color: COLOR_BG_GRAPH,
             },
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),

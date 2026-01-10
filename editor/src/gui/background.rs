@@ -40,14 +40,14 @@ impl DottedBackgroundRenderer {
     }
 
     fn rebuild_mesh(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
-        let spacing = gui.style.background.dotted_base_spacing;
+        let spacing = gui.style.graph_background.dotted_base_spacing;
         assert!(spacing > 0.0, "background spacing must be positive");
 
-        let radius = (gui.style.background.dotted_radius_base).clamp(
-            gui.style.background.dotted_radius_min,
-            gui.style.background.dotted_radius_max,
+        let radius = (gui.style.graph_background.dotted_radius_base).clamp(
+            gui.style.graph_background.dotted_radius_min,
+            gui.style.graph_background.dotted_radius_max,
         );
-        let color = gui.style.background.dotted_color;
+        let color = gui.style.graph_background.dotted_color;
         let origin = gui.rect.min + ctx.view_graph.pan;
         let offset_x = (gui.rect.left() - origin.x).rem_euclid(spacing);
         let offset_y = (gui.rect.top() - origin.y).rem_euclid(spacing);
