@@ -161,7 +161,6 @@ mod tests {
             terminal: false,
             inputs: vec![Input {
                 binding: Binding::None,
-                default_value: None,
             }],
             events: vec![],
         });
@@ -174,7 +173,6 @@ mod tests {
             terminal: false,
             inputs: vec![Input {
                 binding: (frame_event_node_id, 1).into(),
-                default_value: None,
             }],
             events: vec![],
         });
@@ -187,7 +185,6 @@ mod tests {
             terminal: true,
             inputs: vec![Input {
                 binding: (float_to_string_node_id, 0).into(),
-                default_value: None,
             }],
             events: vec![],
         });

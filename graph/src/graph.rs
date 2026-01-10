@@ -27,8 +27,6 @@ pub enum Binding {
 pub struct Input {
     #[serde(default, skip_serializing_if = "Binding::is_none")]
     pub binding: Binding,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_value: Option<StaticValue>,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -205,9 +203,8 @@ impl Node {
         let inputs: Vec<Input> = func
             .inputs
             .iter()
-            .map(|input| Input {
+            .map(|_input| Input {
                 binding: Binding::None,
-                default_value: input.default_value.clone(),
             })
             .collect();
 
@@ -345,11 +342,9 @@ pub fn test_graph() -> Graph {
         inputs: vec![
             Input {
                 binding: (sum_node_id, 0).into(),
-                default_value: None,
             },
             Input {
                 binding: (get_b_node_id, 0).into(),
-                default_value: None,
             },
         ],
         events: vec![],
@@ -384,11 +379,9 @@ pub fn test_graph() -> Graph {
         inputs: vec![
             Input {
                 binding: (get_a_node_id, 0).into(),
-                default_value: None,
             },
             Input {
                 binding: (get_b_node_id, 0).into(),
-                default_value: None,
             },
         ],
         events: vec![],
@@ -402,7 +395,6 @@ pub fn test_graph() -> Graph {
         terminal: true,
         inputs: vec![Input {
             binding: (mult_node_id, 0).into(),
-            default_value: None,
         }],
         events: vec![],
     });
