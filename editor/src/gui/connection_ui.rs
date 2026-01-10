@@ -184,7 +184,7 @@ impl ConnectionUi {
                         gui,
                         Sense::empty(),
                         (
-                            "connection",
+                            "connection_highlight",
                             connection_key.input_node_id,
                             connection_key.input_idx,
                         ),
