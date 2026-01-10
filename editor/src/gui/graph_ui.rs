@@ -8,6 +8,7 @@ use egui::{
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
+use crate::common::UiEquals;
 use crate::gui::background::DottedBackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
@@ -413,8 +414,7 @@ impl GraphUi {
             ctx.view_graph.pan += background_response.drag_delta();
         }
 
-        if crate::common::scale_changed(prev_scale, ctx.view_graph.scale)
-            || crate::common::pan_changed_v2(prev_pan, ctx.view_graph.pan)
+        if !prev_scale.ui_equals(&ctx.view_graph.scale) || !prev_pan.ui_equals(&ctx.view_graph.pan)
         {
             self.interaction.add_action(GraphUiAction::ZoomPanChanged);
         }

@@ -4,6 +4,7 @@ use eframe::egui;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Pos2, Shape, Vec2};
 
+use crate::common::UiEquals;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 
@@ -25,9 +26,9 @@ impl DottedBackgroundRenderer {
         assert!(scale > common::EPSILON, "view graph scale must be positive");
 
         if !self.inited
-            || crate::common::scale_changed(self.last_scale, scale)
-            || crate::common::pan_changed_v2(self.last_pan, pan)
-            || crate::common::pan_changed_v2(self.last_rect_size, rect_size)
+            || !self.last_scale.ui_equals(&scale)
+            || !self.last_pan.ui_equals(&pan)
+            || !self.last_rect_size.ui_equals(&rect_size)
         {
             self.rebuild_mesh(gui, ctx);
             self.last_scale = scale;

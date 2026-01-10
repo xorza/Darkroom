@@ -4,6 +4,7 @@ use egui::{PointerButton, Pos2, Sense};
 use graph::graph::{NodeId, PortAddress};
 use graph::prelude::{Binding, ExecutionStats};
 
+use crate::common::UiEquals;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -95,8 +96,8 @@ impl Default for ConnectionEndpoints {
 impl ConnectionEndpoints {
     fn update(&mut self, output_pos: Pos2, input_pos: Pos2) -> bool {
         let needs_rebuild = !self.inited
-            || crate::common::pos_changed_p2(self.output_pos, output_pos)
-            || crate::common::pos_changed_p2(self.input_pos, input_pos);
+            || !self.output_pos.ui_equals(&output_pos)
+            || !self.input_pos.ui_equals(&input_pos);
         if needs_rebuild {
             self.inited = true;
             self.output_pos = output_pos;

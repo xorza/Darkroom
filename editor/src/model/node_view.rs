@@ -3,7 +3,7 @@ use egui::Pos2;
 use graph::graph::NodeId;
 use serde::{Deserialize, Serialize};
 
-use crate::common::pos_changed_p2;
+use crate::common::UiEquals;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewNode {
@@ -29,7 +29,7 @@ impl KeyIndexKey<NodeId> for ViewNode {
 
 impl PartialEq for ViewNode {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && !pos_changed_p2(self.pos, other.pos)
+        self.id == other.id && self.pos.ui_equals(&other.pos)
     }
 }
 

@@ -4,6 +4,7 @@ use egui::{Galley, Pos2, Rect, Vec2, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
+use crate::common::UiEquals;
 use crate::gui::{Gui, graph_ctx::GraphContext};
 use common::key_index_vec::KeyIndexKey;
 
@@ -80,7 +81,7 @@ impl NodeLayout {
 
         let label_font = gui.style.sub_font.clone();
 
-        if !self.inited || crate::common::scale_changed(self.scale, gui.scale) {
+        if !self.inited || !self.scale.ui_equals(&gui.scale) {
             self.scale = gui.scale;
             self.inited = true;
 

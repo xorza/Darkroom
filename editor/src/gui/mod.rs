@@ -2,7 +2,7 @@ use std::{marker::PhantomData, ptr::NonNull};
 
 use egui::{Painter, Rect, Ui};
 
-use crate::{common::scale_changed, gui::style::Style};
+use crate::{common::UiEquals, gui::style::Style};
 
 pub mod background;
 pub mod connection_breaker;
@@ -63,7 +63,7 @@ impl<'a> Gui<'a> {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
 
-        if !scale_changed(self.scale, scale) {
+        if self.scale.ui_equals(&scale) {
             self.scale = scale;
             return;
         }

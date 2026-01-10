@@ -97,7 +97,7 @@ Undo/redo now keeps the current snapshot at the top of the undo stack, pops it o
 applies the new top snapshot without re-pushing, avoiding the extra duplicate state.
 `GraphUiInteraction.actions` now stores `GraphUiAction` values directly; actions carry their `node_id` (with
 `NodeSelected` using an `Option<NodeId>`), and a `ZoomPanChanged` action is emitted when pan or zoom changes.
-Zoom/pan change detection now uses `common::scale_changed` and `common::vec_changed` thresholds.
+Zoom/pan change detection now uses the `UiEquals` UI tolerance thresholds for scale and pan comparisons.
 `GraphUiInteraction` now lives in `editor/src/gui/graph_ui_interaction.rs` with helper methods for actions/errors,
 and call sites use `add_action`/`add_error`/`add_node_selected` instead of pushing directly.
 `GraphUiInteraction::add_pending_action` now flushes pending actions when mixing action kinds and keeps only the most

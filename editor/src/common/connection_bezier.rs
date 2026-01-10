@@ -1,7 +1,7 @@
 use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
-use crate::common::{bezier_helper, pos_changed_p2, scale_changed};
+use crate::common::{UiEquals, bezier_helper};
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::{Gui, style};
@@ -50,9 +50,9 @@ impl ConnectionBezier {
 
     pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         let needs_rebuild = !self.inited
-            || pos_changed_p2(self.start, start)
-            || pos_changed_p2(self.end, end)
-            || scale_changed(self.scale, scale);
+            || !self.start.ui_equals(&start)
+            || !self.end.ui_equals(&end)
+            || !self.scale.ui_equals(&scale);
         if !needs_rebuild {
             return;
         }
@@ -229,6 +229,6 @@ impl PartialEq for ConnectionBezierStyle {
     fn eq(&self, other: &Self) -> bool {
         self.start_color == other.start_color
             && self.end_color == other.end_color
-            && !scale_changed(self.stroke_width, other.stroke_width)
+            && self.stroke_width.ui_equals(&other.stroke_width)
     }
 }
