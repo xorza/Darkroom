@@ -52,6 +52,7 @@ pub struct GraphUi {
     connections: ConnectionUi,
     node_ui: NodeUi,
     dots_background: DottedBackgroundRenderer,
+    interaction: GraphUiInteraction,
 }
 
 #[derive(Debug, Default)]
@@ -84,6 +85,7 @@ impl GraphUi {
         self.connection_breaker.reset();
         self.connections = ConnectionUi::default();
         self.dots_background = DottedBackgroundRenderer::default();
+        self.interaction = GraphUiInteraction::default();
     }
 
     pub fn render(
@@ -92,8 +94,8 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
-        graph_ui_interaction: &mut GraphUiInteraction,
-    ) {
+    ) -> &GraphUiInteraction {
+        self.interaction.clear();
         let rect = gui.ui().available_rect_before_wrap();
         let rect = rect.shrink(gui.style.big_padding);
 
@@ -132,7 +134,7 @@ impl GraphUi {
             ctx.view_graph.selected_node_id = None;
         }
 
-        self.top_panel(&mut gui, &mut ctx, graph_ui_interaction);
+        self.top_panel(&mut gui, &mut ctx);
 
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(&mut gui, &mut ctx, &background_response, pointer_pos);
@@ -141,13 +143,13 @@ impl GraphUi {
         gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(&gui, &ctx);
         self.dots_background.render(&gui, &ctx);
-        self.render_connections(&mut gui, &mut ctx, graph_ui_interaction);
+        self.render_connections(&mut gui, &mut ctx);
 
         let drag_port_info = self.node_ui.render_nodes(
             &mut gui,
             &mut ctx,
             &mut self.graph_layout,
-            graph_ui_interaction,
+            &mut self.interaction,
             if self.state == InteractionState::BreakingConnections {
                 Some(&self.connection_breaker)
             } else {
@@ -160,13 +162,14 @@ impl GraphUi {
                 &mut gui,
                 &mut ctx,
                 &background_response,
-                graph_ui_interaction,
                 pointer_pos,
                 drag_port_info,
             );
         }
 
         gui.set_scale(1.0);
+
+        &self.interaction
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -175,10 +178,10 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
-        graph_ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) {
+        let graph_ui_interaction = &mut self.interaction;
         let primary_state = gui.ui().input(|input| {
             if input.pointer.primary_pressed() {
                 Some(PointerButtonState::Pressed)
@@ -290,12 +293,8 @@ impl GraphUi {
         }
     }
 
-    fn render_connections(
-        &mut self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext<'_>,
-        ui_interaction: &mut GraphUiInteraction,
-    ) {
+    fn render_connections(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>) {
+        let ui_interaction = &mut self.interaction;
         self.connections.render(
             gui,
             ctx,
@@ -315,12 +314,8 @@ impl GraphUi {
         }
     }
 
-    fn top_panel(
-        &self,
-        gui: &mut Gui<'_>,
-        ctx: &mut GraphContext,
-        graph_ui_interaction: &mut GraphUiInteraction,
-    ) {
+    fn top_panel(&mut self, gui: &mut Gui<'_>, ctx: &mut GraphContext) {
+        let graph_ui_interaction = &mut self.interaction;
         let mut fit_all = false;
         let mut view_selected = false;
         let mut reset_view = false;

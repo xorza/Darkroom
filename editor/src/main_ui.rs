@@ -1,6 +1,6 @@
 use crate::app_data::AppData;
 use crate::gui::Gui;
-use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
+use crate::gui::graph_ui::GraphUi;
 use crate::gui::style::Style;
 use eframe::egui;
 use egui::{Frame, Sense};
@@ -24,7 +24,6 @@ impl UiContext {
 pub struct MainUi {
     pub graph_ui: GraphUi,
     pub ui_context: UiContext,
-    pub graph_ui_interaction: GraphUiInteraction,
 
     pub arena: bumpalo::Bump,
 }
@@ -34,7 +33,6 @@ impl MainUi {
         Self {
             graph_ui: GraphUi::default(),
             ui_context: UiContext::new(ctx),
-            graph_ui_interaction: GraphUiInteraction::default(),
             arena: bumpalo::Bump::new(),
         }
     }
@@ -66,9 +64,6 @@ impl MainUi {
         app_data.update_status();
 
         egui::TopBottomPanel::top("top_panel")
-            // .frame(Frame {
-            //     ..Default::default()
-            // })
             .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
@@ -117,19 +112,9 @@ impl MainUi {
                 ui.label(&app_data.status);
             });
 
-        // egui::TopBottomPanel::bottom("run_panel")
-        //     .show_separator_line(false)
-        //     .show(ctx, |ui| {
-        //         ui.horizontal(|ui| {
-        //             if ui.button("Run").clicked() {
-        //                 self.run_graph(app_data);
-        //             }
-        //         });
-        //     });
-
         let style = Style::new(1.0);
 
-        egui::CentralPanel::default()
+        let interaction = egui::CentralPanel::default()
             .frame(Frame::NONE)
             .show(ctx, |ui| {
                 let mut gui = Gui::new(ui, style);
@@ -139,13 +124,11 @@ impl MainUi {
                     &mut app_data.view_graph,
                     app_data.execution_stats.as_ref(),
                     &app_data.func_lib,
-                    &mut self.graph_ui_interaction,
-                );
-            });
+                )
+            })
+            .inner;
 
-        app_data.handle_graph_ui_actions(&self.graph_ui_interaction);
-
-        self.graph_ui_interaction.clear();
+        app_data.handle_graph_ui_actions(interaction);
         self.arena.reset();
     }
 }

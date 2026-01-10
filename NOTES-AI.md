@@ -81,6 +81,8 @@ The editor now overrides `eframe::App::clear_color` to use `visuals.panel_fill`,
 CentralPanel outer margin matches the top/bottom panel and menu background.
 Graph UI interactions now collect connection errors (like cycle detection) and surface the latest one via the status
 bar in `AppData::handle_graph_ui_actions`.
+`GraphUi` now owns its `GraphUiInteraction` state and `GraphUi::render` returns a reference to the interaction payload
+instead of storing it on `MainUi`.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
