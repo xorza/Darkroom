@@ -6,8 +6,10 @@ use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
+use egui::epaint::CornerRadiusF32;
 use egui::{
-    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
+    Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind,
+    Vec2, pos2, vec2,
 };
 use graph::execution_graph::ExecutedNodeStats;
 use graph::graph::{Node, NodeId};
@@ -180,7 +182,12 @@ fn render_body(
 
         gui.painter().rect(
             header_rect,
-            corner_radius,
+            CornerRadiusF32 {
+                nw: corner_radius,
+                ne: corner_radius,
+                sw: 0.0,
+                se: 0.0,
+            },
             gui.style.active_bg_fill,
             Stroke::NONE,
             StrokeKind::Middle,
