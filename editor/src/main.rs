@@ -100,6 +100,17 @@ impl eframe::App for ScenariumEditor {
         let _ = frame;
         self.main_ui.render(&mut self.app_data, ctx);
     }
+
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        let color = visuals.panel_fill;
+        [
+            color.r() as f32 / 255.0,
+            color.g() as f32 / 255.0,
+            color.b() as f32 / 255.0,
+            color.a() as f32 / 255.0,
+        ]
+    }
+
     fn on_exit(&mut self) {
         self.app_data.worker.exit();
     }
