@@ -108,6 +108,7 @@ Undo snapshots are now LZ4-compressed (`lz4_flex`), storing compressed bytes ins
 Undo/redo stacks now store ranges into backing byte buffers (`undo_bytes`/`redo_bytes`) to reduce per-snapshot
 allocations.
 Undo/redo now truncates backing buffers when popping the most recent snapshot to avoid unbounded growth.
+`UndoStack` is now generic over serde types and constructed with a `FileFormat`.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

@@ -22,6 +22,8 @@ pub struct Status {
 
 pub type SharedStatus = Shared<Status>;
 
+const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
+
 #[derive(Debug)]
 pub struct AppData {
     pub worker: Worker,
@@ -35,7 +37,7 @@ pub struct AppData {
 
     pub shared_status: SharedStatus,
 
-    undo_stack: UndoStack,
+    undo_stack: UndoStack<ViewGraph>,
 }
 
 impl AppData {
@@ -56,7 +58,7 @@ impl AppData {
 
             shared_status,
 
-            undo_stack: UndoStack::default(),
+            undo_stack: UndoStack::new(UNDO_FILE_FORMAT),
         }
     }
 
