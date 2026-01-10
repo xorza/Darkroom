@@ -110,6 +110,7 @@ impl ConnectionEndpoints {
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    missing_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
     pub(crate) temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: ConnectionBezier,

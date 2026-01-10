@@ -7,6 +7,8 @@ use crate::gui::{Gui, polyline_mesh::PolylineMesh};
 const MIN_POINT_DISTANCE: f32 = 4.0;
 const MAX_BREAKER_LENGTH: f32 = 900.0;
 
+const FEATHER: f32 = 0.8;
+
 #[derive(Debug)]
 pub struct ConnectionBreaker {
     mesh: PolylineMesh,
@@ -89,6 +91,7 @@ impl ConnectionBreaker {
                 color,
                 color,
                 gui.style.connections.breaker_stroke.width,
+                FEATHER,
             );
             self.built_len = point_len;
         }

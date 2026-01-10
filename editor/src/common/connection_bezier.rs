@@ -24,10 +24,18 @@ pub struct ConnectionBezier {
     hovered: bool,
     broke: bool,
     points_dirty: bool,
+    feather: f32,
 }
 
 impl ConnectionBezier {
     pub const DEFAULT_POINTS: usize = 25;
+
+    pub fn new(feather: f32) -> Self {
+        Self {
+            feather,
+            ..Default::default()
+        }
+    }
 
     pub fn mesh(&self) -> &Mesh {
         self.polyline.mesh()
@@ -148,8 +156,12 @@ impl ConnectionBezier {
         self.hovered = hovered;
         self.broke = broke;
         self.stroke_width = style.stroke_width;
-        self.polyline
-            .rebuild(style.start_color, style.end_color, style.stroke_width);
+        self.polyline.rebuild(
+            style.start_color,
+            style.end_color,
+            style.stroke_width,
+            self.feather,
+        );
         self.points_dirty = false;
     }
 }
@@ -194,6 +206,7 @@ impl Default for ConnectionBezier {
             hovered: false,
             broke: false,
             points_dirty: false,
+            feather: 0.0,
         }
     }
 }

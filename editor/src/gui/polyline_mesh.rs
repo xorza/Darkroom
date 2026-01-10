@@ -3,8 +3,6 @@ use std::sync::Arc;
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
 use egui::{Color32, Painter, Pos2, Shape, Vec2};
 
-const FEATHER: f32 = 0.8;
-
 #[derive(Debug, Clone)]
 pub struct PolylineMesh {
     mesh: Arc<Mesh>,
@@ -30,11 +28,11 @@ impl PolylineMesh {
         &mut self.points
     }
 
-    pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32) {
+    pub fn rebuild(&mut self, start_color: Color32, end_color: Color32, width: f32, feather: f32) {
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
         mesh.clear();
-        add_curve_segments_to_mesh(mesh, points, 0, start_color, end_color, width);
+        add_curve_segments_to_mesh(mesh, points, 0, start_color, end_color, width, feather);
     }
 
     pub fn append_segments_from_points(
@@ -43,10 +41,19 @@ impl PolylineMesh {
         start_color: Color32,
         end_color: Color32,
         width: f32,
+        feather: f32,
     ) {
         let points = self.points.as_slice();
         let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        add_curve_segments_to_mesh(mesh, points, start_point, start_color, end_color, width);
+        add_curve_segments_to_mesh(
+            mesh,
+            points,
+            start_point,
+            start_color,
+            end_color,
+            width,
+            feather,
+        );
     }
 
     pub fn clear_mesh(&mut self) {
@@ -101,12 +108,11 @@ fn add_curve_segments_to_mesh(
     start_color: Color32,
     end_color: Color32,
     width: f32,
+    feather: f32,
 ) {
     if points.len() < 2 {
         return;
     }
-
-    let feather = FEATHER;
 
     assert!(points.len() >= 2);
     assert!(width > 0.0);
