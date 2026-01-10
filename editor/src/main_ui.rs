@@ -134,18 +134,16 @@ impl MainUi {
         let style = Style::new(1.0);
 
         egui::CentralPanel::default()
-            .frame(Frame {
-                inner_margin: 0.0.into(),
-                stroke: style.inactive_bg_stroke,
-                corner_radius: style.corner_radius.into(),
-                outer_margin: style.padding.into(),
-
-                ..Default::default()
-            })
+            // .frame(Frame {
+            //     inner_margin: 0.0.into(),
+            //     stroke: style.inactive_bg_stroke,
+            //     corner_radius: style.corner_radius.into(),
+            //     outer_margin: style.padding.into(),
+            //     ..Default::default()
+            // })
+            .frame(Frame::NONE)
             .show(ctx, |ui| {
-                let rect = ui
-                    .available_rect_before_wrap()
-                    .shrink(style.inactive_bg_stroke.width);
+                let rect = ui.available_rect_before_wrap();
                 let mut graph_ui = ui.new_child(
                     egui::UiBuilder::new()
                         .id_salt("graph_ui")
