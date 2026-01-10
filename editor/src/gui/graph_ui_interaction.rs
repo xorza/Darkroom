@@ -6,7 +6,7 @@ use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    actions1: Vec<GraphUiAction>,
+    action1: Option<GraphUiAction>,
     actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
@@ -50,7 +50,7 @@ pub enum GraphUiAction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.actions1.clear();
+        self.action1 = None;
         self.actions2.clear();
         self.errors.clear();
         self.run = false;
@@ -58,8 +58,8 @@ impl GraphUiInteraction {
 
     pub fn actions_stacks(&self) -> Vec<&[GraphUiAction]> {
         let mut slices = Vec::with_capacity(2);
-        if !self.actions1.is_empty() {
-            slices.push(self.actions1.as_slice());
+        if let Some(action1) = self.action1.take() {
+            slices.push([action1]);
         }
         if !self.actions2.is_empty() {
             slices.push(self.actions2.as_slice());
@@ -91,7 +91,7 @@ impl GraphUiInteraction {
         let pending = self.pending_action.take().unwrap();
         assert!(!pending.immediate());
         if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
-            self.actions1.push(pending);
+            self.action1 = Some(pending);
             self.pending_action = Some(action);
             return;
         }
@@ -135,7 +135,7 @@ impl GraphUiInteraction {
                 });
             }
             _ => {
-                self.actions1.push(pending);
+                self.action1 = Some(pending);
                 self.pending_action = Some(action);
             }
         }
@@ -143,7 +143,7 @@ impl GraphUiInteraction {
 
     pub fn flush(&mut self) {
         if let Some(action) = self.pending_action.take() {
-            self.actions1.push(action);
+            self.action1 = Some(action);
         }
     }
 }
