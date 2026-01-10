@@ -63,6 +63,8 @@ impl MainUi {
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
         app_data.update_status();
 
+        self.handle_undo_shortcut(ctx);
+
         let style = Style::new(1.0);
         ctx.style_mut(|egui_style| {
             style.apply(egui_style);
@@ -131,5 +133,15 @@ impl MainUi {
 
         app_data.handle_graph_ui_actions(interaction);
         self.arena.reset();
+    }
+
+    fn handle_undo_shortcut(&mut self, ctx: &egui::Context) {
+        let undo_pressed =
+            ctx.input(|input| input.key_pressed(egui::Key::Z) && input.modifiers.command);
+        if !undo_pressed {
+            return;
+        }
+
+        // TODO: wire undo stack
     }
 }
