@@ -74,8 +74,11 @@ impl GraphUi {
         func_lib: &FuncLib,
     ) -> &GraphUiInteraction {
         self.interaction.clear();
-        let rect = gui.ui().available_rect_before_wrap();
-        let rect = rect.shrink(gui.style.big_padding);
+
+        let rect = gui
+            .ui()
+            .available_rect_before_wrap()
+            .shrink(gui.style.big_padding);
 
         gui.painter().rect(
             rect,
