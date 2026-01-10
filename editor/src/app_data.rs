@@ -170,7 +170,11 @@ impl AppData {
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
-        if !graph_ui_interaction.actions.is_empty() {
+        if graph_ui_interaction
+            .actions
+            .iter()
+            .any(|action| action.affects_computation())
+        {
             self.redo_stack.clear();
             self.execution_stats = None;
             self.graph_updated = true;

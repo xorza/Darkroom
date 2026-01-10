@@ -575,3 +575,17 @@ impl std::fmt::Display for Error {
         }
     }
 }
+
+impl GraphUiAction {
+    pub fn affects_computation(&self) -> bool {
+        match self {
+            GraphUiAction::NodeRemoved { .. }
+            | GraphUiAction::InputChanged { .. }
+            | GraphUiAction::CacheToggled { .. } => true,
+
+            GraphUiAction::NodeMoved { .. }
+            | GraphUiAction::NodeSelected { .. }
+            | GraphUiAction::ZoomPanChanged => false,
+        }
+    }
+}
