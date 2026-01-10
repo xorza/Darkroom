@@ -282,10 +282,7 @@ impl GraphUi {
                             Ok((input_node_id, input_idx)) => graph_ui_interaction
                                 .actions
                                 .push((input_node_id, GraphUiAction::InputChanged { input_idx })),
-                            Err(err) => {
-                                graph_ui_interaction.errors.push(err);
-                                //
-                            }
+                            Err(err) => graph_ui_interaction.errors.push(err),
                         }
                     }
                 }
