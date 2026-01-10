@@ -6,10 +6,15 @@ pub use full_serde_undo_stack::FullSerdeUndoStack;
 
 use crate::gui::graph_ui_interaction::GraphUiAction;
 
+pub trait UndoAction<T: Debug> {
+    fn apply(&self, value: &mut T);
+    fn undo(&self, value: &mut T);
+}
+
 pub trait UndoStack<T: Debug>: Debug {
     fn reset_with(&mut self, value: &T);
     // todo extract trait for GraphUiAction and make it intoiter
-    fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>);
+    fn push_current(&mut self, value: &T, actions: impl IntoIterator<Item = impl UndoAction<T>>);
     fn clear_redo(&mut self);
     fn undo(&mut self, value: &mut T) -> bool;
     fn redo(&mut self, value: &mut T) -> bool;
@@ -17,6 +22,8 @@ pub trait UndoStack<T: Debug>: Debug {
 
 #[cfg(test)]
 pub mod undo_stack_tests {
+    use crate::common::undo_stack::UndoAction;
+
     use super::UndoStack;
     use serde::{Deserialize, Serialize};
 
@@ -24,6 +31,13 @@ pub mod undo_stack_tests {
     pub struct TestState {
         pub value: i32,
         pub label: String,
+    }
+
+    pub struct TestUndoAction;
+
+    impl UndoAction<TestState> for TestUndoAction {
+        fn apply(&self, _state: &mut TestState) {}
+        fn undo(&self, _state: &mut TestState) {}
     }
 
     pub trait UndoStackTestAccess {
@@ -62,7 +76,7 @@ pub mod undo_stack_tests {
             value: 2,
             label: "b".to_string(),
         };
-        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
         assert!(stack.undo_len() >= 2);
 
         let mut undone = state_b.clone();
@@ -89,7 +103,7 @@ pub mod undo_stack_tests {
             label: "b".to_string(),
         };
         stack.reset_with(&state_a);
-        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
         let mut undone = state_b.clone();
         let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
@@ -114,13 +128,13 @@ pub mod undo_stack_tests {
             label: "c".to_string(),
         };
         stack.reset_with(&state_a);
-        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
         let mut undone = state_b.clone();
         let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
         assert!(did_undo);
 
-        stack.push_current(&state_c, Vec::new());
+        stack.push_current(&state_c, Vec::<TestUndoAction>::new());
         assert_eq!(stack.redo_len(), 0);
     }
 
@@ -142,8 +156,8 @@ pub mod undo_stack_tests {
             F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b, Vec::new());
-        stack.push_current(&state_c, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
+        stack.push_current(&state_c, Vec::<TestUndoAction>::new());
 
         assert_eq!(stack.undo_len(), 1);
         let mut output = state_c.clone();
@@ -169,8 +183,8 @@ pub mod undo_stack_tests {
         let max_limit = F::limit_for_snapshots(&[state_a.clone(), state_b.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b, Vec::new());
-        stack.push_current(&state_c, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
+        stack.push_current(&state_c, Vec::<TestUndoAction>::new());
 
         assert_eq!(stack.undo_len(), 2);
         let mut output = state_c.clone();
@@ -200,8 +214,8 @@ pub mod undo_stack_tests {
             F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b, Vec::new());
-        stack.push_current(&state_c, Vec::new());
+        stack.push_current(&state_b, Vec::<TestUndoAction>::new());
+        stack.push_current(&state_c, Vec::<TestUndoAction>::new());
 
         assert!(stack.undo_len() <= 1);
     }
