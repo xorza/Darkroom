@@ -110,6 +110,7 @@ allocations.
 Undo/redo now truncates backing buffers when popping the most recent snapshot to avoid unbounded growth.
 `UndoStack` is now generic over serde types and constructed with a `FileFormat`.
 Undo stack tests now validate buffer growth/shrink behavior and redo buffer clearing.
+`MainUi::handle_undo_shortcut` now handles redo on Cmd/Ctrl+Shift+Z.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

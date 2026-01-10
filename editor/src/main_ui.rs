@@ -136,10 +136,16 @@ impl MainUi {
     }
 
     fn handle_undo_shortcut(&mut self, ctx: &egui::Context, app_data: &mut AppData) {
-        let undo_pressed =
-            ctx.input(|input| input.key_pressed(egui::Key::Z) && input.modifiers.command);
+        let undo_pressed = ctx.input(|input| {
+            input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift
+        });
+        let redo_pressed = ctx.input(|input| {
+            input.key_pressed(egui::Key::Z) && input.modifiers.command && input.modifiers.shift
+        });
         if undo_pressed {
             app_data.undo();
+        } else if redo_pressed {
+            app_data.redo();
         }
     }
 }
