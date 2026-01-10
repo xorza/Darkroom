@@ -136,7 +136,7 @@ impl GraphUi {
 
         gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(&mut gui, &ctx);
-        // self.background.render(&mut gui, &ctx);
+        self.background.render(&mut gui, &ctx);
         self.render_connections(&mut gui, &mut ctx, ui_interaction);
 
         let drag_port_info = self.node_ui.render_nodes(
@@ -334,7 +334,7 @@ impl GraphUi {
                     ui.set_min_width(panel_width);
                     ui.set_max_width(panel_width);
                     let frame = Frame::NONE
-                        .fill(Color32::from_black_alpha(160))
+                        .fill(Color32::from_black_alpha(32))
                         .inner_margin(small_padding);
                     frame.show(ui, |ui| {
                         ui.set_min_width(panel_width - small_padding * 2.0);
