@@ -91,7 +91,6 @@ impl GraphUiInteraction {
                 },
                 GraphUiAction::NodeMoved {
                     node_id: node_id2,
-
                     after,
                     ..
                 },
