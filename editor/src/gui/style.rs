@@ -34,7 +34,7 @@ pub struct Style {
     pub small_corner_radius: f32,
 
     pub checked_bg_fill: Color32,
-    pub checked_text_color: Color32,
+    pub dark_text_color: Color32,
 
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
@@ -156,7 +156,6 @@ impl Style {
 
             text_color: COLOR_TEXT,
             noninteractive_text_color: COLOR_TEXT_NONINTERACTIVE,
-            checked_text_color: COLOR_TEXT_CHECKED,
 
             noninteractive_bg_fill: COLOR_BG_NONINTERACTIVE,
             hover_bg_fill: COLOR_BG_HOVER,
@@ -164,6 +163,8 @@ impl Style {
             inactive_bg_stroke,
             active_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_ACTIVE),
             active_bg_fill: COLOR_BG_ACTIVE,
+
+            dark_text_color: COLOR_TEXT_CHECKED,
             checked_bg_fill: COLOR_BG_CHECKED,
 
             big_padding: scaled(6.0),
@@ -249,8 +250,7 @@ impl Style {
         visuals.code_bg_color = self.inactive_bg_fill;
         visuals.text_edit_bg_color = Some(self.active_bg_fill);
         visuals.selection.bg_fill = self.checked_bg_fill;
-        visuals.selection.stroke =
-            Stroke::new(self.active_bg_stroke.width, self.checked_text_color);
+        visuals.selection.stroke = Stroke::new(self.active_bg_stroke.width, self.dark_text_color);
 
         visuals.widgets.noninteractive.bg_fill = self.noninteractive_bg_fill;
         visuals.widgets.noninteractive.bg_stroke = self.inactive_bg_stroke;

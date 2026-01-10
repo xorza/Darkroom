@@ -74,7 +74,7 @@ impl<'a> ToggleButton<'a> {
         let text_color = if !self.enabled {
             gui.style.noninteractive_text_color
         } else if self.checked {
-            gui.style.checked_text_color
+            gui.style.dark_text_color
         } else {
             gui.style.text_color
         };

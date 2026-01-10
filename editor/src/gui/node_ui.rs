@@ -71,7 +71,7 @@ impl NodeUi {
 
             let node_execution_info = node_execution_info(ctx.execution_stats, node_id);
 
-            render_body(gui, node_layout, is_selected, &node_execution_info);
+            render_body(gui, node_layout, is_selected, &node_execution_info, breaker);
             if render_remove_btn(gui, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
@@ -139,8 +139,10 @@ fn render_body(
     node_layout: &NodeLayout,
     selected: bool,
     node_execution_info: &NodeExecutionInfo<'_>,
+    breaker: Option<&ConnectionBreaker>,
 ) {
     let corner_radius = gui.style.corner_radius;
+    let breaker_hit = breaker.is_some_and(|breaker| breaker.intersects_rect(node_layout.body_rect));
 
     let shadow = match *node_execution_info {
         NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
@@ -176,9 +178,13 @@ fn render_body(
             gui.style.noninteractive_text_color,
         );
     }
-    if selected {
+    if selected || breaker_hit {
         let mut header_rect = node_layout.body_rect;
         header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
+        let header_fill = breaker_hit.then_else(
+            gui.style.connections.breaker_stroke.color,
+            gui.style.active_bg_fill,
+        );
 
         gui.painter().rect(
             header_rect,
@@ -188,7 +194,7 @@ fn render_body(
                 sw: 0.0,
                 se: 0.0,
             },
-            gui.style.active_bg_fill,
+            header_fill,
             Stroke::NONE,
             StrokeKind::Middle,
         );
@@ -201,7 +207,7 @@ fn render_body(
     gui.painter().galley(
         title_pos,
         node_layout.title_galley.clone(),
-        gui.style.text_color,
+        breaker_hit.then_else(gui.style.dark_text_color, gui.style.text_color),
     );
 }
 
