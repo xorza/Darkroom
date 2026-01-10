@@ -30,7 +30,7 @@ pub enum GraphUiAction {
         node_id: NodeId,
     },
     NodeSelected {
-        node_id: Option<NodeId>,
+        after: Option<NodeId>,
     },
     ZoomPanChanged,
 }
