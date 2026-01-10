@@ -107,7 +107,7 @@ impl GraphUi {
             .new_child(egui::UiBuilder::new().id_salt("graph_ui").max_rect(rect));
 
         let mut gui = Gui::new(&mut graph_ui, gui.style.clone());
-        gui.ui().clip_rect();
+        gui.ui().set_clip_rect(rect);
 
         let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
 
