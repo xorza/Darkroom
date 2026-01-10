@@ -120,3 +120,68 @@ fn pop_tail_bytes(bytes: &mut Vec<u8>, range: &std::ops::Range<usize>) {
         bytes.truncate(range.start);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    struct TestState {
+        value: i32,
+        label: String,
+    }
+
+    #[test]
+    fn undo_redo_shrinks_buffers() {
+        let mut stack = UndoStack::new(FileFormat::Json);
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        stack.reset_with(&state_a);
+        let len_after_a = stack.undo_bytes.len();
+        assert!(len_after_a > 0);
+        assert!(stack.redo_bytes.is_empty());
+
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        stack.push_current(&state_b);
+        let len_after_b = stack.undo_bytes.len();
+        assert!(len_after_b > len_after_a);
+
+        let undone = stack.undo().expect("undo should return prior state");
+        assert_eq!(undone, state_a);
+        assert_eq!(stack.undo_bytes.len(), len_after_a);
+        assert!(!stack.redo_bytes.is_empty());
+
+        let redo_len = stack.redo_bytes.len();
+        let redone = stack.redo().expect("redo should return next state");
+        assert_eq!(redone, state_b);
+        assert!(redo_len > 0);
+        assert!(stack.redo_bytes.is_empty());
+    }
+
+    #[test]
+    fn clear_redo_empties_buffer() {
+        let mut stack = UndoStack::new(FileFormat::Json);
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.undo();
+        assert!(!stack.redo_bytes.is_empty());
+
+        stack.clear_redo();
+        assert!(stack.redo_bytes.is_empty());
+        assert!(stack.redo_stack.is_empty());
+    }
+}
