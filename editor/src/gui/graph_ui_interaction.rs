@@ -10,7 +10,7 @@ pub(crate) struct GraphUiInteraction {
     pub errors: Vec<Error>,
     pub run: bool,
 
-    pending_actions: Vec<GraphUiAction>,
+    pending_actions: Option<GraphUiAction>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,22 +67,23 @@ impl GraphUiInteraction {
     }
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
-        let action_kind = std::mem::discriminant(&action);
-        let has_other_kind = self
-            .pending_actions
-            .iter()
-            .any(|pending| std::mem::discriminant(pending) != action_kind);
-        if has_other_kind {
-            self.flush();
+        if let Some(pending) = self.pending_actions.take() {
+            // if matches!(&pending, &action) {
+
+            //     //
+            // } else {
+            //     self.actions.push(pending);
+            // }
         }
 
-        self.pending_actions
-            .retain(|pending| std::mem::discriminant(pending) != action_kind);
-        self.pending_actions.push(action);
+        self.pending_actions = Some(action);
     }
 
     fn flush(&mut self) {
-        self.actions.append(&mut self.pending_actions);
+        self.pending_actions.take().is_some_and(|action| {
+            self.actions.push(action);
+            true
+        });
     }
 }
 
