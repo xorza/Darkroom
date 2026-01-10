@@ -55,6 +55,9 @@ where
         {
             return;
         }
+        if !self.redo_stack.is_empty() {
+            self.clear_redo();
+        }
         let range = append_bytes(&mut self.undo_bytes, &snapshot);
         self.undo_stack.push(range);
         enforce_stack_limit(
@@ -222,21 +225,21 @@ mod tests {
             FullSerdeUndoStack::new(FileFormat::Json, limit)
         }
 
-        fn limit_for_two(a: &TestState, b: &TestState) -> usize {
-            let snapshot_a = serialize_snapshot(a, FileFormat::Json);
-            let snapshot_b = serialize_snapshot(b, FileFormat::Json);
-            (snapshot_a.len() + snapshot_b.len()).max(1)
-        }
-
-        fn limit_for_three(a: &TestState, b: &TestState, c: &TestState) -> usize {
-            let snapshot_a = serialize_snapshot(a, FileFormat::Json);
-            let snapshot_b = serialize_snapshot(b, FileFormat::Json);
-            let snapshot_c = serialize_snapshot(c, FileFormat::Json);
-            snapshot_a
-                .len()
-                .max(snapshot_b.len())
-                .max(snapshot_c.len())
-                .max(1)
+        fn limit_for_snapshots(states: &[TestState]) -> usize {
+            let mut max_len = 0;
+            let mut sum_len = 0;
+            for state in states {
+                let snapshot = serialize_snapshot(state, FileFormat::Json);
+                let len = snapshot.len();
+                max_len = max_len.max(len);
+                sum_len += len;
+            }
+            match states.len() {
+                0 => 1,
+                1 => max_len.max(1),
+                2 => sum_len.max(1),
+                _ => max_len.max(1),
+            }
         }
     }
 

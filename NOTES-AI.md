@@ -123,6 +123,7 @@ KeyIndexVec equality now has a unit test covering order independence and value c
 `editor::common::ui_equals` now defines a `UiEquals` trait with `ui_equals` for `f32`, `Vec2`, and `Pos2` using UI tolerance thresholds.
 Undo history now uses a `UndoStack` trait with a `FullSerdeUndoStack` implementation that stores full serialized snapshots.
 `FullSerdeUndoStack` now lives in `editor/src/common/undo_stack/full_serde_undo_stack.rs`.
+`FullSerdeUndoStack` now clears redo history on new snapshot pushes.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.

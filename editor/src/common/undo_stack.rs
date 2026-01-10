@@ -32,15 +32,16 @@ pub mod undo_stack_tests {
         type Stack: UndoStack<TestState> + UndoStackTestAccess;
 
         fn make(limit: usize) -> Self::Stack;
-        fn limit_for_two(a: &TestState, b: &TestState) -> usize;
-        fn limit_for_three(a: &TestState, b: &TestState, c: &TestState) -> usize;
+        fn limit_for_snapshots(states: &[TestState]) -> usize;
     }
 
     pub fn run_all<F: StackFactory>() {
         undo_redo_roundtrip::<F>();
         clear_redo_empties_stack::<F>();
+        redo_invalidated_on_new_push::<F>();
         undo_stack_drops_oldest_when_over_limit::<F>();
         undo_stack_keeps_two_snapshots_with_two_snapshot_budget::<F>();
+        undo_stack_respects_single_snapshot_limit::<F>();
         max_stack_limit_must_be_positive::<F>();
     }
 
@@ -89,6 +90,29 @@ pub mod undo_stack_tests {
         assert_eq!(stack.redo_len(), 0);
     }
 
+    fn redo_invalidated_on_new_push<F: StackFactory>() {
+        let mut stack = F::make(1024 * 1024);
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        let state_c = TestState {
+            value: 3,
+            label: "c".to_string(),
+        };
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.undo();
+        assert_eq!(stack.redo_len(), 1);
+
+        stack.push_current(&state_c);
+        assert_eq!(stack.redo_len(), 0);
+    }
+
     fn undo_stack_drops_oldest_when_over_limit<F: StackFactory>() {
         let state_a = TestState {
             value: 1,
@@ -103,7 +127,8 @@ pub mod undo_stack_tests {
             label: "c".to_string(),
         };
 
-        let max_limit = F::limit_for_three(&state_a, &state_b, &state_c);
+        let max_limit =
+            F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
@@ -127,7 +152,7 @@ pub mod undo_stack_tests {
             label: "c".to_string(),
         };
 
-        let max_limit = F::limit_for_two(&state_a, &state_b);
+        let max_limit = F::limit_for_snapshots(&[state_a.clone(), state_b.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
@@ -136,6 +161,30 @@ pub mod undo_stack_tests {
         assert_eq!(stack.undo_len(), 2);
         assert_eq!(stack.undo().unwrap(), state_b);
         assert!(stack.undo().is_none());
+    }
+
+    fn undo_stack_respects_single_snapshot_limit<F: StackFactory>() {
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        let state_c = TestState {
+            value: 3,
+            label: "c".to_string(),
+        };
+
+        let max_limit =
+            F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
+        let mut stack = F::make(max_limit);
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.push_current(&state_c);
+
+        assert!(stack.undo_len() <= 1);
     }
 
     fn max_stack_limit_must_be_positive<F: StackFactory>() {
