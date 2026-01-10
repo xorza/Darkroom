@@ -51,6 +51,7 @@ impl GraphUiInteraction {
         self.actions.clear();
         self.errors.clear();
         self.run = false;
+        self.pending_actions = None;
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
@@ -68,22 +69,20 @@ impl GraphUiInteraction {
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
         if let Some(pending) = self.pending_actions.take() {
-            // if matches!(&pending, &action) {
-
-            //     //
-            // } else {
-            //     self.actions.push(pending);
-            // }
+            if std::mem::discriminant(&pending) == std::mem::discriminant(&action) {
+                //
+            } else {
+                self.actions.push(pending);
+            }
+        } else {
+            self.pending_actions = Some(action);
         }
-
-        self.pending_actions = Some(action);
     }
 
     fn flush(&mut self) {
-        self.pending_actions.take().is_some_and(|action| {
+        if let Some(action) = self.pending_actions.take() {
             self.actions.push(action);
-            true
-        });
+        }
     }
 }
 

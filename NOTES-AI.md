@@ -129,6 +129,7 @@ Input change actions now include before/after `Binding` values.
 Node removed actions now include the removed `ViewNode` clone and incoming connections that were cleared.
 Node moved actions now include before/after positions as `Vec2`.
 Node selection and zoom/pan actions now include before/after state values.
+Graph UI pending actions now flush per-action kind and are cleared on reset.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.

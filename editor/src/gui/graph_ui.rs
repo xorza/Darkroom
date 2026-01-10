@@ -402,7 +402,7 @@ impl GraphUi {
     ) {
         let prev_scale = ctx.view_graph.scale;
         let prev_pan = ctx.view_graph.pan;
-        
+
         let (zoom_delta, pan) = {
             let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
 
