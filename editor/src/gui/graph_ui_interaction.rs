@@ -7,6 +7,7 @@ pub(crate) struct GraphUiInteraction {
     pub actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
+    pending_actions: Vec<GraphUiAction>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -27,16 +28,36 @@ impl GraphUiInteraction {
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
-        self.actions.push(action);
+        match &action {
+            GraphUiAction::CacheToggled { .. }
+            | GraphUiAction::InputChanged { .. }
+            | GraphUiAction::NodeRemoved { .. } => {
+                self.flush();
+                self.actions.push(action);
+            }
+            GraphUiAction::NodeMoved { node_id } => {
+                self.add_pending_action(GraphUiAction::NodeMoved { node_id: *node_id });
+            }
+            GraphUiAction::NodeSelected { node_id } => {
+                self.add_pending_action(GraphUiAction::NodeSelected { node_id: *node_id });
+            }
+            GraphUiAction::ZoomPanChanged => {
+                self.add_pending_action(GraphUiAction::ZoomPanChanged);
+            }
+        }
     }
 
     pub fn add_error(&mut self, error: Error) {
         self.errors.push(error);
     }
 
-    // pub fn add_node_selected(&mut self, node_id: Option<NodeId>) {
-    //     self.add_action(GraphUiAction::NodeSelected { node_id });
-    // }
+    fn add_pending_action(&mut self, action: GraphUiAction) {
+        self.pending_actions.push(action);
+    }
+
+    fn flush(&mut self) {
+        self.actions.extend(self.pending_actions.drain(..));
+    }
 }
 
 impl GraphUiAction {
