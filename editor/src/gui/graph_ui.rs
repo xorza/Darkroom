@@ -402,10 +402,7 @@ impl GraphUi {
         if crate::common::scale_changed(prev_scale, ctx.view_graph.scale)
             || crate::common::pan_changed_v2(prev_pan, ctx.view_graph.pan)
         {
-
-            // todo only when stopped panning and zooming
-
-            // self.interaction.add_action(GraphUiAction::ZoomPanChanged);
+            self.interaction.add_action(GraphUiAction::ZoomPanChanged);
         }
     }
 }
