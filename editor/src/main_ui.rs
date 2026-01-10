@@ -42,7 +42,7 @@ impl MainUi {
     }
 
     fn empty(&mut self, app_data: &mut AppData) {
-        self.graph_ui.reset();
+        self.graph_ui = GraphUi::default();
         app_data.empty_graph();
     }
 
@@ -51,12 +51,12 @@ impl MainUi {
     }
 
     pub fn load(&mut self, app_data: &mut AppData) {
-        self.graph_ui.reset();
+        self.graph_ui = GraphUi::default();
         app_data.load_graph();
     }
 
     pub fn test_graph(&mut self, app_data: &mut AppData) {
-        self.graph_ui.reset();
+        self.graph_ui = GraphUi::default();
         app_data.load_test_graph();
     }
 

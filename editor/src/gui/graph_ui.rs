@@ -58,15 +58,6 @@ pub struct GraphUi {
 }
 
 impl GraphUi {
-    pub fn reset(&mut self) {
-        self.state = InteractionState::Idle;
-        self.graph_layout = GraphLayout::default();
-        self.connection_breaker.reset();
-        self.connections = ConnectionUi::default();
-        self.dots_background = DottedBackgroundRenderer::default();
-        self.interaction = GraphUiInteraction::default();
-    }
-
     pub fn render(
         &mut self,
         gui: &mut Gui<'_>,

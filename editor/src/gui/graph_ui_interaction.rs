@@ -51,7 +51,6 @@ impl GraphUiInteraction {
         self.actions.clear();
         self.errors.clear();
         self.run = false;
-        self.pending_action = None;
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
