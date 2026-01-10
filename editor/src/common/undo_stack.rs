@@ -4,9 +4,12 @@ mod full_serde_undo_stack;
 
 pub use full_serde_undo_stack::FullSerdeUndoStack;
 
+use crate::gui::graph_ui_interaction::GraphUiAction;
+
 pub trait UndoStack<T: Debug>: Debug {
     fn reset_with(&mut self, value: &T);
-    fn push_current(&mut self, value: &T);
+    // todo extract trait for GraphUiAction and make it intoiter
+    fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>);
     fn clear_redo(&mut self);
     fn undo(&mut self, value: &mut T) -> bool;
     fn redo(&mut self, value: &mut T) -> bool;
@@ -59,7 +62,7 @@ pub mod undo_stack_tests {
             value: 2,
             label: "b".to_string(),
         };
-        stack.push_current(&state_b);
+        stack.push_current(&state_b, Vec::new());
         assert!(stack.undo_len() >= 2);
 
         let mut undone = state_b.clone();
@@ -86,7 +89,7 @@ pub mod undo_stack_tests {
             label: "b".to_string(),
         };
         stack.reset_with(&state_a);
-        stack.push_current(&state_b);
+        stack.push_current(&state_b, Vec::new());
         let mut undone = state_b.clone();
         let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
@@ -111,13 +114,13 @@ pub mod undo_stack_tests {
             label: "c".to_string(),
         };
         stack.reset_with(&state_a);
-        stack.push_current(&state_b);
+        stack.push_current(&state_b, Vec::new());
         let mut undone = state_b.clone();
         let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
         assert!(did_undo);
 
-        stack.push_current(&state_c);
+        stack.push_current(&state_c, Vec::new());
         assert_eq!(stack.redo_len(), 0);
     }
 
@@ -139,8 +142,8 @@ pub mod undo_stack_tests {
             F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.push_current(&state_c);
+        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_c, Vec::new());
 
         assert_eq!(stack.undo_len(), 1);
         let mut output = state_c.clone();
@@ -166,8 +169,8 @@ pub mod undo_stack_tests {
         let max_limit = F::limit_for_snapshots(&[state_a.clone(), state_b.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.push_current(&state_c);
+        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_c, Vec::new());
 
         assert_eq!(stack.undo_len(), 2);
         let mut output = state_c.clone();
@@ -197,8 +200,8 @@ pub mod undo_stack_tests {
             F::limit_for_snapshots(&[state_a.clone(), state_b.clone(), state_c.clone()]);
         let mut stack = F::make(max_limit);
         stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.push_current(&state_c);
+        stack.push_current(&state_b, Vec::new());
+        stack.push_current(&state_c, Vec::new());
 
         assert!(stack.undo_len() <= 1);
     }

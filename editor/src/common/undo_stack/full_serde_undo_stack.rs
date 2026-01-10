@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::common::undo_stack::UndoStack;
+use crate::gui::graph_ui_interaction::GraphUiAction;
 
 #[derive(Debug)]
 pub struct FullSerdeUndoStack<T: Debug> {
@@ -43,10 +44,11 @@ where
         self.redo_bytes.clear();
         self.undo_stack.clear();
         self.redo_stack.clear();
-        self.push_current(value);
+        self.push_current(value, Vec::new());
     }
 
-    pub fn push_current(&mut self, value: &T) {
+    pub fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>) {
+        let _ = actions;
         let snapshot = serialize_snapshot(value, self.format);
         if self
             .undo_stack
@@ -123,8 +125,8 @@ where
         FullSerdeUndoStack::reset_with(self, value);
     }
 
-    fn push_current(&mut self, value: &T) {
-        FullSerdeUndoStack::push_current(self, value);
+    fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>) {
+        FullSerdeUndoStack::push_current(self, value, actions);
     }
 
     fn clear_redo(&mut self) {

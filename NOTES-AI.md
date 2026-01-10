@@ -555,3 +555,6 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - ConnectionBreaker now exposes intersects_rect(); const bind uses it.
 
 - Simplified DragValue rect expansion using Rect::expand.
+- Undo stack `undo`/`redo` now mutate a provided state and return a bool for whether a change was applied.
+- Undo stack `push_current` now accepts an iterator of `GraphUiAction` values.
+- Undo stack push_current now takes a Vec of GraphUiAction values; a helper supports IntoIterator.

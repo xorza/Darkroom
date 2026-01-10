@@ -145,7 +145,8 @@ impl AppData {
         }
         if !graph_ui_interaction.actions.is_empty() {
             self.undo_stack.clear_redo();
-            self.undo_stack.push_current(&self.view_graph);
+            self.undo_stack
+                .push_current(&self.view_graph, graph_ui_interaction.actions.clone());
         }
 
         if graph_ui_interaction.run {
