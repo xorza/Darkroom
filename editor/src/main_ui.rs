@@ -110,6 +110,18 @@ impl MainUi {
             });
         });
 
+        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
+            ui.label(&app_data.status);
+        });
+
+        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("Run").clicked() {
+                    self.run_graph(app_data);
+                }
+            });
+        });
+
         let style = Style::new(1.0);
         let frame = Frame {
             inner_margin: 0.0.into(),
@@ -121,7 +133,16 @@ impl MainUi {
             ..Default::default()
         };
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            let mut gui = Gui::new(ui, style, app_data.view_graph.scale);
+            let rect = ui.available_rect_before_wrap();
+            let mut graph_ui = ui.new_child(
+                egui::UiBuilder::new()
+                    .id_salt("graph_ui")
+                    .max_rect(rect)
+                    .sense(egui::Sense::click_and_drag()),
+            );
+            graph_ui.set_clip_rect(rect);
+
+            let mut gui = Gui::new(&mut graph_ui, style, app_data.view_graph.scale);
 
             let result = self.graph_ui.render(
                 &mut gui,
@@ -133,18 +154,6 @@ impl MainUi {
             if let Err(err) = result {
                 app_data.status = format!("Error: {}", err);
             }
-        });
-
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            ui.label(&app_data.status);
-        });
-
-        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Run").clicked() {
-                    self.run_graph(app_data);
-                }
-            });
         });
 
         app_data.handle_graph_ui_actions(&self.graph_ui_interaction);

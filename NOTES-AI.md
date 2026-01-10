@@ -75,6 +75,8 @@ fit clicks from shifting zoom/pan.
 View-selected now centers based on graph-space node position/size to avoid repeated clicks shifting the camera.
 Graph background rendering now lives in `gui/background.rs`, caches its mesh, and only rebuilds on pan/scale/rect size
 changes.
+Graph rendering now uses a fixed-rect child `Ui` with a clip rect to prevent CentralPanel borders from shifting when
+offscreen widgets (like const bindings) extend beyond the graph area.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
