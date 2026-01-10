@@ -139,8 +139,8 @@ impl GraphUi {
         }
 
         gui.set_scale(ctx.view_graph.scale);
-        self.graph_layout.update(&mut gui, &ctx);
-        self.dots_background.render(&mut gui, &ctx);
+        self.graph_layout.update(&gui, &ctx);
+        self.dots_background.render(&gui, &ctx);
         self.render_connections(&mut gui, &mut ctx, graph_ui_interaction);
 
         let drag_port_info = self.node_ui.render_nodes(
