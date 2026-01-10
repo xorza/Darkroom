@@ -1,5 +1,8 @@
 use eframe::egui;
-use egui::{Area, Color32, Frame, Id, Key, Margin, PointerButton, Pos2, Response, Sense, Vec2};
+use egui::{
+    Area, Button, Color32, Frame, Id, Key, Margin, PointerButton, Pos2, Response, RichText, Sense,
+    Vec2,
+};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -103,15 +106,17 @@ impl GraphUi {
         if background_response.clicked() {
             ctx.view_graph.selected_node_id = None;
         }
+        
+        
+        self.top_panel(gui, &mut ctx);
 
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(gui, &mut ctx, &background_response, pointer_pos);
         }
 
+        gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(gui, &ctx);
-
         self.background.render(gui, &ctx);
-
         self.render_connections(gui, &mut ctx, ui_interaction);
 
         let drag_port_info = self.node_ui.render_nodes(
@@ -125,8 +130,6 @@ impl GraphUi {
                 None
             },
         );
-
-        self.top_panel(gui, &mut ctx);
 
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
@@ -294,19 +297,38 @@ impl GraphUi {
         let mut reset_view = false;
 
         let panel_pos = gui.rect.min;
-        let padding = 4;
-        let small_padding = 2;
+        let panel_width = gui.rect.width();
+        let panel_rect = egui::Rect::from_min_size(panel_pos, Vec2::new(panel_width, 0.0));
+        let mono_font = gui.style.mono_font.clone();
+        let button_size = mono_font.size + gui.style.small_padding * 2.0;
+        assert!(button_size.is_finite());
+        assert!(button_size > 0.0);
+        let button_size = Vec2::splat(button_size);
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
             .show(gui.ui().ctx(), |ui| {
-                let frame = Frame::NONE
-                    .fill(Color32::from_black_alpha(160))
-                    .inner_margin(Margin::symmetric(padding, small_padding));
-                frame.show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        fit_all = ui.button("Fit all").clicked();
-                        view_selected = ui.button("View selected").clicked();
-                        reset_view = ui.button("Reset view").clicked();
+                ui.scope_builder(egui::UiBuilder::new().max_rect(panel_rect), |ui| {
+                    ui.set_min_width(panel_width);
+                    ui.set_max_width(panel_width);
+                    let frame = Frame::NONE
+                        .fill(Color32::from_black_alpha(160))
+                        .inner_margin(Margin::symmetric(0, 0));
+                    frame.show(ui, |ui| {
+                        ui.set_min_width(panel_width - 8.0);
+                        ui.set_max_width(panel_width);
+
+                        ui.horizontal(|ui| {
+                            let mut make_button = |label| {
+                                ui.add_sized(
+                                    button_size,
+                                    Button::new(RichText::new(label).font(mono_font.clone())),
+                                )
+                                .clicked()
+                            };
+                            fit_all = make_button("a");
+                            view_selected = make_button("s");
+                            reset_view = make_button("r");
+                        });
                     });
                 });
             });
@@ -354,7 +376,6 @@ impl GraphUi {
             let origin = gui.rect.min;
             let graph_pos = (pointer_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
             ctx.view_graph.scale = clamped_scale;
-            gui.set_scale(clamped_scale);
             ctx.view_graph.pan = pointer_pos - origin - graph_pos * ctx.view_graph.scale;
         }
 

@@ -283,6 +283,9 @@ Const input edits now render inside a clipped child UI to avoid overflow.
 Const input edits now emit `GraphUiAction::InputChanged` when the value changes.
 Graph UI top panel renders its buttons in a fixed-position area.
 Graph top button row now renders inside a semi-transparent black frame for contrast.
+Graph top button row now stretches to the full graph width.
+Graph top button row now uses a fixed-width UI scope to enforce full-width layout inside the area.
+Graph top buttons now render as fixed-size square buttons using the monospaced font.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.

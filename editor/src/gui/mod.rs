@@ -36,15 +36,16 @@ pub struct Gui<'a> {
 }
 
 impl<'a> Gui<'a> {
-    pub fn new(ui: &'a mut Ui, style: Style, scale: f32) -> Self {
+    pub fn new(ui: &'a mut Ui, style: Style) -> Self {
         let rect = ui.available_rect_before_wrap();
         let painter = GuiPainter(ui.painter_at(rect));
+
         Self {
             ui: NonNull::from(ui),
             style,
             painter,
             rect,
-            scale,
+            scale: 1.0,
             _marker: PhantomData,
         }
     }

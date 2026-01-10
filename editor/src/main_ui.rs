@@ -3,7 +3,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
 use crate::gui::style::Style;
 use eframe::egui;
-use egui::Frame;
+use egui::{Frame, Sense};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -140,11 +140,11 @@ impl MainUi {
                 egui::UiBuilder::new()
                     .id_salt("graph_ui")
                     .max_rect(rect)
-                    .sense(egui::Sense::click_and_drag()),
+                    .sense(Sense::hover()),
             );
             graph_ui.set_clip_rect(rect);
 
-            let mut gui = Gui::new(&mut graph_ui, style, app_data.view_graph.scale);
+            let mut gui = Gui::new(&mut graph_ui, style);
 
             let result = self.graph_ui.render(
                 &mut gui,
