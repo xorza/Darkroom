@@ -6,12 +6,16 @@ const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
 
 #[derive(Debug, Default)]
 pub struct UndoStack {
-    undo_stack: Vec<Vec<u8>>,
-    redo_stack: Vec<Vec<u8>>,
+    undo_bytes: Vec<u8>,
+    redo_bytes: Vec<u8>,
+    undo_stack: Vec<std::ops::Range<usize>>,
+    redo_stack: Vec<std::ops::Range<usize>>,
 }
 
 impl UndoStack {
     pub fn reset_with(&mut self, view_graph: &ViewGraph) {
+        self.undo_bytes.clear();
+        self.redo_bytes.clear();
         self.undo_stack.clear();
         self.redo_stack.clear();
         self.push_current(view_graph);
@@ -19,13 +23,19 @@ impl UndoStack {
 
     pub fn push_current(&mut self, view_graph: &ViewGraph) {
         let snapshot = serialize_snapshot(view_graph);
-        if self.undo_stack.last().is_some_and(|last| last == &snapshot) {
+        if self
+            .undo_stack
+            .last()
+            .is_some_and(|last| snapshot_matches(&self.undo_bytes, last, &snapshot))
+        {
             return;
         }
-        self.undo_stack.push(snapshot);
+        let range = append_bytes(&mut self.undo_bytes, &snapshot);
+        self.undo_stack.push(range);
     }
 
     pub fn clear_redo(&mut self) {
+        self.redo_bytes.clear();
         self.redo_stack.clear();
     }
 
@@ -38,19 +48,28 @@ impl UndoStack {
             .undo_stack
             .pop()
             .expect("undo stack should contain current snapshot");
-        self.redo_stack.push(current);
+        let current_bytes = slice_from_range(&self.undo_bytes, &current).to_vec();
+        let redo_range = append_bytes(&mut self.redo_bytes, &current_bytes);
+        self.redo_stack.push(redo_range);
+        pop_tail_bytes(&mut self.undo_bytes, &current);
 
         let snapshot = self
             .undo_stack
             .last()
             .expect("undo stack should contain a prior snapshot");
-        Some(deserialize_snapshot(snapshot))
+        Some(deserialize_snapshot(slice_from_range(
+            &self.undo_bytes,
+            snapshot,
+        )))
     }
 
     pub fn redo(&mut self) -> Option<ViewGraph> {
         let snapshot = self.redo_stack.pop()?;
-        self.undo_stack.push(snapshot.clone());
-        Some(deserialize_snapshot(&snapshot))
+        let snapshot_bytes = slice_from_range(&self.redo_bytes, &snapshot).to_vec();
+        let undo_range = append_bytes(&mut self.undo_bytes, &snapshot_bytes);
+        self.undo_stack.push(undo_range);
+        pop_tail_bytes(&mut self.redo_bytes, &snapshot);
+        Some(deserialize_snapshot(&snapshot_bytes))
     }
 }
 
@@ -65,4 +84,25 @@ fn deserialize_snapshot(snapshot: &[u8]) -> ViewGraph {
     let decoded = String::from_utf8(decompressed).expect("undo snapshot should be valid UTF-8");
     ViewGraph::deserialize(UNDO_FILE_FORMAT, &decoded)
         .expect("undo snapshot should deserialize into a ViewGraph")
+}
+
+fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {
+    let start = target.len();
+    target.extend_from_slice(bytes);
+    let end = target.len();
+    start..end
+}
+
+fn slice_from_range<'a>(bytes: &'a [u8], range: &std::ops::Range<usize>) -> &'a [u8] {
+    &bytes[range.clone()]
+}
+
+fn snapshot_matches(bytes: &[u8], range: &std::ops::Range<usize>, snapshot: &[u8]) -> bool {
+    slice_from_range(bytes, range) == snapshot
+}
+
+fn pop_tail_bytes(bytes: &mut Vec<u8>, range: &std::ops::Range<usize>) {
+    if range.end == bytes.len() {
+        bytes.truncate(range.start);
+    }
 }
