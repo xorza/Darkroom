@@ -9,7 +9,8 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::graph_ui::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui::GraphUiAction;
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
 
@@ -144,7 +145,7 @@ impl ConnectionUi {
                         .by_id_mut(&curve.key.input_node_id)
                         .unwrap();
                     node.inputs[curve.key.input_idx].binding = Binding::None;
-                    ui_interaction.actions.push(GraphUiAction::InputChanged {
+                    ui_interaction.add_action(GraphUiAction::InputChanged {
                         node_id: curve.key.input_node_id,
                         input_idx: curve.key.input_idx,
                     });

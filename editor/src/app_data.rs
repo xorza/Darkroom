@@ -1,4 +1,4 @@
-use crate::gui::graph_ui::GraphUiInteraction;
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::execution_graph::Result as ExecutionGraphResult;

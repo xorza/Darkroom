@@ -13,6 +13,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -53,21 +54,6 @@ pub struct GraphUi {
     node_ui: NodeUi,
     dots_background: DottedBackgroundRenderer,
     interaction: GraphUiInteraction,
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct GraphUiInteraction {
-    pub actions: Vec<GraphUiAction>,
-    pub errors: Vec<Error>,
-    pub run: bool,
-}
-
-impl GraphUiInteraction {
-    pub fn clear(&mut self) {
-        self.actions.clear();
-        self.errors.clear();
-        self.run = false;
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -134,9 +120,7 @@ impl GraphUi {
 
         if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
             ctx.view_graph.selected_node_id = None;
-            self.interaction
-                .actions
-                .push(GraphUiAction::NodeSelected { node_id: None });
+            self.interaction.add_node_selected(None);
         }
 
         self.top_panel(&mut gui, &mut ctx);
@@ -251,20 +235,17 @@ impl GraphUi {
                             .unwrap();
 
                         node.inputs[connection.input_idx].binding = Binding::None;
-                        graph_ui_interaction
-                            .actions
-                            .push(GraphUiAction::InputChanged {
-                                node_id: connection.input_node_id,
-                                input_idx: connection.input_idx,
-                            });
+                        graph_ui_interaction.add_action(GraphUiAction::InputChanged {
+                            node_id: connection.input_node_id,
+                            input_idx: connection.input_idx,
+                        });
                     }
 
                     for node_id in self.node_ui.node_ids_hit_breaker.iter() {
                         ctx.view_graph.remove_node(node_id);
 
                         graph_ui_interaction
-                            .actions
-                            .push(GraphUiAction::NodeRemoved { node_id: *node_id });
+                            .add_action(GraphUiAction::NodeRemoved { node_id: *node_id });
                     }
                 }
             }
@@ -296,14 +277,12 @@ impl GraphUi {
                         let result = apply_connection(ctx.view_graph, input_port, output_port);
                         match result {
                             Ok((input_node_id, input_idx)) => {
-                                graph_ui_interaction
-                                    .actions
-                                    .push(GraphUiAction::InputChanged {
-                                        node_id: input_node_id,
-                                        input_idx,
-                                    })
+                                graph_ui_interaction.add_action(GraphUiAction::InputChanged {
+                                    node_id: input_node_id,
+                                    input_idx,
+                                })
                             }
-                            Err(err) => graph_ui_interaction.errors.push(err),
+                            Err(err) => graph_ui_interaction.add_error(err),
                         }
                     }
                 }
@@ -432,8 +411,10 @@ impl GraphUi {
         if crate::common::scale_changed(prev_scale, ctx.view_graph.scale)
             || crate::common::pan_changed_v2(prev_pan, ctx.view_graph.pan)
         {
+
             // todo only when stopped panning and zooming
-            // self.interaction.actions.push(GraphUiAction::ZoomPanChanged);
+
+            // self.interaction.add_action(GraphUiAction::ZoomPanChanged);
         }
     }
 }

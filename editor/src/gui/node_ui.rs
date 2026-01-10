@@ -17,7 +17,7 @@ use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::{
-    Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui::GraphUiInteraction,
+    Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui_interaction::GraphUiInteraction,
 };
 
 #[derive(Debug, Clone)]
@@ -123,9 +123,7 @@ fn body_drag<'a>(
         || body_response.dragged_by(PointerButton::Primary);
 
     if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
-        ui_interaction.actions.push(GraphUiAction::NodeSelected {
-            node_id: Some(*node_id),
-        });
+        ui_interaction.add_node_selected(Some(*node_id));
 
         ctx.view_graph.selected_node_id = Some(*node_id);
     }
@@ -241,9 +239,7 @@ fn render_cache_btn(
     if response.clicked() {
         node.behavior = (node.behavior == NodeBehavior::Once)
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
-        ui_interaction
-            .actions
-            .push(GraphUiAction::CacheToggled { node_id: node.id });
+        ui_interaction.add_action(GraphUiAction::CacheToggled { node_id: node.id });
     }
 }
 
@@ -322,9 +318,7 @@ fn render_remove_btn(
         .clicked();
 
     if remove {
-        ui_interaction
-            .actions
-            .push(GraphUiAction::NodeRemoved { node_id: *node_id });
+        ui_interaction.add_action(GraphUiAction::NodeRemoved { node_id: *node_id });
         return true;
     }
 
