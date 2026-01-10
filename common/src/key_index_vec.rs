@@ -16,6 +16,48 @@ pub struct KeyIndexVec<K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
     pub idx_by_key: HashMap<K, usize>,
 }
 
+impl<K, V> PartialEq for KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K> + Eq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        assert_eq!(
+            self.items.len(),
+            self.idx_by_key.len(),
+            "KeyIndexVec must keep items and index map in sync"
+        );
+        assert_eq!(
+            other.items.len(),
+            other.idx_by_key.len(),
+            "KeyIndexVec must keep items and index map in sync"
+        );
+        if self.items.len() != other.items.len() {
+            return false;
+        }
+
+        for item in &self.items {
+            let key = item.key();
+            let other_item = other.by_key(key);
+            if other_item.is_none() {
+                return false;
+            }
+            if item != other_item.unwrap() {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<K, V> Eq for KeyIndexVec<K, V>
+where
+    K: Copy + Eq + Hash,
+    V: KeyIndexKey<K> + Eq,
+{
+}
+
 impl<K: Copy + Eq + Hash, V: KeyIndexKey<K>> Default for KeyIndexVec<K, V> {
     fn default() -> Self {
         Self {
@@ -345,7 +387,7 @@ mod tests {
     use super::*;
     use crate::{FileFormat, deserialize, serialize};
 
-    #[derive(Debug, Default, Serialize, Deserialize, Clone)]
+    #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct TestItem {
         id: u32,
         value: i32,
@@ -487,5 +529,23 @@ mod tests {
 
         let item = &compact[1];
         println!("Inserted item {:?}", item);
+    }
+
+    #[test]
+    fn key_index_vec_eq_is_order_independent() {
+        let mut left = KeyIndexVec::<u32, TestItem>::default();
+        left.add(TestItem { id: 1, value: 10 });
+        left.add(TestItem { id: 2, value: 20 });
+        left.add(TestItem { id: 3, value: 30 });
+
+        let mut right = KeyIndexVec::<u32, TestItem>::default();
+        right.add(TestItem { id: 3, value: 30 });
+        right.add(TestItem { id: 1, value: 10 });
+        right.add(TestItem { id: 2, value: 20 });
+
+        assert_eq!(left, right);
+
+        right.add(TestItem { id: 2, value: 99 });
+        assert_ne!(left, right);
     }
 }
