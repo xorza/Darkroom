@@ -87,7 +87,7 @@ impl GraphUi {
         execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
-    ) -> Result<(), Error> {
+    ) {
         let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
 
         let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
@@ -106,8 +106,7 @@ impl GraphUi {
         if background_response.clicked() {
             ctx.view_graph.selected_node_id = None;
         }
-        
-        
+
         self.top_panel(gui, &mut ctx);
 
         if let Some(pointer_pos) = pointer_pos {
@@ -139,10 +138,10 @@ impl GraphUi {
                 ui_interaction,
                 pointer_pos,
                 drag_port_info,
-            )?;
+            );
         }
 
-        Ok(())
+        gui.set_scale(1.0);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -154,7 +153,7 @@ impl GraphUi {
         ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
-    ) -> Result<(), Error> {
+    ) {
         let primary_state = gui.ui().input(|input| {
             if input.pointer.primary_pressed() {
                 Some(PointerButtonState::Pressed)
@@ -183,7 +182,7 @@ impl GraphUi {
             self.connection_breaker.reset();
             self.state = InteractionState::Idle;
             self.connections.stop_drag();
-            return Ok(());
+            return;
         }
 
         match self.state {
@@ -253,17 +252,17 @@ impl GraphUi {
 
                         self.state = InteractionState::Idle;
 
-                        let (input_node_id, input_idx) =
-                            apply_connection(ctx.view_graph, input_port, output_port)?;
-                        ui_interaction
-                            .actions
-                            .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                        if let Ok((input_node_id, input_idx)) =
+                            apply_connection(ctx.view_graph, input_port, output_port)
+                        {
+                            ui_interaction
+                                .actions
+                                .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                        }
                     }
                 }
             }
         }
-
-        Ok(())
     }
 
     fn render_connections(

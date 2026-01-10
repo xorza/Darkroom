@@ -146,16 +146,13 @@ impl MainUi {
 
             let mut gui = Gui::new(&mut graph_ui, style);
 
-            let result = self.graph_ui.render(
+            self.graph_ui.render(
                 &mut gui,
                 &mut app_data.view_graph,
                 app_data.execution_stats.as_ref(),
                 &app_data.func_lib,
                 &mut self.graph_ui_interaction,
             );
-            if let Err(err) = result {
-                app_data.status = format!("Error: {}", err);
-            }
         });
 
         app_data.handle_graph_ui_actions(&self.graph_ui_interaction);
