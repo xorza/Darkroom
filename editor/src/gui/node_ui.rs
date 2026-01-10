@@ -97,10 +97,11 @@ impl NodeUi {
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
-            let (view_node, incoming) = ctx.view_graph.removal_payload(&node_id);
+            let (view_node, node, incoming) = ctx.view_graph.removal_payload(&node_id);
             ctx.view_graph.remove_node(&node_id);
             ui_interaction.add_action(GraphUiAction::NodeRemoved {
                 view_node,
+                node,
                 incoming,
             });
         }
@@ -169,8 +170,8 @@ fn body_drag<'a>(
             .pos;
         ui_interaction.actions.push(GraphUiAction::NodeMoved {
             node_id: *node_id,
-            before: start_pos.to_vec2(),
-            after: end_pos.to_vec2(),
+            before: start_pos,
+            after: end_pos,
         });
     }
 

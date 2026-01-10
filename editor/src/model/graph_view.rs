@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use common::{FileFormat, is_debug, key_index_vec::KeyIndexVec};
-use graph::graph::Binding;
+use graph::graph::{Binding, Node};
 use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -137,11 +137,16 @@ impl ViewGraph {
         }
     }
 
-    pub fn removal_payload(&self, node_id: &NodeId) -> (ViewNode, Vec<IncomingConnection>) {
+    pub fn removal_payload(&self, node_id: &NodeId) -> (ViewNode, Node, Vec<IncomingConnection>) {
         let view_node = self
             .view_nodes
             .by_key(node_id)
             .expect("remove node expects a view node")
+            .clone();
+        let node = self
+            .graph
+            .by_id(node_id)
+            .expect("remove node expects a graph node")
             .clone();
         let mut incoming = Vec::new();
         for node in self.graph.nodes.iter() {
@@ -158,7 +163,7 @@ impl ViewGraph {
                 }
             }
         }
-        (view_node, incoming)
+        (view_node, node, incoming)
     }
 }
 
