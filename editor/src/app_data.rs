@@ -175,10 +175,11 @@ impl AppData {
             .iter()
             .any(|action| action.affects_computation())
         {
-            self.redo_stack.clear();
             self.execution_stats = None;
             self.graph_updated = true;
-
+        }
+        if !graph_ui_interaction.actions.is_empty() {
+            self.redo_stack.clear();
             self.push_undo();
         }
 

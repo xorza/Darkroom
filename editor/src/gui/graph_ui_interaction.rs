@@ -31,18 +31,13 @@ impl GraphUiInteraction {
         match &action {
             GraphUiAction::CacheToggled { .. }
             | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::NodeRemoved { .. } => {
+            | GraphUiAction::NodeRemoved { .. }
+            | GraphUiAction::NodeSelected { .. } => {
                 self.flush();
                 self.actions.push(action);
             }
-            GraphUiAction::NodeMoved { node_id } => {
-                self.add_pending_action(GraphUiAction::NodeMoved { node_id: *node_id });
-            }
-            GraphUiAction::NodeSelected { node_id } => {
-                self.add_pending_action(GraphUiAction::NodeSelected { node_id: *node_id });
-            }
-            GraphUiAction::ZoomPanChanged => {
-                self.add_pending_action(GraphUiAction::ZoomPanChanged);
+            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged => {
+                self.add_pending_action(action);
             }
         }
     }
@@ -52,6 +47,17 @@ impl GraphUiInteraction {
     }
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
+        let action_kind = std::mem::discriminant(&action);
+        let has_other_kind = self
+            .pending_actions
+            .iter()
+            .any(|pending| std::mem::discriminant(pending) != action_kind);
+        if has_other_kind {
+            self.flush();
+        }
+
+        self.pending_actions
+            .retain(|pending| std::mem::discriminant(pending) != action_kind);
         self.pending_actions.push(action);
     }
 
