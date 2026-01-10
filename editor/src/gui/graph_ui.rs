@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Area, Id, Key, PointerButton, Pos2, Response, Sense, Vec2};
+use egui::{Area, Color32, Frame, Id, Key, Margin, PointerButton, Pos2, Response, Sense, Vec2};
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -293,14 +293,21 @@ impl GraphUi {
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let panel_pos = gui.rect.min + Vec2::splat(gui.style.padding);
+        let panel_pos = gui.rect.min;
+        let padding = 4;
+        let small_padding = 2;
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
             .show(gui.ui().ctx(), |ui| {
-                ui.horizontal(|ui| {
-                    fit_all = ui.button("Fit all").clicked();
-                    view_selected = ui.button("View selected").clicked();
-                    reset_view = ui.button("Reset view").clicked();
+                let frame = Frame::NONE
+                    .fill(Color32::from_black_alpha(160))
+                    .inner_margin(Margin::symmetric(padding, small_padding));
+                frame.show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        fit_all = ui.button("Fit all").clicked();
+                        view_selected = ui.button("View selected").clicked();
+                        reset_view = ui.button("Reset view").clicked();
+                    });
                 });
             });
 

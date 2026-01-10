@@ -133,7 +133,9 @@ impl MainUi {
             ..Default::default()
         };
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            let rect = ui.available_rect_before_wrap();
+            let rect = ui
+                .available_rect_before_wrap()
+                .shrink(style.inactive_bg_stroke.width);
             let mut graph_ui = ui.new_child(
                 egui::UiBuilder::new()
                     .id_salt("graph_ui")
