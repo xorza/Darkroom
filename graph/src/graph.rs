@@ -315,6 +315,15 @@ impl From<StaticValue> for Binding {
     }
 }
 
+impl NodeBehavior {
+    pub fn toggle(&mut self) {
+        match self {
+            NodeBehavior::AsFunction => *self = NodeBehavior::Once,
+            NodeBehavior::Once => *self = NodeBehavior::AsFunction,
+        }
+    }
+}
+
 pub fn test_graph() -> Graph {
     let mut graph = Graph::default();
 
