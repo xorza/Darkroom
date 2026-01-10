@@ -143,12 +143,14 @@ mod tests {
             },
         ];
 
+        let mut stack = ActionUndoStack::new(16);
+        stack.reset_with(&view_graph);
+
         for action in &actions {
             action.apply(&mut view_graph);
         }
         let modified = view_graph.serialize(FileFormat::Json);
 
-        let mut stack = ActionUndoStack::new(16);
         stack.push_current(&view_graph, &actions);
 
         assert!(stack.undo(&mut view_graph));
