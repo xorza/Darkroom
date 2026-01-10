@@ -293,7 +293,7 @@ impl GraphUi {
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let panel_pos = gui.rect.min;
+        let panel_pos = gui.rect.min + Vec2::splat(gui.style.padding);
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
             .show(gui.ui().ctx(), |ui| {

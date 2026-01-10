@@ -1,7 +1,9 @@
 use crate::app_data::AppData;
 use crate::gui::Gui;
 use crate::gui::graph_ui::{GraphUi, GraphUiInteraction};
+use crate::gui::style::Style;
 use eframe::egui;
+use egui::Frame;
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -108,8 +110,18 @@ impl MainUi {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let mut gui = Gui::new(ui, app_data.view_graph.scale);
+        let style = Style::new(1.0);
+        let frame = Frame {
+            inner_margin: 0.0.into(),
+
+            stroke: style.inactive_bg_stroke,
+            corner_radius: style.corner_radius.into(),
+            outer_margin: style.padding.into(),
+
+            ..Default::default()
+        };
+        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            let mut gui = Gui::new(ui, style, app_data.view_graph.scale);
 
             let result = self.graph_ui.render(
                 &mut gui,

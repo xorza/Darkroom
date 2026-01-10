@@ -36,10 +36,7 @@ pub struct Gui<'a> {
 }
 
 impl<'a> Gui<'a> {
-    pub fn new(ui: &'a mut Ui, scale: f32) -> Self {
-        assert!(scale.is_finite());
-
-        let style = Style::new(scale);
+    pub fn new(ui: &'a mut Ui, style: Style, scale: f32) -> Self {
         let rect = ui.available_rect_before_wrap();
         let painter = GuiPainter(ui.painter_at(rect));
         Self {

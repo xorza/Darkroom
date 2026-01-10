@@ -228,4 +228,8 @@ impl Style {
             },
         }
     }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        *self = Self::new(scale);
+    }
 }
