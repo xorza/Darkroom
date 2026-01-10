@@ -56,15 +56,13 @@ impl GraphUiInteraction {
         self.run = false;
     }
 
-    pub fn actions_stacks(&self) -> Vec<&[GraphUiAction]> {
-        let mut slices = Vec::with_capacity(2);
-        if let Some(action1) = self.action1.take() {
-            slices.push([action1]);
-        }
-        if !self.actions2.is_empty() {
-            slices.push(self.actions2.as_slice());
-        }
-        slices
+    pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
+        [
+            self.action1.as_ref().map(std::slice::from_ref),
+            (!self.actions2.is_empty()).then_some(self.actions2.as_slice()),
+        ]
+        .into_iter()
+        .flatten()
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
