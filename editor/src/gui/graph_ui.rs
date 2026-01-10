@@ -258,6 +258,11 @@ impl GraphUi {
                         let input_node =
                             ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
                         input_node.inputs[input_port.port_idx].binding = Binding::Const(0.into());
+
+                        graph_ui_interaction.add_action(GraphUiAction::InputChanged {
+                            node_id: input_port.node_id,
+                            input_idx: input_port.port_idx,
+                        })
                     }
                     ConnectionDragUpdate::FinishedWith {
                         input_port,
