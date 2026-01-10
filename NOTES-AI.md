@@ -124,7 +124,7 @@ KeyIndexVec equality now has a unit test covering order independence and value c
 Undo history now uses a `UndoStack` trait with a `FullSerdeUndoStack` implementation that stores full serialized snapshots.
 `FullSerdeUndoStack` now lives in `editor/src/common/undo_stack/full_serde_undo_stack.rs`.
 `FullSerdeUndoStack` now clears redo history on new snapshot pushes.
-Cache toggle actions now carry the final `NodeBehavior` in `GraphUiAction::CacheToggled`.
+Cache toggle actions now carry both `before` and `after` `NodeBehavior` values in `GraphUiAction::CacheToggled`.
 Input change actions now include before/after `Binding` values.
 Node removed actions now include the removed `ViewNode` clone and incoming connections that were cleared.
 Node moved actions now include before/after positions as `Vec2`.
@@ -410,7 +410,7 @@ Main-window construction now creates a `UiRefresh` helper passed into `AppData::
 egui repaints without holding raw context.
 Graph save/load, test-graph construction, graph-UI action handling, and run-graph status handling now live in `AppData`,
 with `MainUi` delegating to those helpers and `ViewGraph` focusing on in-memory serialization only.
-Node cache toggles now emit `GraphUiAction::CacheToggled` so the UI action stream captures that event.
+Node cache toggles now emit `GraphUiAction::CacheToggled` with before/after behavior so undo is deterministic.
 Editor graph views now store a core `graph::Graph` alongside per-node positions; GUI rendering and edits read/write node
 data and bindings directly on the core graph.
 Graph connection rendering (curve generation, hit detection, and temporary-connection drawing) now lives in

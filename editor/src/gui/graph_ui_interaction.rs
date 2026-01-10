@@ -18,6 +18,7 @@ pub(crate) struct GraphUiInteraction {
 pub enum GraphUiAction {
     CacheToggled {
         node_id: NodeId,
+        before: NodeBehavior,
         after: NodeBehavior,
     },
     InputChanged {
@@ -149,7 +150,7 @@ impl GraphUiInteraction {
 impl GraphUiAction {
     pub fn apply(&self, view_graph: &mut ViewGraph) {
         match self {
-            GraphUiAction::CacheToggled { node_id, after } => {
+            GraphUiAction::CacheToggled { node_id, after, .. } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.behavior = *after;
             }
@@ -189,10 +190,11 @@ impl GraphUiAction {
 
     pub fn undo(&self, view_graph: &mut ViewGraph) {
         match self {
-            GraphUiAction::CacheToggled { node_id, after } => {
+            GraphUiAction::CacheToggled {
+                node_id, before, ..
+            } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
-                node.behavior.toggle();
-                assert_ne!(node.behavior, *after);
+                node.behavior = *before;
             }
             GraphUiAction::InputChanged {
                 node_id,

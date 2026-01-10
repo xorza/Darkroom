@@ -272,9 +272,11 @@ fn render_cache_btn(
         .show(gui, node_layout.cache_button_rect);
 
     if response.clicked() {
+        let before = node.behavior;
         node.behavior.toggle();
         ui_interaction.add_action(GraphUiAction::CacheToggled {
             node_id: node.id,
+            before,
             after: node.behavior,
         });
     }
