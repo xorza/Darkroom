@@ -130,8 +130,11 @@ impl GraphUi {
             Sense::hover() | Sense::drag() | Sense::click(),
         );
 
-        if background_response.clicked() {
+        if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
             ctx.view_graph.selected_node_id = None;
+            self.interaction
+                .actions
+                .push((NodeId::nil(), GraphUiAction::NodeSelected));
         }
 
         self.top_panel(&mut gui, &mut ctx);
