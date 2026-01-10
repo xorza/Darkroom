@@ -143,16 +143,18 @@ impl MainUi {
             // })
             .frame(Frame::NONE)
             .show(ctx, |ui| {
-                let rect = ui.available_rect_before_wrap();
-                let mut graph_ui = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt("graph_ui")
-                        .max_rect(rect)
-                        .sense(Sense::hover()),
-                );
-                graph_ui.set_clip_rect(rect);
+                // let rect = ui.available_rect_before_wrap();
+                // let mut graph_ui = ui.new_child(
+                //     egui::UiBuilder::new()
+                //         .id_salt("graph_ui")
+                //         .max_rect(rect)
+                //         .sense(Sense::hover()),
+                // );
+                // graph_ui.set_clip_rect(rect);
 
-                let mut gui = Gui::new(&mut graph_ui, style);
+                // ui.clip_rect();
+
+                let mut gui = Gui::new(ui, style);
 
                 self.graph_ui.render(
                     &mut gui,

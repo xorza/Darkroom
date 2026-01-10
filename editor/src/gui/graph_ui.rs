@@ -1,12 +1,14 @@
+use std::ptr::NonNull;
+
 use eframe::egui;
 use egui::{
     Area, Button, Color32, Frame, Id, Key, Margin, PointerButton, Pos2, Response, RichText, Sense,
-    Vec2,
+    StrokeKind, Vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
-use crate::gui::background::BackgroundRenderer;
+use crate::gui::background::DottedBackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -49,7 +51,7 @@ pub struct GraphUi {
     connection_breaker: ConnectionBreaker,
     connections: ConnectionUi,
     node_ui: NodeUi,
-    background: BackgroundRenderer,
+    background: DottedBackgroundRenderer,
 }
 
 #[derive(Debug, Default)]
@@ -77,7 +79,7 @@ impl GraphUi {
         self.graph_layout = GraphLayout::default();
         self.connection_breaker.reset();
         self.connections = ConnectionUi::default();
-        self.background = BackgroundRenderer::default();
+        self.background = DottedBackgroundRenderer::default();
     }
 
     pub fn render(
@@ -88,6 +90,25 @@ impl GraphUi {
         func_lib: &FuncLib,
         ui_interaction: &mut GraphUiInteraction,
     ) {
+        let rect = gui.ui().available_rect_before_wrap();
+        let rect = rect.shrink(gui.style.big_padding);
+
+        gui.painter().rect(
+            rect,
+            gui.style.corner_radius,
+            gui.style.inactive_bg_fill,
+            gui.style.inactive_bg_stroke,
+            StrokeKind::Outside,
+        );
+
+        let rect = rect.shrink(gui.style.corner_radius * 0.5);
+        let mut graph_ui = gui
+            .ui()
+            .new_child(egui::UiBuilder::new().id_salt("graph_ui").max_rect(rect));
+
+        let mut gui = Gui::new(&mut graph_ui, gui.style.clone());
+        gui.ui().clip_rect();
+
         let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
 
         let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
@@ -107,19 +128,19 @@ impl GraphUi {
             ctx.view_graph.selected_node_id = None;
         }
 
-        self.top_panel(gui, &mut ctx);
+        self.top_panel(&mut gui, &mut ctx);
 
         if let Some(pointer_pos) = pointer_pos {
-            self.update_zoom_and_pan(gui, &mut ctx, &background_response, pointer_pos);
+            self.update_zoom_and_pan(&mut gui, &mut ctx, &background_response, pointer_pos);
         }
 
         gui.set_scale(ctx.view_graph.scale);
-        self.graph_layout.update(gui, &ctx);
-        // self.background.render(gui, &ctx);
-        self.render_connections(gui, &mut ctx, ui_interaction);
+        self.graph_layout.update(&mut gui, &ctx);
+        // self.background.render(&mut gui, &ctx);
+        self.render_connections(&mut gui, &mut ctx, ui_interaction);
 
         let drag_port_info = self.node_ui.render_nodes(
-            gui,
+            &mut gui,
             &mut ctx,
             &mut self.graph_layout,
             ui_interaction,
@@ -132,7 +153,7 @@ impl GraphUi {
 
         if let Some(pointer_pos) = pointer_pos {
             self.process_connections(
-                gui,
+                &mut gui,
                 &mut ctx,
                 &background_response,
                 ui_interaction,

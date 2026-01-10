@@ -27,6 +27,7 @@ pub struct Style {
     pub inactive_bg_stroke: Stroke,
     pub active_bg_stroke: Stroke,
 
+    pub big_padding: f32,
     pub padding: f32,
     pub small_padding: f32,
     pub corner_radius: f32,
@@ -163,6 +164,7 @@ impl Style {
             active_bg_fill: COLOR_BG_ACTIVE,
             checked_bg_fill: COLOR_BG_CHECKED,
 
+            big_padding: scaled(6.0),
             padding: scaled(4.0),
             small_padding: scaled(2.0),
             corner_radius: scaled(CORNER_RADIUS),

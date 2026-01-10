@@ -8,7 +8,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 
 #[derive(Debug, Default)]
-pub struct BackgroundRenderer {
+pub struct DottedBackgroundRenderer {
     mesh: Arc<Mesh>,
     last_pan: Vec2,
     last_scale: f32,
@@ -16,7 +16,7 @@ pub struct BackgroundRenderer {
     inited: bool,
 }
 
-impl BackgroundRenderer {
+impl DottedBackgroundRenderer {
     pub fn render(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
         let scale = ctx.view_graph.scale;
         let pan = ctx.view_graph.pan;
