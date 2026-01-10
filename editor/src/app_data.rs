@@ -109,7 +109,9 @@ impl AppData {
             return;
         }
 
-        let current = self.view_graph.serialize(FileFormat::Lua);
+        println!("Undo stack size: {}", self.undo_stack.len());
+
+        let current = self.view_graph.serialize(UNDO_FILE_FORMAT);
         self.redo_stack.push(current);
 
         let snapshot = self
@@ -121,6 +123,8 @@ impl AppData {
                 .expect("Failed to deserialize undo snapshot"),
             false,
         );
+
+        println!("Undid stack size: {}", self.undo_stack.len());
     }
 
     pub fn redo(&mut self) {
@@ -128,8 +132,7 @@ impl AppData {
             return;
         }
 
-        let current = self.view_graph.serialize(FileFormat::Lua);
-        self.undo_stack.push(current);
+        self.push_undo();
 
         let snapshot = self
             .redo_stack
@@ -141,6 +144,11 @@ impl AppData {
                 .expect("Failed to deserialize redo snapshot"),
             false,
         );
+    }
+
+    fn push_undo(&mut self) {
+        self.undo_stack
+            .push(self.view_graph.serialize(UNDO_FILE_FORMAT));
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -162,6 +170,9 @@ impl AppData {
             self.redo_stack.clear();
             self.execution_stats = None;
             self.graph_updated = true;
+
+            self.push_undo();
+            println!("Undo stack size: {}", self.undo_stack.len());
         }
 
         if graph_ui_interaction.run {
