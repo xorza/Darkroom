@@ -15,7 +15,7 @@ pub struct PortAddress {
     pub port_idx: usize,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Binding {
     #[default]
     None,
@@ -23,7 +23,7 @@ pub enum Binding {
     Bind(PortAddress),
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Input {
     #[serde(default, skip_serializing_if = "Binding::is_none")]
     pub binding: Binding,
@@ -31,7 +31,7 @@ pub struct Input {
     pub default_value: Option<StaticValue>,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
     pub subscribers: Vec<NodeId>,
 }
@@ -43,7 +43,7 @@ pub enum NodeBehavior {
     Once,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
     pub func_id: FuncId,
@@ -61,7 +61,7 @@ pub struct Node {
     pub events: Vec<Event>,
 }
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Graph {
     pub nodes: KeyIndexVec<NodeId, Node>,
 }
