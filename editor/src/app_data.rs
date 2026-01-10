@@ -29,6 +29,7 @@ pub struct AppData {
     pub worker: Worker,
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
+    pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
     pub graph_updated: bool,
     pub current_path: PathBuf,
@@ -50,6 +51,7 @@ impl AppData {
             worker,
             func_lib: FuncLib::default(),
             view_graph: ViewGraph::default(),
+            interaction: GraphUiInteraction::default(),
             execution_stats: None,
             graph_updated: false,
             current_path,
@@ -130,10 +132,11 @@ impl AppData {
         self.execution_stats = None;
     }
 
-    pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
-        for actions in graph_ui_interaction.actions_stacks() {
+    pub fn handle_graph_ui_actions(&mut self) {
+        for actions in self.interaction.actions_stacks() {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
+            println!("Actions: {:?}", actions);
 
             if actions.iter().any(|action| action.affects_computation()) {
                 self.execution_stats = None;
@@ -141,11 +144,11 @@ impl AppData {
             }
         }
 
-        if graph_ui_interaction.run {
+        if self.interaction.run {
             self.run_graph();
         }
 
-        if let Some(err) = graph_ui_interaction.errors.last() {
+        if let Some(err) = self.interaction.errors.last() {
             self.set_status(format!("Graph error: {err}"));
         }
     }

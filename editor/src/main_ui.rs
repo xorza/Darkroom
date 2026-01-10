@@ -3,7 +3,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::style::Style;
 use eframe::egui;
-use egui::{Frame, Sense};
+use egui::{CentralPanel, Frame, Sense};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -119,19 +119,17 @@ impl MainUi {
                 ui.label(&app_data.status);
             });
 
-        let interaction = egui::CentralPanel::default()
-            .frame(Frame::NONE)
-            .show(ctx, |ui| {
-                self.graph_ui.render(
-                    &mut Gui::new(ui, style),
-                    &mut app_data.view_graph,
-                    app_data.execution_stats.as_ref(),
-                    &app_data.func_lib,
-                )
-            })
-            .inner;
+        CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
+            self.graph_ui.render(
+                &mut Gui::new(ui, style),
+                &mut app_data.view_graph,
+                app_data.execution_stats.as_ref(),
+                &app_data.func_lib,
+                &mut app_data.interaction,
+            )
+        });
 
-        app_data.handle_graph_ui_actions(interaction);
+        app_data.handle_graph_ui_actions();
         self.arena.reset();
     }
 
