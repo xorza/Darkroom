@@ -21,6 +21,8 @@ pub struct Status {
 
 pub type SharedStatus = Shared<Status>;
 
+const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
+
 #[derive(Debug)]
 pub struct AppData {
     pub worker: Worker,
@@ -108,13 +110,17 @@ impl AppData {
         }
 
         let current = self.view_graph.serialize(FileFormat::Lua);
+        self.redo_stack.push(current);
+
         let snapshot = self
             .undo_stack
             .pop()
             .expect("undo stack should contain a snapshot when undo is requested");
-        // self.push_redo_snapshot(current);
-        // self.apply_graph_snapshot(&snapshot);
-        // self.skip_undo_snapshot = true;
+        self.apply_graph(
+            ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
+                .expect("Failed to deserialize undo snapshot"),
+            false,
+        );
     }
 
     pub fn redo(&mut self) {
@@ -123,13 +129,18 @@ impl AppData {
         }
 
         let current = self.view_graph.serialize(FileFormat::Lua);
+        self.undo_stack.push(current);
+
         let snapshot = self
             .redo_stack
             .pop()
             .expect("redo stack should contain a snapshot when redo is requested");
-        // self.push_undo_snapshot(current);
-        // self.apply_graph_snapshot(&snapshot);
-        // self.skip_undo_snapshot = true;
+
+        self.apply_graph(
+            ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
+                .expect("Failed to deserialize redo snapshot"),
+            false,
+        );
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
