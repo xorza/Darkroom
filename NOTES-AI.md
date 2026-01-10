@@ -79,6 +79,8 @@ Graph rendering now uses a fixed-rect child `Ui` with a clip rect to prevent Cen
 offscreen widgets (like const bindings) extend beyond the graph area.
 The editor now overrides `eframe::App::clear_color` to use `visuals.panel_fill`, so the window background behind the
 CentralPanel outer margin matches the top/bottom panel and menu background.
+Graph UI interactions now collect connection errors (like cycle detection) and surface the latest one via the status
+bar in `AppData::handle_graph_ui_actions`.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

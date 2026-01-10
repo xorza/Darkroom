@@ -57,12 +57,14 @@ pub struct GraphUi {
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
     pub actions: Vec<(NodeId, GraphUiAction)>,
+    pub errors: Vec<Error>,
     pub run: bool,
 }
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
         self.actions.clear();
+        self.errors.clear();
         self.run = false;
     }
 }
@@ -173,7 +175,7 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
-        ui_interaction: &mut GraphUiInteraction,
+        graph_ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         drag_port_info: PortDragInfo,
     ) {
@@ -241,7 +243,7 @@ impl GraphUi {
                             .unwrap();
 
                         node.inputs[connection.input_idx].binding = Binding::None;
-                        ui_interaction.actions.push((
+                        graph_ui_interaction.actions.push((
                             connection.input_node_id,
                             GraphUiAction::InputChanged {
                                 input_idx: connection.input_idx,
@@ -277,10 +279,13 @@ impl GraphUi {
 
                         let result = apply_connection(ctx.view_graph, input_port, output_port);
                         match result {
-                            Ok((input_node_id, input_idx)) => ui_interaction
+                            Ok((input_node_id, input_idx)) => graph_ui_interaction
                                 .actions
                                 .push((input_node_id, GraphUiAction::InputChanged { input_idx })),
-                            Err(_) => todo!(),
+                            Err(err) => {
+                                graph_ui_interaction.errors.push(err);
+                                //
+                            }
                         }
                     }
                 }

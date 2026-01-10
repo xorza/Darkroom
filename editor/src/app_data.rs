@@ -114,6 +114,10 @@ impl AppData {
         if graph_ui_interaction.run {
             self.run_graph();
         }
+
+        if let Some(err) = graph_ui_interaction.errors.last() {
+            self.set_status(format!("Graph error: {err}"));
+        }
     }
 
     pub fn empty_graph(&mut self) {
