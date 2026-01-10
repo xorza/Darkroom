@@ -33,6 +33,9 @@ pub struct AppData {
     pub _ui_context: UiContext,
 
     pub shared_status: SharedStatus,
+
+    undo_stack: Vec<String>,
+    redo_stack: Vec<String>,
 }
 
 impl AppData {
@@ -52,6 +55,9 @@ impl AppData {
             _ui_context: ui_context,
 
             shared_status,
+
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -69,7 +75,7 @@ impl AppData {
     }
 
     pub fn save_graph(&mut self) {
-        match self.save_to_file(&self.view_graph, &self.current_path) {
+        match self.save_to_file(&self.current_path) {
             Ok(()) => self.set_status(format!("Saved graph to {}", self.current_path.display())),
             Err(err) => self.set_status(format!("Save failed: {err}")),
         }
@@ -97,20 +103,52 @@ impl AppData {
     }
 
     pub fn undo(&mut self) {
-        // TODO: wire undo stack
+        if self.undo_stack.is_empty() {
+            return;
+        }
+
+        let current = self.view_graph.serialize(FileFormat::Lua);
+        let snapshot = self
+            .undo_stack
+            .pop()
+            .expect("undo stack should contain a snapshot when undo is requested");
+        // self.push_redo_snapshot(current);
+        // self.apply_graph_snapshot(&snapshot);
+        // self.skip_undo_snapshot = true;
     }
 
-    pub fn apply_graph(&mut self, view_graph: ViewGraph) {
+    pub fn redo(&mut self) {
+        if self.redo_stack.is_empty() {
+            return;
+        }
+
+        let current = self.view_graph.serialize(FileFormat::Lua);
+        let snapshot = self
+            .redo_stack
+            .pop()
+            .expect("redo stack should contain a snapshot when redo is requested");
+        // self.push_undo_snapshot(current);
+        // self.apply_graph_snapshot(&snapshot);
+        // self.skip_undo_snapshot = true;
+    }
+
+    pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         view_graph.validate();
 
         self.view_graph = view_graph;
         self.worker.send(WorkerMessage::Clear);
         self.graph_updated = true;
         self.execution_stats = None;
+
+        if reset_undo {
+            self.undo_stack.clear();
+            self.redo_stack.clear();
+        }
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
         if !graph_ui_interaction.actions.is_empty() {
+            self.redo_stack.clear();
             self.execution_stats = None;
             self.graph_updated = true;
         }
@@ -125,7 +163,7 @@ impl AppData {
     }
 
     pub fn empty_graph(&mut self) {
-        self.apply_graph(ViewGraph::default());
+        self.apply_graph(ViewGraph::default(), true);
         self.set_status("Created new graph");
     }
 
@@ -136,7 +174,7 @@ impl AppData {
 
         self.func_lib = test_func_lib(Self::sample_test_hooks(self));
         let graph_view = ViewGraph::from_graph(&graph);
-        self.apply_graph(graph_view);
+        self.apply_graph(graph_view, true);
 
         self.set_status("Loaded sample test graph");
     }
@@ -183,10 +221,10 @@ impl AppData {
         }
     }
 
-    fn save_to_file(&self, graph: &ViewGraph, path: &Path) -> Result<()> {
+    fn save_to_file(&self, path: &Path) -> Result<()> {
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
-        let payload = graph.serialize(format);
+        let payload = self.view_graph.serialize(format);
         std::fs::write(path, payload).map_err(anyhow::Error::from)
     }
 
@@ -194,7 +232,8 @@ impl AppData {
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
         let payload = std::fs::read_to_string(path).map_err(anyhow::Error::from)?;
-        self.apply_graph(ViewGraph::deserialize(format, &payload)?);
+        self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
+
         Ok(())
     }
 }

@@ -93,6 +93,8 @@ Node header fills now switch to the connection breaker color when the breaker pa
 Node title rendering now uses `galley_with_override_text_color` so breaker-hit overrides can change the title color.
 `MainUi::handle_undo_shortcut` now stubs out Cmd/Ctrl+Z handling and returns early from render when not pressed.
 `AppData::undo` is stubbed for future undo stack integration.
+`AppData` now keeps undo/redo stacks of serialized `ViewGraph` snapshots, captures a pending snapshot each frame, and
+applies undo/redo by deserializing JSON snapshots. `MainUi::render` calls `begin_undo_snapshot` before graph edits.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
