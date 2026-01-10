@@ -1,7 +1,7 @@
 use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
-use crate::common::{bezier_helper, pos_changed, scale_changed};
+use crate::common::{bezier_helper, pos_changed_p2, scale_changed};
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::{Gui, style};
@@ -39,8 +39,8 @@ impl ConnectionBezier {
 
     pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         let needs_rebuild = !self.inited
-            || pos_changed(self.start, start)
-            || pos_changed(self.end, end)
+            || pos_changed_p2(self.start, start)
+            || pos_changed_p2(self.end, end)
             || scale_changed(self.scale, scale);
         if !needs_rebuild {
             return;

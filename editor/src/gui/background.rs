@@ -26,8 +26,8 @@ impl DottedBackgroundRenderer {
 
         if !self.inited
             || crate::common::scale_changed(self.last_scale, scale)
-            || crate::common::vec_changed(self.last_pan, pan)
-            || crate::common::vec_changed(self.last_rect_size, rect_size)
+            || crate::common::pan_changed_v2(self.last_pan, pan)
+            || crate::common::pan_changed_v2(self.last_rect_size, rect_size)
         {
             self.rebuild_mesh(gui, ctx);
             self.last_scale = scale;

@@ -97,6 +97,7 @@ Undo/redo now keeps the current snapshot at the top of the undo stack, pops it o
 applies the new top snapshot without re-pushing, avoiding the extra duplicate state.
 `GraphUiInteraction.actions` now stores `GraphUiAction` values directly; actions carry their `node_id` (with
 `NodeSelected` using an `Option<NodeId>`), and a `ZoomPanChanged` action is emitted when pan or zoom changes.
+Zoom/pan change detection now uses `common::scale_changed` and `common::vec_changed` thresholds.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

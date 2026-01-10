@@ -95,8 +95,8 @@ impl Default for ConnectionEndpoints {
 impl ConnectionEndpoints {
     fn update(&mut self, output_pos: Pos2, input_pos: Pos2) -> bool {
         let needs_rebuild = !self.inited
-            || crate::common::pos_changed(self.output_pos, output_pos)
-            || crate::common::pos_changed(self.input_pos, input_pos);
+            || crate::common::pos_changed_p2(self.output_pos, output_pos)
+            || crate::common::pos_changed_p2(self.input_pos, input_pos);
         if needs_rebuild {
             self.inited = true;
             self.output_pos = output_pos;

@@ -14,10 +14,10 @@ pub fn scale_changed(old: f32, new: f32) -> bool {
     diff / scale > 0.001
 }
 
-pub fn vec_changed(old: Vec2, new: Vec2) -> bool {
+pub fn pan_changed_v2(old: Vec2, new: Vec2) -> bool {
     (old - new).length_sq() > 1.0
 }
 
-pub fn pos_changed(old: Pos2, new: Pos2) -> bool {
+pub fn pos_changed_p2(old: Pos2, new: Pos2) -> bool {
     (old - new).length_sq() > 1.0
 }
