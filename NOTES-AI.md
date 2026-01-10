@@ -120,6 +120,7 @@ Temp connection endpoints now live on `ConnectionDrag`.
 Double-clicking a connection now clears its input binding.
 `KeyIndexVec` now implements order-independent `Eq`/`PartialEq` by comparing values by key.
 KeyIndexVec equality now has a unit test covering order independence and value changes.
+`editor::common::ui_equals` now defines a `UiEquals` trait with `ui_equals` for `f32`, `Vec2`, and `Pos2` using UI tolerance thresholds.
 Connection curves now render with a gradient from output port color to input port color, using per-segment strokes.
 Connection curves now use sampled polylines instead of `CubicBezierShape`.
 Bezier math and intersection helpers now live in `common::bezier::Bezier`, reused by connection rendering.
