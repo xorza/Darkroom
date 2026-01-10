@@ -237,4 +237,47 @@ impl Style {
     pub fn set_scale(&mut self, scale: f32) {
         *self = Self::new(scale);
     }
+
+    pub fn apply(&self, egui_style: &mut egui::Style) {
+        let visuals = &mut egui_style.visuals;
+        visuals.dark_mode = true;
+        visuals.override_text_color = Some(self.text_color);
+        visuals.window_fill = self.noninteractive_bg_fill;
+        visuals.panel_fill = self.noninteractive_bg_fill;
+        visuals.faint_bg_color = self.inactive_bg_fill;
+        visuals.extreme_bg_color = self.active_bg_fill;
+        visuals.code_bg_color = self.inactive_bg_fill;
+        visuals.text_edit_bg_color = Some(self.active_bg_fill);
+        visuals.selection.bg_fill = self.checked_bg_fill;
+        visuals.selection.stroke =
+            Stroke::new(self.active_bg_stroke.width, self.checked_text_color);
+
+        visuals.widgets.noninteractive.bg_fill = self.noninteractive_bg_fill;
+        visuals.widgets.noninteractive.bg_stroke = self.inactive_bg_stroke;
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(
+            self.inactive_bg_stroke.width,
+            self.noninteractive_text_color,
+        );
+
+        visuals.widgets.inactive.bg_fill = self.inactive_bg_fill;
+        visuals.widgets.inactive.bg_stroke = self.inactive_bg_stroke;
+        visuals.widgets.inactive.fg_stroke =
+            Stroke::new(self.inactive_bg_stroke.width, self.text_color);
+
+        visuals.widgets.hovered.bg_fill = self.hover_bg_fill;
+        visuals.widgets.hovered.bg_stroke = self.active_bg_stroke;
+        visuals.widgets.hovered.fg_stroke =
+            Stroke::new(self.active_bg_stroke.width, self.text_color);
+
+        visuals.widgets.active.bg_fill = self.active_bg_fill;
+        visuals.widgets.active.bg_stroke = self.active_bg_stroke;
+        visuals.widgets.active.fg_stroke =
+            Stroke::new(self.active_bg_stroke.width, self.text_color);
+
+        visuals.widgets.open = visuals.widgets.active;
+        visuals.hyperlink_color = self.text_color;
+        visuals.window_stroke = self.inactive_bg_stroke;
+        visuals.window_corner_radius = self.corner_radius.into();
+        visuals.menu_corner_radius = self.small_corner_radius.into();
+    }
 }

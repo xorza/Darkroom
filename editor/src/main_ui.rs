@@ -64,6 +64,9 @@ impl MainUi {
         app_data.update_status();
 
         let style = Style::new(1.0);
+        ctx.style_mut(|egui_style| {
+            style.apply(egui_style);
+        });
 
         egui::TopBottomPanel::top("top_panel")
             .show_separator_line(false)

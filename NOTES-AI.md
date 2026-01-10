@@ -83,6 +83,8 @@ Graph UI interactions now collect connection errors (like cycle detection) and s
 bar in `AppData::handle_graph_ui_actions`.
 `GraphUi` now owns its `GraphUiInteraction` state and `GraphUi::render` returns a reference to the interaction payload
 instead of storing it on `MainUi`.
+`Style::apply` now updates egui visuals to match the editor theme (panel/window fills, widget colors, selection, and
+corner radii).
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
