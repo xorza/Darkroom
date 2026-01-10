@@ -96,6 +96,10 @@ impl AppData {
         self.worker.event();
     }
 
+    pub fn undo(&mut self) {
+        // TODO: wire undo stack
+    }
+
     pub fn apply_graph(&mut self, view_graph: ViewGraph) {
         view_graph.validate();
 
