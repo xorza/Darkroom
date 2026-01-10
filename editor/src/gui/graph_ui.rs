@@ -51,17 +51,19 @@ pub struct GraphUi {
     connection_breaker: ConnectionBreaker,
     connections: ConnectionUi,
     node_ui: NodeUi,
-    background: DottedBackgroundRenderer,
+    dots_background: DottedBackgroundRenderer,
 }
 
 #[derive(Debug, Default)]
-pub struct GraphUiInteraction {
+pub(crate) struct GraphUiInteraction {
     pub actions: Vec<(NodeId, GraphUiAction)>,
+    pub run: bool,
 }
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
         self.actions.clear();
+        self.run = false;
     }
 }
 
@@ -79,7 +81,7 @@ impl GraphUi {
         self.graph_layout = GraphLayout::default();
         self.connection_breaker.reset();
         self.connections = ConnectionUi::default();
-        self.background = DottedBackgroundRenderer::default();
+        self.dots_background = DottedBackgroundRenderer::default();
     }
 
     pub fn render(
@@ -88,7 +90,7 @@ impl GraphUi {
         view_graph: &mut model::ViewGraph,
         execution_stats: Option<&ExecutionStats>,
         func_lib: &FuncLib,
-        ui_interaction: &mut GraphUiInteraction,
+        graph_ui_interaction: &mut GraphUiInteraction,
     ) {
         let rect = gui.ui().available_rect_before_wrap();
         let rect = rect.shrink(gui.style.big_padding);
@@ -128,7 +130,7 @@ impl GraphUi {
             ctx.view_graph.selected_node_id = None;
         }
 
-        self.top_panel(&mut gui, &mut ctx);
+        self.top_panel(&mut gui, &mut ctx, graph_ui_interaction);
 
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(&mut gui, &mut ctx, &background_response, pointer_pos);
@@ -136,14 +138,14 @@ impl GraphUi {
 
         gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(&mut gui, &ctx);
-        self.background.render(&mut gui, &ctx);
-        self.render_connections(&mut gui, &mut ctx, ui_interaction);
+        self.dots_background.render(&mut gui, &ctx);
+        self.render_connections(&mut gui, &mut ctx, graph_ui_interaction);
 
         let drag_port_info = self.node_ui.render_nodes(
             &mut gui,
             &mut ctx,
             &mut self.graph_layout,
-            ui_interaction,
+            graph_ui_interaction,
             if self.state == InteractionState::BreakingConnections {
                 Some(&self.connection_breaker)
             } else {
@@ -156,7 +158,7 @@ impl GraphUi {
                 &mut gui,
                 &mut ctx,
                 &background_response,
-                ui_interaction,
+                graph_ui_interaction,
                 pointer_pos,
                 drag_port_info,
             );
@@ -311,7 +313,12 @@ impl GraphUi {
         }
     }
 
-    fn top_panel(&self, gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>) {
+    fn top_panel(
+        &self,
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext,
+        graph_ui_interaction: &mut GraphUiInteraction,
+    ) {
         let mut fit_all = false;
         let mut view_selected = false;
         let mut reset_view = false;
@@ -334,7 +341,7 @@ impl GraphUi {
                     ui.set_min_width(panel_width);
                     ui.set_max_width(panel_width);
                     let frame = Frame::NONE
-                        .fill(Color32::from_black_alpha(32))
+                        .fill(Color32::from_black_alpha(64))
                         .inner_margin(small_padding);
                     frame.show(ui, |ui| {
                         ui.set_min_width(panel_width - small_padding * 2.0);
@@ -348,6 +355,7 @@ impl GraphUi {
                                 )
                                 .clicked()
                             };
+                            graph_ui_interaction.run |= make_button("run");
                             fit_all = make_button("a");
                             view_selected = make_button("s");
                             reset_view = make_button("r");
@@ -388,10 +396,6 @@ impl GraphUi {
                 ),
             )
         };
-
-        // if (zoom_delta - 1.0).abs() > 0.001 || pan.length() > 0.001 {
-        //     println!("zoom_delta: {}, pan {}", zoom_delta, pan);
-        // }
 
         if (zoom_delta - 1.0).abs() > f32::EPSILON {
             // zoom

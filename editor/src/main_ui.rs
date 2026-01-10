@@ -62,10 +62,6 @@ impl MainUi {
         app_data.load_test_graph();
     }
 
-    pub fn run_graph(&mut self, app_data: &mut AppData) {
-        app_data.run_graph();
-    }
-
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
         app_data.update_status();
 
@@ -121,39 +117,21 @@ impl MainUi {
                 ui.label(&app_data.status);
             });
 
-        egui::TopBottomPanel::bottom("run_panel")
-            .show_separator_line(false)
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Run").clicked() {
-                        self.run_graph(app_data);
-                    }
-                });
-            });
+        // egui::TopBottomPanel::bottom("run_panel")
+        //     .show_separator_line(false)
+        //     .show(ctx, |ui| {
+        //         ui.horizontal(|ui| {
+        //             if ui.button("Run").clicked() {
+        //                 self.run_graph(app_data);
+        //             }
+        //         });
+        //     });
 
         let style = Style::new(1.0);
 
         egui::CentralPanel::default()
-            // .frame(Frame {
-            //     inner_margin: 0.0.into(),
-            //     stroke: style.inactive_bg_stroke,
-            //     corner_radius: style.corner_radius.into(),
-            //     outer_margin: style.padding.into(),
-            //     ..Default::default()
-            // })
             .frame(Frame::NONE)
             .show(ctx, |ui| {
-                // let rect = ui.available_rect_before_wrap();
-                // let mut graph_ui = ui.new_child(
-                //     egui::UiBuilder::new()
-                //         .id_salt("graph_ui")
-                //         .max_rect(rect)
-                //         .sense(Sense::hover()),
-                // );
-                // graph_ui.set_clip_rect(rect);
-
-                // ui.clip_rect();
-
                 let mut gui = Gui::new(ui, style);
 
                 self.graph_ui.render(

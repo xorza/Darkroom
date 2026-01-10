@@ -106,12 +106,14 @@ impl AppData {
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
-        if graph_ui_interaction.actions.is_empty() {
-            return;
+        if !graph_ui_interaction.actions.is_empty() {
+            self.execution_stats = None;
+            self.graph_updated = true;
         }
 
-        self.execution_stats = None;
-        self.graph_updated = true;
+        if graph_ui_interaction.run {
+            self.run_graph();
+        }
     }
 
     pub fn empty_graph(&mut self) {
