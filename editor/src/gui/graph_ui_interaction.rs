@@ -141,7 +141,7 @@ impl GraphUiInteraction {
         }
     }
 
-    fn flush(&mut self) {
+    pub fn flush(&mut self) {
         if let Some(action) = self.pending_action.take() {
             self.actions1.push(action);
         }

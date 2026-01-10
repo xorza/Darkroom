@@ -129,7 +129,7 @@ impl MainUi {
             )
         });
 
-        app_data.handle_graph_ui_actions();
+        app_data.handle_interaction();
         self.arena.reset();
     }
 

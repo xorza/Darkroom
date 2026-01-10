@@ -106,6 +106,8 @@ impl AppData {
     }
 
     pub fn undo(&mut self) {
+        self.interaction.flush();
+        self.handle_interaction();
         if self.undo_stack.undo(&mut self.view_graph) {
             self.refresh_after_graph_change();
         }
@@ -132,11 +134,10 @@ impl AppData {
         self.execution_stats = None;
     }
 
-    pub fn handle_graph_ui_actions(&mut self) {
+    pub fn handle_interaction(&mut self) {
         for actions in self.interaction.actions_stacks() {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
-            println!("Actions: {:?}", actions);
 
             if actions.iter().any(|action| action.affects_computation()) {
                 self.execution_stats = None;
@@ -151,6 +152,8 @@ impl AppData {
         if let Some(err) = self.interaction.errors.last() {
             self.set_status(format!("Graph error: {err}"));
         }
+
+        self.interaction.clear();
     }
 
     pub fn empty_graph(&mut self) {
