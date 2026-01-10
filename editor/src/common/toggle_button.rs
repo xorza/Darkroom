@@ -4,9 +4,10 @@ use egui::{Align2, Color32, Rect, Response, Sense, Stroke, StrokeKind};
 use crate::gui::Gui;
 
 #[derive(Debug, Clone, Copy)]
-struct ToggleButtonBackground {
+pub struct ToggleButtonBackground {
     fill: Color32,
-    stroke: Stroke,
+    inactive_stroke: Stroke,
+    hovered_stroke: Stroke,
     radius: f32,
 }
 
@@ -47,13 +48,9 @@ impl<'a> ToggleButton<'a> {
         self
     }
 
-    pub fn background(mut self, fill: Color32, stroke: Stroke, radius: f32) -> Self {
-        assert!(radius.is_finite());
-        self.background = Some(ToggleButtonBackground {
-            fill,
-            stroke,
-            radius,
-        });
+    pub fn background(mut self, background: ToggleButtonBackground) -> Self {
+        assert!(background.radius.is_finite());
+        self.background = Some(background);
         self
     }
 
@@ -95,15 +92,22 @@ impl<'a> ToggleButton<'a> {
 
         let background = self.background.unwrap_or(ToggleButtonBackground {
             fill: default_fill,
-            stroke: gui.style.inactive_bg_stroke,
+            inactive_stroke: gui.style.inactive_bg_stroke,
+            hovered_stroke: gui.style.active_bg_stroke,
             radius: gui.style.small_corner_radius,
         });
+
+        let stroke = if response.hovered() && self.enabled {
+            background.hovered_stroke
+        } else {
+            background.inactive_stroke
+        };
 
         gui.painter().rect(
             rect,
             background.radius,
             background.fill,
-            background.stroke,
+            stroke,
             StrokeKind::Middle,
         );
         gui.painter().text(
