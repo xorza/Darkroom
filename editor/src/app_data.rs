@@ -1,3 +1,4 @@
+use crate::common::undo_stack::UndoStack;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use anyhow::Result;
 use common::{FileFormat, Shared};
@@ -12,7 +13,6 @@ use std::sync::Arc;
 
 use crate::main_ui::UiContext;
 use crate::model::ViewGraph;
-use crate::undo_stack::UndoStack;
 
 #[derive(Debug, Default)]
 pub struct Status {

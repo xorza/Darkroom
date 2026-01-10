@@ -6,6 +6,7 @@ pub mod connection_bezier;
 pub mod drag_value;
 pub mod font;
 pub mod toggle_button;
+pub mod undo_stack;
 
 pub fn scale_changed(old: f32, new: f32) -> bool {
     let diff = (old - new).abs();
