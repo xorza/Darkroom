@@ -1,11 +1,14 @@
 use common::key_index_vec::KeyIndexKey;
+use egui::Pos2;
 use graph::graph::NodeId;
 use serde::{Deserialize, Serialize};
+
+use crate::common::pos_changed_p2;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewNode {
     pub id: NodeId,
-    pub pos: egui::Pos2,
+    pub pos: Pos2,
 }
 
 impl Default for ViewNode {
@@ -14,7 +17,7 @@ impl Default for ViewNode {
 
         Self {
             id,
-            pos: egui::Pos2::ZERO,
+            pos: Pos2::ZERO,
         }
     }
 }
@@ -23,3 +26,11 @@ impl KeyIndexKey<NodeId> for ViewNode {
         &self.id
     }
 }
+
+impl PartialEq for ViewNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && !pos_changed_p2(self.pos, other.pos)
+    }
+}
+
+impl Eq for ViewNode {}
