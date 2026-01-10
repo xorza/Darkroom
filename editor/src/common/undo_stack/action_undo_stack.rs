@@ -11,8 +11,10 @@ use crate::model::ViewGraph;
 
 #[derive(Debug)]
 pub struct ActionUndoStack {
-    undo_stack: Vec<Vec<GraphUiAction>>,
-    redo_stack: Vec<Vec<GraphUiAction>>,
+    undo_actions: Vec<GraphUiAction>,
+    redo_actions: Vec<GraphUiAction>,
+    undo_stack: Vec<std::ops::Range<usize>>,
+    redo_stack: Vec<std::ops::Range<usize>>,
     max_steps: usize,
 }
 
@@ -20,6 +22,8 @@ impl ActionUndoStack {
     pub fn new(max_steps: usize) -> Self {
         assert!(max_steps > 0, "undo stack must allow at least one step");
         Self {
+            undo_actions: Vec::new(),
+            redo_actions: Vec::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_steps,
@@ -28,7 +32,44 @@ impl ActionUndoStack {
 
     fn trim_to_limit(&mut self) {
         while self.undo_stack.len() > self.max_steps {
-            self.undo_stack.remove(0);
+            let removed = self.undo_stack.remove(0);
+            if removed.start == 0 {
+                let offset = self
+                    .undo_stack
+                    .first()
+                    .map(|range| range.start)
+                    .unwrap_or(self.undo_actions.len());
+                if offset > 0 {
+                    self.undo_actions.drain(0..offset);
+                    for range in &mut self.undo_stack {
+                        range.start -= offset;
+                        range.end -= offset;
+                    }
+                }
+            }
+        }
+    }
+
+    fn append_actions(
+        buffer: &mut Vec<GraphUiAction>,
+        actions: &[GraphUiAction],
+    ) -> std::ops::Range<usize> {
+        let start = buffer.len();
+        buffer.extend_from_slice(actions);
+        let end = buffer.len();
+        start..end
+    }
+
+    fn slice_actions<'a>(
+        buffer: &'a [GraphUiAction],
+        range: &std::ops::Range<usize>,
+    ) -> &'a [GraphUiAction] {
+        &buffer[range.clone()]
+    }
+
+    fn pop_tail_actions(buffer: &mut Vec<GraphUiAction>, range: &std::ops::Range<usize>) {
+        if range.end == buffer.len() {
+            buffer.truncate(range.start);
         }
     }
 }
@@ -37,6 +78,8 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
     type Action = GraphUiAction;
 
     fn reset_with(&mut self, _value: &ViewGraph) {
+        self.undo_actions.clear();
+        self.redo_actions.clear();
         self.undo_stack.clear();
         self.redo_stack.clear();
     }
@@ -45,35 +88,44 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         if actions.is_empty() {
             return;
         }
+        self.redo_actions.clear();
         self.redo_stack.clear();
-        self.undo_stack.push(actions.to_vec());
+        let range = Self::append_actions(&mut self.undo_actions, actions);
+        self.undo_stack.push(range);
         self.trim_to_limit();
     }
 
     fn clear_redo(&mut self) {
+        self.redo_actions.clear();
         self.redo_stack.clear();
     }
 
     fn undo(&mut self, value: &mut ViewGraph) -> bool {
-        let Some(actions) = self.undo_stack.pop() else {
+        let Some(actions_range) = self.undo_stack.pop() else {
             return false;
         };
+        let actions = Self::slice_actions(&self.undo_actions, &actions_range);
         for action in actions.iter().rev() {
             action.undo(value);
         }
-        self.redo_stack.push(actions);
+        let redo_range = Self::append_actions(&mut self.redo_actions, actions);
+        self.redo_stack.push(redo_range);
+        Self::pop_tail_actions(&mut self.undo_actions, &actions_range);
 
         true
     }
 
     fn redo(&mut self, value: &mut ViewGraph) -> bool {
-        let Some(actions) = self.redo_stack.pop() else {
+        let Some(actions_range) = self.redo_stack.pop() else {
             return false;
         };
+        let actions = Self::slice_actions(&self.redo_actions, &actions_range);
         for action in actions.iter() {
             action.apply(value);
         }
-        self.undo_stack.push(actions);
+        let undo_range = Self::append_actions(&mut self.undo_actions, actions);
+        self.undo_stack.push(undo_range);
+        Self::pop_tail_actions(&mut self.redo_actions, &actions_range);
 
         true
     }
@@ -85,6 +137,31 @@ mod tests {
     use common::FileFormat;
     use egui::{Pos2, Vec2, vec2};
     use graph::prelude::test_graph;
+
+    fn assert_ranges_match_actions(stack: &ActionUndoStack) {
+        for range in &stack.undo_stack {
+            assert!(range.start <= range.end);
+            assert!(range.end <= stack.undo_actions.len());
+        }
+        for range in &stack.redo_stack {
+            assert!(range.start <= range.end);
+            assert!(range.end <= stack.redo_actions.len());
+        }
+
+        let undo_actions_len: usize = stack
+            .undo_stack
+            .iter()
+            .map(|range| range.end - range.start)
+            .sum();
+        let redo_actions_len: usize = stack
+            .redo_stack
+            .iter()
+            .map(|range| range.end - range.start)
+            .sum();
+
+        assert_eq!(undo_actions_len, stack.undo_actions.len());
+        assert_eq!(redo_actions_len, stack.redo_actions.len());
+    }
 
     #[test]
     fn max_steps_must_be_positive() {
@@ -130,10 +207,13 @@ mod tests {
 
         stack.push_current(&view_graph, &actions);
 
+        assert_ranges_match_actions(&stack);
         assert!(stack.undo(&mut view_graph));
+        assert_ranges_match_actions(&stack);
         assert_eq!(view_graph.serialize(FileFormat::Json), original);
 
         assert!(stack.redo(&mut view_graph));
+        assert_ranges_match_actions(&stack);
         assert_eq!(view_graph.serialize(FileFormat::Json), modified);
     }
 
@@ -155,6 +235,7 @@ mod tests {
             action.apply(&mut view_graph);
         }
         stack.push_current(&view_graph, &first_actions);
+        assert_ranges_match_actions(&stack);
 
         let second_actions = vec![GraphUiAction::NodeMoved {
             node_id,
@@ -165,12 +246,15 @@ mod tests {
             action.apply(&mut view_graph);
         }
         stack.push_current(&view_graph, &second_actions);
+        assert_ranges_match_actions(&stack);
 
         assert!(stack.undo(&mut view_graph));
+        assert_ranges_match_actions(&stack);
         assert_eq!(
             view_graph.view_nodes.by_key(&node_id).unwrap().pos,
             before_pos + vec2(1.0, 0.0)
         );
         assert!(!stack.undo(&mut view_graph));
+        assert_ranges_match_actions(&stack);
     }
 }
