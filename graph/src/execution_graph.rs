@@ -8,7 +8,7 @@ use thiserror::Error;
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
-use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId};
+use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{FuncId, FuncLambda};
 use common::{BoolExt, FileFormat, is_debug};
 
@@ -33,7 +33,7 @@ pub struct ExecutionStats {
     pub elapsed_secs: f64,
 
     pub executed_nodes: Vec<ExecutedNodeStats>,
-    pub nodes_with_missing_inputs: Vec<NodeId>,
+    pub missing_inputs: Vec<PortAddress>,
     pub cached_nodes: Vec<NodeId>,
 }
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -700,7 +700,7 @@ impl ExecutionGraph {
 
     fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
         let mut executed_nodes: Vec<ExecutedNodeStats> = Vec::default();
-        let mut nodes_with_missing_inputs: Vec<NodeId> = Vec::default();
+        let mut missing_inputs: Vec<PortAddress> = Vec::default();
         let mut cached_nodes: Vec<NodeId> = Vec::default();
 
         for e_node_idx in self.e_node_invoke_order.iter().copied() {
@@ -714,7 +714,15 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             if e_node.missing_required_inputs {
-                nodes_with_missing_inputs.push(e_node.id);
+                // nodes_with_missing_inputs.push(e_node.id);
+                for (input_idx, e_input) in e_node.inputs.iter().enumerate() {
+                    if e_input.missing {
+                        missing_inputs.push(PortAddress {
+                            target_id: e_node.id,
+                            port_idx: input_idx,
+                        });
+                    }
+                }
             }
             if e_node.cached {
                 cached_nodes.push(e_node.id);
@@ -724,7 +732,7 @@ impl ExecutionGraph {
         ExecutionStats {
             elapsed_secs: start.elapsed().as_secs_f64(),
             executed_nodes,
-            nodes_with_missing_inputs,
+            missing_inputs,
             cached_nodes,
         }
     }

@@ -1,3 +1,5 @@
+use std::any;
+
 use crate::common::button::Button;
 use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -417,7 +419,11 @@ fn node_execution_info<'a>(
         return NodeExecutionInfo::None;
     };
 
-    if execution_stats.nodes_with_missing_inputs.contains(&node_id) {
+    if execution_stats
+        .missing_inputs
+        .iter()
+        .any(|port_address| port_address.target_id == node_id)
+    {
         return NodeExecutionInfo::MissingInputs;
     }
 

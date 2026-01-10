@@ -1,7 +1,7 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
-use graph::graph::NodeId;
+use graph::graph::{NodeId, PortAddress};
 use graph::prelude::{Binding, ExecutionStats};
 
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
@@ -155,7 +155,10 @@ impl ConnectionUi {
                 // =============
 
                 let missing_inputs = execution_stats.is_some_and(|execution_stats| {
-                    execution_stats.nodes_with_missing_inputs.contains(&node_id)
+                    execution_stats.missing_inputs.contains(&PortAddress {
+                        target_id: node_id,
+                        port_idx: input_idx,
+                    })
                 });
                 if missing_inputs {
                     let (_curve_idx, missing_curve) =

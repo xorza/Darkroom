@@ -9,7 +9,7 @@ use common::{id_type, is_debug};
 
 id_type!(NodeId);
 
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PortAddress {
     pub target_id: NodeId,
     pub port_idx: usize,
