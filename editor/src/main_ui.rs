@@ -70,9 +70,10 @@ impl MainUi {
         app_data.update_status();
 
         egui::TopBottomPanel::top("top_panel")
-            .frame(Frame {
-                ..Default::default()
-            })
+            // .frame(Frame {
+            //     ..Default::default()
+            // })
+            .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     {
@@ -114,17 +115,21 @@ impl MainUi {
                 });
             });
 
-        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
-            ui.label(&app_data.status);
-        });
-
-        egui::TopBottomPanel::bottom("run_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                if ui.button("Run").clicked() {
-                    self.run_graph(app_data);
-                }
+        egui::TopBottomPanel::bottom("status_panel")
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                ui.label(&app_data.status);
             });
-        });
+
+        egui::TopBottomPanel::bottom("run_panel")
+            .show_separator_line(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Run").clicked() {
+                        self.run_graph(app_data);
+                    }
+                });
+            });
 
         let style = Style::new(1.0);
         let frame = Frame {
