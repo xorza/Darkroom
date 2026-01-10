@@ -108,13 +108,21 @@ impl AppData {
     pub fn undo(&mut self) {
         self.interaction.flush();
         self.handle_interaction();
-        if self.undo_stack.undo(&mut self.view_graph) {
+        let mut affects_computation = false;
+        let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
+            affects_computation |= action.affects_computation();
+        });
+        if undid && affects_computation {
             self.refresh_after_graph_change();
         }
     }
 
     pub fn redo(&mut self) {
-        if self.undo_stack.redo(&mut self.view_graph) {
+        let mut affects_computation = false;
+        let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
+            affects_computation |= action.affects_computation();
+        });
+        if redid && affects_computation {
             self.refresh_after_graph_change();
         }
     }

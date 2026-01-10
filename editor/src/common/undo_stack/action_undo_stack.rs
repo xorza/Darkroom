@@ -100,13 +100,14 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         self.redo_stack.clear();
     }
 
-    fn undo(&mut self, value: &mut ViewGraph) -> bool {
+    fn undo(&mut self, value: &mut ViewGraph, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
         let Some(actions_range) = self.undo_stack.pop() else {
             return false;
         };
         let actions = Self::slice_actions(&self.undo_actions, &actions_range);
         for action in actions.iter().rev() {
             action.undo(value);
+            on_action(action);
         }
         let redo_range = Self::append_actions(&mut self.redo_actions, actions);
         self.redo_stack.push(redo_range);
@@ -115,13 +116,14 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         true
     }
 
-    fn redo(&mut self, value: &mut ViewGraph) -> bool {
+    fn redo(&mut self, value: &mut ViewGraph, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
         let Some(actions_range) = self.redo_stack.pop() else {
             return false;
         };
         let actions = Self::slice_actions(&self.redo_actions, &actions_range);
         for action in actions.iter() {
             action.apply(value);
+            on_action(action);
         }
         let undo_range = Self::append_actions(&mut self.undo_actions, actions);
         self.undo_stack.push(undo_range);
@@ -208,11 +210,11 @@ mod tests {
         stack.push_current(&view_graph, &actions);
 
         assert_ranges_match_actions(&stack);
-        assert!(stack.undo(&mut view_graph));
+        assert!(stack.undo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
         assert_eq!(view_graph.serialize(FileFormat::Json), original);
 
-        assert!(stack.redo(&mut view_graph));
+        assert!(stack.redo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
         assert_eq!(view_graph.serialize(FileFormat::Json), modified);
     }
@@ -248,13 +250,13 @@ mod tests {
         stack.push_current(&view_graph, &second_actions);
         assert_ranges_match_actions(&stack);
 
-        assert!(stack.undo(&mut view_graph));
+        assert!(stack.undo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
         assert_eq!(
             view_graph.view_nodes.by_key(&node_id).unwrap().pos,
             before_pos + vec2(1.0, 0.0)
         );
-        assert!(!stack.undo(&mut view_graph));
+        assert!(!stack.undo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
     }
 }

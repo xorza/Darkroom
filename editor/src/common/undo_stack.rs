@@ -12,6 +12,6 @@ pub trait UndoStack<T: Debug>: Debug {
     fn push_current(&mut self, value: &T, actions: &[Self::Action]);
 
     fn clear_redo(&mut self);
-    fn undo(&mut self, value: &mut T) -> bool;
-    fn redo(&mut self, value: &mut T) -> bool;
+    fn undo(&mut self, value: &mut T, on_action: &mut dyn FnMut(&Self::Action)) -> bool;
+    fn redo(&mut self, value: &mut T, on_action: &mut dyn FnMut(&Self::Action)) -> bool;
 }

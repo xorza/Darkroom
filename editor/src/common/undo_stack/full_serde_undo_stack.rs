@@ -72,7 +72,7 @@ where
         self.redo_stack.clear();
     }
 
-    pub fn undo(&mut self, value: &mut T) -> bool {
+    pub fn undo(&mut self, value: &mut T, _on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
         if self.undo_stack.len() < 2 {
             return false;
         }
@@ -99,7 +99,7 @@ where
         true
     }
 
-    pub fn redo(&mut self, value: &mut T) -> bool {
+    pub fn redo(&mut self, value: &mut T, _on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
         let Some(snapshot) = self.redo_stack.pop() else {
             return false;
         };
@@ -135,12 +135,12 @@ where
         FullSerdeUndoStack::clear_redo(self);
     }
 
-    fn undo(&mut self, value: &mut T) -> bool {
-        FullSerdeUndoStack::undo(self, value)
+    fn undo(&mut self, value: &mut T, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
+        FullSerdeUndoStack::undo(self, value, on_action)
     }
 
-    fn redo(&mut self, value: &mut T) -> bool {
-        FullSerdeUndoStack::redo(self, value)
+    fn redo(&mut self, value: &mut T, on_action: &mut dyn FnMut(&GraphUiAction)) -> bool {
+        FullSerdeUndoStack::redo(self, value, on_action)
     }
 }
 
@@ -232,13 +232,13 @@ mod tests {
         assert!(stack.undo_stack.len() >= 2);
 
         let mut undone = state_b.clone();
-        let did_undo = stack.undo(&mut undone);
+        let did_undo = stack.undo(&mut undone, &mut |_| {});
         assert_eq!(undone, state_a);
         assert!(did_undo);
         assert_eq!(stack.redo_stack.len(), 1);
 
         let mut redone = state_a.clone();
-        let did_redo = stack.redo(&mut redone);
+        let did_redo = stack.redo(&mut redone, &mut |_| {});
         assert_eq!(redone, state_b);
         assert!(did_redo);
         assert_eq!(stack.redo_stack.len(), 0);
@@ -258,7 +258,7 @@ mod tests {
         stack.reset_with(&state_a);
         stack.push_current(&state_b, &[]);
         let mut undone = state_b.clone();
-        let did_undo = stack.undo(&mut undone);
+        let did_undo = stack.undo(&mut undone, &mut |_| {});
         assert!(did_undo);
         assert_eq!(stack.redo_stack.len(), 1);
 
@@ -284,7 +284,7 @@ mod tests {
         stack.reset_with(&state_a);
         stack.push_current(&state_b, &[]);
         let mut undone = state_b.clone();
-        let did_undo = stack.undo(&mut undone);
+        let did_undo = stack.undo(&mut undone, &mut |_| {});
         assert!(did_undo);
         assert_eq!(stack.redo_stack.len(), 1);
 
@@ -322,7 +322,7 @@ mod tests {
 
         assert_eq!(stack.undo_stack.len(), 1);
         let mut output = state_c.clone();
-        let did_undo = stack.undo(&mut output);
+        let did_undo = stack.undo(&mut output, &mut |_| {});
         assert_eq!(output, state_c);
         assert!(!did_undo);
     }
@@ -352,10 +352,10 @@ mod tests {
 
         assert_eq!(stack.undo_stack.len(), 2);
         let mut output = state_c.clone();
-        let did_undo = stack.undo(&mut output);
+        let did_undo = stack.undo(&mut output, &mut |_| {});
         assert_eq!(output, state_b);
         assert!(did_undo);
-        let did_undo = stack.undo(&mut output);
+        let did_undo = stack.undo(&mut output, &mut |_| {});
         assert_eq!(output, state_b);
         assert!(!did_undo);
     }
