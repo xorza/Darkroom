@@ -56,7 +56,7 @@ impl GraphUiInteraction {
     }
 
     fn flush(&mut self) {
-        self.actions.extend(self.pending_actions.drain(..));
+        self.actions.append(&mut self.pending_actions);
     }
 }
 

@@ -7,6 +7,7 @@ mod gui;
 mod init;
 mod main_ui;
 mod model;
+mod undo_stack;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};

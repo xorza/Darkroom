@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::main_ui::UiContext;
 use crate::model::ViewGraph;
+use crate::undo_stack::UndoStack;
 
 #[derive(Debug, Default)]
 pub struct Status {
@@ -20,8 +21,6 @@ pub struct Status {
 }
 
 pub type SharedStatus = Shared<Status>;
-
-const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
 
 #[derive(Debug)]
 pub struct AppData {
@@ -36,8 +35,7 @@ pub struct AppData {
 
     pub shared_status: SharedStatus,
 
-    undo_stack: Vec<String>,
-    redo_stack: Vec<String>,
+    undo_stack: UndoStack,
 }
 
 impl AppData {
@@ -58,8 +56,7 @@ impl AppData {
 
             shared_status,
 
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: UndoStack::default(),
         }
     }
 
@@ -105,53 +102,15 @@ impl AppData {
     }
 
     pub fn undo(&mut self) {
-        if self.undo_stack.len() < 2 {
-            return;
+        if let Some(view_graph) = self.undo_stack.undo() {
+            self.apply_graph(view_graph, false);
         }
-
-        let current = self.undo_stack.pop().unwrap();
-        self.redo_stack.push(current);
-
-        let snapshot = self
-            .undo_stack
-            .last()
-            .expect("undo stack should contain a prior snapshot");
-        self.apply_graph(
-            ViewGraph::deserialize(UNDO_FILE_FORMAT, snapshot)
-                .expect("Failed to deserialize undo snapshot"),
-            false,
-        );
-
-        tracing::info!("Undo applied, stack size: {}", self.undo_stack.len());
     }
 
     pub fn redo(&mut self) {
-        if self.redo_stack.is_empty() {
-            return;
+        if let Some(view_graph) = self.undo_stack.redo() {
+            self.apply_graph(view_graph, false);
         }
-
-        let snapshot = self
-            .redo_stack
-            .pop()
-            .expect("redo stack should contain a snapshot when redo is requested");
-
-        self.undo_stack.push(snapshot.clone());
-        self.apply_graph(
-            ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
-                .expect("Failed to deserialize redo snapshot"),
-            false,
-        );
-    }
-
-    fn push_undo(&mut self) {
-        let snapshot = self.view_graph.serialize(UNDO_FILE_FORMAT);
-        if self.undo_stack.last().is_some_and(|last| last == &snapshot) {
-            println!("skip");
-            return;
-        }
-        self.undo_stack.push(snapshot);
-
-        tracing::info!("Undo added, stack size: {}", self.undo_stack.len());
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -163,9 +122,7 @@ impl AppData {
         self.execution_stats = None;
 
         if reset_undo {
-            self.undo_stack.clear();
-            self.redo_stack.clear();
-            self.push_undo();
+            self.undo_stack.reset_with(&self.view_graph);
         }
     }
 
@@ -179,8 +136,8 @@ impl AppData {
             self.graph_updated = true;
         }
         if !graph_ui_interaction.actions.is_empty() {
-            self.redo_stack.clear();
-            self.push_undo();
+            self.undo_stack.clear_redo();
+            self.undo_stack.push_current(&self.view_graph);
         }
 
         if graph_ui_interaction.run {

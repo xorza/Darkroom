@@ -102,6 +102,8 @@ Zoom/pan change detection now uses `common::scale_changed` and `common::vec_chan
 and call sites use `add_action`/`add_error`/`add_node_selected` instead of pushing directly.
 `GraphUiInteraction::add_pending_action` now flushes pending actions when mixing action kinds and keeps only the most
 recent pending action per kind.
+Undo/redo snapshot storage now lives in `editor/src/undo_stack.rs`, with `AppData` delegating stack operations to the
+`UndoStack` helper.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
