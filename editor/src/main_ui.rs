@@ -69,18 +69,12 @@ impl MainUi {
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
         app_data.update_status();
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                {
-                    let style = ui.style_mut();
-                    style.spacing.button_padding = egui::vec2(16.0, 5.0);
-                    style.spacing.item_spacing = egui::vec2(10.0, 5.0);
-                    style
-                        .text_styles
-                        .entry(egui::TextStyle::Button)
-                        .and_modify(|font| font.size = 18.0);
-                }
-                ui.menu_button("File", |ui| {
+        egui::TopBottomPanel::top("top_panel")
+            .frame(Frame {
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
                     {
                         let style = ui.style_mut();
                         style.spacing.button_padding = egui::vec2(16.0, 5.0);
@@ -90,25 +84,35 @@ impl MainUi {
                             .entry(egui::TextStyle::Button)
                             .and_modify(|font| font.size = 18.0);
                     }
-                    if ui.button("New").clicked() {
-                        self.empty(app_data);
-                        ui.close();
-                    }
-                    if ui.button("Save").clicked() {
-                        self.save(app_data);
-                        ui.close();
-                    }
-                    if ui.button("Load").clicked() {
-                        self.load(app_data);
-                        ui.close();
-                    }
-                    if ui.button("Test").clicked() {
-                        self.test_graph(app_data);
-                        ui.close();
-                    }
+                    ui.menu_button("File", |ui| {
+                        {
+                            let style = ui.style_mut();
+                            style.spacing.button_padding = egui::vec2(16.0, 5.0);
+                            style.spacing.item_spacing = egui::vec2(10.0, 5.0);
+                            style
+                                .text_styles
+                                .entry(egui::TextStyle::Button)
+                                .and_modify(|font| font.size = 18.0);
+                        }
+                        if ui.button("New").clicked() {
+                            self.empty(app_data);
+                            ui.close();
+                        }
+                        if ui.button("Save").clicked() {
+                            self.save(app_data);
+                            ui.close();
+                        }
+                        if ui.button("Load").clicked() {
+                            self.load(app_data);
+                            ui.close();
+                        }
+                        if ui.button("Test").clicked() {
+                            self.test_graph(app_data);
+                            ui.close();
+                        }
+                    });
                 });
             });
-        });
 
         egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
             ui.label(&app_data.status);
