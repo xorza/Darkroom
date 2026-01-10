@@ -4,6 +4,8 @@ use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::common::UiEquals;
+
 use super::ViewNode;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,6 +129,17 @@ impl ViewGraph {
         }
     }
 }
+
+impl PartialEq for ViewGraph {
+    fn eq(&self, other: &Self) -> bool {
+        self.view_nodes == other.view_nodes
+            && self.graph == other.graph
+            && self.pan.ui_equals(&other.pan)
+            && self.scale.ui_equals(&other.scale)
+            && self.selected_node_id == other.selected_node_id
+    }
+}
+impl Eq for ViewGraph {}
 
 #[cfg(test)]
 mod tests {
