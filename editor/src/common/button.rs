@@ -4,12 +4,13 @@ use egui::{Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind};
 use crate::gui::Gui;
 
 #[derive(Debug, Clone, Copy)]
-struct ButtonBackground {
+pub struct ButtonBackground {
     disabled_fill: Color32,
     idle_fill: Color32,
     hover_fill: Color32,
     active_fill: Color32,
-    stroke: Stroke,
+    inactive_stroke: Stroke,
+    hovered_stroke: Stroke,
     radius: f32,
 }
 
@@ -41,24 +42,9 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn background(
-        mut self,
-        disabled_fill: Color32,
-        idle_fill: Color32,
-        hover_fill: Color32,
-        active_fill: Color32,
-        stroke: Stroke,
-        radius: f32,
-    ) -> Self {
-        assert!(radius.is_finite());
-        self.background = Some(ButtonBackground {
-            disabled_fill,
-            idle_fill,
-            hover_fill,
-            active_fill,
-            stroke,
-            radius,
-        });
+    pub fn background(mut self, background: ButtonBackground) -> Self {
+        assert!(background.radius.is_finite());
+        self.background = Some(background);
         self
     }
 
@@ -89,7 +75,8 @@ impl<'a> Button<'a> {
             idle_fill: gui.style.inactive_bg_fill,
             hover_fill: gui.style.hover_bg_fill,
             active_fill: gui.style.active_bg_fill,
-            stroke: gui.style.inactive_bg_stroke,
+            inactive_stroke: gui.style.inactive_bg_stroke,
+            hovered_stroke: gui.style.active_bg_stroke,
             radius: gui.style.small_corner_radius,
         });
 
@@ -103,13 +90,14 @@ impl<'a> Button<'a> {
             background.idle_fill
         };
 
-        gui.painter().rect(
-            rect,
-            background.radius,
-            fill,
-            background.stroke,
-            StrokeKind::Middle,
-        );
+        let stroke = if response.hovered() && self.enabled {
+            background.hovered_stroke
+        } else {
+            background.inactive_stroke
+        };
+
+        gui.painter()
+            .rect(rect, background.radius, fill, stroke, StrokeKind::Middle);
         gui.painter().extend(shapes.into_iter().map(Into::into));
 
         response

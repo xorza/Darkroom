@@ -85,6 +85,8 @@ bar in `AppData::handle_graph_ui_actions`.
 instead of storing it on `MainUi`.
 `Style::apply` now updates egui visuals to match the editor theme (panel/window fills, widget colors, selection, and
 corner radii).
+`common::button::ButtonBackground` now tracks a separate `hovered_stroke`, and buttons render that stroke on hover.
+`Button::background` now accepts a `ButtonBackground` struct instead of individual color/stroke arguments.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
