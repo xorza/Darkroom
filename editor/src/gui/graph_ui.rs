@@ -299,10 +299,13 @@ impl GraphUi {
         let panel_width = gui.rect.width();
         let panel_rect = egui::Rect::from_min_size(panel_pos, Vec2::new(panel_width, 0.0));
         let mono_font = gui.style.mono_font.clone();
-        let button_size = mono_font.size + gui.style.small_padding * 2.0;
+        let small_padding = gui.style.small_padding;
+        let button_size = mono_font.size + small_padding * 2.0;
+
         assert!(button_size.is_finite());
         assert!(button_size > 0.0);
         let button_size = Vec2::splat(button_size);
+
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
             .show(gui.ui().ctx(), |ui| {
@@ -311,9 +314,9 @@ impl GraphUi {
                     ui.set_max_width(panel_width);
                     let frame = Frame::NONE
                         .fill(Color32::from_black_alpha(160))
-                        .inner_margin(Margin::symmetric(0, 0));
+                        .inner_margin(small_padding);
                     frame.show(ui, |ui| {
-                        ui.set_min_width(panel_width - 8.0);
+                        ui.set_min_width(panel_width - small_padding * 2.0);
                         ui.set_max_width(panel_width);
 
                         ui.horizontal(|ui| {
