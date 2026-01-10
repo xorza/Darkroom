@@ -51,6 +51,7 @@ mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua
 criterion = { version = "*" }
 arc-swap = { version = "*" }
 bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
+lz4_flex = { version = "*", features = ["std"] }
 
 
 [profile.bench]

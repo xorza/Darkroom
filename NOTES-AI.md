@@ -104,6 +104,7 @@ and call sites use `add_action`/`add_error`/`add_node_selected` instead of pushi
 recent pending action per kind.
 Undo/redo snapshot storage now lives in `editor/src/undo_stack.rs`, with `AppData` delegating stack operations to the
 `UndoStack` helper.
+Undo snapshots are now LZ4-compressed (`lz4_flex`), storing compressed bytes instead of raw serialized strings.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
