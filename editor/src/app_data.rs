@@ -122,7 +122,7 @@ impl AppData {
             false,
         );
 
-        println!("Undo applied, stack size: {}", self.undo_stack.len());
+        tracing::info!("Undo applied, stack size: {}", self.undo_stack.len());
     }
 
     pub fn redo(&mut self) {
@@ -151,7 +151,7 @@ impl AppData {
         }
         self.undo_stack.push(snapshot);
 
-        println!("Undo added, stack size: {}", self.undo_stack.len());
+        tracing::info!("Undo added, stack size: {}", self.undo_stack.len());
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
