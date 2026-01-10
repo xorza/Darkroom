@@ -114,10 +114,7 @@ impl AppData {
         let current = self.view_graph.serialize(UNDO_FILE_FORMAT);
         self.redo_stack.push(current);
 
-        let snapshot = self
-            .undo_stack
-            .pop()
-            .expect("undo stack should contain a snapshot when undo is requested");
+        let snapshot = self.undo_stack.pop().unwrap();
         self.apply_graph(
             ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
                 .expect("Failed to deserialize undo snapshot"),
