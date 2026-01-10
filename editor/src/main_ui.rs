@@ -63,6 +63,8 @@ impl MainUi {
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
         app_data.update_status();
 
+        let style = Style::new(1.0);
+
         egui::TopBottomPanel::top("top_panel")
             .show_separator_line(false)
             .show(ctx, |ui| {
@@ -112,15 +114,11 @@ impl MainUi {
                 ui.label(&app_data.status);
             });
 
-        let style = Style::new(1.0);
-
         let interaction = egui::CentralPanel::default()
             .frame(Frame::NONE)
             .show(ctx, |ui| {
-                let mut gui = Gui::new(ui, style);
-
                 self.graph_ui.render(
-                    &mut gui,
+                    &mut Gui::new(ui, style),
                     &mut app_data.view_graph,
                     app_data.execution_stats.as_ref(),
                     &app_data.func_lib,
