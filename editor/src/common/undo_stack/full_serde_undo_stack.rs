@@ -55,9 +55,7 @@ where
         {
             return;
         }
-        if !self.redo_stack.is_empty() {
-            self.clear_redo();
-        }
+        self.clear_redo();
         let range = append_bytes(&mut self.undo_bytes, &snapshot);
         self.undo_stack.push(range);
         enforce_stack_limit(
