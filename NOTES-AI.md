@@ -320,6 +320,9 @@ Graph top button row now renders inside a semi-transparent black frame for contr
 Graph top button row now stretches to the full graph width.
 Graph top button row now uses a fixed-width UI scope to enforce full-width layout inside the area.
 Graph top buttons now render as fixed-size square buttons using the monospaced font.
+Undo stack now stores a per-instance snapshot limit set via the constructor and drops the oldest entries (plus their
+backing bytes) when the limit is exceeded.
+Undo stack tests now cover eviction behavior and assert the limit must be positive.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.
