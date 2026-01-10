@@ -234,7 +234,20 @@ impl ConnectionUi {
             }
         }
 
-        if self.temp_connection.is_some() {
+        if let Some(temp_connection) = &self.temp_connection {
+            let (start, end) = match temp_connection.start_port.port.kind {
+                PortKind::Input => (
+                    temp_connection.current_pos,
+                    temp_connection.start_port.center,
+                ),
+                PortKind::Output => (
+                    temp_connection.start_port.center,
+                    temp_connection.current_pos,
+                ),
+            };
+
+            self.temp_connection_bezier
+                .update_points(start, end, gui.scale);
             self.temp_connection_bezier
                 .show(gui, Sense::hover(), "temp_connection", false, false);
         }
