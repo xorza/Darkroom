@@ -559,3 +559,4 @@ layout geometry is derived from local constants inside `compute_node_layout`.
 - Undo stack `push_current` now accepts an iterator of `GraphUiAction` values.
 - Undo stack push_current now takes a Vec of GraphUiAction values; a helper supports IntoIterator.
 - Added `ActionUndoStack` for `GraphUiAction`-based undo/redo and made it the default in `AppData` with a step limit.
+- ActionUndoStack now has basic undo/redo and max-step tests using `test_graph`.

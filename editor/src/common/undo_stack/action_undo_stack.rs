@@ -75,10 +75,93 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use common::FileFormat;
+    use egui::{Pos2, Vec2, vec2};
+    use graph::prelude::test_graph;
 
     #[test]
     fn max_steps_must_be_positive() {
         let result = std::panic::catch_unwind(|| ActionUndoStack::new(0));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn action_undo_redo_roundtrip() {
+        let graph = test_graph();
+        let mut view_graph = ViewGraph::from_graph(&graph);
+        let original = view_graph.serialize(FileFormat::Json);
+
+        let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
+        let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
+        let after_pos = before_pos + vec2(10.0, 5.0);
+
+        let actions = vec![
+            GraphUiAction::NodeMoved {
+                node_id,
+                before: before_pos,
+                after: after_pos,
+            },
+            GraphUiAction::NodeSelected {
+                before: None,
+                after: Some(node_id),
+            },
+            GraphUiAction::ZoomPanChanged {
+                before_pan: Vec2::ZERO,
+                before_scale: 1.0,
+                after_pan: vec2(20.0, -10.0),
+                after_scale: 1.5,
+            },
+        ];
+
+        for action in &actions {
+            action.apply(&mut view_graph);
+        }
+        let modified = view_graph.serialize(FileFormat::Json);
+
+        let mut stack = ActionUndoStack::new(16);
+        stack.push_current(&view_graph, &actions);
+
+        assert!(stack.undo(&mut view_graph));
+        assert_eq!(view_graph.serialize(FileFormat::Json), original);
+
+        assert!(stack.redo(&mut view_graph));
+        assert_eq!(view_graph.serialize(FileFormat::Json), modified);
+    }
+
+    #[test]
+    fn max_steps_limits_history() {
+        let graph = test_graph();
+        let mut view_graph = ViewGraph::from_graph(&graph);
+        let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
+        let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
+
+        let mut stack = ActionUndoStack::new(1);
+
+        let first_actions = vec![GraphUiAction::NodeMoved {
+            node_id,
+            before: before_pos,
+            after: before_pos + vec2(1.0, 0.0),
+        }];
+        for action in &first_actions {
+            action.apply(&mut view_graph);
+        }
+        stack.push_current(&view_graph, &first_actions);
+
+        let second_actions = vec![GraphUiAction::NodeMoved {
+            node_id,
+            before: before_pos + vec2(1.0, 0.0),
+            after: before_pos + vec2(2.0, 0.0),
+        }];
+        for action in &second_actions {
+            action.apply(&mut view_graph);
+        }
+        stack.push_current(&view_graph, &second_actions);
+
+        assert!(stack.undo(&mut view_graph));
+        assert_eq!(
+            view_graph.view_nodes.by_key(&node_id).unwrap().pos,
+            before_pos + vec2(1.0, 0.0)
+        );
+        assert!(!stack.undo(&mut view_graph));
     }
 }
