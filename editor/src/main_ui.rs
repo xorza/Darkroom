@@ -132,37 +132,38 @@ impl MainUi {
             });
 
         let style = Style::new(1.0);
-        let frame = Frame {
-            inner_margin: 0.0.into(),
 
-            stroke: style.inactive_bg_stroke,
-            corner_radius: style.corner_radius.into(),
-            outer_margin: style.padding.into(),
+        egui::CentralPanel::default()
+            .frame(Frame {
+                inner_margin: 0.0.into(),
+                stroke: style.inactive_bg_stroke,
+                corner_radius: style.corner_radius.into(),
+                outer_margin: style.padding.into(),
 
-            ..Default::default()
-        };
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
-            let rect = ui
-                .available_rect_before_wrap()
-                .shrink(style.inactive_bg_stroke.width);
-            let mut graph_ui = ui.new_child(
-                egui::UiBuilder::new()
-                    .id_salt("graph_ui")
-                    .max_rect(rect)
-                    .sense(Sense::hover()),
-            );
-            graph_ui.set_clip_rect(rect);
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                let rect = ui
+                    .available_rect_before_wrap()
+                    .shrink(style.inactive_bg_stroke.width);
+                let mut graph_ui = ui.new_child(
+                    egui::UiBuilder::new()
+                        .id_salt("graph_ui")
+                        .max_rect(rect)
+                        .sense(Sense::hover()),
+                );
+                graph_ui.set_clip_rect(rect);
 
-            let mut gui = Gui::new(&mut graph_ui, style);
+                let mut gui = Gui::new(&mut graph_ui, style);
 
-            self.graph_ui.render(
-                &mut gui,
-                &mut app_data.view_graph,
-                app_data.execution_stats.as_ref(),
-                &app_data.func_lib,
-                &mut self.graph_ui_interaction,
-            );
-        });
+                self.graph_ui.render(
+                    &mut gui,
+                    &mut app_data.view_graph,
+                    app_data.execution_stats.as_ref(),
+                    &app_data.func_lib,
+                    &mut self.graph_ui_interaction,
+                );
+            });
 
         app_data.handle_graph_ui_actions(&self.graph_ui_interaction);
 
