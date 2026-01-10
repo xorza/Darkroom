@@ -19,7 +19,7 @@ pub(crate) struct ConnectionBezierStyle {
 pub struct ConnectionBezier {
     polyline: PolylineMesh,
     pub(crate) stroke_width: f32,
-    style_override: Option<ConnectionBezierStyle>,
+    style: Option<ConnectionBezierStyle>,
     start: Pos2,
     end: Pos2,
     scale: f32,
@@ -73,8 +73,8 @@ impl ConnectionBezier {
     pub fn style(&mut self, style: ConnectionBezierStyle) {
         assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
 
-        if self.style_override == Some(style) {
-            self.style_override = Some(style);
+        if self.style != Some(style) {
+            self.style = Some(style);
             self.points_dirty = true;
         }
     }
@@ -106,7 +106,7 @@ impl ConnectionBezier {
                 stroke_width: gui.style.connections.stroke_width,
             }
         };
-        let style = self.style_override.unwrap_or(default_style);
+        let style = self.style.unwrap_or(default_style);
         self.rebuild_mesh_if_needed(style, hovered, broke);
         let hover_scale = gui.style.connections.hover_distance_scale;
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
@@ -211,7 +211,7 @@ impl Default for ConnectionBezier {
         Self {
             polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
             stroke_width: 0.0,
-            style_override: None,
+            style: None,
             start: Pos2::ZERO,
             end: Pos2::ZERO,
             scale: 1.0,

@@ -2,9 +2,9 @@ use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
 use graph::graph::NodeId;
-use graph::prelude::Binding;
+use graph::prelude::{Binding, ExecutionStats};
 
-use crate::common::connection_bezier::ConnectionBezier;
+use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
@@ -122,25 +122,13 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         graph_layout: &GraphLayout,
+        execution_stats: Option<&ExecutionStats>,
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(gui, graph_layout, ctx.view_graph, breaker);
+        self.rebuild(gui, graph_layout, ctx.view_graph, execution_stats, breaker);
 
         for curve in self.curves.iter_mut() {
-            // let missing_curve = self.missing_curves.by_key_mut(&curve.key).unwrap();
-            // missing_curve.bezier.show(
-            //     gui,
-            //     Sense::hover(),
-            //     (
-            //         "connection_highlight",
-            //         curve.key.input_node_id,
-            //         curve.key.input_idx,
-            //     ),
-            //     false,
-            //     false,
-            // );
-
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
@@ -254,13 +242,17 @@ impl ConnectionUi {
         gui: &mut Gui<'_>,
         graph_layout: &GraphLayout,
         view_graph: &model::ViewGraph,
+        execution_stats: Option<&ExecutionStats>,
         breaker: Option<&ConnectionBreaker>,
     ) {
         let mut compact = self.curves.compact_insert_start();
-        let mut _missing_compact = self.missing_curves.compact_insert_start();
+        let mut missing_compact = self.missing_curves.compact_insert_start();
 
         for node_view in &view_graph.view_nodes {
             let node = view_graph.graph.by_id(&node_view.id).unwrap();
+            let missing_inputs = execution_stats.map_or(false, |execution_stats| {
+                execution_stats.nodes_with_missing_inputs.contains(&node.id)
+            });
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {
@@ -282,22 +274,30 @@ impl ConnectionUi {
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
                 curve.broke = curve.bezier.intersects_breaker(breaker);
 
-                // todo update
-                // let (_curve_idx, missing_curve) =
-                //     missing_compact.insert_with(&connection_key, || {
-                //         let bezier = ConnectionBezier::new(6.0);
+                if missing_inputs {
+                    let (_curve_idx, missing_curve) =
+                        missing_compact.insert_with(&connection_key, || {
+                            let mut bezier = ConnectionBezier::new(
+                                gui.style.node.missing_inputs_shadow.blur as f32,
+                            );
+                            bezier.style(ConnectionBezierStyle {
+                                start_color: gui.style.node.missing_inputs_shadow.color,
+                                end_color: gui.style.node.missing_inputs_shadow.color,
+                                stroke_width: gui.style.connections.stroke_width,
+                            });
 
-                //         ConnectionCurve {
-                //             key: connection_key,
-                //             broke: false,
-                //             hovered: false,
-                //             bezier,
-                //         }
-                //     });
+                            ConnectionCurve {
+                                key: connection_key,
+                                broke: false,
+                                hovered: false,
+                                bezier,
+                            }
+                        });
 
-                // missing_curve
-                //     .bezier
-                //     .update_points(output_pos, input_pos, gui.scale);
+                    missing_curve
+                        .bezier
+                        .update_points(output_pos, input_pos, gui.scale);
+                }
             }
         }
 
