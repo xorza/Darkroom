@@ -6,7 +6,7 @@ use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    action1: Option<GraphUiAction>,
+    actions1: Vec<GraphUiAction>,
     actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
@@ -51,7 +51,6 @@ pub enum GraphUiAction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        // action1 should not be cleared here
         self.clear_actions();
         self.errors.clear();
         self.run = false;
@@ -59,7 +58,7 @@ impl GraphUiInteraction {
 
     pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
         [
-            self.action1.as_ref().map(std::slice::from_ref),
+            (!self.actions1.is_empty()).then_some(self.actions1.as_slice()),
             (!self.actions2.is_empty()).then_some(self.actions2.as_slice()),
         ]
         .into_iter()
@@ -67,7 +66,7 @@ impl GraphUiInteraction {
     }
 
     pub fn clear_actions(&mut self) {
-        // action1 should not be cleared here
+        self.actions1.clear();
         self.actions2.clear();
     }
 
@@ -95,7 +94,7 @@ impl GraphUiInteraction {
         let pending = self.pending_action.take().unwrap();
         assert!(!pending.immediate());
         if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
-            self.action1 = Some(pending);
+            self.actions1.push(pending);
             self.pending_action = Some(action);
             return;
         }
@@ -139,15 +138,15 @@ impl GraphUiInteraction {
                 });
             }
             _ => {
-                self.action1 = Some(pending);
+                self.actions1.push(pending);
                 self.pending_action = Some(action);
             }
         }
     }
 
     pub fn flush(&mut self) {
-        if let Some(action) = self.pending_action.take() {
-            self.action1 = Some(action);
+        if let Some(pending) = self.pending_action.take() {
+            self.actions1.push(pending);
         }
     }
 }

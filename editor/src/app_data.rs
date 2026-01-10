@@ -111,6 +111,7 @@ impl AppData {
 
         let mut affects_computation = false;
         let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
+            println!("Undoing action: {:?}", action);
             affects_computation |= action.affects_computation();
         });
         self.view_graph.validate();
@@ -167,6 +168,8 @@ impl AppData {
                 self.execution_stats = None;
                 self.graph_updated = true;
             }
+
+            println!("Actions: {:?}", actions);
         }
         self.interaction.clear_actions();
     }
