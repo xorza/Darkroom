@@ -325,6 +325,7 @@ backing bytes) when the limit is exceeded.
 Undo stack tests now cover byte-based eviction behavior and assert the limit must be positive.
 Undo stack tests now include a two-snapshot budget case.
 ConnectionBezier now supports a per-instance style override used during rendering.
+Connection UI now rebuilds and renders curves in a single pass instead of a separate rebuild step.
 Execution graph debug validation (`validate_with`) now lives in `graph/src/graph.rs` (still on `ExecutionGraph`) to keep
 graph-centric validation together.
 Graph now owns the execution-input validation helper (`validate_execution_inputs`) used by execution-graph updates.

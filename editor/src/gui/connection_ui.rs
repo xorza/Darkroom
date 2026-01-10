@@ -12,7 +12,6 @@ use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
-use crate::model;
 
 // todo merge with constBindUI
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -126,37 +125,112 @@ impl ConnectionUi {
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        self.rebuild(gui, graph_layout, ctx.view_graph, execution_stats, breaker);
+        let mut compact = self.curves.compact_insert_start();
+        let mut missing_compact = self.missing_curves.compact_insert_start();
 
-        for curve in self.curves.iter_mut() {
-            let response = curve.bezier.show(
-                gui,
-                Sense::click() | Sense::hover(),
-                ("connection", curve.key.input_node_id, curve.key.input_idx),
-                curve.hovered,
-                curve.broke,
-            );
+        for node_view in &ctx.view_graph.view_nodes {
+            let node_id = node_view.id;
 
-            if breaker.is_some() {
-                curve.hovered = false;
-            } else {
-                if response.double_clicked_by(PointerButton::Primary) {
-                    let node = ctx
-                        .view_graph
-                        .graph
-                        .by_id_mut(&curve.key.input_node_id)
-                        .unwrap();
-                    node.inputs[curve.key.input_idx].binding = Binding::None;
-                    ui_interaction.add_action(GraphUiAction::InputChanged {
-                        node_id: curve.key.input_node_id,
-                        input_idx: curve.key.input_idx,
-                    });
-                    curve.hovered = false;
+            let inputs_len = ctx.view_graph.graph.by_id(&node_id).unwrap().inputs.len();
+
+            for input_idx in 0..inputs_len {
+                let (binding_target_id, binding_port_idx) = {
+                    let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+                    let input = &node.inputs[input_idx];
+                    let Binding::Bind(binding) = &input.binding else {
+                        continue;
+                    };
+                    (binding.target_id, binding.port_idx)
+                };
+                let connection_key = ConnectionKey {
+                    input_node_id: node_id,
+                    input_idx,
+                };
+                let output_layout = graph_layout.node_layout(&binding_target_id);
+                let input_layout = graph_layout.node_layout(&node_id);
+
+                let input_pos = input_layout.input_center(input_idx);
+                let output_pos = output_layout.output_center(binding_port_idx);
+
+                // =============
+
+                let missing_inputs = execution_stats.is_some_and(|execution_stats| {
+                    execution_stats.nodes_with_missing_inputs.contains(&node_id)
+                });
+                if missing_inputs {
+                    let (_curve_idx, missing_curve) =
+                        missing_compact.insert_with(&connection_key, || {
+                            let mut bezier = ConnectionBezier::new(
+                                gui.style.node.missing_inputs_shadow.blur as f32,
+                            );
+                            bezier.style(ConnectionBezierStyle {
+                                start_color: gui.style.node.missing_inputs_shadow.color,
+                                end_color: gui.style.node.missing_inputs_shadow.color,
+                                stroke_width: gui.style.connections.stroke_width,
+                            });
+
+                            ConnectionCurve {
+                                key: connection_key,
+                                broke: false,
+                                hovered: false,
+                                bezier,
+                            }
+                        });
+
+                    missing_curve
+                        .bezier
+                        .update_points(output_pos, input_pos, gui.scale);
+                    missing_curve.bezier.show(
+                        gui,
+                        Sense::empty(),
+                        (
+                            "connection",
+                            connection_key.input_node_id,
+                            connection_key.input_idx,
+                        ),
+                        false,
+                        false,
+                    );
                 }
 
-                curve.hovered = response.hovered();
+                // =============
+
+                let (_curve_idx, curve) =
+                    compact.insert_with(&connection_key, || ConnectionCurve::new(connection_key));
+
+                curve.bezier.update_points(output_pos, input_pos, gui.scale);
+                curve.broke = curve.bezier.intersects_breaker(breaker);
+
+                let response = curve.bezier.show(
+                    gui,
+                    Sense::click() | Sense::hover(),
+                    ("connection", curve.key.input_node_id, curve.key.input_idx),
+                    curve.hovered,
+                    curve.broke,
+                );
+
+                if breaker.is_some() {
+                    curve.hovered = false;
+                } else {
+                    if response.double_clicked_by(PointerButton::Primary) {
+                        let node = ctx
+                            .view_graph
+                            .graph
+                            .by_id_mut(&curve.key.input_node_id)
+                            .unwrap();
+                        node.inputs[curve.key.input_idx].binding = Binding::None;
+                        ui_interaction.add_action(GraphUiAction::InputChanged {
+                            node_id: curve.key.input_node_id,
+                            input_idx: curve.key.input_idx,
+                        });
+                        curve.hovered = false;
+                    }
+
+                    curve.hovered = response.hovered();
+                }
             }
         }
+
         if self.temp_connection.is_some() {
             self.temp_connection_bezier
                 .show(gui, Sense::hover(), "temp_connection", false, false);
@@ -235,81 +309,6 @@ impl ConnectionUi {
         self.curves
             .iter()
             .filter_map(|curve| curve.broke.then_some(&curve.key))
-    }
-
-    fn rebuild(
-        &mut self,
-        gui: &mut Gui<'_>,
-        graph_layout: &GraphLayout,
-        view_graph: &model::ViewGraph,
-        execution_stats: Option<&ExecutionStats>,
-        breaker: Option<&ConnectionBreaker>,
-    ) {
-        let mut compact = self.curves.compact_insert_start();
-        let mut missing_compact = self.missing_curves.compact_insert_start();
-
-        for node_view in &view_graph.view_nodes {
-            let node = view_graph.graph.by_id(&node_view.id).unwrap();
-            let missing_inputs = execution_stats.map_or(false, |execution_stats| {
-                execution_stats.nodes_with_missing_inputs.contains(&node.id)
-            });
-
-            for (input_idx, input) in node.inputs.iter().enumerate() {
-                let Binding::Bind(binding) = &input.binding else {
-                    continue;
-                };
-                let connection_key = ConnectionKey {
-                    input_node_id: node.id,
-                    input_idx,
-                };
-                let (_curve_idx, curve) =
-                    compact.insert_with(&connection_key, || ConnectionCurve::new(connection_key));
-
-                let output_layout = graph_layout.node_layout(&binding.target_id);
-                let input_layout = graph_layout.node_layout(&node.id);
-
-                let input_pos = input_layout.input_center(input_idx);
-                let output_pos = output_layout.output_center(binding.port_idx);
-
-                curve.bezier.update_points(output_pos, input_pos, gui.scale);
-                curve.broke = curve.bezier.intersects_breaker(breaker);
-
-                if missing_inputs {
-                    let (_curve_idx, missing_curve) =
-                        missing_compact.insert_with(&connection_key, || {
-                            let mut bezier = ConnectionBezier::new(
-                                gui.style.node.missing_inputs_shadow.blur as f32,
-                            );
-                            bezier.style(ConnectionBezierStyle {
-                                start_color: gui.style.node.missing_inputs_shadow.color,
-                                end_color: gui.style.node.missing_inputs_shadow.color,
-                                stroke_width: gui.style.connections.stroke_width,
-                            });
-
-                            ConnectionCurve {
-                                key: connection_key,
-                                broke: false,
-                                hovered: false,
-                                bezier,
-                            }
-                        });
-
-                    missing_curve
-                        .bezier
-                        .update_points(output_pos, input_pos, gui.scale);
-                }
-            }
-        }
-
-        if let Some(drag) = &mut self.temp_connection {
-            let (start, end) = match drag.start_port.port.kind {
-                PortKind::Input => (drag.current_pos, drag.start_port.center),
-                PortKind::Output => (drag.start_port.center, drag.current_pos),
-            };
-
-            self.temp_connection_bezier
-                .update_points(start, end, gui.scale);
-        }
     }
 }
 
