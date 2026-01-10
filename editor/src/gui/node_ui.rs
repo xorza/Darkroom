@@ -123,9 +123,9 @@ fn body_drag<'a>(
         || body_response.dragged_by(PointerButton::Primary);
 
     if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
-        ui_interaction
-            .actions
-            .push((*node_id, GraphUiAction::NodeSelected));
+        ui_interaction.actions.push(GraphUiAction::NodeSelected {
+            node_id: Some(*node_id),
+        });
 
         ctx.view_graph.selected_node_id = Some(*node_id);
     }
@@ -237,7 +237,7 @@ fn render_cache_btn(
             .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
         ui_interaction
             .actions
-            .push((node.id, GraphUiAction::CacheToggled));
+            .push(GraphUiAction::CacheToggled { node_id: node.id });
     }
 }
 
@@ -318,7 +318,7 @@ fn render_remove_btn(
     if remove {
         ui_interaction
             .actions
-            .push((*node_id, GraphUiAction::NodeRemoved));
+            .push(GraphUiAction::NodeRemoved { node_id: *node_id });
         return true;
     }
 

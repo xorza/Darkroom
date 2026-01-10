@@ -57,7 +57,7 @@ pub struct GraphUi {
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    pub actions: Vec<(NodeId, GraphUiAction)>,
+    pub actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
 }
@@ -72,10 +72,11 @@ impl GraphUiInteraction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GraphUiAction {
-    CacheToggled,
-    InputChanged { input_idx: usize },
-    NodeRemoved,
-    NodeSelected,
+    CacheToggled { node_id: NodeId },
+    InputChanged { node_id: NodeId, input_idx: usize },
+    NodeRemoved { node_id: NodeId },
+    NodeSelected { node_id: Option<NodeId> },
+    ZoomPanChanged,
 }
 
 impl GraphUi {
@@ -134,7 +135,7 @@ impl GraphUi {
             ctx.view_graph.selected_node_id = None;
             self.interaction
                 .actions
-                .push((NodeId::nil(), GraphUiAction::NodeSelected));
+                .push(GraphUiAction::NodeSelected { node_id: None });
         }
 
         self.top_panel(&mut gui, &mut ctx);
@@ -249,12 +250,12 @@ impl GraphUi {
                             .unwrap();
 
                         node.inputs[connection.input_idx].binding = Binding::None;
-                        graph_ui_interaction.actions.push((
-                            connection.input_node_id,
-                            GraphUiAction::InputChanged {
+                        graph_ui_interaction
+                            .actions
+                            .push(GraphUiAction::InputChanged {
+                                node_id: connection.input_node_id,
                                 input_idx: connection.input_idx,
-                            },
-                        ));
+                            });
                     }
 
                     for node_id in self.node_ui.node_ids_hit_breaker.iter() {
@@ -262,7 +263,7 @@ impl GraphUi {
 
                         graph_ui_interaction
                             .actions
-                            .push((*node_id, GraphUiAction::NodeRemoved));
+                            .push(GraphUiAction::NodeRemoved { node_id: *node_id });
                     }
                 }
             }
@@ -293,9 +294,14 @@ impl GraphUi {
 
                         let result = apply_connection(ctx.view_graph, input_port, output_port);
                         match result {
-                            Ok((input_node_id, input_idx)) => graph_ui_interaction
-                                .actions
-                                .push((input_node_id, GraphUiAction::InputChanged { input_idx })),
+                            Ok((input_node_id, input_idx)) => {
+                                graph_ui_interaction
+                                    .actions
+                                    .push(GraphUiAction::InputChanged {
+                                        node_id: input_node_id,
+                                        input_idx,
+                                    })
+                            }
                             Err(err) => graph_ui_interaction.errors.push(err),
                         }
                     }
@@ -392,6 +398,8 @@ impl GraphUi {
         background_response: &Response,
         pointer_pos: Pos2,
     ) {
+        let prev_scale = ctx.view_graph.scale;
+        let prev_pan = ctx.view_graph.pan;
         let (zoom_delta, pan) = {
             let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
 
@@ -418,6 +426,10 @@ impl GraphUi {
 
         if background_response.dragged_by(PointerButton::Middle) {
             ctx.view_graph.pan += background_response.drag_delta();
+        }
+
+        if prev_scale != ctx.view_graph.scale || prev_pan != ctx.view_graph.pan {
+            self.interaction.actions.push(GraphUiAction::ZoomPanChanged);
         }
     }
 }

@@ -95,6 +95,8 @@ Node title rendering now uses `galley_with_override_text_color` so breaker-hit o
 `AppData::undo` is stubbed for future undo stack integration.
 Undo/redo now keeps the current snapshot at the top of the undo stack, pops it onto the redo stack on undo, and
 applies the new top snapshot without re-pushing, avoiding the extra duplicate state.
+`GraphUiInteraction.actions` now stores `GraphUiAction` values directly; actions carry their `node_id` (with
+`NodeSelected` using an `Option<NodeId>`), and a `ZoomPanChanged` action is emitted when pan or zoom changes.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.

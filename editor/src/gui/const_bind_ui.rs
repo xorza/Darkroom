@@ -105,9 +105,10 @@ impl<'a> ConstBindFrame<'a> {
 
             if response.double_clicked_by(PointerButton::Primary) {
                 input.binding = Binding::None;
-                ui_interaction
-                    .actions
-                    .push((node.id, GraphUiAction::InputChanged { input_idx }));
+                ui_interaction.actions.push(GraphUiAction::InputChanged {
+                    node_id: node.id,
+                    input_idx,
+                });
                 return;
             }
 
@@ -145,9 +146,10 @@ impl<'a> ConstBindFrame<'a> {
 
                 if response.changed() {
                     currently_hovered = true;
-                    ui_interaction
-                        .actions
-                        .push((node.id, GraphUiAction::InputChanged { input_idx }));
+                    ui_interaction.actions.push(GraphUiAction::InputChanged {
+                        node_id: node.id,
+                        input_idx,
+                    });
                 }
             }
 

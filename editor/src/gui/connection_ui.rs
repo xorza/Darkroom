@@ -144,12 +144,10 @@ impl ConnectionUi {
                         .by_id_mut(&curve.key.input_node_id)
                         .unwrap();
                     node.inputs[curve.key.input_idx].binding = Binding::None;
-                    ui_interaction.actions.push((
-                        curve.key.input_node_id,
-                        GraphUiAction::InputChanged {
-                            input_idx: curve.key.input_idx,
-                        },
-                    ));
+                    ui_interaction.actions.push(GraphUiAction::InputChanged {
+                        node_id: curve.key.input_node_id,
+                        input_idx: curve.key.input_idx,
+                    });
                     curve.hovered = false;
                 }
 
