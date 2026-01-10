@@ -10,7 +10,7 @@ pub(crate) struct GraphUiInteraction {
     pub errors: Vec<Error>,
     pub run: bool,
 
-    pending_actions: Option<GraphUiAction>,
+    pending_action: Option<GraphUiAction>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,7 +51,7 @@ impl GraphUiInteraction {
         self.actions.clear();
         self.errors.clear();
         self.run = false;
-        self.pending_actions = None;
+        self.pending_action = None;
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
@@ -68,19 +68,66 @@ impl GraphUiInteraction {
     }
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
-        if let Some(pending) = self.pending_actions.take() {
-            if std::mem::discriminant(&pending) == std::mem::discriminant(&action) {
-                //
-            } else {
-                self.actions.push(pending);
+        if self.pending_action.is_none() {
+            self.pending_action = Some(action);
+            return;
+        }
+
+        let pending = self.pending_action.take().unwrap();
+        if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
+            self.actions.push(pending);
+            self.pending_action = Some(action);
+            return;
+        }
+
+        match (&pending, &action) {
+            (
+                GraphUiAction::NodeMoved {
+                    node_id: node_id1,
+                    before,
+                    ..
+                },
+                GraphUiAction::NodeMoved {
+                    node_id: node_id2,
+
+                    after,
+                    ..
+                },
+            ) if node_id1 == node_id2 => {
+                self.pending_action = Some(GraphUiAction::NodeMoved {
+                    node_id: *node_id1,
+                    before: *before,
+                    after: *after,
+                });
             }
-        } else {
-            self.pending_actions = Some(action);
+            (
+                GraphUiAction::ZoomPanChanged {
+                    before_pan,
+                    before_scale,
+                    ..
+                },
+                GraphUiAction::ZoomPanChanged {
+                    after_pan,
+                    after_scale,
+                    ..
+                },
+            ) => {
+                self.pending_action = Some(GraphUiAction::ZoomPanChanged {
+                    before_pan: *before_pan,
+                    before_scale: *before_scale,
+                    after_pan: *after_pan,
+                    after_scale: *after_scale,
+                });
+            }
+            _ => {
+                self.actions.push(pending);
+                self.pending_action = Some(action);
+            }
         }
     }
 
     fn flush(&mut self) {
-        if let Some(action) = self.pending_actions.take() {
+        if let Some(action) = self.pending_action.take() {
             self.actions.push(action);
         }
     }
