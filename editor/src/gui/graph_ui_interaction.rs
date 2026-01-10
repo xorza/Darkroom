@@ -7,6 +7,7 @@ pub(crate) struct GraphUiInteraction {
     pub actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
+
     pending_actions: Vec<GraphUiAction>,
 }
 
