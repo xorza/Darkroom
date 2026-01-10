@@ -8,8 +8,8 @@ pub trait UndoStack<T: Debug>: Debug {
     fn reset_with(&mut self, value: &T);
     fn push_current(&mut self, value: &T);
     fn clear_redo(&mut self);
-    fn undo(&mut self) -> Option<T>;
-    fn redo(&mut self) -> Option<T>;
+    fn undo(&mut self, value: &mut T) -> bool;
+    fn redo(&mut self, value: &mut T) -> bool;
 }
 
 #[cfg(test)]
@@ -62,12 +62,16 @@ pub mod undo_stack_tests {
         stack.push_current(&state_b);
         assert!(stack.undo_len() >= 2);
 
-        let undone = stack.undo().expect("undo should return prior state");
+        let mut undone = state_b.clone();
+        let did_undo = stack.undo(&mut undone);
         assert_eq!(undone, state_a);
+        assert!(did_undo);
         assert_eq!(stack.redo_len(), 1);
 
-        let redone = stack.redo().expect("redo should return next state");
+        let mut redone = state_a.clone();
+        let did_redo = stack.redo(&mut redone);
         assert_eq!(redone, state_b);
+        assert!(did_redo);
         assert_eq!(stack.redo_len(), 0);
     }
 
@@ -83,8 +87,10 @@ pub mod undo_stack_tests {
         };
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
-        stack.undo();
+        let mut undone = state_b.clone();
+        let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
+        assert!(did_undo);
 
         stack.clear_redo();
         assert_eq!(stack.redo_len(), 0);
@@ -106,8 +112,10 @@ pub mod undo_stack_tests {
         };
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
-        stack.undo();
+        let mut undone = state_b.clone();
+        let did_undo = stack.undo(&mut undone);
         assert_eq!(stack.redo_len(), 1);
+        assert!(did_undo);
 
         stack.push_current(&state_c);
         assert_eq!(stack.redo_len(), 0);
@@ -135,7 +143,10 @@ pub mod undo_stack_tests {
         stack.push_current(&state_c);
 
         assert_eq!(stack.undo_len(), 1);
-        assert!(stack.undo().is_none());
+        let mut output = state_c.clone();
+        let did_undo = stack.undo(&mut output);
+        assert_eq!(output, state_c);
+        assert!(!did_undo);
     }
 
     fn undo_stack_keeps_two_snapshots_with_two_snapshot_budget<F: StackFactory>() {
@@ -159,8 +170,13 @@ pub mod undo_stack_tests {
         stack.push_current(&state_c);
 
         assert_eq!(stack.undo_len(), 2);
-        assert_eq!(stack.undo().unwrap(), state_b);
-        assert!(stack.undo().is_none());
+        let mut output = state_c.clone();
+        let did_undo = stack.undo(&mut output);
+        assert_eq!(output, state_b);
+        assert!(did_undo);
+        let did_undo = stack.undo(&mut output);
+        assert_eq!(output, state_b);
+        assert!(!did_undo);
     }
 
     fn undo_stack_respects_single_snapshot_limit<F: StackFactory>() {

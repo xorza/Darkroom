@@ -70,9 +70,9 @@ where
         self.redo_stack.clear();
     }
 
-    pub fn undo(&mut self) -> Option<T> {
+    pub fn undo(&mut self, value: &mut T) -> bool {
         if self.undo_stack.len() < 2 {
-            return None;
+            return false;
         }
 
         let current = self
@@ -93,14 +93,14 @@ where
             .undo_stack
             .last()
             .expect("undo stack should contain a prior snapshot");
-        Some(deserialize_snapshot(
-            slice_from_range(&self.undo_bytes, snapshot),
-            self.format,
-        ))
+        *value = deserialize_snapshot(slice_from_range(&self.undo_bytes, snapshot), self.format);
+        true
     }
 
-    pub fn redo(&mut self) -> Option<T> {
-        let snapshot = self.redo_stack.pop()?;
+    pub fn redo(&mut self, value: &mut T) -> bool {
+        let Some(snapshot) = self.redo_stack.pop() else {
+            return false;
+        };
         let snapshot_bytes = slice_from_range(&self.redo_bytes, &snapshot).to_vec();
         let undo_range = append_bytes(&mut self.undo_bytes, &snapshot_bytes);
         self.undo_stack.push(undo_range);
@@ -110,7 +110,8 @@ where
             self.max_stack_bytes,
         );
         pop_tail_bytes(&mut self.redo_bytes, &snapshot);
-        Some(deserialize_snapshot(&snapshot_bytes, self.format))
+        *value = deserialize_snapshot(&snapshot_bytes, self.format);
+        true
     }
 }
 
@@ -130,12 +131,12 @@ where
         FullSerdeUndoStack::clear_redo(self);
     }
 
-    fn undo(&mut self) -> Option<T> {
-        FullSerdeUndoStack::undo(self)
+    fn undo(&mut self, value: &mut T) -> bool {
+        FullSerdeUndoStack::undo(self, value)
     }
 
-    fn redo(&mut self) -> Option<T> {
-        FullSerdeUndoStack::redo(self)
+    fn redo(&mut self, value: &mut T) -> bool {
+        FullSerdeUndoStack::redo(self, value)
     }
 }
 

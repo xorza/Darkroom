@@ -108,28 +108,30 @@ impl AppData {
     }
 
     pub fn undo(&mut self) {
-        if let Some(view_graph) = self.undo_stack.undo() {
-            self.apply_graph(view_graph, false);
+        if self.undo_stack.undo(&mut self.view_graph) {
+            self.refresh_after_graph_change();
         }
     }
 
     pub fn redo(&mut self) {
-        if let Some(view_graph) = self.undo_stack.redo() {
-            self.apply_graph(view_graph, false);
+        if self.undo_stack.redo(&mut self.view_graph) {
+            self.refresh_after_graph_change();
         }
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
-        view_graph.validate();
-
         self.view_graph = view_graph;
-        self.worker.send(WorkerMessage::Clear);
-        self.graph_updated = true;
-        self.execution_stats = None;
-
         if reset_undo {
             self.undo_stack.reset_with(&self.view_graph);
         }
+        self.refresh_after_graph_change();
+    }
+
+    fn refresh_after_graph_change(&mut self) {
+        self.view_graph.validate();
+        self.worker.send(WorkerMessage::Clear);
+        self.graph_updated = true;
+        self.execution_stats = None;
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
