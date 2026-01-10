@@ -168,7 +168,7 @@ fn body_drag<'a>(
             .by_key(node_id)
             .expect("node view must exist after drag")
             .pos;
-        ui_interaction.actions.push(GraphUiAction::NodeMoved {
+        ui_interaction.add_action(GraphUiAction::NodeMoved {
             node_id: *node_id,
             before: start_pos,
             after: end_pos,

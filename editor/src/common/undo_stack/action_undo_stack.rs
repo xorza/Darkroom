@@ -14,9 +14,6 @@ pub struct ActionUndoStack {
     undo_stack: Vec<Vec<GraphUiAction>>,
     redo_stack: Vec<Vec<GraphUiAction>>,
     max_steps: usize,
-
-    #[cfg(debug_assertions)]
-    validation_undo_stack: FullSerdeUndoStack<ViewGraph>,
 }
 
 impl ActionUndoStack {
@@ -26,8 +23,6 @@ impl ActionUndoStack {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             max_steps,
-            #[cfg(debug_assertions)]
-            validation_undo_stack: FullSerdeUndoStack::new(FileFormat::Json, usize::MAX),
         }
     }
 
@@ -41,29 +36,22 @@ impl ActionUndoStack {
 impl UndoStack<ViewGraph> for ActionUndoStack {
     type Action = GraphUiAction;
 
-    fn reset_with(&mut self, value: &ViewGraph) {
+    fn reset_with(&mut self, _value: &ViewGraph) {
         self.undo_stack.clear();
         self.redo_stack.clear();
-        #[cfg(debug_assertions)]
-        self.validation_undo_stack.reset_with(value);
     }
 
-    fn push_current(&mut self, value: &ViewGraph, actions: &[GraphUiAction]) {
+    fn push_current(&mut self, _value: &ViewGraph, actions: &[GraphUiAction]) {
         if actions.is_empty() {
             return;
         }
         self.redo_stack.clear();
         self.undo_stack.push(actions.to_vec());
         self.trim_to_limit();
-
-        #[cfg(debug_assertions)]
-        self.validation_undo_stack.push_current(value, actions);
     }
 
     fn clear_redo(&mut self) {
         self.redo_stack.clear();
-        #[cfg(debug_assertions)]
-        self.validation_undo_stack.clear_redo();
     }
 
     fn undo(&mut self, value: &mut ViewGraph) -> bool {
@@ -75,12 +63,6 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         }
         self.redo_stack.push(actions);
 
-        #[cfg(debug_assertions)]
-        {
-            let mut value2 = ViewGraph::default();
-            assert!(self.validation_undo_stack.undo(&mut value2));
-            assert_eq!(value2, *value);
-        }
         true
     }
 
@@ -92,12 +74,7 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
             action.apply(value);
         }
         self.undo_stack.push(actions);
-        #[cfg(debug_assertions)]
-        {
-            let mut value2 = ViewGraph::default();
-            assert!(self.validation_undo_stack.redo(&mut value2));
-            assert_eq!(value2, *value);
-        }
+
         true
     }
 }

@@ -1,4 +1,4 @@
-use egui::{Pos2, Vec2};
+use egui::{Pos2, SliderOrientation, Vec2};
 use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
@@ -6,7 +6,8 @@ use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
-    pub actions: Vec<GraphUiAction>,
+    actions1: Vec<GraphUiAction>,
+    actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
 
@@ -49,15 +50,27 @@ pub enum GraphUiAction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.actions.clear();
+        self.actions1.clear();
+        self.actions2.clear();
         self.errors.clear();
         self.run = false;
+    }
+
+    pub fn actions_stacks(&self) -> Vec<&[GraphUiAction]> {
+        let mut slices = Vec::with_capacity(2);
+        if !self.actions1.is_empty() {
+            slices.push(self.actions1.as_slice());
+        }
+        if !self.actions2.is_empty() {
+            slices.push(self.actions2.as_slice());
+        }
+        slices
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
         if action.immediate() {
             self.flush();
-            self.actions.push(action);
+            self.actions2.push(action);
         } else {
             self.add_pending_action(action);
         }
@@ -78,7 +91,7 @@ impl GraphUiInteraction {
         let pending = self.pending_action.take().unwrap();
         assert!(!pending.immediate());
         if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
-            self.actions.push(pending);
+            self.actions1.push(pending);
             self.pending_action = Some(action);
             return;
         }
@@ -122,7 +135,7 @@ impl GraphUiInteraction {
                 });
             }
             _ => {
-                self.actions.push(pending);
+                self.actions1.push(pending);
                 self.pending_action = Some(action);
             }
         }
@@ -130,7 +143,7 @@ impl GraphUiInteraction {
 
     fn flush(&mut self) {
         if let Some(action) = self.pending_action.take() {
-            self.actions.push(action);
+            self.actions1.push(action);
         }
     }
 }

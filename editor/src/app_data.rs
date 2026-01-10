@@ -131,18 +131,14 @@ impl AppData {
     }
 
     pub fn handle_graph_ui_actions(&mut self, graph_ui_interaction: &GraphUiInteraction) {
-        if graph_ui_interaction
-            .actions
-            .iter()
-            .any(|action| action.affects_computation())
-        {
-            self.execution_stats = None;
-            self.graph_updated = true;
-        }
-        if !graph_ui_interaction.actions.is_empty() {
+        for actions in graph_ui_interaction.actions_stacks() {
             self.undo_stack.clear_redo();
-            self.undo_stack
-                .push_current(&self.view_graph, &graph_ui_interaction.actions);
+            self.undo_stack.push_current(&self.view_graph, actions);
+
+            if actions.iter().any(|action| action.affects_computation()) {
+                self.execution_stats = None;
+                self.graph_updated = true;
+            }
         }
 
         if graph_ui_interaction.run {
