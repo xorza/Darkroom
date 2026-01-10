@@ -10,17 +10,17 @@ pub struct UndoStack<T> {
     undo_stack: Vec<std::ops::Range<usize>>,
     redo_stack: Vec<std::ops::Range<usize>>,
     format: FileFormat,
-    max_stack_entries: usize,
+    max_stack_bytes: usize,
     _marker: std::marker::PhantomData<T>,
 }
 impl<T> UndoStack<T>
 where
     T: Serialize + DeserializeOwned,
 {
-    pub fn new(format: FileFormat, max_stack_entries: usize) -> Self {
+    pub fn new(format: FileFormat, max_stack_bytes: usize) -> Self {
         assert!(
-            max_stack_entries > 0,
-            "undo stack size limit must be greater than 0"
+            max_stack_bytes > 0,
+            "undo stack byte limit must be greater than 0"
         );
         Self {
             undo_bytes: Vec::new(),
@@ -28,7 +28,7 @@ where
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             format,
-            max_stack_entries,
+            max_stack_bytes,
             _marker: std::marker::PhantomData,
         }
     }
@@ -55,7 +55,7 @@ where
         enforce_stack_limit(
             &mut self.undo_stack,
             &mut self.undo_bytes,
-            self.max_stack_entries,
+            self.max_stack_bytes,
         );
     }
 
@@ -79,7 +79,7 @@ where
         enforce_stack_limit(
             &mut self.redo_stack,
             &mut self.redo_bytes,
-            self.max_stack_entries,
+            self.max_stack_bytes,
         );
         pop_tail_bytes(&mut self.undo_bytes, &current);
 
@@ -101,7 +101,7 @@ where
         enforce_stack_limit(
             &mut self.undo_stack,
             &mut self.undo_bytes,
-            self.max_stack_entries,
+            self.max_stack_bytes,
         );
         pop_tail_bytes(&mut self.redo_bytes, &snapshot);
         Some(deserialize_snapshot(&snapshot_bytes, self.format))
@@ -138,13 +138,13 @@ fn snapshot_matches(bytes: &[u8], range: &std::ops::Range<usize>, snapshot: &[u8
 fn enforce_stack_limit(
     stack: &mut Vec<std::ops::Range<usize>>,
     bytes: &mut Vec<u8>,
-    max_stack_entries: usize,
+    max_stack_bytes: usize,
 ) {
     assert!(
-        max_stack_entries > 0,
-        "undo stack size limit must be greater than 0"
+        max_stack_bytes > 0,
+        "undo stack byte limit must be greater than 0"
     );
-    while stack.len() > max_stack_entries {
+    while !bytes.is_empty() && bytes.len() > max_stack_bytes {
         let removed = stack.remove(0);
         assert_eq!(removed.start, 0, "oldest snapshot range should start at 0");
         let removed_len = removed.end - removed.start;
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn undo_redo_shrinks_buffers() {
-        let mut stack = UndoStack::new(FileFormat::Json, 128);
+        let mut stack = UndoStack::new(FileFormat::Json, 1024 * 1024);
         let state_a = TestState {
             value: 1,
             label: "a".to_string(),
@@ -211,7 +211,7 @@ mod tests {
 
     #[test]
     fn clear_redo_empties_buffer() {
-        let mut stack = UndoStack::new(FileFormat::Json, 128);
+        let mut stack = UndoStack::new(FileFormat::Json, 1024 * 1024);
         let state_a = TestState {
             value: 1,
             label: "a".to_string(),
@@ -232,7 +232,6 @@ mod tests {
 
     #[test]
     fn undo_stack_drops_oldest_when_over_limit() {
-        let mut stack = UndoStack::new(FileFormat::Json, 2);
         let state_a = TestState {
             value: 1,
             label: "a".to_string(),
@@ -246,19 +245,55 @@ mod tests {
             label: "c".to_string(),
         };
 
+        let snapshot_a = serialize_snapshot(&state_a, FileFormat::Json);
+        let snapshot_b = serialize_snapshot(&state_b, FileFormat::Json);
+        let snapshot_c = serialize_snapshot(&state_c, FileFormat::Json);
+        let max_bytes = snapshot_a
+            .len()
+            .max(snapshot_b.len())
+            .max(snapshot_c.len())
+            .max(1);
+        let mut stack = UndoStack::new(FileFormat::Json, max_bytes);
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.push_current(&state_c);
+
+        assert_eq!(stack.undo_stack.len(), 1);
+        assert!(stack.undo().is_none());
+    }
+
+    #[test]
+    fn undo_stack_keeps_two_snapshots_with_two_snapshot_budget() {
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        let state_c = TestState {
+            value: 3,
+            label: "c".to_string(),
+        };
+
+        let snapshot_a = serialize_snapshot(&state_a, FileFormat::Json);
+        let snapshot_b = serialize_snapshot(&state_b, FileFormat::Json);
+        let max_bytes = (snapshot_a.len() + snapshot_b.len()).max(1);
+
+        let mut stack = UndoStack::new(FileFormat::Json, max_bytes);
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
         stack.push_current(&state_c);
 
         assert_eq!(stack.undo_stack.len(), 2);
-        let undone = stack.undo().expect("undo should return prior state");
-        assert_eq!(undone, state_b);
+        assert_eq!(stack.undo().unwrap(), state_b);
         assert!(stack.undo().is_none());
     }
 
     #[test]
-    #[should_panic(expected = "undo stack size limit must be greater than 0")]
-    fn max_stack_entries_must_be_positive() {
+    #[should_panic(expected = "undo stack byte limit must be greater than 0")]
+    fn max_stack_bytes_must_be_positive() {
         let _stack: UndoStack<TestState> = UndoStack::new(FileFormat::Json, 0);
     }
 }

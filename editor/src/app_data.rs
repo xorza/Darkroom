@@ -23,7 +23,7 @@ pub struct Status {
 pub type SharedStatus = Shared<Status>;
 
 const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
-const UNDO_MAX_STACK_ENTRIES: usize = 128;
+const UNDO_MAX_STACK_BYTES: usize = 1024 * 1024 * 4;
 
 #[derive(Debug)]
 pub struct AppData {
@@ -59,7 +59,7 @@ impl AppData {
 
             shared_status,
 
-            undo_stack: UndoStack::new(UNDO_FILE_FORMAT, UNDO_MAX_STACK_ENTRIES),
+            undo_stack: UndoStack::new(UNDO_FILE_FORMAT, UNDO_MAX_STACK_BYTES),
         }
     }
 
