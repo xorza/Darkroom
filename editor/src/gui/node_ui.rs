@@ -77,7 +77,7 @@ impl NodeUi {
             if render_body(gui, node_layout, is_selected, &node_execution_info, breaker) {
                 self.node_ids_hit_breaker.push(node_id);
             }
-            if render_remove_btn(gui, ui_interaction, &node_id, node_layout) {
+            if render_remove_btn(gui, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             render_hints(
@@ -97,7 +97,13 @@ impl NodeUi {
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
+            let (view_node, incoming) = ctx.view_graph.removal_payload(&node_id);
             ctx.view_graph.remove_node(&node_id);
+            ui_interaction.add_action(GraphUiAction::NodeRemoved {
+                node_id,
+                view_node,
+                incoming,
+            });
         }
 
         drag_port_info
@@ -286,12 +292,7 @@ fn render_hints(
     }
 }
 
-fn render_remove_btn(
-    gui: &mut Gui<'_>,
-    ui_interaction: &mut GraphUiInteraction,
-    node_id: &NodeId,
-    node_layout: &NodeLayout,
-) -> bool {
+fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayout) -> bool {
     let remove_rect = node_layout.remove_btn_rect;
     let remove_margin = remove_rect.width() * 0.3;
     let a = pos2(
@@ -323,7 +324,6 @@ fn render_remove_btn(
         .clicked();
 
     if remove {
-        ui_interaction.add_action(GraphUiAction::NodeRemoved { node_id: *node_id });
         return true;
     }
 

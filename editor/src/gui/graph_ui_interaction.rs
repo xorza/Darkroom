@@ -1,6 +1,7 @@
 use graph::graph::{Binding, NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
+use crate::model::{IncomingConnection, ViewNode};
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
@@ -24,7 +25,8 @@ pub enum GraphUiAction {
         after: Binding,
     },
     NodeRemoved {
-        node_id: NodeId,
+        view_node: ViewNode,
+        incoming: Vec<IncomingConnection>,
     },
     NodeMoved {
         node_id: NodeId,

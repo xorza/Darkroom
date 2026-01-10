@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use common::{FileFormat, is_debug, key_index_vec::KeyIndexVec};
+use graph::graph::Binding;
 use graph::prelude::{Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -7,6 +8,13 @@ use std::collections::HashMap;
 use crate::common::UiEquals;
 
 use super::ViewNode;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingConnection {
+    pub node_id: NodeId,
+    pub input_idx: usize,
+    pub binding: Binding,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewGraph {
@@ -127,6 +135,30 @@ impl ViewGraph {
         {
             self.selected_node_id = None;
         }
+    }
+
+    pub fn removal_payload(&self, node_id: &NodeId) -> (ViewNode, Vec<IncomingConnection>) {
+        let view_node = self
+            .view_nodes
+            .by_key(node_id)
+            .expect("remove node expects a view node")
+            .clone();
+        let mut incoming = Vec::new();
+        for node in self.graph.nodes.iter() {
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                let Binding::Bind(binding) = &input.binding else {
+                    continue;
+                };
+                if binding.target_id == *node_id {
+                    incoming.push(IncomingConnection {
+                        node_id: node.id,
+                        input_idx,
+                        binding: input.binding.clone(),
+                    });
+                }
+            }
+        }
+        (view_node, incoming)
     }
 }
 

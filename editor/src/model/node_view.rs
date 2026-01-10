@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::common::UiEquals;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ViewNode {
     pub id: NodeId,
     pub pos: Pos2,
