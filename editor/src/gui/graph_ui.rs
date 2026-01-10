@@ -275,12 +275,12 @@ impl GraphUi {
 
                         self.state = InteractionState::Idle;
 
-                        if let Ok((input_node_id, input_idx)) =
-                            apply_connection(ctx.view_graph, input_port, output_port)
-                        {
-                            ui_interaction
+                        let result = apply_connection(ctx.view_graph, input_port, output_port);
+                        match result {
+                            Ok((input_node_id, input_idx)) => ui_interaction
                                 .actions
-                                .push((input_node_id, GraphUiAction::InputChanged { input_idx }));
+                                .push((input_node_id, GraphUiAction::InputChanged { input_idx })),
+                            Err(_) => todo!(),
                         }
                     }
                 }
