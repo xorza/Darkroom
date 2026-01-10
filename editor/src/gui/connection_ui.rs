@@ -222,10 +222,15 @@ impl ConnectionUi {
                             .graph
                             .by_id_mut(&curve.key.input_node_id)
                             .unwrap();
-                        node.inputs[curve.key.input_idx].binding = Binding::None;
+                        let input = &mut node.inputs[curve.key.input_idx];
+                        let before = input.binding.clone();
+                        input.binding = Binding::None;
+                        let after = input.binding.clone();
                         ui_interaction.add_action(GraphUiAction::InputChanged {
                             node_id: curve.key.input_node_id,
                             input_idx: curve.key.input_idx,
+                            before,
+                            after,
                         });
                         curve.hovered = false;
                     }

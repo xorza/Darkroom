@@ -105,14 +105,19 @@ impl<'a> ConstBindFrame<'a> {
             let mut currently_broke = curve.bezier.intersects_breaker(breaker);
 
             if response.double_clicked_by(PointerButton::Primary) {
+                let before = input.binding.clone();
                 input.binding = Binding::None;
+                let after = input.binding.clone();
                 ui_interaction.add_action(GraphUiAction::InputChanged {
                     node_id: node.id,
                     input_idx,
+                    before,
+                    after,
                 });
                 return;
             }
 
+            let before = input.binding.clone();
             let Binding::Const(value) = &mut input.binding else {
                 continue;
             };
@@ -147,9 +152,12 @@ impl<'a> ConstBindFrame<'a> {
 
                 if response.changed() {
                     currently_hovered = true;
+                    let after = input.binding.clone();
                     ui_interaction.add_action(GraphUiAction::InputChanged {
                         node_id: node.id,
                         input_idx,
+                        before,
+                        after,
                     });
                 }
             }

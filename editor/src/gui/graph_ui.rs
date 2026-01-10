@@ -228,11 +228,15 @@ impl GraphUi {
                             .nodes
                             .by_key_mut(&connection.input_node_id)
                             .unwrap();
-
-                        node.inputs[connection.input_idx].binding = Binding::None;
+                        let input = &mut node.inputs[connection.input_idx];
+                        let before = input.binding.clone();
+                        input.binding = Binding::None;
+                        let after = input.binding.clone();
                         graph_ui_interaction.add_action(GraphUiAction::InputChanged {
                             node_id: connection.input_node_id,
                             input_idx: connection.input_idx,
+                            before,
+                            after,
                         });
                     }
 
@@ -258,11 +262,16 @@ impl GraphUi {
 
                         let input_node =
                             ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-                        input_node.inputs[input_port.port_idx].binding = Binding::Const(0.into());
+                        let input = &mut input_node.inputs[input_port.port_idx];
+                        let before = input.binding.clone();
+                        input.binding = Binding::Const(0.into());
+                        let after = input.binding.clone();
 
                         graph_ui_interaction.add_action(GraphUiAction::InputChanged {
                             node_id: input_port.node_id,
                             input_idx: input_port.port_idx,
+                            before,
+                            after,
                         })
                     }
                     ConnectionDragUpdate::FinishedWith {
@@ -276,12 +285,13 @@ impl GraphUi {
 
                         let result = apply_connection(ctx.view_graph, input_port, output_port);
                         match result {
-                            Ok((input_node_id, input_idx)) => {
-                                graph_ui_interaction.add_action(GraphUiAction::InputChanged {
+                            Ok((input_node_id, input_idx, before, after)) => graph_ui_interaction
+                                .add_action(GraphUiAction::InputChanged {
                                     node_id: input_node_id,
                                     input_idx,
-                                })
-                            }
+                                    before,
+                                    after,
+                                }),
                             Err(err) => graph_ui_interaction.add_error(err),
                         }
                     }
@@ -462,7 +472,7 @@ fn apply_connection(
     view_graph: &mut model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<(NodeId, usize), Error> {
+) -> Result<(NodeId, usize, Binding, Binding), Error> {
     if input_port.node_id == output_port.node_id {
         return Err(Error::CycleDetected {
             input_node_id: input_port.node_id,
@@ -479,12 +489,15 @@ fn apply_connection(
     }
 
     let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-    input_node.inputs[input_port.port_idx].binding = Binding::Bind(PortAddress {
+    let input = &mut input_node.inputs[input_port.port_idx];
+    let before = input.binding.clone();
+    let after = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
         port_idx: output_port.port_idx,
     });
+    input.binding = after.clone();
 
-    Ok((input_port.node_id, input_port.port_idx))
+    Ok((input_port.node_id, input_port.port_idx, before, after))
 }
 
 fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {

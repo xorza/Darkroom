@@ -1,4 +1,4 @@
-use graph::graph::{NodeBehavior, NodeId};
+use graph::graph::{Binding, NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
 
@@ -11,15 +11,17 @@ pub(crate) struct GraphUiInteraction {
     pending_actions: Vec<GraphUiAction>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GraphUiAction {
     CacheToggled {
         node_id: NodeId,
-        behavior: NodeBehavior,
+        after: NodeBehavior,
     },
     InputChanged {
         node_id: NodeId,
         input_idx: usize,
+        before: Binding,
+        after: Binding,
     },
     NodeRemoved {
         node_id: NodeId,

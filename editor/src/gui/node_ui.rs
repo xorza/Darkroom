@@ -240,11 +240,10 @@ fn render_cache_btn(
         .show(gui, node_layout.cache_button_rect);
 
     if response.clicked() {
-        node.behavior = (node.behavior == NodeBehavior::Once)
-            .then_else(NodeBehavior::AsFunction, NodeBehavior::Once);
+        node.behavior.toggle();
         ui_interaction.add_action(GraphUiAction::CacheToggled {
             node_id: node.id,
-            behavior: node.behavior,
+            after: node.behavior,
         });
     }
 }
