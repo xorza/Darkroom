@@ -1,4 +1,4 @@
-use crate::common::undo_stack::UndoStack;
+use crate::common::undo_stack::{FullSerdeUndoStack, UndoStack};
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use anyhow::Result;
 use common::{FileFormat, Shared};
@@ -38,7 +38,7 @@ pub struct AppData {
 
     pub shared_status: SharedStatus,
 
-    undo_stack: UndoStack<ViewGraph>,
+    undo_stack: Box<dyn UndoStack<ViewGraph>>,
 }
 
 impl AppData {
@@ -59,7 +59,10 @@ impl AppData {
 
             shared_status,
 
-            undo_stack: UndoStack::new(UNDO_FILE_FORMAT, UNDO_MAX_STACK_BYTES),
+            undo_stack: Box::new(FullSerdeUndoStack::new(
+                UNDO_FILE_FORMAT,
+                UNDO_MAX_STACK_BYTES,
+            )),
         }
     }
 

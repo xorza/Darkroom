@@ -1,10 +1,20 @@
+use std::fmt::Debug;
+
 use common::FileFormat;
 use lz4_flex::{compress_prepend_size, decompress_size_prepended};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+pub trait UndoStack<T: Debug>: Debug {
+    fn reset_with(&mut self, value: &T);
+    fn push_current(&mut self, value: &T);
+    fn clear_redo(&mut self);
+    fn undo(&mut self) -> Option<T>;
+    fn redo(&mut self) -> Option<T>;
+}
+
 #[derive(Debug)]
-pub struct UndoStack<T> {
+pub struct FullSerdeUndoStack<T: Debug> {
     undo_bytes: Vec<u8>,
     redo_bytes: Vec<u8>,
     undo_stack: Vec<std::ops::Range<usize>>,
@@ -13,7 +23,8 @@ pub struct UndoStack<T> {
     max_stack_bytes: usize,
     _marker: std::marker::PhantomData<T>,
 }
-impl<T> UndoStack<T>
+
+impl<T: Debug> FullSerdeUndoStack<T>
 where
     T: Serialize + DeserializeOwned,
 {
@@ -108,6 +119,31 @@ where
     }
 }
 
+impl<T: Debug> UndoStack<T> for FullSerdeUndoStack<T>
+where
+    T: Serialize + DeserializeOwned,
+{
+    fn reset_with(&mut self, value: &T) {
+        FullSerdeUndoStack::reset_with(self, value);
+    }
+
+    fn push_current(&mut self, value: &T) {
+        FullSerdeUndoStack::push_current(self, value);
+    }
+
+    fn clear_redo(&mut self) {
+        FullSerdeUndoStack::clear_redo(self);
+    }
+
+    fn undo(&mut self) -> Option<T> {
+        FullSerdeUndoStack::undo(self)
+    }
+
+    fn redo(&mut self) -> Option<T> {
+        FullSerdeUndoStack::redo(self)
+    }
+}
+
 fn serialize_snapshot<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     let serialized = common::serialize(value, format);
     compress_prepend_size(serialized.as_bytes())
@@ -179,7 +215,7 @@ mod tests {
 
     #[test]
     fn undo_redo_shrinks_buffers() {
-        let mut stack = UndoStack::new(FileFormat::Json, 1024 * 1024);
+        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, 1024 * 1024);
         let state_a = TestState {
             value: 1,
             label: "a".to_string(),
@@ -211,7 +247,7 @@ mod tests {
 
     #[test]
     fn clear_redo_empties_buffer() {
-        let mut stack = UndoStack::new(FileFormat::Json, 1024 * 1024);
+        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, 1024 * 1024);
         let state_a = TestState {
             value: 1,
             label: "a".to_string(),
@@ -253,7 +289,7 @@ mod tests {
             .max(snapshot_b.len())
             .max(snapshot_c.len())
             .max(1);
-        let mut stack = UndoStack::new(FileFormat::Json, max_bytes);
+        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, max_bytes);
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
         stack.push_current(&state_c);
@@ -281,7 +317,7 @@ mod tests {
         let snapshot_b = serialize_snapshot(&state_b, FileFormat::Json);
         let max_bytes = (snapshot_a.len() + snapshot_b.len()).max(1);
 
-        let mut stack = UndoStack::new(FileFormat::Json, max_bytes);
+        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, max_bytes);
         stack.reset_with(&state_a);
         stack.push_current(&state_b);
         stack.push_current(&state_c);
@@ -294,6 +330,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "undo stack byte limit must be greater than 0")]
     fn max_stack_bytes_must_be_positive() {
-        let _stack: UndoStack<TestState> = UndoStack::new(FileFormat::Json, 0);
+        let _stack: FullSerdeUndoStack<TestState> = FullSerdeUndoStack::new(FileFormat::Json, 0);
     }
 }
