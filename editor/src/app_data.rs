@@ -109,20 +109,18 @@ impl AppData {
             return;
         }
 
-        println!("Undo stack size: {}", self.undo_stack.len());
-
-        let current = self.view_graph.serialize(UNDO_FILE_FORMAT);
+        let current = self.undo_stack.pop().unwrap();
         self.redo_stack.push(current);
 
-        self.undo_stack.pop();
-        let snapshot = self.undo_stack.pop().unwrap();
+        let snapshot = self
+            .undo_stack
+            .last()
+            .expect("undo stack should contain a prior snapshot");
         self.apply_graph(
-            ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
+            ViewGraph::deserialize(UNDO_FILE_FORMAT, snapshot)
                 .expect("Failed to deserialize undo snapshot"),
             false,
         );
-
-        self.undo_stack.push(snapshot);
 
         println!("Undid stack size: {}", self.undo_stack.len());
     }
@@ -132,13 +130,12 @@ impl AppData {
             return;
         }
 
-        self.push_undo();
-
         let snapshot = self
             .redo_stack
             .pop()
             .expect("redo stack should contain a snapshot when redo is requested");
 
+        self.undo_stack.push(snapshot.clone());
         self.apply_graph(
             ViewGraph::deserialize(UNDO_FILE_FORMAT, &snapshot)
                 .expect("Failed to deserialize redo snapshot"),
@@ -147,8 +144,12 @@ impl AppData {
     }
 
     fn push_undo(&mut self) {
-        self.undo_stack
-            .push(self.view_graph.serialize(UNDO_FILE_FORMAT));
+        let snapshot = self.view_graph.serialize(UNDO_FILE_FORMAT);
+        if self.undo_stack.last().is_some_and(|last| last == &snapshot) {
+            println!("skip");
+            return;
+        }
+        self.undo_stack.push(snapshot);
     }
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
@@ -173,7 +174,6 @@ impl AppData {
             self.graph_updated = true;
 
             self.push_undo();
-            println!("Undo stack size: {}", self.undo_stack.len());
         }
 
         if graph_ui_interaction.run {

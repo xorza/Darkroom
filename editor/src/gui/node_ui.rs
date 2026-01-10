@@ -122,14 +122,12 @@ fn body_drag<'a>(
     let dragged = body_response.dragged_by(PointerButton::Middle)
         || body_response.dragged_by(PointerButton::Primary);
 
-    if dragged || body_response.clicked() {
-        if ctx.view_graph.selected_node_id != Some(*node_id) {
-            ui_interaction
-                .actions
-                .push((*node_id, GraphUiAction::NodeSelected));
+    if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
+        ui_interaction
+            .actions
+            .push((*node_id, GraphUiAction::NodeSelected));
 
-            ctx.view_graph.selected_node_id = Some(*node_id);
-        }
+        ctx.view_graph.selected_node_id = Some(*node_id);
     }
     if dragged {
         ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
