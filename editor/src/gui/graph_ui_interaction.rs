@@ -28,17 +28,11 @@ impl GraphUiInteraction {
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
-        match &action {
-            GraphUiAction::CacheToggled { .. }
-            | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::NodeRemoved { .. }
-            | GraphUiAction::NodeSelected { .. } => {
-                self.flush();
-                self.actions.push(action);
-            }
-            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged => {
-                self.add_pending_action(action);
-            }
+        if action.immediate() {
+            self.flush();
+            self.actions.push(action);
+        } else {
+            self.add_pending_action(action);
         }
     }
 
@@ -76,6 +70,15 @@ impl GraphUiAction {
             GraphUiAction::NodeMoved { .. }
             | GraphUiAction::NodeSelected { .. }
             | GraphUiAction::ZoomPanChanged => false,
+        }
+    }
+    pub fn immediate(&self) -> bool {
+        match self {
+            GraphUiAction::CacheToggled { .. }
+            | GraphUiAction::InputChanged { .. }
+            | GraphUiAction::NodeRemoved { .. }
+            | GraphUiAction::NodeSelected { .. } => true,
+            GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged => false,
         }
     }
 }
