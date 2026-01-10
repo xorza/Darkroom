@@ -34,9 +34,9 @@ impl GraphUiInteraction {
         self.errors.push(error);
     }
 
-    pub fn add_node_selected(&mut self, node_id: Option<NodeId>) {
-        self.add_action(GraphUiAction::NodeSelected { node_id });
-    }
+    // pub fn add_node_selected(&mut self, node_id: Option<NodeId>) {
+    //     self.add_action(GraphUiAction::NodeSelected { node_id });
+    // }
 }
 
 impl GraphUiAction {

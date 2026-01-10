@@ -122,7 +122,9 @@ fn body_drag<'a>(
         || body_response.dragged_by(PointerButton::Primary);
 
     if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
-        ui_interaction.add_node_selected(Some(*node_id));
+        ui_interaction.add_action(GraphUiAction::NodeSelected {
+            node_id: Some(*node_id),
+        });
 
         ctx.view_graph.selected_node_id = Some(*node_id);
     }

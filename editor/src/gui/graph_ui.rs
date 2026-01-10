@@ -110,7 +110,8 @@ impl GraphUi {
 
         if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
             ctx.view_graph.selected_node_id = None;
-            self.interaction.add_node_selected(None);
+            self.interaction
+                .add_action(GraphUiAction::NodeSelected { node_id: None });
         }
 
         self.top_panel(&mut gui, &mut ctx);
