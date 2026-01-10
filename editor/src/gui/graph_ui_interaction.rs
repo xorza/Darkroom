@@ -1,12 +1,22 @@
 use graph::graph::NodeId;
 
-use crate::gui::graph_ui::{Error, GraphUiAction};
+use crate::gui::graph_ui::Error;
 
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
     pub actions: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GraphUiAction {
+    CacheToggled { node_id: NodeId },
+    InputChanged { node_id: NodeId, input_idx: usize },
+    NodeRemoved { node_id: NodeId },
+    NodeMoved { node_id: NodeId },
+    NodeSelected { node_id: Option<NodeId> },
+    ZoomPanChanged,
 }
 
 impl GraphUiInteraction {
@@ -26,5 +36,19 @@ impl GraphUiInteraction {
 
     pub fn add_node_selected(&mut self, node_id: Option<NodeId>) {
         self.add_action(GraphUiAction::NodeSelected { node_id });
+    }
+}
+
+impl GraphUiAction {
+    pub fn affects_computation(&self) -> bool {
+        match self {
+            GraphUiAction::NodeRemoved { .. }
+            | GraphUiAction::InputChanged { .. }
+            | GraphUiAction::CacheToggled { .. } => true,
+
+            GraphUiAction::NodeMoved { .. }
+            | GraphUiAction::NodeSelected { .. }
+            | GraphUiAction::ZoomPanChanged => false,
+        }
     }
 }

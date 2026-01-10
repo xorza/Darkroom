@@ -10,8 +10,8 @@ use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey};
-use crate::gui::graph_ui::GraphUiAction;
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
+
+use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};

@@ -9,8 +9,8 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
-use crate::gui::graph_ui::GraphUiAction;
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
+
+use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
 use crate::model;
 

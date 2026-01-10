@@ -3,6 +3,7 @@ use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
+use crate::gui::graph_ui_interaction::GraphUiAction;
 use crate::gui::node_layout::NodeLayout;
 use common::BoolExt;
 use eframe::egui;
@@ -16,9 +17,7 @@ use graph::graph::{Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::ConstBindUi;
-use crate::gui::{
-    Gui, graph_ctx::GraphContext, graph_ui::GraphUiAction, graph_ui_interaction::GraphUiInteraction,
-};
+use crate::gui::{Gui, graph_ctx::GraphContext, graph_ui_interaction::GraphUiInteraction};
 
 #[derive(Debug, Clone)]
 pub enum PortDragInfo {

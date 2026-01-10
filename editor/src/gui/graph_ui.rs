@@ -13,7 +13,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
+use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -54,16 +54,6 @@ pub struct GraphUi {
     node_ui: NodeUi,
     dots_background: DottedBackgroundRenderer,
     interaction: GraphUiInteraction,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GraphUiAction {
-    CacheToggled { node_id: NodeId },
-    InputChanged { node_id: NodeId, input_idx: usize },
-    NodeRemoved { node_id: NodeId },
-    NodeMoved { node_id: NodeId },
-    NodeSelected { node_id: Option<NodeId> },
-    ZoomPanChanged,
 }
 
 impl GraphUi {
@@ -553,20 +543,6 @@ impl std::fmt::Display for Error {
                 "connection would create a cycle between {} and {}",
                 input_node_id, output_node_id
             ),
-        }
-    }
-}
-
-impl GraphUiAction {
-    pub fn affects_computation(&self) -> bool {
-        match self {
-            GraphUiAction::NodeRemoved { .. }
-            | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::CacheToggled { .. } => true,
-
-            GraphUiAction::NodeMoved { .. }
-            | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::ZoomPanChanged => false,
         }
     }
 }
