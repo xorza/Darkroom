@@ -1,5 +1,5 @@
 use crate::common::undo_stack::{FullSerdeUndoStack, UndoStack};
-use crate::gui::graph_ui_interaction::GraphUiInteraction;
+use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::execution_graph::Result as ExecutionGraphResult;
@@ -38,7 +38,7 @@ pub struct AppData {
 
     pub shared_status: SharedStatus,
 
-    undo_stack: Box<dyn UndoStack<ViewGraph>>,
+    undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 }
 
 impl AppData {

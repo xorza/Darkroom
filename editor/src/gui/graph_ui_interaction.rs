@@ -1,7 +1,6 @@
 use egui::{Pos2, Vec2};
 use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 
-use crate::common::undo_stack::UndoAction;
 use crate::gui::graph_ui::Error;
 use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
@@ -256,15 +255,5 @@ impl GraphUiAction {
             | GraphUiAction::NodeSelected { .. } => true,
             GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
         }
-    }
-}
-
-impl UndoAction<ViewGraph> for GraphUiAction {
-    fn apply(&self, value: &mut ViewGraph) {
-        GraphUiAction::apply(self, value);
-    }
-
-    fn undo(&self, value: &mut ViewGraph) {
-        GraphUiAction::undo(self, value);
     }
 }

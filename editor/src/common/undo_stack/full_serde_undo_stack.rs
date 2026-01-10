@@ -44,10 +44,10 @@ where
         self.redo_bytes.clear();
         self.undo_stack.clear();
         self.redo_stack.clear();
-        self.push_current(value, Vec::new());
+        self.push_current(value, &Vec::new());
     }
 
-    pub fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>) {
+    pub fn push_current(&mut self, value: &T, actions: &[GraphUiAction]) {
         let _ = actions;
         let snapshot = serialize_snapshot(value, self.format);
         if self
@@ -121,11 +121,13 @@ impl<T: Debug> UndoStack<T> for FullSerdeUndoStack<T>
 where
     T: Serialize + DeserializeOwned,
 {
+    type Action = GraphUiAction;
+
     fn reset_with(&mut self, value: &T) {
         FullSerdeUndoStack::reset_with(self, value);
     }
 
-    fn push_current(&mut self, value: &T, actions: Vec<GraphUiAction>) {
+    fn push_current(&mut self, value: &T, actions: &[GraphUiAction]) {
         FullSerdeUndoStack::push_current(self, value, actions);
     }
 
