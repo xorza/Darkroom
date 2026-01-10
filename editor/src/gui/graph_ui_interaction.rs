@@ -1,3 +1,4 @@
+use egui::Vec2;
 use graph::graph::{Binding, NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
@@ -30,6 +31,8 @@ pub enum GraphUiAction {
     },
     NodeMoved {
         node_id: NodeId,
+        before: Vec2,
+        after: Vec2,
     },
     NodeSelected {
         after: Option<NodeId>,

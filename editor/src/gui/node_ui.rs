@@ -100,7 +100,6 @@ impl NodeUi {
             let (view_node, incoming) = ctx.view_graph.removal_payload(&node_id);
             ctx.view_graph.remove_node(&node_id);
             ui_interaction.add_action(GraphUiAction::NodeRemoved {
-                node_id,
                 view_node,
                 incoming,
             });
@@ -129,6 +128,18 @@ fn body_drag<'a>(
     let dragged = body_response.dragged_by(PointerButton::Middle)
         || body_response.dragged_by(PointerButton::Primary);
 
+    let drag_start_id = gui.ui().make_persistent_id(("node_drag_start", node_id));
+    if body_response.drag_started() {
+        let start_pos = ctx
+            .view_graph
+            .view_nodes
+            .by_key(node_id)
+            .expect("node view must exist to start drag")
+            .pos;
+        gui.ui()
+            .data_mut(|data| data.insert_temp(drag_start_id, start_pos));
+    }
+
     if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
         ui_interaction.add_action(GraphUiAction::NodeSelected {
             after: Some(*node_id),
@@ -144,9 +155,21 @@ fn body_drag<'a>(
     }
 
     if body_response.drag_stopped() {
-        ui_interaction
-            .actions
-            .push(GraphUiAction::NodeMoved { node_id: *node_id });
+        let start_pos = gui
+            .ui()
+            .data_mut(|data| data.remove_temp::<Pos2>(drag_start_id))
+            .expect("node drag must have a start position");
+        let end_pos = ctx
+            .view_graph
+            .view_nodes
+            .by_key(node_id)
+            .expect("node view must exist after drag")
+            .pos;
+        ui_interaction.actions.push(GraphUiAction::NodeMoved {
+            node_id: *node_id,
+            before: start_pos.to_vec2(),
+            after: end_pos.to_vec2(),
+        });
     }
 
     node_layout
