@@ -11,3 +11,137 @@ pub trait UndoStack<T: Debug>: Debug {
     fn undo(&mut self) -> Option<T>;
     fn redo(&mut self) -> Option<T>;
 }
+
+#[cfg(test)]
+pub mod undo_stack_tests {
+    use super::UndoStack;
+    use serde::{Deserialize, Serialize};
+
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+    pub struct TestState {
+        pub value: i32,
+        pub label: String,
+    }
+
+    pub trait UndoStackTestAccess {
+        fn undo_len(&self) -> usize;
+        fn redo_len(&self) -> usize;
+    }
+
+    pub trait StackFactory {
+        type Stack: UndoStack<TestState> + UndoStackTestAccess;
+
+        fn make(limit: usize) -> Self::Stack;
+        fn limit_for_two(a: &TestState, b: &TestState) -> usize;
+        fn limit_for_three(a: &TestState, b: &TestState, c: &TestState) -> usize;
+    }
+
+    pub fn run_all<F: StackFactory>() {
+        undo_redo_roundtrip::<F>();
+        clear_redo_empties_stack::<F>();
+        undo_stack_drops_oldest_when_over_limit::<F>();
+        undo_stack_keeps_two_snapshots_with_two_snapshot_budget::<F>();
+        max_stack_limit_must_be_positive::<F>();
+    }
+
+    fn undo_redo_roundtrip<F: StackFactory>() {
+        let mut stack = F::make(1024 * 1024);
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        stack.reset_with(&state_a);
+        assert_eq!(stack.undo_len(), 1);
+        assert_eq!(stack.redo_len(), 0);
+
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        stack.push_current(&state_b);
+        assert!(stack.undo_len() >= 2);
+
+        let undone = stack.undo().expect("undo should return prior state");
+        assert_eq!(undone, state_a);
+        assert_eq!(stack.redo_len(), 1);
+
+        let redone = stack.redo().expect("redo should return next state");
+        assert_eq!(redone, state_b);
+        assert_eq!(stack.redo_len(), 0);
+    }
+
+    fn clear_redo_empties_stack<F: StackFactory>() {
+        let mut stack = F::make(1024 * 1024);
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.undo();
+        assert_eq!(stack.redo_len(), 1);
+
+        stack.clear_redo();
+        assert_eq!(stack.redo_len(), 0);
+    }
+
+    fn undo_stack_drops_oldest_when_over_limit<F: StackFactory>() {
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        let state_c = TestState {
+            value: 3,
+            label: "c".to_string(),
+        };
+
+        let max_limit = F::limit_for_three(&state_a, &state_b, &state_c);
+        let mut stack = F::make(max_limit);
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.push_current(&state_c);
+
+        assert_eq!(stack.undo_len(), 1);
+        assert!(stack.undo().is_none());
+    }
+
+    fn undo_stack_keeps_two_snapshots_with_two_snapshot_budget<F: StackFactory>() {
+        let state_a = TestState {
+            value: 1,
+            label: "a".to_string(),
+        };
+        let state_b = TestState {
+            value: 2,
+            label: "b".to_string(),
+        };
+        let state_c = TestState {
+            value: 3,
+            label: "c".to_string(),
+        };
+
+        let max_limit = F::limit_for_two(&state_a, &state_b);
+        let mut stack = F::make(max_limit);
+        stack.reset_with(&state_a);
+        stack.push_current(&state_b);
+        stack.push_current(&state_c);
+
+        assert_eq!(stack.undo_len(), 2);
+        assert_eq!(stack.undo().unwrap(), state_b);
+        assert!(stack.undo().is_none());
+    }
+
+    fn max_stack_limit_must_be_positive<F: StackFactory>() {
+        let result = std::panic::catch_unwind(|| {
+            let _stack = F::make(0);
+        });
+        assert!(result.is_err(), "stack limit must reject zero");
+    }
+}

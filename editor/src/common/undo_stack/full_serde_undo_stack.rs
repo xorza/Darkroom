@@ -199,131 +199,49 @@ fn pop_tail_bytes(bytes: &mut Vec<u8>, range: &std::ops::Range<usize>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde::{Deserialize, Serialize};
+    use crate::common::undo_stack::undo_stack_tests::{
+        StackFactory, TestState, UndoStackTestAccess, run_all,
+    };
 
-    #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-    struct TestState {
-        value: i32,
-        label: String,
+    struct FullSerdeFactory;
+
+    impl UndoStackTestAccess for FullSerdeUndoStack<TestState> {
+        fn undo_len(&self) -> usize {
+            self.undo_stack.len()
+        }
+
+        fn redo_len(&self) -> usize {
+            self.redo_stack.len()
+        }
+    }
+
+    impl StackFactory for FullSerdeFactory {
+        type Stack = FullSerdeUndoStack<TestState>;
+
+        fn make(limit: usize) -> Self::Stack {
+            FullSerdeUndoStack::new(FileFormat::Json, limit)
+        }
+
+        fn limit_for_two(a: &TestState, b: &TestState) -> usize {
+            let snapshot_a = serialize_snapshot(a, FileFormat::Json);
+            let snapshot_b = serialize_snapshot(b, FileFormat::Json);
+            (snapshot_a.len() + snapshot_b.len()).max(1)
+        }
+
+        fn limit_for_three(a: &TestState, b: &TestState, c: &TestState) -> usize {
+            let snapshot_a = serialize_snapshot(a, FileFormat::Json);
+            let snapshot_b = serialize_snapshot(b, FileFormat::Json);
+            let snapshot_c = serialize_snapshot(c, FileFormat::Json);
+            snapshot_a
+                .len()
+                .max(snapshot_b.len())
+                .max(snapshot_c.len())
+                .max(1)
+        }
     }
 
     #[test]
-    fn undo_redo_shrinks_buffers() {
-        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, 1024 * 1024);
-        let state_a = TestState {
-            value: 1,
-            label: "a".to_string(),
-        };
-        stack.reset_with(&state_a);
-        let len_after_a = stack.undo_bytes.len();
-        assert!(len_after_a > 0);
-        assert!(stack.redo_bytes.is_empty());
-
-        let state_b = TestState {
-            value: 2,
-            label: "b".to_string(),
-        };
-        stack.push_current(&state_b);
-        let len_after_b = stack.undo_bytes.len();
-        assert!(len_after_b > len_after_a);
-
-        let undone = stack.undo().expect("undo should return prior state");
-        assert_eq!(undone, state_a);
-        assert_eq!(stack.undo_bytes.len(), len_after_a);
-        assert!(!stack.redo_bytes.is_empty());
-
-        let redo_len = stack.redo_bytes.len();
-        let redone = stack.redo().expect("redo should return next state");
-        assert_eq!(redone, state_b);
-        assert!(redo_len > 0);
-        assert!(stack.redo_bytes.is_empty());
-    }
-
-    #[test]
-    fn clear_redo_empties_buffer() {
-        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, 1024 * 1024);
-        let state_a = TestState {
-            value: 1,
-            label: "a".to_string(),
-        };
-        let state_b = TestState {
-            value: 2,
-            label: "b".to_string(),
-        };
-        stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.undo();
-        assert!(!stack.redo_bytes.is_empty());
-
-        stack.clear_redo();
-        assert!(stack.redo_bytes.is_empty());
-        assert!(stack.redo_stack.is_empty());
-    }
-
-    #[test]
-    fn undo_stack_drops_oldest_when_over_limit() {
-        let state_a = TestState {
-            value: 1,
-            label: "a".to_string(),
-        };
-        let state_b = TestState {
-            value: 2,
-            label: "b".to_string(),
-        };
-        let state_c = TestState {
-            value: 3,
-            label: "c".to_string(),
-        };
-
-        let snapshot_a = serialize_snapshot(&state_a, FileFormat::Json);
-        let snapshot_b = serialize_snapshot(&state_b, FileFormat::Json);
-        let snapshot_c = serialize_snapshot(&state_c, FileFormat::Json);
-        let max_bytes = snapshot_a
-            .len()
-            .max(snapshot_b.len())
-            .max(snapshot_c.len())
-            .max(1);
-        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, max_bytes);
-        stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.push_current(&state_c);
-
-        assert_eq!(stack.undo_stack.len(), 1);
-        assert!(stack.undo().is_none());
-    }
-
-    #[test]
-    fn undo_stack_keeps_two_snapshots_with_two_snapshot_budget() {
-        let state_a = TestState {
-            value: 1,
-            label: "a".to_string(),
-        };
-        let state_b = TestState {
-            value: 2,
-            label: "b".to_string(),
-        };
-        let state_c = TestState {
-            value: 3,
-            label: "c".to_string(),
-        };
-
-        let snapshot_a = serialize_snapshot(&state_a, FileFormat::Json);
-        let snapshot_b = serialize_snapshot(&state_b, FileFormat::Json);
-        let max_bytes = (snapshot_a.len() + snapshot_b.len()).max(1);
-
-        let mut stack = FullSerdeUndoStack::new(FileFormat::Json, max_bytes);
-        stack.reset_with(&state_a);
-        stack.push_current(&state_b);
-        stack.push_current(&state_c);
-
-        assert_eq!(stack.undo_stack.len(), 2);
-        assert_eq!(stack.undo().unwrap(), state_b);
-        assert!(stack.undo().is_none());
-    }
-
-    #[test]
-    #[should_panic(expected = "undo stack byte limit must be greater than 0")]
-    fn max_stack_bytes_must_be_positive() {
-        let _stack: FullSerdeUndoStack<TestState> = FullSerdeUndoStack::new(FileFormat::Json, 0);
+    fn full_serde_undo_stack_suite() {
+        run_all::<FullSerdeFactory>();
     }
 }
