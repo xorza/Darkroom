@@ -68,12 +68,15 @@ impl GraphUiInteraction {
     }
 
     fn add_pending_action(&mut self, action: GraphUiAction) {
+        assert!(!action.immediate());
+
         if self.pending_action.is_none() {
             self.pending_action = Some(action);
             return;
         }
 
         let pending = self.pending_action.take().unwrap();
+        assert!(!pending.immediate());
         if std::mem::discriminant(&pending) != std::mem::discriminant(&action) {
             self.actions.push(pending);
             self.pending_action = Some(action);
