@@ -1,4 +1,4 @@
-use crate::common::undo_stack::{FullSerdeUndoStack, UndoStack};
+use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
@@ -22,8 +22,7 @@ pub struct Status {
 
 pub type SharedStatus = Shared<Status>;
 
-const UNDO_FILE_FORMAT: FileFormat = FileFormat::Lua;
-const UNDO_MAX_STACK_BYTES: usize = 1024 * 1024 * 4;
+const UNDO_MAX_STEPS: usize = 256;
 
 #[derive(Debug)]
 pub struct AppData {
@@ -59,10 +58,7 @@ impl AppData {
 
             shared_status,
 
-            undo_stack: Box::new(FullSerdeUndoStack::new(
-                UNDO_FILE_FORMAT,
-                UNDO_MAX_STACK_BYTES,
-            )),
+            undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
         }
     }
 

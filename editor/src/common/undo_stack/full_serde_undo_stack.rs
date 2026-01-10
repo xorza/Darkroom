@@ -44,7 +44,7 @@ where
         self.redo_bytes.clear();
         self.undo_stack.clear();
         self.redo_stack.clear();
-        self.push_current(value, &Vec::new());
+        self.push_current(value, &[]);
     }
 
     pub fn push_current(&mut self, value: &T, actions: &[GraphUiAction]) {
