@@ -31,6 +31,7 @@ pub enum PortDragInfo {
 #[derive(Debug, Default)]
 pub(crate) struct NodeUi {
     node_ids_to_remove: Vec<NodeId>,
+    pub(crate) node_ids_hit_breaker: Vec<NodeId>,
     pub(crate) const_bind_ui: ConstBindUi,
 }
 
@@ -52,6 +53,8 @@ impl NodeUi {
         breaker: Option<&ConnectionBreaker>,
     ) -> PortDragInfo {
         self.node_ids_to_remove.clear();
+        self.node_ids_hit_breaker.clear();
+
         let mut drag_port_info: PortDragInfo = PortDragInfo::None;
         let mut const_bind_frame = self.const_bind_ui.start();
 
@@ -70,8 +73,9 @@ impl NodeUi {
                 .is_some_and(|id| id == node_id);
 
             let node_execution_info = node_execution_info(ctx.execution_stats, node_id);
-
-            render_body(gui, node_layout, is_selected, &node_execution_info, breaker);
+            if render_body(gui, node_layout, is_selected, &node_execution_info, breaker) {
+                self.node_ids_hit_breaker.push(node_id);
+            }
             if render_remove_btn(gui, ui_interaction, &node_id, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
@@ -140,7 +144,7 @@ fn render_body(
     selected: bool,
     node_execution_info: &NodeExecutionInfo<'_>,
     breaker: Option<&ConnectionBreaker>,
-) {
+) -> bool {
     let corner_radius = gui.style.corner_radius;
     let breaker_hit = breaker.is_some_and(|breaker| breaker.intersects_rect(node_layout.body_rect));
 
@@ -204,11 +208,13 @@ fn render_body(
             gui.style.padding,
             (node_layout.header_row_height - node_layout.title_galley.size().y) * 0.5,
         );
-    gui.painter().galley(
+    gui.painter().galley_with_override_text_color(
         title_pos,
         node_layout.title_galley.clone(),
         breaker_hit.then_else(gui.style.dark_text_color, gui.style.text_color),
     );
+
+    breaker_hit
 }
 
 fn render_cache_btn(

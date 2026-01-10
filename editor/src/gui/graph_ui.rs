@@ -253,6 +253,14 @@ impl GraphUi {
                             },
                         ));
                     }
+
+                    for node_id in self.node_ui.node_ids_hit_breaker.iter() {
+                        ctx.view_graph.remove_node(node_id);
+
+                        graph_ui_interaction
+                            .actions
+                            .push((*node_id, GraphUiAction::NodeRemoved));
+                    }
                 }
             }
             InteractionState::DraggingNewConnection => {

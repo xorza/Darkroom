@@ -90,6 +90,7 @@ corner radii).
 `ToggleButton::background` now accepts a `ToggleButtonBackground` struct instead of individual fill/stroke arguments.
 `ToggleButtonBackground` now includes a `hovered_stroke`, and toggle buttons render that stroke on hover.
 Node header fills now switch to the connection breaker color when the breaker path intersects the node body.
+Node title rendering now uses `galley_with_override_text_color` so breaker-hit overrides can change the title color.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
 Graph UI scroll handling now folds smooth scroll + wheel line/page deltas via `collect_scroll_mouse_wheel_deltas`.
 Connection drag state now lives inside `ConnectionUi` instead of `GraphUi`.
