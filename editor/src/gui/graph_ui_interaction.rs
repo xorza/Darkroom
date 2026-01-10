@@ -51,8 +51,8 @@ pub enum GraphUiAction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.action1 = None;
-        self.actions2.clear();
+        // action1 should not be cleared here
+        self.clear_actions();
         self.errors.clear();
         self.run = false;
     }
@@ -64,6 +64,11 @@ impl GraphUiInteraction {
         ]
         .into_iter()
         .flatten()
+    }
+
+    pub fn clear_actions(&mut self) {
+        // action1 should not be cleared here
+        self.actions2.clear();
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {

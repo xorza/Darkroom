@@ -107,11 +107,13 @@ impl AppData {
 
     pub fn undo(&mut self) {
         self.interaction.flush();
-        self.handle_interaction();
+        self.handle_actions();
+
         let mut affects_computation = false;
         let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
         });
+        self.view_graph.validate();
         if undid && affects_computation {
             self.refresh_after_graph_change();
         }
@@ -122,6 +124,7 @@ impl AppData {
         let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
             affects_computation |= action.affects_computation();
         });
+        self.view_graph.validate();
         if redid && affects_computation {
             self.refresh_after_graph_change();
         }
@@ -136,22 +139,13 @@ impl AppData {
     }
 
     fn refresh_after_graph_change(&mut self) {
-        self.view_graph.validate();
         self.worker.send(WorkerMessage::Clear);
         self.graph_updated = true;
         self.execution_stats = None;
     }
 
     pub fn handle_interaction(&mut self) {
-        for actions in self.interaction.actions_stacks() {
-            self.undo_stack.clear_redo();
-            self.undo_stack.push_current(&self.view_graph, actions);
-
-            if actions.iter().any(|action| action.affects_computation()) {
-                self.execution_stats = None;
-                self.graph_updated = true;
-            }
-        }
+        self.handle_actions();
 
         if self.interaction.run {
             self.run_graph();
@@ -162,6 +156,19 @@ impl AppData {
         }
 
         self.interaction.clear();
+    }
+
+    fn handle_actions(&mut self) {
+        for actions in self.interaction.actions_stacks() {
+            self.undo_stack.clear_redo();
+            self.undo_stack.push_current(&self.view_graph, actions);
+
+            if actions.iter().any(|action| action.affects_computation()) {
+                self.execution_stats = None;
+                self.graph_updated = true;
+            }
+        }
+        self.interaction.clear_actions();
     }
 
     pub fn empty_graph(&mut self) {
