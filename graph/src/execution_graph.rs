@@ -315,7 +315,6 @@ impl ExecutionGraph {
 
         self.e_node_invoke_order.clear();
         self.e_node_process_order.clear();
-        self.e_node_process_order.reserve(graph.nodes.len());
 
         self.forward1(graph, func_lib);
 
