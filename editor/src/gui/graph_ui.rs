@@ -279,8 +279,7 @@ impl GraphUi {
                         input_port,
                         output_port,
                     } => {
-                        assert_eq!(input_port.kind, PortKind::Input);
-                        assert_eq!(output_port.kind, PortKind::Output);
+                        assert_eq!(input_port.kind, output_port.kind.opposite());
 
                         self.state = InteractionState::Idle;
 
