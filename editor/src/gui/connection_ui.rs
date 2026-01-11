@@ -313,6 +313,12 @@ impl ConnectionUi {
                             (PortKind::Input, PortKind::Output) => {
                                 (drag.start_port.port, port_info.port)
                             }
+                            (PortKind::Event, PortKind::Trigger) => {
+                                (port_info.port, drag.start_port.port)
+                            }
+                            (PortKind::Trigger, PortKind::Event) => {
+                                (drag.start_port.port, port_info.port)
+                            }
                             _ => unreachable!("ports must be of opposite types"),
                         };
 
