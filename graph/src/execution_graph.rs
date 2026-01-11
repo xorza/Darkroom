@@ -420,42 +420,12 @@ impl ExecutionGraph {
     }
 
     pub async fn execute(&mut self) -> Result<ExecutionStats> {
-        self.pre_execute()?;
+        self.prepare_execution()?;
 
         self.execute_internal().await
     }
 
-    pub async fn execute_with_ids<T: IntoIterator<Item = NodeId>>(
-        &mut self,
-        ids: T,
-    ) -> Result<ExecutionStats> {
-        self.e_nodes.iter_mut().for_each(|e_node| {
-            e_node.reset_for_execution();
-        });
-
-        self.e_node_terminal_idx.clear();
-        let stack = &mut self.stack;
-        stack.clear();
-
-        for node_id in ids {
-            let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Terminal,
-            });
-            self.e_node_terminal_idx.push(e_node_idx);
-        }
-
-        self.fun_name()?;
-
-        self.execute_internal().await
-    }
-
-    fn pre_execute(&mut self) -> Result<()> {
-        self.e_nodes.iter_mut().for_each(|e_node| {
-            e_node.reset_for_execution();
-        });
-
+    fn prepare_execution(&mut self) -> Result<()> {
         self.e_node_terminal_idx.clear();
         let stack = &mut self.stack;
         stack.clear();
@@ -470,12 +440,38 @@ impl ExecutionGraph {
             }
         }
 
-        self.fun_name()?;
+        self.build_execution_plan()?;
 
         Ok(())
     }
 
-    fn fun_name(&mut self) -> Result<()> {
+    pub async fn execute_with_ids<T: IntoIterator<Item = NodeId>>(
+        &mut self,
+        ids: T,
+    ) -> Result<ExecutionStats> {
+        self.e_node_terminal_idx.clear();
+        let stack = &mut self.stack;
+        stack.clear();
+
+        for node_id in ids {
+            let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Terminal,
+            });
+            self.e_node_terminal_idx.push(e_node_idx);
+        }
+
+        self.build_execution_plan()?;
+
+        self.execute_internal().await
+    }
+
+    fn build_execution_plan(&mut self) -> Result<()> {
+        self.e_nodes.iter_mut().for_each(|e_node| {
+            e_node.reset_for_execution();
+        });
+
         self.backward1()?;
         self.forward2();
         self.backward2();
@@ -938,7 +934,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -993,7 +989,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1022,7 +1018,7 @@ mod tests {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -1087,7 +1083,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
@@ -1140,7 +1136,7 @@ mod tests {
         mult.inputs[1].binding = binding2;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -1168,7 +1164,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1176,7 +1172,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1222,7 +1218,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1242,7 +1238,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1252,7 +1248,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute()?;
+        execution_graph.prepare_execution()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -1371,7 +1367,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         let err = execution_graph
-            .pre_execute()
+            .prepare_execution()
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
