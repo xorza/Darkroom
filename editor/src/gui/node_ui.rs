@@ -456,6 +456,14 @@ fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
         gui.painter()
             .galley(text_pos, galley.clone(), gui.style.text_color);
     }
+
+    let output_count = node_layout.output_galleys.len();
+    for (event_idx, galley) in node_layout.event_galleys.iter().enumerate() {
+        let text_pos = node_layout.output_center(output_count + event_idx)
+            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
+        gui.painter()
+            .galley(text_pos, galley.clone(), gui.style.text_color);
+    }
 }
 
 fn node_execution_info<'a>(
