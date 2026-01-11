@@ -100,13 +100,17 @@ impl ActionUndoStack {
     }
 
     fn compact_undo_buffer_if_needed(&mut self) {
+        // Skip compaction if there is no logical prefix to drop.
         if self.undo_base_offset == 0 {
             return;
         }
+        // Only compact when the unused prefix is at least half the buffer,
+        // to avoid frequent memmoves from small trims.
         if self.undo_base_offset < self.undo_actions.len() / 2 {
             return;
         }
         let offset = self.undo_base_offset;
+        // Drop the unused prefix and renormalize ranges to the new base.
         self.undo_actions.drain(0..offset);
         for range in &mut self.undo_stack {
             range.start -= offset;
