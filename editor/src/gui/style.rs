@@ -89,6 +89,11 @@ pub struct NodeStyle {
     pub input_hover_color: Color32,
     pub output_hover_color: Color32,
 
+    pub trigger_port_color: Color32,
+    pub event_port_color: Color32,
+    pub trigger_hover_color: Color32,
+    pub event_hover_color: Color32,
+
     pub const_stroke_width: f32,
     pub const_bind_style: DragValueStyle,
 }
@@ -161,6 +166,10 @@ impl Style {
         const COLOR_PORT_OUTPUT: Color32 = Color32::from_rgb(70, 200, 200);
         const COLOR_PORT_INPUT_HOVER: Color32 = Color32::from_rgb(120, 190, 255);
         const COLOR_PORT_OUTPUT_HOVER: Color32 = Color32::from_rgb(110, 230, 210);
+        const COLOR_PORT_TRIGGER: Color32 = Color32::from_rgb(235, 200, 70);
+        const COLOR_PORT_EVENT: Color32 = Color32::from_rgb(235, 140, 70);
+        const COLOR_PORT_TRIGGER_HOVER: Color32 = Color32::from_rgb(255, 225, 120);
+        const COLOR_PORT_EVENT_HOVER: Color32 = Color32::from_rgb(255, 175, 120);
         const COLOR_STROKE_BREAKER: Color32 = Color32::from_rgb(255, 120, 120);
         const COLOR_STROKE_BROKE: Color32 = Color32::from_rgb(255, 90, 90);
         const COLOR_TEXT: Color32 = Color32::from_rgb(192, 192, 192);
@@ -273,6 +282,11 @@ impl Style {
                 output_port_color: COLOR_PORT_OUTPUT,
                 input_hover_color: COLOR_PORT_INPUT_HOVER,
                 output_hover_color: COLOR_PORT_OUTPUT_HOVER,
+
+                trigger_port_color: COLOR_PORT_TRIGGER,
+                event_port_color: COLOR_PORT_EVENT,
+                trigger_hover_color: COLOR_PORT_TRIGGER_HOVER,
+                event_hover_color: COLOR_PORT_EVENT_HOVER,
 
                 const_bind_style: DragValueStyle {
                     fill: COLOR_BG_INACTIVE,

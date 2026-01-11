@@ -25,6 +25,9 @@ pub(crate) struct ConnectionKey {
 pub(crate) enum PortKind {
     Input,
     Output,
+
+    Trigger,
+    Event,
 }
 
 #[derive(Debug)]
@@ -252,6 +255,8 @@ impl ConnectionUi {
                     temp_connection.start_port.center,
                     temp_connection.current_pos,
                 ),
+                PortKind::Trigger => todo!(),
+                PortKind::Event => todo!(),
             };
 
             self.temp_connection_bezier
