@@ -450,19 +450,15 @@ impl ExecutionGraph {
         self.e_node_terminal_idx.extend(
             event_ids
                 .iter()
-                .map(|event_id| self.event_subscribers.get(event_id).unwrap())
-                .flatten()
+                .flat_map(|event_id| self.event_subscribers.get(event_id).unwrap())
                 .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
 
         self.build_execution_plan()?;
 
         let mut result = self.execute_internal().await;
-        match &mut result {
-            Ok(exe_stats) => {
-                exe_stats.triggered_events = event_ids;
-            }
-            _ => {}
+        if let Ok(exe_stats) = &mut result {
+            exe_stats.triggered_events = event_ids;
         }
 
         result

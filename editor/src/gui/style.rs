@@ -90,7 +90,6 @@ pub struct NodeStyle {
     pub trigger_hover_color: Color32,
     pub event_hover_color: Color32,
 
-    pub const_stroke_width: f32,
     pub const_bind_style: DragValueStyle,
 }
 
@@ -201,8 +200,6 @@ impl Style {
                 breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
             },
             node: NodeStyle {
-                const_stroke_width: scaled(1.0),
-
                 status_dot_radius: scaled(4.0),
                 status_impure_color: COLOR_DOT_IMPURE,
 
