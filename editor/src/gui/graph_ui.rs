@@ -302,8 +302,17 @@ impl GraphUi {
                                 let result =
                                     apply_event_connection(ctx.view_graph, input_port, output_port);
                                 match result {
-                                    Ok(_) => {
-                                        todo!()
+                                    Ok((event_node_id, event_idx, before, after)) => {
+                                        if before != after {
+                                            interaction.add_action(
+                                                GraphUiAction::EventConnectionChanged {
+                                                    event_node_id,
+                                                    event_idx,
+                                                    before,
+                                                    after,
+                                                },
+                                            );
+                                        }
                                     }
                                     Err(err) => interaction.add_error(err),
                                 }
@@ -525,6 +534,42 @@ fn apply_data_connection(
     input.binding = after.clone();
 
     Ok((input_port.node_id, input_port.port_idx, before, after))
+}
+
+/// Connects an event output port to a trigger input port in `view_graph`.
+///
+/// Returns the event node id, event index, and subscriber list before/after the change.
+///
+/// # Panics
+/// Panics if the ports are not Event/Trigger or if the event index is out of range.
+fn apply_event_connection(
+    view_graph: &mut model::ViewGraph,
+    input_port: PortRef,
+    output_port: PortRef,
+) -> Result<(NodeId, usize, Vec<NodeId>, Vec<NodeId>), Error> {
+    assert_eq!(input_port.kind, PortKind::Trigger);
+    assert_eq!(output_port.kind, PortKind::Event);
+
+    if input_port.node_id == output_port.node_id {
+        return Err(Error::CycleDetected {
+            input_node_id: input_port.node_id,
+            output_node_id: output_port.node_id,
+        });
+    }
+
+    let output_node = view_graph.graph.by_id_mut(&output_port.node_id).unwrap();
+    assert!(
+        output_port.port_idx < output_node.events.len(),
+        "event index out of range for apply_event_connection"
+    );
+    let event = &mut output_node.events[output_port.port_idx];
+    let before = event.subscribers.clone();
+    if !event.subscribers.contains(&input_port.node_id) {
+        event.subscribers.push(input_port.node_id);
+    }
+    let after = event.subscribers.clone();
+
+    Ok((output_port.node_id, output_port.port_idx, before, after))
 }
 
 fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {

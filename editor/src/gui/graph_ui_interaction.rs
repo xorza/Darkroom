@@ -21,6 +21,12 @@ pub enum GraphUiAction {
         before: NodeBehavior,
         after: NodeBehavior,
     },
+    EventConnectionChanged {
+        event_node_id: NodeId,
+        event_idx: usize,
+        before: Vec<NodeId>,
+        after: Vec<NodeId>,
+    },
     InputChanged {
         node_id: NodeId,
         input_idx: usize,
@@ -158,6 +164,19 @@ impl GraphUiAction {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.behavior = *after;
             }
+            GraphUiAction::EventConnectionChanged {
+                event_node_id,
+                event_idx,
+                after,
+                ..
+            } => {
+                let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
+                assert!(
+                    *event_idx < node.events.len(),
+                    "event index out of range for EventConnectionChanged apply"
+                );
+                node.events[*event_idx].subscribers = after.clone();
+            }
             GraphUiAction::InputChanged {
                 node_id,
                 input_idx,
@@ -199,6 +218,19 @@ impl GraphUiAction {
             } => {
                 let node = view_graph.graph.by_id_mut(node_id).unwrap();
                 node.behavior = *before;
+            }
+            GraphUiAction::EventConnectionChanged {
+                event_node_id,
+                event_idx,
+                before,
+                ..
+            } => {
+                let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
+                assert!(
+                    *event_idx < node.events.len(),
+                    "event index out of range for EventConnectionChanged undo"
+                );
+                node.events[*event_idx].subscribers = before.clone();
             }
             GraphUiAction::InputChanged {
                 node_id,
@@ -257,7 +289,8 @@ impl GraphUiAction {
         match self {
             GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::InputChanged { .. }
-            | GraphUiAction::CacheToggled { .. } => true,
+            | GraphUiAction::CacheToggled { .. }
+            | GraphUiAction::EventConnectionChanged { .. } => true,
 
             GraphUiAction::NodeMoved { .. }
             | GraphUiAction::NodeSelected { .. }
@@ -269,6 +302,7 @@ impl GraphUiAction {
             GraphUiAction::CacheToggled { .. }
             | GraphUiAction::InputChanged { .. }
             | GraphUiAction::NodeRemoved { .. }
+            | GraphUiAction::EventConnectionChanged { .. }
             | GraphUiAction::NodeSelected { .. } => true,
             GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
         }
