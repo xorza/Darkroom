@@ -66,8 +66,10 @@ font/color/background/padding when not explicitly set.
 settings instance then calls `Style::apply` to hydrate scaled fields; `Style::apply_to_egui` now handles egui visuals.
 `StyleSettings` now has a TOML roundtrip test to validate serialization.
 `StyleSettings` now provides `from_file`/`to_file` helpers for TOML persistence.
-`StyleSettings` colors now serialize as `#RRGGBBAA` strings via a `ColorHex` wrapper (with backward-compatible
+`StyleSettings` colors now serialize as `#RRGGBBAA` strings via per-field serde helpers (with backward-compatible
 deserialization for old arrays).
+`StyleSettings` now serializes `const_badge_offset` as a 2-element array via a serde helper while still accepting
+`{ x, y }` maps on load.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Const input badge link now renders as a bezier polyline mesh instead of a straight line.
 Const input badge rendering is owned by `ConstBindUi` on `NodeUi`.
