@@ -420,123 +420,47 @@ impl ExecutionGraph {
     }
 
     pub async fn execute(&mut self) -> Result<ExecutionStats> {
-        self.pre_execute([])?;
+        self.pre_execute()?;
 
         self.execute_internal().await
     }
+
     pub async fn execute_with_ids<T: IntoIterator<Item = NodeId>>(
         &mut self,
         ids: T,
     ) -> Result<ExecutionStats> {
-        self.pre_execute(ids)?;
-
-        self.execute_internal().await
-    }
-
-    async fn execute_internal(&mut self) -> std::result::Result<ExecutionStats, Error> {
-        let start = std::time::Instant::now();
-
-        let mut inputs: Vec<InvokeInput> = Vec::default();
-        let mut output_usage: Vec<OutputUsage> = Vec::default();
-        let mut error: Option<Error> = None;
-
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
-            let e_node = &self.e_nodes[e_node_idx];
-
-            inputs.clear();
-            for input in e_node.inputs.iter() {
-                let value: DynamicValue = match &input.binding {
-                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
-                    ExecutionBinding::None => DynamicValue::None,
-                    ExecutionBinding::Const(value) => value.into(),
-                    ExecutionBinding::Bind(port_address) => {
-                        let output_e_node = &self.e_nodes[port_address.target_idx];
-                        let output_values = output_e_node
-                            .output_values
-                            .as_ref()
-                            .expect("Output values missing for bound node; check execution order");
-
-                        assert_eq!(output_values.len(), output_e_node.outputs.len());
-                        output_values[port_address.port_idx].clone()
-                    }
-                };
-
-                let value = value.convert_type(&input.data_type);
-
-                inputs.push(InvokeInput {
-                    changed: input.binding_changed || input.dependency_wants_execute,
-                    value,
-                });
-            }
-
-            output_usage.clear();
-            output_usage.extend(e_node.outputs.iter().map(|output| {
-                (output.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)
-            }));
-
-            let e_node = &mut self.e_nodes[e_node_idx];
-            assert!(e_node.error.is_none());
-
-            let outputs = e_node
-                .output_values
-                .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
-
-            let start = std::time::Instant::now();
-            let invoke_result = e_node
-                .lambda
-                .invoke(
-                    &mut self.ctx_manager,
-                    &mut e_node.cache,
-                    inputs.as_slice(),
-                    output_usage.as_slice(),
-                    outputs.as_mut_slice(),
-                )
-                .await
-                .map_err(|source| Error::Invoke {
-                    func_id: e_node.func_id,
-                    message: source.to_string(),
-                });
-
-            e_node.run_time = start.elapsed().as_secs_f64();
-
-            // after node execution assume unchanged
-            e_node.inputs.iter_mut().for_each(|e_input| {
-                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
-                e_input.binding_changed = false;
-            });
-
-            if let Err(err) = invoke_result {
-                e_node.error = Some(err.clone());
-                error = Some(err);
-                break;
-            }
-        }
-
-        match error {
-            Some(err) => Err(err),
-            None => Ok(self.collect_execution_stats(start)),
-        }
-    }
-
-    fn pre_execute<T: IntoIterator<Item = NodeId>>(&mut self, ids: T) -> Result<()> {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
 
-        self.backward1(ids)?;
+        self.e_node_terminal_idx.clear();
+        let stack = &mut self.stack;
+        stack.clear();
+
+        for node_id in ids {
+            let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Terminal,
+            });
+            self.e_node_terminal_idx.push(e_node_idx);
+        }
+
+        self.backward1()?;
         self.forward2();
         self.backward2();
 
         self.validate_for_execution();
 
-        Ok(())
+        self.execute_internal().await
     }
 
-    // Walk backward from terminal nodes to collect process order and detect cycles.
-    fn backward1<T: IntoIterator<Item = NodeId>>(&mut self, ids: T) -> Result<()> {
-        self.e_node_process_order.clear();
-        self.e_node_terminal_idx.clear();
+    fn pre_execute(&mut self) -> Result<()> {
+        self.e_nodes.iter_mut().for_each(|e_node| {
+            e_node.reset_for_execution();
+        });
 
+        self.e_node_terminal_idx.clear();
         let stack = &mut self.stack;
         stack.clear();
 
@@ -549,15 +473,21 @@ impl ExecutionGraph {
                 self.e_node_terminal_idx.push(e_node_idx);
             }
         }
-        for node_id in ids {
-            let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Terminal,
-            });
-            self.e_node_terminal_idx.push(e_node_idx);
-        }
 
+        self.backward1()?;
+        self.forward2();
+        self.backward2();
+
+        self.validate_for_execution();
+
+        Ok(())
+    }
+
+    // Walk backward from terminal nodes to collect process order and detect cycles.
+    fn backward1(&mut self) -> Result<()> {
+        self.e_node_process_order.clear();
+
+        let stack = &mut self.stack;
         while let Some(visit) = stack.pop() {
             match visit.cause {
                 VisitCause::Terminal => {}
@@ -729,6 +659,91 @@ impl ExecutionGraph {
                     });
                 };
             }
+        }
+    }
+
+    async fn execute_internal(&mut self) -> std::result::Result<ExecutionStats, Error> {
+        let start = std::time::Instant::now();
+
+        let mut inputs: Vec<InvokeInput> = Vec::default();
+        let mut output_usage: Vec<OutputUsage> = Vec::default();
+        let mut error: Option<Error> = None;
+
+        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+            let e_node = &self.e_nodes[e_node_idx];
+
+            inputs.clear();
+            for input in e_node.inputs.iter() {
+                let value: DynamicValue = match &input.binding {
+                    ExecutionBinding::Undefined => unreachable!("uninitialized binding"),
+                    ExecutionBinding::None => DynamicValue::None,
+                    ExecutionBinding::Const(value) => value.into(),
+                    ExecutionBinding::Bind(port_address) => {
+                        let output_e_node = &self.e_nodes[port_address.target_idx];
+                        let output_values = output_e_node
+                            .output_values
+                            .as_ref()
+                            .expect("Output values missing for bound node; check execution order");
+
+                        assert_eq!(output_values.len(), output_e_node.outputs.len());
+                        output_values[port_address.port_idx].clone()
+                    }
+                };
+
+                let value = value.convert_type(&input.data_type);
+
+                inputs.push(InvokeInput {
+                    changed: input.binding_changed || input.dependency_wants_execute,
+                    value,
+                });
+            }
+
+            output_usage.clear();
+            output_usage.extend(e_node.outputs.iter().map(|output| {
+                (output.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)
+            }));
+
+            let e_node = &mut self.e_nodes[e_node_idx];
+            assert!(e_node.error.is_none());
+
+            let outputs = e_node
+                .output_values
+                .get_or_insert_with(|| vec![DynamicValue::None; e_node.outputs.len()]);
+
+            let start = std::time::Instant::now();
+            let invoke_result = e_node
+                .lambda
+                .invoke(
+                    &mut self.ctx_manager,
+                    &mut e_node.cache,
+                    inputs.as_slice(),
+                    output_usage.as_slice(),
+                    outputs.as_mut_slice(),
+                )
+                .await
+                .map_err(|source| Error::Invoke {
+                    func_id: e_node.func_id,
+                    message: source.to_string(),
+                });
+
+            e_node.run_time = start.elapsed().as_secs_f64();
+
+            // after node execution assume unchanged
+            e_node.inputs.iter_mut().for_each(|e_input| {
+                assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
+                e_input.binding_changed = false;
+            });
+
+            if let Err(err) = invoke_result {
+                e_node.error = Some(err.clone());
+                error = Some(err);
+                break;
+            }
+        }
+
+        match error {
+            Some(err) => Err(err),
+            None => Ok(self.collect_execution_stats(start)),
         }
     }
 
@@ -923,7 +938,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -978,7 +993,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1007,7 +1022,7 @@ mod tests {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -1072,7 +1087,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
@@ -1125,7 +1140,7 @@ mod tests {
         mult.inputs[1].binding = binding2;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -1153,7 +1168,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1161,7 +1176,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1207,7 +1222,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1227,7 +1242,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1237,7 +1252,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.pre_execute([])?;
+        execution_graph.pre_execute()?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -1356,7 +1371,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         let err = execution_graph
-            .pre_execute([])
+            .pre_execute()
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
