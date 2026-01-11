@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
-use crate::common::connection_bezier::ConnectionBezierStyle;
+use crate::{common::connection_bezier::ConnectionBezierStyle, gui::style_settings::StyleSettings};
 
 pub fn brighten(color: Color32, amount: f32) -> Color32 {
     let t = amount.clamp(0.0, 1.0);
@@ -12,8 +12,11 @@ pub fn brighten(color: Color32, amount: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(lerp(color.r()), lerp(color.g()), lerp(color.b()), color.a())
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Style {
+    style_settings: StyleSettings,
+    scale: f32,
+
     pub heading_font: FontId,
     pub body_font: FontId,
     pub sub_font: FontId,
@@ -43,7 +46,7 @@ pub struct Style {
     pub node: NodeStyle,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct GraphBackgroundStyle {
     pub bg_color: Color32,
     pub dotted_color: Color32,
@@ -53,7 +56,7 @@ pub struct GraphBackgroundStyle {
     pub dotted_radius_max: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ConnectionStyle {
     pub feather: f32,
     pub stroke_width: f32,
@@ -63,7 +66,7 @@ pub struct ConnectionStyle {
     pub breaker_stroke: Stroke,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
@@ -93,7 +96,7 @@ pub struct NodeStyle {
     pub const_bind_style: DragValueStyle,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct DragValueStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
@@ -101,8 +104,33 @@ pub(crate) struct DragValueStyle {
 }
 
 impl Style {
-    pub fn new(scale: f32) -> Self {
+    pub fn new(settings: StyleSettings, scale: f32) -> Self {
+        assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
+        let mut result = Self {
+            style_settings: settings,
+            scale,
+            ..Default::default()
+        };
+
+        result.apply();
+
+        result
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        assert!(scale.is_finite(), "style scale must be finite");
+        assert!(scale > 0.0, "style scale must be greater than 0");
+
+        self.scale = scale;
+        self.apply();
+    }
+
+    pub fn apply(&mut self) {
+        let scale = self.scale;
+        assert!(scale.is_finite(), "style scale must be finite");
+        assert!(scale > 0.0, "style scale must be greater than 0");
+
         let scaled = |value: f32| value * scale;
         let scaled_u8 = |value: u8| {
             let scaled_value = (f32::from(value) * scale).round();
@@ -113,171 +141,120 @@ impl Style {
             scaled_value as u8
         };
 
-        const COLOR_BG_NONINTERACTIVE: Color32 = Color32::from_rgb(35, 35, 35);
-        const COLOR_BG_INACTIVE: Color32 = Color32::from_rgb(40, 40, 40);
-        const COLOR_BG_GRAPH: Color32 = Color32::from_rgb(16, 16, 16);
-        const COLOR_BG_HOVER: Color32 = Color32::from_rgb(50, 50, 50);
-        const COLOR_BG_ACTIVE: Color32 = Color32::from_rgb(60, 60, 60);
-        const COLOR_BG_CHECKED: Color32 = Color32::from_rgb(240, 205, 90);
-        const COLOR_STROKE_INACTIVE: Color32 = Color32::from_rgb(65, 65, 65);
-        const COLOR_STROKE_ACTIVE: Color32 = Color32::from_rgb(128, 128, 128);
-        const COLOR_PORT_INPUT: Color32 = Color32::from_rgb(70, 150, 255);
-        const COLOR_PORT_OUTPUT: Color32 = Color32::from_rgb(70, 200, 200);
-        const COLOR_PORT_INPUT_HOVER: Color32 = Color32::from_rgb(120, 190, 255);
-        const COLOR_PORT_OUTPUT_HOVER: Color32 = Color32::from_rgb(110, 230, 210);
-        const COLOR_PORT_TRIGGER: Color32 = Color32::from_rgb(235, 200, 70);
-        const COLOR_PORT_EVENT: Color32 = Color32::from_rgb(235, 140, 70);
-        const COLOR_PORT_TRIGGER_HOVER: Color32 = Color32::from_rgb(255, 225, 120);
-        const COLOR_PORT_EVENT_HOVER: Color32 = Color32::from_rgb(255, 175, 120);
-        const COLOR_STROKE_BREAKER: Color32 = Color32::from_rgb(255, 120, 120);
-        const COLOR_STROKE_BROKE: Color32 = Color32::from_rgb(255, 90, 90);
-        const COLOR_TEXT: Color32 = Color32::from_rgb(192, 192, 192);
-        const COLOR_TEXT_NONINTERACTIVE: Color32 = Color32::from_rgb(140, 140, 140);
-        const COLOR_TEXT_CHECKED: Color32 = Color32::from_rgb(60, 50, 20);
-        const COLOR_DOT_IMPURE: Color32 = Color32::from_rgb(255, 150, 70);
-        const COLOR_SHADOW_EXECUTED: Color32 = Color32::from_rgb(66, 216, 130);
-        const COLOR_SHADOW_CACHED: Color32 = Color32::from_rgb(248, 216, 75);
-        const COLOR_SHADOW_MISSING: Color32 = Color32::from_rgb(238, 66, 66);
-        const COLOR_DOTTED: Color32 = Color32::from_rgb(48, 48, 48);
-        const CORNER_RADIUS: f32 = 4.0;
-        const SMALL_CORNER_RADIUS: f32 = 2.0;
-        const DEFAULT_BG_STROKE_WIDTH: f32 = 1.0;
-        const BIG_PADDING: f32 = 6.0;
-        const PADDING: f32 = 4.0;
-        const SMALL_PADDING: f32 = 2.0;
-        const DOTTED_BASE_SPACING: f32 = 24.0;
-        const DOTTED_RADIUS_BASE: f32 = 1.2;
-        const DOTTED_RADIUS_MIN: f32 = 0.6;
-        const DOTTED_RADIUS_MAX: f32 = 2.4;
-        const CONNECTION_FEATHER: f32 = 0.8;
-        const CONNECTION_STROKE_WIDTH: f32 = 1.5;
-        const CONNECTION_HIGHLIGHT_FEATHER: f32 = 3.6;
-        const CONNECTION_HOVER_DETECTION_WIDTH: f32 = 6.0;
-        const CONNECTION_BREAKER_STROKE_WIDTH: f32 = 2.0;
-        const STATUS_DOT_RADIUS: f32 = 4.0;
-        const SHADOW_BLUR: u8 = 5;
-        const SHADOW_SPREAD: u8 = 2;
-        const CACHE_BTN_WIDTH: f32 = 50.0;
-        const REMOVE_BTN_SIZE: f32 = 10.0;
-        const PORT_RADIUS: f32 = 5.0;
-        const PORT_ACTIVATION_RADIUS: f32 = 7.0;
-        const PORT_LABEL_SIDE_PADDING: f32 = 8.0;
-        const CONST_BADGE_OFFSET: Vec2 = Vec2::new(-15.0, -15.0);
+        let settings = &self.style_settings;
+        let inactive_bg_stroke = Stroke::new(
+            scaled(settings.default_bg_stroke_width),
+            settings.color_stroke_inactive,
+        );
 
-        let inactive_bg_stroke =
-            Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_INACTIVE);
+        self.heading_font = FontId {
+            size: scaled(18.0),
+            family: FontFamily::Proportional,
+        };
+        self.body_font = FontId {
+            size: scaled(15.0),
+            family: FontFamily::Proportional,
+        };
+        self.sub_font = FontId {
+            size: scaled(13.0),
+            family: FontFamily::Proportional,
+        };
+        self.mono_font = FontId {
+            size: scaled(13.0),
+            family: FontFamily::Monospace,
+        };
 
-        Self {
-            heading_font: FontId {
-                size: scaled(18.0),
-                family: FontFamily::Proportional,
+        self.text_color = settings.color_text;
+        self.noninteractive_text_color = settings.color_text_noninteractive;
+
+        self.noninteractive_bg_fill = settings.color_bg_noninteractive;
+        self.hover_bg_fill = settings.color_bg_hover;
+        self.inactive_bg_fill = settings.color_bg_inactive;
+        self.inactive_bg_stroke = inactive_bg_stroke;
+        self.active_bg_stroke = Stroke::new(
+            scaled(settings.default_bg_stroke_width),
+            settings.color_stroke_active,
+        );
+        self.active_bg_fill = settings.color_bg_active;
+
+        self.dark_text_color = settings.color_text_checked;
+        self.checked_bg_fill = settings.color_bg_checked;
+
+        self.big_padding = scaled(settings.big_padding);
+        self.padding = scaled(settings.padding);
+        self.small_padding = scaled(settings.small_padding);
+        self.corner_radius = scaled(settings.corner_radius);
+        self.small_corner_radius = scaled(settings.small_corner_radius);
+
+        self.graph_background = GraphBackgroundStyle {
+            dotted_color: settings.color_dotted,
+            dotted_base_spacing: scaled(settings.dotted_base_spacing),
+            dotted_radius_base: scaled(settings.dotted_radius_base),
+            dotted_radius_min: scaled(settings.dotted_radius_min),
+            dotted_radius_max: scaled(settings.dotted_radius_max),
+            bg_color: settings.color_bg_graph,
+        };
+        self.connections = ConnectionStyle {
+            feather: scaled(settings.connection_feather),
+            stroke_width: scaled(settings.connection_stroke_width),
+            highlight_feather: scaled(settings.connection_highlight_feather),
+            broke_clr: settings.color_stroke_broke,
+            hover_detection_width: settings.connection_hover_detection_width,
+            breaker_stroke: Stroke::new(
+                scaled(settings.connection_breaker_stroke_width),
+                settings.color_stroke_breaker,
+            ),
+        };
+        self.node = NodeStyle {
+            status_dot_radius: scaled(settings.status_dot_radius),
+            status_impure_color: settings.color_dot_impure,
+
+            executed_shadow: Shadow {
+                color: settings.color_shadow_executed,
+                offset: [0, 0],
+                blur: scaled_u8(settings.shadow_blur),
+                spread: scaled_u8(settings.shadow_spread),
             },
-            body_font: FontId {
-                size: scaled(15.0),
-                family: FontFamily::Proportional,
+            cached_shadow: Shadow {
+                color: settings.color_shadow_cached,
+                offset: [0, 0],
+                blur: scaled_u8(settings.shadow_blur),
+                spread: scaled_u8(settings.shadow_spread),
             },
-            sub_font: FontId {
-                size: scaled(13.0),
-                family: FontFamily::Proportional,
-            },
-            mono_font: FontId {
-                size: scaled(13.0),
-                family: FontFamily::Monospace,
+            missing_inputs_shadow: Shadow {
+                color: settings.color_shadow_missing,
+                offset: [0, 0],
+                blur: scaled_u8(settings.shadow_blur),
+                spread: scaled_u8(settings.shadow_spread),
             },
 
-            text_color: COLOR_TEXT,
-            noninteractive_text_color: COLOR_TEXT_NONINTERACTIVE,
+            cache_btn_width: scaled(settings.cache_btn_width),
+            remove_btn_size: scaled(settings.remove_btn_size),
 
-            noninteractive_bg_fill: COLOR_BG_NONINTERACTIVE,
-            hover_bg_fill: COLOR_BG_HOVER,
-            inactive_bg_fill: COLOR_BG_INACTIVE,
-            inactive_bg_stroke,
-            active_bg_stroke: Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_ACTIVE),
-            active_bg_fill: COLOR_BG_ACTIVE,
+            port_radius: scaled(settings.port_radius),
+            port_activation_radius: scaled(settings.port_activation_radius),
+            port_label_side_padding: scaled(settings.port_label_side_padding),
+            const_badge_offset: settings.const_badge_offset * scale,
 
-            dark_text_color: COLOR_TEXT_CHECKED,
-            checked_bg_fill: COLOR_BG_CHECKED,
+            input_port_color: settings.color_port_input,
+            output_port_color: settings.color_port_output,
+            input_hover_color: settings.color_port_input_hover,
+            output_hover_color: settings.color_port_output_hover,
 
-            big_padding: scaled(BIG_PADDING),
-            padding: scaled(PADDING),
-            small_padding: scaled(SMALL_PADDING),
-            corner_radius: scaled(CORNER_RADIUS),
-            small_corner_radius: scaled(SMALL_CORNER_RADIUS),
+            trigger_port_color: settings.color_port_trigger,
+            event_port_color: settings.color_port_event,
+            trigger_hover_color: settings.color_port_trigger_hover,
+            event_hover_color: settings.color_port_event_hover,
 
-            graph_background: GraphBackgroundStyle {
-                dotted_color: COLOR_DOTTED,
-                dotted_base_spacing: scaled(DOTTED_BASE_SPACING),
-                dotted_radius_base: scaled(DOTTED_RADIUS_BASE),
-                dotted_radius_min: scaled(DOTTED_RADIUS_MIN),
-                dotted_radius_max: scaled(DOTTED_RADIUS_MAX),
-                bg_color: COLOR_BG_GRAPH,
+            const_bind_style: DragValueStyle {
+                fill: settings.color_bg_inactive,
+                stroke: inactive_bg_stroke,
+                radius: scaled(settings.small_corner_radius),
             },
-            connections: ConnectionStyle {
-                feather: scaled(CONNECTION_FEATHER),
-                stroke_width: scaled(CONNECTION_STROKE_WIDTH),
-                highlight_feather: scaled(CONNECTION_HIGHLIGHT_FEATHER),
-                broke_clr: COLOR_STROKE_BROKE,
-                hover_detection_width: CONNECTION_HOVER_DETECTION_WIDTH,
-                breaker_stroke: Stroke::new(
-                    scaled(CONNECTION_BREAKER_STROKE_WIDTH),
-                    COLOR_STROKE_BREAKER,
-                ),
-            },
-            node: NodeStyle {
-                status_dot_radius: scaled(STATUS_DOT_RADIUS),
-                status_impure_color: COLOR_DOT_IMPURE,
-
-                executed_shadow: Shadow {
-                    color: COLOR_SHADOW_EXECUTED,
-                    offset: [0, 0],
-                    blur: scaled_u8(SHADOW_BLUR),
-                    spread: scaled_u8(SHADOW_SPREAD),
-                },
-                cached_shadow: Shadow {
-                    color: COLOR_SHADOW_CACHED,
-                    offset: [0, 0],
-                    blur: scaled_u8(SHADOW_BLUR),
-                    spread: scaled_u8(SHADOW_SPREAD),
-                },
-                missing_inputs_shadow: Shadow {
-                    color: COLOR_SHADOW_MISSING,
-                    offset: [0, 0],
-                    blur: scaled_u8(SHADOW_BLUR),
-                    spread: scaled_u8(SHADOW_SPREAD),
-                },
-
-                cache_btn_width: scaled(CACHE_BTN_WIDTH),
-                remove_btn_size: scaled(REMOVE_BTN_SIZE),
-
-                port_radius: scaled(PORT_RADIUS),
-                port_activation_radius: scaled(PORT_ACTIVATION_RADIUS),
-                port_label_side_padding: scaled(PORT_LABEL_SIDE_PADDING),
-                const_badge_offset: CONST_BADGE_OFFSET * scale,
-
-                input_port_color: COLOR_PORT_INPUT,
-                output_port_color: COLOR_PORT_OUTPUT,
-                input_hover_color: COLOR_PORT_INPUT_HOVER,
-                output_hover_color: COLOR_PORT_OUTPUT_HOVER,
-
-                trigger_port_color: COLOR_PORT_TRIGGER,
-                event_port_color: COLOR_PORT_EVENT,
-                trigger_hover_color: COLOR_PORT_TRIGGER_HOVER,
-                event_hover_color: COLOR_PORT_EVENT_HOVER,
-
-                const_bind_style: DragValueStyle {
-                    fill: COLOR_BG_INACTIVE,
-                    stroke: inactive_bg_stroke,
-                    radius: scaled(SMALL_CORNER_RADIUS),
-                },
-            },
-        }
+        };
     }
 
-    pub fn set_scale(&mut self, scale: f32) {
-        *self = Self::new(scale);
-    }
-
-    pub fn apply(&self, egui_style: &mut egui::Style) {
+    pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
         let visuals = &mut egui_style.visuals;
         visuals.dark_mode = true;
         visuals.override_text_color = Some(self.text_color);

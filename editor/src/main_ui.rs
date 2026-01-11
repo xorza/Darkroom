@@ -1,7 +1,7 @@
-use crate::app_data::AppData;
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::style::Style;
+use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
 use egui::{CentralPanel, Frame, Sense};
 
@@ -65,9 +65,10 @@ impl MainUi {
 
         self.handle_undo_shortcut(ctx, app_data);
 
-        let style = Style::new(1.0);
+        let style_settings = StyleSettings::default();
+        let style = Style::new(style_settings, 1.0);
         ctx.style_mut(|egui_style| {
-            style.apply(egui_style);
+            style.apply_to_egui(egui_style);
         });
 
         egui::TopBottomPanel::top("top_panel")

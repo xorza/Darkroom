@@ -16,6 +16,7 @@ pub mod node_layout;
 pub mod node_ui;
 pub mod polyline_mesh;
 pub mod style;
+pub mod style_settings;
 
 #[derive(Clone)]
 struct GuiPainter(Painter);
@@ -69,6 +70,6 @@ impl<'a> Gui<'a> {
         }
 
         self.scale = scale;
-        self.style = Style::new(scale);
+        self.style.set_scale(scale);
     }
 }
