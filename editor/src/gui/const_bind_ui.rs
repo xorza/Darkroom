@@ -149,7 +149,7 @@ impl<'a> ConstBindFrame<'a> {
             if let StaticValue::Int(value) = value {
                 let mut const_bind_style = gui.style.node.const_bind_style.clone();
                 if prev_broke || currently_broke {
-                    const_bind_style.stroke.color = gui.style.connections.breaker_stroke.color;
+                    const_bind_style.stroke.color = gui.style.connections.broke_clr;
                 } else if prev_hovered || currently_hovered {
                     const_bind_style.stroke.color = gui.style.node.output_hover_color;
                 } else {

@@ -225,10 +225,8 @@ fn render_body(
     if selected || breaker_hit {
         let mut header_rect = node_layout.body_rect;
         header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
-        let header_fill = breaker_hit.then_else(
-            gui.style.connections.breaker_stroke.color,
-            gui.style.active_bg_fill,
-        );
+        let header_fill =
+            breaker_hit.then_else(gui.style.connections.broke_clr, gui.style.active_bg_fill);
 
         gui.painter().rect(
             header_rect,
