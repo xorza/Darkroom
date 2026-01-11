@@ -1,5 +1,6 @@
 use egui::{Color32, Vec2};
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -54,6 +55,19 @@ pub struct StyleSettings {
     pub port_activation_radius: f32,
     pub port_label_side_padding: f32,
     pub const_badge_offset: Vec2,
+}
+
+impl StyleSettings {
+    pub fn from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let payload = std::fs::read_to_string(path).map_err(anyhow::Error::from)?;
+        let settings = toml::from_str(&payload).map_err(anyhow::Error::from)?;
+        Ok(settings)
+    }
+
+    pub fn to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        let payload = toml::to_string(self).map_err(anyhow::Error::from)?;
+        std::fs::write(path, payload).map_err(anyhow::Error::from)
+    }
 }
 
 impl Default for StyleSettings {

@@ -65,6 +65,7 @@ font/color/background/padding when not explicitly set.
 `StyleSettings` now owns the serialized defaults for all UI color/sizing constants, and `Style::new` consumes a
 settings instance then calls `Style::apply` to hydrate scaled fields; `Style::apply_to_egui` now handles egui visuals.
 `StyleSettings` now has a TOML roundtrip test to validate serialization.
+`StyleSettings` now provides `from_file`/`to_file` helpers for TOML persistence.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Const input badge link now renders as a bezier polyline mesh instead of a straight line.
 Const input badge rendering is owned by `ConstBindUi` on `NodeUi`.
