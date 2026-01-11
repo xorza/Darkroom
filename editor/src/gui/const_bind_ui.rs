@@ -9,7 +9,7 @@ use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey};
+use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
 
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_layout::NodeLayout;
@@ -93,7 +93,8 @@ impl<'a> ConstBindFrame<'a> {
 
             let prev_broke = breaker.is_some() && curve.broke;
 
-            let style = ConnectionBezierStyle::build(&gui.style, prev_broke, prev_hovered);
+            let style =
+                ConnectionBezierStyle::build(&gui.style, PortKind::Input, prev_broke, prev_hovered);
 
             let response = curve.bezier.show(
                 gui,

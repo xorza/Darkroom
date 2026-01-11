@@ -3,6 +3,7 @@ use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::{UiEquals, bezier_helper};
 use crate::gui::connection_breaker::ConnectionBreaker;
+use crate::gui::connection_ui::PortKind;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::style::Style;
 use crate::gui::{Gui, style};
@@ -199,7 +200,12 @@ impl PartialEq for ConnectionBezierStyle {
 impl Eq for ConnectionBezierStyle {}
 
 impl ConnectionBezierStyle {
-    pub fn build(style: &Style, broke: bool, hovered: bool) -> ConnectionBezierStyle {
+    pub fn build(
+        style: &Style,
+        port_kind: PortKind,
+        broke: bool,
+        hovered: bool,
+    ) -> ConnectionBezierStyle {
         assert!(
             style.connections.stroke_width.is_finite() && style.connections.stroke_width >= 0.0,
             "connection stroke width must be finite and non-negative"
@@ -217,18 +223,34 @@ impl ConnectionBezierStyle {
                 feather: style.connections.feather,
             }
         } else if hovered {
-            ConnectionBezierStyle {
-                start_color: style.node.output_hover_color,
-                end_color: style.node.input_hover_color,
-                stroke_width: style.connections.stroke_width,
-                feather: style.connections.feather,
+            match port_kind {
+                PortKind::Input | PortKind::Output => ConnectionBezierStyle {
+                    start_color: style.node.output_hover_color,
+                    end_color: style.node.input_hover_color,
+                    stroke_width: style.connections.stroke_width,
+                    feather: style.connections.feather,
+                },
+                PortKind::Trigger | PortKind::Event => ConnectionBezierStyle {
+                    start_color: style.node.event_hover_color,
+                    end_color: style.node.trigger_hover_color,
+                    stroke_width: style.connections.stroke_width,
+                    feather: style.connections.feather,
+                },
             }
         } else {
-            ConnectionBezierStyle {
-                start_color: style.node.output_port_color,
-                end_color: style.node.input_port_color,
-                stroke_width: style.connections.stroke_width,
-                feather: style.connections.feather,
+            match port_kind {
+                PortKind::Input | PortKind::Output => ConnectionBezierStyle {
+                    start_color: style.node.output_port_color,
+                    end_color: style.node.input_port_color,
+                    stroke_width: style.connections.stroke_width,
+                    feather: style.connections.feather,
+                },
+                PortKind::Trigger | PortKind::Event => ConnectionBezierStyle {
+                    start_color: style.node.event_port_color,
+                    end_color: style.node.trigger_port_color,
+                    stroke_width: style.connections.stroke_width,
+                    feather: style.connections.feather,
+                },
             }
         }
     }

@@ -206,7 +206,12 @@ impl ConnectionUi {
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
                 curve.broke = curve.bezier.intersects_breaker(breaker);
 
-                let style = ConnectionBezierStyle::build(&gui.style, curve.broke, curve.hovered);
+                let style = ConnectionBezierStyle::build(
+                    &gui.style,
+                    PortKind::Input,
+                    curve.broke,
+                    curve.hovered,
+                );
 
                 let response = curve.bezier.show(
                     gui,
@@ -260,7 +265,12 @@ impl ConnectionUi {
                 gui,
                 Sense::hover(),
                 "temp_connection",
-                ConnectionBezierStyle::build(&gui.style, false, false),
+                ConnectionBezierStyle::build(
+                    &gui.style,
+                    temp_connection.start_port.port.kind,
+                    false,
+                    false,
+                ),
             );
         }
     }
