@@ -427,15 +427,8 @@ impl ExecutionGraph {
 
     fn prepare_execution(&mut self) -> Result<()> {
         self.e_node_terminal_idx.clear();
-        let stack = &mut self.stack;
-        stack.clear();
-
         for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
             if e_node.terminal {
-                stack.push(Visit {
-                    e_node_idx,
-                    cause: VisitCause::Terminal,
-                });
                 self.e_node_terminal_idx.push(e_node_idx);
             }
         }
@@ -450,15 +443,8 @@ impl ExecutionGraph {
         ids: T,
     ) -> Result<ExecutionStats> {
         self.e_node_terminal_idx.clear();
-        let stack = &mut self.stack;
-        stack.clear();
-
         for node_id in ids {
             let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
-            stack.push(Visit {
-                e_node_idx,
-                cause: VisitCause::Terminal,
-            });
             self.e_node_terminal_idx.push(e_node_idx);
         }
 
@@ -484,6 +470,14 @@ impl ExecutionGraph {
         self.e_node_process_order.clear();
 
         let stack = &mut self.stack;
+        stack.clear();
+        for e_node_idx in self.e_node_terminal_idx.iter().copied() {
+            stack.push(Visit {
+                e_node_idx,
+                cause: VisitCause::Terminal,
+            });
+        }
+
         while let Some(visit) = stack.pop() {
             match visit.cause {
                 VisitCause::Terminal => {}
