@@ -45,12 +45,15 @@ pub struct AppData {
 impl AppData {
     pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
         let shared_status = Shared::default();
-
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
+        let mut func_lib = FuncLib::default();
+
+        func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
+        func_lib.merge(TimersFuncLib::default());
 
         Self {
             worker,
-            func_lib: FuncLib::default(),
+            func_lib,
             view_graph: ViewGraph::default(),
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
@@ -178,32 +181,15 @@ impl AppData {
     }
 
     pub fn load_test_graph(&mut self) {
-        self.func_lib = test_func_lib(Self::sample_test_hooks(self));
-        self.func_lib.merge(TimersFuncLib::default());
-
         let mut graph = test_graph();
         graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
 
-        graph.add(Node::from_function(
-            self.func_lib.by_name("frame event").unwrap(),
-        ));
+        graph.add(self.func_lib.by_name("frame event").unwrap().into());
 
         let graph_view: ViewGraph = graph.into();
         self.apply_graph(graph_view, true);
 
         self.set_status("Loaded sample test graph");
-    }
-
-    fn sample_test_hooks(app_data: &AppData) -> TestFuncHooks {
-        let shared_status = app_data.shared_status.clone();
-        TestFuncHooks {
-            get_a: Arc::new(|| 21),
-            get_b: Arc::new(|| 2),
-            print: Arc::new(move |value| {
-                let mut shared_status = shared_status.try_lock().unwrap();
-                shared_status.print_output = Some(value.to_string());
-            }),
-        }
     }
 
     pub fn update_status(&mut self) {
@@ -250,5 +236,16 @@ impl AppData {
         self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
 
         Ok(())
+    }
+}
+
+fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
+    TestFuncHooks {
+        get_a: Arc::new(|| 21),
+        get_b: Arc::new(|| 2),
+        print: Arc::new(move |value| {
+            let mut shared_status = shared_status.try_lock().unwrap();
+            shared_status.print_output = Some(value.to_string());
+        }),
     }
 }

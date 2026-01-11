@@ -204,8 +204,8 @@ impl Default for Node {
     }
 }
 
-impl Node {
-    pub fn from_function(func: &Func) -> Node {
+impl From<&Func> for Node {
+    fn from(func: &Func) -> Self {
         let inputs: Vec<Input> = func
             .inputs
             .iter()

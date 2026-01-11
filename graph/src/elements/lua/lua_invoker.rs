@@ -331,7 +331,7 @@ impl LuaInvoker {
                 .by_name(&connection.name)
                 .unwrap_or_else(|| panic!("Func named {:?} not found", connection.name));
 
-            let node = Node::from_function(func);
+            let node: Node = func.into();
 
             assert!(
                 connection.inputs.len() <= node.inputs.len(),
