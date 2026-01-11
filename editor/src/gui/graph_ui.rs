@@ -14,7 +14,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::{EventSubscriberChange, GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -254,15 +254,15 @@ impl GraphUi {
                                     .by_key_mut(&event_node_id)
                                     .unwrap();
                                 let event = &mut node.events[event_idx];
-                                let before = event.subscribers.clone();
-                                event.subscribers.retain(|sub| *sub != trigger_node_id);
-                                let after = event.subscribers.clone();
-                                interaction.add_action(GraphUiAction::EventConnectionChanged {
-                                    event_node_id,
-                                    event_idx,
-                                    before,
-                                    after,
-                                });
+                                if event.subscribers.contains(&trigger_node_id) {
+                                    event.subscribers.retain(|sub| *sub != trigger_node_id);
+                                    interaction.add_action(GraphUiAction::EventConnectionChanged {
+                                        event_node_id,
+                                        event_idx,
+                                        subscriber: trigger_node_id,
+                                        change: EventSubscriberChange::Removed,
+                                    });
+                                }
                             }
                         }
                     }
@@ -332,18 +332,17 @@ impl GraphUi {
                                 let result =
                                     apply_event_connection(ctx.view_graph, input_port, output_port);
                                 match result {
-                                    Ok((event_node_id, event_idx, before, after)) => {
-                                        if before != after {
-                                            interaction.add_action(
-                                                GraphUiAction::EventConnectionChanged {
-                                                    event_node_id,
-                                                    event_idx,
-                                                    before,
-                                                    after,
-                                                },
-                                            );
-                                        }
+                                    Ok(Some((event_node_id, event_idx, subscriber, change))) => {
+                                        interaction.add_action(
+                                            GraphUiAction::EventConnectionChanged {
+                                                event_node_id,
+                                                event_idx,
+                                                subscriber,
+                                                change,
+                                            },
+                                        );
                                     }
+                                    Ok(None) => {}
                                     Err(err) => interaction.add_error(err),
                                 }
                             }
@@ -576,7 +575,7 @@ fn apply_event_connection(
     view_graph: &mut model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<(NodeId, usize, Vec<NodeId>, Vec<NodeId>), Error> {
+) -> Result<Option<(NodeId, usize, NodeId, EventSubscriberChange)>, Error> {
     assert_eq!(input_port.kind, PortKind::Trigger);
     assert_eq!(output_port.kind, PortKind::Event);
 
@@ -593,13 +592,18 @@ fn apply_event_connection(
         "event index out of range for apply_event_connection"
     );
     let event = &mut output_node.events[output_port.port_idx];
-    let before = event.subscribers.clone();
-    if !event.subscribers.contains(&input_port.node_id) {
-        event.subscribers.push(input_port.node_id);
+    if event.subscribers.contains(&input_port.node_id) {
+        return Ok(None);
     }
-    let after = event.subscribers.clone();
 
-    Ok((output_port.node_id, output_port.port_idx, before, after))
+    event.subscribers.push(input_port.node_id);
+
+    Ok(Some((
+        output_port.node_id,
+        output_port.port_idx,
+        input_port.node_id,
+        EventSubscriberChange::Added,
+    )))
 }
 
 fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {

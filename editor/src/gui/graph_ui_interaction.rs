@@ -4,6 +4,12 @@ use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 use crate::gui::graph_ui::Error;
 use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventSubscriberChange {
+    Added,
+    Removed,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
     actions1: Vec<GraphUiAction>,
@@ -25,9 +31,8 @@ pub enum GraphUiAction {
         event_node_id: NodeId,
         event_idx: usize,
 
-        // todo only save NodeId that was added or removed
-        before: Vec<NodeId>,
-        after: Vec<NodeId>,
+        subscriber: NodeId,
+        change: EventSubscriberChange,
     },
     InputChanged {
         node_id: NodeId,
@@ -169,7 +174,8 @@ impl GraphUiAction {
             GraphUiAction::EventConnectionChanged {
                 event_node_id,
                 event_idx,
-                after,
+                subscriber,
+                change,
                 ..
             } => {
                 let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
@@ -177,7 +183,23 @@ impl GraphUiAction {
                     *event_idx < node.events.len(),
                     "event index out of range for EventConnectionChanged apply"
                 );
-                node.events[*event_idx].subscribers = after.clone();
+                let subscribers = &mut node.events[*event_idx].subscribers;
+                match change {
+                    EventSubscriberChange::Added => {
+                        assert!(
+                            !subscribers.contains(subscriber),
+                            "event subscriber already present on add"
+                        );
+                        subscribers.push(*subscriber);
+                    }
+                    EventSubscriberChange::Removed => {
+                        let index = subscribers
+                            .iter()
+                            .position(|node_id| node_id == subscriber)
+                            .expect("event subscriber missing on remove");
+                        subscribers.remove(index);
+                    }
+                }
             }
             GraphUiAction::InputChanged {
                 node_id,
@@ -224,7 +246,8 @@ impl GraphUiAction {
             GraphUiAction::EventConnectionChanged {
                 event_node_id,
                 event_idx,
-                before,
+                subscriber,
+                change,
                 ..
             } => {
                 let node = view_graph.graph.by_id_mut(event_node_id).unwrap();
@@ -232,7 +255,23 @@ impl GraphUiAction {
                     *event_idx < node.events.len(),
                     "event index out of range for EventConnectionChanged undo"
                 );
-                node.events[*event_idx].subscribers = before.clone();
+                let subscribers = &mut node.events[*event_idx].subscribers;
+                match change {
+                    EventSubscriberChange::Added => {
+                        let index = subscribers
+                            .iter()
+                            .position(|node_id| node_id == subscriber)
+                            .expect("event subscriber missing on undo add");
+                        subscribers.remove(index);
+                    }
+                    EventSubscriberChange::Removed => {
+                        assert!(
+                            !subscribers.contains(subscriber),
+                            "event subscriber already present on undo remove"
+                        );
+                        subscribers.push(*subscriber);
+                    }
+                }
             }
             GraphUiAction::InputChanged {
                 node_id,

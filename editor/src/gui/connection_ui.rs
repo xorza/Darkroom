@@ -11,7 +11,7 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::{EventSubscriberChange, GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::PortDragInfo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -283,15 +283,14 @@ impl ConnectionUi {
                         event_curve.hovered = response.hovered();
 
                         if response.double_clicked_by(PointerButton::Primary) {
-                            let before = event.subscribers.clone();
+                            let subscriber = event.subscribers[subscriber_idx];
                             event.subscribers.remove(subscriber_idx);
-                            let after = event.subscribers.clone();
 
                             ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
                                 event_node_id: node_id,
                                 event_idx,
-                                before,
-                                after,
+                                subscriber,
+                                change: EventSubscriberChange::Removed,
                             });
                             event_curve.hovered = false;
                         }
