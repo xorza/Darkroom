@@ -17,7 +17,7 @@ use egui::{
 };
 use graph::execution_graph::ExecutedNodeStats;
 use graph::graph::{Node, NodeId};
-use graph::prelude::{ExecutionStats, FuncBehavior, NodeBehavior};
+use graph::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 
 use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::{Gui, graph_ctx::GraphContext, graph_ui_interaction::GraphUiInteraction};
@@ -85,14 +85,14 @@ impl NodeUi {
                 gui,
                 node_layout,
                 node_id,
-                node.terminal,
+                func.terminal,
                 node.behavior,
                 func,
             );
-            render_cache_btn(gui, ui_interaction, node_layout, node);
+            render_cache_btn(gui, ui_interaction, node_layout, node, func);
             const_bind_frame.render(gui, ui_interaction, node_layout, node, breaker);
 
-            let node_drag_port_result = render_ports(gui, node_layout, node);
+            let node_drag_port_result = render_ports(gui, node_layout, node, func);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_port_labels(gui, node_layout);
         }
@@ -257,8 +257,9 @@ fn render_cache_btn(
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
     node: &mut Node,
+    func: &Func,
 ) {
-    let enabled = !node.terminal;
+    let enabled = !func.terminal;
     let checked = node.behavior == NodeBehavior::Once;
 
     let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
@@ -339,7 +340,12 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayo
     false
 }
 
-fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node: &Node) -> PortDragInfo {
+fn render_ports(
+    gui: &mut Gui<'_>,
+    node_layout: &NodeLayout,
+    node: &Node,
+    func: &Func,
+) -> PortDragInfo {
     let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
@@ -389,7 +395,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node: &Node) -> Por
 
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
-    if node.terminal {
+    if func.terminal {
         let center = node_layout.trigger_center();
         port_drag_info = draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
             .prefer(port_drag_info);

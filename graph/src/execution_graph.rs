@@ -215,7 +215,7 @@ impl ExecutionNode {
             }
         }
 
-        self.terminal = node.terminal;
+        self.terminal = func.terminal;
         self.process_state = ProcessState::None;
 
         self.behavior = match node.behavior {

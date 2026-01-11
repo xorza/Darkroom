@@ -158,7 +158,6 @@ mod tests {
             func_id: frame_event_func_id,
             name: "frame event".to_string(),
             behavior: NodeBehavior::AsFunction,
-            terminal: false,
             inputs: vec![Input {
                 binding: Binding::None,
             }],
@@ -170,7 +169,6 @@ mod tests {
             func_id: float_to_string_func_id,
             name: "float to string".to_string(),
             behavior: NodeBehavior::AsFunction,
-            terminal: false,
             inputs: vec![Input {
                 binding: (frame_event_node_id, 1).into(),
             }],
@@ -182,7 +180,6 @@ mod tests {
             func_id: print_func_id,
             name: "print".to_string(),
             behavior: NodeBehavior::AsFunction,
-            terminal: true,
             inputs: vec![Input {
                 binding: (float_to_string_node_id, 0).into(),
             }],

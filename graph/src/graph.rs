@@ -50,9 +50,6 @@ pub struct Node {
     #[serde(default, skip_serializing_if = "NodeBehavior::is_default")]
     pub behavior: NodeBehavior,
 
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub terminal: bool,
-
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inputs: Vec<Input>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -197,7 +194,6 @@ impl Default for Node {
             func_id: FuncId::nil(),
             name: "".to_string(),
             behavior: NodeBehavior::AsFunction,
-            terminal: false,
             inputs: vec![],
             events: vec![],
         }
@@ -221,7 +217,6 @@ impl From<&Func> for Node {
             func_id: func.id,
             name: func.name.clone(),
             behavior: NodeBehavior::AsFunction,
-            terminal: func.terminal,
             inputs,
             events,
         }
@@ -353,7 +348,6 @@ pub fn test_graph() -> Graph {
         func_id: mult_func_id,
         name: "mult".to_string(),
         behavior: NodeBehavior::AsFunction,
-        terminal: false,
         inputs: vec![
             Input {
                 binding: (sum_node_id, 0).into(),
@@ -370,7 +364,6 @@ pub fn test_graph() -> Graph {
         func_id: get_a_func_id,
         name: "get_a".to_string(),
         behavior: NodeBehavior::Once,
-        terminal: false,
         inputs: vec![],
         events: vec![],
     });
@@ -380,7 +373,6 @@ pub fn test_graph() -> Graph {
         func_id: get_b_func_id,
         name: "get_b".to_string(),
         behavior: NodeBehavior::Once,
-        terminal: false,
         inputs: vec![],
         events: vec![],
     });
@@ -390,7 +382,6 @@ pub fn test_graph() -> Graph {
         func_id: sum_func_id,
         name: "sum".to_string(),
         behavior: NodeBehavior::AsFunction,
-        terminal: false,
         inputs: vec![
             Input {
                 binding: (get_a_node_id, 0).into(),
@@ -407,7 +398,6 @@ pub fn test_graph() -> Graph {
         func_id: print_func_id,
         name: "print".to_string(),
         behavior: NodeBehavior::AsFunction,
-        terminal: true,
         inputs: vec![Input {
             binding: (mult_node_id, 0).into(),
         }],
