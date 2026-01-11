@@ -4,7 +4,7 @@ use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::elements::timers_invoker::TimersFuncLib;
 use graph::execution_graph::Result as ExecutionGraphResult;
-use graph::graph::Binding;
+use graph::graph::{Binding, Node};
 use graph::prelude::{ExecutionStats, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::Worker;
@@ -178,12 +178,16 @@ impl AppData {
     }
 
     pub fn load_test_graph(&mut self) {
-        let mut graph = test_graph();
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
-        graph.by_name_mut("sum").unwrap().inputs[1].binding = Binding::Const(22455.into());
-
         self.func_lib = test_func_lib(Self::sample_test_hooks(self));
         self.func_lib.merge(TimersFuncLib::default());
+
+        let mut graph = test_graph();
+        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
+
+        graph.add(Node::from_function(
+            self.func_lib.by_name("frame event").unwrap(),
+        ));
+
         let graph_view = ViewGraph::from_graph(&graph);
         self.apply_graph(graph_view, true);
 
