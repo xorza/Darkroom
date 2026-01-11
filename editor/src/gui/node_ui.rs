@@ -286,12 +286,15 @@ fn render_hints(
     node_id: NodeId,
     _is_terminal: bool,
     node_behavior: NodeBehavior,
-    func: &graph::prelude::Func,
+    func: &Func,
 ) {
     let dot_radius = gui.style.node.status_dot_radius;
     let dot_step = (dot_radius * 2.0) + gui.style.small_padding;
 
-    if node_behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
+    if node_behavior == NodeBehavior::AsFunction
+        && func.behavior == FuncBehavior::Impure
+        && !func.outputs.is_empty()
+    {
         let center = node_layout.dot_center(0, dot_step);
         gui.painter()
             .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
