@@ -17,7 +17,7 @@ use crate::gui::node_ui::PortDragInfo;
 // todo merge with constBindUI
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ConnectionKey {
-    pub(crate) input_node_id: NodeId,
+    pub(crate) in_node_id: NodeId,
     pub(crate) input_idx: usize,
 }
 
@@ -147,7 +147,7 @@ impl ConnectionUi {
                     (binding.target_id, binding.port_idx)
                 };
                 let connection_key = ConnectionKey {
-                    input_node_id: node_id,
+                    in_node_id: node_id,
                     input_idx,
                 };
                 let output_layout = graph_layout.node_layout(&binding_target_id);
@@ -191,7 +191,7 @@ impl ConnectionUi {
                         Sense::empty(),
                         (
                             "connection_highlight",
-                            connection_key.input_node_id,
+                            connection_key.in_node_id,
                             connection_key.input_idx,
                         ),
                         style,
@@ -216,7 +216,7 @@ impl ConnectionUi {
                 let response = curve.bezier.show(
                     gui,
                     Sense::click() | Sense::hover(),
-                    ("connection", curve.key.input_node_id, curve.key.input_idx),
+                    ("connection", curve.key.in_node_id, curve.key.input_idx),
                     style,
                 );
 
@@ -227,14 +227,14 @@ impl ConnectionUi {
                         let node = ctx
                             .view_graph
                             .graph
-                            .by_id_mut(&curve.key.input_node_id)
+                            .by_id_mut(&curve.key.in_node_id)
                             .unwrap();
                         let input = &mut node.inputs[curve.key.input_idx];
                         let before = input.binding.clone();
                         input.binding = Binding::None;
                         let after = input.binding.clone();
                         ui_interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: curve.key.input_node_id,
+                            node_id: curve.key.in_node_id,
                             input_idx: curve.key.input_idx,
                             before,
                             after,

@@ -223,14 +223,14 @@ impl GraphUi {
                             .view_graph
                             .graph
                             .nodes
-                            .by_key_mut(&connection.input_node_id)
+                            .by_key_mut(&connection.in_node_id)
                             .unwrap();
                         let input = &mut node.inputs[connection.input_idx];
                         let before = input.binding.clone();
                         input.binding = Binding::None;
                         let after = input.binding.clone();
                         interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: connection.input_node_id,
+                            node_id: connection.in_node_id,
                             input_idx: connection.input_idx,
                             before,
                             after,

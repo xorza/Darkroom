@@ -72,7 +72,7 @@ impl<'a> ConstBindFrame<'a> {
             }
 
             let connection_key = ConnectionKey {
-                input_node_id: node.id,
+                in_node_id: node.id,
                 input_idx,
             };
             let prev_hovered = *self.prev_hovered_connection == Some(connection_key);
