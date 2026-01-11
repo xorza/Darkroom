@@ -286,7 +286,7 @@ impl GraphUi {
                         match output_port.kind {
                             PortKind::Output => {
                                 let result =
-                                    apply_connection(ctx.view_graph, input_port, output_port);
+                                    apply_data_connection(ctx.view_graph, input_port, output_port);
                                 match result {
                                     Ok((input_node_id, input_idx, before, after)) => interaction
                                         .add_action(GraphUiAction::InputChanged {
@@ -298,7 +298,16 @@ impl GraphUi {
                                     Err(err) => interaction.add_error(err),
                                 }
                             }
-                            PortKind::Event => todo!(),
+                            PortKind::Event => {
+                                let result =
+                                    apply_event_connection(ctx.view_graph, input_port, output_port);
+                                match result {
+                                    Ok(_) => {
+                                        todo!()
+                                    }
+                                    Err(err) => interaction.add_error(err),
+                                }
+                            }
                             _ => unreachable!(),
                         }
                     }
@@ -486,7 +495,7 @@ fn collect_scroll_mouse_wheel_deltas(gui: &mut Gui<'_>) -> (Vec2, f32) {
 /// # Panics
 /// Panics if the ports are not of opposite kinds, or if the input node id
 /// is not present in the graph.
-fn apply_connection(
+fn apply_data_connection(
     view_graph: &mut model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
