@@ -120,15 +120,16 @@ where
 
         if !events.is_empty() {
             execute_node_ids.clear();
-            events.iter().for_each(|event_id| {
-                execute_node_ids.extend(&execution_graph.event_subscribers[event_id]);
+            events.drain(..).for_each(|event_id| {
+                execute_node_ids.extend(&execution_graph.event_subscribers[&event_id]);
             });
 
-            let result = execution_graph
-                .execute_with_ids(execute_node_ids.iter().copied())
-                .await;
-            (callback.lock().await)(result);
-            events.clear();
+            if !execute_node_ids.is_empty() {
+                let result = execution_graph
+                    .execute_with_ids(execute_node_ids.iter().copied())
+                    .await;
+                (callback.lock().await)(result);
+            }
         }
     }
 }
