@@ -1,6 +1,7 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
+use graph::event::EventId;
 use graph::graph::{NodeId, PortAddress};
 use graph::prelude::{Binding, ExecutionStats};
 
@@ -120,8 +121,9 @@ impl ConnectionEndpoints {
 pub(crate) struct ConnectionUi {
     curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     missing_data_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    highlighted_event_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
-    pub(crate) temp_connection: Option<ConnectionDrag>,
+    temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -136,7 +138,9 @@ impl ConnectionUi {
         breaker: Option<&ConnectionBreaker>,
     ) {
         let mut curves_compact = self.curves.compact_insert_start();
-        let mut missing_curves_compact = self.missing_data_curves.compact_insert_start();
+        let mut missing_data_curves_compact = self.missing_data_curves.compact_insert_start();
+        let mut highlighted_event_curves_compact =
+            self.highlighted_event_curves.compact_insert_start();
 
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
@@ -160,15 +164,15 @@ impl ConnectionUi {
 
                 // =============
 
-                let missing_inputs = execution_stats.is_some_and(|execution_stats| {
+                let input_missing = execution_stats.is_some_and(|execution_stats| {
                     execution_stats.missing_inputs.contains(&PortAddress {
                         target_id: node_id,
                         port_idx: input_idx,
                     })
                 });
-                if missing_inputs {
+                if input_missing {
                     let (_curve_idx, missing_curve) =
-                        missing_curves_compact.insert_with(&connection_key, || {
+                        missing_data_curves_compact.insert_with(&connection_key, || {
                             let bezier = ConnectionBezier::default();
 
                             ConnectionCurve {
@@ -254,6 +258,40 @@ impl ConnectionUi {
                         event_idx,
                         trigger_node_id,
                     };
+
+                    let highlighted = execution_stats.is_some_and(|exe_stats| {
+                        exe_stats
+                            .triggered_events
+                            .contains(&EventId { node_id, event_idx })
+                    });
+                    if highlighted {
+                        let (_idx, highlighted) =
+                            highlighted_event_curves_compact.insert_with(&connection_key, || {
+                                let bezier = ConnectionBezier::default();
+
+                                ConnectionCurve {
+                                    key: connection_key,
+                                    broke: false,
+                                    hovered: false,
+                                    bezier,
+                                }
+                            });
+                        let style = ConnectionBezierStyle {
+                            start_color: gui.style.node.missing_inputs_shadow.color,
+                            end_color: gui.style.node.missing_inputs_shadow.color,
+                            stroke_width: gui.style.connections.stroke_width * gui.scale,
+                            feather: gui.style.node.missing_inputs_shadow.blur as f32,
+                        };
+                        highlighted
+                            .bezier
+                            .update_points(event_pos, trigger_pos, gui.scale);
+                        highlighted.bezier.show(
+                            gui,
+                            Sense::empty(),
+                            ("connection_highlight", connection_key),
+                            style,
+                        );
+                    }
 
                     let (_curve_idx, event_curve) = curves_compact
                         .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
