@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
-use common::{FileFormat, SerdeFormatResult, deserialize, is_false, serialize};
+use common::{FileFormat, SerdeFormatResult, deserialize, serialize};
 use common::{id_type, is_debug};
 
 id_type!(NodeId);
