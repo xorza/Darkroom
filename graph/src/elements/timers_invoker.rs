@@ -3,6 +3,7 @@ use std::time::Instant;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
+use crate::prelude::FuncLambda;
 use common::BoolExt;
 
 #[derive(Debug)]
@@ -91,6 +92,19 @@ impl Default for TimersFuncLib {
                 outputs[1] = DynamicValue::Int(frame_no);
                 Ok(())
             }),
+        });
+
+        invoker.add(Func {
+            id: "01897c92-d605-5f5a-7a21-627ed74824ff".into(),
+            name: "run".to_string(),
+            description: None,
+            behavior: FuncBehavior::Impure,
+            category: "Timers".to_string(),
+            inputs: vec![],
+            outputs: vec![],
+            events: vec!["run".into()],
+            required_contexts: vec![],
+            lambda: FuncLambda::None,
         });
 
         TimersFuncLib { func_lib: invoker }

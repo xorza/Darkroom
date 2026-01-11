@@ -46,8 +46,8 @@ impl AppData {
     pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
         let shared_status = Shared::default();
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
-        let mut func_lib = FuncLib::default();
 
+        let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
         func_lib.merge(TimersFuncLib::default());
 
