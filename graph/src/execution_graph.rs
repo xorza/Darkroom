@@ -29,13 +29,14 @@ pub struct ExecutedNodeStats {
     pub elapsed_secs: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExecutionStats {
     pub elapsed_secs: f64,
 
     pub executed_nodes: Vec<ExecutedNodeStats>,
     pub missing_inputs: Vec<PortAddress>,
     pub cached_nodes: Vec<NodeId>,
+    pub triggered_events: Vec<EventId>,
 }
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
@@ -441,19 +442,30 @@ impl ExecutionGraph {
 
     pub async fn execute_with_events<T: IntoIterator<Item = EventId>>(
         &mut self,
-        ids: T,
+        event_ids: T,
     ) -> Result<ExecutionStats> {
+        let event_ids: Vec<EventId> = event_ids.into_iter().collect();
+
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(
-            ids.into_iter()
-                .map(|event_id| self.event_subscribers.get(&event_id).unwrap())
+            event_ids
+                .iter()
+                .map(|event_id| self.event_subscribers.get(event_id).unwrap())
                 .flatten()
                 .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
 
         self.build_execution_plan()?;
 
-        self.execute_internal().await
+        let mut result = self.execute_internal().await;
+        match &mut result {
+            Ok(exe_stats) => {
+                exe_stats.triggered_events = event_ids;
+            }
+            _ => {}
+        }
+
+        result
     }
 
     fn build_execution_plan(&mut self) -> Result<()> {
@@ -776,6 +788,7 @@ impl ExecutionGraph {
             executed_nodes,
             missing_inputs,
             cached_nodes,
+            triggered_events: Vec::default(),
         }
     }
 
