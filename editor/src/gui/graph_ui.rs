@@ -283,16 +283,23 @@ impl GraphUi {
 
                         self.state = InteractionState::Idle;
 
-                        let result = apply_connection(ctx.view_graph, input_port, output_port);
-                        match result {
-                            Ok((input_node_id, input_idx, before, after)) => interaction
-                                .add_action(GraphUiAction::InputChanged {
-                                    node_id: input_node_id,
-                                    input_idx,
-                                    before,
-                                    after,
-                                }),
-                            Err(err) => interaction.add_error(err),
+                        match output_port.kind {
+                            PortKind::Output => {
+                                let result =
+                                    apply_connection(ctx.view_graph, input_port, output_port);
+                                match result {
+                                    Ok((input_node_id, input_idx, before, after)) => interaction
+                                        .add_action(GraphUiAction::InputChanged {
+                                            node_id: input_node_id,
+                                            input_idx,
+                                            before,
+                                            after,
+                                        }),
+                                    Err(err) => interaction.add_error(err),
+                                }
+                            }
+                            PortKind::Event => todo!(),
+                            _ => unreachable!(),
                         }
                     }
                 }
