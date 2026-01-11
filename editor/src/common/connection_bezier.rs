@@ -4,6 +4,7 @@ use egui::{Color32, Pos2, Rect, Response, Sense};
 use crate::common::{UiEquals, bezier_helper};
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::polyline_mesh::PolylineMesh;
+use crate::gui::style::Style;
 use crate::gui::{Gui, style};
 
 const DEFAULT_FEATHER: f32 = 0.8;
@@ -194,4 +195,41 @@ impl PartialEq for ConnectionBezierStyle {
             && self.feather.ui_equals(&other.feather)
     }
 }
+
 impl Eq for ConnectionBezierStyle {}
+
+impl ConnectionBezierStyle {
+    pub fn build(style: &Style, broke: bool, hovered: bool) -> ConnectionBezierStyle {
+        assert!(
+            style.connections.stroke_width.is_finite() && style.connections.stroke_width >= 0.0,
+            "connection stroke width must be finite and non-negative"
+        );
+        assert!(
+            style.connections.feather.is_finite() && style.connections.feather >= 0.0,
+            "connection feather must be finite and non-negative"
+        );
+
+        if broke {
+            ConnectionBezierStyle {
+                start_color: style.connections.broke_clr,
+                end_color: style.connections.broke_clr,
+                stroke_width: style.connections.stroke_width,
+                feather: style.connections.feather,
+            }
+        } else if hovered {
+            ConnectionBezierStyle {
+                start_color: style.node.output_hover_color,
+                end_color: style.node.input_hover_color,
+                stroke_width: style.connections.stroke_width,
+                feather: style.connections.feather,
+            }
+        } else {
+            ConnectionBezierStyle {
+                start_color: style.node.output_port_color,
+                end_color: style.node.input_port_color,
+                stroke_width: style.connections.stroke_width,
+                feather: style.connections.feather,
+            }
+        }
+    }
+}
