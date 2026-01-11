@@ -14,9 +14,7 @@ fn bench_foo(c: &mut Criterion) {
 
         b.iter(|| {
             let mut execution_graph = ExecutionGraph::default();
-            execution_graph
-                .update(&graph, &func_lib)
-                .expect("Failed to update execution graph for benchmark");
+            execution_graph.update(&graph, &func_lib);
             black_box(execution_graph);
         })
     });

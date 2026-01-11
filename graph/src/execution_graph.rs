@@ -187,6 +187,7 @@ impl ExecutionNode {
         self.cached = false;
         self.run_time = 0.0;
         self.error = None;
+        self.process_state = ProcessState::Forward;
 
         for e_input in self.inputs.iter_mut() {
             e_input.dependency_wants_execute = false;
@@ -309,7 +310,7 @@ impl ExecutionGraph {
     }
 
     // Rebuild execution-node caches and schedule data from the current graph/func library.
-    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) -> Result<()> {
+    pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         graph.validate_with(func_lib);
 
         self.e_node_invoke_order.clear();
@@ -317,11 +318,8 @@ impl ExecutionGraph {
         self.e_node_process_order.reserve(graph.nodes.len());
 
         self.forward1(graph, func_lib);
-        self.backward1()?;
 
         self.validate_with(graph, func_lib);
-
-        Ok(())
     }
 
     // Build execution nodes and bind inputs, refreshing cached node state.
@@ -402,67 +400,6 @@ impl ExecutionGraph {
                 assert!(!matches!(e_input.binding, ExecutionBinding::Undefined));
             }
         }
-    }
-
-    // Walk backward from terminal nodes to collect process order and detect cycles.
-    fn backward1(&mut self) -> Result<()> {
-        let stack = &mut self.stack;
-        stack.clear();
-
-        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            if e_node.terminal {
-                stack.push(Visit {
-                    e_node_idx,
-                    cause: VisitCause::Terminal,
-                });
-            }
-        }
-
-        while let Some(visit) = stack.pop() {
-            match visit.cause {
-                VisitCause::Terminal => {}
-                VisitCause::OutputRequest { output_idx } => {
-                    let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    e_node.outputs[output_idx].usage_count += 1;
-                }
-                VisitCause::Done => {
-                    let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    assert_eq!(e_node.process_state, ProcessState::Processing);
-                    e_node.process_state = ProcessState::Backward;
-                    self.e_node_process_order.push(visit.e_node_idx);
-                    continue;
-                }
-            };
-
-            let e_node = &mut self.e_nodes[visit.e_node_idx];
-            match e_node.process_state {
-                ProcessState::None => unreachable!("should be Forward"),
-                ProcessState::Processing => {
-                    return Err(Error::CycleDetected { node_id: e_node.id });
-                }
-                ProcessState::Backward => continue,
-                ProcessState::Forward => {}
-            }
-
-            e_node.process_state = ProcessState::Processing;
-            stack.push(Visit {
-                e_node_idx: visit.e_node_idx,
-                cause: VisitCause::Done,
-            });
-
-            for e_input in e_node.inputs.iter() {
-                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
-                    stack.push(Visit {
-                        e_node_idx: port_address.target_idx,
-                        cause: VisitCause::OutputRequest {
-                            output_idx: port_address.port_idx,
-                        },
-                    });
-                };
-            }
-        }
-
-        Ok(())
     }
 
     pub async fn execute(&mut self) -> Result<ExecutionStats> {
@@ -557,10 +494,74 @@ impl ExecutionGraph {
             e_node.reset_for_execution();
         });
 
+        self.backward1()?;
         self.forward2();
-        self.backward2()?;
+        self.backward2();
 
         self.validate_for_execution();
+
+        Ok(())
+    }
+
+    // Walk backward from terminal nodes to collect process order and detect cycles.
+    fn backward1(&mut self) -> Result<()> {
+        self.e_node_process_order.clear();
+
+        let stack = &mut self.stack;
+        stack.clear();
+
+        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
+            if e_node.terminal {
+                stack.push(Visit {
+                    e_node_idx,
+                    cause: VisitCause::Terminal,
+                });
+            }
+        }
+
+        while let Some(visit) = stack.pop() {
+            match visit.cause {
+                VisitCause::Terminal => {}
+                VisitCause::OutputRequest { output_idx } => {
+                    let e_node = &mut self.e_nodes[visit.e_node_idx];
+                    e_node.outputs[output_idx].usage_count += 1;
+                }
+                VisitCause::Done => {
+                    let e_node = &mut self.e_nodes[visit.e_node_idx];
+                    assert_eq!(e_node.process_state, ProcessState::Processing);
+                    e_node.process_state = ProcessState::Backward;
+                    self.e_node_process_order.push(visit.e_node_idx);
+                    continue;
+                }
+            };
+
+            let e_node = &mut self.e_nodes[visit.e_node_idx];
+            match e_node.process_state {
+                ProcessState::None => unreachable!("should be Forward"),
+                ProcessState::Processing => {
+                    return Err(Error::CycleDetected { node_id: e_node.id });
+                }
+                ProcessState::Backward => continue,
+                ProcessState::Forward => {}
+            }
+
+            e_node.process_state = ProcessState::Processing;
+            stack.push(Visit {
+                e_node_idx: visit.e_node_idx,
+                cause: VisitCause::Done,
+            });
+
+            for e_input in e_node.inputs.iter() {
+                if let ExecutionBinding::Bind(port_address) = &e_input.binding {
+                    stack.push(Visit {
+                        e_node_idx: port_address.target_idx,
+                        cause: VisitCause::OutputRequest {
+                            output_idx: port_address.port_idx,
+                        },
+                    });
+                };
+            }
+        }
 
         Ok(())
     }
@@ -630,7 +631,7 @@ impl ExecutionGraph {
     }
 
     // Walk upstream dependencies to collect the execution order.
-    fn backward2(&mut self) -> Result<()> {
+    fn backward2(&mut self) {
         self.e_node_invoke_order.clear();
         self.e_node_invoke_order
             .reserve(self.e_node_process_order.len());
@@ -662,7 +663,7 @@ impl ExecutionGraph {
 
             match e_node.process_state {
                 ProcessState::Processing => {
-                    return Err(Error::CycleDetected { node_id: e_node.id });
+                    unreachable!("Should have been detected in backward1()")
                 }
                 ProcessState::None => unreachable!("Node should have been processed in forward()"),
                 ProcessState::Forward => {}
@@ -694,8 +695,6 @@ impl ExecutionGraph {
                 };
             }
         }
-
-        Ok(())
     }
 
     fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
@@ -836,10 +835,6 @@ impl ExecutionGraph {
 
                     let output_e_node = &self.e_nodes[port_address.target_idx];
                     assert!(port_address.port_idx < output_e_node.outputs.len());
-
-                    if output_e_node.wants_execute {
-                        assert!(e_input.dependency_wants_execute);
-                    }
                 };
             }
         }
@@ -892,7 +887,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert_eq!(
@@ -947,7 +942,7 @@ mod tests {
         graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::None;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -976,7 +971,7 @@ mod tests {
         // this makes mult execute with missing non required input
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1010,7 +1005,7 @@ mod tests {
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
 
         let mult = execution_graph.by_name("mult").unwrap();
         assert!(mult.inputs[0].binding_changed);
@@ -1030,7 +1025,7 @@ mod tests {
         assert!(!mult.inputs[1].binding_changed);
         assert!(!mult.inputs[1].dependency_wants_execute);
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -1041,7 +1036,7 @@ mod tests {
         assert!(!mult.inputs[1].binding_changed);
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         let mult = execution_graph.by_name("mult").unwrap();
@@ -1068,7 +1063,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
@@ -1086,7 +1081,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
         let mut execution_graph = ExecutionGraph::default();
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
 
         let binding1: Binding = (graph.by_name("get_a").unwrap().id, 0).into();
         let binding2: Binding = (graph.by_name("get_b").unwrap().id, 0).into();
@@ -1094,7 +1089,8 @@ mod tests {
         mult.inputs[0].binding = binding1;
         mult.inputs[1].binding = binding2;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.pre_execute()?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -1121,7 +1117,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Pure;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -1129,7 +1125,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
@@ -1147,7 +1143,7 @@ mod tests {
         });
         let mut execution_graph = ExecutionGraph::default();
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1171,11 +1167,11 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert_eq!(
@@ -1195,7 +1191,7 @@ mod tests {
         graph.by_name_mut("get_b").unwrap().behavior = NodeBehavior::Once;
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert_eq!(
@@ -1205,7 +1201,7 @@ mod tests {
 
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.pre_execute()?;
 
         assert_eq!(
@@ -1228,7 +1224,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1236,7 +1232,7 @@ mod tests {
             ["sum", "mult", "print"]
         );
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         // nothing changed in uppdate so nothing should recompute
@@ -1245,7 +1241,7 @@ mod tests {
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = mult.inputs[1].binding.clone();
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1268,7 +1264,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1276,7 +1272,7 @@ mod tests {
             ["sum", "mult", "print"]
         );
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         // nothing changed in uppdate so nothing should recompute
@@ -1288,7 +1284,7 @@ mod tests {
         mult.inputs[0].binding = Binding::Const(2.into());
         mult.inputs[1].binding = Binding::Const(22.into());
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1300,7 +1296,7 @@ mod tests {
         mult.inputs[0].binding = old_binding1;
         mult.inputs[1].binding = old_binding0;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1322,22 +1318,14 @@ mod tests {
         sum_inputs[0].binding = (mult_node_id, 0).into();
 
         let mut execution_graph = ExecutionGraph::default();
-        let err = execution_graph
-            .update(&graph, &func_lib)
-            .expect_err("Expected cycle detection error");
-        match err {
-            Error::CycleDetected { node_id } => {
-                assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
-            }
-            _ => panic!("Unexpected error"),
-        }
+        execution_graph.update(&graph, &func_lib);
 
         let err = execution_graph
             .pre_execute()
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
-                assert_eq!(node_id, "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into());
+                assert_eq!(node_id, "579ae1d6-10a3-4906-8948-135cb7d7508b".into());
             }
             _ => panic!("Unexpected error"),
         }
@@ -1349,7 +1337,7 @@ mod tests {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
 
         let sum = graph.by_name("sum").unwrap().id;
 
@@ -1387,14 +1375,14 @@ mod tests {
         let graph = test_graph();
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
         // get_b is pure, so changing this should not affect result
         test_values.try_lock()?.b = 7;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
         assert_eq!(test_values.try_lock()?.result, 35);
 
@@ -1402,7 +1390,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         let mut execution_graph = ExecutionGraph::default();
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(test_values.try_lock()?.result, 63);
@@ -1426,7 +1414,7 @@ mod tests {
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
         mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1435,14 +1423,14 @@ mod tests {
         );
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(3));
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
 
         let mult = graph.by_name_mut("mult").unwrap();
         mult.inputs[0].binding = Binding::Const(StaticValue::Int(4));
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1450,7 +1438,7 @@ mod tests {
             ["mult", "print"]
         );
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -1469,7 +1457,7 @@ mod tests {
         let mut graph = test_graph();
         let mut execution_graph = ExecutionGraph::default();
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         // second input for mult is optional
@@ -1478,7 +1466,7 @@ mod tests {
         sum.inputs[0].binding = Binding::Const(2.into());
         sum.inputs[1].binding = Binding::None;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1486,7 +1474,7 @@ mod tests {
             ["mult", "print"]
         );
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(execution_node_names_in_order(&execution_graph), ["print"]);
@@ -1508,7 +1496,7 @@ mod tests {
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = Binding::Const(33.into());
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1519,7 +1507,7 @@ mod tests {
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[1].binding = Binding::None;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1545,7 +1533,7 @@ mod tests {
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = Binding::Const(33.into());
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1556,7 +1544,7 @@ mod tests {
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = (get_b_id, 0).into();
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1581,7 +1569,7 @@ mod tests {
         let sum = graph.by_name_mut("sum").unwrap();
         sum.inputs[0].binding = Binding::None;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
         execution_graph.execute().await?;
 
@@ -1600,7 +1588,7 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
 
         // first execution caches output value for get_b
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         let mult = graph.by_name_mut("mult").unwrap();
@@ -1608,7 +1596,7 @@ mod tests {
         mult.inputs[1].binding = Binding::Const(21.into());
 
         // now get_b is not used
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1621,7 +1609,7 @@ mod tests {
         mult.inputs[0].binding = (get_b_id, 0).into();
 
         // now get_b is used again and should use values cached from first run
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(
@@ -1647,7 +1635,7 @@ mod tests {
         sum.inputs[0].binding = Binding::Const(2.into());
         sum.inputs[1].binding = Binding::Const(21.into());
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         let sum = graph.by_name_mut("sum").unwrap();
@@ -1655,7 +1643,7 @@ mod tests {
         let mult = graph.by_name_mut("mult").unwrap();
         mult.behavior = NodeBehavior::Once;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1670,7 +1658,7 @@ mod tests {
         let mult = graph.by_name_mut("mult").unwrap();
         mult.behavior = NodeBehavior::AsFunction;
 
-        execution_graph.update(&graph, &func_lib)?;
+        execution_graph.update(&graph, &func_lib);
         execution_graph.execute().await?;
 
         assert_eq!(

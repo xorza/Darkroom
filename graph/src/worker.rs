@@ -115,10 +115,8 @@ where
             assert!(invalidate_node_ids.is_empty());
         }
 
-        if let Some((graph, func_lib)) = context.take()
-            && let Err(err) = execution_graph.update(&graph, &func_lib)
-        {
-            (callback.lock().await)(Err(err));
+        if let Some((graph, func_lib)) = context.take() {
+            execution_graph.update(&graph, &func_lib)
         }
 
         if !events.is_empty() {
@@ -134,7 +132,7 @@ mod tests {
     use common::output_stream::OutputStream;
 
     use crate::elements::basic_invoker::BasicInvoker;
-    use crate::elements::timers_invoker::TimersFuncLib;
+    use crate::elements::timers_invoker::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
     use crate::function::FuncId;
     use crate::graph::NodeId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
@@ -145,7 +143,7 @@ mod tests {
         let mut graph = Graph::default();
 
         let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
-        let frame_event_func_id: FuncId = "01897c92-d605-5f5a-7a21-627ed74824ff".into();
+        let frame_event_func_id: FuncId = FRAME_EVENT_FUNC_ID;
 
         let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
         let float_to_string_func_id: FuncId = "01896a88-bf15-dead-4a15-5969da5a9e65".into();
