@@ -13,32 +13,27 @@ pub(crate) struct ConnectionBezierStyle {
     pub(crate) start_color: Color32,
     pub(crate) end_color: Color32,
     pub(crate) stroke_width: f32,
+    pub(crate) feather: f32,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConnectionBezier {
     polyline: PolylineMesh,
-    pub(crate) stroke_width: f32,
-    style: Option<ConnectionBezierStyle>,
+
+    inited: bool,
+    points_dirty: bool,
+
     start: Pos2,
     end: Pos2,
     scale: f32,
-    inited: bool,
-    hovered: bool,
-    broke: bool,
-    points_dirty: bool,
-    feather: f32,
+    // hovered: bool,
+    // broke: bool,
+    style: Option<ConnectionBezierStyle>,
+    built_style: Option<ConnectionBezierStyle>,
 }
 
 impl ConnectionBezier {
     pub const DEFAULT_POINTS: usize = 25;
-
-    pub fn new(feather: f32) -> Self {
-        Self {
-            feather,
-            ..Default::default()
-        }
-    }
 
     pub fn mesh(&self) -> &Mesh {
         self.polyline.mesh()
@@ -58,10 +53,11 @@ impl ConnectionBezier {
         }
 
         self.inited = true;
+        self.points_dirty = true;
+
         self.start = start;
         self.end = end;
         self.scale = scale;
-        self.points_dirty = true;
 
         let points = self.polyline.points_mut();
         if points.len() != Self::DEFAULT_POINTS {
@@ -75,7 +71,7 @@ impl ConnectionBezier {
 
         if self.style != Some(style) {
             self.style = Some(style);
-            self.points_dirty = true;
+            self.inited = false;
         }
     }
 
@@ -87,35 +83,41 @@ impl ConnectionBezier {
         hovered: bool,
         broke: bool,
     ) -> Response {
-        let default_style = if broke {
-            ConnectionBezierStyle {
-                start_color: gui.style.connections.broke_clr,
-                end_color: gui.style.connections.broke_clr,
-                stroke_width: gui.style.connections.stroke_width,
+        let style = self.style.unwrap_or_else(|| {
+            if broke {
+                ConnectionBezierStyle {
+                    start_color: gui.style.connections.broke_clr,
+                    end_color: gui.style.connections.broke_clr,
+                    stroke_width: gui.style.connections.stroke_width,
+                    feather: DEFAULT_FEATHER,
+                }
+            } else if hovered {
+                ConnectionBezierStyle {
+                    start_color: gui.style.node.output_hover_color,
+                    end_color: gui.style.node.input_hover_color,
+                    stroke_width: gui.style.connections.stroke_width,
+                    feather: DEFAULT_FEATHER,
+                }
+            } else {
+                ConnectionBezierStyle {
+                    start_color: gui.style.node.output_port_color,
+                    end_color: gui.style.node.input_port_color,
+                    stroke_width: gui.style.connections.stroke_width,
+                    feather: DEFAULT_FEATHER,
+                }
             }
-        } else if hovered {
-            ConnectionBezierStyle {
-                start_color: gui.style.node.output_hover_color,
-                end_color: gui.style.node.input_hover_color,
-                stroke_width: gui.style.connections.stroke_width,
-            }
-        } else {
-            ConnectionBezierStyle {
-                start_color: gui.style.node.output_port_color,
-                end_color: gui.style.node.input_port_color,
-                stroke_width: gui.style.connections.stroke_width,
-            }
-        };
-        let style = self.style.unwrap_or(default_style);
-        self.rebuild_mesh_if_needed(style, hovered, broke);
-        let hover_scale = gui.style.connections.hover_distance_scale;
+        });
+        self.rebuild_mesh_if_needed(style);
+
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
-        let hit = pointer_pos.is_some_and(|pos| self.hit_test(pos, hover_scale));
+        let hit = pointer_pos.is_some_and(|pos| {
+            self.hit_test(pos, gui.style.connections.hover_detection_width * gui.scale)
+        });
 
         let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
             let rect = points_bounds(self.polyline.points())
-                .map(|rect| rect.expand(self.stroke_width * 0.5))
+                .map(|rect| rect.expand(style.stroke_width * 0.5))
                 .unwrap_or(Rect::NOTHING);
             gui.ui().interact(rect, id, sense)
         } else {
@@ -141,41 +143,39 @@ impl ConnectionBezier {
         false
     }
 
-    fn hit_test(&self, pos: Pos2, hover_scale: f32) -> bool {
-        let width = self.stroke_width;
-        if width <= 0.0 {
+    fn hit_test(&self, pos: Pos2, hover_detection_width: f32) -> bool {
+        assert!(hover_detection_width.is_finite() && hover_detection_width >= 0.0);
+        if hover_detection_width <= 0.0 {
             return false;
         }
-        assert!(hover_scale.is_finite() && hover_scale >= 0.0);
         let points = self.polyline.points();
         if points.len() < 2 {
             return false;
         }
 
-        let threshold_sq = width * width * hover_scale;
+        let threshold_sq = hover_detection_width * hover_detection_width;
         points
             .windows(2)
             .any(|segment| distance_sq_point_segment(pos, segment[0], segment[1]) <= threshold_sq)
     }
 
-    fn rebuild_mesh_if_needed(&mut self, style: ConnectionBezierStyle, hovered: bool, broke: bool) {
-        let style_changed = self.hovered != hovered || self.broke != broke;
-        if !self.points_dirty && !style_changed {
+    fn rebuild_mesh_if_needed(&mut self, style: ConnectionBezierStyle) {
+        assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
+        assert!(style.feather.is_finite() && style.feather >= 0.0);
+
+        if !self.points_dirty && self.built_style == Some(style) {
             return;
         }
 
-        assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
+        self.built_style = Some(style);
+        self.points_dirty = false;
 
-        self.hovered = hovered;
-        self.broke = broke;
-        self.stroke_width = style.stroke_width;
         self.polyline.rebuild(
             style.start_color,
             style.end_color,
             style.stroke_width,
-            self.feather,
+            style.feather,
         );
-        self.points_dirty = false;
     }
 }
 
@@ -210,17 +210,19 @@ impl Default for ConnectionBezier {
     fn default() -> Self {
         Self {
             polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
-            stroke_width: 0.0,
+
             style: None,
+            built_style: None,
+
             start: Pos2::ZERO,
             end: Pos2::ZERO,
             scale: 1.0,
+
             inited: false,
 
-            hovered: false,
-            broke: false,
+            // hovered: false,
+            // broke: false,
             points_dirty: false,
-            feather: DEFAULT_FEATHER,
         }
     }
 }
@@ -230,5 +232,7 @@ impl PartialEq for ConnectionBezierStyle {
         self.start_color == other.start_color
             && self.end_color == other.end_color
             && self.stroke_width.ui_equals(&other.stroke_width)
+            && self.feather.ui_equals(&other.feather)
     }
 }
+impl Eq for ConnectionBezierStyle {}

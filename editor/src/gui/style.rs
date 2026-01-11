@@ -55,7 +55,7 @@ pub struct GraphBackgroundStyle {
 pub struct ConnectionStyle {
     pub stroke_width: f32,
     pub broke_clr: Color32,
-    pub hover_distance_scale: f32,
+    pub hover_detection_width: f32,
     pub breaker_stroke: Stroke,
 }
 
@@ -184,7 +184,7 @@ impl Style {
             connections: ConnectionStyle {
                 stroke_width: scaled(1.5),
                 broke_clr: COLOR_STROKE_BROKE,
-                hover_distance_scale: 6.0,
+                hover_detection_width: 6.0,
                 breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
             },
             node: NodeStyle {

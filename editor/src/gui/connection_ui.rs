@@ -164,14 +164,7 @@ impl ConnectionUi {
                 if missing_inputs {
                     let (_curve_idx, missing_curve) =
                         missing_compact.insert_with(&connection_key, || {
-                            let mut bezier = ConnectionBezier::new(
-                                gui.style.node.missing_inputs_shadow.blur as f32,
-                            );
-                            bezier.style(ConnectionBezierStyle {
-                                start_color: gui.style.node.missing_inputs_shadow.color,
-                                end_color: gui.style.node.missing_inputs_shadow.color,
-                                stroke_width: gui.style.connections.stroke_width,
-                            });
+                            let bezier = ConnectionBezier::default();
 
                             ConnectionCurve {
                                 key: connection_key,
@@ -181,6 +174,12 @@ impl ConnectionUi {
                             }
                         });
 
+                    missing_curve.bezier.style(ConnectionBezierStyle {
+                        start_color: gui.style.node.missing_inputs_shadow.color,
+                        end_color: gui.style.node.missing_inputs_shadow.color,
+                        stroke_width: gui.style.connections.stroke_width * gui.scale,
+                        feather: gui.style.node.missing_inputs_shadow.blur as f32,
+                    });
                     missing_curve
                         .bezier
                         .update_points(output_pos, input_pos, gui.scale);
