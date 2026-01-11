@@ -2,6 +2,7 @@ use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
+use graph::elements::timers_invoker::TimersFuncLib;
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::Binding;
 use graph::prelude::{ExecutionStats, FuncLib};
@@ -182,6 +183,7 @@ impl AppData {
         graph.by_name_mut("sum").unwrap().inputs[1].binding = Binding::Const(22455.into());
 
         self.func_lib = test_func_lib(Self::sample_test_hooks(self));
+        self.func_lib.merge(TimersFuncLib::default());
         let graph_view = ViewGraph::from_graph(&graph);
         self.apply_graph(graph_view, true);
 

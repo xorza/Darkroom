@@ -209,7 +209,8 @@ impl FuncLib {
         self.funcs.add(func);
     }
 
-    pub fn merge(&mut self, other: FuncLib) {
+    pub fn merge<T: Into<FuncLib>>(&mut self, other: T) {
+        let other = other.into();
         for func in other.funcs.items {
             self.add(func);
         }

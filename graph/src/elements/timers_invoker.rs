@@ -6,7 +6,7 @@ use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use common::BoolExt;
 
 #[derive(Debug)]
-pub struct TimersInvoker {
+pub struct TimersFuncLib {
     func_lib: FuncLib,
 }
 
@@ -16,7 +16,7 @@ struct FrameEventCache {
     frame_no: i64,
 }
 
-impl TimersInvoker {
+impl TimersFuncLib {
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
@@ -26,8 +26,8 @@ impl TimersInvoker {
     }
 }
 
-impl Default for TimersInvoker {
-    fn default() -> TimersInvoker {
+impl Default for TimersFuncLib {
+    fn default() -> TimersFuncLib {
         let mut invoker = FuncLib::default();
 
         invoker.add(Func {
@@ -93,6 +93,12 @@ impl Default for TimersInvoker {
             }),
         });
 
-        TimersInvoker { func_lib: invoker }
+        TimersFuncLib { func_lib: invoker }
+    }
+}
+
+impl From<TimersFuncLib> for FuncLib {
+    fn from(value: TimersFuncLib) -> Self {
+        value.func_lib
     }
 }

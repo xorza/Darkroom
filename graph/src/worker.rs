@@ -134,7 +134,7 @@ mod tests {
     use common::output_stream::OutputStream;
 
     use crate::elements::basic_invoker::BasicInvoker;
-    use crate::elements::timers_invoker::TimersInvoker;
+    use crate::elements::timers_invoker::TimersFuncLib;
     use crate::function::FuncId;
     use crate::graph::NodeId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
@@ -196,7 +196,7 @@ mod tests {
     async fn test_worker() -> anyhow::Result<()> {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersInvoker::default();
+        let timers_invoker = TimersFuncLib::default();
         let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
