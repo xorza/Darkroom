@@ -221,7 +221,7 @@ impl From<&Func> for Node {
             func_id: func.id,
             name: func.name.clone(),
             behavior: NodeBehavior::AsFunction,
-            terminal: func.terminal(),
+            terminal: func.terminal,
             inputs,
             events,
         }

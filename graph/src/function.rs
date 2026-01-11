@@ -137,6 +137,7 @@ pub struct Func {
     pub id: FuncId,
     pub name: String,
     pub category: String,
+    pub terminal: bool,
 
     pub behavior: FuncBehavior,
 
@@ -165,12 +166,6 @@ pub struct FuncLib {
 }
 
 impl Func {
-    pub fn terminal(&self) -> bool {
-        self.validate();
-
-        self.outputs.is_empty()
-    }
-
     fn validate(&self) {
         assert!(
             !self.outputs.is_empty() || self.behavior == FuncBehavior::Impure,
@@ -370,6 +365,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
+            terminal: false,
             inputs: vec![
                 FuncInput {
                     name: "A".to_string(),
@@ -411,6 +407,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
+            terminal: false,
             inputs: vec![],
             outputs: vec![FuncOutput {
                 name: "Int32 Value".to_string(),
@@ -432,6 +429,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Impure,
+            terminal: false,
             inputs: vec![],
             outputs: vec![FuncOutput {
                 name: "Int32 Value".to_string(),
@@ -453,6 +451,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
+            terminal: false,
             inputs: vec![
                 FuncInput {
                     name: "A".to_string(),
@@ -492,6 +491,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             description: None,
             category: "Debug".to_string(),
             behavior: FuncBehavior::Impure,
+            terminal: true,
             inputs: vec![FuncInput {
                 name: "message".to_string(),
                 required: true,

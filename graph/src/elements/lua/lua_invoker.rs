@@ -174,6 +174,7 @@ impl LuaInvoker {
             category: "".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
+            terminal: false,
             inputs: vec![],
             outputs: vec![],
             events: vec![],

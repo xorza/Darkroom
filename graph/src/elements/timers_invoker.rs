@@ -38,8 +38,9 @@ impl Default for TimersFuncLib {
             id: FRAME_EVENT_FUNC_ID,
             name: "frame event".to_string(),
             description: None,
-            behavior: FuncBehavior::Impure,
+            behavior: FuncBehavior::Pure,
             category: "Timers".to_string(),
+            terminal: false,
             inputs: vec![FuncInput {
                 name: "frequency".to_string(),
                 required: false,
@@ -103,6 +104,7 @@ impl Default for TimersFuncLib {
             description: None,
             behavior: FuncBehavior::Impure,
             category: "Timers".to_string(),
+            terminal: false,
             inputs: vec![],
             outputs: vec![],
             events: vec!["run".into()],

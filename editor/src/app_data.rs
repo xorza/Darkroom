@@ -2,7 +2,7 @@ use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
-use graph::elements::timers_invoker::TimersFuncLib;
+use graph::elements::timers_invoker::{RUN_FUNC_ID, TimersFuncLib};
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node};
 use graph::prelude::{ExecutionStats, FuncLib};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::main_ui::UiContext;
-use crate::model::ViewGraph;
+use crate::model::{ViewGraph, ViewNode};
 
 #[derive(Debug, Default)]
 pub struct Status {
@@ -136,6 +136,19 @@ impl AppData {
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         self.view_graph = view_graph;
+        if self
+            .view_graph
+            .graph
+            .nodes
+            .iter()
+            .all(|node| node.func_id != RUN_FUNC_ID)
+        {
+            let run_func = self.func_lib.by_id(&RUN_FUNC_ID).unwrap();
+            let node: Node = run_func.into();
+            let view_node: ViewNode = (&node).into();
+            self.view_graph.view_nodes.add(view_node);
+            self.view_graph.graph.add(node);
+        }
         if reset_undo {
             self.undo_stack.reset_with(&self.view_graph);
         }
