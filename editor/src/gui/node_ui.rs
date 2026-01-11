@@ -259,22 +259,24 @@ fn render_cache_btn(
     node: &mut Node,
     func: &Func,
 ) {
-    let enabled = !func.terminal;
-    let checked = node.behavior == NodeBehavior::Once;
+    let visible = !func.terminal && !func.outputs.is_empty();
+    if visible {
+        let checked = node.behavior == NodeBehavior::Once;
 
-    let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
-        .enabled(enabled)
-        .checked(checked)
-        .show(gui, node_layout.cache_button_rect);
+        let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
+            .enabled(visible)
+            .checked(checked)
+            .show(gui, node_layout.cache_button_rect);
 
-    if response.clicked() {
-        let before = node.behavior;
-        node.behavior.toggle();
-        ui_interaction.add_action(GraphUiAction::CacheToggled {
-            node_id: node.id,
-            before,
-            after: node.behavior,
-        });
+        if response.clicked() {
+            let before = node.behavior;
+            node.behavior.toggle();
+            ui_interaction.add_action(GraphUiAction::CacheToggled {
+                node_id: node.id,
+                before,
+                after: node.behavior,
+            });
+        }
     }
 }
 
