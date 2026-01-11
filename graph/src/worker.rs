@@ -77,7 +77,6 @@ where
     let mut context: Option<(Graph, FuncLib)> = None;
     let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
     let mut events: Vec<EventId> = Vec::default();
-    let mut execute_node_ids: Vec<NodeId> = Vec::default();
 
     'worker: loop {
         let msg = rx.recv().await;
@@ -119,17 +118,8 @@ where
         }
 
         if !events.is_empty() {
-            execute_node_ids.clear();
-            events.drain(..).for_each(|event_id| {
-                execute_node_ids.extend(&execution_graph.event_subscribers[&event_id]);
-            });
-
-            if !execute_node_ids.is_empty() {
-                let result = execution_graph
-                    .execute_with_ids(execute_node_ids.iter().copied())
-                    .await;
-                (callback.lock().await)(result);
-            }
+            let result = execution_graph.execute_with_events(events.drain(..)).await;
+            (callback.lock().await)(result);
         }
     }
 }

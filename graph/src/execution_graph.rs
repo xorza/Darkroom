@@ -439,14 +439,16 @@ impl ExecutionGraph {
         Ok(())
     }
 
-    pub async fn execute_with_ids<T: IntoIterator<Item = NodeId>>(
+    pub async fn execute_with_events<T: IntoIterator<Item = EventId>>(
         &mut self,
         ids: T,
     ) -> Result<ExecutionStats> {
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(
             ids.into_iter()
-                .map(|node_id| self.e_nodes.index_of_key(&node_id).unwrap()),
+                .map(|event_id| self.event_subscribers.get(&event_id).unwrap())
+                .flatten()
+                .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
 
         self.build_execution_plan()?;
