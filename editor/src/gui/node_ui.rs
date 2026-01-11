@@ -367,8 +367,8 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
 
     let trigger_base = gui.style.node.trigger_port_color;
     let trigger_hover = gui.style.node.trigger_hover_color;
-    let _event_base = gui.style.node.event_port_color;
-    let _event_hover = gui.style.node.event_hover_color;
+    let event_base = gui.style.node.event_port_color;
+    let event_hover = gui.style.node.event_hover_color;
 
     let mut draw_port = |center: Pos2,
                          kind: PortKind,
@@ -428,6 +428,13 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
             output_base,
             output_hover,
         );
+        port_drag_info = port_drag_info.prefer(drag_info);
+    }
+
+    let output_count = node_layout.output_galleys.len();
+    for event_idx in 0..node_layout.event_galleys.len() {
+        let center = node_layout.output_center(output_count + event_idx);
+        let drag_info = draw_port(center, PortKind::Event, event_idx, event_base, event_hover);
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 

@@ -430,6 +430,7 @@ Graph UI helpers now pass `ViewGraph` explicitly instead of storing it on `Graph
 Node layout sizing now computes row widths inline and reuses cached cache-button metrics to avoid extra allocations.
 Node layout right-column sizing now uses a clearer output-vs-event row check for width/height calculation.
 Node layout translation now happens before struct construction to avoid mutable layout patch-up.
+Event ports now render in the output column after the output ports, using the event port colors.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 Execution graph tests include `none_binding_execute_is_stable` to exercise repeated execution with an unset input
 binding.
