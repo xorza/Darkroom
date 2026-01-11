@@ -112,8 +112,10 @@ impl ConnectionEndpoints {
 
 #[derive(Debug, Default)]
 pub(crate) struct ConnectionUi {
-    curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
-    missing_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    data_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+    missing_data_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
+
+    event_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
     pub(crate) temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: ConnectionBezier,
@@ -129,8 +131,9 @@ impl ConnectionUi {
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) {
-        let mut compact = self.curves.compact_insert_start();
-        let mut missing_compact = self.missing_curves.compact_insert_start();
+        let mut data_curves_compact = self.data_curves.compact_insert_start();
+        let mut missing_data_curves_compact = self.missing_data_curves.compact_insert_start();
+        let mut event_curves_compact = self.event_curves.compact_insert_start();
 
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
@@ -166,7 +169,7 @@ impl ConnectionUi {
                 });
                 if missing_inputs {
                     let (_curve_idx, missing_curve) =
-                        missing_compact.insert_with(&connection_key, || {
+                        missing_data_curves_compact.insert_with(&connection_key, || {
                             let bezier = ConnectionBezier::default();
 
                             ConnectionCurve {
@@ -200,60 +203,122 @@ impl ConnectionUi {
 
                 // =============
 
-                let (_curve_idx, curve) =
-                    compact.insert_with(&connection_key, || ConnectionCurve::new(connection_key));
+                let (_curve_idx, data_curve) = data_curves_compact
+                    .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
 
-                curve.bezier.update_points(output_pos, input_pos, gui.scale);
-                curve.broke = curve.bezier.intersects_breaker(breaker);
+                data_curve
+                    .bezier
+                    .update_points(output_pos, input_pos, gui.scale);
+                data_curve.broke = data_curve.bezier.intersects_breaker(breaker);
 
                 let style = ConnectionBezierStyle::build(
                     &gui.style,
                     PortKind::Input,
-                    curve.broke,
-                    curve.hovered,
+                    data_curve.broke,
+                    data_curve.hovered,
                 );
 
-                let response = curve.bezier.show(
+                let response = data_curve.bezier.show(
                     gui,
                     Sense::click() | Sense::hover(),
-                    ("connection", curve.key.in_node_id, curve.key.input_idx),
+                    (
+                        "connection",
+                        data_curve.key.in_node_id,
+                        data_curve.key.input_idx,
+                    ),
                     style,
                 );
 
                 if breaker.is_some() {
-                    curve.hovered = false;
+                    data_curve.hovered = false;
                 } else {
                     if response.double_clicked_by(PointerButton::Primary) {
                         let node = ctx
                             .view_graph
                             .graph
-                            .by_id_mut(&curve.key.in_node_id)
+                            .by_id_mut(&data_curve.key.in_node_id)
                             .unwrap();
-                        let input = &mut node.inputs[curve.key.input_idx];
+                        let input = &mut node.inputs[data_curve.key.input_idx];
                         let before = input.binding.clone();
                         input.binding = Binding::None;
                         let after = input.binding.clone();
                         ui_interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: curve.key.in_node_id,
-                            input_idx: curve.key.input_idx,
+                            node_id: data_curve.key.in_node_id,
+                            input_idx: data_curve.key.input_idx,
                             before,
                             after,
                         });
-                        curve.hovered = false;
+                        data_curve.hovered = false;
                     }
 
-                    curve.hovered = response.hovered();
+                    data_curve.hovered = response.hovered();
                 }
             }
 
             let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
             for (event_idx, event) in node.events.iter().enumerate() {
                 let event_layout = graph_layout.node_layout(&node.id);
-                let event_pos = event_layout.output_center(event_idx);
+                let event_pos = event_layout.event_center(event_idx);
 
-                for node_id in event.subscribers.iter() {
+                for trigger_node_id in event.subscribers.iter() {
+                    let trigger_layout = graph_layout.node_layout(&trigger_node_id);
+                    let trigger_pos = trigger_layout.trigger_center();
 
-                    //
+                    let connection_key = ConnectionKey {
+                        in_node_id: *trigger_node_id,
+                        input_idx: 0,
+                    };
+
+                    let (_curve_idx, event_curve) = event_curves_compact
+                        .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
+
+                    event_curve
+                        .bezier
+                        .update_points(event_pos, trigger_pos, gui.scale);
+                    event_curve.broke = event_curve.bezier.intersects_breaker(breaker);
+
+                    let style = ConnectionBezierStyle::build(
+                        &gui.style,
+                        PortKind::Trigger,
+                        event_curve.broke,
+                        event_curve.hovered,
+                    );
+
+                    let response = event_curve.bezier.show(
+                        gui,
+                        Sense::click() | Sense::hover(),
+                        (
+                            "connection",
+                            event_curve.key.in_node_id,
+                            event_curve.key.input_idx,
+                        ),
+                        style,
+                    );
+
+                    if breaker.is_some() {
+                        event_curve.hovered = false;
+                    } else {
+                        if response.double_clicked_by(PointerButton::Primary) {
+                            //     let node = ctx
+                            //         .view_graph
+                            //         .graph
+                            //         .by_id_mut(&event_curve.key.in_node_id)
+                            //         .unwrap();
+                            //     let input = &mut node.inputs[event_curve.key.input_idx];
+                            //     let before = input.binding.clone();
+                            //     input.binding = Binding::None;
+                            //     let after = input.binding.clone();
+                            //     ui_interaction.add_action(GraphUiAction::InputChanged {
+                            //         node_id: event_curve.key.in_node_id,
+                            //         input_idx: event_curve.key.input_idx,
+                            //         before,
+                            //         after,
+                            //     });
+                            //     event_curve.hovered = false;
+                        }
+
+                        event_curve.hovered = response.hovered();
+                    }
                 }
 
                 // let (binding_target_id, binding_port_idx) = {
@@ -375,11 +440,11 @@ impl ConnectionUi {
     }
 
     pub(crate) fn any_hovered(&self) -> bool {
-        self.curves.iter().any(|c| c.hovered)
+        self.data_curves.iter().any(|c| c.hovered)
     }
 
     pub(crate) fn broke_iter(&self) -> impl Iterator<Item = &ConnectionKey> {
-        self.curves
+        self.data_curves
             .iter()
             .filter_map(|curve| curve.broke.then_some(&curve.key))
     }
