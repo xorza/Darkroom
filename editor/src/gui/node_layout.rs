@@ -26,6 +26,7 @@ pub struct NodeLayout {
     pub title_galley: Arc<Galley>,
     pub input_galleys: Vec<Arc<Galley>>,
     pub output_galleys: Vec<Arc<Galley>>,
+    pub event_galleys: Vec<Arc<Galley>>,
 }
 
 impl NodeLayout {
@@ -71,6 +72,7 @@ impl NodeLayout {
             title_galley,
             input_galleys: Vec::default(),
             output_galleys: Vec::default(),
+            event_galleys: Vec::default(),
         }
     }
 
@@ -109,6 +111,16 @@ impl NodeLayout {
                 );
                 self.output_galleys.push(galley);
             }
+
+            self.event_galleys.clear();
+            for event in &func.events {
+                let galley = gui.painter().layout_no_wrap(
+                    event.name.to_string(),
+                    label_font.clone(),
+                    gui.style.text_color,
+                );
+                self.event_galleys.push(galley);
+            }
         }
 
         // ===============
@@ -135,8 +147,10 @@ impl NodeLayout {
 
         let input_count = self.input_galleys.len();
         let output_count = self.output_galleys.len();
-        let row_count = input_count.max(output_count).max(1);
+        let event_count = self.event_galleys.len();
+        let row_count = input_count.max(output_count + event_count).max(1);
         let port_label_side_padding = gui.style.node.port_label_side_padding;
+
         let mut max_row_width: f32 = 0.0;
         let mut max_row_height: f32 = 0.0;
         for row in 0..row_count {
@@ -144,10 +158,15 @@ impl NodeLayout {
                 .input_galleys
                 .get(row)
                 .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
-            let (right, right_height) = self
-                .output_galleys
-                .get(row)
-                .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
+
+            let (right, right_height) = self.output_galleys.get(row).map_or_else(
+                || {
+                    self.event_galleys
+                        .get(row - output_count)
+                        .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
+                },
+                |galley| (galley.size().x, galley.size().y),
+            );
 
             let row_width = port_label_side_padding
                 + left
