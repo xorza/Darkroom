@@ -24,6 +24,8 @@ pub enum GraphUiAction {
     EventConnectionChanged {
         event_node_id: NodeId,
         event_idx: usize,
+
+        // todo only save NodeId that was added or removed
         before: Vec<NodeId>,
         after: Vec<NodeId>,
     },

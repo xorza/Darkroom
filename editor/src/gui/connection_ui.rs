@@ -228,42 +228,38 @@ impl ConnectionUi {
                     data_curve.hovered = false;
                 } else {
                     if response.double_clicked_by(PointerButton::Primary) {
-                        todo!()
-                        // let node = ctx
-                        //     .view_graph
-                        //     .graph
-                        //     .by_id_mut(&data_curve.key.in_node_id)
-                        //     .unwrap();
-                        // let input = &mut node.inputs[data_curve.key.input_idx];
-                        // let before = input.binding.clone();
-                        // input.binding = Binding::None;
-                        // let after = input.binding.clone();
-                        // ui_interaction.add_action(GraphUiAction::InputChanged {
-                        //     node_id: data_curve.key.in_node_id,
-                        //     input_idx: data_curve.key.input_idx,
-                        //     before,
-                        //     after,
-                        // });
-                        // data_curve.hovered = false;
+                        let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+                        let input = &mut node.inputs[input_idx];
+                        let before = input.binding.clone();
+                        input.binding = Binding::None;
+                        let after = input.binding.clone();
+                        ui_interaction.add_action(GraphUiAction::InputChanged {
+                            node_id,
+                            input_idx,
+                            before,
+                            after,
+                        });
+                        data_curve.hovered = false;
                     }
 
                     data_curve.hovered = response.hovered();
                 }
             }
 
-            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-            for (event_idx, event) in node.events.iter().enumerate() {
-                let event_layout = graph_layout.node_layout(&node.id);
+            let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+            for (event_idx, event) in node.events.iter_mut().enumerate() {
+                let event_layout = graph_layout.node_layout(&node_id);
                 let event_pos = event_layout.event_center(event_idx);
 
-                for trigger_node_id in event.subscribers.iter() {
+                for subscriber_idx in event.subscribers.len() - 1..0 {
+                    let trigger_node_id = event.subscribers[subscriber_idx];
                     let trigger_layout = graph_layout.node_layout(&trigger_node_id);
                     let trigger_pos = trigger_layout.trigger_center();
 
                     let connection_key = ConnectionKey::Event {
                         event_node_id: node_id,
                         event_idx,
-                        trigger_node_id: *trigger_node_id,
+                        trigger_node_id,
                     };
 
                     let (_curve_idx, event_curve) = curves_compact
@@ -291,26 +287,21 @@ impl ConnectionUi {
                     if breaker.is_some() {
                         event_curve.hovered = false;
                     } else {
-                        if response.double_clicked_by(PointerButton::Primary) {
-                            //     let node = ctx
-                            //         .view_graph
-                            //         .graph
-                            //         .by_id_mut(&event_curve.key.in_node_id)
-                            //         .unwrap();
-                            //     let input = &mut node.inputs[event_curve.key.input_idx];
-                            //     let before = input.binding.clone();
-                            //     input.binding = Binding::None;
-                            //     let after = input.binding.clone();
-                            //     ui_interaction.add_action(GraphUiAction::InputChanged {
-                            //         node_id: event_curve.key.in_node_id,
-                            //         input_idx: event_curve.key.input_idx,
-                            //         before,
-                            //         after,
-                            //     });
-                            //     event_curve.hovered = false;
-                        }
-
                         event_curve.hovered = response.hovered();
+
+                        if response.double_clicked_by(PointerButton::Primary) {
+                            let before = event.subscribers.clone();
+                            event.subscribers.remove(subscriber_idx);
+                            let after = event.subscribers.clone();
+
+                            ui_interaction.add_action(GraphUiAction::EventConnectionChanged {
+                                event_node_id: node_id,
+                                event_idx,
+                                before,
+                                after,
+                            });
+                            event_curve.hovered = false;
+                        }
                     }
                 }
             }
