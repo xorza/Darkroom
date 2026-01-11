@@ -141,21 +141,8 @@ impl AppData {
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         self.view_graph = view_graph;
-        if self
-            .view_graph
-            .graph
-            .nodes
-            .iter()
-            .all(|node| node.func_id != RUN_FUNC_ID)
-        {
-            let run_func = self.func_lib.by_id(&RUN_FUNC_ID).unwrap();
-            let mut node: Node = run_func.into();
-            node.id = RUN_NODE_ID;
-            let mut view_node: ViewNode = (&node).into();
-            view_node.removable = false;
-            self.view_graph.view_nodes.add(view_node);
-            self.view_graph.graph.add(node);
-        }
+        add_run_node(&mut self.view_graph, &self.func_lib);
+
         if reset_undo {
             self.undo_stack.reset_with(&self.view_graph);
         }
@@ -267,5 +254,27 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
             let mut shared_status = shared_status.try_lock().unwrap();
             shared_status.print_output = Some(value.to_string());
         }),
+    }
+}
+
+fn add_run_node(view_graph: &mut ViewGraph, func_lib: &FuncLib) {
+    if let Some(node_id) = view_graph
+        .graph
+        .nodes
+        .iter_mut()
+        .find(|node| node.func_id == RUN_FUNC_ID && node.id != RUN_NODE_ID)
+        .map(|node| node.id)
+    {
+        view_graph.remove_node(&node_id);
+    }
+
+    if view_graph.view_nodes.by_key(&RUN_NODE_ID).is_none() {
+        let run_func = func_lib.by_id(&RUN_FUNC_ID).unwrap();
+        let mut node: Node = run_func.into();
+        node.id = RUN_NODE_ID;
+        let mut view_node: ViewNode = (&node).into();
+        view_node.removable = false;
+        view_graph.view_nodes.add(view_node);
+        view_graph.graph.add(node);
     }
 }
