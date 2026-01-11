@@ -158,22 +158,31 @@ impl ViewGraph {
             .by_id(node_id)
             .expect("remove node expects a graph node")
             .clone();
-        let mut incoming = Vec::new();
+        let mut incoming_connections = Vec::new();
+        let mut incoming_events = Vec::new();
         for node in self.graph.nodes.iter() {
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 let Binding::Bind(binding) = &input.binding else {
                     continue;
                 };
                 if binding.target_id == *node_id {
-                    incoming.push(IncomingConnection {
+                    incoming_connections.push(IncomingConnection {
                         node_id: node.id,
                         input_idx,
                         binding: input.binding.clone(),
                     });
                 }
             }
+            for (event_idx, event) in node.events.iter().enumerate() {
+                if event.subscribers.contains(node_id) {
+                    incoming_events.push(IncomingEvent {
+                        node_id: node.id,
+                        event_idx,
+                    });
+                }
+            }
         }
-        (view_node, node, incoming)
+        (view_node, node, incoming_connections, incoming_events)
     }
 }
 

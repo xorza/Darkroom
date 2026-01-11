@@ -294,6 +294,7 @@ impl GraphUiAction {
                 incoming_connections,
                 incoming_events,
             } => {
+                let removed_node_id = node.id;
                 assert!(
                     view_graph.graph.by_id(&node.id).is_none(),
                     "undo expects removed node to be absent"
@@ -302,14 +303,15 @@ impl GraphUiAction {
                 view_graph.view_nodes.add(view_node.clone());
                 for connection in incoming_connections {
                     let node = view_graph.graph.by_id_mut(&connection.node_id).unwrap();
-                    assert!(
-                        connection.input_idx < node.inputs.len(),
-                        "incoming connection input index out of range"
-                    );
+
                     node.inputs[connection.input_idx].binding = connection.binding.clone();
                 }
+                for event in incoming_events {
+                    let node = view_graph.graph.by_id_mut(&event.node_id).unwrap();
 
-                todo!("incoming events")
+                    let subscribers = &mut node.events[event.event_idx].subscribers;
+                    subscribers.push(removed_node_id);
+                }
             }
             GraphUiAction::NodeMoved {
                 node_id, before, ..
