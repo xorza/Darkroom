@@ -43,6 +43,11 @@ impl NodeLayout {
             self.output_first_center.y + self.port_row_height * index as f32,
         )
     }
+
+    pub fn trigger_center(&self) -> Pos2 {
+        self.body_rect.min
+    }
+
     pub fn event_center(&self, index: usize) -> Pos2 {
         egui::pos2(
             self.output_first_center.x,

@@ -408,7 +408,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
 
     {
         // event trigger
-        let center = node_layout.body_rect.min;
+        let center = node_layout.trigger_center();
         port_drag_info = draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
             .prefer(port_drag_info);
     }

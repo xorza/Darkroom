@@ -251,6 +251,11 @@ impl ConnectionUi {
                 let event_layout = graph_layout.node_layout(&node.id);
                 let event_pos = event_layout.output_center(event_idx);
 
+                for node_id in event.subscribers.iter() {
+
+                    //
+                }
+
                 // let (binding_target_id, binding_port_idx) = {
                 //     let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
                 //     let input = &node.inputs[input_idx];
