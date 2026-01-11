@@ -11,8 +11,8 @@ use crate::model::ViewGraph;
 
 #[derive(Debug)]
 pub struct ActionUndoStack {
-    undo_actions: Vec<GraphUiAction>,
-    redo_actions: Vec<GraphUiAction>,
+    undo_actions: Vec<u8>,
+    redo_actions: Vec<u8>,
     undo_stack: Vec<std::ops::Range<usize>>,
     redo_stack: Vec<std::ops::Range<usize>>,
     max_steps: usize,
@@ -50,24 +50,48 @@ impl ActionUndoStack {
         }
     }
 
-    fn append_actions(
-        buffer: &mut Vec<GraphUiAction>,
-        actions: &[GraphUiAction],
-    ) -> std::ops::Range<usize> {
-        let start = buffer.len();
-        buffer.extend_from_slice(actions);
-        let end = buffer.len();
+    fn append_actions(buffer: &mut Vec<u8>, actions: &[GraphUiAction]) -> std::ops::Range<usize> {
+        assert!(
+            !actions.is_empty(),
+            "undo stack should not store empty action batches"
+        );
+        let bytes = Self::serialize_actions(actions);
+        Self::append_bytes(buffer, &bytes)
+    }
+
+    fn serialize_actions(actions: &[GraphUiAction]) -> Vec<u8> {
+        bincode::serde::encode_to_vec(actions, bincode::config::standard())
+            .expect("undo stack action batch should serialize via bincode")
+    }
+
+    fn deserialize_actions(bytes: &[u8]) -> Vec<GraphUiAction> {
+        let (decoded, read) = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
+            .expect("undo stack action batch should deserialize via bincode");
+        assert_eq!(
+            read,
+            bytes.len(),
+            "undo stack action batch should decode fully"
+        );
+        decoded
+    }
+
+    fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {
+        let start = target.len();
+        target.extend_from_slice(bytes);
+        let end = target.len();
         start..end
     }
 
-    fn slice_actions<'a>(
-        buffer: &'a [GraphUiAction],
-        range: &std::ops::Range<usize>,
-    ) -> &'a [GraphUiAction] {
+    fn slice_bytes<'a>(buffer: &'a [u8], range: &std::ops::Range<usize>) -> &'a [u8] {
+        assert!(range.start <= range.end, "undo stack range start > end");
+        assert!(
+            range.end <= buffer.len(),
+            "undo stack range exceeds buffer length"
+        );
         &buffer[range.clone()]
     }
 
-    fn pop_tail_actions(buffer: &mut Vec<GraphUiAction>, range: &std::ops::Range<usize>) {
+    fn pop_tail_actions(buffer: &mut Vec<u8>, range: &std::ops::Range<usize>) {
         if range.end == buffer.len() {
             buffer.truncate(range.start);
         }
@@ -104,12 +128,13 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         let Some(actions_range) = self.undo_stack.pop() else {
             return false;
         };
-        let actions = Self::slice_actions(&self.undo_actions, &actions_range);
+        let actions_bytes = Self::slice_bytes(&self.undo_actions, &actions_range);
+        let actions = Self::deserialize_actions(actions_bytes);
         for action in actions.iter().rev() {
             action.undo(value);
             on_action(action);
         }
-        let redo_range = Self::append_actions(&mut self.redo_actions, actions);
+        let redo_range = Self::append_bytes(&mut self.redo_actions, actions_bytes);
         self.redo_stack.push(redo_range);
         Self::pop_tail_actions(&mut self.undo_actions, &actions_range);
 
@@ -120,12 +145,13 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         let Some(actions_range) = self.redo_stack.pop() else {
             return false;
         };
-        let actions = Self::slice_actions(&self.redo_actions, &actions_range);
+        let actions_bytes = Self::slice_bytes(&self.redo_actions, &actions_range);
+        let actions = Self::deserialize_actions(actions_bytes);
         for action in actions.iter() {
             action.apply(value);
             on_action(action);
         }
-        let undo_range = Self::append_actions(&mut self.undo_actions, actions);
+        let undo_range = Self::append_bytes(&mut self.undo_actions, actions_bytes);
         self.undo_stack.push(undo_range);
         Self::pop_tail_actions(&mut self.redo_actions, &actions_range);
 

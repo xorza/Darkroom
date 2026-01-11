@@ -1,11 +1,12 @@
 use egui::{Pos2, SliderOrientation, Vec2};
 use graph::graph::{Binding, Node, NodeBehavior, NodeId};
+use serde::{Deserialize, Serialize};
 
 use crate::gui::graph_ui::Error;
 use crate::model::graph_view::IncomingEvent;
 use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EventSubscriberChange {
     Added,
     Removed,
@@ -21,7 +22,7 @@ pub(crate) struct GraphUiInteraction {
     pending_action: Option<GraphUiAction>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GraphUiAction {
     CacheToggled {
         node_id: NodeId,

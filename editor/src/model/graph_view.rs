@@ -10,14 +10,14 @@ use crate::common::UiEquals;
 use super::ViewNode;
 use crate::gui::graph_ui_interaction::GraphUiAction;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingConnection {
     pub node_id: NodeId,
     pub input_idx: usize,
     pub binding: Binding,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingEvent {
     pub node_id: NodeId,
     pub event_idx: usize,
