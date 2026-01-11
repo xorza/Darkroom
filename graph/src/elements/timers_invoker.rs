@@ -102,7 +102,7 @@ impl Default for TimersFuncLib {
             id: RUN_FUNC_ID,
             name: "run".to_string(),
             description: None,
-            behavior: FuncBehavior::Pure,
+            behavior: FuncBehavior::Impure,
             category: "Timers".to_string(),
             terminal: false,
             inputs: vec![],
