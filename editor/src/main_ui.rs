@@ -32,7 +32,7 @@ pub struct MainUi {
 impl MainUi {
     pub fn new(ctx: &egui::Context) -> Self {
         let style_settings = StyleSettings::from_file("style.toml").unwrap_or_default();
-        style_settings.to_file("style.toml").ok();
+
         Self {
             graph_ui: GraphUi::default(),
             ui_context: UiContext::new(ctx),
