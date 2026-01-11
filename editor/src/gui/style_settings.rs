@@ -2,6 +2,63 @@ use egui::{Color32, Vec2};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+impl Default for StyleSettings {
+    fn default() -> Self {
+        Self {
+            color_bg_noninteractive: Color32::from_rgb(35, 35, 35),
+            color_bg_inactive: Color32::from_rgb(40, 40, 40),
+            color_bg_graph: Color32::from_rgb(16, 16, 16),
+            color_bg_hover: Color32::from_rgb(50, 50, 50),
+            color_bg_active: Color32::from_rgb(60, 60, 60),
+            color_bg_checked: Color32::from_rgb(240, 205, 90),
+            color_stroke_inactive: Color32::from_rgb(65, 65, 65),
+            color_stroke_active: Color32::from_rgb(128, 128, 128),
+            color_port_input: Color32::from_rgb(70, 150, 255),
+            color_port_output: Color32::from_rgb(70, 200, 200),
+            color_port_input_hover: Color32::from_rgb(120, 190, 255),
+            color_port_output_hover: Color32::from_rgb(110, 230, 210),
+            color_port_trigger: Color32::from_rgb(235, 200, 70),
+            color_port_event: Color32::from_rgb(235, 140, 70),
+            color_port_trigger_hover: Color32::from_rgb(255, 225, 120),
+            color_port_event_hover: Color32::from_rgb(255, 175, 120),
+            color_stroke_breaker: Color32::from_rgb(255, 120, 120),
+            color_stroke_broke: Color32::from_rgb(255, 90, 90),
+            color_text: Color32::from_rgb(192, 192, 192),
+            color_text_noninteractive: Color32::from_rgb(140, 140, 140),
+            color_text_checked: Color32::from_rgb(60, 50, 20),
+            color_dot_impure: Color32::from_rgb(255, 150, 70),
+            color_shadow_executed: Color32::from_rgb(66, 216, 130),
+            color_shadow_cached: Color32::from_rgb(248, 216, 75),
+            color_shadow_missing: Color32::from_rgb(238, 66, 66),
+            color_dotted: Color32::from_rgb(48, 48, 48),
+            corner_radius: 4.0,
+            small_corner_radius: 2.0,
+            default_bg_stroke_width: 1.0,
+            big_padding: 6.0,
+            padding: 4.0,
+            small_padding: 2.0,
+            dotted_base_spacing: 24.0,
+            dotted_radius_base: 1.2,
+            dotted_radius_min: 0.6,
+            dotted_radius_max: 2.4,
+            connection_feather: 0.8,
+            connection_stroke_width: 1.5,
+            connection_highlight_feather: 3.6,
+            connection_hover_detection_width: 6.0,
+            connection_breaker_stroke_width: 2.0,
+            status_dot_radius: 4.0,
+            shadow_blur: 5,
+            shadow_spread: 2,
+            cache_btn_width: 50.0,
+            remove_btn_size: 10.0,
+            port_radius: 5.0,
+            port_activation_radius: 7.0,
+            port_label_side_padding: 8.0,
+            const_badge_offset: Vec2::new(-15.0, -15.0),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StyleSettings {
@@ -256,63 +313,6 @@ mod vec2_array {
             let x = x.ok_or_else(|| de::Error::custom("missing x value"))?;
             let y = y.ok_or_else(|| de::Error::custom("missing y value"))?;
             Ok(Vec2::new(x, y))
-        }
-    }
-}
-
-impl Default for StyleSettings {
-    fn default() -> Self {
-        Self {
-            color_bg_noninteractive: Color32::from_rgb(35, 35, 35),
-            color_bg_inactive: Color32::from_rgb(40, 40, 40),
-            color_bg_graph: Color32::from_rgb(16, 16, 16),
-            color_bg_hover: Color32::from_rgb(50, 50, 50),
-            color_bg_active: Color32::from_rgb(60, 60, 60),
-            color_bg_checked: Color32::from_rgb(240, 205, 90),
-            color_stroke_inactive: Color32::from_rgb(65, 65, 65),
-            color_stroke_active: Color32::from_rgb(128, 128, 128),
-            color_port_input: Color32::from_rgb(70, 150, 255),
-            color_port_output: Color32::from_rgb(70, 200, 200),
-            color_port_input_hover: Color32::from_rgb(120, 190, 255),
-            color_port_output_hover: Color32::from_rgb(110, 230, 210),
-            color_port_trigger: Color32::from_rgb(235, 200, 70),
-            color_port_event: Color32::from_rgb(235, 140, 70),
-            color_port_trigger_hover: Color32::from_rgb(255, 225, 120),
-            color_port_event_hover: Color32::from_rgb(255, 175, 120),
-            color_stroke_breaker: Color32::from_rgb(255, 120, 120),
-            color_stroke_broke: Color32::from_rgb(255, 90, 90),
-            color_text: Color32::from_rgb(192, 192, 192),
-            color_text_noninteractive: Color32::from_rgb(140, 140, 140),
-            color_text_checked: Color32::from_rgb(60, 50, 20),
-            color_dot_impure: Color32::from_rgb(255, 150, 70),
-            color_shadow_executed: Color32::from_rgb(66, 216, 130),
-            color_shadow_cached: Color32::from_rgb(248, 216, 75),
-            color_shadow_missing: Color32::from_rgb(238, 66, 66),
-            color_dotted: Color32::from_rgb(48, 48, 48),
-            corner_radius: 4.0,
-            small_corner_radius: 2.0,
-            default_bg_stroke_width: 1.0,
-            big_padding: 6.0,
-            padding: 4.0,
-            small_padding: 2.0,
-            dotted_base_spacing: 24.0,
-            dotted_radius_base: 1.2,
-            dotted_radius_min: 0.6,
-            dotted_radius_max: 2.4,
-            connection_feather: 0.8,
-            connection_stroke_width: 1.5,
-            connection_highlight_feather: 3.6,
-            connection_hover_detection_width: 6.0,
-            connection_breaker_stroke_width: 2.0,
-            status_dot_radius: 4.0,
-            shadow_blur: 5,
-            shadow_spread: 2,
-            cache_btn_width: 50.0,
-            remove_btn_size: 10.0,
-            port_radius: 5.0,
-            port_activation_radius: 7.0,
-            port_label_side_padding: 8.0,
-            const_badge_offset: Vec2::new(-15.0, -15.0),
         }
     }
 }
