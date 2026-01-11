@@ -142,6 +142,13 @@ impl Style {
         const CORNER_RADIUS: f32 = 4.0;
         const SMALL_CORNER_RADIUS: f32 = 2.0;
         const DEFAULT_BG_STROKE_WIDTH: f32 = 1.0;
+        const BIG_PADDING: f32 = 6.0;
+        const PADDING: f32 = 4.0;
+        const SMALL_PADDING: f32 = 2.0;
+        const DOTTED_BASE_SPACING: f32 = 24.0;
+        const DOTTED_RADIUS_BASE: f32 = 1.2;
+        const DOTTED_RADIUS_MIN: f32 = 0.6;
+        const DOTTED_RADIUS_MAX: f32 = 2.4;
         const CONNECTION_FEATHER: f32 = 0.8;
         const CONNECTION_STROKE_WIDTH: f32 = 1.5;
         const CONNECTION_HIGHLIGHT_FEATHER: f32 = 3.6;
@@ -152,8 +159,8 @@ impl Style {
         const SHADOW_SPREAD: u8 = 2;
         const CACHE_BTN_WIDTH: f32 = 50.0;
         const REMOVE_BTN_SIZE: f32 = 10.0;
-        const PORT_RADIUS: f32 = 18.0;
-        const PORT_ACTIVATION_RADIUS: f32 = 25.0;
+        const PORT_RADIUS: f32 = 5.0;
+        const PORT_ACTIVATION_RADIUS: f32 = 7.0;
         const PORT_LABEL_SIDE_PADDING: f32 = 8.0;
         const CONST_BADGE_OFFSET: Vec2 = Vec2::new(-15.0, -15.0);
 
@@ -191,18 +198,18 @@ impl Style {
             dark_text_color: COLOR_TEXT_CHECKED,
             checked_bg_fill: COLOR_BG_CHECKED,
 
-            big_padding: scaled(6.0),
-            padding: scaled(4.0),
-            small_padding: scaled(2.0),
+            big_padding: scaled(BIG_PADDING),
+            padding: scaled(PADDING),
+            small_padding: scaled(SMALL_PADDING),
             corner_radius: scaled(CORNER_RADIUS),
             small_corner_radius: scaled(SMALL_CORNER_RADIUS),
 
             graph_background: GraphBackgroundStyle {
                 dotted_color: COLOR_DOTTED,
-                dotted_base_spacing: scaled(24.0),
-                dotted_radius_base: scaled(1.2),
-                dotted_radius_min: scaled(0.6),
-                dotted_radius_max: scaled(2.4),
+                dotted_base_spacing: scaled(DOTTED_BASE_SPACING),
+                dotted_radius_base: scaled(DOTTED_RADIUS_BASE),
+                dotted_radius_min: scaled(DOTTED_RADIUS_MIN),
+                dotted_radius_max: scaled(DOTTED_RADIUS_MAX),
                 bg_color: COLOR_BG_GRAPH,
             },
             connections: ConnectionStyle {
