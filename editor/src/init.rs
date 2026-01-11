@@ -1,5 +1,10 @@
 use anyhow::Result;
+use std::sync::OnceLock;
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_rolling_file::RollingFileAppenderBase;
+use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 pub fn init() -> Result<()> {
     dotenv::dotenv().ok();
@@ -16,11 +21,13 @@ fn init_trace() -> Result<()> {
         .condition_max_file_size(10 * 1024 * 1024)
         .build()
         .expect("failed to initialize log appender");
-    let (non_blocking, _log_guard) = appender.get_non_blocking_appender();
+    let (non_blocking, log_guard) = appender.get_non_blocking_appender();
+    LOG_GUARD
+        .set(log_guard)
+        .expect("log guard should only be initialized once");
     tracing_subscriber::fmt()
         .with_env_filter("info")
-        .with_writer(non_blocking)
-        .with_writer(std::io::stdout)
+        .with_writer(non_blocking.and(std::io::stdout))
         .init();
 
     Ok(())

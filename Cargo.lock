@@ -2660,6 +2660,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "tracing-appender",
  "tracing-rolling-file",
  "tracing-subscriber",
  "uuid",

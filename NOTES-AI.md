@@ -124,6 +124,8 @@ Undo stack tests now validate buffer growth/shrink behavior and redo buffer clea
 `GraphUiAction` and `EventSubscriberChange` now derive serde `Serialize`/`Deserialize` for binary action storage.
 `IncomingConnection` and `IncomingEvent` now derive serde `Serialize`/`Deserialize` to support action serialization.
 `ActionUndoStack` tests now cover base-offset trimming and compaction behavior.
+`ActionUndoStack` tests now include a full roundtrip across all `GraphUiAction` variants using JSON snapshots.
+Editor logging now keeps the non-blocking file guard alive and uses a combined writer to emit to both file and stdout.
 Action undo stack tests now validate range bounds and buffer length consistency.
 `MainUi::handle_undo_shortcut` now handles redo on Cmd/Ctrl+Shift+Z.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
