@@ -149,8 +149,10 @@ impl AppData {
             .all(|node| node.func_id != RUN_FUNC_ID)
         {
             let run_func = self.func_lib.by_id(&RUN_FUNC_ID).unwrap();
-            let node: Node = run_func.into();
-            let view_node: ViewNode = (&node).into();
+            let mut node: Node = run_func.into();
+            node.id = RUN_NODE_ID;
+            let mut view_node: ViewNode = (&node).into();
+            view_node.removable = false;
             self.view_graph.view_nodes.add(view_node);
             self.view_graph.graph.add(node);
         }
