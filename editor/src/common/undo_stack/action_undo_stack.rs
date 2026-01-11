@@ -49,8 +49,9 @@ impl ActionUndoStack {
                 "undo stack offset must not move backwards"
             );
             self.undo_base_offset = offset;
-            self.compact_undo_buffer_if_needed();
         }
+
+        self.compact_undo_buffer_if_needed();
     }
 
     fn append_actions(buffer: &mut Vec<u8>, actions: &[GraphUiAction]) -> std::ops::Range<usize> {
