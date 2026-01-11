@@ -1,4 +1,5 @@
 use hashbrown::HashMap;
+use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::Arc;
 
@@ -21,10 +22,10 @@ pub struct NodeEventManager {
     node_events: HashMap<NodeId, NodeEvent>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId {
     pub node_id: NodeId,
-    pub event_index: u32,
+    pub event_idx: usize,
 }
 
 #[derive(Debug)]
@@ -88,7 +89,7 @@ impl NodeEventManager {
 
         let trigger = node_event.trigger.clone();
         let node_id = event_id.node_id;
-        let event_index = event_id.event_index;
+        let event_index = event_id.event_idx;
         let mut frame_rx = self.frame_tx.subscribe();
 
         let join_handle = runtime.spawn(async move {
@@ -108,7 +109,7 @@ impl NodeEventManager {
                         .expect("Event trigger missing")
                         .send(EventId {
                             node_id,
-                            event_index,
+                            event_idx: event_index,
                         })
                         .await
                 };
@@ -154,7 +155,7 @@ mod tests {
             &runtime,
             EventId {
                 node_id,
-                event_index: 0,
+                event_idx: 0,
             },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
@@ -164,7 +165,7 @@ mod tests {
             &runtime,
             EventId {
                 node_id,
-                event_index: 1,
+                event_idx: 1,
             },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
@@ -179,15 +180,15 @@ mod tests {
         }
 
         let event = next_event(&mut event_rx).await;
-        assert_eq!(event.event_index, 0);
+        assert_eq!(event.event_idx, 0);
 
         let event = next_event(&mut event_rx).await;
-        assert_eq!(event.event_index, 1);
+        assert_eq!(event.event_idx, 1);
 
         frame_tx.send(()).expect("Failed to send frame signal");
 
         let event = next_event(&mut event_rx).await;
-        assert_eq!(event.event_index, 0);
+        assert_eq!(event.event_idx, 0);
 
         event_owner.stop_node_events(node_id);
 
@@ -195,7 +196,7 @@ mod tests {
             &runtime,
             EventId {
                 node_id,
-                event_index: 2,
+                event_idx: 2,
             },
             || async move {
                 tokio::time::sleep(tokio::time::Duration::from_millis(18)).await;
@@ -203,6 +204,6 @@ mod tests {
         );
 
         let event = next_event(&mut event_rx).await;
-        assert_eq!(event.event_index, 2);
+        assert_eq!(event.event_idx, 2);
     }
 }

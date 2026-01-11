@@ -1,12 +1,13 @@
 use std::panic;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::HashSet;
+use hashbrown::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::event::EventId;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{FuncId, FuncLambda};
@@ -142,6 +143,8 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
+    pub event_subscribers: HashMap<EventId, Vec<NodeId>>,
+
     pub e_node_process_order: Vec<usize>,
     pub e_node_invoke_order: Vec<usize>,
 
@@ -328,6 +331,7 @@ impl ExecutionGraph {
         self.e_nodes
             .iter_mut()
             .for_each(|e_node| e_node.process_state = ProcessState::None);
+        self.event_subscribers.clear();
 
         let mut compact_insert = self.e_nodes.compact_insert_start();
 
@@ -341,6 +345,18 @@ impl ExecutionGraph {
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.reset(node, func);
+            node.events
+                .iter()
+                .enumerate()
+                .for_each(|(event_idx, event)| {
+                    self.event_subscribers.insert(
+                        EventId {
+                            node_id: e_node.id,
+                            event_idx,
+                        },
+                        event.subscribers.clone(),
+                    );
+                });
             e_node.process_state = ProcessState::Forward;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {

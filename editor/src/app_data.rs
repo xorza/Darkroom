@@ -3,8 +3,9 @@ use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::elements::timers_invoker::{RUN_FUNC_ID, TimersFuncLib};
+use graph::event::EventId;
 use graph::execution_graph::Result as ExecutionGraphResult;
-use graph::graph::{Binding, Node};
+use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::Worker;
@@ -23,6 +24,7 @@ pub struct Status {
 
 pub type SharedStatus = Shared<Status>;
 
+const RUN_NODE_ID: NodeId = NodeId::from_u128(0xe871ddf47a536ae59728927a88649673);
 const UNDO_MAX_STEPS: usize = 256;
 
 #[derive(Debug)]
@@ -106,7 +108,10 @@ impl AppData {
                 .update(self.view_graph.graph.clone(), self.func_lib.clone());
             self.graph_updated = false;
         }
-        self.worker.event();
+        self.worker.event(EventId {
+            node_id: RUN_NODE_ID,
+            event_idx: 0,
+        });
     }
 
     pub fn undo(&mut self) {

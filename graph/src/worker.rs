@@ -12,12 +12,10 @@ use tracing::error;
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    Event,
+    Event { event_id: EventId },
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
 }
-
-type EventQueue = Shared<Vec<EventId>>;
 
 #[derive(Debug)]
 pub struct Worker {
@@ -57,8 +55,8 @@ impl Worker {
             // thread_handle.await.expect("Worker thread failed to join");
         }
     }
-    pub fn event(&mut self) {
-        self.send(WorkerMessage::Event);
+    pub fn event(&mut self, event_id: EventId) {
+        self.send(WorkerMessage::Event { event_id });
     }
 }
 
@@ -78,7 +76,8 @@ where
     let mut msgs: Vec<WorkerMessage> = Vec::default();
     let mut context: Option<(Graph, FuncLib)> = None;
     let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
-    let mut events: Vec<u8> = Vec::default();
+    let mut events: Vec<EventId> = Vec::default();
+    let mut execute_node_ids: Vec<NodeId> = Vec::default();
 
     'worker: loop {
         let msg = rx.recv().await;
@@ -96,7 +95,7 @@ where
         for msg in msgs.drain(..) {
             match msg {
                 WorkerMessage::Exit => break 'worker,
-                WorkerMessage::Event => events.push(0),
+                WorkerMessage::Event { event_id } => events.push(event_id),
                 WorkerMessage::Update { graph, func_lib } => {
                     events.clear();
                     context = Some((graph, func_lib));
@@ -120,7 +119,14 @@ where
         }
 
         if !events.is_empty() {
-            let result = execution_graph.execute().await;
+            execute_node_ids.clear();
+            events.iter().for_each(|event_id| {
+                execute_node_ids.extend(&execution_graph.event_subscribers[event_id]);
+            });
+
+            let result = execution_graph
+                .execute_with_ids(execute_node_ids.iter().copied())
+                .await;
             (callback.lock().await)(result);
             events.clear();
         }
@@ -133,9 +139,10 @@ mod tests {
 
     use crate::elements::basic_invoker::BasicInvoker;
     use crate::elements::timers_invoker::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
+    use crate::event::EventId;
     use crate::function::FuncId;
-    use crate::graph::NodeId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
+    use crate::graph::{Event, NodeId};
 
     use crate::worker::Worker;
 
@@ -159,7 +166,9 @@ mod tests {
             inputs: vec![Input {
                 binding: Binding::None,
             }],
-            events: vec![],
+            events: vec![Event {
+                subscribers: vec![print_node_id],
+            }],
         });
 
         graph.add(Node {
@@ -198,6 +207,7 @@ mod tests {
         func_lib.merge(timers_invoker.into_func_lib());
 
         let graph = log_frame_no_graph();
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
 
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
         let mut worker = Worker::new(move |result| {
@@ -207,7 +217,10 @@ mod tests {
         });
 
         worker.update(graph.clone(), func_lib.clone());
-        worker.event();
+        worker.event(EventId {
+            node_id: frame_event_node_id,
+            event_idx: 0,
+        });
 
         let executed = compute_finish_rx
             .recv()
@@ -218,7 +231,10 @@ mod tests {
         assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        worker.event();
+        worker.event(EventId {
+            node_id: frame_event_node_id,
+            event_idx: 0,
+        });
 
         let executed = compute_finish_rx
             .recv()
@@ -229,7 +245,10 @@ mod tests {
         assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["2"]);
 
-        worker.event();
+        worker.event(EventId {
+            node_id: frame_event_node_id,
+            event_idx: 0,
+        });
 
         let executed = compute_finish_rx
             .recv()
