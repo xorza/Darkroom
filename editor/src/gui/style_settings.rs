@@ -112,3 +112,59 @@ impl Default for StyleSettings {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::StyleSettings;
+
+    #[test]
+    fn style_settings_toml_roundtrip() {
+        let settings = StyleSettings::default();
+        let serialized =
+            toml::to_string(&settings).expect("style settings should serialize to TOML");
+        assert!(
+            !serialized.trim().is_empty(),
+            "serialized style settings should not be empty"
+        );
+
+        let deserialized: StyleSettings =
+            toml::from_str(&serialized).expect("style settings should deserialize from TOML");
+
+        assert_eq!(
+            settings.color_bg_noninteractive, deserialized.color_bg_noninteractive,
+            "background noninteractive color should round-trip"
+        );
+        assert_eq!(
+            settings.color_port_input, deserialized.color_port_input,
+            "input port color should round-trip"
+        );
+        assert_eq!(
+            settings.color_shadow_cached, deserialized.color_shadow_cached,
+            "cached shadow color should round-trip"
+        );
+        assert_eq!(
+            settings.corner_radius, deserialized.corner_radius,
+            "corner radius should round-trip"
+        );
+        assert_eq!(
+            settings.dotted_base_spacing, deserialized.dotted_base_spacing,
+            "dotted base spacing should round-trip"
+        );
+        assert_eq!(
+            settings.connection_stroke_width, deserialized.connection_stroke_width,
+            "connection stroke width should round-trip"
+        );
+        assert_eq!(
+            settings.shadow_blur, deserialized.shadow_blur,
+            "shadow blur should round-trip"
+        );
+        assert_eq!(
+            settings.port_activation_radius, deserialized.port_activation_radius,
+            "port activation radius should round-trip"
+        );
+        assert_eq!(
+            settings.const_badge_offset, deserialized.const_badge_offset,
+            "const badge offset should round-trip"
+        );
+    }
+}
