@@ -24,6 +24,7 @@ impl UiContext {
 pub struct MainUi {
     pub graph_ui: GraphUi,
     pub ui_context: UiContext,
+    pub style_settings: StyleSettings,
 
     pub arena: bumpalo::Bump,
 }
@@ -33,6 +34,7 @@ impl MainUi {
         Self {
             graph_ui: GraphUi::default(),
             ui_context: UiContext::new(ctx),
+            style_settings: StyleSettings::default(),
             arena: bumpalo::Bump::new(),
         }
     }
@@ -61,15 +63,14 @@ impl MainUi {
     }
 
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
-        app_data.update_status();
-
-        self.handle_undo_shortcut(ctx, app_data);
-
-        let style_settings = StyleSettings::default();
-        let style = Style::new(style_settings, 1.0);
+        let style = Style::new(self.style_settings.clone(), 1.0);
         ctx.style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });
+
+        app_data.update_status();
+
+        self.handle_undo_shortcut(ctx, app_data);
 
         egui::TopBottomPanel::top("top_panel")
             .show_separator_line(false)
