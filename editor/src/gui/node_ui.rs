@@ -89,7 +89,7 @@ impl NodeUi {
                 node.behavior,
                 func,
             );
-            render_cache_btn(gui, ui_interaction, node_layout, node, func);
+            render_cache_btn(gui, ui_interaction, node_layout, node);
             const_bind_frame.render(gui, ui_interaction, node_layout, node, breaker);
 
             let node_drag_port_result = render_ports(gui, node_layout, node, func);
@@ -257,9 +257,8 @@ fn render_cache_btn(
     ui_interaction: &mut GraphUiInteraction,
     node_layout: &NodeLayout,
     node: &mut Node,
-    func: &Func,
 ) {
-    let visible = !func.terminal && !func.outputs.is_empty();
+    let visible = node_layout.has_cache_btn;
     if visible {
         let checked = node.behavior == NodeBehavior::Once;
 

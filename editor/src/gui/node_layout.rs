@@ -16,7 +16,10 @@ pub struct NodeLayout {
     pub node_id: NodeId,
     pub body_rect: Rect,
     pub remove_btn_rect: Rect,
+
+    pub has_cache_btn: bool,
     pub cache_button_rect: Rect,
+
     pub dot_first_center: Pos2,
     pub input_first_center: Pos2,
     pub output_first_center: Pos2,
@@ -74,6 +77,7 @@ impl NodeLayout {
             node_id: *node_id,
             body_rect: Rect::ZERO,
             remove_btn_rect: Rect::ZERO,
+            has_cache_btn: false,
             cache_button_rect: Rect::ZERO,
             dot_first_center: Pos2::ZERO,
             input_first_center: Pos2::ZERO,
@@ -153,7 +157,6 @@ impl NodeLayout {
 
         let header_width = {
             let status_width = 2.0 * (small_padding + status_dot_size);
-
             title_width + padding + status_width + padding + remove_size + padding
         };
 
@@ -192,14 +195,19 @@ impl NodeLayout {
             max_row_height = max_row_height.max(row_height);
         }
 
-        let cache_button_height = gui.style.sub_font.size;
+        let has_cache_btn = !func.terminal && !func.outputs.is_empty();
+        let (cache_button_height, cache_row_height) = if has_cache_btn {
+            let cache_button_height = gui.style.sub_font.size;
+            (cache_button_height, cache_button_height + padding * 2.0)
+        } else {
+            (0.0, 0.0)
+        };
 
         let header_row_height = header_height + small_padding * 2.0;
         let port_row_height = label_font
             .size
             .max(max_row_height)
             .max(gui.style.node.port_radius * 2.0);
-        let cache_row_height = cache_button_height + padding * 2.0;
 
         let node_width = header_width.max(max_row_width);
         let node_height = header_row_height
@@ -249,6 +257,7 @@ impl NodeLayout {
 
         self.body_rect = body_rect;
         self.remove_btn_rect = remove_btn_rect;
+        self.has_cache_btn = has_cache_btn;
         self.cache_button_rect = cache_button_rect;
         self.dot_first_center = dot_first_center;
         self.input_first_center = input_first_center;
