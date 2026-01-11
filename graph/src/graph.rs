@@ -25,7 +25,7 @@ pub enum Binding {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Input {
-    #[serde(default, skip_serializing_if = "Binding::is_none")]
+    #[serde(default)]
     pub binding: Binding,
 }
 
@@ -47,12 +47,12 @@ pub struct Node {
     pub func_id: FuncId,
     pub name: String,
 
-    #[serde(default, skip_serializing_if = "NodeBehavior::is_default")]
+    #[serde(default)]
     pub behavior: NodeBehavior,
 
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub inputs: Vec<Input>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub events: Vec<Event>,
 }
 

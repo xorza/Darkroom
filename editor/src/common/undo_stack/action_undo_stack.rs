@@ -140,6 +140,8 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         let range = Self::append_actions(&mut self.undo_actions, actions);
         self.undo_stack.push(range);
         self.trim_to_limit();
+
+        tracing::info!("Undo buffer size: {}", self.undo_actions.len());
     }
 
     fn clear_redo(&mut self) {
@@ -201,8 +203,13 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::UiEquals;
+    use crate::gui::graph_ui_interaction::EventSubscriberChange;
+    use crate::model::graph_view::{IncomingConnection, IncomingEvent};
     use common::FileFormat;
     use egui::{Pos2, Vec2, vec2};
+    use graph::data::StaticValue;
+    use graph::graph::{Binding, Event, Input, NodeBehavior};
     use graph::prelude::test_graph;
 
     fn assert_ranges_match_actions(stack: &ActionUndoStack) {
@@ -232,6 +239,45 @@ mod tests {
             stack.undo_actions.len() - stack.undo_base_offset
         );
         assert_eq!(redo_actions_len, stack.redo_actions.len());
+    }
+
+    fn collect_incoming_connections(
+        view_graph: &ViewGraph,
+        removed_node_id: graph::graph::NodeId,
+    ) -> Vec<IncomingConnection> {
+        let mut incoming = Vec::new();
+        for node in view_graph.graph.nodes.iter() {
+            for (input_idx, input) in node.inputs.iter().enumerate() {
+                if let Binding::Bind(address) = &input.binding
+                    && address.target_id == removed_node_id
+                {
+                    incoming.push(IncomingConnection {
+                        node_id: node.id,
+                        input_idx,
+                        binding: input.binding.clone(),
+                    });
+                }
+            }
+        }
+        incoming
+    }
+
+    fn collect_incoming_events(
+        view_graph: &ViewGraph,
+        removed_node_id: graph::graph::NodeId,
+    ) -> Vec<IncomingEvent> {
+        let mut incoming = Vec::new();
+        for node in view_graph.graph.nodes.iter() {
+            for (event_idx, event) in node.events.iter().enumerate() {
+                if event.subscribers.contains(&removed_node_id) {
+                    incoming.push(IncomingEvent {
+                        node_id: node.id,
+                        event_idx,
+                    });
+                }
+            }
+        }
+        incoming
     }
 
     #[test]
@@ -360,5 +406,200 @@ mod tests {
 
         assert_eq!(stack.undo_base_offset, 0);
         assert_ranges_match_actions(&stack);
+    }
+
+    #[test]
+    fn undo_roundtrip_all_action_variants_with_json_snapshots() {
+        let graph = test_graph();
+        let mut view_graph: ViewGraph = graph.into();
+        let mut stack = ActionUndoStack::new(32);
+
+        let node_ids: Vec<_> = view_graph.graph.nodes.iter().map(|node| node.id).collect();
+        let primary_id = *node_ids.first().expect("test graph must have nodes");
+        let secondary_id = node_ids
+            .iter()
+            .copied()
+            .find(|node_id| *node_id != primary_id)
+            .unwrap_or(primary_id);
+
+        if view_graph
+            .graph
+            .nodes
+            .iter()
+            .all(|node| node.events.is_empty())
+        {
+            let node = view_graph
+                .graph
+                .by_id_mut(&primary_id)
+                .expect("primary node must exist");
+            node.events.push(Event {
+                subscribers: Vec::new(),
+            });
+        }
+        if view_graph
+            .graph
+            .nodes
+            .iter()
+            .all(|node| node.inputs.is_empty())
+        {
+            let node = view_graph
+                .graph
+                .by_id_mut(&primary_id)
+                .expect("primary node must exist");
+            node.inputs.push(Input {
+                binding: Binding::None,
+            });
+        }
+        let input_node_id = view_graph
+            .graph
+            .nodes
+            .iter()
+            .find(|node| !node.inputs.is_empty())
+            .map(|node| node.id)
+            .expect("test graph must include input nodes");
+        let input_idx = 0;
+        {
+            let node = view_graph
+                .graph
+                .by_id_mut(&input_node_id)
+                .expect("input node must exist");
+            node.inputs[input_idx].binding = Binding::None;
+        }
+
+        stack.reset_with(&view_graph);
+        let mut snapshots = vec![view_graph.serialize(FileFormat::Json)];
+
+        let cache_before = view_graph.graph.by_id(&primary_id).unwrap().behavior;
+        let cache_after = match cache_before {
+            NodeBehavior::AsFunction => NodeBehavior::Once,
+            NodeBehavior::Once => NodeBehavior::AsFunction,
+        };
+        let action = GraphUiAction::CacheToggled {
+            node_id: primary_id,
+            before: cache_before,
+            after: cache_after,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let event_node = view_graph
+            .graph
+            .nodes
+            .iter()
+            .find(|node| !node.events.is_empty())
+            .expect("test graph must include event nodes");
+        let event_idx = 0;
+        let subscribers = &event_node.events[event_idx].subscribers;
+        let (subscriber, change) = if let Some(existing) = subscribers.first() {
+            (*existing, EventSubscriberChange::Removed)
+        } else {
+            let subscriber = node_ids
+                .iter()
+                .copied()
+                .find(|node_id| *node_id != event_node.id)
+                .unwrap_or(event_node.id);
+            (subscriber, EventSubscriberChange::Added)
+        };
+        let action = GraphUiAction::EventConnectionChanged {
+            event_node_id: event_node.id,
+            event_idx,
+            subscriber,
+            change,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let before_binding = Binding::None;
+        let after_binding = Binding::Const(StaticValue::Int(123));
+        let action = GraphUiAction::InputChanged {
+            node_id: input_node_id,
+            input_idx,
+            before: before_binding,
+            after: after_binding,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let moved_before = view_graph.view_nodes.by_key(&primary_id).unwrap().pos;
+        let moved_after = moved_before + vec2(5.0, -3.0);
+        let action = GraphUiAction::NodeMoved {
+            node_id: primary_id,
+            before: moved_before,
+            after: moved_after,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let selected_before = view_graph.selected_node_id;
+        let selected_after = match selected_before {
+            Some(id) if id == primary_id => None,
+            _ => Some(primary_id),
+        };
+        let action = GraphUiAction::NodeSelected {
+            before: selected_before,
+            after: selected_after,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let zoom_before_pan = view_graph.pan;
+        let zoom_before_scale = view_graph.scale;
+        let action = GraphUiAction::ZoomPanChanged {
+            before_pan: zoom_before_pan,
+            before_scale: zoom_before_scale,
+            after_pan: zoom_before_pan + vec2(12.0, -6.0),
+            after_scale: zoom_before_scale + 0.25,
+        };
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        let mut bound_targets = std::collections::HashSet::new();
+        for node in view_graph.graph.nodes.iter() {
+            for input in &node.inputs {
+                if let Binding::Bind(address) = &input.binding {
+                    bound_targets.insert(address.target_id);
+                }
+            }
+        }
+        let removed_node_id = node_ids
+            .iter()
+            .copied()
+            .find(|node_id| !bound_targets.contains(node_id))
+            .unwrap_or(secondary_id);
+        let action = view_graph.removal_action(&removed_node_id);
+        view_graph.remove_node(&removed_node_id);
+        action.apply(&mut view_graph);
+        stack.push_current(&view_graph, std::slice::from_ref(&action));
+        snapshots.push(view_graph.serialize(FileFormat::Json));
+
+        for (range_idx, range) in stack.undo_stack.iter().enumerate() {
+            let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
+            let (decoded, read) = bincode::serde::decode_from_slice::<Vec<GraphUiAction>, _>(
+                bytes,
+                bincode::config::standard(),
+            )
+            .unwrap_or_else(|err| panic!("undo range {} failed to decode: {}", range_idx, err));
+            assert_eq!(read, bytes.len());
+            assert_eq!(decoded.len(), 1);
+        }
+
+        for snapshot_idx in (1..snapshots.len()).rev() {
+            assert!(stack.undo(&mut view_graph, &mut |_| {}));
+            let snapshot_graph =
+                ViewGraph::deserialize(FileFormat::Json, &snapshots[snapshot_idx - 1])
+                    .expect("snapshot should deserialize");
+            assert_eq!(view_graph.graph, snapshot_graph.graph);
+            assert_eq!(view_graph.view_nodes, snapshot_graph.view_nodes);
+            assert!(view_graph.pan.ui_equals(&snapshot_graph.pan));
+            assert!(view_graph.scale.ui_equals(&snapshot_graph.scale));
+            assert_eq!(view_graph.selected_node_id, snapshot_graph.selected_node_id);
+        }
+        assert!(!stack.undo(&mut view_graph, &mut |_| {}));
     }
 }
