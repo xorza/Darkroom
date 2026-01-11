@@ -55,13 +55,11 @@ impl ActionUndoStack {
             !actions.is_empty(),
             "undo stack should not store empty action batches"
         );
-        let bytes = Self::serialize_actions(actions);
-        Self::append_bytes(buffer, &bytes)
-    }
-
-    fn serialize_actions(actions: &[GraphUiAction]) -> Vec<u8> {
-        bincode::serde::encode_to_vec(actions, bincode::config::standard())
-            .expect("undo stack action batch should serialize via bincode")
+        let start = buffer.len();
+        bincode::serde::encode_into_std_write(actions, buffer, bincode::config::standard())
+            .expect("undo stack action batch should serialize via bincode");
+        let end = buffer.len();
+        start..end
     }
 
     fn deserialize_actions(bytes: &[u8]) -> Vec<GraphUiAction> {
