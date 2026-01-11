@@ -251,7 +251,7 @@ impl ConnectionUi {
                 let event_layout = graph_layout.node_layout(&node_id);
                 let event_pos = event_layout.event_center(event_idx);
 
-                for subscriber_idx in event.subscribers.len() - 1..0 {
+                for subscriber_idx in (0..event.subscribers.len()).rev() {
                     let trigger_node_id = event.subscribers[subscriber_idx];
                     let trigger_layout = graph_layout.node_layout(&trigger_node_id);
                     let trigger_pos = trigger_layout.trigger_center();
