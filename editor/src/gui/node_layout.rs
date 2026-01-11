@@ -159,14 +159,16 @@ impl NodeLayout {
                 .get(row)
                 .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
 
-            let (right, right_height) = self.output_galleys.get(row).map_or_else(
-                || {
-                    self.event_galleys
-                        .get(row - output_count)
-                        .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
-                },
-                |galley| (galley.size().x, galley.size().y),
-            );
+            let (right, right_height) = if row < output_count {
+                self.output_galleys
+                    .get(row)
+                    .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
+            } else {
+                let event_row = row - output_count;
+                self.event_galleys
+                    .get(event_row)
+                    .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
+            };
 
             let row_width = port_label_side_padding
                 + left
