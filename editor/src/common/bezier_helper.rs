@@ -1,7 +1,13 @@
 use egui::Pos2;
 
+// - `ENDPOINT_BIAS = 1.0` → no change (linear spacing in t).
+// - `ENDPOINT_BIAS > 1.0` → concentrates samples toward the ends (more points near t≈0 and t≈1).
+// - `ENDPOINT_BIAS < 1.0` → flattens toward the middle (more points near t≈0.5).
+const ENDPOINT_BIAS: f32 = 1.2;
+
 pub fn sample(points: &mut [Pos2], start: Pos2, end: Pos2, scale: f32) {
     assert!(points.len() >= 3, "bezier steps must be greater than 2");
+
     let steps = points.len() - 1;
 
     let p0 = start;
@@ -11,9 +17,10 @@ pub fn sample(points: &mut [Pos2], start: Pos2, end: Pos2, scale: f32) {
     let p1 = p0 + egui::vec2(control_offset, 0.0);
     let p2 = p3 + egui::vec2(-control_offset, 0.0);
 
-    for (i, point) in points.iter_mut().enumerate().take(steps + 1) {
-        let t_linear = i as f32 / steps as f32;
-        let t = 0.5 - 0.5 * (std::f32::consts::PI * t_linear).cos();
+    for (idx, point) in points.iter_mut().enumerate().take(steps + 1) {
+        let t_linear = idx as f32 / steps as f32;
+        // let t = 0.5 - 0.5 * (std::f32::consts::PI * t_linear).cos();
+        let t = bias_t(t_linear, ENDPOINT_BIAS);
         let one_minus = 1.0 - t;
         let a = one_minus * one_minus * one_minus;
         let b = 3.0 * one_minus * one_minus * t;
@@ -51,6 +58,17 @@ pub fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
 fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
     (dx * 0.5).max(30.0 * scale)
+}
+
+fn bias_t(t: f32, bias: f32) -> f32 {
+    assert!(bias > 0.0, "endpoint bias must be positive");
+
+    if (bias - 1.0).abs() <= f32::EPSILON {
+        return t;
+    }
+    let t_pow = t.powf(bias);
+    let inv_pow = (1.0 - t).powf(bias);
+    t_pow / (t_pow + inv_pow)
 }
 
 fn orient(a: Pos2, b: Pos2, c: Pos2) -> f32 {

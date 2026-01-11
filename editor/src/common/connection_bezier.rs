@@ -32,7 +32,7 @@ pub struct ConnectionBezier {
 }
 
 impl ConnectionBezier {
-    pub const DEFAULT_POINTS: usize = 25;
+    pub const DEFAULT_POINTS: usize = 35;
 
     pub fn mesh(&self) -> &Mesh {
         self.polyline.mesh()
