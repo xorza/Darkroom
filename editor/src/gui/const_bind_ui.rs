@@ -71,10 +71,11 @@ impl<'a> ConstBindFrame<'a> {
                 continue;
             }
 
-            let connection_key = ConnectionKey {
-                in_node_id: node.id,
+            let connection_key = ConnectionKey::Input {
+                input_node_id: node.id,
                 input_idx,
             };
+
             let prev_hovered = *self.prev_hovered_connection == Some(connection_key);
 
             let input_center = node_layout.input_center(input_idx);

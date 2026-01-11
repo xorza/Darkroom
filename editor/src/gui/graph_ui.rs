@@ -219,22 +219,23 @@ impl GraphUi {
                         .chain(self.node_ui.const_bind_ui.broke_iter());
 
                     for connection in iter {
-                        let node = ctx
-                            .view_graph
-                            .graph
-                            .nodes
-                            .by_key_mut(&connection.in_node_id)
-                            .unwrap();
-                        let input = &mut node.inputs[connection.input_idx];
-                        let before = input.binding.clone();
-                        input.binding = Binding::None;
-                        let after = input.binding.clone();
-                        interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: connection.in_node_id,
-                            input_idx: connection.input_idx,
-                            before,
-                            after,
-                        });
+                        todo!()
+                        // let node = ctx
+                        //     .view_graph
+                        //     .graph
+                        //     .nodes
+                        //     .by_key_mut(&connection.in_node_id)
+                        //     .unwrap();
+                        // let input = &mut node.inputs[connection.input_idx];
+                        // let before = input.binding.clone();
+                        // input.binding = Binding::None;
+                        // let after = input.binding.clone();
+                        // interaction.add_action(GraphUiAction::InputChanged {
+                        //     node_id: connection.in_node_id,
+                        //     input_idx: connection.input_idx,
+                        //     before,
+                        //     after,
+                        // });
                     }
 
                     for node_id in self.node_ui.node_ids_hit_breaker.iter() {
