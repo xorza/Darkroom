@@ -174,6 +174,7 @@ Execution graph tests now verify that impure functions execute without input cha
 behaviors panic unless nodes are Terminal.
 Execution graph tests include coverage for toggling a Once node back to AsFunction to refresh upstream execution.
 Execution graph execution now builds terminal indices with a single iterator extend in execute-with-ids setup.
+Execution graph execution now builds terminal indices via iterator extend in the default prepare-execution path too.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 

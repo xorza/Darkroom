@@ -427,11 +427,12 @@ impl ExecutionGraph {
 
     fn prepare_execution(&mut self) -> Result<()> {
         self.e_node_terminal_idx.clear();
-        for (e_node_idx, e_node) in self.e_nodes.iter().enumerate() {
-            if e_node.terminal {
-                self.e_node_terminal_idx.push(e_node_idx);
-            }
-        }
+        self.e_node_terminal_idx.extend(
+            self.e_nodes
+                .iter()
+                .enumerate()
+                .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
+        );
 
         self.build_execution_plan()?;
 
