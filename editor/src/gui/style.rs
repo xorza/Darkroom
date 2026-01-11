@@ -144,7 +144,7 @@ impl Style {
         let settings = &self.style_settings;
         let inactive_bg_stroke = Stroke::new(
             scaled(settings.default_bg_stroke_width),
-            Color32::from(settings.color_stroke_inactive),
+            settings.color_stroke_inactive,
         );
 
         self.heading_font = FontId {
@@ -164,21 +164,21 @@ impl Style {
             family: FontFamily::Monospace,
         };
 
-        self.text_color = settings.color_text.into();
-        self.noninteractive_text_color = settings.color_text_noninteractive.into();
+        self.text_color = settings.color_text;
+        self.noninteractive_text_color = settings.color_text_noninteractive;
 
-        self.noninteractive_bg_fill = settings.color_bg_noninteractive.into();
-        self.hover_bg_fill = settings.color_bg_hover.into();
-        self.inactive_bg_fill = settings.color_bg_inactive.into();
+        self.noninteractive_bg_fill = settings.color_bg_noninteractive;
+        self.hover_bg_fill = settings.color_bg_hover;
+        self.inactive_bg_fill = settings.color_bg_inactive;
         self.inactive_bg_stroke = inactive_bg_stroke;
         self.active_bg_stroke = Stroke::new(
             scaled(settings.default_bg_stroke_width),
-            Color32::from(settings.color_stroke_active),
+            settings.color_stroke_active,
         );
-        self.active_bg_fill = settings.color_bg_active.into();
+        self.active_bg_fill = settings.color_bg_active;
 
-        self.dark_text_color = settings.color_text_checked.into();
-        self.checked_bg_fill = settings.color_bg_checked.into();
+        self.dark_text_color = settings.color_text_checked;
+        self.checked_bg_fill = settings.color_bg_checked;
 
         self.big_padding = scaled(settings.big_padding);
         self.padding = scaled(settings.padding);
@@ -187,42 +187,42 @@ impl Style {
         self.small_corner_radius = scaled(settings.small_corner_radius);
 
         self.graph_background = GraphBackgroundStyle {
-            dotted_color: settings.color_dotted.into(),
+            dotted_color: settings.color_dotted,
             dotted_base_spacing: scaled(settings.dotted_base_spacing),
             dotted_radius_base: scaled(settings.dotted_radius_base),
             dotted_radius_min: scaled(settings.dotted_radius_min),
             dotted_radius_max: scaled(settings.dotted_radius_max),
-            bg_color: settings.color_bg_graph.into(),
+            bg_color: settings.color_bg_graph,
         };
         self.connections = ConnectionStyle {
             feather: scaled(settings.connection_feather),
             stroke_width: scaled(settings.connection_stroke_width),
             highlight_feather: scaled(settings.connection_highlight_feather),
-            broke_clr: settings.color_stroke_broke.into(),
+            broke_clr: settings.color_stroke_broke,
             hover_detection_width: settings.connection_hover_detection_width,
             breaker_stroke: Stroke::new(
                 scaled(settings.connection_breaker_stroke_width),
-                Color32::from(settings.color_stroke_breaker),
+                settings.color_stroke_breaker,
             ),
         };
         self.node = NodeStyle {
             status_dot_radius: scaled(settings.status_dot_radius),
-            status_impure_color: settings.color_dot_impure.into(),
+            status_impure_color: settings.color_dot_impure,
 
             executed_shadow: Shadow {
-                color: settings.color_shadow_executed.into(),
+                color: settings.color_shadow_executed,
                 offset: [0, 0],
                 blur: scaled_u8(settings.shadow_blur),
                 spread: scaled_u8(settings.shadow_spread),
             },
             cached_shadow: Shadow {
-                color: settings.color_shadow_cached.into(),
+                color: settings.color_shadow_cached,
                 offset: [0, 0],
                 blur: scaled_u8(settings.shadow_blur),
                 spread: scaled_u8(settings.shadow_spread),
             },
             missing_inputs_shadow: Shadow {
-                color: settings.color_shadow_missing.into(),
+                color: settings.color_shadow_missing,
                 offset: [0, 0],
                 blur: scaled_u8(settings.shadow_blur),
                 spread: scaled_u8(settings.shadow_spread),
@@ -236,18 +236,18 @@ impl Style {
             port_label_side_padding: scaled(settings.port_label_side_padding),
             const_badge_offset: settings.const_badge_offset * scale,
 
-            input_port_color: settings.color_port_input.into(),
-            output_port_color: settings.color_port_output.into(),
-            input_hover_color: settings.color_port_input_hover.into(),
-            output_hover_color: settings.color_port_output_hover.into(),
+            input_port_color: settings.color_port_input,
+            output_port_color: settings.color_port_output,
+            input_hover_color: settings.color_port_input_hover,
+            output_hover_color: settings.color_port_output_hover,
 
-            trigger_port_color: settings.color_port_trigger.into(),
-            event_port_color: settings.color_port_event.into(),
-            trigger_hover_color: settings.color_port_trigger_hover.into(),
-            event_hover_color: settings.color_port_event_hover.into(),
+            trigger_port_color: settings.color_port_trigger,
+            event_port_color: settings.color_port_event,
+            trigger_hover_color: settings.color_port_trigger_hover,
+            event_hover_color: settings.color_port_event_hover,
 
             const_bind_style: DragValueStyle {
-                fill: settings.color_bg_inactive.into(),
+                fill: settings.color_bg_inactive,
                 stroke: inactive_bg_stroke,
                 radius: scaled(settings.small_corner_radius),
             },

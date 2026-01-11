@@ -2,51 +2,61 @@ use egui::{Color32, Vec2};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ColorHex(#[serde(with = "color_hex")] pub Color32);
-
-impl From<Color32> for ColorHex {
-    fn from(color: Color32) -> Self {
-        Self(color)
-    }
-}
-
-impl From<ColorHex> for Color32 {
-    fn from(color: ColorHex) -> Self {
-        color.0
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct StyleSettings {
-    pub color_bg_noninteractive: ColorHex,
-    pub color_bg_inactive: ColorHex,
-    pub color_bg_graph: ColorHex,
-    pub color_bg_hover: ColorHex,
-    pub color_bg_active: ColorHex,
-    pub color_bg_checked: ColorHex,
-    pub color_stroke_inactive: ColorHex,
-    pub color_stroke_active: ColorHex,
-    pub color_port_input: ColorHex,
-    pub color_port_output: ColorHex,
-    pub color_port_input_hover: ColorHex,
-    pub color_port_output_hover: ColorHex,
-    pub color_port_trigger: ColorHex,
-    pub color_port_event: ColorHex,
-    pub color_port_trigger_hover: ColorHex,
-    pub color_port_event_hover: ColorHex,
-    pub color_stroke_breaker: ColorHex,
-    pub color_stroke_broke: ColorHex,
-    pub color_text: ColorHex,
-    pub color_text_noninteractive: ColorHex,
-    pub color_text_checked: ColorHex,
-    pub color_dot_impure: ColorHex,
-    pub color_shadow_executed: ColorHex,
-    pub color_shadow_cached: ColorHex,
-    pub color_shadow_missing: ColorHex,
-    pub color_dotted: ColorHex,
+    #[serde(with = "color_hex")]
+    pub color_bg_noninteractive: Color32,
+    #[serde(with = "color_hex")]
+    pub color_bg_inactive: Color32,
+    #[serde(with = "color_hex")]
+    pub color_bg_graph: Color32,
+    #[serde(with = "color_hex")]
+    pub color_bg_hover: Color32,
+    #[serde(with = "color_hex")]
+    pub color_bg_active: Color32,
+    #[serde(with = "color_hex")]
+    pub color_bg_checked: Color32,
+    #[serde(with = "color_hex")]
+    pub color_stroke_inactive: Color32,
+    #[serde(with = "color_hex")]
+    pub color_stroke_active: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_input: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_output: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_input_hover: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_output_hover: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_trigger: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_event: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_trigger_hover: Color32,
+    #[serde(with = "color_hex")]
+    pub color_port_event_hover: Color32,
+    #[serde(with = "color_hex")]
+    pub color_stroke_breaker: Color32,
+    #[serde(with = "color_hex")]
+    pub color_stroke_broke: Color32,
+    #[serde(with = "color_hex")]
+    pub color_text: Color32,
+    #[serde(with = "color_hex")]
+    pub color_text_noninteractive: Color32,
+    #[serde(with = "color_hex")]
+    pub color_text_checked: Color32,
+    #[serde(with = "color_hex")]
+    pub color_dot_impure: Color32,
+    #[serde(with = "color_hex")]
+    pub color_shadow_executed: Color32,
+    #[serde(with = "color_hex")]
+    pub color_shadow_cached: Color32,
+    #[serde(with = "color_hex")]
+    pub color_shadow_missing: Color32,
+    #[serde(with = "color_hex")]
+    pub color_dotted: Color32,
     pub corner_radius: f32,
     pub small_corner_radius: f32,
     pub default_bg_stroke_width: f32,
@@ -70,6 +80,7 @@ pub struct StyleSettings {
     pub port_radius: f32,
     pub port_activation_radius: f32,
     pub port_label_side_padding: f32,
+    #[serde(with = "vec2_array")]
     pub const_badge_offset: Vec2,
 }
 
@@ -89,7 +100,7 @@ impl StyleSettings {
 mod color_hex {
     use egui::Color32;
     use serde::de::{self, SeqAccess, Visitor};
-    use serde::{Deserializer, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use std::fmt;
 
     pub fn serialize<S>(color: &Color32, serializer: S) -> Result<S::Ok, S::Error>
@@ -185,35 +196,99 @@ mod color_hex {
     }
 }
 
+mod vec2_array {
+    use egui::Vec2;
+    use serde::de::{self, SeqAccess, Visitor};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use std::fmt;
+
+    pub fn serialize<S>(value: &Vec2, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        [value.x, value.y].serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec2, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(Vec2Visitor)
+    }
+
+    struct Vec2Visitor;
+
+    impl<'de> Visitor<'de> for Vec2Visitor {
+        type Value = Vec2;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a 2-element float array or { x, y } object")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let x: f32 = seq
+                .next_element()?
+                .ok_or_else(|| de::Error::custom("missing x value"))?;
+            let y: f32 = seq
+                .next_element()?
+                .ok_or_else(|| de::Error::custom("missing y value"))?;
+            Ok(Vec2::new(x, y))
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::MapAccess<'de>,
+        {
+            let mut x: Option<f32> = None;
+            let mut y: Option<f32> = None;
+            while let Some(key) = map.next_key::<String>()? {
+                match key.as_str() {
+                    "x" => x = Some(map.next_value()?),
+                    "y" => y = Some(map.next_value()?),
+                    _ => {
+                        let _: de::IgnoredAny = map.next_value()?;
+                    }
+                }
+            }
+            let x = x.ok_or_else(|| de::Error::custom("missing x value"))?;
+            let y = y.ok_or_else(|| de::Error::custom("missing y value"))?;
+            Ok(Vec2::new(x, y))
+        }
+    }
+}
+
 impl Default for StyleSettings {
     fn default() -> Self {
         Self {
-            color_bg_noninteractive: ColorHex::from(Color32::from_rgb(35, 35, 35)),
-            color_bg_inactive: ColorHex::from(Color32::from_rgb(40, 40, 40)),
-            color_bg_graph: ColorHex::from(Color32::from_rgb(16, 16, 16)),
-            color_bg_hover: ColorHex::from(Color32::from_rgb(50, 50, 50)),
-            color_bg_active: ColorHex::from(Color32::from_rgb(60, 60, 60)),
-            color_bg_checked: ColorHex::from(Color32::from_rgb(240, 205, 90)),
-            color_stroke_inactive: ColorHex::from(Color32::from_rgb(65, 65, 65)),
-            color_stroke_active: ColorHex::from(Color32::from_rgb(128, 128, 128)),
-            color_port_input: ColorHex::from(Color32::from_rgb(70, 150, 255)),
-            color_port_output: ColorHex::from(Color32::from_rgb(70, 200, 200)),
-            color_port_input_hover: ColorHex::from(Color32::from_rgb(120, 190, 255)),
-            color_port_output_hover: ColorHex::from(Color32::from_rgb(110, 230, 210)),
-            color_port_trigger: ColorHex::from(Color32::from_rgb(235, 200, 70)),
-            color_port_event: ColorHex::from(Color32::from_rgb(235, 140, 70)),
-            color_port_trigger_hover: ColorHex::from(Color32::from_rgb(255, 225, 120)),
-            color_port_event_hover: ColorHex::from(Color32::from_rgb(255, 175, 120)),
-            color_stroke_breaker: ColorHex::from(Color32::from_rgb(255, 120, 120)),
-            color_stroke_broke: ColorHex::from(Color32::from_rgb(255, 90, 90)),
-            color_text: ColorHex::from(Color32::from_rgb(192, 192, 192)),
-            color_text_noninteractive: ColorHex::from(Color32::from_rgb(140, 140, 140)),
-            color_text_checked: ColorHex::from(Color32::from_rgb(60, 50, 20)),
-            color_dot_impure: ColorHex::from(Color32::from_rgb(255, 150, 70)),
-            color_shadow_executed: ColorHex::from(Color32::from_rgb(66, 216, 130)),
-            color_shadow_cached: ColorHex::from(Color32::from_rgb(248, 216, 75)),
-            color_shadow_missing: ColorHex::from(Color32::from_rgb(238, 66, 66)),
-            color_dotted: ColorHex::from(Color32::from_rgb(48, 48, 48)),
+            color_bg_noninteractive: Color32::from_rgb(35, 35, 35),
+            color_bg_inactive: Color32::from_rgb(40, 40, 40),
+            color_bg_graph: Color32::from_rgb(16, 16, 16),
+            color_bg_hover: Color32::from_rgb(50, 50, 50),
+            color_bg_active: Color32::from_rgb(60, 60, 60),
+            color_bg_checked: Color32::from_rgb(240, 205, 90),
+            color_stroke_inactive: Color32::from_rgb(65, 65, 65),
+            color_stroke_active: Color32::from_rgb(128, 128, 128),
+            color_port_input: Color32::from_rgb(70, 150, 255),
+            color_port_output: Color32::from_rgb(70, 200, 200),
+            color_port_input_hover: Color32::from_rgb(120, 190, 255),
+            color_port_output_hover: Color32::from_rgb(110, 230, 210),
+            color_port_trigger: Color32::from_rgb(235, 200, 70),
+            color_port_event: Color32::from_rgb(235, 140, 70),
+            color_port_trigger_hover: Color32::from_rgb(255, 225, 120),
+            color_port_event_hover: Color32::from_rgb(255, 175, 120),
+            color_stroke_breaker: Color32::from_rgb(255, 120, 120),
+            color_stroke_broke: Color32::from_rgb(255, 90, 90),
+            color_text: Color32::from_rgb(192, 192, 192),
+            color_text_noninteractive: Color32::from_rgb(140, 140, 140),
+            color_text_checked: Color32::from_rgb(60, 50, 20),
+            color_dot_impure: Color32::from_rgb(255, 150, 70),
+            color_shadow_executed: Color32::from_rgb(66, 216, 130),
+            color_shadow_cached: Color32::from_rgb(248, 216, 75),
+            color_shadow_missing: Color32::from_rgb(238, 66, 66),
+            color_dotted: Color32::from_rgb(48, 48, 48),
             corner_radius: 4.0,
             small_corner_radius: 2.0,
             default_bg_stroke_width: 1.0,
@@ -258,6 +333,10 @@ mod tests {
         assert!(
             serialized.contains("#EBC846FF"),
             "serialized colors should use hex format"
+        );
+        assert!(
+            serialized.contains("const_badge_offset = ["),
+            "serialized vec2 values should use array format"
         );
 
         let deserialized: StyleSettings =
