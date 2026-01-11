@@ -23,6 +23,9 @@ macro_rules! id_type {
             pub fn nil() -> $name {
                 $name(uuid::Uuid::nil())
             }
+            pub const fn from_u128(value: u128) -> $name {
+                $name(uuid::Uuid::from_u128(value))
+            }
             pub fn is_nil(&self) -> bool {
                 self.0 == uuid::Uuid::nil()
             }
@@ -40,6 +43,12 @@ macro_rules! id_type {
         impl From<uuid::Uuid> for $name {
             fn from(uuid: uuid::Uuid) -> $name {
                 $name(uuid)
+            }
+        }
+
+        impl From<u128> for $name {
+            fn from(value: u128) -> $name {
+                $name(uuid::Uuid::from_u128(value))
             }
         }
 

@@ -435,6 +435,8 @@ Event labels now render under output labels in the same right column.
 Event connection drags now update event subscribers via `GraphUiAction::EventConnectionChanged` with undo support, storing only the subscriber id and add/remove change.
 Connection apply helpers now return `GraphUiAction` values directly to centralize action construction.
 Node removal now captures incoming event subscriptions and `ViewGraph::remove_node` clears event subscribers for removed nodes; `ViewGraph::removal_payload` returns a `GraphUiAction::NodeRemoved` action.
+Timers invoker now defines const IDs for frame events and run, using `FuncId::from_u128` literals to avoid runtime parsing.
+ID newtypes now expose `from_u128` for const-friendly UUID initialization.
 Event connection rendering iterates subscribers in reverse so removals during iteration stay safe on empty lists.
 Execution graph tests now assert per-node output usage counts for simple, missing-input, and graph-change scenarios.
 Execution graph tests include `none_binding_execute_is_stable` to exercise repeated execution with an unset input

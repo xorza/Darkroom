@@ -3,8 +3,11 @@ use std::time::Instant;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use crate::prelude::FuncLambda;
+use crate::prelude::{FuncId, FuncLambda};
 use common::BoolExt;
+
+pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
+pub const RUN_FUNC_ID: FuncId = FuncId::from_u128(0xe871ddf47a534ae59728927a88649673);
 
 #[derive(Debug)]
 pub struct TimersFuncLib {
@@ -32,7 +35,7 @@ impl Default for TimersFuncLib {
         let mut invoker = FuncLib::default();
 
         invoker.add(Func {
-            id: "01897c92-d605-5f5a-7a21-627ed74824ff".into(),
+            id: FRAME_EVENT_FUNC_ID,
             name: "frame event".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
@@ -95,7 +98,7 @@ impl Default for TimersFuncLib {
         });
 
         invoker.add(Func {
-            id: "01897c92-d605-5f5a-7a21-627ed74824ff".into(),
+            id: RUN_FUNC_ID,
             name: "run".to_string(),
             description: None,
             behavior: FuncBehavior::Impure,
