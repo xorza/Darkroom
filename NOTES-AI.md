@@ -18,6 +18,7 @@ Node body rendering now reuses the shared `Style` background fill/stroke colors 
 Selected node outlines now use `Style.active_bg_stroke`.
 Graph background dotted grid styling now lives in `Style.background` (`GraphBackgroundStyle`).
 Connection stroke styling now lives in `Style.connections` (`ConnectionStyle`).
+`ConnectionStyle` now also carries input/output port + hover colors and provides `bezier_style` to build connection bezier styles for broke/hovered states.
 `NodeLayout` and its layout computation now live in `editor/src/gui/node_layout.rs`.
 Node layout now caches text galleys for titles and port labels to reuse during rendering.
 Cache button text now uses a cached galley in `NodeLayout` for rendering.

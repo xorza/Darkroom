@@ -203,30 +203,10 @@ impl ConnectionUi {
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
                 curve.broke = curve.bezier.intersects_breaker(breaker);
 
-                let style = {
-                    if curve.broke {
-                        ConnectionBezierStyle {
-                            start_color: gui.style.connections.broke_clr,
-                            end_color: gui.style.connections.broke_clr,
-                            stroke_width: gui.style.connections.stroke_width,
-                            feather: gui.style.connections.feather,
-                        }
-                    } else if curve.hovered {
-                        ConnectionBezierStyle {
-                            start_color: gui.style.node.output_hover_color,
-                            end_color: gui.style.node.input_hover_color,
-                            stroke_width: gui.style.connections.stroke_width,
-                            feather: gui.style.connections.feather,
-                        }
-                    } else {
-                        ConnectionBezierStyle {
-                            start_color: gui.style.node.output_port_color,
-                            end_color: gui.style.node.input_port_color,
-                            stroke_width: gui.style.connections.stroke_width,
-                            feather: gui.style.connections.feather,
-                        }
-                    }
-                };
+                let style = gui
+                    .style
+                    .connections
+                    .bezier_style(curve.broke, curve.hovered);
 
                 let response = curve.bezier.show(
                     gui,
@@ -280,12 +260,7 @@ impl ConnectionUi {
                 gui,
                 Sense::hover(),
                 "temp_connection",
-                ConnectionBezierStyle {
-                    start_color: gui.style.node.output_port_color,
-                    end_color: gui.style.node.input_port_color,
-                    stroke_width: gui.style.connections.stroke_width,
-                    feather: gui.style.connections.feather,
-                },
+                gui.style.connections.bezier_style(false, false),
             );
         }
     }

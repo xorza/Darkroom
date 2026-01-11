@@ -1,6 +1,8 @@
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
+use crate::common::connection_bezier::ConnectionBezierStyle;
+
 pub fn brighten(color: Color32, amount: f32) -> Color32 {
     let t = amount.clamp(0.0, 1.0);
     let lerp = |c: u8| -> u8 {
@@ -56,6 +58,10 @@ pub struct ConnectionStyle {
     pub feather: f32,
     pub stroke_width: f32,
     pub broke_clr: Color32,
+    pub input_port_color: Color32,
+    pub output_port_color: Color32,
+    pub input_hover_color: Color32,
+    pub output_hover_color: Color32,
     pub hover_detection_width: f32,
     pub breaker_stroke: Stroke,
 }
@@ -92,6 +98,42 @@ pub(crate) struct DragValueStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
     pub(crate) radius: f32,
+}
+
+impl ConnectionStyle {
+    pub fn bezier_style(&self, broke: bool, hovered: bool) -> ConnectionBezierStyle {
+        assert!(
+            self.stroke_width.is_finite() && self.stroke_width >= 0.0,
+            "connection stroke width must be finite and non-negative"
+        );
+        assert!(
+            self.feather.is_finite() && self.feather >= 0.0,
+            "connection feather must be finite and non-negative"
+        );
+
+        if broke {
+            ConnectionBezierStyle {
+                start_color: self.broke_clr,
+                end_color: self.broke_clr,
+                stroke_width: self.stroke_width,
+                feather: self.feather,
+            }
+        } else if hovered {
+            ConnectionBezierStyle {
+                start_color: self.output_hover_color,
+                end_color: self.input_hover_color,
+                stroke_width: self.stroke_width,
+                feather: self.feather,
+            }
+        } else {
+            ConnectionBezierStyle {
+                start_color: self.output_port_color,
+                end_color: self.input_port_color,
+                stroke_width: self.stroke_width,
+                feather: self.feather,
+            }
+        }
+    }
 }
 
 impl Style {
@@ -186,6 +228,10 @@ impl Style {
                 feather: scaled(0.8),
                 stroke_width: scaled(1.5),
                 broke_clr: COLOR_STROKE_BROKE,
+                input_port_color: COLOR_PORT_INPUT,
+                output_port_color: COLOR_PORT_OUTPUT,
+                input_hover_color: COLOR_PORT_INPUT_HOVER,
+                output_hover_color: COLOR_PORT_OUTPUT_HOVER,
                 hover_detection_width: 6.0,
                 breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
             },
