@@ -120,9 +120,10 @@ allocations.
 Undo/redo now truncates backing buffers when popping the most recent snapshot to avoid unbounded growth.
 `UndoStack` is now generic over serde types and constructed with a `FileFormat`.
 Undo stack tests now validate buffer growth/shrink behavior and redo buffer clearing.
-`ActionUndoStack` now serializes `GraphUiAction` batches directly into backing byte buffers with range stacks, avoiding per-step Vec allocations.
+`ActionUndoStack` now tracks a base offset for undo bytes so front trims advance a logical cursor and only compact when needed, avoiding frequent front-drains.
 `GraphUiAction` and `EventSubscriberChange` now derive serde `Serialize`/`Deserialize` for binary action storage.
 `IncomingConnection` and `IncomingEvent` now derive serde `Serialize`/`Deserialize` to support action serialization.
+`ActionUndoStack` tests now cover base-offset trimming and compaction behavior.
 Action undo stack tests now validate range bounds and buffer length consistency.
 `MainUi::handle_undo_shortcut` now handles redo on Cmd/Ctrl+Shift+Z.
 Graph UI `update_zoom_and_pan` now lives on `GraphUi` as a private method.
