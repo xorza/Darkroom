@@ -446,11 +446,7 @@ impl ExecutionGraph {
             self.e_node_terminal_idx.push(e_node_idx);
         }
 
-        self.backward1()?;
-        self.forward2();
-        self.backward2();
-
-        self.validate_for_execution();
+        self.fun_name()?;
 
         self.execute_internal().await
     }
@@ -474,12 +470,16 @@ impl ExecutionGraph {
             }
         }
 
+        self.fun_name()?;
+
+        Ok(())
+    }
+
+    fn fun_name(&mut self) -> Result<()> {
         self.backward1()?;
         self.forward2();
         self.backward2();
-
         self.validate_for_execution();
-
         Ok(())
     }
 
