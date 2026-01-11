@@ -16,6 +16,12 @@ pub struct IncomingConnection {
     pub binding: Binding,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IncomingEvent {
+    pub node_id: NodeId,
+    pub event_idx: usize,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ViewGraph {
     pub graph: CoreGraph,
@@ -137,7 +143,11 @@ impl ViewGraph {
         }
     }
 
-    pub fn removal_payload(&self, node_id: &NodeId) -> (ViewNode, Node, Vec<IncomingConnection>) {
+    // todo return GraphUiAction
+    pub fn removal_payload(
+        &self,
+        node_id: &NodeId,
+    ) -> (ViewNode, Node, Vec<IncomingConnection>, Vec<IncomingEvent>) {
         let view_node = self
             .view_nodes
             .by_key(node_id)

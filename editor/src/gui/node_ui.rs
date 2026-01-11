@@ -98,12 +98,14 @@ impl NodeUi {
         }
 
         while let Some(node_id) = self.node_ids_to_remove.pop() {
-            let (view_node, node, incoming) = ctx.view_graph.removal_payload(&node_id);
+            let (view_node, node, incoming_connections, incoming_events) =
+                ctx.view_graph.removal_payload(&node_id);
             ctx.view_graph.remove_node(&node_id);
             ui_interaction.add_action(GraphUiAction::NodeRemoved {
                 view_node,
                 node,
-                incoming,
+                incoming_connections,
+                incoming_events,
             });
         }
 

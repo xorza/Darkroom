@@ -2,6 +2,7 @@ use egui::{Pos2, SliderOrientation, Vec2};
 use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 
 use crate::gui::graph_ui::Error;
+use crate::model::graph_view::IncomingEvent;
 use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,7 +44,8 @@ pub enum GraphUiAction {
     NodeRemoved {
         view_node: ViewNode,
         node: Node,
-        incoming: Vec<IncomingConnection>,
+        incoming_connections: Vec<IncomingConnection>,
+        incoming_events: Vec<IncomingEvent>,
     },
     NodeMoved {
         node_id: NodeId,
@@ -289,7 +291,8 @@ impl GraphUiAction {
             GraphUiAction::NodeRemoved {
                 view_node,
                 node,
-                incoming,
+                incoming_connections,
+                incoming_events,
             } => {
                 assert!(
                     view_graph.graph.by_id(&node.id).is_none(),
@@ -297,7 +300,7 @@ impl GraphUiAction {
                 );
                 view_graph.graph.add(node.clone());
                 view_graph.view_nodes.add(view_node.clone());
-                for connection in incoming {
+                for connection in incoming_connections {
                     let node = view_graph.graph.by_id_mut(&connection.node_id).unwrap();
                     assert!(
                         connection.input_idx < node.inputs.len(),
@@ -305,6 +308,8 @@ impl GraphUiAction {
                     );
                     node.inputs[connection.input_idx].binding = connection.binding.clone();
                 }
+
+                todo!("incoming events")
             }
             GraphUiAction::NodeMoved {
                 node_id, before, ..
