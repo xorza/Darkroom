@@ -64,7 +64,6 @@ pub struct ConnectionStyle {
 
 #[derive(Debug, Clone)]
 pub struct NodeStyle {
-    pub status_terminal_color: Color32,
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
@@ -135,7 +134,6 @@ impl Style {
         const COLOR_TEXT: Color32 = Color32::from_rgb(192, 192, 192);
         const COLOR_TEXT_NONINTERACTIVE: Color32 = Color32::from_rgb(140, 140, 140);
         const COLOR_TEXT_CHECKED: Color32 = Color32::from_rgb(60, 50, 20);
-        const COLOR_DOT_TERMINAL: Color32 = Color32::from_rgb(128, 128, 128);
         const COLOR_DOT_IMPURE: Color32 = Color32::from_rgb(255, 150, 70);
         const COLOR_SHADOW_EXECUTED: Color32 = Color32::from_rgb(66, 216, 130);
         const COLOR_SHADOW_CACHED: Color32 = Color32::from_rgb(248, 216, 75);
@@ -204,7 +202,6 @@ impl Style {
                 const_stroke_width: scaled(1.0),
 
                 status_dot_radius: scaled(4.0),
-                status_terminal_color: COLOR_DOT_TERMINAL,
                 status_impure_color: COLOR_DOT_IMPURE,
 
                 executed_shadow: Shadow {

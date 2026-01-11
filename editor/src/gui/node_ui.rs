@@ -7,6 +7,7 @@ use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 use crate::gui::graph_ui_interaction::GraphUiAction;
 use crate::gui::node_layout::NodeLayout;
+use crate::model::ViewNode;
 use common::BoolExt;
 use eframe::egui;
 use egui::epaint::CornerRadiusF32;
@@ -91,7 +92,7 @@ impl NodeUi {
             render_cache_btn(gui, ui_interaction, node_layout, node);
             const_bind_frame.render(gui, ui_interaction, node_layout, node, breaker);
 
-            let node_drag_port_result = render_ports(gui, node_layout, node_id);
+            let node_drag_port_result = render_ports(gui, node_layout, node);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
             render_port_labels(gui, node_layout);
         }
@@ -284,29 +285,15 @@ fn render_hints(
     gui: &mut Gui<'_>,
     node_layout: &NodeLayout,
     node_id: NodeId,
-    is_terminal: bool,
+    _is_terminal: bool,
     node_behavior: NodeBehavior,
     func: &graph::prelude::Func,
 ) {
     let dot_radius = gui.style.node.status_dot_radius;
     let dot_step = (dot_radius * 2.0) + gui.style.small_padding;
 
-    if is_terminal {
-        let center = node_layout.dot_center(0, dot_step);
-        gui.painter()
-            .circle_filled(center, dot_radius, gui.style.node.status_terminal_color);
-        let dot_rect =
-            egui::Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-        let dot_id = gui
-            .ui()
-            .make_persistent_id(("node_status_terminal", node_id));
-        let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
-        if dot_response.hovered() {
-            dot_response.show_tooltip_text("terminal");
-        }
-    }
     if node_behavior == NodeBehavior::AsFunction && func.behavior == FuncBehavior::Impure {
-        let center = node_layout.dot_center(usize::from(is_terminal), dot_step);
+        let center = node_layout.dot_center(0, dot_step);
         gui.painter()
             .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
         let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
@@ -356,7 +343,7 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayo
     false
 }
 
-fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) -> PortDragInfo {
+fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node: &Node) -> PortDragInfo {
     let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
@@ -378,7 +365,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
      -> PortDragInfo {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let ui = gui.ui();
-        let port_id = ui.make_persistent_id(("node_port", kind, node_id, idx));
+        let port_id = ui.make_persistent_id(("node_port", kind, node.id, idx));
         let response = ui.interact(port_rect, port_id, Sense::drag() | Sense::hover());
         let is_hovered = ui.rect_contains_pointer(port_rect);
 
@@ -387,7 +374,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
 
         let port_info = PortInfo {
             port: PortRef {
-                node_id,
+                node_id: node.id,
                 port_idx: idx,
                 kind,
             },
@@ -406,8 +393,7 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
 
     let mut port_drag_info: PortDragInfo = PortDragInfo::None;
 
-    {
-        // event trigger
+    if node.terminal {
         let center = node_layout.trigger_center();
         port_drag_info = draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
             .prefer(port_drag_info);

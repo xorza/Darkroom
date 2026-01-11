@@ -346,9 +346,13 @@ impl ConnectionUi {
         drag.current_pos = pointer_pos;
 
         match drag_port_info {
-            PortDragInfo::None => ConnectionDragUpdate::InProgress,
+            PortDragInfo::None => {
+                drag.end_port = None;
+                ConnectionDragUpdate::InProgress
+            }
             PortDragInfo::DragStart(_) => unreachable!(),
             PortDragInfo::Hover(port_info) => {
+                drag.end_port = None;
                 if drag.start_port.port.kind.opposite() == port_info.port.kind {
                     drag.end_port = Some(port_info);
                     drag.current_pos = port_info.center;
