@@ -142,6 +142,20 @@ impl Style {
         const CORNER_RADIUS: f32 = 4.0;
         const SMALL_CORNER_RADIUS: f32 = 2.0;
         const DEFAULT_BG_STROKE_WIDTH: f32 = 1.0;
+        const CONNECTION_FEATHER: f32 = 0.8;
+        const CONNECTION_STROKE_WIDTH: f32 = 1.5;
+        const CONNECTION_HIGHLIGHT_FEATHER: f32 = 3.6;
+        const CONNECTION_HOVER_DETECTION_WIDTH: f32 = 6.0;
+        const CONNECTION_BREAKER_STROKE_WIDTH: f32 = 2.0;
+        const STATUS_DOT_RADIUS: f32 = 4.0;
+        const SHADOW_BLUR: u8 = 5;
+        const SHADOW_SPREAD: u8 = 2;
+        const CACHE_BTN_WIDTH: f32 = 50.0;
+        const REMOVE_BTN_SIZE: f32 = 10.0;
+        const PORT_RADIUS: f32 = 18.0;
+        const PORT_ACTIVATION_RADIUS: f32 = 25.0;
+        const PORT_LABEL_SIDE_PADDING: f32 = 8.0;
+        const CONST_BADGE_OFFSET: Vec2 = Vec2::new(-15.0, -15.0);
 
         let inactive_bg_stroke =
             Stroke::new(scaled(DEFAULT_BG_STROKE_WIDTH), COLOR_STROKE_INACTIVE);
@@ -192,43 +206,46 @@ impl Style {
                 bg_color: COLOR_BG_GRAPH,
             },
             connections: ConnectionStyle {
-                feather: scaled(0.8),
-                stroke_width: scaled(1.5),
-                highlight_feather: scaled(3.6),
+                feather: scaled(CONNECTION_FEATHER),
+                stroke_width: scaled(CONNECTION_STROKE_WIDTH),
+                highlight_feather: scaled(CONNECTION_HIGHLIGHT_FEATHER),
                 broke_clr: COLOR_STROKE_BROKE,
-                hover_detection_width: 6.0,
-                breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
+                hover_detection_width: CONNECTION_HOVER_DETECTION_WIDTH,
+                breaker_stroke: Stroke::new(
+                    scaled(CONNECTION_BREAKER_STROKE_WIDTH),
+                    COLOR_STROKE_BREAKER,
+                ),
             },
             node: NodeStyle {
-                status_dot_radius: scaled(4.0),
+                status_dot_radius: scaled(STATUS_DOT_RADIUS),
                 status_impure_color: COLOR_DOT_IMPURE,
 
                 executed_shadow: Shadow {
                     color: COLOR_SHADOW_EXECUTED,
                     offset: [0, 0],
-                    blur: scaled_u8(5),
-                    spread: scaled_u8(2),
+                    blur: scaled_u8(SHADOW_BLUR),
+                    spread: scaled_u8(SHADOW_SPREAD),
                 },
                 cached_shadow: Shadow {
                     color: COLOR_SHADOW_CACHED,
                     offset: [0, 0],
-                    blur: scaled_u8(5),
-                    spread: scaled_u8(2),
+                    blur: scaled_u8(SHADOW_BLUR),
+                    spread: scaled_u8(SHADOW_SPREAD),
                 },
                 missing_inputs_shadow: Shadow {
                     color: COLOR_SHADOW_MISSING,
                     offset: [0, 0],
-                    blur: scaled_u8(5),
-                    spread: scaled_u8(2),
+                    blur: scaled_u8(SHADOW_BLUR),
+                    spread: scaled_u8(SHADOW_SPREAD),
                 },
 
-                cache_btn_width: scaled(50.0),
-                remove_btn_size: scaled(10.0),
+                cache_btn_width: scaled(CACHE_BTN_WIDTH),
+                remove_btn_size: scaled(REMOVE_BTN_SIZE),
 
-                port_radius: scaled(18.0 * 0.3),
-                port_activation_radius: scaled(18.0 * 0.3 * 1.3),
-                port_label_side_padding: scaled(8.0),
-                const_badge_offset: Vec2::new(scaled(-15.0), scaled(-15.0)),
+                port_radius: scaled(PORT_RADIUS),
+                port_activation_radius: scaled(PORT_ACTIVATION_RADIUS),
+                port_label_side_padding: scaled(PORT_LABEL_SIDE_PADDING),
+                const_badge_offset: CONST_BADGE_OFFSET * scale,
 
                 input_port_color: COLOR_PORT_INPUT,
                 output_port_color: COLOR_PORT_OUTPUT,

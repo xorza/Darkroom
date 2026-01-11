@@ -62,6 +62,8 @@ font/color/background/padding when not explicitly set.
 `Gui` now owns a cloned `Style` to avoid borrowing it from callers.
 `Gui` now exposes `set_scale` to update scale and recreate `Style` when zoom changes.
 `Style.node` now carries `const_badge_offset` for const input badge positioning.
+Style sizing literals for connection shadows, node ports, cache/remove buttons, and connection strokes are now named
+constants in `Style::new` for easier tuning.
 Const int drag widgets now render directly on the main UI instead of using a child text UI scope.
 Const input badge link now renders as a bezier polyline mesh instead of a straight line.
 Const input badge rendering is owned by `ConstBindUi` on `NodeUi`.
