@@ -244,16 +244,14 @@ impl ConnectionUi {
 
         if let Some(temp_connection) = &self.temp_connection {
             let (start, end) = match temp_connection.start_port.port.kind {
-                PortKind::Input => (
+                PortKind::Trigger | PortKind::Input => (
                     temp_connection.current_pos,
                     temp_connection.start_port.center,
                 ),
-                PortKind::Output => (
+                PortKind::Event | PortKind::Output => (
                     temp_connection.start_port.center,
                     temp_connection.current_pos,
                 ),
-                PortKind::Trigger => todo!(),
-                PortKind::Event => todo!(),
             };
 
             self.temp_connection_bezier
@@ -288,7 +286,7 @@ impl ConnectionUi {
             PortDragInfo::None => ConnectionDragUpdate::InProgress,
             PortDragInfo::DragStart(_) => unreachable!(),
             PortDragInfo::Hover(port_info) => {
-                if drag.start_port.port.kind != port_info.port.kind {
+                if drag.start_port.port.kind.opposite() == port_info.port.kind {
                     drag.end_port = Some(port_info);
                     drag.current_pos = port_info.center;
                 }
@@ -345,5 +343,16 @@ impl ConnectionUi {
 impl KeyIndexKey<ConnectionKey> for ConnectionCurve {
     fn key(&self) -> &ConnectionKey {
         &self.key
+    }
+}
+
+impl PortKind {
+    pub fn opposite(&self) -> Self {
+        match self {
+            PortKind::Input => PortKind::Output,
+            PortKind::Output => PortKind::Input,
+            PortKind::Trigger => PortKind::Event,
+            PortKind::Event => PortKind::Trigger,
+        }
     }
 }
