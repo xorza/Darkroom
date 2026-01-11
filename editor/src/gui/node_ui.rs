@@ -365,10 +365,10 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
     let output_base = gui.style.node.output_port_color;
     let output_hover = gui.style.node.output_hover_color;
 
-    let trigger_base = gui.style.node.input_port_color;
-    let trigger_hover = gui.style.node.input_hover_color;
-    let _event_base = gui.style.node.output_port_color;
-    let _event_hover = gui.style.node.output_hover_color;
+    let trigger_base = gui.style.node.trigger_port_color;
+    let trigger_hover = gui.style.node.trigger_hover_color;
+    let _event_base = gui.style.node.event_port_color;
+    let _event_hover = gui.style.node.event_hover_color;
 
     let mut draw_port = |center: Pos2,
                          kind: PortKind,
