@@ -82,6 +82,13 @@ impl Graph {
                 }
                 _ => {}
             });
+
+        self.nodes
+            .iter_mut()
+            .flat_map(|node| node.events.iter_mut())
+            .for_each(|event| {
+                event.subscribers.retain(|sub| *sub != id);
+            });
     }
 
     pub fn by_name(&self, name: &str) -> Option<&Node> {
