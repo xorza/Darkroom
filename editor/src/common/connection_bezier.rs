@@ -69,33 +69,7 @@ impl ConnectionBezier {
         sense: Sense,
         id_salt: impl std::hash::Hash,
         style: ConnectionBezierStyle,
-        // hovered: bool,
-        // broke: bool,
     ) -> Response {
-        // let style = self.style.unwrap_or_else(|| {
-        //     if broke {
-        //         ConnectionBezierStyle {
-        //             start_color: gui.style.connections.broke_clr,
-        //             end_color: gui.style.connections.broke_clr,
-        //             stroke_width: gui.style.connections.stroke_width,
-        //             feather: DEFAULT_FEATHER,
-        //         }
-        //     } else if hovered {
-        //         ConnectionBezierStyle {
-        //             start_color: gui.style.node.output_hover_color,
-        //             end_color: gui.style.node.input_hover_color,
-        //             stroke_width: gui.style.connections.stroke_width,
-        //             feather: DEFAULT_FEATHER,
-        //         }
-        //     } else {
-        //         ConnectionBezierStyle {
-        //             start_color: gui.style.node.output_port_color,
-        //             end_color: gui.style.node.input_port_color,
-        //             stroke_width: gui.style.connections.stroke_width,
-        //             feather: DEFAULT_FEATHER,
-        //         }
-        //     }
-        // });
         self.rebuild_mesh_if_needed(style);
 
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
