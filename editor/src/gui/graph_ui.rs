@@ -11,8 +11,8 @@ use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 use crate::common::UiEquals;
 use crate::gui::background::DottedBackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
-use crate::gui::connection_ui::PortKind;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
+use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
@@ -216,26 +216,55 @@ impl GraphUi {
                     let iter = self
                         .connections
                         .broke_iter()
-                        .chain(self.node_ui.const_bind_ui.broke_iter());
+                        .chain(self.node_ui.const_bind_ui.broke_iter())
+                        .cloned();
 
                     for connection in iter {
-                        todo!()
-                        // let node = ctx
-                        //     .view_graph
-                        //     .graph
-                        //     .nodes
-                        //     .by_key_mut(&connection.in_node_id)
-                        //     .unwrap();
-                        // let input = &mut node.inputs[connection.input_idx];
-                        // let before = input.binding.clone();
-                        // input.binding = Binding::None;
-                        // let after = input.binding.clone();
-                        // interaction.add_action(GraphUiAction::InputChanged {
-                        //     node_id: connection.in_node_id,
-                        //     input_idx: connection.input_idx,
-                        //     before,
-                        //     after,
-                        // });
+                        match connection {
+                            ConnectionKey::Input {
+                                input_node_id,
+                                input_idx,
+                            } => {
+                                let node = ctx
+                                    .view_graph
+                                    .graph
+                                    .nodes
+                                    .by_key_mut(&input_node_id)
+                                    .unwrap();
+                                let input = &mut node.inputs[input_idx];
+                                let before = input.binding.clone();
+                                input.binding = Binding::None;
+                                let after = input.binding.clone();
+                                interaction.add_action(GraphUiAction::InputChanged {
+                                    node_id: input_node_id,
+                                    input_idx,
+                                    before,
+                                    after,
+                                });
+                            }
+                            ConnectionKey::Event {
+                                event_node_id,
+                                event_idx,
+                                trigger_node_id,
+                            } => {
+                                let node = ctx
+                                    .view_graph
+                                    .graph
+                                    .nodes
+                                    .by_key_mut(&event_node_id)
+                                    .unwrap();
+                                let event = &mut node.events[event_idx];
+                                let before = event.subscribers.clone();
+                                event.subscribers.retain(|sub| *sub != trigger_node_id);
+                                let after = event.subscribers.clone();
+                                interaction.add_action(GraphUiAction::EventConnectionChanged {
+                                    event_node_id,
+                                    event_idx,
+                                    before,
+                                    after,
+                                });
+                            }
+                        }
                     }
 
                     for node_id in self.node_ui.node_ids_hit_breaker.iter() {
