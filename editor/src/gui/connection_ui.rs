@@ -174,12 +174,12 @@ impl ConnectionUi {
                             }
                         });
 
-                    missing_curve.bezier.style(ConnectionBezierStyle {
+                    let style = ConnectionBezierStyle {
                         start_color: gui.style.node.missing_inputs_shadow.color,
                         end_color: gui.style.node.missing_inputs_shadow.color,
                         stroke_width: gui.style.connections.stroke_width * gui.scale,
                         feather: gui.style.node.missing_inputs_shadow.blur as f32,
-                    });
+                    };
                     missing_curve
                         .bezier
                         .update_points(output_pos, input_pos, gui.scale);
@@ -191,8 +191,7 @@ impl ConnectionUi {
                             connection_key.input_node_id,
                             connection_key.input_idx,
                         ),
-                        false,
-                        false,
+                        style,
                     );
                 }
 
@@ -204,12 +203,36 @@ impl ConnectionUi {
                 curve.bezier.update_points(output_pos, input_pos, gui.scale);
                 curve.broke = curve.bezier.intersects_breaker(breaker);
 
+                let style = {
+                    if curve.broke {
+                        ConnectionBezierStyle {
+                            start_color: gui.style.connections.broke_clr,
+                            end_color: gui.style.connections.broke_clr,
+                            stroke_width: gui.style.connections.stroke_width,
+                            feather: gui.style.connections.feather,
+                        }
+                    } else if curve.hovered {
+                        ConnectionBezierStyle {
+                            start_color: gui.style.node.output_hover_color,
+                            end_color: gui.style.node.input_hover_color,
+                            stroke_width: gui.style.connections.stroke_width,
+                            feather: gui.style.connections.feather,
+                        }
+                    } else {
+                        ConnectionBezierStyle {
+                            start_color: gui.style.node.output_port_color,
+                            end_color: gui.style.node.input_port_color,
+                            stroke_width: gui.style.connections.stroke_width,
+                            feather: gui.style.connections.feather,
+                        }
+                    }
+                };
+
                 let response = curve.bezier.show(
                     gui,
                     Sense::click() | Sense::hover(),
                     ("connection", curve.key.input_node_id, curve.key.input_idx),
-                    curve.hovered,
-                    curve.broke,
+                    style,
                 );
 
                 if breaker.is_some() {
@@ -253,8 +276,17 @@ impl ConnectionUi {
 
             self.temp_connection_bezier
                 .update_points(start, end, gui.scale);
-            self.temp_connection_bezier
-                .show(gui, Sense::hover(), "temp_connection", false, false);
+            self.temp_connection_bezier.show(
+                gui,
+                Sense::hover(),
+                "temp_connection",
+                ConnectionBezierStyle {
+                    start_color: gui.style.node.output_port_color,
+                    end_color: gui.style.node.input_port_color,
+                    stroke_width: gui.style.connections.stroke_width,
+                    feather: gui.style.connections.feather,
+                },
+            );
         }
     }
 

@@ -5,7 +5,7 @@ use egui::{
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
-use crate::common::connection_bezier::ConnectionBezier;
+use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -93,12 +93,36 @@ impl<'a> ConstBindFrame<'a> {
 
             let prev_broke = breaker.is_some() && curve.broke;
 
+            let style = {
+                if prev_broke {
+                    ConnectionBezierStyle {
+                        start_color: gui.style.connections.broke_clr,
+                        end_color: gui.style.connections.broke_clr,
+                        stroke_width: gui.style.connections.stroke_width,
+                        feather: gui.style.connections.feather,
+                    }
+                } else if prev_hovered {
+                    ConnectionBezierStyle {
+                        start_color: gui.style.node.output_hover_color,
+                        end_color: gui.style.node.input_hover_color,
+                        stroke_width: gui.style.connections.stroke_width,
+                        feather: gui.style.connections.feather,
+                    }
+                } else {
+                    ConnectionBezierStyle {
+                        start_color: gui.style.node.output_port_color,
+                        end_color: gui.style.node.input_port_color,
+                        stroke_width: gui.style.connections.stroke_width,
+                        feather: gui.style.connections.feather,
+                    }
+                }
+            };
+
             let response = curve.bezier.show(
                 gui,
                 Sense::click() | Sense::hover(),
                 ("const_link", node.id, input_idx),
-                prev_hovered,
-                prev_broke,
+                style,
             );
 
             let mut currently_hovered = response.hovered();

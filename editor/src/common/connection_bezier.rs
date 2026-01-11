@@ -26,9 +26,6 @@ pub struct ConnectionBezier {
     start: Pos2,
     end: Pos2,
     scale: f32,
-    // hovered: bool,
-    // broke: bool,
-    style: Option<ConnectionBezierStyle>,
     built_style: Option<ConnectionBezierStyle>,
 }
 
@@ -66,47 +63,39 @@ impl ConnectionBezier {
         bezier_helper::sample(points.as_mut_slice(), start, end, scale);
     }
 
-    pub fn style(&mut self, style: ConnectionBezierStyle) {
-        assert!(style.stroke_width.is_finite() && style.stroke_width >= 0.0);
-
-        if self.style != Some(style) {
-            self.style = Some(style);
-            self.inited = false;
-        }
-    }
-
     pub fn show(
         &mut self,
         gui: &mut Gui<'_>,
         sense: Sense,
         id_salt: impl std::hash::Hash,
-        hovered: bool,
-        broke: bool,
+        style: ConnectionBezierStyle,
+        // hovered: bool,
+        // broke: bool,
     ) -> Response {
-        let style = self.style.unwrap_or_else(|| {
-            if broke {
-                ConnectionBezierStyle {
-                    start_color: gui.style.connections.broke_clr,
-                    end_color: gui.style.connections.broke_clr,
-                    stroke_width: gui.style.connections.stroke_width,
-                    feather: DEFAULT_FEATHER,
-                }
-            } else if hovered {
-                ConnectionBezierStyle {
-                    start_color: gui.style.node.output_hover_color,
-                    end_color: gui.style.node.input_hover_color,
-                    stroke_width: gui.style.connections.stroke_width,
-                    feather: DEFAULT_FEATHER,
-                }
-            } else {
-                ConnectionBezierStyle {
-                    start_color: gui.style.node.output_port_color,
-                    end_color: gui.style.node.input_port_color,
-                    stroke_width: gui.style.connections.stroke_width,
-                    feather: DEFAULT_FEATHER,
-                }
-            }
-        });
+        // let style = self.style.unwrap_or_else(|| {
+        //     if broke {
+        //         ConnectionBezierStyle {
+        //             start_color: gui.style.connections.broke_clr,
+        //             end_color: gui.style.connections.broke_clr,
+        //             stroke_width: gui.style.connections.stroke_width,
+        //             feather: DEFAULT_FEATHER,
+        //         }
+        //     } else if hovered {
+        //         ConnectionBezierStyle {
+        //             start_color: gui.style.node.output_hover_color,
+        //             end_color: gui.style.node.input_hover_color,
+        //             stroke_width: gui.style.connections.stroke_width,
+        //             feather: DEFAULT_FEATHER,
+        //         }
+        //     } else {
+        //         ConnectionBezierStyle {
+        //             start_color: gui.style.node.output_port_color,
+        //             end_color: gui.style.node.input_port_color,
+        //             stroke_width: gui.style.connections.stroke_width,
+        //             feather: DEFAULT_FEATHER,
+        //         }
+        //     }
+        // });
         self.rebuild_mesh_if_needed(style);
 
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
@@ -211,7 +200,6 @@ impl Default for ConnectionBezier {
         Self {
             polyline: PolylineMesh::with_point_capacity(ConnectionBezier::DEFAULT_POINTS),
 
-            style: None,
             built_style: None,
 
             start: Pos2::ZERO,
@@ -219,9 +207,6 @@ impl Default for ConnectionBezier {
             scale: 1.0,
 
             inited: false,
-
-            // hovered: false,
-            // broke: false,
             points_dirty: false,
         }
     }
