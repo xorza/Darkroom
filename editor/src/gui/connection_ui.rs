@@ -186,8 +186,8 @@ impl ConnectionUi {
                     let style = ConnectionBezierStyle {
                         start_color: gui.style.node.missing_inputs_shadow.color,
                         end_color: gui.style.node.missing_inputs_shadow.color,
-                        stroke_width: gui.style.connections.stroke_width * gui.scale,
-                        feather: gui.style.node.missing_inputs_shadow.blur as f32,
+                        stroke_width: gui.style.connections.stroke_width,
+                        feather: gui.style.connections.highlight_feather,
                     };
                     missing_curve
                         .bezier
@@ -279,8 +279,8 @@ impl ConnectionUi {
                         let style = ConnectionBezierStyle {
                             start_color: gui.style.node.missing_inputs_shadow.color,
                             end_color: gui.style.node.missing_inputs_shadow.color,
-                            stroke_width: gui.style.connections.stroke_width * gui.scale,
-                            feather: gui.style.node.missing_inputs_shadow.blur as f32,
+                            stroke_width: gui.style.connections.stroke_width,
+                            feather: gui.style.connections.highlight_feather,
                         };
                         highlighted
                             .bezier

@@ -57,6 +57,7 @@ pub struct GraphBackgroundStyle {
 pub struct ConnectionStyle {
     pub feather: f32,
     pub stroke_width: f32,
+    pub highlight_feather: f32,
     pub broke_clr: Color32,
     pub hover_detection_width: f32,
     pub breaker_stroke: Stroke,
@@ -194,6 +195,7 @@ impl Style {
             connections: ConnectionStyle {
                 feather: scaled(0.8),
                 stroke_width: scaled(1.5),
+                highlight_feather: scaled(3.6),
                 broke_clr: COLOR_STROKE_BROKE,
                 hover_detection_width: 6.0,
                 breaker_stroke: Stroke::new(scaled(2.0), COLOR_STROKE_BREAKER),
