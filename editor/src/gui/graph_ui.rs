@@ -318,13 +318,7 @@ impl GraphUi {
                                 let result =
                                     apply_data_connection(ctx.view_graph, input_port, output_port);
                                 match result {
-                                    Ok((input_node_id, input_idx, before, after)) => interaction
-                                        .add_action(GraphUiAction::InputChanged {
-                                            node_id: input_node_id,
-                                            input_idx,
-                                            before,
-                                            after,
-                                        }),
+                                    Ok(action) => interaction.add_action(action),
                                     Err(err) => interaction.add_error(err),
                                 }
                             }
@@ -332,16 +326,7 @@ impl GraphUi {
                                 let result =
                                     apply_event_connection(ctx.view_graph, input_port, output_port);
                                 match result {
-                                    Ok(Some((event_node_id, event_idx, subscriber, change))) => {
-                                        interaction.add_action(
-                                            GraphUiAction::EventConnectionChanged {
-                                                event_node_id,
-                                                event_idx,
-                                                subscriber,
-                                                change,
-                                            },
-                                        );
-                                    }
+                                    Ok(Some(action)) => interaction.add_action(action),
                                     Ok(None) => {}
                                     Err(err) => interaction.add_error(err),
                                 }
@@ -537,7 +522,7 @@ fn apply_data_connection(
     view_graph: &mut model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<(NodeId, usize, Binding, Binding), Error> {
+) -> Result<GraphUiAction, Error> {
     if input_port.node_id == output_port.node_id {
         return Err(Error::CycleDetected {
             input_node_id: input_port.node_id,
@@ -562,7 +547,12 @@ fn apply_data_connection(
     });
     input.binding = after.clone();
 
-    Ok((input_port.node_id, input_port.port_idx, before, after))
+    Ok(GraphUiAction::InputChanged {
+        node_id: input_port.node_id,
+        input_idx: input_port.port_idx,
+        before,
+        after,
+    })
 }
 
 /// Connects an event output port to a trigger input port in `view_graph`.
@@ -575,7 +565,7 @@ fn apply_event_connection(
     view_graph: &mut model::ViewGraph,
     input_port: PortRef,
     output_port: PortRef,
-) -> Result<Option<(NodeId, usize, NodeId, EventSubscriberChange)>, Error> {
+) -> Result<Option<GraphUiAction>, Error> {
     assert_eq!(input_port.kind, PortKind::Trigger);
     assert_eq!(output_port.kind, PortKind::Event);
 
@@ -598,12 +588,12 @@ fn apply_event_connection(
 
     event.subscribers.push(input_port.node_id);
 
-    Ok(Some((
-        output_port.node_id,
-        output_port.port_idx,
-        input_port.node_id,
-        EventSubscriberChange::Added,
-    )))
+    Ok(Some(GraphUiAction::EventConnectionChanged {
+        event_node_id: output_port.node_id,
+        event_idx: output_port.port_idx,
+        subscriber: input_port.node_id,
+        change: EventSubscriberChange::Added,
+    }))
 }
 
 fn view_selected_node(gui: &mut Gui<'_>, ctx: &mut GraphContext<'_>, graph_layout: &GraphLayout) {
