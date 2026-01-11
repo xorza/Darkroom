@@ -443,10 +443,10 @@ impl ExecutionGraph {
         ids: T,
     ) -> Result<ExecutionStats> {
         self.e_node_terminal_idx.clear();
-        for node_id in ids {
-            let e_node_idx = self.e_nodes.index_of_key(&node_id).unwrap();
-            self.e_node_terminal_idx.push(e_node_idx);
-        }
+        self.e_node_terminal_idx.extend(
+            ids.into_iter()
+                .map(|node_id| self.e_nodes.index_of_key(&node_id).unwrap()),
+        );
 
         self.build_execution_plan()?;
 

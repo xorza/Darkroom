@@ -173,6 +173,7 @@ Editor view tests now derive their graph view from `test_graph` + `test_func_lib
 Execution graph tests now verify that impure functions execute without input changes, pure functions do not, and Output
 behaviors panic unless nodes are Terminal.
 Execution graph tests include coverage for toggling a Once node back to AsFunction to refresh upstream execution.
+Execution graph execution now builds terminal indices with a single iterator extend in execute-with-ids setup.
 
 Commit messages are often prompts sent to an AI agent to request a change.
 
