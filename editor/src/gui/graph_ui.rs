@@ -268,16 +268,9 @@ impl GraphUi {
                     }
 
                     for node_id in self.node_ui.node_ids_hit_breaker.iter() {
-                        let (view_node, node, incoming_connections, incoming_events) =
-                            ctx.view_graph.removal_payload(node_id);
+                        let action = ctx.view_graph.removal_action(node_id);
                         ctx.view_graph.remove_node(node_id);
-
-                        interaction.add_action(GraphUiAction::NodeRemoved {
-                            view_node,
-                            node,
-                            incoming_connections,
-                            incoming_events,
-                        });
+                        interaction.add_action(action);
                     }
                 }
             }

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use crate::common::UiEquals;
 
 use super::ViewNode;
+use crate::gui::graph_ui_interaction::GraphUiAction;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingConnection {
@@ -143,11 +144,7 @@ impl ViewGraph {
         }
     }
 
-    // todo return GraphUiAction
-    pub fn removal_payload(
-        &self,
-        node_id: &NodeId,
-    ) -> (ViewNode, Node, Vec<IncomingConnection>, Vec<IncomingEvent>) {
+    pub fn removal_action(&self, node_id: &NodeId) -> GraphUiAction {
         let view_node = self
             .view_nodes
             .by_key(node_id)
@@ -182,7 +179,12 @@ impl ViewGraph {
                 }
             }
         }
-        (view_node, node, incoming_connections, incoming_events)
+        GraphUiAction::NodeRemoved {
+            view_node,
+            node,
+            incoming_connections,
+            incoming_events,
+        }
     }
 }
 
