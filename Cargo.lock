@@ -1233,6 +1233,7 @@ name = "graph"
 version = "0.1.1"
 dependencies = [
  "anyhow",
+ "bincode",
  "common",
  "criterion",
  "glam",

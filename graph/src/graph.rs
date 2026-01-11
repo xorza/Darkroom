@@ -412,6 +412,7 @@ pub fn test_graph() -> Graph {
 #[cfg(test)]
 mod tests {
     use crate::graph::Graph;
+    use bincode::config;
     use common::FileFormat;
 
     #[test]
@@ -424,6 +425,14 @@ mod tests {
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized, serialized_again);
         }
+
+        let bin = bincode::serde::encode_to_vec(&graph, config::standard())
+            .expect("graph should serialize via bincode");
+        let (decoded, read) =
+            bincode::serde::decode_from_slice::<Graph, _>(&bin, config::standard())
+                .expect("graph should deserialize via bincode");
+        assert_eq!(read, bin.len());
+        assert_eq!(graph, decoded);
 
         Ok(())
     }
