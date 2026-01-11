@@ -188,7 +188,7 @@ impl AppData {
             self.func_lib.by_name("frame event").unwrap(),
         ));
 
-        let graph_view = ViewGraph::from_graph(&graph);
+        let graph_view: ViewGraph = graph.into();
         self.apply_graph(graph_view, true);
 
         self.set_status("Loaded sample test graph");

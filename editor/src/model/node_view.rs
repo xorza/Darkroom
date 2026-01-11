@@ -1,6 +1,6 @@
 use common::key_index_vec::KeyIndexKey;
 use egui::Pos2;
-use graph::graph::NodeId;
+use graph::graph::{Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::common::UiEquals;
@@ -9,18 +9,19 @@ use crate::common::UiEquals;
 pub struct ViewNode {
     pub id: NodeId,
     pub pos: Pos2,
+    pub removable: bool,
 }
 
-impl Default for ViewNode {
-    fn default() -> Self {
-        let id = NodeId::unique();
-
+impl From<&Node> for ViewNode {
+    fn from(node: &Node) -> Self {
         Self {
-            id,
+            id: node.id,
             pos: Pos2::ZERO,
+            removable: true,
         }
     }
 }
+
 impl KeyIndexKey<NodeId> for ViewNode {
     fn key(&self) -> &NodeId {
         &self.id

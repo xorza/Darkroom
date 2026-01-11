@@ -174,7 +174,7 @@ mod tests {
     #[test]
     fn action_undo_redo_roundtrip() {
         let graph = test_graph();
-        let mut view_graph = ViewGraph::from_graph(&graph);
+        let mut view_graph: ViewGraph = graph.into();
         let original = view_graph.serialize(FileFormat::Json);
 
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn max_steps_limits_history() {
         let graph = test_graph();
-        let mut view_graph = ViewGraph::from_graph(&graph);
+        let mut view_graph: ViewGraph = graph.into();
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
         let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
 
