@@ -43,6 +43,13 @@ impl NodeLayout {
             self.output_first_center.y + self.port_row_height * index as f32,
         )
     }
+    pub fn event_center(&self, index: usize) -> Pos2 {
+        egui::pos2(
+            self.output_first_center.x,
+            self.output_first_center.y
+                + self.port_row_height * (index + self.output_galleys.len()) as f32,
+        )
+    }
 
     pub fn dot_center(&self, index: usize, dot_step: f32) -> Pos2 {
         let first = self.dot_first_center;

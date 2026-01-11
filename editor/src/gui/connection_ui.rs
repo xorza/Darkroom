@@ -135,6 +135,7 @@ impl ConnectionUi {
         for node_view in &ctx.view_graph.view_nodes {
             let node_id = node_view.id;
 
+            let input_layout = graph_layout.node_layout(&node_id);
             let inputs_len = ctx.view_graph.graph.by_id(&node_id).unwrap().inputs.len();
 
             for input_idx in 0..inputs_len {
@@ -151,7 +152,6 @@ impl ConnectionUi {
                     input_idx,
                 };
                 let output_layout = graph_layout.node_layout(&binding_target_id);
-                let input_layout = graph_layout.node_layout(&node_id);
 
                 let input_pos = input_layout.input_center(input_idx);
                 let output_pos = output_layout.output_center(binding_port_idx);
@@ -244,6 +244,30 @@ impl ConnectionUi {
 
                     curve.hovered = response.hovered();
                 }
+            }
+
+            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+            for (event_idx, event) in node.events.iter().enumerate() {
+                let event_layout = graph_layout.node_layout(&node.id);
+                let event_pos = event_layout.output_center(event_idx);
+
+                // let (binding_target_id, binding_port_idx) = {
+                //     let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+                //     let input = &node.inputs[input_idx];
+                //     let Binding::Bind(binding) = &input.binding else {
+                //         continue;
+                //     };
+                //     (binding.target_id, binding.port_idx)
+                // };
+                // let connection_key = ConnectionKey {
+                //     in_node_id: node_id,
+                //     input_idx,
+                // };
+                // let output_layout = graph_layout.node_layout(&binding_target_id);
+
+                // let input_pos = input_layout.input_center(input_idx);
+
+                //
             }
         }
 

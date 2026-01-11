@@ -431,9 +431,8 @@ fn render_ports(gui: &mut Gui<'_>, node_layout: &NodeLayout, node_id: NodeId) ->
         port_drag_info = port_drag_info.prefer(drag_info);
     }
 
-    let output_count = node_layout.output_galleys.len();
     for event_idx in 0..node_layout.event_galleys.len() {
-        let center = node_layout.output_center(output_count + event_idx);
+        let center = node_layout.event_center(event_idx);
         let drag_info = draw_port(center, PortKind::Event, event_idx, event_base, event_hover);
         port_drag_info = port_drag_info.prefer(drag_info);
     }
@@ -457,9 +456,8 @@ fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
             .galley(text_pos, galley.clone(), gui.style.text_color);
     }
 
-    let output_count = node_layout.output_galleys.len();
     for (event_idx, galley) in node_layout.event_galleys.iter().enumerate() {
-        let text_pos = node_layout.output_center(output_count + event_idx)
+        let text_pos = node_layout.event_center(event_idx)
             + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
         gui.painter()
             .galley(text_pos, galley.clone(), gui.style.text_color);
