@@ -238,7 +238,9 @@ Recent adjustments:
 - `EditorFuncLib` now uses an async `EventLambda` that waits on a shared `Notify`; callers construct it with
   `EditorFuncLib::new(run_event)` instead of `Default`.
 - `WorkerMessage::StartEventLoop` now carries a callback that is invoked inside the event loop task after spawning
-  the initial event lambdas.
+  the initial event lambdas, with a readiness barrier that waits for all event tasks to start polling before
+  firing the callback.
+- `ReadyState` now lives in `common/src/ready_state.rs` and is re-exported from `common::ReadyState`.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.

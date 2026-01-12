@@ -5,14 +5,14 @@ use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
-use common::Shared;
+use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::error;
 
-#[derive()]
+#[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
     Event { event_id: EventId },
@@ -25,7 +25,28 @@ pub enum WorkerMessage {
     Multi { msgs: Vec<WorkerMessage> },
 }
 
-pub type EventLoopCallback = Arc<dyn Fn() + Send + Sync + 'static>;
+#[derive(Clone)]
+pub struct EventLoopCallback {
+    inner: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
+impl EventLoopCallback {
+    pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            inner: Arc::new(callback),
+        }
+    }
+
+    pub fn call(&self) {
+        (self.inner)();
+    }
+}
+
+impl std::fmt::Debug for EventLoopCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventLoopCallback").finish()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId {
@@ -215,11 +236,18 @@ fn start_event_loop(
     let event_task_handle = tokio::spawn({
         async move {
             let mut pending = JoinSet::new();
+            let ready = ReadyState::new(events.len());
             for (node_id, event_lambda) in events {
-                spawn_event_task(&mut pending, node_id, event_lambda);
+                let ready = ready.clone();
+                pending.spawn(async move {
+                    ready.signal();
+                    let event_idx = event_lambda.invoke().await;
+                    (event_lambda, node_id, event_idx)
+                });
             }
 
-            (callback)();
+            ready.wait().await;
+            callback.call();
 
             let mut event_ids: Vec<EventId> = Vec::default();
             let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
@@ -245,7 +273,10 @@ fn start_event_loop(
                 }
 
                 for (node_id, event_lambda) in events.drain(..) {
-                    spawn_event_task(&mut pending, node_id, event_lambda);
+                    pending.spawn(async move {
+                        let event_idx = event_lambda.invoke().await;
+                        (event_lambda, node_id, event_idx)
+                    });
                 }
             }
         }
@@ -258,17 +289,6 @@ fn start_event_loop(
     }
 }
 
-fn spawn_event_task(
-    pending: &mut JoinSet<(EventLambda, NodeId, usize)>,
-    node_id: NodeId,
-    event_lambda: EventLambda,
-) {
-    pending.spawn(async move {
-        let event_idx = event_lambda.invoke().await;
-        (event_lambda, node_id, event_idx)
-    });
-}
-
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     if let Some(event_loop_handle) = event_loop_handle.take() {
         event_loop_handle.stop().await;
@@ -277,8 +297,6 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use common::output_stream::OutputStream;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -289,7 +307,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{EventId, Worker, WorkerMessage};
+    use crate::worker::{EventId, EventLoopCallback, Worker, WorkerMessage};
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -415,7 +433,11 @@ mod tests {
         let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
 
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], Arc::new(|| {}));
+        let handle = super::start_event_loop(
+            tx,
+            vec![(node_id, event_lambda)],
+            EventLoopCallback::new(|| {}),
+        );
 
         let event_id = EventId {
             node_id,

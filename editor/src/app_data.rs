@@ -9,7 +9,7 @@ use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::WorkerMessage;
-use graph::worker::{EventId, Worker};
+use graph::worker::{EventId, EventLoopCallback, Worker};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Notify;
@@ -116,7 +116,7 @@ impl AppData {
                         func_lib: self.func_lib.clone(),
                     },
                     WorkerMessage::StartEventLoop {
-                        callback: Arc::new({
+                        callback: EventLoopCallback::new({
                             let run_event = self.run_event.clone();
                             move || {
                                 run_event.notify_waiters();
