@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use crate::context::ContextType;
 
+use crate::event::EventLambda;
 use crate::lambda::FuncLambda;
 use crate::{async_lambda, data::*};
 use common::id_type;
@@ -72,6 +73,8 @@ pub struct Func {
 
     #[serde(skip, default)]
     pub lambda: FuncLambda,
+    #[serde(skip, default)]
+    pub event_lambda: EventLambda,
 }
 impl KeyIndexKey<FuncId> for Func {
     fn key(&self) -> &FuncId {
@@ -158,15 +161,6 @@ impl FromStr for FuncEvent {
         Ok(FuncEvent {
             name: s.to_string(),
         })
-    }
-}
-
-impl std::fmt::Debug for FuncLambda {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FuncLambda::None => f.debug_struct("FuncLambda::None").finish(),
-            FuncLambda::Lambda(_) => f.debug_struct("FuncLambda::Lambda").finish(),
-        }
     }
 }
 
@@ -318,6 +312,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
                 Ok(())
             }),
+            ..Default::default()
         },
         Func {
             id: "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into(),
@@ -340,6 +335,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
         Func {
             id: "a937baff-822d-48fd-9154-58751539b59b".into(),
@@ -362,6 +358,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
         Func {
             id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into(),
@@ -402,6 +399,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 outputs[0] = (a + b).into();
                 Ok(())
             }),
+            ..Default::default()
         },
         Func {
             id: "f22cd316-1cdf-4a80-b86c-1277acd1408a".into(),
@@ -428,6 +426,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
     ]
     .into()

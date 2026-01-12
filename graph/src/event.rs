@@ -34,3 +34,12 @@ impl EventLambda {
         }
     }
 }
+
+impl std::fmt::Debug for EventLambda {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventLambda::None => f.debug_struct("EventLambda::None").finish(),
+            EventLambda::Lambda(_) => f.debug_struct("EventLambda::Lambda").finish(),
+        }
+    }
+}

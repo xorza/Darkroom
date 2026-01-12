@@ -184,6 +184,7 @@ impl LuaInvoker {
             events: vec![],
             required_contexts: vec![],
             lambda: FuncLambda::None,
+            ..Default::default()
         };
 
         let inputs: mlua::Table = table.get("inputs")?;

@@ -95,6 +95,7 @@ impl Default for TimersFuncLib {
                 outputs[1] = DynamicValue::Int(frame_no);
                 Ok(())
             }),
+            ..Default::default()
         });
 
         TimersFuncLib { func_lib: invoker }

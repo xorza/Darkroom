@@ -36,6 +36,7 @@ impl Default for EditorFuncLib {
             events: vec!["run".into()],
             required_contexts: vec![],
             lambda: FuncLambda::None,
+            ..Default::default()
         });
 
         EditorFuncLib { func_lib: invoker }
