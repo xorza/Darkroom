@@ -123,19 +123,18 @@ impl Drop for Worker {
 
 async fn worker_loop<Callback>(
     mut rx: UnboundedReceiver<WorkerMessage>,
-    _tx: UnboundedSender<WorkerMessage>,
+    tx: UnboundedSender<WorkerMessage>,
     callback: Shared<Callback>,
 ) where
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
-    // start_event_loop(tx);
-
     let mut execution_graph = ExecutionGraph::default();
     let mut msgs: Vec<WorkerMessage> = Vec::default();
 
     let mut context: Option<(Graph, FuncLib)>;
     let mut events: Vec<EventId> = Vec::default();
     let mut execute_terminals: bool;
+    let mut event_loop_handle: Option<EventLoopHandle> = None;
 
     'worker: loop {
         execute_terminals = false;
@@ -167,8 +166,13 @@ async fn worker_loop<Callback>(
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop => todo!(),
-                WorkerMessage::StopEventLoop => todo!(),
+                WorkerMessage::StartEventLoop => {
+                    stop_event_loop(&mut event_loop_handle).await;
+                    event_loop_handle = Some(start_event_loop(tx.clone()));
+                }
+                WorkerMessage::StopEventLoop => {
+                    stop_event_loop(&mut event_loop_handle).await;
+                }
             }
         }
 
@@ -189,15 +193,11 @@ fn start_event_loop(tx: UnboundedSender<WorkerMessage>) -> EventLoopHandle {
     let (event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
 
     let thread_handle = tokio::spawn(async move {
-        loop {
-            let events = event_rx.recv().await;
-
-            if let Some(events) = events {
-                let result = tx.send(WorkerMessage::Events { event_ids: events });
-                if result.is_err() {
-                    return;
-                }
-            } else {
+        while let Some(events) = event_rx.recv().await {
+            if tx
+                .send(WorkerMessage::Events { event_ids: events })
+                .is_err()
+            {
                 return;
             }
         }
@@ -208,6 +208,12 @@ fn start_event_loop(tx: UnboundedSender<WorkerMessage>) -> EventLoopHandle {
             tx: Some(event_tx),
             thread_handle: Some(thread_handle),
         }),
+    }
+}
+
+async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
+    if let Some(event_loop_handle) = event_loop_handle.take() {
+        event_loop_handle.stop().await;
     }
 }
 

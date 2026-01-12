@@ -228,6 +228,7 @@ Recent adjustments:
 - `start_event_loop` now returns an `EventLoopHandle` with `send` and async `stop` to close the event channel and await
   shutdown of the background task.
 - `EventLoopHandle` now wraps a `Shared<EventLoopInner>` so clones share the same sender and join handle.
+- Worker event-loop start/stop now routes through `stop_event_loop` helper to centralize shutdown behavior.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.
