@@ -214,7 +214,7 @@ fn start_event_loop(
                 }
 
                 let result = tx.send(WorkerMessage::Events {
-                    event_ids: event_ids.drain(..).collect(),
+                    event_ids: std::mem::take(&mut event_ids),
                 });
                 if result.is_err() {
                     return;
@@ -253,8 +253,6 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
 
 #[cfg(test)]
 mod tests {
-    use std::pin::Pin;
-
     use common::output_stream::OutputStream;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -388,20 +386,15 @@ mod tests {
     #[tokio::test]
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
-        let event_lambda = EventLambda::Lambda({
-            Pin::new(Box::new(|| async move {
-                return 1 as usize;
-            }))
-        });
+        let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
 
         let (tx, mut rx) = unbounded_channel();
         let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]);
 
         let event_id = EventId {
-            node_id: NodeId::unique(),
-            event_idx: 0,
+            node_id,
+            event_idx: 1,
         };
-        // handle.send(vec![event_id.clone()]).await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
         let WorkerMessage::Events { event_ids } = msg else {
