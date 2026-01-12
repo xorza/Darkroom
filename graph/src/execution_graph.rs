@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
@@ -133,6 +134,8 @@ pub struct ExecutionNode {
 
     #[serde(skip)]
     pub lambda: FuncLambda,
+    #[serde(skip)]
+    pub event_lambda: EventLambda,
 
     #[cfg(debug_assertions)]
     pub name: String,
