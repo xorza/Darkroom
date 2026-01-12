@@ -7,10 +7,10 @@ use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::event::EventId;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::prelude::{FuncId, FuncLambda};
+use crate::worker::EventId;
 use common::{BoolExt, FileFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]

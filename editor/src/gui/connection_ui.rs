@@ -1,9 +1,9 @@
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
-use graph::event::EventId;
 use graph::graph::{NodeId, PortAddress};
 use graph::prelude::{Binding, ExecutionStats};
+use graph::worker::EventId;
 
 use crate::common::UiEquals;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};

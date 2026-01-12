@@ -4,13 +4,12 @@ use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
-use graph::event::EventId;
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
-use graph::worker::Worker;
 use graph::worker::WorkerMessage;
+use graph::worker::{EventId, Worker};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

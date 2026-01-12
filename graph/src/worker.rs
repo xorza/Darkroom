@@ -1,8 +1,8 @@
-use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
-use crate::graph::Graph;
+use crate::graph::{Graph, NodeId};
 use common::Shared;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -18,6 +18,12 @@ pub enum WorkerMessage {
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct EventId {
+    pub node_id: NodeId,
+    pub event_idx: usize,
 }
 
 #[derive(Debug)]
@@ -223,12 +229,11 @@ mod tests {
 
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
-    use crate::event::EventId;
     use crate::function::FuncId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{Worker, WorkerMessage};
+    use crate::worker::{EventId, Worker, WorkerMessage};
     use tokio::sync::mpsc::unbounded_channel;
 
     fn log_frame_no_graph() -> Graph {
