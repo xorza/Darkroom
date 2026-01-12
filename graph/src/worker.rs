@@ -200,12 +200,12 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start { callback } => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
-                for e_node in execution_graph.e_nodes.iter() {
-                    if !e_node.event_lambda.is_none() {
-                        events.push((e_node.id, e_node.event_lambda.clone()));
-                    }
-                }
+                let events: Vec<(NodeId, EventLambda)> = execution_graph
+                    .e_nodes
+                    .iter()
+                    .filter(|e_node| !e_node.event_lambda.is_none())
+                    .map(|e_node| (e_node.id, e_node.event_lambda.clone()))
+                    .collect();
                 if !events.is_empty() {
                     event_loop_handle = Some(start_event_loop(tx.clone(), events, callback));
                 }
@@ -255,18 +255,18 @@ fn start_event_loop(
                     events.push((node_id, event_lambda));
                 }
 
-                let result = tx.send(WorkerMessage::Events {
-                    event_ids: std::mem::take(&mut event_ids),
-                });
-                if result.is_err() {
-                    return;
-                }
-
                 for (node_id, event_lambda) in events.drain(..) {
                     pending.spawn(async move {
                         let event_idx = event_lambda.invoke().await;
                         (event_lambda, node_id, event_idx)
                     });
+                }
+
+                let result = tx.send(WorkerMessage::Events {
+                    event_ids: std::mem::take(&mut event_ids),
+                });
+                if result.is_err() {
+                    return;
                 }
             }
         }
