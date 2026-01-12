@@ -1,9 +1,8 @@
 use crate::event::EventId;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
-use crate::graph::{Graph, NodeId};
+use crate::graph::Graph;
 use common::Shared;
-use hashbrown::HashSet;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -15,6 +14,7 @@ pub enum WorkerMessage {
     Event { event_id: EventId },
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
+    RunTerminals,
 }
 
 #[derive(Debug)]
@@ -74,11 +74,16 @@ where
 {
     let mut execution_graph = ExecutionGraph::default();
     let mut msgs: Vec<WorkerMessage> = Vec::default();
-    let mut context: Option<(Graph, FuncLib)> = None;
-    let mut invalidate_node_ids: HashSet<NodeId> = HashSet::default();
+
+    let mut context: Option<(Graph, FuncLib)>;
     let mut events: Vec<EventId> = Vec::default();
+    let mut execute_terminals: bool;
 
     'worker: loop {
+        execute_terminals = false;
+        events.clear();
+        context = None;
+
         let msg = rx.recv().await;
         let Some(msg) = msg else { break };
         msgs.push(msg);
@@ -101,24 +106,17 @@ where
                 }
                 WorkerMessage::Clear => {
                     execution_graph.clear();
-                    events.clear();
-                    context = None;
-                    invalidate_node_ids.clear();
                 }
+                WorkerMessage::RunTerminals => execute_terminals = true,
             }
-        }
-
-        if !invalidate_node_ids.is_empty() {
-            execution_graph.invalidate_recursively(invalidate_node_ids.drain());
-            assert!(invalidate_node_ids.is_empty());
         }
 
         if let Some((graph, func_lib)) = context.take() {
             execution_graph.update(&graph, &func_lib)
         }
 
-        if !events.is_empty() {
-            let result = execution_graph.execute_with_events(events.drain(..)).await;
+        if execute_terminals || !events.is_empty() {
+            let result = execution_graph.execute_events(events.drain(..)).await;
             (callback.lock().await)(result);
         }
     }

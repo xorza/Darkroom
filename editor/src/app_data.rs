@@ -263,7 +263,12 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
     }
 }
 
-fn add_node_from_func_id(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id: FuncId, node_id: NodeId) {
+fn add_node_from_func_id(
+    view_graph: &mut ViewGraph,
+    func_lib: &FuncLib,
+    func_id: FuncId,
+    node_id: NodeId,
+) {
     if let Some(wrong_node_id) = view_graph
         .graph
         .nodes
