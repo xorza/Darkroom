@@ -1,7 +1,11 @@
-use std::time::Instant;
+use std::sync::Arc;
 
 use common::BoolExt;
-use graph::prelude::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib};
+use graph::{
+    event::EventLambda,
+    prelude::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib},
+};
+use tokio::sync::Notify;
 
 #[derive(Debug)]
 pub struct EditorFuncLib {
@@ -11,18 +15,15 @@ pub struct EditorFuncLib {
 impl EditorFuncLib {
     pub const RUN_FUNC_ID: FuncId = FuncId::from_u128(0xe871ddf47a534ae59728927a88649673);
 
-    pub fn func_lib(&self) -> &FuncLib {
-        &self.func_lib
-    }
-
-    pub fn into_func_lib(self) -> FuncLib {
-        self.func_lib
-    }
-}
-
-impl Default for EditorFuncLib {
-    fn default() -> EditorFuncLib {
+    pub fn new(run_event: Arc<Notify>) -> EditorFuncLib {
         let mut invoker = FuncLib::default();
+        let lambda = EventLambda::new(move || {
+            let run_event = Arc::clone(&run_event);
+            Box::pin(async move {
+                run_event.notified().await;
+                0
+            })
+        });
 
         invoker.add(Func {
             id: Self::RUN_FUNC_ID,
@@ -36,10 +37,18 @@ impl Default for EditorFuncLib {
             events: vec!["run".into()],
             required_contexts: vec![],
             lambda: FuncLambda::None,
-            ..Default::default()
+            event_lambda: lambda,
         });
 
         EditorFuncLib { func_lib: invoker }
+    }
+
+    pub fn func_lib(&self) -> &FuncLib {
+        &self.func_lib
+    }
+
+    pub fn into_func_lib(self) -> FuncLib {
+        self.func_lib
     }
 }
 

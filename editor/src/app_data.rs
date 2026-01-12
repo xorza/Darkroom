@@ -12,6 +12,7 @@ use graph::worker::WorkerMessage;
 use graph::worker::{EventId, Worker};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
@@ -39,6 +40,7 @@ pub struct AppData {
     pub _ui_context: UiContext,
 
     pub shared_status: SharedStatus,
+    pub run_event: Arc<Notify>,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 }
@@ -47,11 +49,12 @@ impl AppData {
     pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
         let shared_status = Shared::default();
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
+        let run_event = Arc::new(Notify::new());
 
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
         func_lib.merge(TimersFuncLib::default());
-        func_lib.merge(EditorFuncLib::default());
+        func_lib.merge(EditorFuncLib::new(Arc::clone(&run_event)));
 
         Self {
             worker,
@@ -65,6 +68,7 @@ impl AppData {
             _ui_context: ui_context,
 
             shared_status,
+            run_event,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
         }
