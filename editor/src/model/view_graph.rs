@@ -234,6 +234,7 @@ mod tests {
         assert_roundtrip(FileFormat::Json);
         assert_roundtrip(FileFormat::Yaml);
         assert_roundtrip(FileFormat::Lua);
+        assert_roundtrip(FileFormat::Bin);
     }
 
     fn build_test_view() -> ViewGraph {

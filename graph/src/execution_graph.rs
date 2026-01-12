@@ -1126,7 +1126,12 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
 
-        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
+        for format in [
+            FileFormat::Yaml,
+            FileFormat::Json,
+            FileFormat::Lua,
+            FileFormat::Bin,
+        ] {
             let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);

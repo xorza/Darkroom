@@ -32,9 +32,9 @@ pub struct FuncInput {
     pub name: String,
     pub required: bool,
     pub data_type: DataType,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub default_value: Option<StaticValue>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub value_options: Vec<ValueOption>,
 }
 
@@ -60,13 +60,13 @@ pub struct Func {
 
     pub behavior: FuncBehavior,
 
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub inputs: Vec<FuncInput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub outputs: Vec<FuncOutput>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub events: Vec<FuncEvent>,
     #[serde(skip, default)]
     pub required_contexts: Vec<ContextType>,
@@ -445,7 +445,12 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
+        for format in [
+            FileFormat::Yaml,
+            FileFormat::Json,
+            FileFormat::Lua,
+            FileFormat::Bin,
+        ] {
             let serialized = func_lib.serialize(format);
             let deserialized = super::FuncLib::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);

@@ -418,7 +418,12 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
 
-        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
+        for format in [
+            FileFormat::Yaml,
+            FileFormat::Json,
+            FileFormat::Lua,
+            FileFormat::Bin,
+        ] {
             let serialized = graph.serialize(format);
             let deserialized = Graph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);
