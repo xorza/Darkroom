@@ -16,6 +16,8 @@ pub enum WorkerMessage {
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
     ExecuteTerminals,
+    StartEventLoop,
+    StopEventLoop,
 }
 
 #[derive(Debug)]
@@ -31,8 +33,11 @@ impl Worker {
     {
         let callback: Shared<Callback> = Shared::new(callback);
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
-        let thread_handle: JoinHandle<()> = tokio::spawn(async move {
-            worker_loop(rx, callback).await;
+        let thread_handle: JoinHandle<()> = tokio::spawn({
+            let tx = tx.clone();
+            async move {
+                worker_loop(rx, tx, callback).await;
+            }
         });
 
         Self {
@@ -78,10 +83,15 @@ impl Drop for Worker {
     }
 }
 
-async fn worker_loop<Callback>(mut rx: UnboundedReceiver<WorkerMessage>, callback: Shared<Callback>)
-where
+async fn worker_loop<Callback>(
+    mut rx: UnboundedReceiver<WorkerMessage>,
+    _tx: UnboundedSender<WorkerMessage>,
+    callback: Shared<Callback>,
+) where
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
+    // start_event_loop(tx);
+
     let mut execution_graph = ExecutionGraph::default();
     let mut msgs: Vec<WorkerMessage> = Vec::default();
 
@@ -119,6 +129,8 @@ where
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
+                WorkerMessage::StartEventLoop => todo!(),
+                WorkerMessage::StopEventLoop => todo!(),
             }
         }
 
@@ -133,6 +145,27 @@ where
             (callback.lock().await)(result);
         }
     }
+}
+
+fn start_event_loop(tx: UnboundedSender<WorkerMessage>) {
+    let (_event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
+
+    tokio::spawn({
+        async move {
+            loop {
+                let events = event_rx.recv().await;
+
+                if let Some(events) = events {
+                    let resutl = tx.send(WorkerMessage::Events { event_ids: events });
+                    if resutl.is_err() {
+                        return;
+                    }
+                } else {
+                    return;
+                }
+            }
+        }
+    });
 }
 
 #[cfg(test)]
