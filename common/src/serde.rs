@@ -13,16 +13,14 @@ pub fn is_false(value: &bool) -> bool {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SerdeFormatError {
-    #[error("YAML serialization failed")]
+    #[error("YAML serialization/deserialization failed")]
     Yaml(#[from] serde_yml::Error),
-    #[error("JSON serialization failed")]
+    #[error("JSON serialization/deserialization failed")]
     Json(#[from] serde_json::Error),
-    #[error("Lua serialization failed")]
+    #[error("Lua serialization/deserialization failed")]
     Lua(#[from] SerdeLuaError),
-    #[error("Binary serialization failed")]
-    Bin(#[from] bincode::error::EncodeError),
-    #[error("Binary deserialization failed")]
-    BinDecode(#[from] bincode::error::DecodeError),
+    #[error("Binary serialization/deserialization failed: {0}")]
+    Bin(String),
     #[error("Serialized data is not valid UTF-8")]
     Utf8(#[from] Utf8Error),
     #[error("Binary payload has trailing bytes")]
@@ -30,6 +28,18 @@ pub enum SerdeFormatError {
 }
 
 pub type SerdeFormatResult<T> = Result<T, SerdeFormatError>;
+
+impl From<bincode::error::EncodeError> for SerdeFormatError {
+    fn from(err: bincode::error::EncodeError) -> Self {
+        SerdeFormatError::Bin(err.to_string())
+    }
+}
+
+impl From<bincode::error::DecodeError> for SerdeFormatError {
+    fn from(err: bincode::error::DecodeError) -> Self {
+        SerdeFormatError::Bin(err.to_string())
+    }
+}
 
 pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     match format {
