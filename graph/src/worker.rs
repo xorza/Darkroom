@@ -12,6 +12,7 @@ use tracing::error;
 pub enum WorkerMessage {
     Exit,
     Event { event_id: EventId },
+    Events { event_ids: Vec<EventId> },
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
     ExecuteTerminals,
@@ -58,8 +59,14 @@ impl Worker {
             // thread_handle.await.expect("Worker thread failed to join");
         }
     }
+
     pub fn event(&mut self, event_id: EventId) {
         self.send(WorkerMessage::Event { event_id });
+    }
+
+    pub fn execute_events<T: IntoIterator<Item = EventId>>(&mut self, event_ids: T) {
+        let event_ids: Vec<EventId> = event_ids.into_iter().collect();
+        self.send(WorkerMessage::Events { event_ids });
     }
 }
 
@@ -103,6 +110,7 @@ where
             match msg {
                 WorkerMessage::Exit => break 'worker,
                 WorkerMessage::Event { event_id } => events.push(event_id),
+                WorkerMessage::Events { event_ids } => events.extend(event_ids),
                 WorkerMessage::Update { graph, func_lib } => {
                     events.clear();
                     context = Some((graph, func_lib));
@@ -119,7 +127,9 @@ where
         }
 
         if execute_terminals || !events.is_empty() {
-            let result = execution_graph.execute_events(events.drain(..)).await;
+            let result = execution_graph
+                .execute(execute_terminals, events.drain(..))
+                .await;
             (callback.lock().await)(result);
         }
     }

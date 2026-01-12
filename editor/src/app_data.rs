@@ -107,10 +107,23 @@ impl AppData {
                 .update(self.view_graph.graph.clone(), self.func_lib.clone());
             self.graph_updated = false;
         }
-        self.worker.event(EventId {
-            node_id: RUN_NODE_ID,
-            event_idx: 0,
-        });
+
+        let events: Vec<EventId> = self
+            .view_graph
+            .graph
+            .nodes
+            .iter()
+            .filter(|node| node.func_id == RUN_FUNC_ID)
+            .map(|node| EventId {
+                node_id: node.id,
+                event_idx: 0,
+            })
+            .collect();
+        if events.is_empty() {
+            self.worker.execute_terminals();
+        } else {
+            self.worker.execute_events(events);
+        }
     }
 
     pub fn undo(&mut self) {
