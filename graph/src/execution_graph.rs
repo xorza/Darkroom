@@ -427,21 +427,6 @@ impl ExecutionGraph {
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
         self.execute(true, []).await
     }
-
-    fn prepare_execution(&mut self) -> Result<()> {
-        self.e_node_terminal_idx.clear();
-        self.e_node_terminal_idx.extend(
-            self.e_nodes
-                .iter()
-                .enumerate()
-                .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
-        );
-
-        self.build_execution_plan()?;
-
-        Ok(())
-    }
-
     pub async fn execute_events<T: IntoIterator<Item = EventId>>(
         &mut self,
         event_ids: T,
@@ -455,7 +440,19 @@ impl ExecutionGraph {
         event_ids: T,
     ) -> Result<ExecutionStats> {
         let event_ids: Vec<EventId> = event_ids.into_iter().collect();
+        self.prepare_execution(terminals, &event_ids)?;
 
+        let mut result = self.execute_internal().await;
+        if let Ok(exe_stats) = &mut result {
+            exe_stats.triggered_events = event_ids;
+        }
+
+        self.e_node_terminal_idx.clear();
+
+        result
+    }
+
+    fn prepare_execution(&mut self, terminals: bool, event_ids: &[EventId]) -> Result<()> {
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(
             event_ids
@@ -471,18 +468,6 @@ impl ExecutionGraph {
                     .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
             );
         }
-
-        self.build_execution_plan()?;
-
-        let mut result = self.execute_internal().await;
-        if let Ok(exe_stats) = &mut result {
-            exe_stats.triggered_events = event_ids;
-        }
-
-        result
-    }
-
-    fn build_execution_plan(&mut self) -> Result<()> {
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
@@ -490,6 +475,7 @@ impl ExecutionGraph {
         self.backward1()?;
         self.forward2();
         self.backward2();
+
         self.validate_for_execution();
         Ok(())
     }
@@ -958,7 +944,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1013,7 +999,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1042,7 +1028,7 @@ mod tests {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -1107,7 +1093,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
@@ -1160,7 +1146,7 @@ mod tests {
         mult.inputs[1].binding = binding2;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -1188,7 +1174,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1196,7 +1182,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1242,7 +1228,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1262,7 +1248,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1272,7 +1258,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution()?;
+        execution_graph.prepare_execution(true, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -1391,7 +1377,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         let err = execution_graph
-            .prepare_execution()
+            .prepare_execution(true, &[])
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {
