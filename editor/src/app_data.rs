@@ -188,13 +188,11 @@ impl AppData {
     }
 
     pub fn load_test_graph(&mut self) {
-        let mut graph = test_graph();
-        graph.by_name_mut("sum").unwrap().inputs[0].binding = Binding::Const(132.into());
+        let graph = test_graph();
+        let mut view_graph: ViewGraph = graph.into();
 
-        graph.add(self.func_lib.by_name("frame event").unwrap().into());
-
-        let graph_view: ViewGraph = graph.into();
-        self.apply_graph(graph_view, true);
+        add_run_node(&mut view_graph, &self.func_lib);
+        self.apply_graph(view_graph, true);
 
         self.set_status("Loaded sample test graph");
     }

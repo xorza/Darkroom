@@ -203,7 +203,7 @@ mod tests {
     use super::*;
     use crate::common::UiEquals;
     use crate::gui::graph_ui_interaction::EventSubscriberChange;
-    use crate::model::graph_view::{IncomingConnection, IncomingEvent};
+    use crate::model::view_graph::{IncomingConnection, IncomingEvent};
     use common::FileFormat;
     use egui::{Pos2, Vec2, vec2};
     use graph::data::StaticValue;

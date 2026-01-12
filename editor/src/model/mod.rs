@@ -1,5 +1,5 @@
-pub mod graph_view;
-pub mod node_view;
+pub mod view_graph;
+pub mod view_node;
 
-pub use graph_view::{IncomingConnection, ViewGraph};
-pub use node_view::ViewNode;
+pub use view_graph::{IncomingConnection, ViewGraph};
+pub use view_node::ViewNode;

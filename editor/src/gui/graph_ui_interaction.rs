@@ -3,7 +3,7 @@ use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::gui::graph_ui::Error;
-use crate::model::graph_view::IncomingEvent;
+use crate::model::view_graph::IncomingEvent;
 use crate::model::{IncomingConnection, ViewGraph, ViewNode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
