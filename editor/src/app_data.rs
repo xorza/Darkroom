@@ -191,8 +191,8 @@ impl AppData {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
 
-        add_run_node(&mut view_graph, &self.func_lib, RUN_FUNC_ID, RUN_NODE_ID);
-        add_run_node(
+        add_node_from_func_id(&mut view_graph, &self.func_lib, RUN_FUNC_ID, RUN_NODE_ID);
+        add_node_from_func_id(
             &mut view_graph,
             &self.func_lib,
             FRAME_EVENT_FUNC_ID,
@@ -263,7 +263,7 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
     }
 }
 
-fn add_run_node(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id: FuncId, node_id: NodeId) {
+fn add_node_from_func_id(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id: FuncId, node_id: NodeId) {
     if let Some(wrong_node_id) = view_graph
         .graph
         .nodes
