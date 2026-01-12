@@ -14,7 +14,7 @@ pub enum WorkerMessage {
     Event { event_id: EventId },
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
-    RunTerminals,
+    ExecuteTerminals,
 }
 
 #[derive(Debug)]
@@ -42,6 +42,9 @@ impl Worker {
 
     pub fn send(&mut self, msg: WorkerMessage) {
         self.tx.send(msg).unwrap();
+    }
+    pub fn execute_terminals(&mut self) {
+        self.send(WorkerMessage::ExecuteTerminals);
     }
 
     pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
@@ -107,7 +110,7 @@ where
                 WorkerMessage::Clear => {
                     execution_graph.clear();
                 }
-                WorkerMessage::RunTerminals => execute_terminals = true,
+                WorkerMessage::ExecuteTerminals => execute_terminals = true,
             }
         }
 

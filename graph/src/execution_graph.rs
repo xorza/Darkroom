@@ -425,9 +425,7 @@ impl ExecutionGraph {
     }
 
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.prepare_execution()?;
-
-        self.execute_internal().await
+        self.execute(true, []).await
     }
 
     fn prepare_execution(&mut self) -> Result<()> {
@@ -448,6 +446,14 @@ impl ExecutionGraph {
         &mut self,
         event_ids: T,
     ) -> Result<ExecutionStats> {
+        self.execute(false, event_ids).await
+    }
+
+    pub async fn execute<T: IntoIterator<Item = EventId>>(
+        &mut self,
+        terminals: bool,
+        event_ids: T,
+    ) -> Result<ExecutionStats> {
         let event_ids: Vec<EventId> = event_ids.into_iter().collect();
 
         self.e_node_terminal_idx.clear();
@@ -457,6 +463,14 @@ impl ExecutionGraph {
                 .flat_map(|event_id| self.event_subscribers.get(event_id).unwrap())
                 .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
+        if terminals {
+            self.e_node_terminal_idx.extend(
+                self.e_nodes
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
+            );
+        }
 
         self.build_execution_plan()?;
 
