@@ -1,4 +1,4 @@
-# Scenarium Onboarding (Junior Dev)
+# Onboarding
 
 Welcome! This is a short, practical guide to help you get productive fast.
 
