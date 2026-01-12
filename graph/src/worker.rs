@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
@@ -19,6 +21,7 @@ pub enum WorkerMessage {
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
+    Multi { msgs: Vec<WorkerMessage> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -123,7 +126,7 @@ async fn worker_loop<Callback>(
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
     let mut execution_graph = ExecutionGraph::default();
-    let mut msgs: Vec<WorkerMessage> = Vec::default();
+    let mut msgs: VecDeque<WorkerMessage> = VecDeque::default();
 
     let mut events: Vec<EventId> = Vec::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
@@ -133,11 +136,11 @@ async fn worker_loop<Callback>(
 
         let msg = rx.recv().await;
         let Some(msg) = msg else { break };
-        msgs.push(msg);
+        msgs.push_back(msg);
 
         loop {
             match rx.try_recv() {
-                Ok(msg) => msgs.push(msg),
+                Ok(msg) => msgs.push_back(msg),
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => break 'worker,
             }
@@ -147,7 +150,7 @@ async fn worker_loop<Callback>(
         let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
 
-        for msg in msgs.drain(..) {
+        while let Some(msg) = msgs.pop_front() {
             match msg {
                 WorkerMessage::Exit => break 'worker,
                 WorkerMessage::Event { event_id } => events.push(event_id),
@@ -163,6 +166,7 @@ async fn worker_loop<Callback>(
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
                 WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
+                WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
             }
         }
 
