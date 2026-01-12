@@ -174,7 +174,7 @@ async fn worker_loop<Callback>(
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
-                    event_loop_handle = Some(start_event_loop(tx.clone()));
+                    event_loop_handle = Some(start_event_loop(tx.clone(), &mut execution_graph));
                 }
                 WorkerMessage::StopEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
@@ -195,7 +195,10 @@ async fn worker_loop<Callback>(
     }
 }
 
-fn start_event_loop(tx: UnboundedSender<WorkerMessage>) -> EventLoopHandle {
+fn start_event_loop(
+    tx: UnboundedSender<WorkerMessage>,
+    execution_graph: &mut ExecutionGraph,
+) -> EventLoopHandle {
     let (event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
 
     let thread_handle = tokio::spawn(async move {
@@ -209,12 +212,29 @@ fn start_event_loop(tx: UnboundedSender<WorkerMessage>) -> EventLoopHandle {
         }
     });
 
-    EventLoopHandle {
+    let handle = EventLoopHandle {
         inner: Shared::new(EventLoopInner {
             tx: Some(event_tx),
             thread_handle: Some(thread_handle),
         }),
+    };
+
+    let mut events = Vec::with_capacity(execution_graph.e_nodes.len());
+    for e_node in execution_graph.e_nodes.iter() {
+        let event_lambda = e_node.event_lambda.clone();
+        events.push(event_lambda.clone());
     }
+
+    tokio::spawn({
+        let handle = handle.clone();
+        async move {
+            for event in events {
+                event.invoke(handle.clone()).await;
+            }
+        }
+    });
+
+    handle
 }
 
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
@@ -233,6 +253,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
+    use crate::prelude::ExecutionGraph;
     use crate::worker::{EventId, Worker, WorkerMessage};
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -356,8 +377,9 @@ mod tests {
 
     #[tokio::test]
     async fn start_event_loop_forwards_events() {
+        let mut execution_graph = ExecutionGraph::default();
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(tx);
+        let handle = super::start_event_loop(tx, &mut execution_graph);
 
         let event_id = EventId {
             node_id: NodeId::unique(),

@@ -213,6 +213,7 @@ impl ExecutionNode {
             self.inited = true;
             self.func_id = func.id;
             self.lambda = func.lambda.clone();
+            self.event_lambda = func.event_lambda.clone();
 
             self.inputs
                 .resize(func.inputs.len(), ExecutionInput::default());
