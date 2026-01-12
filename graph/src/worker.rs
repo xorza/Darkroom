@@ -35,8 +35,7 @@ pub struct Worker {
 
 #[derive(Debug)]
 struct EventLoopInner {
-    event_tx: Option<UnboundedSender<Vec<EventId>>>,
-    thread_handle: Option<JoinHandle<()>>,
+    event_task_handle: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug, Clone)]
@@ -102,29 +101,11 @@ impl Drop for Worker {
 }
 
 impl EventLoopHandle {
-    pub async fn send(&self, events: Vec<EventId>) {
-        let inner = self.inner.lock().await;
-        let tx = inner
-            .event_tx
-            .as_ref()
-            .expect("Event loop sender should be available before stop");
-        tx.send(events).unwrap();
-    }
-
     pub async fn stop(&self) {
-        let handle = {
-            let mut inner = self.inner.lock().await;
-            let tx = inner
-                .event_tx
-                .take()
-                .expect("Event loop sender should be available before stop");
-            drop(tx);
-            inner
-                .thread_handle
-                .take()
-                .expect("Event loop handle should be available before stop")
-        };
-        handle.await.expect("Event loop task failed to join");
+        let mut inner = self.inner.lock().await;
+        if let Some(event_task_handle) = inner.event_task_handle.take() {
+            event_task_handle.abort();
+        }
     }
 }
 
@@ -175,7 +156,14 @@ async fn worker_loop<Callback>(
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
-                    event_loop_handle = start_event_loop(tx.clone(), &mut execution_graph);
+                    let mut events: Vec<(NodeId, EventLambda)> =
+                        Vec::with_capacity(execution_graph.e_nodes.len());
+                    for e_node in execution_graph.e_nodes.iter() {
+                        events.push((e_node.id, e_node.event_lambda.clone()));
+                    }
+                    if !events.is_empty() {
+                        event_loop_handle = Some(start_event_loop(tx.clone(), events));
+                    }
                 }
                 WorkerMessage::StopEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
@@ -198,61 +186,52 @@ async fn worker_loop<Callback>(
 
 fn start_event_loop(
     tx: UnboundedSender<WorkerMessage>,
-    execution_graph: &mut ExecutionGraph,
-) -> Option<EventLoopHandle> {
-    let mut events: Vec<(NodeId, EventLambda)> = Vec::with_capacity(execution_graph.e_nodes.len());
-    for e_node in execution_graph.e_nodes.iter() {
-        events.push((e_node.id, e_node.event_lambda.clone()));
-    }
-    if events.is_empty() {
-        return None;
-    }
+    events: Vec<(NodeId, EventLambda)>,
+) -> EventLoopHandle {
+    assert!(!events.is_empty());
 
-    let (event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
-
-    let thread_handle = tokio::spawn(async move {
-        while let Some(events) = event_rx.recv().await {
-            if tx
-                .send(WorkerMessage::Events { event_ids: events })
-                .is_err()
-            {
-                return;
-            }
-        }
-    });
-
-    tokio::spawn({
-        let event_tx = event_tx.clone();
+    let event_task_handle = tokio::spawn({
         async move {
             let mut pending = JoinSet::new();
             for (node_id, event_lambda) in events {
                 spawn_event_task(&mut pending, node_id, event_lambda);
             }
 
-            while let Some(result) = pending.join_next().await {
-                //todo call also tryjoinnext
-                //
-                // pending.abort_all();
-                // pending.detach_all();
+            let mut event_ids: Vec<EventId> = Vec::default();
+            let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
 
+            while let Some(result) = pending.join_next().await {
                 let (event_lambda, node_id, event_idx) =
                     result.expect("Event loop task should complete");
-                let result = event_tx.send(vec![EventId { node_id, event_idx }]);
+                event_ids.push(EventId { node_id, event_idx });
+                events.push((node_id, event_lambda));
+
+                while let Some(result) = pending.try_join_next() {
+                    let (event_lambda, node_id, event_idx) =
+                        result.expect("Event loop task should complete");
+                    event_ids.push(EventId { node_id, event_idx });
+                    events.push((node_id, event_lambda));
+                }
+
+                let result = tx.send(WorkerMessage::Events {
+                    event_ids: event_ids.drain(..).collect(),
+                });
                 if result.is_err() {
                     return;
                 }
-                spawn_event_task(&mut pending, node_id, event_lambda);
+
+                for (node_id, event_lambda) in events.drain(..) {
+                    spawn_event_task(&mut pending, node_id, event_lambda);
+                }
             }
         }
     });
 
-    let handle = EventLoopHandle {
+    EventLoopHandle {
         inner: Shared::new(EventLoopInner {
-            event_tx: Some(event_tx),
-            thread_handle: Some(thread_handle),
+            event_task_handle: Some(event_task_handle),
         }),
-    };
-    Some(handle)
+    }
 }
 
 fn spawn_event_task(
@@ -274,17 +253,19 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
 
 #[cfg(test)]
 mod tests {
+    use std::pin::Pin;
+
     use common::output_stream::OutputStream;
+    use tokio::sync::mpsc::unbounded_channel;
 
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
+    use crate::event::EventLambda;
     use crate::function::FuncId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::prelude::ExecutionGraph;
     use crate::worker::{EventId, Worker, WorkerMessage};
-    use tokio::sync::mpsc::unbounded_channel;
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -406,23 +387,28 @@ mod tests {
 
     #[tokio::test]
     async fn start_event_loop_forwards_events() {
-        //todo
-        // let mut execution_graph = ExecutionGraph::default();
-        // let (tx, mut rx) = unbounded_channel();
-        // let handle = super::start_event_loop(tx, &mut execution_graph);
+        let node_id = NodeId::unique();
+        let event_lambda = EventLambda::Lambda({
+            Pin::new(Box::new(|| async move {
+                return 1 as usize;
+            }))
+        });
 
-        // let event_id = EventId {
-        //     node_id: NodeId::unique(),
-        //     event_idx: 0,
-        // };
+        let (tx, mut rx) = unbounded_channel();
+        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]);
+
+        let event_id = EventId {
+            node_id: NodeId::unique(),
+            event_idx: 0,
+        };
         // handle.send(vec![event_id.clone()]).await;
 
-        // let msg = rx.recv().await.expect("Expected event loop message");
-        // let WorkerMessage::Events { event_ids } = msg else {
-        //     panic!("Expected WorkerMessage::Events");
-        // };
-        // assert_eq!(event_ids, vec![event_id]);
+        let msg = rx.recv().await.expect("Expected event loop message");
+        let WorkerMessage::Events { event_ids } = msg else {
+            panic!("Expected WorkerMessage::Events");
+        };
+        assert_eq!(event_ids, vec![event_id]);
 
-        // handle.stop().await;
+        handle.stop().await;
     }
 }

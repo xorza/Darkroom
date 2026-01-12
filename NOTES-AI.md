@@ -234,6 +234,7 @@ Recent adjustments:
   unrelated `FuncLambda`.
 - Event loop trigger tasks now use a `JoinSet`, re-queueing each `EventLambda` after it completes and forwarding the
   associated `EventId`.
+- `EventLoopHandle::stop` now aborts the event trigger task so all pending `JoinSet` jobs are canceled on shutdown.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.
