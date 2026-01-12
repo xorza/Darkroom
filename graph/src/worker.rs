@@ -119,7 +119,6 @@ async fn worker_loop<Callback>(
     let mut execution_graph = ExecutionGraph::default();
     let mut msgs: Vec<WorkerMessage> = Vec::default();
 
-    let mut context: Option<(Graph, FuncLib)>;
     let mut events: Vec<EventId> = Vec::default();
     let mut execute_terminals: bool;
     let mut event_loop_handle: Option<EventLoopHandle> = None;
@@ -127,7 +126,6 @@ async fn worker_loop<Callback>(
     'worker: loop {
         execute_terminals = false;
         events.clear();
-        context = None;
 
         let msg = rx.recv().await;
         let Some(msg) = msg else { break };
@@ -148,7 +146,7 @@ async fn worker_loop<Callback>(
                 WorkerMessage::Events { event_ids } => events.extend(event_ids),
                 WorkerMessage::Update { graph, func_lib } => {
                     events.clear();
-                    context = Some((graph, func_lib));
+                    execution_graph.update(&graph, &func_lib)
                 }
                 WorkerMessage::Clear => {
                     execution_graph.clear();
@@ -158,7 +156,7 @@ async fn worker_loop<Callback>(
                     stop_event_loop(&mut event_loop_handle).await;
                     let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
                     for e_node in execution_graph.e_nodes.iter() {
-                        if e_node.event_lambda.is_none() {
+                        if !e_node.event_lambda.is_none() {
                             events.push((e_node.id, e_node.event_lambda.clone()));
                         }
                     }
@@ -170,10 +168,6 @@ async fn worker_loop<Callback>(
                     stop_event_loop(&mut event_loop_handle).await;
                 }
             }
-        }
-
-        if let Some((graph, func_lib)) = context.take() {
-            execution_graph.update(&graph, &func_lib)
         }
 
         if execute_terminals || !events.is_empty() {

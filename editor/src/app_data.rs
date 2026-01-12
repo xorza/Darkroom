@@ -115,22 +115,6 @@ impl AppData {
             self.graph_updated = false;
         }
 
-        // let events: Vec<EventId> = self
-        //     .view_graph
-        //     .graph
-        //     .nodes
-        //     .iter()
-        //     .filter(|node| node.func_id == EditorFuncLib::RUN_FUNC_ID)
-        //     .map(|node| EventId {
-        //         node_id: node.id,
-        //         event_idx: 0,
-        //     })
-        //     .collect();
-        // if events.is_empty() {
-        //     self.worker.execute_terminals();
-        // } else {
-        //     self.worker.execute_events(events);
-        // }
         self.run_event.notify_waiters();
     }
 
