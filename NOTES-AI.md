@@ -230,6 +230,8 @@ Recent adjustments:
 - `EventLoopHandle` now wraps a `Shared<EventLoopInner>` so clones share the same sender and join handle.
 - Worker event-loop start/stop now routes through `stop_event_loop` helper to centralize shutdown behavior.
 - Worker tests now cover `start_event_loop` forwarding and `EventLoopHandle` send/stop behavior.
+- `EventLambda` now uses a proper async event trait signature, and `invoke` matches on `EventLambda` instead of the
+  unrelated `FuncLambda`.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.
