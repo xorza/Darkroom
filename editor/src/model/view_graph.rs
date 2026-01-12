@@ -45,6 +45,27 @@ impl Default for ViewGraph {
 }
 
 impl ViewGraph {
+    pub fn auto_place_nodes(&mut self) {
+        assert_eq!(
+            self.view_nodes.len(),
+            self.graph.nodes.len(),
+            "auto-place requires view nodes for every graph node"
+        );
+
+        for (idx, node) in self.graph.nodes.iter().enumerate() {
+            let column = idx % 3;
+            let row = idx / 3;
+            let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
+            let view_node = self
+                .view_nodes
+                .by_key_mut(&node.id)
+                .expect("auto-place expects a view node for each graph node");
+            view_node.pos = pos;
+        }
+
+        self.validate();
+    }
+
     pub fn validate(&self) {
         if !is_debug() {
             return;
@@ -182,24 +203,19 @@ impl Eq for ViewGraph {}
 impl From<CoreGraph> for ViewGraph {
     fn from(graph: CoreGraph) -> Self {
         let mut view_nodes = KeyIndexVec::with_capacity(graph.nodes.len());
-        for (idx, node) in graph.nodes.iter().enumerate() {
-            let column = idx % 3;
-            let row = idx / 3;
-            let pos = egui::pos2(80.0 + 240.0 * column as f32, 120.0 + 180.0 * row as f32);
-
-            let mut view_node = ViewNode::from(node);
-            view_node.pos = pos;
+        for node in graph.nodes.iter() {
+            let view_node = ViewNode::from(node);
             view_nodes.add(view_node);
         }
 
-        let view_graph = Self {
+        let mut view_graph = Self {
             graph: graph.clone(),
             view_nodes,
             pan: egui::Vec2::ZERO,
             scale: 1.0,
             selected_node_id: None,
         };
-        view_graph.validate();
+        view_graph.auto_place_nodes();
         view_graph
     }
 }

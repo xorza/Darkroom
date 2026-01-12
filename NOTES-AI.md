@@ -158,6 +158,7 @@ Connection style now includes a hover stroke for hovered connections.
 Connection style now includes `hover_brighten` and `style::brighten` for hover color tuning.
 Connection bezier sampling now eases parameterization to add detail near endpoints while reducing mid-curve density.
 Connection curve mesh allocation now reserves vertex/index capacity based on bezier point count.
+`ViewGraph::auto_place_nodes` now arranges view nodes into a 3-column grid and is used when constructing from a core graph.
 Polyline mesh construction helpers now live in `editor/src/gui/polyline_mesh.rs` with a `PolylineMesh` wrapper used by
 connection rendering.
 Bezier rendering now uses `common::bezier::Bezier`, which wraps `PolylineMesh` and owns bezier sampling.

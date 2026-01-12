@@ -2,11 +2,11 @@ use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
-use graph::elements::timers_invoker::{RUN_FUNC_ID, TimersFuncLib};
+use graph::elements::timers_invoker::{FRAME_EVENT_FUNC_ID, RUN_FUNC_ID, TimersFuncLib};
 use graph::event::EventId;
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node, NodeId};
-use graph::prelude::{ExecutionStats, FuncLib};
+use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::Worker;
 use graph::worker::WorkerMessage;
@@ -25,6 +25,7 @@ pub struct Status {
 pub type SharedStatus = Shared<Status>;
 
 const RUN_NODE_ID: NodeId = NodeId::from_u128(0xe871ddf47a536ae59728927a88649673);
+const FRAME_EVENT_NODE_ID: NodeId = NodeId::from_u128(0x01897c92d6055f5a7c21627ed74824ff);
 const UNDO_MAX_STEPS: usize = 256;
 
 #[derive(Debug)]
@@ -141,7 +142,6 @@ impl AppData {
 
     pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         self.view_graph = view_graph;
-        add_run_node(&mut self.view_graph, &self.func_lib);
 
         if reset_undo {
             self.undo_stack.reset_with(&self.view_graph);
@@ -191,7 +191,15 @@ impl AppData {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
 
-        add_run_node(&mut view_graph, &self.func_lib);
+        add_run_node(&mut view_graph, &self.func_lib, RUN_FUNC_ID, RUN_NODE_ID);
+        add_run_node(
+            &mut view_graph,
+            &self.func_lib,
+            FRAME_EVENT_FUNC_ID,
+            FRAME_EVENT_NODE_ID,
+        );
+
+        view_graph.auto_place_nodes();
         self.apply_graph(view_graph, true);
 
         self.set_status("Loaded sample test graph");
@@ -255,23 +263,22 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
     }
 }
 
-fn add_run_node(view_graph: &mut ViewGraph, func_lib: &FuncLib) {
-    if let Some(node_id) = view_graph
+fn add_run_node(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id: FuncId, node_id: NodeId) {
+    if let Some(wrong_node_id) = view_graph
         .graph
         .nodes
         .iter_mut()
-        .find(|node| node.func_id == RUN_FUNC_ID && node.id != RUN_NODE_ID)
+        .find(|node| node.func_id == func_id && node.id != node_id)
         .map(|node| node.id)
     {
-        view_graph.remove_node(&node_id);
+        view_graph.remove_node(&wrong_node_id);
     }
 
-    if view_graph.view_nodes.by_key(&RUN_NODE_ID).is_none() {
-        let run_func = func_lib.by_id(&RUN_FUNC_ID).unwrap();
+    if view_graph.view_nodes.by_key(&node_id).is_none() {
+        let run_func = func_lib.by_id(&func_id).unwrap();
         let mut node: Node = run_func.into();
-        node.id = RUN_NODE_ID;
-        let mut view_node: ViewNode = (&node).into();
-        view_node.removable = false;
+        node.id = node_id;
+        let view_node: ViewNode = (&node).into();
         view_graph.view_nodes.add(view_node);
         view_graph.graph.add(node);
     }

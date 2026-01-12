@@ -9,7 +9,6 @@ use crate::common::UiEquals;
 pub struct ViewNode {
     pub id: NodeId,
     pub pos: Pos2,
-    pub removable: bool,
 }
 
 impl From<&Node> for ViewNode {
@@ -17,7 +16,6 @@ impl From<&Node> for ViewNode {
         Self {
             id: node.id,
             pos: Pos2::ZERO,
-            removable: true,
         }
     }
 }
