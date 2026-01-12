@@ -30,30 +30,6 @@ pub struct EventLoopCallback {
     inner: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
-impl EventLoopCallback {
-    pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
-        Self {
-            inner: Some(Arc::new(callback)),
-        }
-    }
-
-    pub fn none() -> Self {
-        Self { inner: None }
-    }
-
-    pub fn call(&self) {
-        if let Some(inner) = &self.inner {
-            (inner)();
-        }
-    }
-}
-
-impl std::fmt::Debug for EventLoopCallback {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EventLoopCallback").finish()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId {
     pub node_id: NodeId,
@@ -142,6 +118,7 @@ impl EventLoopHandle {
     }
 }
 
+#[derive(Debug, Clone)]
 enum EventLoopCommand {
     None,
     Start { callback: EventLoopCallback },
@@ -305,6 +282,30 @@ fn start_event_loop(
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     if let Some(event_loop_handle) = event_loop_handle.take() {
         event_loop_handle.stop().await;
+    }
+}
+
+impl EventLoopCallback {
+    pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
+        Self {
+            inner: Some(Arc::new(callback)),
+        }
+    }
+
+    pub fn none() -> Self {
+        Self { inner: None }
+    }
+
+    pub fn call(&self) {
+        if let Some(inner) = &self.inner {
+            (inner)();
+        }
+    }
+}
+
+impl std::fmt::Debug for EventLoopCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventLoopCallback").finish()
     }
 }
 
