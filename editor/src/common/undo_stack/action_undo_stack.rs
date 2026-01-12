@@ -140,8 +140,6 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         let range = Self::append_actions(&mut self.undo_actions, actions);
         self.undo_stack.push(range);
         self.trim_to_limit();
-
-        tracing::info!("Undo buffer size: {}", self.undo_actions.len());
     }
 
     fn clear_redo(&mut self) {
