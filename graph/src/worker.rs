@@ -43,33 +43,6 @@ pub struct EventLoopHandle {
     inner: Shared<EventLoopInner>,
 }
 
-impl EventLoopHandle {
-    pub async fn send(&self, events: Vec<EventId>) {
-        let inner = self.inner.lock().await;
-        let tx = inner
-            .tx
-            .as_ref()
-            .expect("Event loop sender should be available before stop");
-        tx.send(events).unwrap();
-    }
-
-    pub async fn stop(&self) {
-        let handle = {
-            let mut inner = self.inner.lock().await;
-            let tx = inner
-                .tx
-                .take()
-                .expect("Event loop sender should be available before stop");
-            drop(tx);
-            inner
-                .thread_handle
-                .take()
-                .expect("Event loop handle should be available before stop")
-        };
-        handle.await.expect("Event loop task failed to join");
-    }
-}
-
 impl Worker {
     pub fn new<Callback>(callback: Callback) -> Self
     where
@@ -124,6 +97,33 @@ impl Drop for Worker {
         if self.thread_handle.is_some() {
             error!("Worker dropped while the thread is still running; call Worker::exit() first");
         }
+    }
+}
+
+impl EventLoopHandle {
+    pub async fn send(&self, events: Vec<EventId>) {
+        let inner = self.inner.lock().await;
+        let tx = inner
+            .tx
+            .as_ref()
+            .expect("Event loop sender should be available before stop");
+        tx.send(events).unwrap();
+    }
+
+    pub async fn stop(&self) {
+        let handle = {
+            let mut inner = self.inner.lock().await;
+            let tx = inner
+                .tx
+                .take()
+                .expect("Event loop sender should be available before stop");
+            drop(tx);
+            inner
+                .thread_handle
+                .take()
+                .expect("Event loop handle should be available before stop")
+        };
+        handle.await.expect("Event loop task failed to join");
     }
 }
 
