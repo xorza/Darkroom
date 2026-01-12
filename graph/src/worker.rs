@@ -109,6 +109,12 @@ impl EventLoopHandle {
     }
 }
 
+enum EventLoopCommand {
+    None,
+    Start,
+    Stop,
+}
+
 async fn worker_loop<Callback>(
     mut rx: UnboundedReceiver<WorkerMessage>,
     tx: UnboundedSender<WorkerMessage>,
@@ -120,11 +126,9 @@ async fn worker_loop<Callback>(
     let mut msgs: Vec<WorkerMessage> = Vec::default();
 
     let mut events: Vec<EventId> = Vec::default();
-    let mut execute_terminals: bool;
     let mut event_loop_handle: Option<EventLoopHandle> = None;
 
     'worker: loop {
-        execute_terminals = false;
         events.clear();
 
         let msg = rx.recv().await;
@@ -139,6 +143,10 @@ async fn worker_loop<Callback>(
             }
         }
 
+        let mut execute_terminals: bool = false;
+        let mut event_loop_cmd = EventLoopCommand::None;
+        let mut update_graph: Option<(Graph, FuncLib)> = None;
+
         for msg in msgs.drain(..) {
             match msg {
                 WorkerMessage::Exit => break 'worker,
@@ -146,28 +154,20 @@ async fn worker_loop<Callback>(
                 WorkerMessage::Events { event_ids } => events.extend(event_ids),
                 WorkerMessage::Update { graph, func_lib } => {
                     events.clear();
-                    execution_graph.update(&graph, &func_lib)
+                    update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
+                    events.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop => {
-                    stop_event_loop(&mut event_loop_handle).await;
-                    let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
-                    for e_node in execution_graph.e_nodes.iter() {
-                        if !e_node.event_lambda.is_none() {
-                            events.push((e_node.id, e_node.event_lambda.clone()));
-                        }
-                    }
-                    if !events.is_empty() {
-                        event_loop_handle = Some(start_event_loop(tx.clone(), events));
-                    }
-                }
-                WorkerMessage::StopEventLoop => {
-                    stop_event_loop(&mut event_loop_handle).await;
-                }
+                WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
+                WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
             }
+        }
+
+        if let Some((graph, func_lib)) = update_graph.take() {
+            execution_graph.update(&graph, &func_lib);
         }
 
         if execute_terminals || !events.is_empty() {
@@ -175,6 +175,23 @@ async fn worker_loop<Callback>(
                 .execute(execute_terminals, events.drain(..))
                 .await;
             (callback.lock().await)(result);
+        }
+
+        match event_loop_cmd {
+            EventLoopCommand::None => {}
+            EventLoopCommand::Start => {
+                stop_event_loop(&mut event_loop_handle).await;
+                let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
+                for e_node in execution_graph.e_nodes.iter() {
+                    if !e_node.event_lambda.is_none() {
+                        events.push((e_node.id, e_node.event_lambda.clone()));
+                    }
+                }
+                if !events.is_empty() {
+                    event_loop_handle = Some(start_event_loop(tx.clone(), events));
+                }
+            }
+            EventLoopCommand::Stop => stop_event_loop(&mut event_loop_handle).await,
         }
     }
 }
