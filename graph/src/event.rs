@@ -22,7 +22,7 @@ pub struct NodeEventManager {
     node_events: HashMap<NodeId, NodeEvent>,
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId {
     pub node_id: NodeId,
     pub event_idx: usize,

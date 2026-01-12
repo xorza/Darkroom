@@ -228,7 +228,8 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::Worker;
+    use crate::worker::{Worker, WorkerMessage};
+    use tokio::sync::mpsc::unbounded_channel;
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -346,5 +347,25 @@ mod tests {
         worker.exit();
 
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn start_event_loop_forwards_events() {
+        let (tx, mut rx) = unbounded_channel();
+        let handle = super::start_event_loop(tx);
+
+        let event_id = EventId {
+            node_id: NodeId::unique(),
+            event_idx: 0,
+        };
+        handle.send(vec![event_id.clone()]).await;
+
+        let msg = rx.recv().await.expect("Expected event loop message");
+        let WorkerMessage::Events { event_ids } = msg else {
+            panic!("Expected WorkerMessage::Events");
+        };
+        assert_eq!(event_ids, vec![event_id]);
+
+        handle.stop().await;
     }
 }
