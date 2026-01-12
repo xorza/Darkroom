@@ -23,8 +23,6 @@ pub enum SerdeFormatError {
     Bin(String),
     #[error("Serialized data is not valid UTF-8")]
     Utf8(#[from] Utf8Error),
-    #[error("Binary payload has trailing bytes")]
-    TrailingBytes,
 }
 
 pub type SerdeFormatResult<T> = Result<T, SerdeFormatError>;
@@ -79,11 +77,9 @@ pub fn deserialize<T: DeserializeOwned>(
             Ok(serde_lua::from_str(text)?)
         }
         FileFormat::Bin => {
-            let (decoded, read) =
-                bincode::serde::decode_from_slice(serialized, bincode::config::standard())?;
-            if read != serialized.len() {
-                return Err(SerdeFormatError::TrailingBytes);
-            }
+            let (decoded, _read) =
+                bincode::serde::decode_from_slice(serialized, bincode::config::standard())
+                    .map_err(|err| SerdeFormatError::Bin(err.to_string()))?;
             Ok(decoded)
         }
     }
