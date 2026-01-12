@@ -13,7 +13,7 @@ use crate::function::{
 };
 
 #[derive(Debug)]
-pub struct BasicInvoker {
+pub struct BasicFuncLib {
     func_lib: FuncLib,
     output_stream: Shared<Option<OutputStream>>,
 }
@@ -74,7 +74,7 @@ impl From<i64> for Math2ArgOp {
     }
 }
 
-impl BasicInvoker {
+impl BasicFuncLib {
     pub async fn with_output_stream(output_stream: &OutputStream) -> Self {
         let invoker = Self::default();
         invoker
@@ -86,7 +86,7 @@ impl BasicInvoker {
     }
 }
 
-impl BasicInvoker {
+impl BasicFuncLib {
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
@@ -96,7 +96,7 @@ impl BasicInvoker {
     }
 }
 
-impl Default for BasicInvoker {
+impl Default for BasicFuncLib {
     fn default() -> Self {
         let mut func_lib = FuncLib::default();
         let output_stream = Shared::new(None::<OutputStream>);

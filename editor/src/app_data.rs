@@ -1,8 +1,9 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
+use crate::elements::editor_funclib::EditorFuncLib;
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
 use anyhow::Result;
 use common::{FileFormat, Shared};
-use graph::elements::timers_invoker::{FRAME_EVENT_FUNC_ID, RUN_FUNC_ID, TimersFuncLib};
+use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
 use graph::event::EventId;
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node, NodeId};
@@ -51,6 +52,7 @@ impl AppData {
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
         func_lib.merge(TimersFuncLib::default());
+        func_lib.merge(EditorFuncLib::default());
 
         Self {
             worker,
@@ -113,7 +115,7 @@ impl AppData {
             .graph
             .nodes
             .iter()
-            .filter(|node| node.func_id == RUN_FUNC_ID)
+            .filter(|node| node.func_id == EditorFuncLib::RUN_FUNC_ID)
             .map(|node| EventId {
                 node_id: node.id,
                 event_idx: 0,
@@ -202,7 +204,7 @@ impl AppData {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
 
-        add_node_from_func_id(&mut view_graph, &self.func_lib, RUN_FUNC_ID);
+        add_node_from_func_id(&mut view_graph, &self.func_lib, EditorFuncLib::RUN_FUNC_ID);
         add_node_from_func_id(&mut view_graph, &self.func_lib, FRAME_EVENT_FUNC_ID);
 
         view_graph.auto_place_nodes();

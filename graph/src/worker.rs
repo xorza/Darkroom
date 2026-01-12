@@ -139,8 +139,8 @@ where
 mod tests {
     use common::output_stream::OutputStream;
 
-    use crate::elements::basic_invoker::BasicInvoker;
-    use crate::elements::timers_invoker::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
+    use crate::elements::basic_funclib::BasicFuncLib;
+    use crate::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
     use crate::event::EventId;
     use crate::function::FuncId;
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
@@ -203,7 +203,7 @@ mod tests {
         let output_stream = OutputStream::new();
 
         let timers_invoker = TimersFuncLib::default();
-        let basic_invoker = BasicInvoker::with_output_stream(&output_stream).await;
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());

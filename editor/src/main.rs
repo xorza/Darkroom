@@ -3,6 +3,7 @@
 
 mod app_data;
 mod common;
+mod elements;
 mod gui;
 mod init;
 mod main_ui;
