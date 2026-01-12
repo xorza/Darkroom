@@ -115,14 +115,21 @@ impl AppData {
                         graph: self.view_graph.graph.clone(),
                         func_lib: self.func_lib.clone(),
                     },
-                    WorkerMessage::StartEventLoop,
+                    WorkerMessage::StartEventLoop {
+                        callback: Arc::new({
+                            let run_event = self.run_event.clone();
+                            move || {
+                                run_event.notify_waiters();
+                            }
+                        }),
+                    },
                 ],
             });
 
             self.graph_updated = false;
+        } else {
+            self.run_event.notify_waiters();
         }
-
-        self.run_event.notify_waiters();
     }
 
     pub fn undo(&mut self) {

@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
@@ -11,7 +12,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::error;
 
-#[derive(Debug)]
+#[derive()]
 pub enum WorkerMessage {
     Exit,
     Event { event_id: EventId },
@@ -19,10 +20,12 @@ pub enum WorkerMessage {
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
     ExecuteTerminals,
-    StartEventLoop,
+    StartEventLoop { callback: EventLoopCallback },
     StopEventLoop,
     Multi { msgs: Vec<WorkerMessage> },
 }
+
+pub type EventLoopCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventId {
@@ -114,7 +117,7 @@ impl EventLoopHandle {
 
 enum EventLoopCommand {
     None,
-    Start,
+    Start { callback: EventLoopCallback },
     Stop,
 }
 
@@ -164,7 +167,9 @@ async fn worker_loop<Callback>(
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
+                WorkerMessage::StartEventLoop { callback } => {
+                    event_loop_cmd = EventLoopCommand::Start { callback };
+                }
                 WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
             }
@@ -183,7 +188,7 @@ async fn worker_loop<Callback>(
 
         match event_loop_cmd {
             EventLoopCommand::None => {}
-            EventLoopCommand::Start => {
+            EventLoopCommand::Start { callback } => {
                 stop_event_loop(&mut event_loop_handle).await;
                 let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
                 for e_node in execution_graph.e_nodes.iter() {
@@ -192,7 +197,7 @@ async fn worker_loop<Callback>(
                     }
                 }
                 if !events.is_empty() {
-                    event_loop_handle = Some(start_event_loop(tx.clone(), events));
+                    event_loop_handle = Some(start_event_loop(tx.clone(), events, callback));
                 }
             }
             EventLoopCommand::Stop => stop_event_loop(&mut event_loop_handle).await,
@@ -203,6 +208,7 @@ async fn worker_loop<Callback>(
 fn start_event_loop(
     tx: UnboundedSender<WorkerMessage>,
     events: Vec<(NodeId, EventLambda)>,
+    callback: EventLoopCallback,
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
@@ -212,6 +218,8 @@ fn start_event_loop(
             for (node_id, event_lambda) in events {
                 spawn_event_task(&mut pending, node_id, event_lambda);
             }
+
+            (callback)();
 
             let mut event_ids: Vec<EventId> = Vec::default();
             let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
@@ -269,6 +277,8 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use common::output_stream::OutputStream;
     use tokio::sync::mpsc::unbounded_channel;
 
@@ -405,7 +415,7 @@ mod tests {
         let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
 
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]);
+        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], Arc::new(|| {}));
 
         let event_id = EventId {
             node_id,
