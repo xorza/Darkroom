@@ -27,18 +27,24 @@ pub enum WorkerMessage {
 
 #[derive(Clone)]
 pub struct EventLoopCallback {
-    inner: Arc<dyn Fn() + Send + Sync + 'static>,
+    inner: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 }
 
 impl EventLoopCallback {
     pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
-            inner: Arc::new(callback),
+            inner: Some(Arc::new(callback)),
         }
     }
 
+    pub fn none() -> Self {
+        Self { inner: None }
+    }
+
     pub fn call(&self) {
-        (self.inner)();
+        if let Some(inner) = &self.inner {
+            (inner)();
+        }
     }
 }
 
@@ -199,7 +205,7 @@ async fn worker_loop<Callback>(
         if let Some((graph, func_lib)) = update_graph.take() {
             if event_loop_handle.is_some() && !matches!(event_loop_cmd, EventLoopCommand::Stop) {
                 event_loop_cmd = EventLoopCommand::Start {
-                    callback: EventLoopCallback::new(|| {}),
+                    callback: EventLoopCallback::none(),
                 };
             }
             stop_event_loop(&mut event_loop_handle).await;
