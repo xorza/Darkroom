@@ -1,3 +1,4 @@
+use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -219,17 +220,17 @@ fn start_event_loop(
         }),
     };
 
-    let mut events = Vec::with_capacity(execution_graph.e_nodes.len());
+    let mut events: Vec<(NodeId, EventLambda)> = Vec::with_capacity(execution_graph.e_nodes.len());
     for e_node in execution_graph.e_nodes.iter() {
         let event_lambda = e_node.event_lambda.clone();
-        events.push(event_lambda.clone());
+        events.push((e_node.id, event_lambda.clone()));
     }
 
     tokio::spawn({
         let _handle = handle.clone();
         async move {
             for event in events {
-                event.invoke().await;
+                event.1.invoke().await;
             }
         }
     });
