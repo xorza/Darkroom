@@ -1,43 +1,15 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::str::Utf8Error;
 
 use crate::file_format::FileFormat;
 use crate::normalize_string::NormalizeString;
 use crate::serde_lua;
-use crate::serde_lua::SerdeLuaError;
 
 pub fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum SerdeFormatError {
-    #[error("YAML serialization/deserialization failed")]
-    Yaml(#[from] serde_yml::Error),
-    #[error("JSON serialization/deserialization failed")]
-    Json(#[from] serde_json::Error),
-    #[error("Lua serialization/deserialization failed")]
-    Lua(#[from] SerdeLuaError),
-    #[error("Binary serialization/deserialization failed: {0}")]
-    Bin(String),
-    #[error("Serialized data is not valid UTF-8")]
-    Utf8(#[from] Utf8Error),
-}
-
-pub type SerdeFormatResult<T> = Result<T, SerdeFormatError>;
-
-impl From<bincode::error::EncodeError> for SerdeFormatError {
-    fn from(err: bincode::error::EncodeError) -> Self {
-        SerdeFormatError::Bin(err.to_string())
-    }
-}
-
-impl From<bincode::error::DecodeError> for SerdeFormatError {
-    fn from(err: bincode::error::DecodeError) -> Self {
-        SerdeFormatError::Bin(err.to_string())
-    }
-}
+pub type SerdeFormatResult<T> = anyhow::Result<T>;
 
 pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     match format {
@@ -77,9 +49,11 @@ pub fn deserialize<T: DeserializeOwned>(
             Ok(serde_lua::from_str(text)?)
         }
         FileFormat::Bin => {
-            let (decoded, _read) =
-                bincode::serde::decode_from_slice(serialized, bincode::config::standard())
-                    .map_err(|err| SerdeFormatError::Bin(err.to_string()))?;
+            let (decoded, read) =
+                bincode::serde::decode_from_slice(serialized, bincode::config::standard())?;
+            if read != serialized.len() {
+                anyhow::bail!("binary payload should be fully consumed");
+            }
             Ok(decoded)
         }
     }

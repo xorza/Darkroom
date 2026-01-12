@@ -312,7 +312,7 @@ impl ExecutionGraph {
         common::serialize(self, format)
     }
     pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
-        Ok(common::deserialize(serialized, format)?)
+        common::deserialize(serialized, format)
     }
 
     // Rebuild execution-node caches and schedule data from the current graph/func library.

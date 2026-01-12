@@ -176,7 +176,7 @@ impl Func {
 
 impl FuncLib {
     pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
-        Ok(deserialize(serialized, format)?)
+        deserialize(serialized, format)
     }
     pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         serialize(&self, format)
