@@ -208,15 +208,13 @@ impl From<CoreGraph> for ViewGraph {
             view_nodes.add(view_node);
         }
 
-        let mut view_graph = Self {
+        Self {
             graph: graph.clone(),
             view_nodes,
             pan: egui::Vec2::ZERO,
             scale: 1.0,
             selected_node_id: None,
-        };
-        view_graph.auto_place_nodes();
-        view_graph
+        }
     }
 }
 
