@@ -308,10 +308,10 @@ impl ExecutionGraph {
         self.e_nodes.iter_mut().find(|node| node.name == node_name)
     }
 
-    pub fn serialize(&self, format: FileFormat) -> String {
+    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         common::serialize(self, format)
     }
-    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
+    pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
         Ok(common::deserialize(serialized, format)?)
     }
 
@@ -1119,7 +1119,7 @@ mod tests {
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = execution_graph.serialize(format);
-            let deserialized = ExecutionGraph::deserialize(serialized.as_str(), format)?;
+            let deserialized = ExecutionGraph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized, serialized_again);
         }

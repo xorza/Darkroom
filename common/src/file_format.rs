@@ -21,6 +21,7 @@ pub enum FileFormat {
     Yaml,
     Json,
     Lua,
+    Bin,
 }
 
 impl FileFormat {
@@ -33,6 +34,7 @@ impl FileFormat {
             "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
             "lua" => Ok(Self::Lua),
+            "bin" => Ok(Self::Bin),
             _ => Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
             )),

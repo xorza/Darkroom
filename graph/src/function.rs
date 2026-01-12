@@ -175,10 +175,10 @@ impl Func {
 }
 
 impl FuncLib {
-    pub fn deserialize(serialized: &str, format: FileFormat) -> anyhow::Result<Self> {
+    pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
         Ok(deserialize(serialized, format)?)
     }
-    pub fn serialize(&self, format: FileFormat) -> String {
+    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         serialize(&self, format)
     }
 
@@ -529,7 +529,7 @@ mod tests {
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = func_lib.serialize(format);
-            let deserialized = super::FuncLib::deserialize(serialized.as_str(), format)?;
+            let deserialized = super::FuncLib::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized, serialized_again);
         }

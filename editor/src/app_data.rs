@@ -239,7 +239,7 @@ impl AppData {
     fn load_from_file(&mut self, path: &Path) -> Result<()> {
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
-        let payload = std::fs::read_to_string(path).map_err(anyhow::Error::from)?;
+        let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
         self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
 
         Ok(())

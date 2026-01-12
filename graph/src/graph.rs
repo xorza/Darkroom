@@ -139,10 +139,10 @@ impl Graph {
         ordered
     }
 
-    pub fn serialize(&self, format: FileFormat) -> String {
+    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         serialize(self, format)
     }
-    pub fn deserialize(serialized: &str, format: FileFormat) -> SerdeFormatResult<Graph> {
+    pub fn deserialize(serialized: &[u8], format: FileFormat) -> SerdeFormatResult<Graph> {
         let graph: Self = deserialize(serialized, format)?;
         graph.validate();
         Ok(graph)
@@ -412,7 +412,6 @@ pub fn test_graph() -> Graph {
 #[cfg(test)]
 mod tests {
     use crate::graph::Graph;
-    use bincode::config;
     use common::FileFormat;
 
     #[test]
@@ -421,18 +420,14 @@ mod tests {
 
         for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
             let serialized = graph.serialize(format);
-            let deserialized = Graph::deserialize(serialized.as_str(), format)?;
+            let deserialized = Graph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);
             assert_eq!(serialized, serialized_again);
         }
 
-        let bin = bincode::serde::encode_to_vec(&graph, config::standard())
-            .expect("graph should serialize via bincode");
-        let (decoded, read) =
-            bincode::serde::decode_from_slice::<Graph, _>(&bin, config::standard())
-                .expect("graph should deserialize via bincode");
-        assert_eq!(read, bin.len());
-        assert_eq!(graph, decoded);
+        let bin = graph.serialize(FileFormat::Bin);
+        let deserialized = Graph::deserialize(&bin, FileFormat::Bin)?;
+        assert_eq!(graph, deserialized);
 
         Ok(())
     }

@@ -95,13 +95,13 @@ impl ViewGraph {
         }
     }
 
-    pub fn serialize(&self, format: FileFormat) -> String {
+    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         self.validate();
         common::serialize(self, format)
     }
 
-    pub fn deserialize(format: FileFormat, input: &str) -> Result<Self> {
-        if input.trim().is_empty() {
+    pub fn deserialize(format: FileFormat, input: &[u8]) -> Result<Self> {
+        if input.is_empty() {
             bail!("graph input is empty");
         }
 
@@ -230,7 +230,7 @@ mod tests {
         let graph = build_test_view();
         let serialized = graph.serialize(format);
         assert!(
-            !serialized.trim().is_empty(),
+            !serialized.is_empty(),
             "serialized graph should not be empty"
         );
         let deserialized = ViewGraph::deserialize(format, &serialized)

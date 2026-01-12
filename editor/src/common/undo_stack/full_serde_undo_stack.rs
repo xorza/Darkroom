@@ -146,14 +146,14 @@ where
 
 fn serialize_snapshot<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     let serialized = common::serialize(value, format);
-    compress_prepend_size(serialized.as_bytes())
+    compress_prepend_size(&serialized)
 }
 
 fn deserialize_snapshot<T: DeserializeOwned>(snapshot: &[u8], format: FileFormat) -> T {
     let decompressed =
         decompress_size_prepended(snapshot).expect("undo snapshot should decompress");
-    let decoded = String::from_utf8(decompressed).expect("undo snapshot should be valid UTF-8");
-    common::deserialize(&decoded, format).expect("undo snapshot should deserialize into a value")
+    common::deserialize(&decompressed, format)
+        .expect("undo snapshot should deserialize into a value")
 }
 
 fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {

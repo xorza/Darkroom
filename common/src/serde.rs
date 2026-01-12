@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use std::str::Utf8Error;
 
 use crate::file_format::FileFormat;
 use crate::normalize_string::NormalizeString;
@@ -18,26 +19,62 @@ pub enum SerdeFormatError {
     Json(#[from] serde_json::Error),
     #[error("Lua serialization failed")]
     Lua(#[from] SerdeLuaError),
+    #[error("Binary serialization failed")]
+    Bin(#[from] bincode::error::EncodeError),
+    #[error("Binary deserialization failed")]
+    BinDecode(#[from] bincode::error::DecodeError),
+    #[error("Serialized data is not valid UTF-8")]
+    Utf8(#[from] Utf8Error),
+    #[error("Binary payload has trailing bytes")]
+    TrailingBytes,
 }
 
 pub type SerdeFormatResult<T> = Result<T, SerdeFormatError>;
 
-pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> String {
+pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     match format {
-        FileFormat::Yaml => serde_yml::to_string(value).unwrap(),
-        FileFormat::Json => serde_json::to_string_pretty(value).unwrap(),
-        FileFormat::Lua => serde_lua::to_string(value).unwrap(),
+        FileFormat::Yaml => serde_yml::to_string(value)
+            .unwrap()
+            .normalize()
+            .into_bytes(),
+        FileFormat::Json => serde_json::to_string_pretty(value)
+            .unwrap()
+            .normalize()
+            .into_bytes(),
+        FileFormat::Lua => serde_lua::to_string(value)
+            .unwrap()
+            .normalize()
+            .into_bytes(),
+        FileFormat::Bin => {
+            bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap()
+        }
     }
-    .normalize()
 }
 
 pub fn deserialize<T: DeserializeOwned>(
-    serialized: &str,
+    serialized: &[u8],
     format: FileFormat,
 ) -> SerdeFormatResult<T> {
     match format {
-        FileFormat::Yaml => Ok(serde_yml::from_str(serialized)?),
-        FileFormat::Json => Ok(serde_json::from_str(serialized)?),
-        FileFormat::Lua => Ok(serde_lua::from_str(serialized)?),
+        FileFormat::Yaml => {
+            let text = std::str::from_utf8(serialized)?;
+            Ok(serde_yml::from_str(text)?)
+        }
+        FileFormat::Json => {
+            let text = std::str::from_utf8(serialized)?;
+            Ok(serde_json::from_str(text)?)
+        }
+        FileFormat::Lua => {
+            let text = std::str::from_utf8(serialized)?;
+            Ok(serde_lua::from_str(text)?)
+        }
+        FileFormat::Bin => {
+            let (decoded, read) =
+                bincode::serde::decode_from_slice(serialized, bincode::config::standard())?;
+            if read != serialized.len() {
+                return Err(SerdeFormatError::TrailingBytes);
+            }
+            Ok(decoded)
+        }
     }
 }

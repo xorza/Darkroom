@@ -126,8 +126,9 @@ Undo stack tests now validate buffer growth/shrink behavior and redo buffer clea
 `ActionUndoStack` tests now cover base-offset trimming and compaction behavior.
 `ActionUndoStack` tests now include a full roundtrip across all `GraphUiAction` variants using JSON snapshots.
 Graph serialization now always includes behavior/inputs/events/bindings (no `skip_serializing_if` on core graph types) to keep binary serialization consistent.
-`common::serialize`/`deserialize` now panic if asked to handle `FileFormat::Bin`, since those helpers are string-based.
-Graph tests now include a bincode roundtrip for `Graph` alongside YAML/JSON/Lua.
+`common::serialize` now returns `Vec<u8>` and `deserialize` accepts bytes; text formats are UTF-8 bytes and `FileFormat::Bin` uses bincode.
+Graph/func/execution/view serialize APIs now return bytes and deserialize from bytes; file load/save uses byte IO.
+Graph tests now include a `FileFormat::Bin` roundtrip alongside YAML/JSON/Lua.
 Editor logging now keeps the non-blocking file guard alive and uses a combined writer to emit to both file and stdout.
 Action undo stack tests now validate range bounds and buffer length consistency.
 `MainUi::handle_undo_shortcut` now handles redo on Cmd/Ctrl+Shift+Z.
