@@ -31,6 +31,10 @@ impl EventLambda {
             EventLambda::Lambda(inner) => (inner)().await,
         }
     }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, EventLambda::None)
+    }
 }
 
 impl std::fmt::Debug for EventLambda {

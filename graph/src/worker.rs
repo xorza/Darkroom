@@ -63,14 +63,14 @@ impl Worker {
         }
     }
 
-    pub fn send(&mut self, msg: WorkerMessage) {
+    pub fn send(&self, msg: WorkerMessage) {
         self.tx.send(msg).unwrap();
     }
-    pub fn execute_terminals(&mut self) {
+    pub fn execute_terminals(&self) {
         self.send(WorkerMessage::ExecuteTerminals);
     }
 
-    pub fn update(&mut self, graph: Graph, func_lib: FuncLib) {
+    pub fn update(&self, graph: Graph, func_lib: FuncLib) {
         self.send(WorkerMessage::Update { graph, func_lib });
     }
 
@@ -82,11 +82,11 @@ impl Worker {
         }
     }
 
-    pub fn event(&mut self, event_id: EventId) {
+    pub fn event(&self, event_id: EventId) {
         self.send(WorkerMessage::Event { event_id });
     }
 
-    pub fn execute_events<T: IntoIterator<Item = EventId>>(&mut self, event_ids: T) {
+    pub fn execute_events<T: IntoIterator<Item = EventId>>(&self, event_ids: T) {
         let event_ids: Vec<EventId> = event_ids.into_iter().collect();
         self.send(WorkerMessage::Events { event_ids });
     }
@@ -156,10 +156,11 @@ async fn worker_loop<Callback>(
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
-                    let mut events: Vec<(NodeId, EventLambda)> =
-                        Vec::with_capacity(execution_graph.e_nodes.len());
+                    let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
                     for e_node in execution_graph.e_nodes.iter() {
-                        events.push((e_node.id, e_node.event_lambda.clone()));
+                        if e_node.event_lambda.is_none() {
+                            events.push((e_node.id, e_node.event_lambda.clone()));
+                        }
                     }
                     if !events.is_empty() {
                         event_loop_handle = Some(start_event_loop(tx.clone(), events));

@@ -49,6 +49,7 @@ impl AppData {
     pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
         let shared_status = Shared::default();
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
+
         let run_event = Arc::new(Notify::new());
 
         let mut func_lib = FuncLib::default();
@@ -110,25 +111,27 @@ impl AppData {
         if self.graph_updated {
             self.worker
                 .update(self.view_graph.graph.clone(), self.func_lib.clone());
+            self.worker.send(WorkerMessage::StartEventLoop);
             self.graph_updated = false;
         }
 
-        let events: Vec<EventId> = self
-            .view_graph
-            .graph
-            .nodes
-            .iter()
-            .filter(|node| node.func_id == EditorFuncLib::RUN_FUNC_ID)
-            .map(|node| EventId {
-                node_id: node.id,
-                event_idx: 0,
-            })
-            .collect();
-        if events.is_empty() {
-            self.worker.execute_terminals();
-        } else {
-            self.worker.execute_events(events);
-        }
+        // let events: Vec<EventId> = self
+        //     .view_graph
+        //     .graph
+        //     .nodes
+        //     .iter()
+        //     .filter(|node| node.func_id == EditorFuncLib::RUN_FUNC_ID)
+        //     .map(|node| EventId {
+        //         node_id: node.id,
+        //         event_idx: 0,
+        //     })
+        //     .collect();
+        // if events.is_empty() {
+        //     self.worker.execute_terminals();
+        // } else {
+        //     self.worker.execute_events(events);
+        // }
+        self.run_event.notify_waiters();
     }
 
     pub fn undo(&mut self) {
