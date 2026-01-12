@@ -109,9 +109,16 @@ impl AppData {
         }
 
         if self.graph_updated {
-            self.worker
-                .update(self.view_graph.graph.clone(), self.func_lib.clone());
-            self.worker.send(WorkerMessage::StartEventLoop);
+            self.worker.send(WorkerMessage::Multi {
+                msgs: vec![
+                    WorkerMessage::Update {
+                        graph: self.view_graph.graph.clone(),
+                        func_lib: self.func_lib.clone(),
+                    },
+                    WorkerMessage::StartEventLoop,
+                ],
+            });
+
             self.graph_updated = false;
         }
 
