@@ -247,6 +247,7 @@ fn start_event_loop(
             }
 
             ready.wait().await;
+            tokio::task::yield_now().await;
             callback.call();
 
             let mut event_ids: Vec<EventId> = Vec::default();
