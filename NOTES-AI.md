@@ -225,6 +225,9 @@ Recent adjustments:
 - `common/src/bool_ext.rs` adds `BoolExt` with `then_else` and `then_else_with` helpers for conditional value selection.
 - Worker execution now skips `execute()` when `ExecutionGraph::update` fails, forwarding the update error directly to
   the compute callback.
+- `start_event_loop` now returns an `EventLoopHandle` with `send` and async `stop` to close the event channel and await
+  shutdown of the background task.
+- `EventLoopHandle` now wraps a `Shared<EventLoopInner>` so clones share the same sender and join handle.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.

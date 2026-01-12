@@ -26,6 +26,44 @@ pub struct Worker {
     tx: UnboundedSender<WorkerMessage>,
 }
 
+#[derive(Debug)]
+struct EventLoopInner {
+    tx: Option<UnboundedSender<Vec<EventId>>>,
+    thread_handle: Option<JoinHandle<()>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EventLoopHandle {
+    inner: Shared<EventLoopInner>,
+}
+
+impl EventLoopHandle {
+    pub async fn send(&self, events: Vec<EventId>) {
+        let inner = self.inner.lock().await;
+        let tx = inner
+            .tx
+            .as_ref()
+            .expect("Event loop sender should be available before stop");
+        tx.send(events).unwrap();
+    }
+
+    pub async fn stop(&self) {
+        let handle = {
+            let mut inner = self.inner.lock().await;
+            let tx = inner
+                .tx
+                .take()
+                .expect("Event loop sender should be available before stop");
+            drop(tx);
+            inner
+                .thread_handle
+                .take()
+                .expect("Event loop handle should be available before stop")
+        };
+        handle.await.expect("Event loop task failed to join");
+    }
+}
+
 impl Worker {
     pub fn new<Callback>(callback: Callback) -> Self
     where
@@ -147,25 +185,30 @@ async fn worker_loop<Callback>(
     }
 }
 
-fn start_event_loop(tx: UnboundedSender<WorkerMessage>) {
-    let (_event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
+fn start_event_loop(tx: UnboundedSender<WorkerMessage>) -> EventLoopHandle {
+    let (event_tx, mut event_rx) = unbounded_channel::<Vec<EventId>>();
 
-    tokio::spawn({
-        async move {
-            loop {
-                let events = event_rx.recv().await;
+    let thread_handle = tokio::spawn(async move {
+        loop {
+            let events = event_rx.recv().await;
 
-                if let Some(events) = events {
-                    let resutl = tx.send(WorkerMessage::Events { event_ids: events });
-                    if resutl.is_err() {
-                        return;
-                    }
-                } else {
+            if let Some(events) = events {
+                let result = tx.send(WorkerMessage::Events { event_ids: events });
+                if result.is_err() {
                     return;
                 }
+            } else {
+                return;
             }
         }
     });
+
+    EventLoopHandle {
+        inner: Shared::new(EventLoopInner {
+            tx: Some(event_tx),
+            thread_handle: Some(thread_handle),
+        }),
+    }
 }
 
 #[cfg(test)]
