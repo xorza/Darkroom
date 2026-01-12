@@ -1,17 +1,15 @@
 use std::any::Any;
-use std::future::Future;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::context::{ContextManager, ContextType};
-use crate::execution_graph::OutputUsage;
+use crate::context::ContextType;
+
+use crate::lambda::FuncLambda;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use common::{FileFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub enum FuncBehavior {
@@ -20,86 +18,6 @@ pub enum FuncBehavior {
     Impure,
     // always returns the same value for same inputs
     Pure,
-}
-
-#[derive(Debug, Error)]
-pub enum InvokeError {
-    #[error("Invocation failed: {0}")]
-    External(#[from] anyhow::Error),
-}
-
-pub type InvokeResult<T> = Result<T, InvokeError>;
-
-#[derive(Debug)]
-pub struct InvokeInput {
-    pub changed: bool,
-    pub value: DynamicValue,
-}
-
-type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
-
-pub trait AsyncLambdaFn:
-    for<'a> Fn(
-        &'a mut ContextManager,
-        &'a mut InvokeCache,
-        &'a [InvokeInput],
-        &'a [OutputUsage],
-        &'a mut [DynamicValue],
-    ) -> AsyncLambdaFuture<'a>
-    + Send
-    + Sync
-    + 'static
-{
-}
-
-impl<T> AsyncLambdaFn for T where
-    T: for<'a> Fn(
-            &'a mut ContextManager,
-            &'a mut InvokeCache,
-            &'a [InvokeInput],
-            &'a [OutputUsage],
-            &'a mut [DynamicValue],
-        ) -> AsyncLambdaFuture<'a>
-        + Send
-        + Sync
-        + 'static
-{
-}
-
-pub type AsyncLambda = dyn AsyncLambdaFn;
-
-#[derive(Clone, Default)]
-pub enum FuncLambda {
-    #[default]
-    None,
-    Lambda(Arc<AsyncLambda>),
-}
-
-impl FuncLambda {
-    pub fn new<F>(lambda: F) -> Self
-    where
-        F: AsyncLambdaFn,
-    {
-        Self::Lambda(Arc::new(lambda))
-    }
-
-    pub async fn invoke(
-        &self,
-        ctx_manager: &mut ContextManager,
-        cache: &mut InvokeCache,
-        inputs: &[InvokeInput],
-        output_usage: &[OutputUsage],
-        outputs: &mut [DynamicValue],
-    ) -> InvokeResult<()> {
-        match self {
-            FuncLambda::None => {
-                panic!("Func missing lambda");
-            }
-            FuncLambda::Lambda(inner) => {
-                (inner)(ctx_manager, cache, inputs, output_usage, outputs).await
-            }
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -520,7 +438,8 @@ mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::OutputUsage;
-    use crate::function::{InvokeCache, InvokeInput, TestFuncHooks, test_func_lib};
+    use crate::function::{InvokeCache, TestFuncHooks, test_func_lib};
+    use crate::lambda::InvokeInput;
     use common::FileFormat;
 
     #[test]

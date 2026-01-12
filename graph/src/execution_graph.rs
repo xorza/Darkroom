@@ -7,8 +7,9 @@ use thiserror::Error;
 
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache, InvokeInput};
+use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
+use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventId;
 use common::{BoolExt, FileFormat, is_debug};

@@ -9,8 +9,12 @@ use std::sync::Arc;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
-use crate::function::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib};
 use crate::graph::{Graph, Node, NodeId};
+use crate::lambda::FuncLambda;
+use crate::prelude::Func;
+use crate::prelude::FuncBehavior;
+use crate::prelude::FuncId;
+use crate::prelude::FuncLib;
 use crate::{data, function};
 
 #[derive(Clone, Debug)]
