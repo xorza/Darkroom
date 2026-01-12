@@ -197,6 +197,12 @@ async fn worker_loop<Callback>(
         }
 
         if let Some((graph, func_lib)) = update_graph.take() {
+            if event_loop_handle.is_some() && !matches!(event_loop_cmd, EventLoopCommand::Stop) {
+                event_loop_cmd = EventLoopCommand::Start {
+                    callback: EventLoopCallback::new(|| {}),
+                };
+            }
+            stop_event_loop(&mut event_loop_handle).await;
             execution_graph.update(&graph, &func_lib);
         }
 
