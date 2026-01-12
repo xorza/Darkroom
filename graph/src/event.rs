@@ -1,12 +1,10 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::worker::EventLoopHandle;
+type AsyncEventFuture = Pin<Box<dyn Future<Output = usize> + Send>>;
 
-type AsyncEventFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub trait AsyncEventFn: Fn() -> AsyncEventFuture + Send + Sync + 'static {}
 
-pub trait AsyncEventFn: Fn(EventLoopHandle) -> AsyncEventFuture + Send + Sync + 'static {}
-
-impl<T> AsyncEventFn for T where T: Fn(EventLoopHandle) -> AsyncEventFuture + Send + Sync + 'static {}
+impl<T> AsyncEventFn for T where T: Fn() -> AsyncEventFuture + Send + Sync + 'static {}
 
 pub type AsyncEvent = dyn AsyncEventFn;
 
@@ -25,12 +23,12 @@ impl EventLambda {
         Self::Lambda(Arc::new(lambda))
     }
 
-    pub async fn invoke(&self, event_loop_handle: EventLoopHandle) {
+    pub async fn invoke(&self) -> usize {
         match self {
             EventLambda::None => {
                 panic!("Func missing lambda");
             }
-            EventLambda::Lambda(inner) => (inner)(event_loop_handle).await,
+            EventLambda::Lambda(inner) => (inner)().await,
         }
     }
 }

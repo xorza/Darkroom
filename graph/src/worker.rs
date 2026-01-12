@@ -226,10 +226,10 @@ fn start_event_loop(
     }
 
     tokio::spawn({
-        let handle = handle.clone();
+        let _handle = handle.clone();
         async move {
             for event in events {
-                event.invoke(handle.clone()).await;
+                event.invoke().await;
             }
         }
     });
