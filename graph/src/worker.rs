@@ -239,23 +239,23 @@ fn start_event_loop(
             tokio::task::yield_now().await;
             callback.call();
 
-            let mut event_ids: Vec<EventId> = Vec::default();
-            let mut events: Vec<(NodeId, EventLambda)> = Vec::default();
+            let mut fired_event_ids: Vec<EventId> = Vec::default();
+            let mut events_to_respawn: Vec<(NodeId, EventLambda)> = Vec::default();
 
             while let Some(result) = pending.join_next().await {
                 let (event_lambda, node_id, event_idx) =
                     result.expect("Event loop task should complete");
-                event_ids.push(EventId { node_id, event_idx });
-                events.push((node_id, event_lambda));
+                fired_event_ids.push(EventId { node_id, event_idx });
+                events_to_respawn.push((node_id, event_lambda));
 
                 while let Some(result) = pending.try_join_next() {
                     let (event_lambda, node_id, event_idx) =
                         result.expect("Event loop task should complete");
-                    event_ids.push(EventId { node_id, event_idx });
-                    events.push((node_id, event_lambda));
+                    fired_event_ids.push(EventId { node_id, event_idx });
+                    events_to_respawn.push((node_id, event_lambda));
                 }
 
-                for (node_id, event_lambda) in events.drain(..) {
+                for (node_id, event_lambda) in events_to_respawn.drain(..) {
                     pending.spawn(async move {
                         let event_idx = event_lambda.invoke().await;
                         (event_lambda, node_id, event_idx)
@@ -263,7 +263,7 @@ fn start_event_loop(
                 }
 
                 let result = tx.send(WorkerMessage::Events {
-                    event_ids: std::mem::take(&mut event_ids),
+                    event_ids: std::mem::take(&mut fired_event_ids),
                 });
                 if result.is_err() {
                     return;
@@ -311,8 +311,12 @@ impl std::fmt::Debug for EventLoopCallback {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use common::output_stream::OutputStream;
+    use tokio::sync::Notify;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::{Duration, timeout};
 
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
@@ -463,6 +467,45 @@ mod tests {
             panic!("Expected WorkerMessage::Events");
         };
         assert_eq!(event_ids, vec![event_id]);
+
+        handle.stop().await;
+    }
+
+    #[tokio::test]
+    async fn start_event_loop_waits_for_callback() {
+        let node_id = NodeId::unique();
+        let notify = Arc::new(Notify::new());
+        let notify_for_event = Arc::clone(&notify);
+        let event_lambda = EventLambda::new(move || {
+            let notify = Arc::clone(&notify_for_event);
+            Box::pin(async move {
+                notify.notified().await;
+                0
+            })
+        });
+
+        let notify_for_callback = Arc::clone(&notify);
+        let callback = EventLoopCallback::new(move || {
+            notify_for_callback.notify_waiters();
+        });
+
+        let (tx, mut rx) = unbounded_channel();
+        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback);
+
+        let msg = timeout(Duration::from_millis(200), rx.recv())
+            .await
+            .expect("Expected event message")
+            .expect("Event channel closed");
+        let WorkerMessage::Events { event_ids } = msg else {
+            panic!("Expected WorkerMessage::Events");
+        };
+        assert_eq!(
+            event_ids,
+            vec![EventId {
+                node_id,
+                event_idx: 0
+            }]
+        );
 
         handle.stop().await;
     }
