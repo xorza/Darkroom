@@ -90,20 +90,20 @@ impl AppData {
 
     pub fn empty_graph(&mut self) {
         self.apply_graph(ViewGraph::default(), true);
-        self.set_status("Created new graph");
+        self.add_status("Created new graph");
     }
 
     pub fn save_graph(&mut self) {
         match self.save_to_file(&self.current_path) {
-            Ok(()) => self.set_status(format!("Saved graph to {}", self.current_path.display())),
-            Err(err) => self.set_status(format!("Save failed: {err}")),
+            Ok(()) => self.add_status(format!("Saved graph to {}", self.current_path.display())),
+            Err(err) => self.add_status(format!("Save failed: {err}")),
         }
     }
 
     pub fn load_graph(&mut self) {
         match self.load_from_file(&self.current_path.clone()) {
-            Ok(()) => self.set_status(format!("Loaded graph from {}", self.current_path.display())),
-            Err(err) => self.set_status(format!("Load failed: {err}")),
+            Ok(()) => self.add_status(format!("Loaded graph from {}", self.current_path.display())),
+            Err(err) => self.add_status(format!("Load failed: {err}")),
         }
     }
 
@@ -117,7 +117,7 @@ impl AppData {
         view_graph.auto_place_nodes();
         self.apply_graph(view_graph, true);
 
-        self.set_status("Loaded sample test graph");
+        self.add_status("Loaded sample test graph");
     }
 
     pub fn update_status(&mut self) {
@@ -185,7 +185,7 @@ impl AppData {
         }
 
         if let Some(err) = self.interaction.errors.last() {
-            self.set_status(format!("Graph error: {err}"));
+            self.add_status(format!("Graph error: {err}"));
         }
 
         self.interaction.clear();
@@ -205,13 +205,16 @@ impl AppData {
         })
     }
 
-    fn set_status(&mut self, message: impl Into<String>) {
-        self.status = message.into();
+    fn add_status(&mut self, message: impl AsRef<str>) {
+        if !self.status.is_empty() {
+            self.status.push('\n');
+        }
+        self.status.push_str(message.as_ref());
     }
 
     fn run_graph(&mut self) {
         if self.view_graph.graph.nodes.is_empty() {
-            self.set_status("Run failed: no graph loaded");
+            self.add_status("Run failed: no graph loaded");
             return;
         }
 
