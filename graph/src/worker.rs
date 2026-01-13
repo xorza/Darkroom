@@ -208,7 +208,7 @@ async fn start_event_loop(
 
     let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
     let event_task_handle = tokio::spawn({
-        let tx = worker_message_tx.clone();
+        let worker_message_tx = worker_message_tx.clone();
         async move {
             let mut event_ids = Vec::default();
             loop {
@@ -221,11 +221,11 @@ async fn start_event_loop(
                     return;
                 }
                 let result = if event_ids.len() == 1 {
-                    tx.send(WorkerMessage::Event {
+                    worker_message_tx.send(WorkerMessage::Event {
                         event_id: event_ids[0].clone(),
                     })
                 } else {
-                    tx.send(WorkerMessage::Events {
+                    worker_message_tx.send(WorkerMessage::Events {
                         event_ids: std::mem::take(&mut event_ids),
                     })
                 };
