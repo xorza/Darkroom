@@ -451,16 +451,17 @@ mod tests {
             EventLoopCallback::new(|| {}),
         );
 
-        let event_id = EventId {
-            node_id,
-            event_idx: 1,
-        };
-
         let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::Events { event_ids } = msg else {
+        let WorkerMessage::Event { event_id } = msg else {
             panic!("Expected WorkerMessage::Events");
         };
-        assert_eq!(event_ids, vec![event_id]);
+        assert_eq!(
+            event_id,
+            EventId {
+                node_id,
+                event_idx: 1,
+            }
+        );
 
         handle.stop().await;
     }
