@@ -81,25 +81,14 @@ impl MainUi {
             .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
-                    {
+                    let style = ui.style_mut();
+                    style.spacing.button_padding = egui::vec2(16.0, 5.0);
+
+                    ui.menu_button("File", |ui| {
                         let style = ui.style_mut();
                         style.spacing.button_padding = egui::vec2(16.0, 5.0);
-                        style.spacing.item_spacing = egui::vec2(10.0, 5.0);
-                        style
-                            .text_styles
-                            .entry(egui::TextStyle::Button)
-                            .and_modify(|font| font.size = 18.0);
-                    }
-                    ui.menu_button("File", |ui| {
-                        {
-                            let style = ui.style_mut();
-                            style.spacing.button_padding = egui::vec2(16.0, 5.0);
-                            style.spacing.item_spacing = egui::vec2(10.0, 5.0);
-                            style
-                                .text_styles
-                                .entry(egui::TextStyle::Button)
-                                .and_modify(|font| font.size = 18.0);
-                        }
+
+                        ui.set_min_width(100.0);
                         if ui.button("New").clicked() {
                             self.empty(app_data);
                             ui.close();
