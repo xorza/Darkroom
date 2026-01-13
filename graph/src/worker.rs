@@ -97,15 +97,6 @@ impl Drop for Worker {
     }
 }
 
-impl EventLoopHandle {
-    pub async fn stop(&self) {
-        let mut inner = self.inner.lock().await;
-        if let Some(event_task_handle) = inner.event_task_handle.take() {
-            event_task_handle.abort();
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 enum EventLoopCommand {
     None,
@@ -287,6 +278,15 @@ impl EventLoopCallback {
     pub fn call(&self) {
         if let Some(inner) = &self.inner {
             (inner)();
+        }
+    }
+}
+
+impl EventLoopHandle {
+    pub async fn stop(&self) {
+        let mut inner = self.inner.lock().await;
+        if let Some(event_task_handle) = inner.event_task_handle.take() {
+            event_task_handle.abort();
         }
     }
 }
