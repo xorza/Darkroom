@@ -53,11 +53,11 @@ pub struct EventLoopHandle {
 }
 
 impl Worker {
-    pub fn new<Callback>(callback: Callback) -> Self
+    pub fn new<ExecutionCallback>(callback: ExecutionCallback) -> Self
     where
-        Callback: Fn(Result<ExecutionStats>) + Send + 'static,
+        ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
     {
-        let callback: Shared<Callback> = Shared::new(callback);
+        let callback: Shared<ExecutionCallback> = Shared::new(callback);
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let thread_handle: JoinHandle<()> = tokio::spawn({
             let tx = tx.clone();
@@ -75,9 +75,6 @@ impl Worker {
     pub fn send(&self, msg: WorkerMessage) {
         self.tx.send(msg).unwrap();
     }
-    pub fn execute_terminals(&self) {
-        self.send(WorkerMessage::ExecuteTerminals);
-    }
 
     pub fn update(&self, graph: Graph, func_lib: FuncLib) {
         self.send(WorkerMessage::Update { graph, func_lib });
@@ -89,15 +86,6 @@ impl Worker {
         if let Some(_thread_handle) = self.thread_handle.take() {
             // thread_handle.await.expect("Worker thread failed to join");
         }
-    }
-
-    pub fn event(&self, event_id: EventId) {
-        self.send(WorkerMessage::Event { event_id });
-    }
-
-    pub fn execute_events<T: IntoIterator<Item = EventId>>(&self, event_ids: T) {
-        let event_ids: Vec<EventId> = event_ids.into_iter().collect();
-        self.send(WorkerMessage::Events { event_ids });
     }
 }
 
@@ -398,9 +386,11 @@ mod tests {
         });
 
         worker.update(graph.clone(), func_lib.clone());
-        worker.event(EventId {
-            node_id: frame_event_node_id,
-            event_idx: 0,
+        worker.send(WorkerMessage::Event {
+            event_id: EventId {
+                node_id: frame_event_node_id,
+                event_idx: 0,
+            },
         });
 
         let executed = compute_finish_rx
@@ -412,9 +402,11 @@ mod tests {
         assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["1"]);
 
-        worker.event(EventId {
-            node_id: frame_event_node_id,
-            event_idx: 0,
+        worker.send(WorkerMessage::Event {
+            event_id: EventId {
+                node_id: frame_event_node_id,
+                event_idx: 0,
+            },
         });
 
         let executed = compute_finish_rx
@@ -426,9 +418,11 @@ mod tests {
         assert_eq!(executed.executed_nodes.len(), 3);
         assert_eq!(output_stream.take().await, ["2"]);
 
-        worker.event(EventId {
-            node_id: frame_event_node_id,
-            event_idx: 0,
+        worker.send(WorkerMessage::Event {
+            event_id: EventId {
+                node_id: frame_event_node_id,
+                event_idx: 0,
+            },
         });
 
         let executed = compute_finish_rx
