@@ -5,6 +5,8 @@ use crate::gui::Gui;
 use crate::gui::style::Style;
 use common::StrExt;
 
+const LINE_COUNT: usize = 6;
+
 #[derive(Debug, Default)]
 pub struct LogUi;
 
@@ -39,15 +41,19 @@ impl LogUi {
 
                     if state.is_open() {
                         let line_height = ui.text_style_height(&TextStyle::Body);
-                        let max_height = line_height * 6.0;
+                        let max_height = line_height * LINE_COUNT as f32;
                         ui.set_height(max_height);
+
                         ScrollArea::vertical()
                             .auto_shrink(Vec2b::new(true, true))
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
                                 ui.vertical(|ui| {
                                     ui.take_available_width();
-                                    ui.add_space(max_height);
+                                    ui.add_space(
+                                        (max_height - status.line_count() as f32 * line_height)
+                                            .max(0.0),
+                                    );
                                     ui.label(status);
                                 });
                             });
