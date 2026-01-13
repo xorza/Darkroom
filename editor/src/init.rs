@@ -26,7 +26,7 @@ fn init_trace() -> Result<()> {
         .set(log_guard)
         .expect("log guard should only be initialized once");
     tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter("warn")
         .with_writer(non_blocking.and(std::io::stdout))
         .init();
 
