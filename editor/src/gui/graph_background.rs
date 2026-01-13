@@ -43,13 +43,15 @@ impl GraphBackgroundRenderer {
     }
 
     fn rebuild_texture(&mut self, gui: &mut Gui<'_>, _ctx: &GraphContext<'_>) {
-        let spacing = gui.style.graph_background.dotted_base_spacing;
-        assert!(spacing > 0.0, "background spacing must be positive");
-
         let radius = gui.style.graph_background.dotted_radius_base;
         let color = gui.style.graph_background.dotted_color;
 
-        let tile = spacing.ceil().max(radius * 2.0 + 2.0);
+        let tile = gui
+            .style
+            .graph_background
+            .dotted_base_spacing
+            .ceil()
+            .max(radius * 2.0 + 2.0);
         let size = tile as usize;
         let mut image = ColorImage::new([size, size], vec![Color32::TRANSPARENT; size * size]);
 
@@ -78,7 +80,10 @@ impl GraphBackgroundRenderer {
     fn draw_tiled(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         let texture = self.texture.as_ref().unwrap();
 
-        let spacing = gui.style.graph_background.dotted_base_spacing;
+        const MIN_SPACING: f32 = 8.0;
+        const MAX_SPACING: f32 = 60.0;
+        let spacing = (gui.style.graph_background.dotted_base_spacing * gui.scale)
+            .clamp(MIN_SPACING, MAX_SPACING);
         let origin = gui.rect.min + ctx.view_graph.pan;
 
         let uv = |p: Pos2| {
