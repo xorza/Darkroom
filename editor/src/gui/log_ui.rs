@@ -26,7 +26,7 @@ impl LogUi {
                     top: 0,
                     bottom: style.big_padding as i8,
                 })
-                .inner_margin(style.corner_radius * 0.5);
+                .inner_margin(style.corner_radius);
 
             frame.show(ui, |ui| {
                 ui.take_available_width();
@@ -47,13 +47,16 @@ impl LogUi {
                             .max_height(max_height)
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
-                                ui.set_width(ui.available_width());
+                                ui.take_available_width();
+                                let content_height = line_height * status.lines().count() as f32;
+                                let extra_space = (max_height - content_height).max(0.0);
+                                if extra_space > 0.0 {
+                                    ui.add_space(extra_space);
+                                }
                                 ui.label(status);
                             });
                     } else {
-                        let mut label = Label::new(status.last_line().to_owned()).wrap();
-                        label = label.truncate();
-                        ui.add(label);
+                        ui.add(Label::new(status.last_line().to_owned()).truncate());
                     }
 
                     state.store(ui.ctx());
