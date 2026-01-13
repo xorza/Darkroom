@@ -293,8 +293,7 @@ impl EventLoopHandle {
     async fn stop(&mut self) {
         for ah in self.join_handles.drain(..) {
             ah.abort();
-            let result = ah.await;
-            if let Err(err) = result {
+            if let Err(err) = ah.await {
                 if err.is_panic() {
                     std::panic::resume_unwind(err.into_panic());
                 } else {
