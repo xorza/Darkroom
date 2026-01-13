@@ -3,7 +3,8 @@ use crate::gui::graph_ui::GraphUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame, Sense};
+use egui::collapsing_header::CollapsingState;
+use egui::{CentralPanel, Frame, Label, Sense};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -120,7 +121,14 @@ impl MainUi {
         egui::TopBottomPanel::bottom("status_panel")
             .show_separator_line(false)
             .show(ctx, |ui| {
-                ui.label(&app_data.status);
+                let id = ui.make_persistent_id("status_panel_header");
+                CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                    .show_header(ui, |ui| {
+                        ui.add(Label::new(&app_data.status).truncate());
+                    })
+                    .body_unindented(|ui| {
+                        ui.label(&app_data.status.last_line());
+                    });
             });
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {

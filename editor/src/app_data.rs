@@ -141,10 +141,12 @@ impl AppData {
                         format!("Compute finished {summary}")
                     };
 
-                    self.status = message;
+                    self.status.push('\n');
+                    self.status.push_str(&message);
                 }
                 Err(err) => {
-                    self.status = format!("Compute failed: {err}");
+                    self.status.push('\n');
+                    self.status.push_str(&format!("Compute failed: {err}"));
                 }
             }
         }

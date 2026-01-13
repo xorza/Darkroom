@@ -90,6 +90,7 @@ Graph rendering now uses a fixed-rect child `Ui` with a clip rect to prevent Cen
 offscreen widgets (like const bindings) extend beyond the graph area.
 The editor now overrides `eframe::App::clear_color` to use `visuals.panel_fill`, so the window background behind the
 CentralPanel outer margin matches the top/bottom panel and menu background.
+Status panel now uses a collapsible header so it stays one line when collapsed and expands to show full status text.
 Native window position/size now persist between runs via `eframe` window persistence with `persist_window` enabled.
 Graph UI interactions now collect connection errors (like cycle detection) and surface the latest one via the status
 bar in `AppData::handle_graph_ui_actions`.
