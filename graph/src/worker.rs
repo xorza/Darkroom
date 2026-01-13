@@ -357,7 +357,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{EventId, EventLoopCallback, MAX_EVENTS_PER_LOOP, Worker, WorkerMessage};
+    use crate::worker::{EventId, EventLoopCallback, Worker, WorkerMessage};
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -496,12 +496,11 @@ mod tests {
         );
 
         let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::Events { event_ids } = msg else {
+        let WorkerMessage::Event { event_id } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
-        assert_eq!(event_ids.len(), MAX_EVENTS_PER_LOOP);
         assert_eq!(
-            event_ids[0],
+            event_id,
             EventId {
                 node_id,
                 event_idx: 1
