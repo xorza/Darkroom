@@ -1,8 +1,5 @@
 use std::collections::{HashSet, VecDeque};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::sync::Arc;
 
 use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
@@ -10,7 +7,6 @@ use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::error;
@@ -51,8 +47,6 @@ pub struct Worker {
 struct EventLoopInner {
     event_task_handle1: Option<JoinHandle<()>>,
     event_task_handle2: Option<JoinHandle<()>>,
-    stop_flag: Arc<AtomicBool>,
-    stop_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,9 +204,6 @@ fn start_event_loop(
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
-    let stop_flag = Arc::new(AtomicBool::new(false));
-    let stop_notify = Arc::new(Notify::new());
-
     let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
 
     let event_task_handle1 = tokio::spawn({
@@ -246,33 +237,22 @@ fn start_event_loop(
     });
 
     let event_task_handle2 = tokio::spawn({
-        let stop_flag = stop_flag.clone();
-        let stop_notify = stop_notify.clone();
         let ready = ReadyState::new(events.len());
 
         async move {
             for (node_id, event_lambda) in events {
                 tokio::spawn({
                     let event_tx = event_tx.clone();
-                    let stop_flag = stop_flag.clone();
-                    let stop_notify = stop_notify.clone();
                     let ready = ready.clone();
 
                     async move {
                         ready.signal();
 
                         loop {
-                            if stop_flag.load(Ordering::Acquire) {
+                            let event_idx = event_lambda.invoke().await;
+                            let result = event_tx.send(EventId { node_id, event_idx }).await;
+                            if result.is_err() {
                                 return;
-                            }
-                            tokio::select! {
-                                _ = stop_notify.notified() => return,
-                                event_idx = event_lambda.invoke() => {
-                                    let result = event_tx.send(EventId { node_id, event_idx }).await;
-                                    if result.is_err() {
-                                        return;
-                                    }
-                                }
                             }
 
                             tokio::task::yield_now().await;
@@ -291,8 +271,6 @@ fn start_event_loop(
         inner: Shared::new(EventLoopInner {
             event_task_handle1: Some(event_task_handle1),
             event_task_handle2: Some(event_task_handle2),
-            stop_flag,
-            stop_notify,
         }),
     }
 }
@@ -325,8 +303,6 @@ impl EventLoopHandle {
     pub async fn stop(&self) {
         let mut inner = self.inner.lock().await;
         if let Some(event_task_handle1) = inner.event_task_handle1.take() {
-            inner.stop_flag.store(true, Ordering::Release);
-            inner.stop_notify.notify_waiters();
             event_task_handle1.abort();
         }
         if let Some(event_task_handle2) = inner.event_task_handle2.take() {
