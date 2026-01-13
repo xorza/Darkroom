@@ -117,13 +117,13 @@ async fn worker_loop<Callback>(
     let mut events: Vec<EventId> = Vec::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
 
-    'worker: loop {
+    loop {
         assert!(msgs.is_empty());
         assert!(msgs_vec.is_empty());
         assert!(events.is_empty());
 
         if rx.recv_many(&mut msgs_vec, 10).await == 0 {
-            break 'worker;
+            return;
         }
         msgs.extend(msgs_vec.drain(..));
 
@@ -133,7 +133,7 @@ async fn worker_loop<Callback>(
 
         while let Some(msg) = msgs.pop_front() {
             match msg {
-                WorkerMessage::Exit => break 'worker,
+                WorkerMessage::Exit => return,
                 WorkerMessage::Event { event_id } => events.push(event_id),
                 WorkerMessage::Events { event_ids } => events.extend(event_ids),
                 WorkerMessage::Update { graph, func_lib } => {
