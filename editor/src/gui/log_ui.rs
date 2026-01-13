@@ -36,10 +36,12 @@ impl LogUi {
                         false,
                     );
 
+                    let is_open = state.is_open();
+
                     let toggle_response = state.show_toggle_button(ui, paint_default_icon);
                     ui.expand_to_include_rect(toggle_response.rect);
 
-                    if state.is_open() {
+                    if is_open {
                         let line_height = ui.text_style_height(&TextStyle::Body);
                         let max_height = line_height * LINE_COUNT as f32;
                         ui.set_height(max_height);
