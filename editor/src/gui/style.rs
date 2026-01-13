@@ -259,7 +259,7 @@ impl Style {
             },
         };
         self.menu = MenuStyle {
-            button_padding: Vec2::new(scaled(16.0), scaled(5.0)),
+            button_padding: Vec2::new(scaled(12.0), scaled(3.0)),
         };
     }
 
