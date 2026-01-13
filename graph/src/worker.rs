@@ -283,7 +283,7 @@ impl EventLoopCallback {
         Self { inner: None }
     }
 
-    pub fn call(&self) {
+    fn call(&self) {
         if let Some(inner) = &self.inner {
             (inner)();
         }
