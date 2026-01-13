@@ -53,7 +53,8 @@ impl LogUi {
                                 ui.vertical(|ui| {
                                     ui.take_available_width();
                                     ui.add_space(
-                                        (max_height - status.line_count() as f32 * line_height)
+                                        (max_height
+                                            - (status.line_count() - 1) as f32 * line_height)
                                             .max(0.0),
                                     );
                                     ui.label(status);
