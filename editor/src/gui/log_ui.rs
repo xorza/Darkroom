@@ -12,6 +12,7 @@ pub struct LogUi;
 
 impl LogUi {
     pub fn render(&mut self, gui: &mut Gui, status: &str) {
+        let line_height = gui.font_height(gui.style.body_font.clone());
         let style = &gui.style;
 
         gui.ui.horizontal(|ui| {
@@ -42,7 +43,6 @@ impl LogUi {
                     ui.expand_to_include_rect(toggle_response.rect);
 
                     if is_open {
-                        let line_height = ui.text_style_height(&TextStyle::Body);
                         let max_height = line_height * LINE_COUNT as f32;
                         ui.set_height(max_height);
 

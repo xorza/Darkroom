@@ -123,7 +123,7 @@ impl GraphUi {
         }
 
         gui.set_scale(ctx.view_graph.scale);
-        self.graph_layout.update(&gui, &ctx);
+        self.graph_layout.update(&mut gui, &ctx);
         self.dots_background.render(&gui, &ctx);
         self.render_connections(&mut gui, &mut ctx, execution_stats, interaction);
 

@@ -92,7 +92,7 @@ impl NodeLayout {
         }
     }
 
-    pub fn update(&mut self, ctx: &GraphContext, gui: &Gui<'_>, origin: Pos2) {
+    pub fn update(&mut self, ctx: &GraphContext, gui: &mut Gui, origin: Pos2) {
         let view_node = ctx.view_graph.view_nodes.by_key(&self.node_id).unwrap();
         let node = ctx.view_graph.graph.by_id(&self.node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
@@ -167,22 +167,22 @@ impl NodeLayout {
         let port_label_side_padding = gui.style.node.port_label_side_padding;
 
         let mut max_row_width: f32 = 0.0;
-        let mut max_row_height: f32 = 0.0;
+        let row_height: f32 = gui.font_height(label_font) + small_padding;
         for row in 0..row_count {
-            let (left, left_height) = self
+            let left = self
                 .input_galleys
                 .get(row)
-                .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y));
+                .map_or(0.0, |galley| galley.size().x);
 
-            let (right, right_height) = if row < output_count {
+            let right = if row < output_count {
                 self.output_galleys
                     .get(row)
-                    .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
+                    .map_or(0.0, |galley| galley.size().x)
             } else {
                 let event_row = row - output_count;
                 self.event_galleys
                     .get(event_row)
-                    .map_or((0.0, 0.0), |galley| (galley.size().x, galley.size().y))
+                    .map_or(0.0, |galley| galley.size().x)
             };
 
             let row_width = port_label_side_padding
@@ -190,9 +190,6 @@ impl NodeLayout {
                 + right
                 + (left > 0.0 && right > 0.0).then_else(padding, 0.0);
             max_row_width = max_row_width.max(row_width);
-
-            let row_height = left_height.max(right_height) + small_padding;
-            max_row_height = max_row_height.max(row_height);
         }
 
         let has_cache_btn = !func.terminal && !func.outputs.is_empty();
@@ -204,10 +201,7 @@ impl NodeLayout {
         };
 
         let header_row_height = header_height + small_padding * 2.0;
-        let port_row_height = label_font
-            .size
-            .max(max_row_height)
-            .max(gui.style.node.port_radius * 2.0);
+        let port_row_height = row_height.max(gui.style.node.port_radius * 2.0);
 
         let node_width = header_width.max(max_row_width);
         let node_height = header_row_height

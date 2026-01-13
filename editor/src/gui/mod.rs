@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ptr::NonNull};
 
-use egui::{Painter, Rect, Ui};
+use egui::{FontId, Painter, Rect, Ui};
 
 use crate::{common::UiEquals, gui::style::Style};
 
@@ -72,5 +72,9 @@ impl<'a> Gui<'a> {
 
         self.scale = scale;
         self.style.set_scale(scale);
+    }
+
+    pub fn font_height(&mut self, font_id: FontId) -> f32 {
+        self.ui.fonts_mut(|f| f.row_height(&font_id))
     }
 }

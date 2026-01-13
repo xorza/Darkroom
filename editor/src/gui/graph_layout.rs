@@ -35,7 +35,7 @@ impl Default for GraphLayout {
 }
 
 impl GraphLayout {
-    pub fn update(&mut self, gui: &Gui<'_>, ctx: &GraphContext) {
+    pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
         let view_graph = &ctx.view_graph;
         self.origin = gui.rect.min + view_graph.pan;
         let mut compact = self.node_layouts.compact_insert_start();
