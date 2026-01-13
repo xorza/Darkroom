@@ -93,10 +93,7 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        if let Some(thread_handle) = self.thread_handle.take() {
-            thread_handle.abort();
-            error!("Worker dropped while the thread is still running; call Worker::exit() first");
-        }
+        self.exit();
     }
 }
 
