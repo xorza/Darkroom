@@ -43,14 +43,9 @@ pub struct Worker {
 }
 
 #[derive(Debug)]
-struct EventLoopInner {
+struct EventLoopHandle {
     event_task_handle: JoinHandle<()>,
     event_task_set: JoinSet<()>,
-}
-
-#[derive(Debug, Clone)]
-struct EventLoopHandle {
-    inner: Shared<Option<EventLoopInner>>,
 }
 
 impl Worker {
@@ -266,15 +261,13 @@ async fn start_event_loop(
     callback.call();
 
     EventLoopHandle {
-        inner: Shared::new(Some(EventLoopInner {
-            event_task_handle,
-            event_task_set,
-        })),
+        event_task_handle,
+        event_task_set,
     }
 }
 
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
-    if let Some(event_loop_handle) = event_loop_handle.take() {
+    if let Some(mut event_loop_handle) = event_loop_handle.take() {
         event_loop_handle.stop().await;
     }
 }
@@ -298,14 +291,10 @@ impl EventLoopCallback {
 }
 
 impl EventLoopHandle {
-    async fn stop(&self) {
-        let Some(mut inner) = self.inner.lock().await.take() else {
-            return;
-        };
-
-        inner.event_task_handle.abort();
-        inner.event_task_set.abort_all();
-        while let Some(result) = inner.event_task_set.join_next().await {
+    async fn stop(&mut self) {
+        self.event_task_handle.abort();
+        self.event_task_set.abort_all();
+        while let Some(result) = self.event_task_set.join_next().await {
             if let Err(err) = result {
                 if err.is_panic() {
                     std::panic::resume_unwind(err.into_panic());
@@ -470,7 +459,7 @@ mod tests {
         let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
 
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(
+        let mut handle = super::start_event_loop(
             tx,
             vec![(node_id, event_lambda)],
             EventLoopCallback::new(|| {}),
@@ -511,7 +500,7 @@ mod tests {
         });
 
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback).await;
+        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback).await;
 
         let msg = timeout(Duration::from_millis(200), rx.recv())
             .await
