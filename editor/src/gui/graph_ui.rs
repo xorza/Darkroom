@@ -75,7 +75,7 @@ impl GraphUi {
             gui.style.corner_radius,
             gui.style.graph_background.bg_color,
             gui.style.inactive_bg_stroke,
-            StrokeKind::Outside,
+            StrokeKind::Inside,
         );
 
         let rect = rect.shrink(gui.style.corner_radius * 0.5);

@@ -4,7 +4,7 @@ use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame};
+use egui::{CentralPanel, Frame, TopBottomPanel};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -120,7 +120,13 @@ impl MainUi {
                 });
             });
 
-        self.log_ui.render(ctx, &style, &app_data.status);
+        TopBottomPanel::bottom("status_panel")
+            .show_separator_line(false)
+            .frame(Frame::NONE)
+            .show(ctx, |ui| {
+                self.log_ui
+                    .render(&mut Gui::new(ui, style.clone()), &app_data.status);
+            });
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
             self.graph_ui.render(

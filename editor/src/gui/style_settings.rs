@@ -34,7 +34,7 @@ impl Default for StyleSettings {
             corner_radius: 4.0,
             small_corner_radius: 2.0,
             default_bg_stroke_width: 1.0,
-            big_padding: 6.0,
+            big_padding: 5.0,
             padding: 4.0,
             small_padding: 2.0,
             dotted_base_spacing: 24.0,

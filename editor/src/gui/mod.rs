@@ -28,9 +28,9 @@ impl std::fmt::Debug for GuiPainter {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Gui<'a> {
-    ui: NonNull<Ui>,
+    ui: &'a mut Ui,
     pub style: Style,
     painter: GuiPainter,
     pub rect: Rect,
@@ -44,7 +44,7 @@ impl<'a> Gui<'a> {
         let painter = GuiPainter(ui.painter_at(rect));
 
         Self {
-            ui: NonNull::from(ui),
+            ui,
             style,
             painter,
             rect,
@@ -54,7 +54,7 @@ impl<'a> Gui<'a> {
     }
 
     pub fn ui(&mut self) -> &mut Ui {
-        unsafe { self.ui.as_mut() }
+        self.ui
     }
 
     pub fn painter(&self) -> Painter {
