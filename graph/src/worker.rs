@@ -77,7 +77,7 @@ impl Worker {
     }
 
     pub fn exit(&mut self) {
-        self.send(WorkerMessage::Exit);
+        self.tx.send(WorkerMessage::Exit).ok();
 
         if let Some(thread_handle) = self.thread_handle.take() {
             thread_handle.abort();

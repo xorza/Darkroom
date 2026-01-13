@@ -27,6 +27,7 @@ async fn main() -> Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon)
             .with_app_id("scenarium-egui"),
+        persist_window: true,
         ..Default::default()
     };
 
