@@ -176,6 +176,10 @@ impl AppData {
         self.interaction.clear();
     }
 
+    pub fn exit(&mut self) {
+        self.worker.exit();
+    }
+
     fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
         Worker::new(move |result| {
             let mut shared_status = shared_status.try_lock().unwrap();
@@ -261,10 +265,6 @@ impl AppData {
         self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
 
         Ok(())
-    }
-
-    pub fn exit(&mut self) {
-        self.worker.exit();
     }
 }
 
