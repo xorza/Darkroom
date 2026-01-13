@@ -2,6 +2,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
+use common::LastLine;
 use eframe::egui;
 use egui::collapsing_header::CollapsingState;
 use egui::{CentralPanel, Frame, Label, Sense};
@@ -124,10 +125,10 @@ impl MainUi {
                 let id = ui.make_persistent_id("status_panel_header");
                 CollapsingState::load_with_default_open(ui.ctx(), id, false)
                     .show_header(ui, |ui| {
-                        ui.add(Label::new(&app_data.status).truncate());
+                        ui.add(Label::new(app_data.status.last_line()).truncate());
                     })
                     .body_unindented(|ui| {
-                        ui.label(&app_data.status.last_line());
+                        ui.label(&app_data.status);
                     });
             });
 

@@ -13,6 +13,7 @@ pub mod scoped_ref;
 pub mod serde;
 pub mod serde_lua;
 pub mod shared;
+pub mod string_ext;
 pub mod toggle;
 pub mod yaml_format;
 
@@ -25,3 +26,4 @@ pub use ready_state::ReadyState;
 pub use serde::Result;
 pub use serde::{deserialize, is_false, serialize};
 pub use shared::Shared;
+pub use string_ext::LastLine;
