@@ -15,6 +15,8 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_c
 use tokio::task::JoinHandle;
 use tracing::error;
 
+const MAX_EVENTS_PER_LOOP: usize = 10;
+
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
@@ -118,8 +120,8 @@ async fn worker_loop<Callback>(
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
     let mut execution_graph = ExecutionGraph::default();
-    let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(10);
-    let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(10);
+    let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(MAX_EVENTS_PER_LOOP);
+    let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
     let mut events: Vec<EventId> = Vec::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
@@ -129,7 +131,7 @@ async fn worker_loop<Callback>(
         assert!(msgs_vec.is_empty());
         assert!(events.is_empty());
 
-        if rx.recv_many(&mut msgs_vec, 10).await == 0 {
+        if rx.recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP).await == 0 {
             return;
         }
         msgs.extend(msgs_vec.drain(..));
@@ -206,21 +208,29 @@ fn start_event_loop(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_notify = Arc::new(Notify::new());
 
-    let (event_tx, mut event_rx) = channel::<EventId>(10);
+    let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
 
     let event_task_handle1 = tokio::spawn({
         let tx = tx.clone();
         async move {
-            let mut buffer = Vec::with_capacity(10);
+            let mut buffer = Vec::default();
             loop {
-                event_rx.recv_many(&mut buffer, 10).await;
-
-                if tx
-                    .send(WorkerMessage::Events {
+                buffer.clear();
+                let count = event_rx.recv_many(&mut buffer, MAX_EVENTS_PER_LOOP).await;
+                if count == 0 {
+                    return;
+                }
+                let result = if count == 1 {
+                    tx.send(WorkerMessage::Event {
+                        event_id: buffer[0].clone(),
+                    })
+                } else {
+                    tx.send(WorkerMessage::Events {
                         event_ids: std::mem::take(&mut buffer),
                     })
-                    .is_err()
-                {
+                };
+
+                if result.is_err() {
                     return;
                 }
             }
@@ -337,7 +347,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{EventId, EventLoopCallback, Worker, WorkerMessage};
+    use crate::worker::{EventId, EventLoopCallback, MAX_EVENTS_PER_LOOP, Worker, WorkerMessage};
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -479,6 +489,7 @@ mod tests {
         let WorkerMessage::Events { event_ids } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
+        assert_eq!(event_ids.len(), MAX_EVENTS_PER_LOOP);
         assert_eq!(
             event_ids[0],
             EventId {
@@ -515,11 +526,11 @@ mod tests {
             .await
             .expect("Expected event message")
             .expect("Event channel closed");
-        let WorkerMessage::Events { event_ids } = msg else {
+        let WorkerMessage::Event { event_id } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
-            event_ids[0],
+            event_id,
             EventId {
                 node_id,
                 event_idx: 0
