@@ -50,7 +50,7 @@ struct EventLoopInner {
 }
 
 #[derive(Debug, Clone)]
-pub struct EventLoopHandle {
+struct EventLoopHandle {
     inner: Shared<Option<EventLoopInner>>,
 }
 
