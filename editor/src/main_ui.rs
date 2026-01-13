@@ -1,11 +1,10 @@
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
+use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
-use common::LastLine;
 use eframe::egui;
-use egui::collapsing_header::CollapsingState;
-use egui::{CentralPanel, Frame, Label, Sense};
+use egui::{CentralPanel, Frame};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -25,6 +24,7 @@ impl UiContext {
 #[derive(Debug)]
 pub struct MainUi {
     pub graph_ui: GraphUi,
+    pub log_ui: LogUi,
     pub ui_context: UiContext,
     pub style_settings: StyleSettings,
 
@@ -37,6 +37,7 @@ impl MainUi {
 
         Self {
             graph_ui: GraphUi::default(),
+            log_ui: LogUi,
             ui_context: UiContext::new(ctx),
             style_settings,
             arena: bumpalo::Bump::new(),
@@ -119,18 +120,7 @@ impl MainUi {
                 });
             });
 
-        egui::TopBottomPanel::bottom("status_panel")
-            .show_separator_line(false)
-            .show(ctx, |ui| {
-                let id = ui.make_persistent_id("status_panel_header");
-                CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                    .show_header(ui, |ui| {
-                        ui.add(Label::new(app_data.status.last_line()).truncate());
-                    })
-                    .body_unindented(|ui| {
-                        ui.label(&app_data.status);
-                    });
-            });
+        self.log_ui.render(ctx, &style, &app_data.status);
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
             self.graph_ui.render(
