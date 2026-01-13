@@ -190,6 +190,7 @@ impl AppData {
     }
 
     pub fn exit(&mut self) {
+        self.config.save();
         self.worker.exit();
     }
 

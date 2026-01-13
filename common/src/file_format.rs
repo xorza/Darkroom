@@ -22,6 +22,7 @@ pub enum FileFormat {
     Json,
     Lua,
     Bin,
+    Toml,
 }
 
 impl FileFormat {
@@ -35,6 +36,7 @@ impl FileFormat {
             "json" => Ok(Self::Json),
             "lua" => Ok(Self::Lua),
             "bin" => Ok(Self::Bin),
+            "toml" => Ok(Self::Toml),
             _ => Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),
             )),

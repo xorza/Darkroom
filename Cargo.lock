@@ -499,6 +499,7 @@ dependencies = [
  "serde_yml",
  "thiserror 2.0.17",
  "tokio",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

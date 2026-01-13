@@ -7,4 +7,5 @@
 **/target/
 /patch.diff
 style.toml
+config.toml
 log/

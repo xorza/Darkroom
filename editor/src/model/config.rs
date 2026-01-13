@@ -8,8 +8,13 @@ impl Config {
         Config::load().unwrap_or_default()
     }
 
+    pub fn save(&self) {
+        let serialized = common::serde::serialize(self, common::FileFormat::Yaml);
+        std::fs::write("config.toml", serialized).ok();
+    }
+
     fn load() -> anyhow::Result<Self> {
-        let serialized = std::fs::read("config.json")?;
+        let serialized = std::fs::read("config.toml")?;
         common::serde::deserialize(&serialized, common::FileFormat::Yaml)
     }
 }

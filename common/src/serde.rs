@@ -28,6 +28,7 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
         FileFormat::Bin => {
             bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap()
         }
+        FileFormat::Toml => toml::to_string(value).unwrap().normalize().into_bytes(),
     }
 }
 
@@ -44,6 +45,10 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
         FileFormat::Lua => {
             let text = std::str::from_utf8(serialized)?;
             Ok(serde_lua::from_str(text)?)
+        }
+        FileFormat::Toml => {
+            let text = std::str::from_utf8(serialized)?;
+            Ok(toml::from_str(text)?)
         }
         FileFormat::Bin => {
             let (decoded, read) =
