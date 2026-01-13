@@ -7,7 +7,6 @@ use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
 use tracing::error;
@@ -112,25 +111,21 @@ async fn worker_loop<Callback>(
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
     let mut execution_graph = ExecutionGraph::default();
-    let mut msgs: VecDeque<WorkerMessage> = VecDeque::default();
+    let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(10);
+    let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(10);
 
     let mut events: Vec<EventId> = Vec::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
 
     'worker: loop {
-        events.clear();
+        assert!(msgs.is_empty());
+        assert!(msgs_vec.is_empty());
+        assert!(events.is_empty());
 
-        let msg = rx.recv().await;
-        let Some(msg) = msg else { break };
-        msgs.push_back(msg);
-
-        loop {
-            match rx.try_recv() {
-                Ok(msg) => msgs.push_back(msg),
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break 'worker,
-            }
+        if rx.recv_many(&mut msgs_vec, 10).await == 0 {
+            break 'worker;
         }
+        msgs.extend(msgs_vec.drain(..));
 
         let mut execute_terminals: bool = false;
         let mut event_loop_cmd = EventLoopCommand::None;
