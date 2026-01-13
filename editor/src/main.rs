@@ -85,7 +85,6 @@ impl ScenariumEditor {
             main_ui,
         };
 
-        app.main_ui.test_graph(&mut app.app_data);
         app.main_ui.load(&mut app.app_data);
 
         app
