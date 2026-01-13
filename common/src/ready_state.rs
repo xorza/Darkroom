@@ -33,3 +33,50 @@ impl ReadyState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ReadyState;
+    use tokio::time::{Duration, timeout};
+
+    #[test]
+    #[should_panic(expected = "ReadyState total must be positive")]
+    fn new_rejects_zero_total() {
+        ReadyState::new(0);
+    }
+
+    #[tokio::test]
+    async fn wait_completes_after_total_signals() {
+        let ready = ReadyState::new(2);
+        let waiter = tokio::spawn({
+            let ready = ready.clone();
+            async move {
+                ready.wait().await;
+            }
+        });
+
+        ready.signal();
+        let first_wait = timeout(Duration::from_millis(50), ready.wait()).await;
+        assert!(
+            first_wait.is_err(),
+            "wait should block before total signals"
+        );
+
+        ready.signal();
+        let second_wait = timeout(Duration::from_millis(50), waiter).await;
+        assert!(
+            second_wait.is_ok(),
+            "wait should complete after total signals"
+        );
+        second_wait.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn wait_returns_immediately_when_already_ready() {
+        let ready = ReadyState::new(1);
+        ready.signal();
+
+        let result = timeout(Duration::from_millis(50), ready.wait()).await;
+        assert!(result.is_ok(), "wait should return when already ready");
+    }
+}

@@ -241,6 +241,7 @@ Recent adjustments:
   the initial event lambdas, with a readiness barrier that waits for all event tasks to start polling before
   firing the callback.
 - `ReadyState` now lives in `common/src/ready_state.rs` and is re-exported from `common::ReadyState`.
+- `common/src/ready_state.rs` includes unit tests for readiness waiting and zero-total validation.
 - Worker compute callbacks are stored as boxed trait objects to satisfy `Shared<T: Sized>` bounds.
 - Function lambdas are async: `FuncLambda` stores `Arc<AsyncLambda>` (a boxed-future closure type alias), and built-in
   invokers use async closures wrapped in `Box::pin(async move { ... })`.
