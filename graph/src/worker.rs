@@ -274,6 +274,8 @@ fn start_event_loop(
                                     }
                                 }
                             }
+
+                            tokio::task::yield_now().await;
                         }
                     }
                 });
