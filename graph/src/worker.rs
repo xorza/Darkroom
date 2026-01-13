@@ -311,8 +311,6 @@ impl EventLoopHandle {
                 assert!(err.is_cancelled(), "event task join error: {err}");
             }
         }
-
-        drop(inner);
     }
 }
 
