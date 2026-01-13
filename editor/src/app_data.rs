@@ -1,6 +1,7 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::model::config::Config;
 use anyhow::Result;
 use common::{FileFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
@@ -29,14 +30,19 @@ const UNDO_MAX_STEPS: usize = 256;
 
 #[derive(Debug)]
 pub struct AppData {
-    pub worker: Worker,
     pub func_lib: FuncLib,
     pub view_graph: ViewGraph,
     pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
     pub graph_updated: bool,
+
     pub current_path: PathBuf,
     pub status: String,
+
+    pub config: Config,
+
+    pub worker: Worker,
+
     pub _ui_context: UiContext,
 
     pub shared_status: SharedStatus,
@@ -47,6 +53,8 @@ pub struct AppData {
 
 impl AppData {
     pub fn new(ui_context: UiContext) -> Self {
+        let config = Config::load_or_default();
+
         let shared_status = Shared::default();
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
 
@@ -58,14 +66,19 @@ impl AppData {
         func_lib.merge(EditorFuncLib::new(Arc::clone(&run_event)));
 
         Self {
-            worker,
             func_lib,
             view_graph: ViewGraph::default(),
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
             graph_updated: false,
+
             current_path: std::env::temp_dir().join("scenarium-graph.lua"),
             status: String::new(),
+
+            config,
+
+            worker,
+
             _ui_context: ui_context,
 
             shared_status,

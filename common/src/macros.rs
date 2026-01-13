@@ -67,7 +67,7 @@ macro_rules! id_type {
         impl std::str::FromStr for $name {
             type Err = anyhow::Error;
 
-            fn from_str(id: &str) -> Result<$name, Self::Err> {
+            fn from_str(id: &str) -> std::result::Result<$name, Self::Err> {
                 let uuid = uuid::Uuid::parse_str(id)?;
                 Ok($name(uuid))
             }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
-use common::{FileFormat, SerdeFormatResult, deserialize, serialize};
+use common::{FileFormat, Result, deserialize, serialize};
 use common::{id_type, is_debug};
 
 id_type!(NodeId);
@@ -142,7 +142,7 @@ impl Graph {
     pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
         serialize(self, format)
     }
-    pub fn deserialize(serialized: &[u8], format: FileFormat) -> SerdeFormatResult<Graph> {
+    pub fn deserialize(serialized: &[u8], format: FileFormat) -> Result<Graph> {
         let graph: Self = deserialize(serialized, format)?;
         graph.validate();
         Ok(graph)

@@ -1,3 +1,4 @@
+pub mod config;
 pub mod view_graph;
 pub mod view_node;
 

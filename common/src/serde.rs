@@ -9,7 +9,7 @@ pub fn is_false(value: &bool) -> bool {
     !*value
 }
 
-pub type SerdeFormatResult<T> = anyhow::Result<T>;
+pub type Result<T> = anyhow::Result<T>;
 
 pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     match format {
@@ -31,10 +31,7 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
     }
 }
 
-pub fn deserialize<T: DeserializeOwned>(
-    serialized: &[u8],
-    format: FileFormat,
-) -> SerdeFormatResult<T> {
+pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -> Result<T> {
     match format {
         FileFormat::Yaml => {
             let text = std::str::from_utf8(serialized)?;
