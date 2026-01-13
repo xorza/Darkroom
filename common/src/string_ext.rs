@@ -1,14 +1,15 @@
-pub trait LastLine {
+pub trait StrExt {
     fn last_line(&self) -> &str;
+    fn line_count(&self) -> usize;
 }
 
-impl LastLine for str {
+impl StrExt for str {
     fn last_line(&self) -> &str {
         let bytes = self.as_bytes();
         let mut end = bytes.len();
         while end > 0 {
             let byte = bytes[end - 1];
-            if byte == b'\n' || byte == b'\r' {
+            if is_newline(byte) {
                 end -= 1;
             } else {
                 break;
@@ -19,23 +20,42 @@ impl LastLine for str {
         }
         let mut idx = end;
         while idx > 0 {
-            if bytes[idx - 1] == b'\n' {
+            if is_newline(bytes[idx - 1]) {
                 break;
             }
             idx -= 1;
         }
         &self[idx..end]
     }
+
+    fn line_count(&self) -> usize {
+        if self.is_empty() {
+            return 0;
+        }
+        self.as_bytes().iter().filter(|&&b| is_newline(b)).count() + 1
+    }
 }
 
-impl LastLine for String {
+impl StrExt for String {
     fn last_line(&self) -> &str {
         self.as_str().last_line()
     }
+
+    fn line_count(&self) -> usize {
+        self.as_str().line_count()
+    }
 }
 
-impl LastLine for &str {
+impl StrExt for &str {
     fn last_line(&self) -> &str {
         (*self).last_line()
     }
+
+    fn line_count(&self) -> usize {
+        (*self).line_count()
+    }
+}
+
+fn is_newline(byte: u8) -> bool {
+    byte == b'\n' || byte == b'\r'
 }

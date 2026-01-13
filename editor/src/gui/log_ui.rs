@@ -1,12 +1,9 @@
-use eframe::egui;
 use egui::collapsing_header::{CollapsingState, paint_default_icon};
-use egui::{Frame, Label, Margin, ScrollArea, TextStyle};
+use egui::{Align, Frame, Label, Layout, Margin, ScrollArea, TextStyle, Vec2b};
 
 use crate::gui::Gui;
 use crate::gui::style::Style;
-use common::LastLine;
-
-const EXPANDED_STATUS_LINES: usize = 5;
+use common::StrExt;
 
 #[derive(Debug, Default)]
 pub struct LogUi;
@@ -43,17 +40,16 @@ impl LogUi {
                     if state.is_open() {
                         let line_height = ui.text_style_height(&TextStyle::Body);
                         let max_height = line_height * 6.0;
+                        ui.set_height(max_height);
                         ScrollArea::vertical()
-                            .max_height(max_height)
+                            .auto_shrink(Vec2b::new(true, true))
                             .stick_to_bottom(true)
                             .show(ui, |ui| {
-                                ui.take_available_width();
-                                let content_height = line_height * status.lines().count() as f32;
-                                let extra_space = (max_height - content_height).max(0.0);
-                                if extra_space > 0.0 {
-                                    ui.add_space(extra_space);
-                                }
-                                ui.label(status);
+                                ui.vertical(|ui| {
+                                    ui.take_available_width();
+                                    ui.add_space(max_height);
+                                    ui.label(status);
+                                });
                             });
                     } else {
                         ui.add(Label::new(status.last_line().to_owned()).truncate());
