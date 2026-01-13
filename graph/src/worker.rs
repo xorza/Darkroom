@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -123,13 +123,13 @@ async fn worker_loop<Callback>(
     let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(MAX_EVENTS_PER_LOOP);
     let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
-    let mut events: Vec<EventId> = Vec::default();
+    let mut event_ids: HashSet<EventId> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
 
     loop {
         assert!(msgs.is_empty());
         assert!(msgs_vec.is_empty());
-        assert!(events.is_empty());
+        assert!(event_ids.is_empty());
 
         if rx.recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP).await == 0 {
             return;
@@ -143,14 +143,18 @@ async fn worker_loop<Callback>(
         while let Some(msg) = msgs.pop_front() {
             match msg {
                 WorkerMessage::Exit => return,
-                WorkerMessage::Event { event_id } => events.push(event_id),
-                WorkerMessage::Events { event_ids } => events.extend(event_ids),
+                WorkerMessage::Event { event_id } => {
+                    event_ids.insert(event_id);
+                }
+                WorkerMessage::Events {
+                    event_ids: new_event_ids,
+                } => event_ids.extend(new_event_ids),
                 WorkerMessage::Update { graph, func_lib } => {
-                    events.clear();
+                    event_ids.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
-                    events.clear();
+                    event_ids.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
@@ -172,9 +176,9 @@ async fn worker_loop<Callback>(
             execution_graph.update(&graph, &func_lib);
         }
 
-        if execute_terminals || !events.is_empty() {
+        if execute_terminals || !event_ids.is_empty() {
             let result = execution_graph
-                .execute(execute_terminals, events.drain(..))
+                .execute(execute_terminals, event_ids.drain())
                 .await;
             (callback.lock().await)(result);
         }
@@ -213,20 +217,22 @@ fn start_event_loop(
     let event_task_handle1 = tokio::spawn({
         let tx = tx.clone();
         async move {
-            let mut buffer = Vec::default();
+            let mut event_ids = Vec::default();
             loop {
-                buffer.clear();
-                let count = event_rx.recv_many(&mut buffer, MAX_EVENTS_PER_LOOP).await;
+                event_ids.clear();
+                let count = event_rx
+                    .recv_many(&mut event_ids, MAX_EVENTS_PER_LOOP)
+                    .await;
                 if count == 0 {
                     return;
                 }
                 let result = if count == 1 {
                     tx.send(WorkerMessage::Event {
-                        event_id: buffer[0].clone(),
+                        event_id: event_ids[0].clone(),
                     })
                 } else {
                     tx.send(WorkerMessage::Events {
-                        event_ids: std::mem::take(&mut buffer),
+                        event_ids: std::mem::take(&mut event_ids),
                     })
                 };
 
