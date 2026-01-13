@@ -1,46 +1,48 @@
 use std::sync::Arc;
 
 use eframe::egui;
-use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{Pos2, Shape, Vec2};
+use egui::epaint::{ColorImage, Mesh, Vertex};
+use egui::{Color32, Pos2, Shape, TextureFilter, TextureHandle, TextureOptions, Vec2};
 
 use crate::common::UiEquals;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct GraphBackgroundRenderer {
-    mesh: Arc<Mesh>,
-    last_pan: Vec2,
-    last_scale: f32,
-    last_rect_size: Vec2,
-    inited: bool,
+    texture: Option<TextureHandle>,
+    quad_mesh: Option<Arc<Mesh>>,
+}
+
+impl std::fmt::Debug for GraphBackgroundRenderer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GraphBackgroundRenderer")
+            .field("has_texture", &self.texture.is_some())
+            .finish()
+    }
 }
 
 impl GraphBackgroundRenderer {
-    pub fn render(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
+    pub fn render(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         let scale = ctx.view_graph.scale;
-        let pan = ctx.view_graph.pan;
-        let rect_size = gui.rect.size();
 
         assert!(scale > common::EPSILON, "view graph scale must be positive");
 
-        if !self.inited
-            || !self.last_scale.ui_equals(&scale)
-            || !self.last_pan.ui_equals(&pan)
-            || !self.last_rect_size.ui_equals(&rect_size)
-        {
-            self.rebuild_mesh(gui, ctx);
-            self.last_scale = scale;
-            self.last_pan = pan;
-            self.last_rect_size = rect_size;
-            self.inited = true;
+        if self.texture.is_none() {
+            self.rebuild_texture(gui, ctx);
+        }
+        if self.quad_mesh.is_none() {
+            let mut mesh = Mesh::default();
+            mesh.vertices.resize(4, Vertex::default());
+            mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+            let arc = Arc::new(mesh);
+            self.quad_mesh = Some(arc);
         }
 
-        gui.painter().add(Shape::mesh(Arc::clone(&self.mesh)));
+        self.draw_tiled(gui, ctx);
     }
 
-    fn rebuild_mesh(&mut self, gui: &Gui<'_>, ctx: &GraphContext<'_>) {
+    fn rebuild_texture(&mut self, gui: &mut Gui<'_>, _ctx: &GraphContext<'_>) {
         let spacing = gui.style.graph_background.dotted_base_spacing;
         assert!(spacing > 0.0, "background spacing must be positive");
 
@@ -49,62 +51,66 @@ impl GraphBackgroundRenderer {
             gui.style.graph_background.dotted_radius_max,
         );
         let color = gui.style.graph_background.dotted_color;
-        let origin = gui.rect.min + ctx.view_graph.pan;
-        let offset_x = (gui.rect.left() - origin.x).rem_euclid(spacing);
-        let offset_y = (gui.rect.top() - origin.y).rem_euclid(spacing);
-        let start_x = gui.rect.left() - offset_x - spacing;
-        let start_y = gui.rect.top() - offset_y - spacing;
 
-        let mesh = Arc::get_mut(&mut self.mesh).unwrap();
-        mesh.clear();
+        let tile = spacing.ceil().max(radius * 2.0 + 2.0);
+        let size = tile as usize;
+        let mut image = ColorImage::new([size, size], vec![Color32::TRANSPARENT; size * size]);
 
-        let segments = 5;
-        let mut y = start_y;
-        while y <= gui.rect.bottom() + spacing {
-            let mut x = start_x;
-            while x <= gui.rect.right() + spacing {
-                add_circle_to_mesh(mesh, Pos2::new(x, y), radius, color, segments);
-                x += spacing;
+        let center = (tile * 0.5, tile * 0.5);
+        let r_sq = radius * radius;
+        for y in 0..size {
+            for x in 0..size {
+                let dx = x as f32 + 0.5 - center.0;
+                let dy = y as f32 + 0.5 - center.1;
+                if dx * dx + dy * dy <= r_sq {
+                    image[(x, y)] = color;
+                }
             }
-            y += spacing;
         }
-    }
-}
 
-fn add_circle_to_mesh(
-    mesh: &mut Mesh,
-    center: Pos2,
-    radius: f32,
-    color: egui::Color32,
-    segments: usize,
-) {
-    assert!(segments >= 3, "circle mesh needs at least 3 segments");
-
-    let base_index = mesh.vertices.len() as u32;
-    mesh.vertices.push(Vertex {
-        pos: center,
-        uv: WHITE_UV,
-        color,
-    });
-
-    let step = std::f32::consts::TAU / segments as f32;
-    for i in 0..segments {
-        let angle = step * i as f32;
-        let pos = Pos2::new(
-            center.x + radius * angle.cos(),
-            center.y + radius * angle.sin(),
-        );
-        mesh.vertices.push(Vertex {
-            pos,
-            uv: WHITE_UV,
-            color,
-        });
+        let options = TextureOptions {
+            magnification: TextureFilter::Linear,
+            minification: TextureFilter::Linear,
+            mipmap_mode: Some(TextureFilter::Linear),
+            wrap_mode: egui::TextureWrapMode::Repeat,
+        };
+        let handle = gui.ui().ctx().load_texture("graph_dots", image, options);
+        self.texture = Some(handle);
     }
 
-    for i in 0..segments {
-        let next = if i + 1 == segments { 0 } else { i + 1 };
-        mesh.indices.push(base_index);
-        mesh.indices.push(base_index + 1 + i as u32);
-        mesh.indices.push(base_index + 1 + next as u32);
+    fn draw_tiled(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
+        let texture = self.texture.as_ref().unwrap();
+
+        let spacing = gui.style.graph_background.dotted_base_spacing;
+        let origin = gui.rect.min + ctx.view_graph.pan;
+
+        let uv = |p: Pos2| {
+            let offset = (p - origin) / spacing;
+            Pos2::new(offset.x, offset.y)
+        };
+
+        {
+            let mesh = Arc::make_mut(self.quad_mesh.as_mut().unwrap());
+            mesh.texture_id = texture.id();
+
+            mesh.vertices[0].pos = gui.rect.left_top();
+            mesh.vertices[0].uv = uv(gui.rect.left_top());
+            mesh.vertices[0].color = Color32::WHITE;
+
+            mesh.vertices[1].pos = gui.rect.right_top();
+            mesh.vertices[1].uv = uv(gui.rect.right_top());
+            mesh.vertices[1].color = Color32::WHITE;
+
+            mesh.vertices[2].pos = gui.rect.right_bottom();
+            mesh.vertices[2].uv = uv(gui.rect.right_bottom());
+            mesh.vertices[2].color = Color32::WHITE;
+
+            mesh.vertices[3].pos = gui.rect.left_bottom();
+            mesh.vertices[3].uv = uv(gui.rect.left_bottom());
+            mesh.vertices[3].color = Color32::WHITE;
+        }
+
+        gui.painter()
+            .add(Shape::mesh(Arc::clone(&self.quad_mesh.as_ref().unwrap())));
     }
 }
