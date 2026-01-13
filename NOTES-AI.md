@@ -6,6 +6,7 @@ This file captures implementation details and internal structure for AI agents.
 
 Scenarium collects the tooling required to build node based applications. The repository is a Rust workspace containing
 the core graph implementation and an editor front end.
+Event loop workers now use a stop flag + notify broadcast so `EventLoopHandle::stop` can break per-node event loops promptly before aborting the task.
 Editor node UI styling now pulls widget/selection colors from `Style`, with `Style` initialized from egui visuals to
 centralize theme values.
 `Style::new` now takes a `scale` argument and scales font sizes, padding, radii, stroke widths, and other size

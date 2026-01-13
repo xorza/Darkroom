@@ -1,5 +1,8 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
@@ -7,8 +10,9 @@ use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
+use tokio::sync::Notify;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinHandle;
 use tracing::error;
 
 #[derive(Debug)]
@@ -44,6 +48,8 @@ pub struct Worker {
 #[derive(Debug)]
 struct EventLoopInner {
     event_task_handle: Option<JoinHandle<()>>,
+    stop_flag: Arc<AtomicBool>,
+    stop_notify: Arc<Notify>,
 }
 
 #[derive(Debug, Clone)]
@@ -196,59 +202,56 @@ fn start_event_loop(
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
+    let stop_flag = Arc::new(AtomicBool::new(false));
+    let stop_notify = Arc::new(Notify::new());
+
     let event_task_handle = tokio::spawn({
+        let stop_flag = stop_flag.clone();
+        let stop_notify = stop_notify.clone();
+        let ready = ReadyState::new(events.len());
+
         async move {
-            let mut pending = JoinSet::new();
-            let ready = ReadyState::new(events.len());
             for (node_id, event_lambda) in events {
-                let ready = ready.clone();
-                pending.spawn(async move {
-                    ready.signal();
-                    let event_idx = event_lambda.invoke().await;
-                    (event_lambda, node_id, event_idx)
+                tokio::spawn({
+                    let tx = tx.clone();
+                    let stop_flag = stop_flag.clone();
+                    let stop_notify = stop_notify.clone();
+                    let ready = ready.clone();
+
+                    async move {
+                        ready.signal();
+
+                        loop {
+                            if stop_flag.load(Ordering::Acquire) {
+                                return;
+                            }
+                            tokio::select! {
+                                _ = stop_notify.notified() => return,
+                                event_idx = event_lambda.invoke() => {
+                                    let result = tx.send(WorkerMessage::Event {
+                                        event_id: EventId { node_id, event_idx },
+                                    });
+                                    if result.is_err() {
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 });
             }
 
             ready.wait().await;
             tokio::task::yield_now().await;
             callback.call();
-
-            let mut fired_event_ids: Vec<EventId> = Vec::default();
-            let mut events_to_respawn: Vec<(NodeId, EventLambda)> = Vec::default();
-
-            while let Some(result) = pending.join_next().await {
-                let (event_lambda, node_id, event_idx) =
-                    result.expect("Event loop task should complete");
-                fired_event_ids.push(EventId { node_id, event_idx });
-                events_to_respawn.push((node_id, event_lambda));
-
-                while let Some(result) = pending.try_join_next() {
-                    let (event_lambda, node_id, event_idx) =
-                        result.expect("Event loop task should complete");
-                    fired_event_ids.push(EventId { node_id, event_idx });
-                    events_to_respawn.push((node_id, event_lambda));
-                }
-
-                for (node_id, event_lambda) in events_to_respawn.drain(..) {
-                    pending.spawn(async move {
-                        let event_idx = event_lambda.invoke().await;
-                        (event_lambda, node_id, event_idx)
-                    });
-                }
-
-                let result = tx.send(WorkerMessage::Events {
-                    event_ids: std::mem::take(&mut fired_event_ids),
-                });
-                if result.is_err() {
-                    return;
-                }
-            }
         }
     });
 
     EventLoopHandle {
         inner: Shared::new(EventLoopInner {
             event_task_handle: Some(event_task_handle),
+            stop_flag,
+            stop_notify,
         }),
     }
 }
@@ -281,6 +284,8 @@ impl EventLoopHandle {
     pub async fn stop(&self) {
         let mut inner = self.inner.lock().await;
         if let Some(event_task_handle) = inner.event_task_handle.take() {
+            inner.stop_flag.store(true, Ordering::Release);
+            inner.stop_notify.notify_waiters();
             event_task_handle.abort();
         }
     }
