@@ -236,6 +236,7 @@ Recent adjustments:
 - Event loop trigger tasks now use a `JoinSet`, re-queueing each `EventLambda` after it completes and forwarding the
   associated `EventId`.
 - `EventLoopHandle::stop` now aborts the event trigger task so all pending `JoinSet` jobs are canceled on shutdown.
+- Event loop event tasks are now tracked in a `JoinSet` so stop aborts and drains all event tasks.
 - `EditorFuncLib` now uses an async `EventLambda` that waits on a shared `Notify`; callers construct it with
   `EditorFuncLib::new(run_event)` instead of `Default`.
 - `WorkerMessage::StartEventLoop` now carries a callback that is invoked inside the event loop task after spawning

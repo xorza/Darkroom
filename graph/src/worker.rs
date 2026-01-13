@@ -8,7 +8,7 @@ use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
-use tokio::task::JoinHandle;
+use tokio::task::{JoinHandle, JoinSet};
 use tracing::error;
 
 const MAX_EVENTS_PER_LOOP: usize = 10;
@@ -45,13 +45,13 @@ pub struct Worker {
 
 #[derive(Debug)]
 struct EventLoopInner {
-    event_task_handle1: Option<JoinHandle<()>>,
-    event_task_handle2: Option<JoinHandle<()>>,
+    event_task_handle: JoinHandle<()>,
+    event_task_set: JoinSet<()>,
 }
 
 #[derive(Debug, Clone)]
 pub struct EventLoopHandle {
-    inner: Shared<EventLoopInner>,
+    inner: Shared<Option<EventLoopInner>>,
 }
 
 impl Worker {
@@ -189,7 +189,7 @@ async fn worker_loop<Callback>(
                     .map(|e_node| (e_node.id, e_node.event_lambda.clone()))
                     .collect();
                 if !events.is_empty() {
-                    event_loop_handle = Some(start_event_loop(tx.clone(), events, callback));
+                    event_loop_handle = Some(start_event_loop(tx.clone(), events, callback).await);
                 }
             }
             EventLoopCommand::Stop => stop_event_loop(&mut event_loop_handle).await,
@@ -197,7 +197,7 @@ async fn worker_loop<Callback>(
     }
 }
 
-fn start_event_loop(
+async fn start_event_loop(
     tx: UnboundedSender<WorkerMessage>,
     events: Vec<(NodeId, EventLambda)>,
     callback: EventLoopCallback,
@@ -205,8 +205,7 @@ fn start_event_loop(
     assert!(!events.is_empty());
 
     let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
-
-    let event_task_handle1 = tokio::spawn({
+    let event_task_handle = tokio::spawn({
         let tx = tx.clone();
         async move {
             let mut event_ids = Vec::default();
@@ -236,42 +235,39 @@ fn start_event_loop(
         }
     });
 
-    let event_task_handle2 = tokio::spawn({
-        let ready = ReadyState::new(events.len());
+    let ready = ReadyState::new(events.len());
 
-        async move {
-            for (node_id, event_lambda) in events {
-                tokio::spawn({
-                    let event_tx = event_tx.clone();
-                    let ready = ready.clone();
+    let mut event_task_set = JoinSet::new();
+    for (node_id, event_lambda) in events {
+        event_task_set.spawn({
+            let event_tx = event_tx.clone();
+            let ready = ready.clone();
 
-                    async move {
-                        ready.signal();
+            async move {
+                ready.signal();
 
-                        loop {
-                            let event_idx = event_lambda.invoke().await;
-                            let result = event_tx.send(EventId { node_id, event_idx }).await;
-                            if result.is_err() {
-                                return;
-                            }
-
-                            tokio::task::yield_now().await;
-                        }
+                loop {
+                    let event_idx = event_lambda.invoke().await;
+                    let result = event_tx.send(EventId { node_id, event_idx }).await;
+                    if result.is_err() {
+                        return;
                     }
-                });
-            }
 
-            ready.wait().await;
-            tokio::task::yield_now().await;
-            callback.call();
-        }
-    });
+                    tokio::task::yield_now().await;
+                }
+            }
+        });
+    }
+
+    ready.wait().await;
+    tokio::task::yield_now().await;
+    callback.call();
 
     EventLoopHandle {
-        inner: Shared::new(EventLoopInner {
-            event_task_handle1: Some(event_task_handle1),
-            event_task_handle2: Some(event_task_handle2),
-        }),
+        inner: Shared::new(Some(EventLoopInner {
+            event_task_handle,
+            event_task_set,
+        })),
     }
 }
 
@@ -300,14 +296,23 @@ impl EventLoopCallback {
 }
 
 impl EventLoopHandle {
-    pub async fn stop(&self) {
-        let mut inner = self.inner.lock().await;
-        if let Some(event_task_handle1) = inner.event_task_handle1.take() {
-            event_task_handle1.abort();
+    async fn stop(&self) {
+        let Some(mut inner) = self.inner.lock().await.take() else {
+            return;
+        };
+
+        inner.event_task_handle.abort();
+        inner.event_task_set.abort_all();
+        while let Some(result) = inner.event_task_set.join_next().await {
+            if let Err(err) = result {
+                if err.is_panic() {
+                    std::panic::resume_unwind(err.into_panic());
+                }
+                assert!(err.is_cancelled(), "event task join error: {err}");
+            }
         }
-        if let Some(event_task_handle2) = inner.event_task_handle2.take() {
-            event_task_handle2.abort();
-        }
+
+        drop(inner);
     }
 }
 
@@ -469,7 +474,8 @@ mod tests {
             tx,
             vec![(node_id, event_lambda)],
             EventLoopCallback::new(|| {}),
-        );
+        )
+        .await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
         let WorkerMessage::Event { event_id } = msg else {
@@ -505,7 +511,7 @@ mod tests {
         });
 
         let (tx, mut rx) = unbounded_channel();
-        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback);
+        let handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback).await;
 
         let msg = timeout(Duration::from_millis(200), rx.recv())
             .await
