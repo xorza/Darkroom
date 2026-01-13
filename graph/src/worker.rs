@@ -87,7 +87,6 @@ impl Worker {
 
         if let Some(thread_handle) = self.thread_handle.take() {
             thread_handle.abort();
-            // thread_handle.await.expect("Worker thread failed to join");
         }
     }
 }
