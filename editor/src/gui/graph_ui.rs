@@ -378,7 +378,7 @@ impl GraphUi {
                 ui.take_available_width();
                 Frame::NONE
                     .fill(Color32::from_black_alpha(128))
-                    .inner_margin(Margin::symmetric(padding as i8, padding as i8))
+                    .inner_margin(padding)
                     .show(ui, |ui| {
                         ui.take_available_width();
 
@@ -402,7 +402,7 @@ impl GraphUi {
         {
             let mut bottom_ui = gui.ui().new_child(UiBuilder::new());
             bottom_ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                Frame::NONE.inner_margin(small_padding).show(ui, |ui| {
+                Frame::NONE.inner_margin(padding).show(ui, |ui| {
                     interaction.run |= ui.button("run").clicked();
                 });
             });
