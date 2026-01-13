@@ -4,7 +4,7 @@ use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
 use eframe::egui;
-use egui::{CentralPanel, Frame, TopBottomPanel};
+use egui::{CentralPanel, Frame, TopBottomPanel, ViewportCommand};
 
 #[derive(Clone, Debug)]
 pub struct UiContext {
@@ -81,12 +81,10 @@ impl MainUi {
             .show_separator_line(false)
             .show(ctx, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
-                    let style = ui.style_mut();
-                    style.spacing.button_padding = egui::vec2(16.0, 5.0);
+                    style.apply_menu_style(ui);
 
                     ui.menu_button("File", |ui| {
-                        let style = ui.style_mut();
-                        style.spacing.button_padding = egui::vec2(16.0, 5.0);
+                        style.apply_menu_style(ui);
 
                         ui.set_min_width(100.0);
                         if ui.button("New").clicked() {
@@ -104,6 +102,10 @@ impl MainUi {
                         if ui.button("Test").clicked() {
                             self.test_graph(app_data);
                             ui.close();
+                        }
+                        if ui.button("Exit").clicked() {
+                            ui.close();
+                            ctx.send_viewport_cmd(ViewportCommand::Close);
                         }
                     });
                 });

@@ -11,6 +11,7 @@ mod model;
 
 use anyhow::Result;
 use eframe::{NativeOptions, egui};
+use egui::ViewportCommand;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -93,8 +94,7 @@ impl ScenariumEditor {
 }
 
 impl eframe::App for ScenariumEditor {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let _ = frame;
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.main_ui.render(&mut self.app_data, ctx);
     }
 

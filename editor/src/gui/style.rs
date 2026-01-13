@@ -44,6 +44,7 @@ pub struct Style {
     pub graph_background: GraphBackgroundStyle,
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
+    pub menu: MenuStyle,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -94,6 +95,11 @@ pub struct NodeStyle {
     pub event_hover_color: Color32,
 
     pub const_bind_style: DragValueStyle,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MenuStyle {
+    pub button_padding: Vec2,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -252,6 +258,9 @@ impl Style {
                 radius: scaled(settings.small_corner_radius),
             },
         };
+        self.menu = MenuStyle {
+            button_padding: Vec2::new(scaled(16.0), scaled(5.0)),
+        };
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
@@ -294,5 +303,10 @@ impl Style {
         visuals.window_stroke = self.inactive_bg_stroke;
         visuals.window_corner_radius = self.corner_radius.into();
         visuals.menu_corner_radius = self.small_corner_radius.into();
+    }
+
+    pub fn apply_menu_style(&self, ui: &mut egui::Ui) {
+        let style = ui.style_mut();
+        style.spacing.button_padding = self.menu.button_padding;
     }
 }
