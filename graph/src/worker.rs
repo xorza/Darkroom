@@ -9,7 +9,6 @@ use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::{JoinHandle, JoinSet};
-use tracing::error;
 
 const MAX_EVENTS_PER_LOOP: usize = 10;
 
