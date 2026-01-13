@@ -220,13 +220,14 @@ fn start_event_loop(
             let mut event_ids = Vec::default();
             loop {
                 event_ids.clear();
-                let count = event_rx
+                if event_rx
                     .recv_many(&mut event_ids, MAX_EVENTS_PER_LOOP)
-                    .await;
-                if count == 0 {
+                    .await
+                    == 0
+                {
                     return;
                 }
-                let result = if count == 1 {
+                let result = if event_ids.len() == 1 {
                     tx.send(WorkerMessage::Event {
                         event_id: event_ids[0].clone(),
                     })
