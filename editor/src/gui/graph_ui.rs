@@ -21,7 +21,7 @@ use common::BoolExt;
 
 const MIN_ZOOM: f32 = 0.2;
 const MAX_ZOOM: f32 = 4.0;
-const WHEEL_ZOOM_SPEED: f32 = 0.05;
+const WHEEL_ZOOM_SPEED: f32 = 0.08;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum InteractionState {
