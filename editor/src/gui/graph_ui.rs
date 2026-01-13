@@ -2,8 +2,8 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Area, Button, Color32, Frame, Id, Key, Layout, Margin, PointerButton, Pos2, Rect,
-    Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Area, Button, Color32, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
+    Rect, Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
@@ -371,41 +371,62 @@ impl GraphUi {
         let mono_font = gui.style.mono_font.clone();
         let small_padding = gui.style.small_padding;
         let padding = gui.style.padding;
+        let rect = gui.rect;
+        let egui_ctx = gui.ui().ctx();
 
         {
-            let mut top_ui = gui.ui().new_child(UiBuilder::new());
-            top_ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
-                ui.take_available_width();
-                Frame::NONE
-                    .fill(Color32::from_black_alpha(128))
-                    .inner_margin(padding)
-                    .show(ui, |ui| {
+            Area::new(Id::new("graph_ui_top_buttons"))
+                .sizing_pass(false)
+                .default_width(rect.width())
+                .movable(false)
+                .interactable(false)
+                .fixed_pos(rect.min)
+                .show(egui_ctx, |ui| {
+                    ui.set_clip_rect(rect);
+
+                    ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
                         ui.take_available_width();
 
-                        ui.horizontal(|ui| {
-                            let mut make_button = |label| {
-                                let button_size = Vec2::splat(mono_font.size + small_padding * 2.0);
-                                ui.add_sized(
-                                    button_size,
-                                    Button::new(RichText::new(label).font(mono_font.clone())),
-                                )
-                                .clicked()
-                            };
-                            fit_all = make_button("a");
-                            view_selected = make_button("s");
-                            reset_view = make_button("r");
-                        });
+                        Frame::NONE
+                            .fill(Color32::from_black_alpha(128))
+                            .inner_margin(padding)
+                            .show(ui, |ui| {
+                                ui.take_available_width();
+
+                                ui.horizontal(|ui| {
+                                    let mut make_button = |label| {
+                                        let button_size =
+                                            Vec2::splat(mono_font.size + small_padding * 2.0);
+                                        ui.add_sized(
+                                            button_size,
+                                            Button::new(
+                                                RichText::new(label).font(mono_font.clone()),
+                                            ),
+                                        )
+                                        .clicked()
+                                    };
+                                    fit_all = make_button("a");
+                                    view_selected = make_button("s");
+                                    reset_view = make_button("r");
+                                });
+                            });
                     });
-            });
+                });
         }
 
         {
-            let mut bottom_ui = gui.ui().new_child(UiBuilder::new());
-            bottom_ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                    interaction.run |= ui.button("run").clicked();
+            Area::new(Id::new("graph_ui_bottom_buttons"))
+                .fixed_pos(pos2(rect.left(), rect.bottom()))
+                .pivot(Align2::LEFT_BOTTOM)
+                .constrain_to(rect)
+                .show(egui_ctx, |ui| {
+                    ui.set_clip_rect(rect);
+                    ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+                        Frame::NONE.inner_margin(padding).show(ui, |ui| {
+                            interaction.run |= ui.button("run").clicked();
+                        });
+                    });
                 });
-            });
         }
 
         if reset_view {

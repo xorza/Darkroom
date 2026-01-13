@@ -90,6 +90,7 @@ Graph background rendering now lives in `gui/background.rs`, caches its mesh, an
 changes.
 Graph rendering now uses a fixed-rect child `Ui` with a clip rect to prevent CentralPanel borders from shifting when
 offscreen widgets (like const bindings) extend beyond the graph area.
+Graph overlay controls (fit/view/reset + run) now render in foreground `Area`s pinned to the graph rect, so graph-space widgets (e.g. const binding drag values) and pan/zoom don't shift their screen position.
 The editor now overrides `eframe::App::clear_color` to use `visuals.panel_fill`, so the window background behind the
 CentralPanel outer margin matches the top/bottom panel and menu background.
 Status panel now uses a dedicated log UI with graph-style background and rounded corners; a left-aligned triangle toggle collapses to the latest status line and expands to show the most recent handful of lines.
