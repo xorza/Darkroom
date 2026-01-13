@@ -80,10 +80,7 @@ impl GraphBackgroundRenderer {
     fn draw_tiled(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         let texture = self.texture.as_ref().unwrap();
 
-        const MIN_SPACING: f32 = 8.0;
-        const MAX_SPACING: f32 = 60.0;
-        let spacing = (gui.style.graph_background.dotted_base_spacing * gui.scale)
-            .clamp(MIN_SPACING, MAX_SPACING);
+        let spacing = gui.style.graph_background.dotted_base_spacing * gui.scale;
         let origin = gui.rect.min + ctx.view_graph.pan;
 
         let uv = |p: Pos2| {
