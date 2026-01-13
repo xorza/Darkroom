@@ -11,7 +11,7 @@ use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::error;
 
@@ -47,7 +47,8 @@ pub struct Worker {
 
 #[derive(Debug)]
 struct EventLoopInner {
-    event_task_handle: Option<JoinHandle<()>>,
+    event_task_handle1: Option<JoinHandle<()>>,
+    event_task_handle2: Option<JoinHandle<()>>,
     stop_flag: Arc<AtomicBool>,
     stop_notify: Arc<Notify>,
 }
@@ -205,7 +206,28 @@ fn start_event_loop(
     let stop_flag = Arc::new(AtomicBool::new(false));
     let stop_notify = Arc::new(Notify::new());
 
-    let event_task_handle = tokio::spawn({
+    let (event_tx, mut event_rx) = channel::<EventId>(10);
+
+    let event_task_handle1 = tokio::spawn({
+        let tx = tx.clone();
+        async move {
+            let mut buffer = Vec::with_capacity(10);
+            loop {
+                event_rx.recv_many(&mut buffer, 10).await;
+
+                if tx
+                    .send(WorkerMessage::Events {
+                        event_ids: std::mem::take(&mut buffer),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        }
+    });
+
+    let event_task_handle2 = tokio::spawn({
         let stop_flag = stop_flag.clone();
         let stop_notify = stop_notify.clone();
         let ready = ReadyState::new(events.len());
@@ -213,7 +235,7 @@ fn start_event_loop(
         async move {
             for (node_id, event_lambda) in events {
                 tokio::spawn({
-                    let tx = tx.clone();
+                    let event_tx = event_tx.clone();
                     let stop_flag = stop_flag.clone();
                     let stop_notify = stop_notify.clone();
                     let ready = ready.clone();
@@ -228,9 +250,7 @@ fn start_event_loop(
                             tokio::select! {
                                 _ = stop_notify.notified() => return,
                                 event_idx = event_lambda.invoke() => {
-                                    let result = tx.send(WorkerMessage::Event {
-                                        event_id: EventId { node_id, event_idx },
-                                    });
+                                    let result = event_tx.send(EventId { node_id, event_idx }).await;
                                     if result.is_err() {
                                         return;
                                     }
@@ -249,7 +269,8 @@ fn start_event_loop(
 
     EventLoopHandle {
         inner: Shared::new(EventLoopInner {
-            event_task_handle: Some(event_task_handle),
+            event_task_handle1: Some(event_task_handle1),
+            event_task_handle2: Some(event_task_handle2),
             stop_flag,
             stop_notify,
         }),
@@ -283,10 +304,13 @@ impl EventLoopCallback {
 impl EventLoopHandle {
     pub async fn stop(&self) {
         let mut inner = self.inner.lock().await;
-        if let Some(event_task_handle) = inner.event_task_handle.take() {
+        if let Some(event_task_handle1) = inner.event_task_handle1.take() {
             inner.stop_flag.store(true, Ordering::Release);
             inner.stop_notify.notify_waiters();
-            event_task_handle.abort();
+            event_task_handle1.abort();
+        }
+        if let Some(event_task_handle2) = inner.event_task_handle2.take() {
+            event_task_handle2.abort();
         }
     }
 }
@@ -452,14 +476,14 @@ mod tests {
         );
 
         let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::Event { event_id } = msg else {
-            panic!("Expected WorkerMessage::Events");
+        let WorkerMessage::Events { event_ids } = msg else {
+            panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
-            event_id,
+            event_ids[0],
             EventId {
                 node_id,
-                event_idx: 1,
+                event_idx: 1
             }
         );
 
@@ -491,11 +515,11 @@ mod tests {
             .await
             .expect("Expected event message")
             .expect("Event channel closed");
-        let WorkerMessage::Event { event_id } = msg else {
-            panic!("Expected WorkerMessage::Events");
+        let WorkerMessage::Events { event_ids } = msg else {
+            panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
-            event_id,
+            event_ids[0],
             EventId {
                 node_id,
                 event_idx: 0
