@@ -491,15 +491,15 @@ mod tests {
             .await
             .expect("Expected event message")
             .expect("Event channel closed");
-        let WorkerMessage::Events { event_ids } = msg else {
+        let WorkerMessage::Event { event_id } = msg else {
             panic!("Expected WorkerMessage::Events");
         };
         assert_eq!(
-            event_ids,
-            vec![EventId {
+            event_id,
+            EventId {
                 node_id,
                 event_idx: 0
-            }]
+            }
         );
 
         handle.stop().await;
