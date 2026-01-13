@@ -2,8 +2,8 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Area, Button, Color32, Frame, Id, Key, Layout, Margin, Order, PointerButton,
-    Pos2, Rect, Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Area, Button, Color32, Frame, Id, Key, Layout, Margin, PointerButton, Pos2, Rect,
+    Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
@@ -110,8 +110,6 @@ impl GraphUi {
             });
         }
 
-        self.buttons(&mut gui, &mut ctx, interaction);
-
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(
                 &mut gui,
@@ -149,6 +147,8 @@ impl GraphUi {
                 interaction,
             );
         }
+
+        self.buttons(&mut gui, &mut ctx, interaction);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -406,10 +406,12 @@ impl GraphUi {
             });
 
         {
-            let rect = gui.rect;
             let mut bottom_ui = gui.ui().new_child(UiBuilder::new());
+
             bottom_ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                interaction.run |= ui.button("run").clicked();
+                Frame::NONE.inner_margin(small_padding).show(ui, |ui| {
+                    interaction.run |= ui.button("run").clicked();
+                });
             });
         }
 
