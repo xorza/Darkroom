@@ -81,17 +81,13 @@ impl ScenariumEditor {
     fn new(ui_context: &egui::Context) -> Self {
         let main_ui = MainUi::new(ui_context);
         let mut app = Self {
-            app_data: AppData::new(main_ui.ui_context(), Self::default_path()),
+            app_data: AppData::new(main_ui.ui_context()),
             main_ui,
         };
 
         app.main_ui.load(&mut app.app_data);
 
         app
-    }
-
-    fn default_path() -> PathBuf {
-        std::env::temp_dir().join("scenarium-graph.lua")
     }
 }
 

@@ -46,7 +46,7 @@ pub struct AppData {
 }
 
 impl AppData {
-    pub fn new(ui_context: UiContext, current_path: PathBuf) -> Self {
+    pub fn new(ui_context: UiContext) -> Self {
         let shared_status = Shared::default();
         let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
 
@@ -64,7 +64,7 @@ impl AppData {
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
             graph_updated: false,
-            current_path,
+            current_path: std::env::temp_dir().join("scenarium-graph.lua"),
             status: String::new(),
             _ui_context: ui_context,
 
