@@ -3,7 +3,7 @@ use std::ptr::NonNull;
 use eframe::egui;
 use egui::{
     Align, Align2, Area, Button, Color32, Frame, Id, Key, Layout, Margin, Order, PointerButton,
-    Pos2, Response, RichText, Sense, StrokeKind, Vec2, pos2, vec2,
+    Pos2, Rect, Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
@@ -405,22 +405,13 @@ impl GraphUi {
                 });
             });
 
-        let small_padding = gui.style.small_padding;
-        let button_height = gui.ui().spacing().interact_size.y + small_padding * 2.0;
-        let button_rect = egui::Rect::from_min_size(
-            pos2(
-                gui.rect.left() + small_padding,
-                gui.rect.bottom() - small_padding - button_height,
-            ),
-            vec2(gui.rect.width() - small_padding * 2.0, button_height),
-        );
-
-        // gui.ui()
-        //     .allocate_ui_with_layout(button_rect.size(), Layout::bottom_up(Align::Min), |ui| {
-        //         Frame::NONE.inner_margin(small_padding).show(ui, |ui| {
-        //             ui.horizontal(|ui| interaction.run |= ui.button("run").clicked());
-        //         });
-        //     });
+        {
+            let rect = gui.rect;
+            let mut bottom_ui = gui.ui().new_child(UiBuilder::new());
+            bottom_ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
+                interaction.run |= ui.button("run").clicked();
+            });
+        }
 
         if reset_view {
             ctx.view_graph.scale = 1.0;
