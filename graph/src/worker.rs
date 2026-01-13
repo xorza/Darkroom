@@ -85,7 +85,8 @@ impl Worker {
     pub fn exit(&mut self) {
         self.send(WorkerMessage::Exit);
 
-        if let Some(_thread_handle) = self.thread_handle.take() {
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.abort();
             // thread_handle.await.expect("Worker thread failed to join");
         }
     }
@@ -93,7 +94,8 @@ impl Worker {
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        if self.thread_handle.is_some() {
+        if let Some(thread_handle) = self.thread_handle.take() {
+            thread_handle.abort();
             error!("Worker dropped while the thread is still running; call Worker::exit() first");
         }
     }
