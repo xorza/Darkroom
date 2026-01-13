@@ -153,7 +153,7 @@ pub struct ExecutionGraph {
     pub e_node_process_order: Vec<usize>,
     pub e_node_invoke_order: Vec<usize>,
 
-    pub e_node_terminal_idx: Vec<usize>,
+    pub e_node_terminal_idx: HashSet<usize>,
 
     #[serde(skip)]
     ctx_manager: ContextManager,
@@ -616,7 +616,7 @@ impl ExecutionGraph {
         let stack = &mut self.stack;
         stack.clear();
 
-        for e_node_idx in self.e_node_terminal_idx.drain(..) {
+        for e_node_idx in self.e_node_terminal_idx.drain() {
             stack.push(Visit {
                 e_node_idx,
                 cause: VisitCause::Terminal,
