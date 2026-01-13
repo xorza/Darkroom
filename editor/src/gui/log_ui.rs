@@ -1,6 +1,6 @@
 use eframe::egui;
 use egui::collapsing_header::{CollapsingState, paint_default_icon};
-use egui::{Frame, Label, Margin};
+use egui::{Frame, Label, Margin, ScrollArea, TextStyle};
 
 use crate::gui::Gui;
 use crate::gui::style::Style;
@@ -40,17 +40,21 @@ impl LogUi {
                     let toggle_response = state.show_toggle_button(ui, paint_default_icon);
                     ui.expand_to_include_rect(toggle_response.rect);
 
-                    let display_text = if state.is_open() {
-                        status_tail(status, EXPANDED_STATUS_LINES)
+                    if state.is_open() {
+                        let line_height = ui.text_style_height(&TextStyle::Body);
+                        let max_height = line_height * 6.0;
+                        ScrollArea::vertical()
+                            .max_height(max_height)
+                            .stick_to_bottom(true)
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width());
+                                ui.label(status);
+                            });
                     } else {
-                        status.last_line().to_owned()
-                    };
-
-                    let mut label = Label::new(display_text).wrap();
-                    if !state.is_open() {
+                        let mut label = Label::new(status.last_line().to_owned()).wrap();
                         label = label.truncate();
+                        ui.add(label);
                     }
-                    ui.add(label);
 
                     state.store(ui.ctx());
                 });
@@ -58,16 +62,4 @@ impl LogUi {
             // ui.add_space(style.big_padding);
         });
     }
-}
-
-fn status_tail(status: &str, lines_to_show: usize) -> String {
-    assert!(
-        lines_to_show > 0,
-        "status lines to show must be greater than zero"
-    );
-
-    let lines: Vec<&str> = status.lines().collect();
-    let total = lines.len();
-    let start = total.saturating_sub(lines_to_show);
-    lines[start..].join("\n")
 }
