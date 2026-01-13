@@ -9,10 +9,10 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
-use crate::gui::background::DottedBackgroundRenderer;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
+use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{EventSubscriberChange, GraphUiAction, GraphUiInteraction};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
@@ -54,7 +54,7 @@ pub struct GraphUi {
     connection_breaker: ConnectionBreaker,
     connections: ConnectionUi,
     node_ui: NodeUi,
-    dots_background: DottedBackgroundRenderer,
+    dots_background: GraphBackgroundRenderer,
 }
 
 impl GraphUi {
