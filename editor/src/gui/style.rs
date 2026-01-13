@@ -53,8 +53,6 @@ pub struct GraphBackgroundStyle {
     pub dotted_color: Color32,
     pub dotted_base_spacing: f32,
     pub dotted_radius_base: f32,
-    pub dotted_radius_min: f32,
-    pub dotted_radius_max: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -194,10 +192,8 @@ impl Style {
 
         self.graph_background = GraphBackgroundStyle {
             dotted_color: settings.color_dotted,
-            dotted_base_spacing: scaled(settings.dotted_base_spacing),
-            dotted_radius_base: scaled(settings.dotted_radius_base),
-            dotted_radius_min: scaled(settings.dotted_radius_min),
-            dotted_radius_max: scaled(settings.dotted_radius_max),
+            dotted_base_spacing: settings.dotted_base_spacing,
+            dotted_radius_base: settings.dotted_radius_base,
             bg_color: settings.color_bg_graph,
         };
         self.connections = ConnectionStyle {

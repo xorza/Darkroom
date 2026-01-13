@@ -46,10 +46,7 @@ impl GraphBackgroundRenderer {
         let spacing = gui.style.graph_background.dotted_base_spacing;
         assert!(spacing > 0.0, "background spacing must be positive");
 
-        let radius = (gui.style.graph_background.dotted_radius_base).clamp(
-            gui.style.graph_background.dotted_radius_min,
-            gui.style.graph_background.dotted_radius_max,
-        );
+        let radius = gui.style.graph_background.dotted_radius_base;
         let color = gui.style.graph_background.dotted_color;
 
         let tile = spacing.ceil().max(radius * 2.0 + 2.0);
