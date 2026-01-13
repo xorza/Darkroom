@@ -75,17 +75,9 @@ impl AppData {
         }
     }
 
-    fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
-        Worker::new(move |result| {
-            let mut shared_status = shared_status.try_lock().unwrap();
-            shared_status.execution_stats = Some(result);
-
-            ui_refresh.request_redraw();
-        })
-    }
-
-    fn set_status(&mut self, message: impl Into<String>) {
-        self.status = message.into();
+    pub fn empty_graph(&mut self) {
+        self.apply_graph(ViewGraph::default(), true);
+        self.set_status("Created new graph");
     }
 
     pub fn save_graph(&mut self) {
@@ -100,108 +92,6 @@ impl AppData {
             Ok(()) => self.set_status(format!("Loaded graph from {}", self.current_path.display())),
             Err(err) => self.set_status(format!("Load failed: {err}")),
         }
-    }
-
-    pub fn run_graph(&mut self) {
-        if self.view_graph.graph.nodes.is_empty() {
-            self.set_status("Run failed: no graph loaded");
-            return;
-        }
-
-        if self.graph_updated {
-            self.worker.send(WorkerMessage::Multi {
-                msgs: vec![
-                    WorkerMessage::Update {
-                        graph: self.view_graph.graph.clone(),
-                        func_lib: self.func_lib.clone(),
-                    },
-                    WorkerMessage::StartEventLoop {
-                        callback: EventLoopCallback::new({
-                            let run_event = self.run_event.clone();
-                            move || {
-                                run_event.notify_waiters();
-                            }
-                        }),
-                    },
-                ],
-            });
-
-            self.graph_updated = false;
-        } else {
-            self.run_event.notify_waiters();
-        }
-    }
-
-    pub fn undo(&mut self) {
-        self.interaction.flush();
-        self.handle_actions();
-
-        let mut affects_computation = false;
-        let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
-        });
-        self.view_graph.validate();
-        if undid && affects_computation {
-            self.refresh_after_graph_change();
-        }
-    }
-
-    pub fn redo(&mut self) {
-        let mut affects_computation = false;
-        let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
-            affects_computation |= action.affects_computation();
-        });
-        self.view_graph.validate();
-        if redid && affects_computation {
-            self.refresh_after_graph_change();
-        }
-    }
-
-    pub fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
-        self.view_graph = view_graph;
-
-        if reset_undo {
-            self.undo_stack.reset_with(&self.view_graph);
-        }
-        self.refresh_after_graph_change();
-    }
-
-    fn refresh_after_graph_change(&mut self) {
-        self.worker.send(WorkerMessage::Clear);
-        self.graph_updated = true;
-        self.execution_stats = None;
-    }
-
-    pub fn handle_interaction(&mut self) {
-        self.handle_actions();
-
-        if self.interaction.run {
-            self.run_graph();
-        }
-
-        if let Some(err) = self.interaction.errors.last() {
-            self.set_status(format!("Graph error: {err}"));
-        }
-
-        self.interaction.clear();
-    }
-
-    fn handle_actions(&mut self) {
-        for actions in self.interaction.actions_stacks() {
-            self.undo_stack.clear_redo();
-            self.undo_stack.push_current(&self.view_graph, actions);
-
-            if actions.iter().any(|action| action.affects_computation()) {
-                self.execution_stats = None;
-                self.graph_updated = true;
-            }
-        }
-        self.interaction.clear_actions();
-    }
-
-    pub fn empty_graph(&mut self) {
-        self.apply_graph(ViewGraph::default(), true);
-        self.set_status("Created new graph");
     }
 
     pub fn load_test_graph(&mut self) {
@@ -247,6 +137,116 @@ impl AppData {
         }
     }
 
+    pub fn undo(&mut self) {
+        self.interaction.flush();
+        self.handle_actions();
+
+        let mut affects_computation = false;
+        let undid = self.undo_stack.undo(&mut self.view_graph, &mut |action| {
+            affects_computation |= action.affects_computation();
+        });
+        self.view_graph.validate();
+        if undid && affects_computation {
+            self.refresh_after_graph_change();
+        }
+    }
+
+    pub fn redo(&mut self) {
+        let mut affects_computation = false;
+        let redid = self.undo_stack.redo(&mut self.view_graph, &mut |action| {
+            affects_computation |= action.affects_computation();
+        });
+        self.view_graph.validate();
+        if redid && affects_computation {
+            self.refresh_after_graph_change();
+        }
+    }
+
+    pub fn handle_interaction(&mut self) {
+        self.handle_actions();
+
+        if self.interaction.run {
+            self.run_graph();
+        }
+
+        if let Some(err) = self.interaction.errors.last() {
+            self.set_status(format!("Graph error: {err}"));
+        }
+
+        self.interaction.clear();
+    }
+
+    fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
+        Worker::new(move |result| {
+            let mut shared_status = shared_status.try_lock().unwrap();
+            shared_status.execution_stats = Some(result);
+
+            ui_refresh.request_redraw();
+        })
+    }
+
+    fn set_status(&mut self, message: impl Into<String>) {
+        self.status = message.into();
+    }
+
+    fn run_graph(&mut self) {
+        if self.view_graph.graph.nodes.is_empty() {
+            self.set_status("Run failed: no graph loaded");
+            return;
+        }
+
+        if self.graph_updated {
+            self.worker.send(WorkerMessage::Multi {
+                msgs: vec![
+                    WorkerMessage::Update {
+                        graph: self.view_graph.graph.clone(),
+                        func_lib: self.func_lib.clone(),
+                    },
+                    WorkerMessage::StartEventLoop {
+                        callback: EventLoopCallback::new({
+                            let run_event = self.run_event.clone();
+                            move || {
+                                run_event.notify_waiters();
+                            }
+                        }),
+                    },
+                ],
+            });
+
+            self.graph_updated = false;
+        } else {
+            self.run_event.notify_waiters();
+        }
+    }
+
+    fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
+        self.view_graph = view_graph;
+
+        if reset_undo {
+            self.undo_stack.reset_with(&self.view_graph);
+        }
+        self.refresh_after_graph_change();
+    }
+
+    fn refresh_after_graph_change(&mut self) {
+        self.worker.send(WorkerMessage::Clear);
+        self.graph_updated = true;
+        self.execution_stats = None;
+    }
+
+    fn handle_actions(&mut self) {
+        for actions in self.interaction.actions_stacks() {
+            self.undo_stack.clear_redo();
+            self.undo_stack.push_current(&self.view_graph, actions);
+
+            if actions.iter().any(|action| action.affects_computation()) {
+                self.execution_stats = None;
+                self.graph_updated = true;
+            }
+        }
+        self.interaction.clear_actions();
+    }
+
     fn save_to_file(&self, path: &Path) -> Result<()> {
         let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
             .map_err(anyhow::Error::from)?;
@@ -261,6 +261,10 @@ impl AppData {
         self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
 
         Ok(())
+    }
+
+    pub fn exit(&mut self) {
+        self.worker.exit();
     }
 }
 

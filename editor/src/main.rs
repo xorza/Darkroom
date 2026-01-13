@@ -113,6 +113,6 @@ impl eframe::App for ScenariumEditor {
     }
 
     fn on_exit(&mut self) {
-        self.app_data.worker.exit();
+        self.app_data.exit();
     }
 }
