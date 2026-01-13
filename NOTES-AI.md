@@ -19,6 +19,7 @@ Node body rendering now reuses the shared `Style` background fill/stroke colors 
 Selected node outlines now use `Style.active_bg_stroke`.
 Graph background dotted grid styling now lives in `Style.background` (`GraphBackgroundStyle`).
 Graph background UVs are computed in graph-space (pan+scale) and the dotted spacing wraps by applying a power-of-two multiplier to keep on-screen spacing within a fixed zoom range.
+Graph background power-of-two scale wrapping now computes the exponent via `log2` (no loop), choosing the multiplier closest to 1.0 that keeps spacing in-range.
 Connection stroke styling now lives in `Style.connections` (`ConnectionStyle`).
 `ConnectionStyle` now also carries input/output port + hover colors and provides `bezier_style` to build connection bezier styles for broke/hovered states.
 Trigger/event port colors and hover colors now come from `Style.node` with yellow trigger and orange event defaults.

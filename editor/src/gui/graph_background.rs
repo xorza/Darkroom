@@ -48,25 +48,34 @@ impl GraphBackgroundRenderer {
         assert!(min > common::EPSILON);
         assert!(max > min);
 
-        let mut multiplier = 1.0_f32;
-        let mut normalized = view_scale;
-        for _ in 0..64 {
-            if normalized > max {
-                multiplier *= 0.5;
-                normalized *= 0.5;
-                continue;
-            }
-            if normalized < min {
-                multiplier *= 2.0;
-                normalized *= 2.0;
-                continue;
-            }
-            break;
-        }
+        let ratio_min = (min as f64) / (view_scale as f64);
+        let ratio_max = (max as f64) / (view_scale as f64);
+        assert!(ratio_min.is_finite(), "min/view_scale must be finite");
+        assert!(ratio_max.is_finite(), "max/view_scale must be finite");
+
+        let k_low = ratio_min.log2().ceil();
+        let k_high = ratio_max.log2().floor();
+        assert!(k_low.is_finite(), "k_low must be finite");
+        assert!(k_high.is_finite(), "k_high must be finite");
+
+        assert!(
+            k_low <= k_high,
+            "no power-of-two multiplier can satisfy bounds; view_scale={view_scale} min={min} max={max} k_low={k_low} k_high={k_high}"
+        );
+
+        let k_low_i32 = k_low as i32;
+        let k_high_i32 = k_high as i32;
+        let k = 0_i32.clamp(k_low_i32, k_high_i32);
+        assert!(
+            (-64..=64).contains(&k),
+            "scale normalization must converge within 64 steps; view_scale={view_scale} min={min} max={max} k={k} k_low={k_low_i32} k_high={k_high_i32}"
+        );
+        let multiplier = 2.0_f32.powi(k);
+        let normalized = view_scale * multiplier;
 
         assert!(
             normalized >= min && normalized <= max,
-            "scale normalization must converge; view_scale={view_scale} min={min} max={max} normalized={normalized}"
+            "scale normalization must converge; view_scale={view_scale} min={min} max={max} normalized={normalized} k={k}"
         );
 
         multiplier
