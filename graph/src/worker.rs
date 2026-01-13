@@ -8,7 +8,7 @@ use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
-use tokio::task::{JoinHandle, JoinSet};
+use tokio::task::JoinHandle;
 
 const MAX_EVENTS_PER_LOOP: usize = 10;
 
@@ -44,8 +44,7 @@ pub struct Worker {
 
 #[derive(Debug)]
 struct EventLoopHandle {
-    event_task_handle: JoinHandle<()>,
-    event_task_set: JoinSet<()>,
+    join_handles: Vec<JoinHandle<()>>,
 }
 
 impl Worker {
@@ -201,8 +200,10 @@ async fn start_event_loop(
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
+    let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
+
     let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
-    let event_task_handle = tokio::spawn({
+    let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
             let mut event_ids = Vec::default();
@@ -231,12 +232,12 @@ async fn start_event_loop(
             }
         }
     });
+    join_handles.push(join_handle);
 
     let ready = ReadyState::new(events.len());
 
-    let mut event_task_set = JoinSet::new();
     for (node_id, event_lambda) in events {
-        event_task_set.spawn({
+        let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();
 
@@ -254,16 +255,14 @@ async fn start_event_loop(
                 }
             }
         });
+        join_handles.push(join_handle);
     }
 
     ready.wait().await;
     tokio::task::yield_now().await;
     callback.call();
 
-    EventLoopHandle {
-        event_task_handle,
-        event_task_set,
-    }
+    EventLoopHandle { join_handles }
 }
 
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
@@ -292,14 +291,15 @@ impl EventLoopCallback {
 
 impl EventLoopHandle {
     async fn stop(&mut self) {
-        self.event_task_handle.abort();
-        self.event_task_set.abort_all();
-        while let Some(result) = self.event_task_set.join_next().await {
+        for ah in self.join_handles.drain(..) {
+            ah.abort();
+            let result = ah.await;
             if let Err(err) = result {
                 if err.is_panic() {
                     std::panic::resume_unwind(err.into_panic());
+                } else {
+                    assert!(err.is_cancelled(), "event task join error: {err}");
                 }
-                assert!(err.is_cancelled(), "event task join error: {err}");
             }
         }
     }
