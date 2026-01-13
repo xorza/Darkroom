@@ -107,8 +107,8 @@ enum EventLoopCommand {
 }
 
 async fn worker_loop<Callback>(
-    mut rx: UnboundedReceiver<WorkerMessage>,
-    tx: UnboundedSender<WorkerMessage>,
+    mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
+    worker_message_tx: UnboundedSender<WorkerMessage>,
     callback: Shared<Callback>,
 ) where
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
@@ -126,7 +126,11 @@ async fn worker_loop<Callback>(
         assert!(msgs_vec.is_empty());
         assert!(event_ids.is_empty());
 
-        if rx.recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP).await == 0 {
+        if worker_message_rx
+            .recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP)
+            .await
+            == 0
+        {
             return;
         }
         msgs.extend(msgs_vec.drain(..));
@@ -189,7 +193,8 @@ async fn worker_loop<Callback>(
                     .map(|e_node| (e_node.id, e_node.event_lambda.clone()))
                     .collect();
                 if !events.is_empty() {
-                    event_loop_handle = Some(start_event_loop(tx.clone(), events, callback).await);
+                    event_loop_handle =
+                        Some(start_event_loop(worker_message_tx.clone(), events, callback).await);
                 }
             }
             EventLoopCommand::Stop => stop_event_loop(&mut event_loop_handle).await,
@@ -198,7 +203,7 @@ async fn worker_loop<Callback>(
 }
 
 async fn start_event_loop(
-    tx: UnboundedSender<WorkerMessage>,
+    worker_message_tx: UnboundedSender<WorkerMessage>,
     events: Vec<(NodeId, EventLambda)>,
     callback: EventLoopCallback,
 ) -> EventLoopHandle {
@@ -206,7 +211,7 @@ async fn start_event_loop(
 
     let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
     let event_task_handle = tokio::spawn({
-        let tx = tx.clone();
+        let tx = worker_message_tx.clone();
         async move {
             let mut event_ids = Vec::default();
             loop {
