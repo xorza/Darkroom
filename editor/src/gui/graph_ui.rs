@@ -2,8 +2,8 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Area, Button, Color32, Frame, Id, Key, Margin, PointerButton, Pos2, Response, RichText, Sense,
-    StrokeKind, Vec2,
+    Align, Align2, Area, Button, Color32, Frame, Id, Key, Layout, Margin, Order, PointerButton,
+    Pos2, Response, RichText, Sense, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
@@ -110,7 +110,7 @@ impl GraphUi {
             });
         }
 
-        self.top_panel(&mut gui, &mut ctx, interaction);
+        self.buttons(&mut gui, &mut ctx, interaction);
 
         if let Some(pointer_pos) = pointer_pos {
             self.update_zoom_and_pan(
@@ -149,8 +149,6 @@ impl GraphUi {
                 interaction,
             );
         }
-
-        gui.set_scale(1.0);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -361,7 +359,7 @@ impl GraphUi {
         }
     }
 
-    fn top_panel(
+    fn buttons(
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
@@ -376,41 +374,53 @@ impl GraphUi {
         let panel_rect = egui::Rect::from_min_size(panel_pos, Vec2::new(panel_width, 0.0));
         let mono_font = gui.style.mono_font.clone();
         let small_padding = gui.style.small_padding;
-        let button_size = mono_font.size + small_padding * 2.0;
-
-        assert!(button_size.is_finite());
-        assert!(button_size > 0.0);
-        let button_size = Vec2::splat(button_size);
+        let padding = gui.style.padding;
 
         Area::new(Id::new("graph_top_buttons"))
             .fixed_pos(panel_pos)
             .show(gui.ui().ctx(), |ui| {
                 ui.scope_builder(egui::UiBuilder::new().max_rect(panel_rect), |ui| {
-                    ui.set_min_width(panel_width);
-                    ui.set_max_width(panel_width);
-                    let frame = Frame::NONE
-                        .fill(Color32::from_black_alpha(64))
-                        .inner_margin(small_padding);
-                    frame.show(ui, |ui| {
-                        ui.set_min_width(panel_width - small_padding * 2.0);
-                        ui.set_max_width(panel_width);
+                    ui.take_available_width();
+                    Frame::NONE
+                        .fill(Color32::from_black_alpha(128))
+                        .inner_margin(Margin::symmetric(padding as i8, padding as i8))
+                        .show(ui, |ui| {
+                            ui.take_available_width();
 
-                        ui.horizontal(|ui| {
-                            let mut make_button = |label| {
-                                ui.add_sized(
-                                    button_size,
-                                    Button::new(RichText::new(label).font(mono_font.clone())),
-                                )
-                                .clicked()
-                            };
-                            interaction.run |= make_button("run");
-                            fit_all = make_button("a");
-                            view_selected = make_button("s");
-                            reset_view = make_button("r");
+                            ui.horizontal(|ui| {
+                                let mut make_button = |label| {
+                                    let button_size =
+                                        Vec2::splat(mono_font.size + small_padding * 2.0);
+                                    ui.add_sized(
+                                        button_size,
+                                        Button::new(RichText::new(label).font(mono_font.clone())),
+                                    )
+                                    .clicked()
+                                };
+                                fit_all = make_button("a");
+                                view_selected = make_button("s");
+                                reset_view = make_button("r");
+                            });
                         });
-                    });
                 });
             });
+
+        let small_padding = gui.style.small_padding;
+        let button_height = gui.ui().spacing().interact_size.y + small_padding * 2.0;
+        let button_rect = egui::Rect::from_min_size(
+            pos2(
+                gui.rect.left() + small_padding,
+                gui.rect.bottom() - small_padding - button_height,
+            ),
+            vec2(gui.rect.width() - small_padding * 2.0, button_height),
+        );
+
+        // gui.ui()
+        //     .allocate_ui_with_layout(button_rect.size(), Layout::bottom_up(Align::Min), |ui| {
+        //         Frame::NONE.inner_margin(small_padding).show(ui, |ui| {
+        //             ui.horizontal(|ui| interaction.run |= ui.button("run").clicked());
+        //         });
+        //     });
 
         if reset_view {
             ctx.view_graph.scale = 1.0;
