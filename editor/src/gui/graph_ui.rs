@@ -29,6 +29,7 @@ enum InteractionState {
     Idle,
     BreakingConnections,
     DraggingNewConnection,
+    PanningGraph,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -110,15 +111,13 @@ impl GraphUi {
             });
         }
 
-        if let Some(pointer_pos) = pointer_pos {
-            self.update_zoom_and_pan(
-                &mut gui,
-                &mut ctx,
-                &background_response,
-                pointer_pos,
-                interaction,
-            );
-        }
+        self.update_zoom_and_pan(
+            &mut gui,
+            &mut ctx,
+            &background_response,
+            pointer_pos,
+            interaction,
+        );
 
         gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(&mut gui, &ctx);
@@ -193,6 +192,7 @@ impl GraphUi {
         }
 
         match self.state {
+            InteractionState::PanningGraph => {}
             InteractionState::Idle => {
                 if primary_pressed {
                     if let PortDragInfo::DragStart(_) = drag_port_info {
@@ -353,9 +353,8 @@ impl GraphUi {
         );
 
         match self.state {
-            InteractionState::Idle => {}
-            InteractionState::DraggingNewConnection => {}
             InteractionState::BreakingConnections => self.connection_breaker.show(gui),
+            _ => {}
         }
     }
 
@@ -397,7 +396,6 @@ impl GraphUi {
                             reset_view = make_button("r");
                         });
                     });
-                //
             });
         }
 
@@ -428,38 +426,53 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
-        pointer_pos: Pos2,
+        pointer_pos: Option<Pos2>,
         interaction: &mut GraphUiInteraction,
     ) {
         let prev_scale = ctx.view_graph.scale;
         let prev_pan = ctx.view_graph.pan;
+        if let Some(pointer_pos) = pointer_pos {
+            let (zoom_delta, pan) = {
+                let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
 
-        let (zoom_delta, pan) = {
-            let (scroll_delta, mouse_wheel_delta) = collect_scroll_mouse_wheel_deltas(gui);
+                (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
+                    ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
+                    (
+                        gui.ui().input(|input| {
+                            input.modifiers.command.then_else(1.0, input.zoom_delta())
+                        }),
+                        scroll_delta,
+                    ),
+                )
+            };
 
-            (mouse_wheel_delta.abs() > f32::EPSILON).then_else(
-                ((mouse_wheel_delta * WHEEL_ZOOM_SPEED).exp(), Vec2::ZERO),
-                (
-                    gui.ui()
-                        .input(|input| input.modifiers.command.then_else(1.0, input.zoom_delta())),
-                    scroll_delta,
-                ),
-            )
-        };
+            if (zoom_delta - 1.0).abs() > f32::EPSILON {
+                // zoom
+                let clamped_scale = (ctx.view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
+                let origin = gui.rect.min;
+                let graph_pos = (pointer_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
+                ctx.view_graph.scale = clamped_scale;
+                ctx.view_graph.pan = pointer_pos - origin - graph_pos * ctx.view_graph.scale;
+            }
 
-        if (zoom_delta - 1.0).abs() > f32::EPSILON {
-            // zoom
-            let clamped_scale = (ctx.view_graph.scale * zoom_delta).clamp(MIN_ZOOM, MAX_ZOOM);
-            let origin = gui.rect.min;
-            let graph_pos = (pointer_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
-            ctx.view_graph.scale = clamped_scale;
-            ctx.view_graph.pan = pointer_pos - origin - graph_pos * ctx.view_graph.scale;
+            ctx.view_graph.pan += pan;
         }
 
-        ctx.view_graph.pan += pan;
-
-        if background_response.dragged_by(PointerButton::Middle) {
-            ctx.view_graph.pan += background_response.drag_delta();
+        match self.state {
+            InteractionState::Idle => {
+                if background_response.drag_started_by(PointerButton::Middle) {
+                    self.state = InteractionState::PanningGraph;
+                }
+            }
+            InteractionState::PanningGraph => {
+                if background_response.drag_stopped_by(PointerButton::Middle) {
+                    self.state = InteractionState::Idle;
+                }
+                if background_response.dragged_by(PointerButton::Middle) {
+                    ctx.view_graph.pan += background_response.drag_delta();
+                }
+            }
+            _ => {}
         }
 
         if !prev_scale.ui_equals(&ctx.view_graph.scale) || !prev_pan.ui_equals(&ctx.view_graph.pan)
