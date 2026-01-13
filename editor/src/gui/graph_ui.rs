@@ -353,9 +353,8 @@ impl GraphUi {
             },
         );
 
-        match self.state {
-            InteractionState::BreakingConnections => self.connection_breaker.show(gui),
-            _ => {}
+        if self.state == InteractionState::BreakingConnections {
+            self.connection_breaker.show(gui);
         }
     }
 

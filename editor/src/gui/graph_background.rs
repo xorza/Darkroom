@@ -24,9 +24,7 @@ impl std::fmt::Debug for GraphBackgroundRenderer {
 
 impl GraphBackgroundRenderer {
     pub fn render(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
-        let scale = ctx.view_graph.scale;
-
-        assert!(scale > common::EPSILON, "view graph scale must be positive");
+        assert!(ctx.view_graph.scale > common::EPSILON);
 
         if self.texture.is_none() {
             self.rebuild_texture(gui, ctx);
@@ -40,6 +38,38 @@ impl GraphBackgroundRenderer {
         }
 
         self.draw_tiled(gui, ctx);
+    }
+
+    fn wrap_scale_multiplier(view_scale: f32, min: f32, max: f32) -> f32 {
+        assert!(view_scale.is_finite());
+        assert!(view_scale > common::EPSILON);
+        assert!(min.is_finite());
+        assert!(max.is_finite());
+        assert!(min > common::EPSILON);
+        assert!(max > min);
+
+        let mut multiplier = 1.0_f32;
+        let mut normalized = view_scale;
+        for _ in 0..64 {
+            if normalized > max {
+                multiplier *= 0.5;
+                normalized *= 0.5;
+                continue;
+            }
+            if normalized < min {
+                multiplier *= 2.0;
+                normalized *= 2.0;
+                continue;
+            }
+            break;
+        }
+
+        assert!(
+            normalized >= min && normalized <= max,
+            "scale normalization must converge; view_scale={view_scale} min={min} max={max} normalized={normalized}"
+        );
+
+        multiplier
     }
 
     fn rebuild_texture(&mut self, gui: &mut Gui<'_>, _ctx: &GraphContext<'_>) {
@@ -80,11 +110,20 @@ impl GraphBackgroundRenderer {
     fn draw_tiled(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext<'_>) {
         let texture = self.texture.as_ref().unwrap();
 
-        let spacing = gui.style.graph_background.dotted_base_spacing * gui.scale;
+        let min = 0.5;
+        let max = 3.0;
+        let view_scale = ctx.view_graph.scale;
+        let scale_multiplier = Self::wrap_scale_multiplier(view_scale, min, max);
+
+        let base_spacing = gui.style.graph_background.dotted_base_spacing;
+        assert!(base_spacing > common::EPSILON);
+        let world_spacing = base_spacing * scale_multiplier;
+
         let origin = gui.rect.min + ctx.view_graph.pan;
 
         let uv = |p: Pos2| {
-            let offset = (p - origin) / spacing;
+            let graph_pos = (p - origin) / view_scale;
+            let offset = graph_pos / world_spacing;
             Pos2::new(offset.x, offset.y)
         };
 
@@ -110,6 +149,6 @@ impl GraphBackgroundRenderer {
         }
 
         gui.painter()
-            .add(Shape::mesh(Arc::clone(&self.quad_mesh.as_ref().unwrap())));
+            .add(Shape::mesh(Arc::clone(self.quad_mesh.as_ref().unwrap())));
     }
 }
