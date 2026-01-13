@@ -195,7 +195,7 @@ impl Style {
             bg_color: settings.color_bg_graph,
         };
         self.connections = ConnectionStyle {
-            feather: scaled(settings.connection_feather),
+            feather: settings.connection_feather,
             stroke_width: scaled(settings.connection_stroke_width),
             highlight_feather: scaled(settings.connection_highlight_feather),
             broke_clr: settings.color_stroke_broke,
