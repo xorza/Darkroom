@@ -386,11 +386,9 @@ impl GraphUi {
             .interactable(false)
             .fixed_pos(rect.min)
             .show(&egui_ctx, |ui| {
-                // ui.set_clip_rect(rect);
-
                 Frame::NONE
                     .fill(Color32::from_black_alpha(128))
-                    .outer_margin(padding)
+                    .inner_margin(padding)
                     .show(ui, |ui| {
                         ui.take_available_width();
 
@@ -417,11 +415,9 @@ impl GraphUi {
             .movable(false)
             .interactable(false)
             .show(&egui_ctx, |ui| {
-                // ui.set_clip_rect(rect);
-
                 Frame::NONE
-                    // .fill(Color32::from_black_alpha(128))
-                    .outer_margin(padding)
+                    .fill(Color32::from_black_alpha(128))
+                    .inner_margin(padding)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let mut gui = Gui::new(ui, style_clone);
