@@ -137,13 +137,6 @@ impl<'a> ToggleButton<'a> {
         let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
         gui.painter()
             .galley(text_pos, galley.clone(), gui.style.text_color);
-        // gui.painter().text(
-        //     rect.center(),
-        //     Align2::CENTER_CENTER,
-        //     text,
-        //     gui.style.sub_font.clone(),
-        //     text_color,
-        // );
 
         response
     }
