@@ -148,10 +148,10 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    pub event_subscribers: HashMap<EventId, Vec<NodeId>>,
+    pub event_subscriptions: HashMap<EventId, Vec<NodeId>>,
 
     pub e_node_process_order: Vec<usize>,
-    pub e_node_invoke_order: Vec<usize>,
+    pub e_node_execute_order: Vec<usize>,
 
     pub e_node_terminal_idx: HashSet<usize>,
 
@@ -301,9 +301,9 @@ impl ExecutionGraph {
 
     pub fn clear(&mut self) {
         self.e_nodes.clear();
-        self.event_subscribers.clear();
+        self.event_subscriptions.clear();
         self.e_node_process_order.clear();
-        self.e_node_invoke_order.clear();
+        self.e_node_execute_order.clear();
         self.e_node_terminal_idx.clear();
         self.stack.clear();
     }
@@ -328,7 +328,7 @@ impl ExecutionGraph {
     pub fn update(&mut self, graph: &Graph, func_lib: &FuncLib) {
         graph.validate_with(func_lib);
 
-        self.e_node_invoke_order.clear();
+        self.e_node_execute_order.clear();
         self.e_node_process_order.clear();
 
         self.forward1(graph, func_lib);
@@ -341,7 +341,7 @@ impl ExecutionGraph {
         self.e_nodes
             .iter_mut()
             .for_each(|e_node| e_node.process_state = ProcessState::None);
-        self.event_subscribers.clear();
+        self.event_subscriptions.clear();
 
         let mut compact_insert = self.e_nodes.compact_insert_start();
 
@@ -359,7 +359,7 @@ impl ExecutionGraph {
                 .iter()
                 .enumerate()
                 .for_each(|(event_idx, event)| {
-                    self.event_subscribers.insert(
+                    self.event_subscriptions.insert(
                         EventId {
                             node_id: e_node.id,
                             event_idx,
@@ -430,22 +430,23 @@ impl ExecutionGraph {
     }
 
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
-        self.execute(true, []).await
+        self.execute(true, false, []).await
     }
     pub async fn execute_events<T: IntoIterator<Item = EventId>>(
         &mut self,
         event_ids: T,
     ) -> Result<ExecutionStats> {
-        self.execute(false, event_ids).await
+        self.execute(false, false, event_ids).await
     }
 
     pub async fn execute<T: IntoIterator<Item = EventId>>(
         &mut self,
         terminals: bool,
+        events: bool,
         event_ids: T,
     ) -> Result<ExecutionStats> {
         let event_ids: Vec<EventId> = event_ids.into_iter().collect();
-        self.prepare_execution(terminals, &event_ids)?;
+        self.prepare_execution(terminals, events, &event_ids)?;
 
         let mut result = self.execute_internal().await;
         if let Ok(exe_stats) = &mut result {
@@ -457,12 +458,17 @@ impl ExecutionGraph {
         result
     }
 
-    fn prepare_execution(&mut self, terminals: bool, event_ids: &[EventId]) -> Result<()> {
+    fn prepare_execution(
+        &mut self,
+        terminals: bool,
+        events: bool,
+        event_ids: &[EventId],
+    ) -> Result<()> {
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(
             event_ids
                 .iter()
-                .flat_map(|event_id| self.event_subscribers.get(event_id).unwrap())
+                .flat_map(|event_id| self.event_subscriptions.get(event_id).unwrap())
                 .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
         if terminals {
@@ -471,6 +477,13 @@ impl ExecutionGraph {
                     .iter()
                     .enumerate()
                     .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
+            );
+        }
+        if events {
+            self.e_node_terminal_idx.extend(
+                self.event_subscriptions
+                    .iter()
+                    .map(|(event_id, _)| self.e_nodes.index_of_key(&event_id.node_id).unwrap()),
             );
         }
         self.e_nodes.iter_mut().for_each(|e_node| {
@@ -611,7 +624,7 @@ impl ExecutionGraph {
 
     // Walk upstream dependencies to collect the execution order.
     fn backward2(&mut self) {
-        self.e_node_invoke_order.clear();
+        self.e_node_execute_order.clear();
 
         let stack = &mut self.stack;
         stack.clear();
@@ -630,7 +643,7 @@ impl ExecutionGraph {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
                     assert_eq!(e_node.process_state, ProcessState::Processing);
-                    self.e_node_invoke_order.push(visit.e_node_idx);
+                    self.e_node_execute_order.push(visit.e_node_idx);
                     e_node.process_state = ProcessState::Backward;
                     continue;
                 }
@@ -679,7 +692,7 @@ impl ExecutionGraph {
         let mut output_usage: Vec<OutputUsage> = Vec::default();
         let mut error: Option<Error> = None;
 
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+        for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
 
             inputs.clear();
@@ -762,7 +775,7 @@ impl ExecutionGraph {
         let mut missing_inputs: Vec<PortAddress> = Vec::default();
         let mut cached_nodes: Vec<NodeId> = Vec::default();
 
-        for e_node_idx in self.e_node_invoke_order.iter().copied() {
+        for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             executed_nodes.push(ExecutedNodeStats {
                 node_id: e_node.id,
@@ -900,12 +913,12 @@ impl ExecutionGraph {
             }
         }
 
-        assert!(self.e_node_invoke_order.len() <= self.e_node_process_order.len());
+        assert!(self.e_node_execute_order.len() <= self.e_node_process_order.len());
 
-        let mut pending_after: HashSet<usize> = self.e_node_invoke_order.iter().copied().collect();
-        assert_eq!(pending_after.len(), self.e_node_invoke_order.len());
+        let mut pending_after: HashSet<usize> = self.e_node_execute_order.iter().copied().collect();
+        assert_eq!(pending_after.len(), self.e_node_execute_order.len());
 
-        for &e_node_idx in self.e_node_invoke_order.iter() {
+        for &e_node_idx in self.e_node_execute_order.iter() {
             assert!(e_node_idx < self.e_nodes.len());
             pending_after.remove(&e_node_idx);
 
@@ -936,7 +949,7 @@ mod tests {
 
     fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String> {
         execution_graph
-            .e_node_invoke_order
+            .e_node_execute_order
             .iter()
             .map(|&e_node_idx| execution_graph.e_nodes[e_node_idx].name.clone())
             .collect()
@@ -949,7 +962,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -958,7 +971,7 @@ mod tests {
 
         assert_eq!(execution_graph.e_nodes.len(), 5);
         assert_eq!(execution_graph.e_node_process_order.len(), 5);
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 5);
+        assert_eq!(execution_graph.e_node_execute_order.len(), 5);
         assert!(
             execution_graph
                 .e_nodes
@@ -1004,7 +1017,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         let get_b = execution_graph.by_name("get_b").unwrap();
         let sum = execution_graph.by_name("sum").unwrap();
@@ -1016,7 +1029,7 @@ mod tests {
         assert!(mult.missing_required_inputs);
         assert!(print.missing_required_inputs);
 
-        assert_eq!(execution_graph.e_node_invoke_order.len(), 0);
+        assert_eq!(execution_graph.e_node_execute_order.len(), 0);
 
         Ok(())
     }
@@ -1033,7 +1046,7 @@ mod tests {
         func_lib.by_name_mut("mult").unwrap().inputs[0].required = false;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         let sum = execution_graph.by_name("sum").unwrap();
         let mult = execution_graph.by_name("mult").unwrap();
@@ -1098,7 +1111,7 @@ mod tests {
 
         graph.by_name_mut("mult").unwrap().inputs[0].binding = Binding::Const(StaticValue::Int(4));
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         let mult = execution_graph.by_name("mult").unwrap();
         let print = execution_graph.by_name("print").unwrap();
@@ -1156,7 +1169,7 @@ mod tests {
         mult.inputs[1].binding = binding2;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         let get_a = execution_graph.by_name("get_a").unwrap();
         let get_b = execution_graph.by_name("get_b").unwrap();
@@ -1184,7 +1197,7 @@ mod tests {
 
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1192,7 +1205,7 @@ mod tests {
             Some(vec![DynamicValue::Int(7)]);
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert!(!execution_node_names_in_order(&execution_graph).contains(&"get_b".to_string()));
 
@@ -1238,7 +1251,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1258,7 +1271,7 @@ mod tests {
         func_lib.by_name_mut("get_b").unwrap().behavior = FuncBehavior::Impure;
 
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph)[2..],
@@ -1268,7 +1281,7 @@ mod tests {
         execution_graph.by_name_mut("get_b").unwrap().output_values =
             Some(vec![DynamicValue::Int(7)]);
         execution_graph.update(&graph, &func_lib);
-        execution_graph.prepare_execution(true, &[])?;
+        execution_graph.prepare_execution(true, false, &[])?;
 
         assert_eq!(
             execution_node_names_in_order(&execution_graph),
@@ -1387,7 +1400,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         let err = execution_graph
-            .prepare_execution(true, &[])
+            .prepare_execution(true, false, &[])
             .expect_err("Expected cycle detection error");
         match err {
             Error::CycleDetected { node_id } => {

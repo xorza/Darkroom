@@ -168,7 +168,7 @@ async fn worker_loop<Callback>(
 
         if execute_terminals || !event_ids.is_empty() {
             let result = execution_graph
-                .execute(execute_terminals, event_ids.drain())
+                .execute(execute_terminals, false, event_ids.drain())
                 .await;
             (callback.lock().await)(result);
         }
