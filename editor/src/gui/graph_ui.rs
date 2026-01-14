@@ -389,33 +389,26 @@ impl GraphUi {
             .show(&egui_ctx, |ui| {
                 ui.set_clip_rect(rect);
 
-                ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
-                    ui.take_available_width();
+                Frame::NONE
+                    .fill(Color32::from_black_alpha(128))
+                    .inner_margin(padding)
+                    .show(ui, |ui| {
+                        ui.take_available_width();
 
-                    Frame::NONE
-                        .fill(Color32::from_black_alpha(128))
-                        .inner_margin(padding)
-                        .show(ui, |ui| {
-                            ui.take_available_width();
-
-                            ui.horizontal(|ui| {
-                                let mut make_button = |label| {
-                                    let button_size =
-                                        Vec2::splat(mono_font.size + small_padding * 2.0);
-                                    ui.add_sized(
-                                        button_size,
-                                        egui::Button::new(
-                                            RichText::new(label).font(mono_font.clone()),
-                                        ),
-                                    )
-                                    .clicked()
-                                };
-                                fit_all = make_button("a");
-                                view_selected = make_button("s");
-                                reset_view = make_button("r");
-                            });
+                        ui.horizontal(|ui| {
+                            let mut make_button = |label| {
+                                let button_size = Vec2::splat(mono_font.size + small_padding * 2.0);
+                                ui.add_sized(
+                                    button_size,
+                                    egui::Button::new(RichText::new(label).font(mono_font.clone())),
+                                )
+                                .clicked()
+                            };
+                            fit_all = make_button("a");
+                            view_selected = make_button("s");
+                            reset_view = make_button("r");
                         });
-                });
+                    });
             });
 
         Area::new(Id::new("graph_ui_bottom_buttons"))
