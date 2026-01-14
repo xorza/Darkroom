@@ -446,7 +446,16 @@ impl ExecutionGraph {
         events: bool,
         event_ids: T,
     ) -> Result<ExecutionStats> {
-        let event_ids: Vec<EventId> = event_ids.into_iter().collect();
+        let mut event_ids: Vec<EventId> = event_ids.into_iter().collect();
+
+        // add run event subscribers
+        event_ids.extend(self.e_nodes.iter().filter_map(|e_node| {
+            (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventId {
+                node_id: e_node.id,
+                event_idx: 0,
+            })
+        }));
+
         self.prepare_execution(terminals, events, &event_ids)?;
 
         let mut result = self.execute_internal().await;
@@ -479,23 +488,6 @@ impl ExecutionGraph {
                     .enumerate()
                     .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
             );
-
-            // add run event subscribers
-            let run_node_ids = self.e_nodes.iter().filter_map(|e_node| {
-                (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(e_node.id)
-            });
-            for run_node_id in run_node_ids {
-                let run_subscribers_node_ids = self.event_subscriptions.get(&EventId {
-                    node_id: run_node_id,
-                    event_idx: 0,
-                });
-                if let Some(run_subscribers_node_ids) = run_subscribers_node_ids {
-                    for run_subscriber_node_id in run_subscribers_node_ids {
-                        self.e_node_terminal_idx
-                            .insert(self.e_nodes.index_of_key(run_subscriber_node_id).unwrap());
-                    }
-                }
-            }
         }
         if events {
             self.e_node_terminal_idx.extend(
@@ -513,6 +505,7 @@ impl ExecutionGraph {
         self.backward2();
 
         self.validate_for_execution();
+
         Ok(())
     }
 
