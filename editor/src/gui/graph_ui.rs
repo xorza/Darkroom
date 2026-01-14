@@ -373,7 +373,6 @@ impl GraphUi {
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let mono_font = gui.style.mono_font.clone();
         let small_padding = gui.style.small_padding;
         let padding = gui.style.padding;
         let rect = gui.rect;
@@ -396,6 +395,7 @@ impl GraphUi {
                         ui.take_available_width();
 
                         ui.horizontal(|ui| {
+                            let mono_font = gui.style.mono_font.clone();
                             let mut make_button = |label| {
                                 let button_size = Vec2::splat(mono_font.size + small_padding * 2.0);
                                 ui.add_sized(
