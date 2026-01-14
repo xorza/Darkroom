@@ -67,7 +67,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, _id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let text = self.text.unwrap_or("");
 
         let text_color = if !self.enabled {

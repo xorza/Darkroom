@@ -431,31 +431,25 @@ impl GraphUi {
                     ui.set_clip_rect(rect);
 
                     Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                        const BUTTON_SPACING: f32 = 8.0;
+                        ui.horizontal(|ui| {
+                            let mut gui = Gui::new(ui, style_clone.clone());
 
-                        {
-                            ui.horizontal(|ui| {
-                                let mut gui = Gui::new(ui, style_clone.clone());
+                            let run_response = Button::new().text("run").show(&mut gui);
 
-                                let run_response = Button::new()
-                                    .text("run")
-                                    .show(&mut gui, "graph_run_button");
+                            interaction.run |= run_response.clicked();
 
-                                interaction.run |= run_response.clicked();
+                            gui.ui.add_space(gui.style.padding);
 
-                                gui.ui.add_space(BUTTON_SPACING);
+                            ToggleButton::new(&mut self.autorun_enabled)
+                                .text("autorun")
+                                .show(&mut gui);
 
-                                ToggleButton::new(&mut self.autorun_enabled)
-                                    .text("autorun")
-                                    .show(&mut gui);
-
-                                if self.autorun_enabled {
-                                    interaction.autorun = AutorunCommand::Start;
-                                } else {
-                                    interaction.autorun = AutorunCommand::Stop;
-                                }
-                            });
-                        }
+                            if self.autorun_enabled {
+                                interaction.autorun = AutorunCommand::Start;
+                            } else {
+                                interaction.autorun = AutorunCommand::Stop;
+                            }
+                        });
                     });
                 });
         }

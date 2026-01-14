@@ -337,7 +337,7 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayo
         .tooltip("Remove node")
         .rect(remove_rect)
         .shapes(remove_shapes)
-        .show(gui, ("node_remove", node_id))
+        .show(gui)
         .clicked();
 
     if remove {
