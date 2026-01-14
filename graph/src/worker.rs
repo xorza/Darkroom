@@ -40,6 +40,7 @@ pub struct EventId {
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<WorkerMessage>,
+    event_loop_callback: Option<EventLoopCallback>,
 }
 
 #[derive(Debug)]
@@ -64,11 +65,19 @@ impl Worker {
         Self {
             thread_handle: Some(thread_handle),
             tx,
+            event_loop_callback: None,
         }
     }
 
     pub fn send(&self, msg: WorkerMessage) {
-        self.tx.send(msg).unwrap();
+        self.tx
+            .send(msg)
+            .expect("Failed to send message to worker, it probably exited");
+    }
+
+    pub fn send_with_callback(&mut self, msg: WorkerMessage, callback: EventLoopCallback) {
+        self.send(msg);
+        self.event_loop_callback = Some(callback);
     }
 
     pub fn update(&self, graph: Graph, func_lib: FuncLib) {
@@ -93,7 +102,7 @@ impl Drop for Worker {
 #[derive(Debug, Clone)]
 enum EventLoopCommand {
     None,
-    Start { callback: EventLoopCallback },
+    Start,
     Stop,
 }
 
@@ -129,7 +138,6 @@ async fn worker_loop<Callback>(
         let mut execute_terminals: bool = false;
         let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
-        let mut event_callback: EventLoopCallback = EventLoopCallback::empty();
 
         while let Some(msg) = msgs.pop_front() {
             match msg {
@@ -178,7 +186,7 @@ async fn worker_loop<Callback>(
 
         match event_loop_cmd {
             EventLoopCommand::None => {}
-            EventLoopCommand::Start { callback } => {
+            EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
                 let events: Vec<(NodeId, EventLambda)> = execution_graph
                     .e_nodes
@@ -191,15 +199,18 @@ async fn worker_loop<Callback>(
                         Some(start_event_loop(worker_message_tx.clone(), events).await);
                     tracing::info!("Event loop started");
                 }
-
-                event_callback = callback;
             }
             EventLoopCommand::Stop => {
                 stop_event_loop(&mut event_loop_handle).await;
             }
         }
 
-        event_callback.call_once();
+        // if let Some(event_loop_handle) = self. {
+        //     event_loop_handle.await;
+        // }
+        //
+        todo!()
+        // event_callback.call_once();
     }
 }
 
