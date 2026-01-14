@@ -182,15 +182,15 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let events: Vec<(NodeId, EventLambda)> = execution_graph
+                let events_triggers: Vec<(NodeId, EventLambda)> = execution_graph
                     .e_nodes
                     .iter()
-                    .filter(|e_node| !e_node.event_lambda.is_none())
+                    .filter(|&e_node| !e_node.event_lambda.is_none())
                     .map(|e_node| (e_node.id, e_node.event_lambda.clone()))
                     .collect();
-                if !events.is_empty() {
+                if !events_triggers.is_empty() {
                     event_loop_handle =
-                        Some(start_event_loop(worker_message_tx.clone(), events).await);
+                        Some(start_event_loop(worker_message_tx.clone(), events_triggers).await);
                     tracing::info!("Event loop started");
                 }
             }
