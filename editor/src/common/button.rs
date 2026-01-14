@@ -138,7 +138,7 @@ impl<'a> Button<'a> {
         };
 
         gui.painter()
-            .rect(rect, background.radius, fill, stroke, StrokeKind::Middle);
+            .rect(rect, background.radius, fill, stroke, StrokeKind::Inside);
 
         if !self.shapes.is_empty() {
             gui.painter().extend(self.shapes);

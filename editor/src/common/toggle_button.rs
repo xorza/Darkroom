@@ -132,7 +132,7 @@ impl<'a> ToggleButton<'a> {
             background.radius,
             background.fill,
             stroke,
-            StrokeKind::Middle,
+            StrokeKind::Inside,
         );
         let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
         gui.painter()

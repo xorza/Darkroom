@@ -391,7 +391,7 @@ impl GraphUi {
 
                 Frame::NONE
                     .fill(Color32::from_black_alpha(128))
-                    .inner_margin(padding)
+                    .outer_margin(padding)
                     .show(ui, |ui| {
                         ui.take_available_width();
 
@@ -414,31 +414,32 @@ impl GraphUi {
         Area::new(Id::new("graph_ui_bottom_buttons"))
             .fixed_pos(pos2(rect.left(), rect.bottom()))
             .pivot(Align2::LEFT_BOTTOM)
-            // .constrain_to(rect)
             .movable(false)
             .interactable(false)
             .show(&egui_ctx, |ui| {
                 ui.set_clip_rect(rect);
 
-                ui.horizontal(|ui| {
-                    let mut gui = Gui::new(ui, style_clone.clone());
+                Frame::NONE
+                    // .fill(Color32::from_black_alpha(128))
+                    .outer_margin(padding)
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let mut gui = Gui::new(ui, style_clone.clone());
 
-                    let run_response = Button::new().text("run").show(&mut gui);
+                            let run_response = Button::new().text("run").show(&mut gui);
+                            gui.ui.add_space(gui.style.padding);
+                            ToggleButton::new(&mut self.autorun_enabled)
+                                .text("autorun")
+                                .show(&mut gui);
 
-                    interaction.run |= run_response.clicked();
-
-                    gui.ui.add_space(gui.style.padding);
-
-                    ToggleButton::new(&mut self.autorun_enabled)
-                        .text("autorun")
-                        .show(&mut gui);
-
-                    if self.autorun_enabled {
-                        interaction.autorun = AutorunCommand::Start;
-                    } else {
-                        interaction.autorun = AutorunCommand::Stop;
-                    }
-                });
+                            interaction.run |= run_response.clicked();
+                            if self.autorun_enabled {
+                                interaction.autorun = AutorunCommand::Start;
+                            } else {
+                                interaction.autorun = AutorunCommand::Stop;
+                            }
+                        });
+                    });
             });
 
         if reset_view {
