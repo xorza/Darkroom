@@ -380,79 +380,75 @@ impl GraphUi {
         let egui_ctx = gui.ui().ctx().clone();
         let style_clone = gui.style.clone();
 
-        {
-            Area::new(Id::new("graph_ui_top_buttons"))
-                .sizing_pass(false)
-                .default_width(rect.width())
-                .movable(false)
-                .interactable(false)
-                .fixed_pos(rect.min)
-                .show(&egui_ctx, |ui| {
-                    ui.set_clip_rect(rect);
+        Area::new(Id::new("graph_ui_top_buttons"))
+            .sizing_pass(false)
+            .default_width(rect.width())
+            .movable(false)
+            .interactable(false)
+            .fixed_pos(rect.min)
+            .show(&egui_ctx, |ui| {
+                ui.set_clip_rect(rect);
 
-                    ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
-                        ui.take_available_width();
+                ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
+                    ui.take_available_width();
 
-                        Frame::NONE
-                            .fill(Color32::from_black_alpha(128))
-                            .inner_margin(padding)
-                            .show(ui, |ui| {
-                                ui.take_available_width();
+                    Frame::NONE
+                        .fill(Color32::from_black_alpha(128))
+                        .inner_margin(padding)
+                        .show(ui, |ui| {
+                            ui.take_available_width();
 
-                                ui.horizontal(|ui| {
-                                    let mut make_button = |label| {
-                                        let button_size =
-                                            Vec2::splat(mono_font.size + small_padding * 2.0);
-                                        ui.add_sized(
-                                            button_size,
-                                            egui::Button::new(
-                                                RichText::new(label).font(mono_font.clone()),
-                                            ),
-                                        )
-                                        .clicked()
-                                    };
-                                    fit_all = make_button("a");
-                                    view_selected = make_button("s");
-                                    reset_view = make_button("r");
-                                });
+                            ui.horizontal(|ui| {
+                                let mut make_button = |label| {
+                                    let button_size =
+                                        Vec2::splat(mono_font.size + small_padding * 2.0);
+                                    ui.add_sized(
+                                        button_size,
+                                        egui::Button::new(
+                                            RichText::new(label).font(mono_font.clone()),
+                                        ),
+                                    )
+                                    .clicked()
+                                };
+                                fit_all = make_button("a");
+                                view_selected = make_button("s");
+                                reset_view = make_button("r");
                             });
-                    });
-                });
-        }
-
-        {
-            Area::new(Id::new("graph_ui_bottom_buttons"))
-                .fixed_pos(pos2(rect.left(), rect.bottom()))
-                .pivot(Align2::LEFT_BOTTOM)
-                .constrain_to(rect)
-                .movable(false)
-                .interactable(false)
-                .show(&egui_ctx, |ui| {
-                    ui.set_clip_rect(rect);
-
-                    Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let mut gui = Gui::new(ui, style_clone.clone());
-
-                            let run_response = Button::new().text("run").show(&mut gui);
-
-                            interaction.run |= run_response.clicked();
-
-                            gui.ui.add_space(gui.style.padding);
-
-                            ToggleButton::new(&mut self.autorun_enabled)
-                                .text("autorun")
-                                .show(&mut gui);
-
-                            if self.autorun_enabled {
-                                interaction.autorun = AutorunCommand::Start;
-                            } else {
-                                interaction.autorun = AutorunCommand::Stop;
-                            }
                         });
+                });
+            });
+
+        Area::new(Id::new("graph_ui_bottom_buttons"))
+            .fixed_pos(pos2(rect.left(), rect.bottom()))
+            .pivot(Align2::LEFT_BOTTOM)
+            .constrain_to(rect)
+            .movable(false)
+            .interactable(false)
+            .show(&egui_ctx, |ui| {
+                ui.set_clip_rect(rect);
+
+                Frame::NONE.inner_margin(padding).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let mut gui = Gui::new(ui, style_clone.clone());
+
+                        let run_response = Button::new().text("run").show(&mut gui);
+
+                        interaction.run |= run_response.clicked();
+
+                        gui.ui.add_space(gui.style.padding);
+
+                        ToggleButton::new(&mut self.autorun_enabled)
+                            .text("autorun")
+                            .show(&mut gui);
+
+                        if self.autorun_enabled {
+                            interaction.autorun = AutorunCommand::Start;
+                        } else {
+                            interaction.autorun = AutorunCommand::Stop;
+                        }
                     });
                 });
-        }
+            });
 
         if reset_view {
             ctx.view_graph.scale = 1.0;
