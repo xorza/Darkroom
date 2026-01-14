@@ -472,15 +472,13 @@ impl ExecutionGraph {
     ) -> Result<()> {
         self.e_node_terminal_idx.clear();
 
-        self.e_node_terminal_idx.extend(
-            event_ids
-                .iter()
-                .flat_map(|event_id| {
-                    &self.e_nodes.by_key(&event_id.node_id).unwrap().events[event_id.event_idx]
-                        .subscribers
-                })
-                .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
-        );
+        self.e_node_terminal_idx
+            .extend(event_ids.iter().flat_map(|event_id| {
+                self.e_nodes.by_key(&event_id.node_id).unwrap().events[event_id.event_idx]
+                    .subscribers
+                    .iter()
+                    .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap())
+            }));
         if terminals {
             self.e_node_terminal_idx.extend(
                 self.e_nodes
