@@ -181,7 +181,7 @@ impl AppData {
 
     pub fn handle_interaction(&mut self) {
         while let Some(err) = self.interaction.errors.pop() {
-            self.add_status(format!("Graph error: {err}"));
+            self.add_status(format!("Error: {err}"));
         }
 
         self.graph_dirty |= self.handle_actions();
@@ -207,21 +207,24 @@ impl AppData {
         if self.interaction.run {
             update_if_dirty = true;
 
-            if self.autorun {
-                self.run_event.notify_waiters();
-            } else {
+            if !self.autorun {
                 msgs.push(WorkerMessage::ExecuteTerminals);
             }
         }
 
-        if !msgs.is_empty() {
-            if update_if_dirty {
-                msgs.push(WorkerMessage::Update {
-                    graph: self.view_graph.graph.clone(),
-                    func_lib: self.func_lib.clone(),
-                });
-                self.graph_dirty = false;
+        if update_if_dirty {
+            msgs.push(WorkerMessage::Update {
+                graph: self.view_graph.graph.clone(),
+                func_lib: self.func_lib.clone(),
+            });
+            self.graph_dirty = false;
+
+            if self.autorun {
+                self.run_event.notify_waiters();
             }
+        }
+
+        if !msgs.is_empty() {
             self.worker.send(WorkerMessage::Multi { msgs });
         }
 
