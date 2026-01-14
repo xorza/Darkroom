@@ -14,8 +14,8 @@ const MAX_EVENTS_PER_LOOP: usize = 10;
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    Event { event_id: EventId },
-    Events { event_ids: Vec<EventId> },
+    Event { event_id: EventRef },
+    Events { event_ids: Vec<EventRef> },
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
     ExecuteTerminals,
@@ -31,7 +31,7 @@ pub struct ProcessingCallback {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EventId {
+pub struct EventRef {
     pub node_id: NodeId,
     pub event_idx: usize,
 }
@@ -111,7 +111,7 @@ async fn worker_loop<Callback>(
     let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(MAX_EVENTS_PER_LOOP);
     let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
-    let mut event_ids: HashSet<EventId> = HashSet::default();
+    let mut event_ids: HashSet<EventRef> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
     let mut processing_callback: Option<ProcessingCallback> = None;
 
@@ -213,7 +213,7 @@ async fn start_event_loop(
 
     let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
 
-    let (event_tx, mut event_rx) = channel::<EventId>(MAX_EVENTS_PER_LOOP);
+    let (event_tx, mut event_rx) = channel::<EventRef>(MAX_EVENTS_PER_LOOP);
     let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
@@ -257,7 +257,7 @@ async fn start_event_loop(
 
                 loop {
                     let event_idx = event_lambda.invoke().await;
-                    let result = event_tx.send(EventId { node_id, event_idx }).await;
+                    let result = event_tx.send(EventRef { node_id, event_idx }).await;
                     if result.is_err() {
                         return;
                     }
@@ -331,7 +331,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{EventId, ProcessingCallback, Worker, WorkerMessage};
+    use crate::worker::{EventRef, ProcessingCallback, Worker, WorkerMessage};
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -405,7 +405,7 @@ mod tests {
 
         worker.update(graph.clone(), func_lib.clone());
         worker.send(WorkerMessage::Event {
-            event_id: EventId {
+            event_id: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -421,7 +421,7 @@ mod tests {
         assert_eq!(output_stream.take().await, ["1"]);
 
         worker.send(WorkerMessage::Event {
-            event_id: EventId {
+            event_id: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(output_stream.take().await, ["2"]);
 
         worker.send(WorkerMessage::Event {
-            event_id: EventId {
+            event_id: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -471,7 +471,7 @@ mod tests {
         };
         assert_eq!(
             event_id,
-            EventId {
+            EventRef {
                 node_id,
                 event_idx: 1
             }
@@ -512,7 +512,7 @@ mod tests {
         };
         assert_eq!(
             event_id,
-            EventId {
+            EventRef {
                 node_id,
                 event_idx: 0
             }

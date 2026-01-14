@@ -13,7 +13,7 @@ use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
 use crate::graph::{Binding, Event, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
-use crate::worker::EventId;
+use crate::worker::EventRef;
 use common::{BoolExt, FileFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub struct ExecutionStats {
     pub executed_nodes: Vec<ExecutedNodeStats>,
     pub missing_inputs: Vec<PortAddress>,
     pub cached_nodes: Vec<NodeId>,
-    pub triggered_events: Vec<EventId>,
+    pub triggered_events: Vec<EventRef>,
 }
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
@@ -429,24 +429,24 @@ impl ExecutionGraph {
     pub async fn execute_terminals(&mut self) -> Result<ExecutionStats> {
         self.execute(true, false, []).await
     }
-    pub async fn execute_events<T: IntoIterator<Item = EventId>>(
+    pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
         &mut self,
         event_ids: T,
     ) -> Result<ExecutionStats> {
         self.execute(false, false, event_ids).await
     }
 
-    pub async fn execute<T: IntoIterator<Item = EventId>>(
+    pub async fn execute<T: IntoIterator<Item = EventRef>>(
         &mut self,
         terminals: bool,
         event_triggers: bool,
         event_ids: T,
     ) -> Result<ExecutionStats> {
-        let mut event_ids: Vec<EventId> = event_ids.into_iter().collect();
+        let mut event_ids: Vec<EventRef> = event_ids.into_iter().collect();
 
         // add run event subscribers
         event_ids.extend(self.e_nodes.iter().filter_map(|e_node| {
-            (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventId {
+            (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventRef {
                 node_id: e_node.id,
                 event_idx: 0,
             })
@@ -468,7 +468,7 @@ impl ExecutionGraph {
         &mut self,
         terminals: bool,
         event_triggers: bool,
-        event_ids: &[EventId],
+        event_ids: &[EventRef],
     ) -> Result<()> {
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(

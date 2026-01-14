@@ -3,7 +3,7 @@ use eframe::egui;
 use egui::{PointerButton, Pos2, Sense};
 use graph::graph::{NodeId, PortAddress};
 use graph::prelude::{Binding, ExecutionStats};
-use graph::worker::EventId;
+use graph::worker::EventRef;
 
 use crate::common::UiEquals;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
@@ -262,7 +262,7 @@ impl ConnectionUi {
                     let highlighted = execution_stats.is_some_and(|exe_stats| {
                         exe_stats
                             .triggered_events
-                            .contains(&EventId { node_id, event_idx })
+                            .contains(&EventRef { node_id, event_idx })
                     });
                     if highlighted {
                         let (_idx, highlighted) =

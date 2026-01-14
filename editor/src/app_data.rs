@@ -10,7 +10,7 @@ use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::WorkerMessage;
-use graph::worker::{EventId, ProcessingCallback, Worker};
+use graph::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Notify;
