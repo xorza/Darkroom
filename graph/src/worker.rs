@@ -163,6 +163,8 @@ async fn worker_loop<Callback>(
                 };
             }
             stop_event_loop(&mut event_loop_handle).await;
+
+            tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
         }
 
@@ -186,9 +188,13 @@ async fn worker_loop<Callback>(
                 if !events.is_empty() {
                     event_loop_handle =
                         Some(start_event_loop(worker_message_tx.clone(), events, callback).await);
+                    tracing::info!("Event loop started");
                 }
             }
-            EventLoopCommand::Stop => stop_event_loop(&mut event_loop_handle).await,
+            EventLoopCommand::Stop => {
+                stop_event_loop(&mut event_loop_handle).await;
+                tracing::info!("Event loop stopped");
+            }
         }
     }
 }

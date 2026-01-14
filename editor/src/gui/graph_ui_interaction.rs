@@ -79,6 +79,7 @@ impl GraphUiInteraction {
         self.clear_actions();
         self.errors.clear();
         self.run = false;
+        self.autorun = AutorunCommand::None;
     }
 
     pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {

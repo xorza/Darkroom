@@ -9,6 +9,7 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
+use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
@@ -57,6 +58,7 @@ pub struct GraphUi {
     connections: ConnectionUi,
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
+    autorun_enabled: bool,
 }
 
 impl GraphUi {
@@ -374,7 +376,8 @@ impl GraphUi {
         let small_padding = gui.style.small_padding;
         let padding = gui.style.padding;
         let rect = gui.rect;
-        let egui_ctx = gui.ui().ctx();
+        let egui_ctx = gui.ui().ctx().clone();
+        let style_clone = gui.style.clone();
 
         {
             Area::new(Id::new("graph_ui_top_buttons"))
@@ -383,7 +386,7 @@ impl GraphUi {
                 .movable(false)
                 .interactable(false)
                 .fixed_pos(rect.min)
-                .show(egui_ctx, |ui| {
+                .show(&egui_ctx, |ui| {
                     ui.set_clip_rect(rect);
 
                     ui.with_layout(Layout::top_down(Align::LEFT), |ui| {
@@ -421,16 +424,94 @@ impl GraphUi {
                 .fixed_pos(pos2(rect.left(), rect.bottom()))
                 .pivot(Align2::LEFT_BOTTOM)
                 .constrain_to(rect)
-                .show(egui_ctx, |ui| {
+                .show(&egui_ctx, |ui| {
                     ui.set_clip_rect(rect);
                     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
                         Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                interaction.run |= ui.button("run").clicked();
-                                if ui.button("autorun").clicked() {
+                            let mut bottom_gui = Gui::new(ui, style_clone.clone());
+                            let button_font = bottom_gui.style.sub_font.clone();
+                            let text_color = bottom_gui.style.text_color;
+
+                            let (run_button_size, autorun_button_size) = {
+                                let horizontal_padding = bottom_gui.style.small_padding * 2.0;
+                                let vertical_padding = bottom_gui.style.small_padding;
+
+                                let run_size = bottom_gui.ui().fonts_mut(|fonts| {
+                                    fonts
+                                        .layout_no_wrap(
+                                            String::from("run"),
+                                            button_font.clone(),
+                                            text_color,
+                                        )
+                                        .size()
+                                });
+                                let autorun_size = bottom_gui.ui().fonts_mut(|fonts| {
+                                    fonts
+                                        .layout_no_wrap(
+                                            String::from("autorun"),
+                                            button_font.clone(),
+                                            text_color,
+                                        )
+                                        .size()
+                                });
+
+                                (
+                                    vec2(
+                                        run_size.x + horizontal_padding * 2.0,
+                                        run_size.y + vertical_padding * 2.0,
+                                    ),
+                                    vec2(
+                                        autorun_size.x + horizontal_padding * 2.0,
+                                        autorun_size.y + vertical_padding * 2.0,
+                                    ),
+                                )
+                            };
+
+                            let (run_clicked, autorun_rect) = {
+                                let mut run_clicked = false;
+                                let mut autorun_rect =
+                                    Rect::from_min_size(bottom_gui.rect.min, Vec2::ZERO);
+
+                                {
+                                    let ui = bottom_gui.ui();
+                                    ui.horizontal(|ui| {
+                                        run_clicked = ui
+                                            .add_sized(
+                                                run_button_size,
+                                                Button::new(
+                                                    RichText::new("run").font(button_font.clone()),
+                                                ),
+                                            )
+                                            .clicked();
+
+                                        let (rect, _) = ui.allocate_exact_size(
+                                            autorun_button_size,
+                                            Sense::click(),
+                                        );
+                                        autorun_rect = rect;
+                                    });
+                                }
+
+                                assert!(autorun_rect.is_finite(), "autorun rect must be set");
+                                (run_clicked, autorun_rect)
+                            };
+
+                            interaction.run |= run_clicked;
+
+                            let autorun_id =
+                                bottom_gui.ui().make_persistent_id("graph_autorun_toggle");
+                            let autorun_response = ToggleButton::new(autorun_id, "autorun")
+                                .checked(self.autorun_enabled)
+                                .show(&mut bottom_gui, autorun_rect);
+
+                            if autorun_response.clicked() {
+                                if self.autorun_enabled {
+                                    interaction.autorun = AutorunCommand::Stop;
+                                } else {
                                     interaction.autorun = AutorunCommand::Start;
                                 }
-                            });
+                                self.autorun_enabled = !self.autorun_enabled;
+                            }
                         });
                     });
                 });

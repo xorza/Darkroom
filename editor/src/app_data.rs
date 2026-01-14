@@ -34,7 +34,6 @@ pub struct AppData {
     pub view_graph: ViewGraph,
     pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
-    pub graph_updated: bool,
 
     pub current_path: PathBuf,
     pub status: String,
@@ -47,6 +46,7 @@ pub struct AppData {
 
     pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
+    pub autorun: bool,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 }
@@ -70,7 +70,6 @@ impl AppData {
             view_graph: ViewGraph::default(),
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
-            graph_updated: false,
 
             current_path: std::env::temp_dir().join("scenarium-graph.lua"),
             status: String::new(),
@@ -83,6 +82,7 @@ impl AppData {
 
             shared_status,
             run_event,
+            autorun: false,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
         }
@@ -178,25 +178,49 @@ impl AppData {
     }
 
     pub fn handle_interaction(&mut self) {
-        self.handle_actions();
+        let graph_updated = self.handle_actions();
 
-        if self.interaction.run {
-            self.run_graph();
+        let mut msgs: Vec<WorkerMessage> = Vec::default();
+        if graph_updated {
+            msgs.push(WorkerMessage::Update {
+                graph: self.view_graph.graph.clone(),
+                func_lib: self.func_lib.clone(),
+            });
         }
+
         match self.interaction.autorun {
             AutorunCommand::Start => {
-                self.worker.send(WorkerMessage::StartEventLoop {
-                    callback: EventLoopCallback::none(),
+                msgs.push(WorkerMessage::StartEventLoop {
+                    callback: EventLoopCallback::new({
+                        let run_event = self.run_event.clone();
+                        move || {
+                            run_event.notify_waiters();
+                        }
+                    }),
                 });
+                self.autorun = true;
             }
             AutorunCommand::Stop => {
-                self.worker.send(WorkerMessage::StopEventLoop);
+                msgs.push(WorkerMessage::StopEventLoop);
+                self.autorun = false;
             }
             AutorunCommand::None => {}
         }
 
         if let Some(err) = self.interaction.errors.last() {
             self.add_status(format!("Graph error: {err}"));
+        }
+
+        if self.interaction.run {
+            if self.autorun {
+                self.run_event.notify_waiters();
+            } else {
+                msgs.push(WorkerMessage::ExecuteTerminals);
+            }
+        }
+
+        if !msgs.is_empty() {
+            self.worker.send(WorkerMessage::Multi { msgs });
         }
 
         self.interaction.clear();
@@ -223,29 +247,6 @@ impl AppData {
         self.status.push_str(message.as_ref());
     }
 
-    fn run_graph(&mut self) {
-        if self.view_graph.graph.nodes.is_empty() {
-            self.add_status("Run failed: no graph loaded");
-            return;
-        }
-
-        if self.graph_updated {
-            self.worker.send(WorkerMessage::Multi {
-                msgs: vec![
-                    WorkerMessage::Update {
-                        graph: self.view_graph.graph.clone(),
-                        func_lib: self.func_lib.clone(),
-                    },
-                    WorkerMessage::ExecuteTerminals,
-                ],
-            });
-
-            self.graph_updated = false;
-        } else {
-            self.worker.send(WorkerMessage::ExecuteTerminals);
-        }
-    }
-
     fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         self.view_graph = view_graph;
 
@@ -257,21 +258,24 @@ impl AppData {
 
     fn refresh_after_graph_change(&mut self) {
         self.worker.send(WorkerMessage::Clear);
-        self.graph_updated = true;
         self.execution_stats = None;
     }
 
-    fn handle_actions(&mut self) {
+    fn handle_actions(&mut self) -> bool {
+        let mut graph_updated = false;
+
         for actions in self.interaction.actions_stacks() {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
 
             if actions.iter().any(|action| action.affects_computation()) {
                 self.execution_stats = None;
-                self.graph_updated = true;
+                graph_updated = true;
             }
         }
         self.interaction.clear_actions();
+
+        graph_updated
     }
 
     fn save_to_file(&self, path: &Path) -> Result<()> {
