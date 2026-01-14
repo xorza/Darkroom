@@ -386,7 +386,7 @@ impl GraphUi {
             .interactable(false)
             .fixed_pos(rect.min)
             .show(&egui_ctx, |ui| {
-                ui.set_clip_rect(rect);
+                // ui.set_clip_rect(rect);
 
                 Frame::NONE
                     .fill(Color32::from_black_alpha(128))
@@ -417,7 +417,7 @@ impl GraphUi {
             .movable(false)
             .interactable(false)
             .show(&egui_ctx, |ui| {
-                ui.set_clip_rect(rect);
+                // ui.set_clip_rect(rect);
 
                 Frame::NONE
                     // .fill(Color32::from_black_alpha(128))
