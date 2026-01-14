@@ -129,6 +129,7 @@ async fn worker_loop<Callback>(
         let mut execute_terminals: bool = false;
         let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
+        let mut event_callback: EventLoopCallback = EventLoopCallback::none();
 
         while let Some(msg) = msgs.pop_front() {
             match msg {
@@ -187,21 +188,24 @@ async fn worker_loop<Callback>(
                     .collect();
                 if !events.is_empty() {
                     event_loop_handle =
-                        Some(start_event_loop(worker_message_tx.clone(), events, callback).await);
+                        Some(start_event_loop(worker_message_tx.clone(), events).await);
                     tracing::info!("Event loop started");
                 }
+
+                event_callback = callback;
             }
             EventLoopCommand::Stop => {
                 stop_event_loop(&mut event_loop_handle).await;
             }
         }
+
+        event_callback.call_once();
     }
 }
 
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
     events: Vec<(NodeId, EventLambda)>,
-    callback: EventLoopCallback,
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
@@ -265,7 +269,6 @@ async fn start_event_loop(
 
     ready.wait().await;
     tokio::task::yield_now().await;
-    callback.call();
 
     EventLoopHandle { join_handles }
 }
@@ -288,8 +291,8 @@ impl EventLoopCallback {
         Self { inner: None }
     }
 
-    fn call(&self) {
-        if let Some(inner) = &self.inner {
+    fn call_once(&mut self) {
+        if let Some(inner) = self.inner.take() {
             (inner)();
         }
     }
@@ -464,12 +467,7 @@ mod tests {
         let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
 
         let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(
-            tx,
-            vec![(node_id, event_lambda)],
-            EventLoopCallback::new(|| {}),
-        )
-        .await;
+        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]).await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
         let WorkerMessage::Event { event_id } = msg else {
@@ -500,12 +498,14 @@ mod tests {
         });
 
         let notify_for_callback = Arc::clone(&notify);
-        let callback = EventLoopCallback::new(move || {
+        let mut callback = EventLoopCallback::new(move || {
             notify_for_callback.notify_waiters();
         });
 
         let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)], callback).await;
+        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]).await;
+
+        callback.call_once();
 
         let msg = timeout(Duration::from_millis(200), rx.recv())
             .await
