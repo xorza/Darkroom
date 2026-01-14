@@ -1,5 +1,4 @@
 use std::collections::{HashSet, VecDeque};
-use std::sync::Arc;
 
 use crate::event::EventLambda;
 use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
@@ -22,12 +21,13 @@ pub enum WorkerMessage {
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
+    ProcessingCallback { callback: ProcessingCallback },
     Multi { msgs: Vec<WorkerMessage> },
 }
 
-#[derive(Clone)]
-pub struct EventLoopCallback {
-    inner: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
+#[derive()]
+pub struct ProcessingCallback {
+    inner: Box<dyn Fn() + Send + Sync + 'static>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -40,7 +40,6 @@ pub struct EventId {
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<WorkerMessage>,
-    event_loop_callback: Option<EventLoopCallback>,
 }
 
 #[derive(Debug)]
@@ -65,7 +64,6 @@ impl Worker {
         Self {
             thread_handle: Some(thread_handle),
             tx,
-            event_loop_callback: None,
         }
     }
 
@@ -73,11 +71,6 @@ impl Worker {
         self.tx
             .send(msg)
             .expect("Failed to send message to worker, it probably exited");
-    }
-
-    pub fn send_with_callback(&mut self, msg: WorkerMessage, callback: EventLoopCallback) {
-        self.send(msg);
-        self.event_loop_callback = Some(callback);
     }
 
     pub fn update(&self, graph: Graph, func_lib: FuncLib) {
@@ -109,7 +102,7 @@ enum EventLoopCommand {
 async fn worker_loop<Callback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
     worker_message_tx: UnboundedSender<WorkerMessage>,
-    callback: Shared<Callback>,
+    execution_callback: Shared<Callback>,
 ) where
     Callback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
@@ -120,11 +113,13 @@ async fn worker_loop<Callback>(
 
     let mut event_ids: HashSet<EventId> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
+    let mut processing_callback: Option<ProcessingCallback> = None;
 
     loop {
         assert!(msgs.is_empty());
         assert!(msgs_vec.is_empty());
         assert!(event_ids.is_empty());
+        assert!(processing_callback.is_none());
 
         if worker_message_rx
             .recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP)
@@ -160,6 +155,9 @@ async fn worker_loop<Callback>(
                 WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
                 WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
+                WorkerMessage::ProcessingCallback { callback } => {
+                    processing_callback = Some(callback)
+                }
             }
         }
 
@@ -177,7 +175,7 @@ async fn worker_loop<Callback>(
             let result = execution_graph
                 .execute(execute_terminals, false, event_ids.drain())
                 .await;
-            (callback.lock().await)(result);
+            (execution_callback.lock().await)(result);
         }
 
         match event_loop_cmd {
@@ -201,12 +199,9 @@ async fn worker_loop<Callback>(
             }
         }
 
-        // if let Some(event_loop_handle) = self. {
-        //     event_loop_handle.await;
-        // }
-        //
-        // todo!()
-        // event_callback.call_once();
+        if let Some(callback) = processing_callback.take() {
+            callback.call();
+        }
     }
 }
 
@@ -287,21 +282,15 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     }
 }
 
-impl EventLoopCallback {
+impl ProcessingCallback {
     pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
-            inner: Some(Arc::new(callback)),
+            inner: Box::new(callback),
         }
     }
 
-    pub fn empty() -> Self {
-        Self { inner: None }
-    }
-
-    fn call_once(&mut self) {
-        if let Some(inner) = self.inner.take() {
-            (inner)();
-        }
+    fn call(&self) {
+        (self.inner)();
     }
 }
 
@@ -320,7 +309,7 @@ impl EventLoopHandle {
     }
 }
 
-impl std::fmt::Debug for EventLoopCallback {
+impl std::fmt::Debug for ProcessingCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EventLoopCallback").finish()
     }
@@ -342,7 +331,7 @@ mod tests {
     use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
     use crate::graph::{Event, NodeId};
 
-    use crate::worker::{EventId, EventLoopCallback, Worker, WorkerMessage};
+    use crate::worker::{EventId, ProcessingCallback, Worker, WorkerMessage};
 
     fn log_frame_no_graph() -> Graph {
         let mut graph = Graph::default();
@@ -505,14 +494,14 @@ mod tests {
         });
 
         let notify_for_callback = Arc::clone(&notify);
-        let mut callback = EventLoopCallback::new(move || {
+        let callback = ProcessingCallback::new(move || {
             notify_for_callback.notify_waiters();
         });
 
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]).await;
 
-        callback.call_once();
+        callback.call();
 
         let msg = timeout(Duration::from_millis(200), rx.recv())
             .await
