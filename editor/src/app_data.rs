@@ -219,26 +219,36 @@ impl AppData {
         }
 
         if self.graph_updated {
+            // self.worker.send(WorkerMessage::Multi {
+            //     msgs: vec![
+            //         WorkerMessage::Update {
+            //             graph: self.view_graph.graph.clone(),
+            //             func_lib: self.func_lib.clone(),
+            //         },
+            //         WorkerMessage::StartEventLoop {
+            //             callback: EventLoopCallback::new({
+            //                 let run_event = self.run_event.clone();
+            //                 move || {
+            //                     run_event.notify_waiters();
+            //                 }
+            //             }),
+            //         },
+            //     ],
+            // });
+
             self.worker.send(WorkerMessage::Multi {
                 msgs: vec![
                     WorkerMessage::Update {
                         graph: self.view_graph.graph.clone(),
                         func_lib: self.func_lib.clone(),
                     },
-                    WorkerMessage::StartEventLoop {
-                        callback: EventLoopCallback::new({
-                            let run_event = self.run_event.clone();
-                            move || {
-                                run_event.notify_waiters();
-                            }
-                        }),
-                    },
+                    WorkerMessage::ExecuteTerminals,
                 ],
             });
 
             self.graph_updated = false;
         } else {
-            self.run_event.notify_waiters();
+            self.worker.send(WorkerMessage::ExecuteTerminals);
         }
     }
 
