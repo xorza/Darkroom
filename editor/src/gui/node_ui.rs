@@ -78,7 +78,7 @@ impl NodeUi {
             if render_body(gui, node_layout, is_selected, &node_execution_info, breaker) {
                 self.node_ids_hit_breaker.push(node_id);
             }
-            if render_remove_btn(gui, &node_id, node_layout) {
+            if render_remove_btn(gui, node_layout) {
                 self.node_ids_to_remove.push(node_id);
             }
             render_hints(
@@ -307,7 +307,7 @@ fn render_hints(
     }
 }
 
-fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayout) -> bool {
+fn render_remove_btn(gui: &mut Gui<'_>, node_layout: &NodeLayout) -> bool {
     let remove_rect = node_layout.remove_btn_rect;
     let remove_margin = remove_rect.width() * 0.3;
     let a = pos2(
