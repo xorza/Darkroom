@@ -1,7 +1,7 @@
 use std::panic;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use hashbrown::{HashMap, HashSet};
+use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -10,7 +10,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::elements::timers_funclib::TimersFuncLib;
 use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
-use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
+use crate::graph::{Binding, Event, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventId;
@@ -122,6 +122,7 @@ pub struct ExecutionNode {
 
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
+    pub events: Vec<Event>,
 
     pub func_id: FuncId,
 
@@ -149,7 +150,6 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct ExecutionGraph {
     pub e_nodes: KeyIndexVec<NodeId, ExecutionNode>,
-    pub event_subscriptions: HashMap<EventId, Vec<NodeId>>,
 
     pub e_node_process_order: Vec<usize>,
     pub e_node_execute_order: Vec<usize>,
@@ -226,6 +226,9 @@ impl ExecutionNode {
                     e_input.data_type = func_input.data_type.clone();
                 }
             }
+
+            self.events.clear();
+            self.events.resize(node.events.len(), Event::default());
         }
 
         self.terminal = func.terminal;
@@ -242,6 +245,13 @@ impl ExecutionNode {
         self.outputs.clear();
         self.outputs
             .resize(func.outputs.len(), ExecutionOutput::default());
+
+        for (event_idx, event) in node.events.iter().enumerate() {
+            self.events[event_idx].subscribers.clear();
+            self.events[event_idx]
+                .subscribers
+                .extend(&event.subscribers);
+        }
 
         assert_eq!(self.inputs.len(), node.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
@@ -302,7 +312,6 @@ impl ExecutionGraph {
 
     pub fn clear(&mut self) {
         self.e_nodes.clear();
-        self.event_subscriptions.clear();
         self.e_node_process_order.clear();
         self.e_node_execute_order.clear();
         self.e_node_terminal_idx.clear();
@@ -342,7 +351,6 @@ impl ExecutionGraph {
         self.e_nodes
             .iter_mut()
             .for_each(|e_node| e_node.process_state = ProcessState::None);
-        self.event_subscriptions.clear();
 
         let mut compact_insert = self.e_nodes.compact_insert_start();
 
@@ -356,18 +364,6 @@ impl ExecutionGraph {
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.reset(node, func);
-            node.events
-                .iter()
-                .enumerate()
-                .for_each(|(event_idx, event)| {
-                    self.event_subscriptions.insert(
-                        EventId {
-                            node_id: e_node.id,
-                            event_idx,
-                        },
-                        event.subscribers.clone(),
-                    );
-                });
             e_node.process_state = ProcessState::Forward;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
@@ -443,7 +439,7 @@ impl ExecutionGraph {
     pub async fn execute<T: IntoIterator<Item = EventId>>(
         &mut self,
         terminals: bool,
-        events: bool,
+        event_triggers: bool,
         event_ids: T,
     ) -> Result<ExecutionStats> {
         let mut event_ids: Vec<EventId> = event_ids.into_iter().collect();
@@ -456,7 +452,7 @@ impl ExecutionGraph {
             })
         }));
 
-        self.prepare_execution(terminals, events, &event_ids)?;
+        self.prepare_execution(terminals, event_triggers, &event_ids)?;
 
         let mut result = self.execute_internal().await;
         if let Ok(exe_stats) = &mut result {
@@ -471,14 +467,17 @@ impl ExecutionGraph {
     fn prepare_execution(
         &mut self,
         terminals: bool,
-        events: bool,
+        event_triggers: bool,
         event_ids: &[EventId],
     ) -> Result<()> {
         self.e_node_terminal_idx.clear();
         self.e_node_terminal_idx.extend(
             event_ids
                 .iter()
-                .flat_map(|event_id| self.event_subscriptions.get(event_id).unwrap())
+                .flat_map(|event_id| {
+                    &self.e_nodes.by_key(&event_id.node_id).unwrap().events[event_id.event_idx]
+                        .subscribers
+                })
                 .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap()),
         );
         if terminals {
@@ -489,12 +488,24 @@ impl ExecutionGraph {
                     .filter_map(|(e_node_idx, e_node)| e_node.terminal.then_some(e_node_idx)),
             );
         }
-        if events {
-            self.e_node_terminal_idx.extend(
-                self.event_subscriptions
-                    .iter()
-                    .map(|(event_id, _)| self.e_nodes.index_of_key(&event_id.node_id).unwrap()),
-            );
+        if event_triggers {
+            self.e_node_terminal_idx
+                .extend(
+                    self.e_nodes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(e_node_idx, e_node)| {
+                            if e_node
+                                .events
+                                .iter()
+                                .any(|event| !event.subscribers.is_empty())
+                            {
+                                Some(e_node_idx)
+                            } else {
+                                None
+                            }
+                        }),
+                );
         }
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
