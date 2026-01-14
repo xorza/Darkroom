@@ -64,7 +64,7 @@ impl AppData {
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
         func_lib.merge(TimersFuncLib::default());
-        func_lib.merge(EditorFuncLib::new(Arc::clone(&run_event)));
+        func_lib.merge(EditorFuncLib::new());
 
         Self {
             func_lib,
@@ -113,7 +113,7 @@ impl AppData {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
 
-        add_node_from_func_id(&mut view_graph, &self.func_lib, EditorFuncLib::RUN_FUNC_ID);
+        add_node_from_func_id(&mut view_graph, &self.func_lib, TimersFuncLib::RUN_FUNC_ID);
         add_node_from_func_id(&mut view_graph, &self.func_lib, FRAME_EVENT_FUNC_ID);
 
         view_graph.auto_place_nodes();

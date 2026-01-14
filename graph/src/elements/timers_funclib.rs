@@ -1,16 +1,22 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
+use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
+use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::BoolExt;
+use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 
 #[derive(Debug)]
 pub struct TimersFuncLib {
     func_lib: FuncLib,
+
+    run_event: Arc<Notify>,
 }
 
 #[derive(Debug)]
@@ -20,6 +26,8 @@ struct FrameEventCache {
 }
 
 impl TimersFuncLib {
+    pub const RUN_FUNC_ID: FuncId = FuncId::from_u128(0xe871ddf47a534ae59728927a88649673);
+
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
@@ -31,9 +39,9 @@ impl TimersFuncLib {
 
 impl Default for TimersFuncLib {
     fn default() -> TimersFuncLib {
-        let mut invoker = FuncLib::default();
+        let mut func_lib = FuncLib::default();
 
-        invoker.add(Func {
+        func_lib.add(Func {
             id: FRAME_EVENT_FUNC_ID,
             name: "frame event".to_string(),
             description: None,
@@ -98,7 +106,36 @@ impl Default for TimersFuncLib {
             ..Default::default()
         });
 
-        TimersFuncLib { func_lib: invoker }
+        let run_event = Arc::new(Notify::new());
+
+        func_lib.add(Func {
+            id: Self::RUN_FUNC_ID,
+            name: "run".to_string(),
+            description: None,
+            behavior: FuncBehavior::Impure,
+            category: "Timers".to_string(),
+            terminal: false,
+            inputs: vec![],
+            outputs: vec![],
+            events: vec!["run".into()],
+            required_contexts: vec![],
+            lambda: FuncLambda::None,
+            event_lambda: EventLambda::new({
+                let run_event = Arc::clone(&run_event);
+                move || {
+                    let run_event = Arc::clone(&run_event);
+                    Box::pin(async move {
+                        run_event.notified().await;
+                        0
+                    })
+                }
+            }),
+        });
+
+        TimersFuncLib {
+            func_lib,
+            run_event,
+        }
     }
 }
 
