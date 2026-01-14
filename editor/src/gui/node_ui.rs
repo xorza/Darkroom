@@ -266,7 +266,7 @@ fn render_cache_btn(
             .text("cache")
             .enabled(visible)
             .rect(node_layout.cache_button_rect)
-            .show(gui, (node.id, "cache"));
+            .show(gui);
 
         if response.clicked() {
             let before = node.behavior;

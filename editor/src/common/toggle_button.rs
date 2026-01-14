@@ -59,11 +59,19 @@ impl<'a> ToggleButton<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
-        let id = gui.ui().make_persistent_id(id_salt);
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let text = self.text.unwrap_or("");
 
-        let rect = self.rect.unwrap_or_else(|| {
+        let sense = if self.enabled {
+            Sense::click() | Sense::hover()
+        } else {
+            Sense::hover()
+        };
+
+        let (rect, response) = if let Some(rect) = self.rect {
+            let response = gui.ui().allocate_rect(rect, sense);
+            (rect, response)
+        } else {
             // Autosize: calculate button size based on text
             let font = gui.style.sub_font.clone();
             let text_color = gui.style.text_color;
@@ -77,19 +85,19 @@ impl<'a> ToggleButton<'a> {
 
             let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
 
-            let (rect, _) = gui.ui().allocate_exact_size(button_size, Sense::empty());
-            rect
-        });
+            let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
+            (rect, response)
+        };
 
-        let response = gui.ui().interact(
-            rect,
-            id,
-            if self.enabled {
-                Sense::click() | Sense::hover()
-            } else {
-                Sense::hover()
-            },
-        );
+        // let response = gui.ui().interact(
+        //     rect,
+        //     id,
+        //     if self.enabled {
+        //         Sense::click() | Sense::hover()
+        //     } else {
+        //         Sense::hover()
+        //     },
+        // );
 
         if response.clicked() && self.enabled {
             *self.value = !*self.value;

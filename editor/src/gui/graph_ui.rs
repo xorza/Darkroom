@@ -465,7 +465,7 @@ impl GraphUi {
 
                                 ToggleButton::new(&mut self.autorun_enabled)
                                     .text("autorun")
-                                    .show(&mut gui, "graph_autorun_toggle");
+                                    .show(&mut gui);
 
                                 if self.autorun_enabled {
                                     interaction.autorun = AutorunCommand::Start;
