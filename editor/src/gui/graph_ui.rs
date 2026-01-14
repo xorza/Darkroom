@@ -2,14 +2,14 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Area, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
-    Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Area, Button, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton,
+    Pos2, Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
-use crate::common::button::{self, Button};
+
 use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -422,13 +422,13 @@ impl GraphUi {
                         ui.horizontal(|ui| {
                             let mut gui = Gui::new(ui, style_clone);
 
-                            let run_response = Button::new().text("run").show(&mut gui);
+                            interaction.run |= gui.ui().button("run").clicked();
                             gui.ui.add_space(gui.style.padding);
+
                             ToggleButton::new(&mut self.autorun_enabled)
                                 .text("autorun")
                                 .show(&mut gui);
 
-                            interaction.run |= run_response.clicked();
                             if self.autorun_enabled {
                                 interaction.autorun = AutorunCommand::Start;
                             } else {
