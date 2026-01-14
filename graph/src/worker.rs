@@ -129,7 +129,7 @@ async fn worker_loop<Callback>(
         let mut execute_terminals: bool = false;
         let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
-        let mut event_callback: EventLoopCallback = EventLoopCallback::none();
+        let mut event_callback: EventLoopCallback = EventLoopCallback::empty();
 
         while let Some(msg) = msgs.pop_front() {
             match msg {
@@ -160,7 +160,7 @@ async fn worker_loop<Callback>(
         if let Some((graph, func_lib)) = update_graph.take() {
             if event_loop_handle.is_some() && matches!(event_loop_cmd, EventLoopCommand::None) {
                 event_loop_cmd = EventLoopCommand::Start {
-                    callback: EventLoopCallback::none(),
+                    callback: EventLoopCallback::empty(),
                 };
             }
             stop_event_loop(&mut event_loop_handle).await;
@@ -287,7 +287,7 @@ impl EventLoopCallback {
         }
     }
 
-    pub fn none() -> Self {
+    pub fn empty() -> Self {
         Self { inner: None }
     }
 
