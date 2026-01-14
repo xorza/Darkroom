@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind};
+use egui::{Align2, Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind};
 
 use crate::gui::Gui;
 
@@ -16,24 +16,33 @@ pub struct ButtonBackground {
 
 #[derive(Debug)]
 pub struct Button<'a> {
-    id: egui::Id,
     enabled: bool,
+    text: Option<&'a str>,
     tooltip: Option<&'a str>,
     background: Option<ButtonBackground>,
+    rect: Option<Rect>,
+    shapes: Vec<Shape>,
 }
 
 impl<'a> Button<'a> {
-    pub fn new(id: egui::Id) -> Self {
+    pub fn new() -> Self {
         Self {
-            id,
             enabled: true,
+            text: None,
             tooltip: None,
             background: None,
+            rect: None,
+            shapes: Vec::new(),
         }
     }
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    pub fn text(mut self, text: &'a str) -> Self {
+        self.text = Some(text);
         self
     }
 
@@ -48,21 +57,46 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(
-        self,
-        gui: &mut Gui<'_>,
-        rect: Rect,
-        shapes: impl IntoIterator<Item = impl Into<Shape>>,
-    ) -> Response {
-        let response = gui.ui().interact(
-            rect,
-            self.id,
-            if self.enabled {
-                Sense::click() | Sense::hover()
-            } else {
-                Sense::hover()
-            },
-        );
+    pub fn rect(mut self, rect: Rect) -> Self {
+        self.rect = Some(rect);
+        self
+    }
+
+    pub fn shapes(mut self, shapes: impl IntoIterator<Item = impl Into<Shape>>) -> Self {
+        self.shapes = shapes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn show(self, gui: &mut Gui<'_>, _id_salt: impl std::hash::Hash) -> Response {
+        let text = self.text.unwrap_or("");
+
+        let text_color = if !self.enabled {
+            gui.style.noninteractive_text_color
+        } else {
+            gui.style.text_color
+        };
+        let galley =
+            gui.painter()
+                .layout_no_wrap(text.to_string(), gui.style.sub_font.clone(), text_color);
+
+        let sense = if self.enabled {
+            Sense::click() | Sense::hover()
+        } else {
+            Sense::hover()
+        };
+
+        let (rect, response) = if let Some(rect) = self.rect {
+            let response = gui.ui().allocate_rect(rect, sense);
+            (rect, response)
+        } else {
+            // Autosize: calculate button size based on text
+            let padding = gui.style.small_padding * 2.0;
+            let text_size = galley.size();
+            let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
+            let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
+            (rect, response)
+        };
+
         if response.hovered()
             && let Some(tooltip) = self.tooltip
             && !tooltip.is_empty()
@@ -98,7 +132,13 @@ impl<'a> Button<'a> {
 
         gui.painter()
             .rect(rect, background.radius, fill, stroke, StrokeKind::Middle);
-        gui.painter().extend(shapes.into_iter().map(Into::into));
+
+        if !self.shapes.is_empty() {
+            gui.painter().extend(self.shapes);
+        } else {
+            let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
+            gui.painter().galley(text_pos, galley, text_color);
+        }
 
         response
     }

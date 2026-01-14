@@ -332,10 +332,12 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_id: &NodeId, node_layout: &NodeLayo
         Shape::line_segment([a, b], remove_stroke),
         Shape::line_segment([c, d], remove_stroke),
     ];
-    let remove = Button::new(gui.ui().make_persistent_id(("node_remove", node_id)))
+    let remove = Button::new()
         .enabled(true)
         .tooltip("Remove node")
-        .show(gui, remove_rect, remove_shapes)
+        .rect(remove_rect)
+        .shapes(remove_shapes)
+        .show(gui, ("node_remove", node_id))
         .clicked();
 
     if remove {

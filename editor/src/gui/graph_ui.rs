@@ -431,30 +431,15 @@ impl GraphUi {
                     ui.set_clip_rect(rect);
 
                     Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                        const BUTTON_WIDTH: f32 = 60.0;
-                        const BUTTON_HEIGHT: f32 = 24.0;
                         const BUTTON_SPACING: f32 = 8.0;
-
-                        let run_button_size = vec2(BUTTON_WIDTH, BUTTON_HEIGHT);
 
                         {
                             ui.horizontal(|ui| {
                                 let mut gui = Gui::new(ui, style_clone.clone());
 
-                                let (run_rect, _) =
-                                    gui.ui.allocate_exact_size(run_button_size, Sense::hover());
-
-                                let run_id = gui.ui().make_persistent_id("graph_run_button");
-                                let run_text_shape = {
-                                    let font = gui.style.sub_font.clone();
-                                    let color = gui.style.text_color;
-                                    let galley = gui.ui().fonts_mut(|fonts| {
-                                        fonts.layout_no_wrap("run".to_string(), font, color)
-                                    });
-                                    Shape::galley(run_rect.center(), galley, color)
-                                };
-                                let run_response =
-                                    Button::new(run_id).show(&mut gui, run_rect, [run_text_shape]);
+                                let run_response = Button::new()
+                                    .text("run")
+                                    .show(&mut gui, "graph_run_button");
 
                                 interaction.run |= run_response.clicked();
 
