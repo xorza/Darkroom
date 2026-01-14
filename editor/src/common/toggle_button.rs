@@ -15,18 +15,18 @@ pub struct ToggleButtonBackground {
 pub struct ToggleButton<'a> {
     enabled: bool,
     checked: bool,
-    text: &'a str,
+    text: Option<&'a str>,
     tooltip: Option<&'a str>,
     background: Option<ToggleButtonBackground>,
     rect: Option<Rect>,
 }
 
 impl<'a> ToggleButton<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn new() -> Self {
         Self {
             enabled: true,
             checked: false,
-            text,
+            text: None,
             tooltip: None,
             background: None,
             rect: None,
@@ -40,6 +40,11 @@ impl<'a> ToggleButton<'a> {
 
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = checked;
+        self
+    }
+
+    pub fn text(mut self, text: &'a str) -> Self {
+        self.text = Some(text);
         self
     }
 
@@ -61,6 +66,8 @@ impl<'a> ToggleButton<'a> {
 
     pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
         let id = gui.ui().make_persistent_id(id_salt);
+        let text = self.text.unwrap_or("");
+
         let rect = self.rect.unwrap_or_else(|| {
             // Autosize: calculate button size based on text
             let font = gui.style.sub_font.clone();
@@ -69,7 +76,7 @@ impl<'a> ToggleButton<'a> {
 
             let text_size = gui.ui().fonts_mut(|fonts| {
                 fonts
-                    .layout_no_wrap(self.text.to_string(), font, text_color)
+                    .layout_no_wrap(text.to_string(), font, text_color)
                     .size()
             });
 
@@ -137,7 +144,7 @@ impl<'a> ToggleButton<'a> {
         gui.painter().text(
             rect.center(),
             Align2::CENTER_CENTER,
-            self.text,
+            text,
             gui.style.sub_font.clone(),
             text_color,
         );

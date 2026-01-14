@@ -463,7 +463,8 @@ impl GraphUi {
 
                                 gui.ui.add_space(BUTTON_SPACING);
 
-                                let autorun_response = ToggleButton::new("autorun")
+                                let autorun_response = ToggleButton::new()
+                                    .text("autorun")
                                     .checked(self.autorun_enabled)
                                     .show(&mut gui, "graph_autorun_toggle");
 
