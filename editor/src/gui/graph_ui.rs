@@ -424,7 +424,7 @@ impl GraphUi {
                     .outer_margin(padding)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let mut gui = Gui::new(ui, style_clone.clone());
+                            let mut gui = Gui::new(ui, style_clone);
 
                             let run_response = Button::new().text("run").show(&mut gui);
                             gui.ui.add_space(gui.style.padding);
