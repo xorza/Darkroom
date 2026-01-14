@@ -193,7 +193,6 @@ async fn worker_loop<Callback>(
             }
             EventLoopCommand::Stop => {
                 stop_event_loop(&mut event_loop_handle).await;
-                tracing::info!("Event loop stopped");
             }
         }
     }
@@ -274,6 +273,7 @@ async fn start_event_loop(
 async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     if let Some(mut event_loop_handle) = event_loop_handle.take() {
         event_loop_handle.stop().await;
+        tracing::info!("Event loop stopped");
     }
 }
 
