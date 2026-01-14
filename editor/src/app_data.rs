@@ -180,27 +180,21 @@ impl AppData {
     }
 
     pub fn handle_interaction(&mut self) {
-        let graph_updated = self.graph_dirty || self.handle_actions();
+        while let Some(err) = self.interaction.errors.pop() {
+            self.add_status(format!("Graph error: {err}"));
+        }
+
+        self.graph_dirty |= self.handle_actions();
 
         let mut msgs: Vec<WorkerMessage> = Vec::default();
-        if graph_updated {
-            msgs.push(WorkerMessage::Update {
-                graph: self.view_graph.graph.clone(),
-                func_lib: self.func_lib.clone(),
-            });
-            self.graph_dirty = false;
-        }
+        let mut update_if_dirty = false;
 
         match self.interaction.autorun {
             AutorunCommand::Start => {
                 msgs.push(WorkerMessage::StartEventLoop {
-                    callback: EventLoopCallback::new({
-                        let run_event = self.run_event.clone();
-                        move || {
-                            run_event.notify_waiters();
-                        }
-                    }),
+                    callback: EventLoopCallback::none(),
                 });
+                update_if_dirty = true;
                 self.autorun = true;
             }
             AutorunCommand::Stop => {
@@ -210,19 +204,23 @@ impl AppData {
             AutorunCommand::None => {}
         }
 
-        if let Some(err) = self.interaction.errors.last() {
-            self.add_status(format!("Graph error: {err}"));
-        }
-
         if self.interaction.run {
             if self.autorun {
                 self.run_event.notify_waiters();
             } else {
                 msgs.push(WorkerMessage::ExecuteTerminals);
+                update_if_dirty = true;
             }
         }
 
         if !msgs.is_empty() {
+            if update_if_dirty {
+                msgs.push(WorkerMessage::Update {
+                    graph: self.view_graph.graph.clone(),
+                    func_lib: self.func_lib.clone(),
+                });
+                self.graph_dirty = false;
+            }
             self.worker.send(WorkerMessage::Multi { msgs });
         }
 
