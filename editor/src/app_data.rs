@@ -47,6 +47,7 @@ pub struct AppData {
     pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
     pub autorun: bool,
+    pub graph_dirty: bool,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 }
@@ -83,6 +84,7 @@ impl AppData {
             shared_status,
             run_event,
             autorun: false,
+            graph_dirty: true,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
         }
@@ -178,7 +180,7 @@ impl AppData {
     }
 
     pub fn handle_interaction(&mut self) {
-        let graph_updated = self.handle_actions();
+        let graph_updated = self.graph_dirty || self.handle_actions();
 
         let mut msgs: Vec<WorkerMessage> = Vec::default();
         if graph_updated {
@@ -186,6 +188,7 @@ impl AppData {
                 graph: self.view_graph.graph.clone(),
                 func_lib: self.func_lib.clone(),
             });
+            self.graph_dirty = false;
         }
 
         match self.interaction.autorun {
@@ -253,11 +256,12 @@ impl AppData {
         if reset_undo {
             self.undo_stack.reset_with(&self.view_graph);
         }
+
         self.refresh_after_graph_change();
     }
 
     fn refresh_after_graph_change(&mut self) {
-        self.worker.send(WorkerMessage::Clear);
+        self.graph_dirty = true;
         self.execution_stats = None;
     }
 
