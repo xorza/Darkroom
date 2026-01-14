@@ -1,6 +1,6 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::{AutorunCommand, GraphUiAction, GraphUiInteraction};
 use crate::model::config::Config;
 use anyhow::Result;
 use common::{FileFormat, Shared};
@@ -182,6 +182,17 @@ impl AppData {
 
         if self.interaction.run {
             self.run_graph();
+        }
+        match self.interaction.autorun {
+            AutorunCommand::Start => {
+                self.worker.send(WorkerMessage::StartEventLoop {
+                    callback: EventLoopCallback::none(),
+                });
+            }
+            AutorunCommand::Stop => {
+                self.worker.send(WorkerMessage::StopEventLoop);
+            }
+            AutorunCommand::None => {}
         }
 
         if let Some(err) = self.interaction.errors.last() {

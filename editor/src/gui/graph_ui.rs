@@ -14,7 +14,9 @@ use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::graph_ui_interaction::{EventSubscriberChange, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::{
+    AutorunCommand, EventSubscriberChange, GraphUiAction, GraphUiInteraction,
+};
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -423,7 +425,12 @@ impl GraphUi {
                     ui.set_clip_rect(rect);
                     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
                         Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                            interaction.run |= ui.button("run").clicked();
+                            ui.horizontal(|ui| {
+                                interaction.run |= ui.button("run").clicked();
+                                if ui.button("autorun").clicked() {
+                                    interaction.autorun = AutorunCommand::Start;
+                                }
+                            });
                         });
                     });
                 });

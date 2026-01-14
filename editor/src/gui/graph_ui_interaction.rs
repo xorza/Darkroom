@@ -12,12 +12,21 @@ pub enum EventSubscriberChange {
     Removed,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum AutorunCommand {
+    #[default]
+    None,
+    Start,
+    Stop,
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct GraphUiInteraction {
     actions1: Vec<GraphUiAction>,
     actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run: bool,
+    pub autorun: AutorunCommand,
 
     pending_action: Option<GraphUiAction>,
 }
