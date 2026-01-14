@@ -187,13 +187,11 @@ impl AppData {
         self.graph_dirty |= self.handle_actions();
 
         let mut msgs: Vec<WorkerMessage> = Vec::default();
-        let mut fire_run_event = false;
 
         match self.interaction.autorun {
             AutorunCommand::Start => {
                 if !self.autorun {
                     msgs.push(WorkerMessage::StartEventLoop);
-                    fire_run_event = true;
                 }
                 self.autorun = true;
             }
@@ -204,34 +202,18 @@ impl AppData {
             AutorunCommand::None => {}
         }
 
-        let update_if_dirty = self.autorun || self.interaction.run;
+        let update_graph = self.graph_dirty && (self.autorun || self.interaction.run);
 
-        if self.interaction.run {
-            if self.autorun {
-                fire_run_event = true;
-            } else {
-                msgs.push(WorkerMessage::ExecuteTerminals);
-            }
-        }
-
-        if update_if_dirty && self.graph_dirty {
+        if update_graph {
             msgs.push(WorkerMessage::Update {
                 graph: self.view_graph.graph.clone(),
                 func_lib: self.func_lib.clone(),
             });
             self.graph_dirty = false;
-            fire_run_event |= self.autorun;
         }
 
-        if fire_run_event {
-            msgs.push(WorkerMessage::ProcessingCallback {
-                callback: ProcessingCallback::new({
-                    let run_event = self.run_event.clone();
-                    move || {
-                        run_event.notify_waiters();
-                    }
-                }),
-            });
+        if self.interaction.run || (self.autorun && update_graph) {
+            msgs.push(WorkerMessage::ExecuteTerminals);
         }
 
         if !msgs.is_empty() {
