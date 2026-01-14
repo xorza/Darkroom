@@ -100,10 +100,9 @@ impl<'a> Button<'a> {
             let small_padding = gui.style.small_padding * 2.0;
             let padding = gui.style.padding * 2.0;
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
-            let button_size =
-                Vec2::splat(1.0) + egui::vec2(text_size.x + padding, text_size.y + small_padding);
+            let button_size = egui::vec2(text_size.x + padding, text_size.y + small_padding);
             let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
-            (rect.shrink(1.0), response)
+            (rect, response)
         };
 
         if response.hovered()
