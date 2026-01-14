@@ -260,12 +260,11 @@ fn render_cache_btn(
 ) {
     let visible = node_layout.has_cache_btn;
     if visible {
-        let checked = node.behavior == NodeBehavior::Once;
+        let mut checked = node.behavior == NodeBehavior::Once;
 
-        let response = ToggleButton::new()
+        let response = ToggleButton::new(&mut checked)
             .text("cache")
             .enabled(visible)
-            .checked(checked)
             .rect(node_layout.cache_button_rect)
             .show(gui, (node.id, "cache"));
 

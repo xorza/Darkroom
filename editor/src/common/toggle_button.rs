@@ -14,7 +14,7 @@ pub struct ToggleButtonBackground {
 #[derive(Debug)]
 pub struct ToggleButton<'a> {
     enabled: bool,
-    checked: bool,
+    value: &'a mut bool,
     text: Option<&'a str>,
     tooltip: Option<&'a str>,
     background: Option<ToggleButtonBackground>,
@@ -22,10 +22,10 @@ pub struct ToggleButton<'a> {
 }
 
 impl<'a> ToggleButton<'a> {
-    pub fn new() -> Self {
+    pub fn new(value: &'a mut bool) -> Self {
         Self {
             enabled: true,
-            checked: false,
+            value,
             text: None,
             tooltip: None,
             background: None,
@@ -35,11 +35,6 @@ impl<'a> ToggleButton<'a> {
 
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
-        self
-    }
-
-    pub fn checked(mut self, checked: bool) -> Self {
-        self.checked = checked;
         self
     }
 
@@ -95,6 +90,11 @@ impl<'a> ToggleButton<'a> {
                 Sense::hover()
             },
         );
+
+        if response.clicked() && self.enabled {
+            *self.value = !*self.value;
+        }
+
         if response.hovered()
             && let Some(tooltip) = self.tooltip
             && !tooltip.is_empty()
@@ -104,14 +104,14 @@ impl<'a> ToggleButton<'a> {
 
         let text_color = if !self.enabled {
             gui.style.noninteractive_text_color
-        } else if self.checked {
+        } else if *self.value {
             gui.style.dark_text_color
         } else {
             gui.style.text_color
         };
         let default_fill = if !self.enabled {
             gui.style.noninteractive_bg_fill
-        } else if self.checked {
+        } else if *self.value {
             gui.style.checked_bg_fill
         } else if response.is_pointer_button_down_on() {
             gui.style.active_bg_fill
