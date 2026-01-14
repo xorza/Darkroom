@@ -471,6 +471,7 @@ impl ExecutionGraph {
         event_ids: &[EventRef],
     ) -> Result<()> {
         self.e_node_terminal_idx.clear();
+
         self.e_node_terminal_idx.extend(
             event_ids
                 .iter()
@@ -489,24 +490,20 @@ impl ExecutionGraph {
             );
         }
         if event_triggers {
-            self.e_node_terminal_idx
-                .extend(
-                    self.e_nodes
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(e_node_idx, e_node)| {
-                            if e_node
-                                .events
-                                .iter()
-                                .any(|event| !event.subscribers.is_empty())
-                            {
-                                Some(e_node_idx)
-                            } else {
-                                None
-                            }
-                        }),
-                );
+            self.e_node_terminal_idx.extend(
+                self.e_nodes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, e_node)| {
+                        e_node
+                            .events
+                            .iter()
+                            .any(|event| !event.subscribers.is_empty())
+                    })
+                    .map(|(e_node_idx, _)| e_node_idx),
+            );
         }
+
         self.e_nodes.iter_mut().for_each(|e_node| {
             e_node.reset_for_execution();
         });
