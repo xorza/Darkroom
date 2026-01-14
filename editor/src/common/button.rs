@@ -68,16 +68,22 @@ impl<'a> Button<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
-        let text = self.text.unwrap_or("");
-
         let text_color = if !self.enabled {
             gui.style.noninteractive_text_color
         } else {
             gui.style.text_color
         };
-        let galley =
-            gui.painter()
-                .layout_no_wrap(text.to_string(), gui.style.sub_font.clone(), text_color);
+        let galley = if let Some(text) = self.text {
+            let galley = gui.painter().layout_no_wrap(
+                text.to_string(),
+                gui.style.sub_font.clone(),
+                text_color,
+            );
+
+            Some(galley)
+        } else {
+            None
+        };
 
         let sense = if self.enabled {
             Sense::click() | Sense::hover()
@@ -90,8 +96,9 @@ impl<'a> Button<'a> {
             (rect, response)
         } else {
             // Autosize: calculate button size based on text
+            // todo also include provided shapes size
             let padding = gui.style.small_padding * 2.0;
-            let text_size = galley.size();
+            let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
             let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
             let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
             (rect, response)
@@ -135,7 +142,8 @@ impl<'a> Button<'a> {
 
         if !self.shapes.is_empty() {
             gui.painter().extend(self.shapes);
-        } else {
+        }
+        if let Some(galley) = galley {
             let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
             gui.painter().galley(text_pos, galley, text_color);
         }
