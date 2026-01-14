@@ -414,32 +414,30 @@ impl GraphUi {
         Area::new(Id::new("graph_ui_bottom_buttons"))
             .fixed_pos(pos2(rect.left(), rect.bottom()))
             .pivot(Align2::LEFT_BOTTOM)
-            .constrain_to(rect)
+            // .constrain_to(rect)
             .movable(false)
             .interactable(false)
             .show(&egui_ctx, |ui| {
                 ui.set_clip_rect(rect);
 
-                Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let mut gui = Gui::new(ui, style_clone.clone());
+                ui.horizontal(|ui| {
+                    let mut gui = Gui::new(ui, style_clone.clone());
 
-                        let run_response = Button::new().text("run").show(&mut gui);
+                    let run_response = Button::new().text("run").show(&mut gui);
 
-                        interaction.run |= run_response.clicked();
+                    interaction.run |= run_response.clicked();
 
-                        gui.ui.add_space(gui.style.padding);
+                    gui.ui.add_space(gui.style.padding);
 
-                        ToggleButton::new(&mut self.autorun_enabled)
-                            .text("autorun")
-                            .show(&mut gui);
+                    ToggleButton::new(&mut self.autorun_enabled)
+                        .text("autorun")
+                        .show(&mut gui);
 
-                        if self.autorun_enabled {
-                            interaction.autorun = AutorunCommand::Start;
-                        } else {
-                            interaction.autorun = AutorunCommand::Stop;
-                        }
-                    });
+                    if self.autorun_enabled {
+                        interaction.autorun = AutorunCommand::Start;
+                    } else {
+                        interaction.autorun = AutorunCommand::Stop;
+                    }
                 });
             });
 
