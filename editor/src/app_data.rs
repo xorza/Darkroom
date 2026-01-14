@@ -205,11 +205,12 @@ impl AppData {
         }
 
         if self.interaction.run {
+            update_if_dirty = true;
+
             if self.autorun {
                 self.run_event.notify_waiters();
             } else {
                 msgs.push(WorkerMessage::ExecuteTerminals);
-                update_if_dirty = true;
             }
         }
 
@@ -275,7 +276,6 @@ impl AppData {
                 graph_updated = true;
             }
         }
-        self.interaction.clear_actions();
 
         graph_updated
     }

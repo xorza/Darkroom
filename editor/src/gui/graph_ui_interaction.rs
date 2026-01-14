@@ -76,7 +76,8 @@ pub enum GraphUiAction {
 
 impl GraphUiInteraction {
     pub fn clear(&mut self) {
-        self.clear_actions();
+        self.actions1.clear();
+        self.actions2.clear();
         self.errors.clear();
         self.run = false;
         self.autorun = AutorunCommand::None;
@@ -89,11 +90,6 @@ impl GraphUiInteraction {
         ]
         .into_iter()
         .flatten()
-    }
-
-    pub fn clear_actions(&mut self) {
-        self.actions1.clear();
-        self.actions2.clear();
     }
 
     pub fn add_action(&mut self, action: GraphUiAction) {
