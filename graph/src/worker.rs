@@ -20,7 +20,7 @@ pub enum WorkerMessage {
     Update { graph: Graph, func_lib: FuncLib },
     Clear,
     ExecuteTerminals,
-    StartEventLoop { callback: EventLoopCallback },
+    StartEventLoop,
     StopEventLoop,
     Multi { msgs: Vec<WorkerMessage> },
 }
@@ -157,9 +157,7 @@ async fn worker_loop<Callback>(
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop { callback } => {
-                    event_loop_cmd = EventLoopCommand::Start { callback };
-                }
+                WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
                 WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
             }
@@ -167,9 +165,7 @@ async fn worker_loop<Callback>(
 
         if let Some((graph, func_lib)) = update_graph.take() {
             if event_loop_handle.is_some() && matches!(event_loop_cmd, EventLoopCommand::None) {
-                event_loop_cmd = EventLoopCommand::Start {
-                    callback: EventLoopCallback::empty(),
-                };
+                event_loop_cmd = EventLoopCommand::Start;
             }
             stop_event_loop(&mut event_loop_handle).await;
 
@@ -209,7 +205,7 @@ async fn worker_loop<Callback>(
         //     event_loop_handle.await;
         // }
         //
-        todo!()
+        // todo!()
         // event_callback.call_once();
     }
 }

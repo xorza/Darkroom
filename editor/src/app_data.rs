@@ -192,12 +192,7 @@ impl AppData {
         match self.interaction.autorun {
             AutorunCommand::Start => {
                 if !self.autorun {
-                    msgs.push(WorkerMessage::StartEventLoop {
-                        callback: EventLoopCallback::new({
-                            let run_event = self.run_event.clone();
-                            move || run_event.notify_waiters()
-                        }),
-                    });
+                    msgs.push(WorkerMessage::StartEventLoop);
                 }
                 update_if_dirty = true;
                 self.autorun = true;
