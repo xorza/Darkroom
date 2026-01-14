@@ -9,7 +9,7 @@ use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
-use crate::common::button;
+use crate::common::button::{self, Button};
 use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -453,11 +453,8 @@ impl GraphUi {
                                     });
                                     Shape::galley(run_rect.center(), galley, color)
                                 };
-                                let run_response = button::Button::new(run_id).show(
-                                    &mut gui,
-                                    run_rect,
-                                    [run_text_shape],
-                                );
+                                let run_response =
+                                    Button::new(run_id).show(&mut gui, run_rect, [run_text_shape]);
 
                                 interaction.run |= run_response.clicked();
 
