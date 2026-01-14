@@ -13,7 +13,6 @@ pub struct ToggleButtonBackground {
 
 #[derive(Debug)]
 pub struct ToggleButton<'a> {
-    id: egui::Id,
     enabled: bool,
     checked: bool,
     text: &'a str,
@@ -23,9 +22,8 @@ pub struct ToggleButton<'a> {
 }
 
 impl<'a> ToggleButton<'a> {
-    pub fn new(id: egui::Id, text: &'a str) -> Self {
+    pub fn new(text: &'a str) -> Self {
         Self {
-            id,
             enabled: true,
             checked: false,
             text,
@@ -61,7 +59,8 @@ impl<'a> ToggleButton<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+        let id = gui.ui().make_persistent_id(id_salt);
         let rect = self.rect.unwrap_or_else(|| {
             // Autosize: calculate button size based on text
             let font = gui.style.sub_font.clone();
@@ -79,10 +78,10 @@ impl<'a> ToggleButton<'a> {
             let (rect, _) = gui.ui().allocate_exact_size(button_size, Sense::empty());
             rect
         });
-        
+
         let response = gui.ui().interact(
             rect,
-            self.id,
+            id,
             if self.enabled {
                 Sense::click() | Sense::hover()
             } else {

@@ -262,11 +262,11 @@ fn render_cache_btn(
     if visible {
         let checked = node.behavior == NodeBehavior::Once;
 
-        let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
+        let response = ToggleButton::new("cache")
             .enabled(visible)
             .checked(checked)
             .rect(node_layout.cache_button_rect)
-            .show(gui);
+            .show(gui, (node.id, "cache"));
 
         if response.clicked() {
             let before = node.behavior;

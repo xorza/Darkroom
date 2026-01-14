@@ -466,12 +466,9 @@ impl GraphUi {
 
                                         gui.ui.add_space(BUTTON_SPACING);
 
-                                        let autorun_id =
-                                            gui.ui.make_persistent_id("graph_autorun_toggle");
-                                        let autorun_response =
-                                            ToggleButton::new(autorun_id, "autorun")
-                                                .checked(self.autorun_enabled)
-                                                .show(&mut gui);
+                                        let autorun_response = ToggleButton::new("autorun")
+                                            .checked(self.autorun_enabled)
+                                            .show(&mut gui, "graph_autorun_toggle");
 
                                         if autorun_response.clicked() {
                                             if self.autorun_enabled {
