@@ -62,6 +62,17 @@ impl<'a> ToggleButton<'a> {
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let text = self.text.unwrap_or("");
 
+        let text_color = if !self.enabled {
+            gui.style.noninteractive_text_color
+        } else if *self.value {
+            gui.style.dark_text_color
+        } else {
+            gui.style.text_color
+        };
+        let galley =
+            gui.painter()
+                .layout_no_wrap(text.to_string(), gui.style.sub_font.clone(), text_color);
+
         let sense = if self.enabled {
             Sense::click() | Sense::hover()
         } else {
@@ -73,31 +84,12 @@ impl<'a> ToggleButton<'a> {
             (rect, response)
         } else {
             // Autosize: calculate button size based on text
-            let font = gui.style.sub_font.clone();
-            let text_color = gui.style.text_color;
             let padding = gui.style.small_padding * 2.0;
-
-            let text_size = gui.ui().fonts_mut(|fonts| {
-                fonts
-                    .layout_no_wrap(text.to_string(), font, text_color)
-                    .size()
-            });
-
+            let text_size = galley.size();
             let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
-
             let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
             (rect, response)
         };
-
-        // let response = gui.ui().interact(
-        //     rect,
-        //     id,
-        //     if self.enabled {
-        //         Sense::click() | Sense::hover()
-        //     } else {
-        //         Sense::hover()
-        //     },
-        // );
 
         if response.clicked() && self.enabled {
             *self.value = !*self.value;
@@ -110,13 +102,6 @@ impl<'a> ToggleButton<'a> {
             response.show_tooltip_text(tooltip);
         }
 
-        let text_color = if !self.enabled {
-            gui.style.noninteractive_text_color
-        } else if *self.value {
-            gui.style.dark_text_color
-        } else {
-            gui.style.text_color
-        };
         let default_fill = if !self.enabled {
             gui.style.noninteractive_bg_fill
         } else if *self.value {
@@ -149,13 +134,16 @@ impl<'a> ToggleButton<'a> {
             stroke,
             StrokeKind::Middle,
         );
-        gui.painter().text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            gui.style.sub_font.clone(),
-            text_color,
-        );
+        let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
+        gui.painter()
+            .galley(text_pos, galley.clone(), gui.style.text_color);
+        // gui.painter().text(
+        //     rect.center(),
+        //     Align2::CENTER_CENTER,
+        //     text,
+        //     gui.style.sub_font.clone(),
+        //     text_color,
+        // );
 
         response
     }
