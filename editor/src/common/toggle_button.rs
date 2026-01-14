@@ -19,6 +19,7 @@ pub struct ToggleButton<'a> {
     text: &'a str,
     tooltip: Option<&'a str>,
     background: Option<ToggleButtonBackground>,
+    rect: Option<Rect>,
 }
 
 impl<'a> ToggleButton<'a> {
@@ -30,6 +31,7 @@ impl<'a> ToggleButton<'a> {
             text,
             tooltip: None,
             background: None,
+            rect: None,
         }
     }
 
@@ -54,7 +56,30 @@ impl<'a> ToggleButton<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, rect: Rect) -> Response {
+    pub fn rect(mut self, rect: Rect) -> Self {
+        self.rect = Some(rect);
+        self
+    }
+
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+        let rect = self.rect.unwrap_or_else(|| {
+            // Autosize: calculate button size based on text
+            let font = gui.style.sub_font.clone();
+            let text_color = gui.style.text_color;
+            let padding = gui.style.small_padding * 2.0;
+
+            let text_size = gui.ui().fonts_mut(|fonts| {
+                fonts
+                    .layout_no_wrap(self.text.to_string(), font, text_color)
+                    .size()
+            });
+
+            let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
+
+            let (rect, _) = gui.ui().allocate_exact_size(button_size, Sense::empty());
+            rect
+        });
+        
         let response = gui.ui().interact(
             rect,
             self.id,

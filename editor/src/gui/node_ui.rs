@@ -265,7 +265,8 @@ fn render_cache_btn(
         let response = ToggleButton::new(gui.ui().make_persistent_id((node.id, "cache")), "cache")
             .enabled(visible)
             .checked(checked)
-            .show(gui, node_layout.cache_button_rect);
+            .rect(node_layout.cache_button_rect)
+            .show(gui);
 
         if response.clicked() {
             let before = node.behavior;

@@ -2,13 +2,14 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Area, Button, Color32, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
-    Rect, Response, RichText, Sense, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Area, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
+    Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
+use crate::common::button;
 use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -404,7 +405,7 @@ impl GraphUi {
                                             Vec2::splat(mono_font.size + small_padding * 2.0);
                                         ui.add_sized(
                                             button_size,
-                                            Button::new(
+                                            egui::Button::new(
                                                 RichText::new(label).font(mono_font.clone()),
                                             ),
                                         )
@@ -427,92 +428,62 @@ impl GraphUi {
                 .show(&egui_ctx, |ui| {
                     ui.set_clip_rect(rect);
                     ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                        Frame::NONE.inner_margin(padding).show(ui, |ui| {
-                            let mut bottom_gui = Gui::new(ui, style_clone.clone());
-                            let button_font = bottom_gui.style.sub_font.clone();
-                            let text_color = bottom_gui.style.text_color;
+                        Frame::NONE
+                            .fill(Color32::from_gray(64))
+                            .inner_margin(padding)
+                            .show(ui, |ui| {
+                                const BUTTON_WIDTH: f32 = 60.0;
+                                const BUTTON_HEIGHT: f32 = 24.0;
+                                const BUTTON_SPACING: f32 = 8.0;
 
-                            let (run_button_size, autorun_button_size) = {
-                                let horizontal_padding = bottom_gui.style.small_padding * 2.0;
-                                let vertical_padding = bottom_gui.style.small_padding;
-
-                                let run_size = bottom_gui.ui().fonts_mut(|fonts| {
-                                    fonts
-                                        .layout_no_wrap(
-                                            String::from("run"),
-                                            button_font.clone(),
-                                            text_color,
-                                        )
-                                        .size()
-                                });
-                                let autorun_size = bottom_gui.ui().fonts_mut(|fonts| {
-                                    fonts
-                                        .layout_no_wrap(
-                                            String::from("autorun"),
-                                            button_font.clone(),
-                                            text_color,
-                                        )
-                                        .size()
-                                });
-
-                                (
-                                    vec2(
-                                        run_size.x + horizontal_padding * 2.0,
-                                        run_size.y + vertical_padding * 2.0,
-                                    ),
-                                    vec2(
-                                        autorun_size.x + horizontal_padding * 2.0,
-                                        autorun_size.y + vertical_padding * 2.0,
-                                    ),
-                                )
-                            };
-
-                            let (run_clicked, autorun_rect) = {
-                                let mut run_clicked = false;
-                                let mut autorun_rect =
-                                    Rect::from_min_size(bottom_gui.rect.min, Vec2::ZERO);
+                                let run_button_size = vec2(BUTTON_WIDTH, BUTTON_HEIGHT);
 
                                 {
-                                    let ui = bottom_gui.ui();
                                     ui.horizontal(|ui| {
-                                        run_clicked = ui
-                                            .add_sized(
-                                                run_button_size,
-                                                Button::new(
-                                                    RichText::new("run").font(button_font.clone()),
-                                                ),
-                                            )
-                                            .clicked();
+                                        let mut gui = Gui::new(ui, style_clone.clone());
 
-                                        let (rect, _) = ui.allocate_exact_size(
-                                            autorun_button_size,
-                                            Sense::click(),
+                                        let (run_rect, _) = gui
+                                            .ui
+                                            .allocate_exact_size(run_button_size, Sense::hover());
+
+                                        let run_id =
+                                            gui.ui().make_persistent_id("graph_run_button");
+                                        let run_text_shape = {
+                                            let font = gui.style.sub_font.clone();
+                                            let color = gui.style.text_color;
+                                            let galley = gui.ui().fonts_mut(|fonts| {
+                                                fonts.layout_no_wrap("run".to_string(), font, color)
+                                            });
+                                            Shape::galley(run_rect.center(), galley, color)
+                                        };
+                                        let run_response = button::Button::new(run_id).show(
+                                            &mut gui,
+                                            run_rect,
+                                            [run_text_shape],
                                         );
-                                        autorun_rect = rect;
+
+                                        interaction.run |= run_response.clicked();
+
+                                        gui.ui.add_space(BUTTON_SPACING);
+
+                                        let autorun_id =
+                                            gui.ui.make_persistent_id("graph_autorun_toggle");
+                                        let autorun_response =
+                                            ToggleButton::new(autorun_id, "autorun")
+                                                .checked(self.autorun_enabled)
+                                                .show(&mut gui);
+
+                                        if autorun_response.clicked() {
+                                            if self.autorun_enabled {
+                                                interaction.autorun = AutorunCommand::Stop;
+                                            } else {
+                                                interaction.autorun = AutorunCommand::Start;
+                                            }
+                                            self.autorun_enabled = !self.autorun_enabled;
+                                        }
                                     });
                                 }
-
-                                assert!(autorun_rect.is_finite(), "autorun rect must be set");
-                                (run_clicked, autorun_rect)
-                            };
-
-                            interaction.run |= run_clicked;
-
-                            let autorun_id =
-                                bottom_gui.ui().make_persistent_id("graph_autorun_toggle");
-                            let autorun_response = ToggleButton::new(autorun_id, "autorun")
-                                .checked(self.autorun_enabled)
-                                .show(&mut bottom_gui, autorun_rect);
-
-                            if autorun_response.clicked() {
-                                if self.autorun_enabled {
-                                    interaction.autorun = AutorunCommand::Stop;
-                                } else {
-                                    interaction.autorun = AutorunCommand::Start;
-                                }
-                                self.autorun_enabled = !self.autorun_enabled;
-                            }
-                        });
+                            });
                     });
                 });
         }
