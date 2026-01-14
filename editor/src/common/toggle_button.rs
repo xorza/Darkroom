@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align2, Color32, Rect, Response, Sense, Stroke, StrokeKind};
+use egui::{Align2, Color32, Rect, Response, Sense, Stroke, StrokeKind, Vec2};
 
 use crate::gui::Gui;
 
@@ -84,11 +84,13 @@ impl<'a> ToggleButton<'a> {
             (rect, response)
         } else {
             // Autosize: calculate button size based on text
-            let padding = gui.style.small_padding * 2.0;
+            let small_padding = gui.style.small_padding * 2.0;
+            let padding = gui.style.padding * 2.0;
             let text_size = galley.size();
-            let button_size = egui::vec2(text_size.x + padding, text_size.y + padding);
+            let button_size =
+                Vec2::splat(1.0) + egui::vec2(text_size.x + padding, text_size.y + small_padding);
             let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
-            (rect, response)
+            (rect.shrink(1.0), response)
         };
 
         if response.clicked() && self.enabled {
