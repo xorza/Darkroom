@@ -104,8 +104,7 @@ impl MainUi {
 
         app_data.update_status();
 
-        self.handle_undo_shortcut(app_data);
-        self.handle_save_load_shortcuts(app_data);
+        self.handle_shortcuts(app_data);
 
         egui::TopBottomPanel::top("top_panel")
             .show_separator_line(false)
@@ -165,6 +164,11 @@ impl MainUi {
 
         app_data.handle_interaction();
         self.arena.reset();
+    }
+
+    fn handle_shortcuts(&mut self, app_data: &mut AppData) {
+        self.handle_undo_shortcut(app_data);
+        self.handle_save_load_shortcuts(app_data);
     }
 
     fn handle_undo_shortcut(&mut self, app_data: &mut AppData) {
