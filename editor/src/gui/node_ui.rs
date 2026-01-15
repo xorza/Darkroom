@@ -192,16 +192,11 @@ fn render_body(
     let corner_radius = gui.style.corner_radius;
     let breaker_hit = breaker.is_some_and(|breaker| breaker.intersects_rect(node_layout.body_rect));
 
-    let scale = gui.scale();
-
     gui.painter().add(Shape::Rect(
-        Shadow {
-            offset: [(4.0 * scale) as i8, (5.0 * scale) as i8],
-            blur: (6.0 * scale) as u8,
-            spread: (4.0 * scale) as u8,
-            color: Color32::from_black_alpha(128),
-        }
-        .as_shape(node_layout.body_rect, corner_radius),
+        gui.style
+            .node
+            .shadow
+            .as_shape(node_layout.body_rect, corner_radius),
     ));
 
     let shadow = match *node_execution_info {

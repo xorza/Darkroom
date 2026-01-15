@@ -74,6 +74,7 @@ pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
 
+    pub shadow: Shadow,
     pub executed_shadow: Shadow,
     pub cached_shadow: Shadow,
     pub missing_inputs_shadow: Shadow,
@@ -207,6 +208,12 @@ impl Style {
             node: NodeStyle {
                 status_dot_radius: scaled(style_settings.status_dot_radius),
                 status_impure_color: style_settings.color_dot_impure,
+                shadow: Shadow {
+                    offset: [(4.0 * scale) as i8, (5.0 * scale) as i8],
+                    blur: (6.0 * scale) as u8,
+                    spread: (4.0 * scale) as u8,
+                    color: Color32::from_black_alpha(128),
+                },
                 executed_shadow: Shadow {
                     color: style_settings.color_shadow_executed,
                     offset: [0, 0],
