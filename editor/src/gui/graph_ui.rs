@@ -128,7 +128,6 @@ impl GraphUi {
             interaction,
         );
 
-        gui.set_scale(ctx.view_graph.scale);
         self.graph_layout.update(&mut gui, &ctx);
         self.dots_background.render(&mut gui, &ctx);
         self.render_connections(&mut gui, &mut ctx, execution_stats, interaction);
@@ -510,6 +509,8 @@ impl GraphUi {
 
         if !prev_scale.ui_equals(&ctx.view_graph.scale) || !prev_pan.ui_equals(&ctx.view_graph.pan)
         {
+            gui.set_scale(ctx.view_graph.scale);
+
             interaction.add_action(GraphUiAction::ZoomPanChanged {
                 before_pan: prev_pan,
                 before_scale: prev_scale,
