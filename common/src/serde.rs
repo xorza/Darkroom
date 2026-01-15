@@ -39,27 +39,27 @@ pub fn serialize_into<T: Serialize, W: Write>(
             serde_lua::to_writer(writer, &value).unwrap();
         }
         SerdeFormat::Bincode => {
-            bincode::serde::encode_into_std_write(value, temp_buffer, bincode::config::standard())
+            bincode::serde::encode_into_std_write(value, writer, bincode::config::standard())
                 .unwrap();
 
-            // Prepend uncompressed size (4 bytes, little-endian)
-            let uncompressed_size = temp_buffer.len();
-            writer
-                .write_all(&(uncompressed_size as u32).to_le_bytes())
-                .unwrap();
+            // // Prepend uncompressed size (4 bytes, little-endian)
+            // let uncompressed_size = temp_buffer.len();
+            // writer
+            //     .write_all(&(uncompressed_size as u32).to_le_bytes())
+            //     .unwrap();
 
-            let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
-            temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
+            // let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
+            // temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
 
-            let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
+            // let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
 
-            let compressed_len = lz4_flex::compress_into(input, output).unwrap();
-            writer.write_all(&output[..compressed_len]).unwrap();
+            // let compressed_len = lz4_flex::compress_into(input, output).unwrap();
+            // writer.write_all(&output[..compressed_len]).unwrap();
 
-            println!(
-                "Compressed size: {} / {}",
-                compressed_len, uncompressed_size
-            );
+            // println!(
+            //     "Compressed size: {} / {}",
+            //     compressed_len, uncompressed_size
+            // );
         }
         SerdeFormat::Toml => {
             let s = toml::to_string(&value).unwrap().normalize();
@@ -95,30 +95,34 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
         }
         SerdeFormat::Bincode => {
             reader.read_to_end(temp_buffer)?;
-            let uncompressed_size =
-                u32::from_le_bytes(temp_buffer[0..4].try_into().unwrap()) as usize;
-            let compressed_start = 4;
-            let compressed_len = temp_buffer.len() - compressed_start;
+            // let uncompressed_size =
+            //     u32::from_le_bytes(temp_buffer[0..4].try_into().unwrap()) as usize;
+            // let compressed_start = 4;
+            // let compressed_len = temp_buffer.len() - compressed_start;
 
-            // Reserve space for decompressed data at the end
-            temp_buffer.resize(compressed_start + compressed_len + uncompressed_size, 0);
+            // // Reserve space for decompressed data at the end
+            // temp_buffer.resize(compressed_start + compressed_len + uncompressed_size, 0);
 
-            let (compressed_part, decompressed_part) =
-                temp_buffer.split_at_mut(compressed_start + compressed_len);
-            let compressed = &compressed_part[compressed_start..];
+            // let (compressed_part, decompressed_part) =
+            //     temp_buffer.split_at_mut(compressed_start + compressed_len);
+            // let compressed = &compressed_part[compressed_start..];
 
-            let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
-            assert_eq!(
-                decompressed_len, uncompressed_size,
-                "decompressed size mismatch"
-            );
+            // let decompressed_len = lz4_flex::decompress_into(compressed, decompressed_part)?;
+            // assert_eq!(
+            //     decompressed_len, uncompressed_size,
+            //     "decompressed size mismatch"
+            // );
 
-            let (decoded, read) =
-                bincode::serde::decode_from_slice(decompressed_part, bincode::config::standard())?;
-            assert_eq!(
-                read, uncompressed_size,
-                "binary payload should be fully consumed"
-            );
+            let (decoded, read) = bincode::serde::decode_from_slice(
+                temp_buffer.as_slice(),
+                bincode::config::standard(),
+            )?;
+            assert_eq!(read, temp_buffer.len());
+
+            // assert_eq!(
+            //     read, uncompressed_size,
+            //     "binary payload should be fully consumed"
+            // );
 
             Ok(decoded)
         }
