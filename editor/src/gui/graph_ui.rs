@@ -425,16 +425,15 @@ impl GraphUi {
                     // .fill(Color32::from_black_alpha(128))
                     .inner_margin(padding)
                     .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let mut gui = Gui::new(ui, &style);
+                        let mut gui = Gui::new(ui, &style);
 
-                            interaction.run |=
-                                Button::default().text("run").show(&mut gui).clicked();
+                        gui.horizontal(|gui| {
+                            interaction.run |= Button::default().text("run").show(gui).clicked();
 
                             Button::default()
                                 .toggle(&mut self.autorun_enabled)
                                 .text("autorun")
-                                .show(&mut gui);
+                                .show(gui);
 
                             if self.autorun_enabled {
                                 interaction.autorun = AutorunCommand::Start;

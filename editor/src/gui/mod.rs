@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use egui::{FontId, Painter, Rect, Ui};
+use egui::{FontId, InnerResponse, Painter, Rect, Ui};
 
 use crate::{common::UiEquals, gui::style::Style};
 
@@ -64,5 +64,16 @@ impl<'a> Gui<'a> {
 
     pub fn font_height(&mut self, font_id: FontId) -> f32 {
         self.ui.fonts_mut(|f| f.row_height(&font_id))
+    }
+
+    pub fn horizontal<R>(
+        &mut self,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let style = Rc::clone(&self.style);
+        self.ui.horizontal(|ui| {
+            let mut gui = Gui::new(ui, &style);
+            add_contents(&mut gui)
+        })
     }
 }
