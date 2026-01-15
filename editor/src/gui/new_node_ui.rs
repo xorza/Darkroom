@@ -1,7 +1,9 @@
-use egui::{Key, Pos2, Vec2};
+use egui::{Key, Order, Pos2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
+use crate::common::area::Area;
+use crate::common::frame::Frame;
 use crate::gui::Gui;
 
 #[derive(Debug, Default)]
@@ -33,12 +35,12 @@ impl NewNodeUi {
 
         let popup_id = gui.ui().make_persistent_id("new_node_popup");
 
-        egui::Area::new(popup_id)
+        Area::new(popup_id)
             .fixed_pos(self.position)
-            .order(egui::Order::Foreground)
-            .show(gui.ui().ctx(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_min_width(150.0);
+            .order(Order::Foreground)
+            .show(gui, |gui| {
+                Frame::none().show(gui, |gui| {
+                    gui.ui().set_min_width(150.0);
 
                     let mut categories: Vec<&str> =
                         func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
@@ -46,7 +48,7 @@ impl NewNodeUi {
                     categories.dedup();
 
                     for category in categories {
-                        ui.menu_button(category, |ui| {
+                        gui.ui().menu_button(category, |ui| {
                             for func in func_lib.funcs.iter() {
                                 if func.category != category {
                                     continue;
@@ -60,8 +62,8 @@ impl NewNodeUi {
                         });
                     }
 
-                    ui.separator();
-                    if ui.button("Cancel").clicked() {
+                    gui.ui().separator();
+                    if gui.ui().button("Cancel").clicked() {
                         self.open = false;
                     }
                 });

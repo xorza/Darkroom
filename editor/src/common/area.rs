@@ -46,6 +46,11 @@ impl Area {
         self
     }
 
+    pub fn order(mut self, order: egui::Order) -> Self {
+        self.inner = self.inner.order(order);
+        self
+    }
+
     pub fn show<R>(
         self,
         gui: &mut Gui,
