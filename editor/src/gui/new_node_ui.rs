@@ -43,7 +43,7 @@ impl NewNodeUi {
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     gui.ui().set_min_width(150.0);
-                    // gui.ui().set_max_width(150.0);
+                    gui.ui().set_min_height(150.0);
 
                     gui.horizontal(|gui| {
                         let mut categories: Vec<&str> =
@@ -53,51 +53,50 @@ impl NewNodeUi {
 
                         for category in categories {
                             gui.vertical(|gui| {
-                                Expander::new(category)
-                                    .min_width(80.0 + gui.style.padding * 2.0)
-                                    .default_open(true)
-                                    .show(gui, |gui| {
-                                        for func in func_lib.funcs.iter() {
-                                            if func.category != category {
-                                                continue;
-                                            }
+                                gui.ui.set_min_width(80.0 + gui.style.padding * 2.0);
 
-                                            let btn_font = gui.style.sub_font.clone();
-                                            let max_width = func_lib
-                                                .funcs
-                                                .iter()
-                                                .filter(|f| f.category == category)
-                                                .map(|f| {
-                                                    gui.painter()
-                                                        .layout_no_wrap(
-                                                            f.name.clone(),
-                                                            btn_font.clone(),
-                                                            gui.style.text_color,
-                                                        )
-                                                        .size()
-                                                        .x
-                                                })
-                                                .max_by(|a, b| a.partial_cmp(b).unwrap())
-                                                .unwrap_or(80.0)
-                                                .max(80.0);
-
-                                            let button_width = max_width + gui.style.padding * 2.0;
-                                            let button_height = gui.font_height(&btn_font)
-                                                + gui.style.small_padding * 2.0;
-
-                                            if Button::default()
-                                                .background(gui.style.list_button)
-                                                .text(&func.name)
-                                                .size(vec2(button_width, button_height))
-                                                .align(Align::Min)
-                                                .show(gui)
-                                                .clicked()
-                                            {
-                                                selected_func = Some(func);
-                                                self.open = false;
-                                            }
+                                Expander::new(category).default_open(true).show(gui, |gui| {
+                                    for func in func_lib.funcs.iter() {
+                                        if func.category != category {
+                                            continue;
                                         }
-                                    });
+
+                                        let btn_font = gui.style.sub_font.clone();
+                                        let max_width = func_lib
+                                            .funcs
+                                            .iter()
+                                            .filter(|f| f.category == category)
+                                            .map(|f| {
+                                                gui.painter()
+                                                    .layout_no_wrap(
+                                                        f.name.clone(),
+                                                        btn_font.clone(),
+                                                        gui.style.text_color,
+                                                    )
+                                                    .size()
+                                                    .x
+                                            })
+                                            .max_by(|a, b| a.partial_cmp(b).unwrap())
+                                            .unwrap_or(80.0)
+                                            .max(80.0);
+
+                                        let button_width = max_width + gui.style.padding * 2.0;
+                                        let button_height = gui.font_height(&btn_font)
+                                            + gui.style.small_padding * 2.0;
+
+                                        if Button::default()
+                                            .background(gui.style.list_button)
+                                            .text(&func.name)
+                                            .size(vec2(button_width, button_height))
+                                            .align(Align::Min)
+                                            .show(gui)
+                                            .clicked()
+                                        {
+                                            selected_func = Some(func);
+                                            self.open = false;
+                                        }
+                                    }
+                                });
                             });
                         }
                     });
