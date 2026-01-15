@@ -175,7 +175,7 @@ impl GraphUi {
         interaction: &mut GraphUiInteraction,
         background_response: Response,
     ) {
-        // Close menu on any graph interaction
+        // Close menu on any graph bg interaction
         if self.new_node_ui.is_open() {
             let newid = gui.ui().next_auto_id();
             let rect = gui.rect;
