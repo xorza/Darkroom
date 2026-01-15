@@ -109,6 +109,7 @@ impl<'a> DragValue<'a> {
         let id = ui.make_persistent_id(id_salt);
         let edit_id = id.with("edit");
         let edit_text_id = id.with("edit_text");
+        let edit_original_id = id.with("edit_original");
         let drag_temp_id = id.with("drag_temp");
         let mut edit_active = ui
             .data_mut(|data| data.get_temp::<bool>(edit_id))
@@ -128,6 +129,10 @@ impl<'a> DragValue<'a> {
             let mut edit_text = ui
                 .data_mut(|data| data.get_temp::<String>(edit_text_id))
                 .unwrap_or_else(|| self.value.to_string());
+            let original_value = ui
+                .data_mut(|data| data.get_temp::<i64>(edit_original_id))
+                .unwrap_or(*self.value);
+
             let text_edit = TextEdit::singleline(&mut edit_text)
                 .id(edit_id)
                 .font(font.clone())
@@ -139,17 +144,20 @@ impl<'a> DragValue<'a> {
                 .frame(false);
             let mut response = ui.put(rect, text_edit);
 
-            if response.lost_focus()
-                && ui.input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click())
-            {
+            let should_confirm = response.lost_focus()
+                && ui.input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
+            let should_cancel =
+                response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape));
+
+            if should_confirm {
                 if let Ok(parsed) = edit_text.trim().parse::<i64>()
-                    && parsed != *self.value
+                    && parsed != original_value
                 {
                     *self.value = parsed;
                     response.mark_changed();
                 }
                 edit_active = false;
-            } else if response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape)) {
+            } else if should_cancel {
                 edit_active = false;
             }
 
@@ -157,9 +165,11 @@ impl<'a> DragValue<'a> {
                 if edit_active {
                     data.insert_temp(edit_id, true);
                     data.insert_temp(edit_text_id, edit_text);
+                    data.insert_temp(edit_original_id, original_value);
                 } else {
                     data.remove::<bool>(edit_id);
                     data.remove::<String>(edit_text_id);
+                    data.remove::<i64>(edit_original_id);
                 }
             });
 
@@ -172,6 +182,7 @@ impl<'a> DragValue<'a> {
             ui.data_mut(|data| {
                 data.insert_temp(edit_id, true);
                 data.insert_temp(edit_text_id, self.value.to_string());
+                data.insert_temp(edit_original_id, *self.value);
             });
             ui.memory_mut(|memory| memory.request_focus(edit_id));
         }
