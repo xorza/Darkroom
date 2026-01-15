@@ -85,8 +85,10 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
             Ok(toml::from_str(text)?)
         }
         FileFormat::Bin => {
-            let compressed_size = u32::from_le_bytes(serialized[0..4].try_into().unwrap()) as usize;
-            let decompressed = lz4_flex::decompress(&serialized[4..], compressed_size).unwrap();
+            let uncompressed_size =
+                u32::from_le_bytes(serialized[0..4].try_into().unwrap()) as usize;
+
+            let decompressed = lz4_flex::decompress(&serialized[4..], uncompressed_size)?;
 
             let (decoded, read) =
                 bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())?;
