@@ -27,6 +27,10 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
+    pub fn all_slice() -> [Self; 5] {
+        [Self::Yaml, Self::Json, Self::Lua, Self::Bincode, Self::Scn]
+    }
+
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
         let extension = get_file_extension(file_name)
             .map(|ext| ext.to_ascii_lowercase())

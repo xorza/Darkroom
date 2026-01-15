@@ -272,10 +272,9 @@ mod tests {
 
     #[test]
     fn graph_roundtrip() {
-        assert_roundtrip(SerdeFormat::Json);
-        assert_roundtrip(SerdeFormat::Yaml);
-        assert_roundtrip(SerdeFormat::Lua);
-        assert_roundtrip(SerdeFormat::Bincode);
+        for format in SerdeFormat::all_slice() {
+            assert_roundtrip(format);
+        }
     }
 
     fn build_test_view() -> ViewGraph {
