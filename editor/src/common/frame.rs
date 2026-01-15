@@ -1,0 +1,55 @@
+use std::rc::Rc;
+
+use egui::{Color32, CornerRadius, InnerResponse, Margin, Stroke};
+
+use crate::gui::{Gui, style::Style};
+
+#[derive(Debug, Clone)]
+pub struct Frame {
+    inner: egui::Frame,
+}
+
+impl Frame {
+    pub fn none() -> Self {
+        Self {
+            inner: egui::Frame::NONE,
+        }
+    }
+
+    pub fn fill(mut self, fill: Color32) -> Self {
+        self.inner = self.inner.fill(fill);
+        self
+    }
+
+    pub fn stroke(mut self, stroke: Stroke) -> Self {
+        self.inner = self.inner.stroke(stroke);
+        self
+    }
+
+    pub fn inner_margin(mut self, margin: impl Into<Margin>) -> Self {
+        self.inner = self.inner.inner_margin(margin);
+        self
+    }
+
+    pub fn outer_margin(mut self, margin: impl Into<Margin>) -> Self {
+        self.inner = self.inner.outer_margin(margin);
+        self
+    }
+
+    pub fn corner_radius(mut self, corner_radius: impl Into<CornerRadius>) -> Self {
+        self.inner = self.inner.corner_radius(corner_radius);
+        self
+    }
+
+    pub fn show<R>(
+        self,
+        gui: &mut Gui<'_>,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let style = gui.style.clone();
+        self.inner.show(gui.ui(), |ui| {
+            let mut gui = Gui::new(ui, &style);
+            add_contents(&mut gui)
+        })
+    }
+}
