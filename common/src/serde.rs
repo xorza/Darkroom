@@ -56,9 +56,8 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
             let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
 
-            let compressed = lz4_flex::compress_into(input, output).unwrap();
-            let written = writer.write(&output[..compressed]).unwrap();
-            assert_eq!(compressed, written);
+            let compressed_len = lz4_flex::compress_into(input, output).unwrap();
+            writer.write_all(&output[..compressed_len]).unwrap();
         }
         FileFormat::Toml => {
             let s = toml::to_string(value).unwrap().normalize();
