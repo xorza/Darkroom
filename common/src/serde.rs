@@ -30,12 +30,10 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
     match format {
         FileFormat::Yaml => {
-            let s = serde_yml::to_string(&value).unwrap().normalize();
-            writer.write_all(s.as_bytes()).unwrap();
+            serde_yml::to_writer(writer, &value).unwrap();
         }
         FileFormat::Json => {
-            let s = serde_json::to_string_pretty(&value).unwrap().normalize();
-            writer.write_all(s.as_bytes()).unwrap();
+            serde_json::to_writer_pretty(writer, &value).unwrap();
         }
         FileFormat::Lua => {
             let s = serde_lua::to_string(&value).unwrap().normalize();
