@@ -164,16 +164,18 @@ impl GraphUi {
             }
 
             if let Some(func) = self.new_node_ui.show(gui, ctx.func_lib) {
-                let node_id = ctx.view_graph.add_node_from_func(func);
-                let view_node = ctx.view_graph.view_nodes.by_key_mut(&node_id).unwrap();
                 let screen_pos = self.new_node_ui.position();
                 let origin = rect.min;
                 let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
-                view_node.pos = graph_pos.to_pos2();
+                let pos = graph_pos.to_pos2();
 
-                let view_node = view_node.clone();
-                let node = ctx.view_graph.graph.by_id(&node_id).unwrap().clone();
-                interaction.add_action(GraphUiAction::NodeAdded { view_node, node });
+                let (node, view_node) = ctx.view_graph.add_node_from_func(func);
+                view_node.pos = pos;
+
+                interaction.add_action(GraphUiAction::NodeAdded {
+                    view_node: view_node.clone(),
+                    node: node.clone(),
+                });
             }
         });
     }

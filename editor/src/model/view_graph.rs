@@ -145,13 +145,15 @@ impl ViewGraph {
         }
     }
 
-    pub fn add_node_from_func(&mut self, func: &Func) -> NodeId {
+    pub fn add_node_from_func(&mut self, func: &Func) -> (&Node, &mut ViewNode) {
         let node: Node = func.into();
         let node_id = node.id;
         let view_node: ViewNode = (&node).into();
         self.view_nodes.add(view_node);
         self.graph.add(node);
-        node_id
+        let node = self.graph.by_id(&node_id).unwrap();
+        let view_node = self.view_nodes.by_key_mut(&node_id).unwrap();
+        (node, view_node)
     }
 
     pub fn removal_action(&self, node_id: &NodeId) -> GraphUiAction {
