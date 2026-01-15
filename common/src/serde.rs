@@ -26,7 +26,12 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
             .normalize()
             .into_bytes(),
         FileFormat::Bin => {
-            bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap()
+            let encoded =
+                bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap();
+            let compressed = lz4_flex::compress_prepend_size(&encoded);
+
+            println!("Compressed size: {}/{}", compressed.len(), encoded.len());
+            compressed
         }
         FileFormat::Toml => toml::to_string(value).unwrap().normalize().into_bytes(),
     }
@@ -51,9 +56,10 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
             Ok(toml::from_str(text)?)
         }
         FileFormat::Bin => {
+            let decompressed = lz4_flex::decompress_size_prepended(serialized)?;
             let (decoded, read) =
-                bincode::serde::decode_from_slice(serialized, bincode::config::standard())?;
-            if read != serialized.len() {
+                bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())?;
+            if read != decompressed.len() {
                 anyhow::bail!("binary payload should be fully consumed");
             }
             Ok(decoded)

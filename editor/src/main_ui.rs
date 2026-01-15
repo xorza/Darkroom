@@ -68,6 +68,7 @@ impl MainUi {
             .add_filter("Lua", &["lua"])
             .add_filter("JSON", &["json"])
             .add_filter("YAML", &["yaml", "yml"])
+            .add_filter("Scn binary", &["scn"])
             .save_file();
 
         if let Some(path) = file {
@@ -81,6 +82,7 @@ impl MainUi {
             .add_filter("Lua", &["lua"])
             .add_filter("JSON", &["json"])
             .add_filter("YAML", &["yaml", "yml"])
+            .add_filter("Scn binary", &["scn"])
             .pick_file();
 
         if let Some(path) = file {

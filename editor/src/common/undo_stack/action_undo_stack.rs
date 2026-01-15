@@ -17,6 +17,8 @@ pub struct ActionUndoStack {
     redo_stack: Vec<std::ops::Range<usize>>,
     undo_base_offset: usize,
     max_steps: usize,
+
+    temp_buffer: Vec<u8>,
 }
 
 impl ActionUndoStack {
@@ -29,6 +31,7 @@ impl ActionUndoStack {
             redo_stack: Vec::new(),
             undo_base_offset: 0,
             max_steps,
+            temp_buffer: Vec::new(),
         }
     }
 
@@ -54,24 +57,43 @@ impl ActionUndoStack {
         self.compact_undo_buffer_if_needed();
     }
 
-    fn append_actions(buffer: &mut Vec<u8>, actions: &[GraphUiAction]) -> std::ops::Range<usize> {
+    fn append_actions(
+        buffer: &mut Vec<u8>,
+        actions: &[GraphUiAction],
+        temp_buffer: &mut Vec<u8>,
+    ) -> std::ops::Range<usize> {
         assert!(
             !actions.is_empty(),
             "undo stack should not store empty action batches"
         );
+
         let start = buffer.len();
-        bincode::serde::encode_into_std_write(actions, buffer, bincode::config::standard())
+
+        temp_buffer.clear();
+        bincode::serde::encode_into_std_write(actions, temp_buffer, bincode::config::standard())
             .expect("undo stack action batch should serialize via bincode");
-        let end = buffer.len();
+
+        let max_size = lz4_flex::block::get_maximum_output_size(temp_buffer.len());
+
+        buffer.resize(buffer.len() + max_size, 0);
+        let compressed_len =
+            lz4_flex::compress_into(temp_buffer.as_slice(), &mut buffer[start..]).unwrap();
+        let end = start + compressed_len;
+        buffer.truncate(end);
+
         start..end
     }
 
-    fn deserialize_actions(bytes: &[u8]) -> Vec<GraphUiAction> {
-        let (decoded, read) = bincode::serde::decode_from_slice(bytes, bincode::config::standard())
-            .expect("undo stack action batch should deserialize via bincode");
+    fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
+        temp_buffer.clear();
+        *temp_buffer = lz4_flex::decompress(bytes, 1024 * 1024)
+            .expect("undo stack action batch should decompress via lz4");
+        let (decoded, read) =
+            bincode::serde::decode_from_slice(temp_buffer, bincode::config::standard())
+                .expect("undo stack action batch should deserialize via bincode");
         assert_eq!(
             read,
-            bytes.len(),
+            temp_buffer.len(),
             "undo stack action batch should decode fully"
         );
         decoded
@@ -137,7 +159,7 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         }
         self.redo_actions.clear();
         self.redo_stack.clear();
-        let range = Self::append_actions(&mut self.undo_actions, actions);
+        let range = Self::append_actions(&mut self.undo_actions, actions, &mut self.temp_buffer);
         self.undo_stack.push(range);
         self.trim_to_limit();
     }
@@ -155,19 +177,13 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
             actions_range.start >= self.undo_base_offset,
             "undo range starts before base offset"
         );
-        let actions_bytes = {
-            let undo_actions = &self.undo_actions;
-            Self::slice_bytes(undo_actions, &actions_range)
-        };
-        let actions = Self::deserialize_actions(actions_bytes);
+        let actions_bytes = Self::slice_bytes(&self.undo_actions, &actions_range);
+        let actions = Self::deserialize_actions(actions_bytes, &mut self.temp_buffer);
         for action in actions.iter().rev() {
             action.undo(value);
             on_action(action);
         }
-        let redo_range = {
-            let redo_actions = &mut self.redo_actions;
-            Self::append_bytes(redo_actions, actions_bytes)
-        };
+        let redo_range = Self::append_bytes(&mut self.redo_actions, actions_bytes);
         self.redo_stack.push(redo_range);
         Self::pop_tail_actions(&mut self.undo_actions, &actions_range);
 
@@ -178,19 +194,13 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
         let Some(actions_range) = self.redo_stack.pop() else {
             return false;
         };
-        let actions_bytes = {
-            let redo_actions = &self.redo_actions;
-            Self::slice_bytes(redo_actions, &actions_range)
-        };
-        let actions = Self::deserialize_actions(actions_bytes);
+        let actions_bytes = Self::slice_bytes(&self.redo_actions, &actions_range);
+        let actions = Self::deserialize_actions(actions_bytes, &mut self.temp_buffer);
         for action in actions.iter() {
             action.apply(value);
             on_action(action);
         }
-        let undo_range = {
-            let undo_actions = &mut self.undo_actions;
-            Self::append_bytes(undo_actions, actions_bytes)
-        };
+        let undo_range = Self::append_bytes(&mut self.undo_actions, actions_bytes);
         self.undo_stack.push(undo_range);
         Self::pop_tail_actions(&mut self.redo_actions, &actions_range);
 
@@ -383,7 +393,8 @@ mod tests {
 
         stack.reset_with(&view_graph);
 
-        for i in 0..3 {
+        // Push enough actions to trigger compaction (need base_offset >= len/2)
+        for i in 0..10 {
             let action = GraphUiAction::NodeMoved {
                 node_id,
                 before: start_pos + vec2(i as f32, 0.0),
@@ -392,18 +403,28 @@ mod tests {
             stack.push_current(&view_graph, &[action]);
         }
 
+        // After trimming to max_steps=2, we should have base_offset > 0
         assert!(stack.undo_base_offset > 0);
         assert_ranges_match_actions(&stack);
 
-        let action = GraphUiAction::NodeMoved {
-            node_id,
-            before: start_pos + vec2(3.0, 0.0),
-            after: start_pos + vec2(4.0, 0.0),
-        };
-        stack.push_current(&view_graph, &[action]);
+        // Keep pushing until compaction happens (base_offset >= len/2)
+        let mut compacted = stack.undo_base_offset == 0;
+        for i in 10..20 {
+            if compacted {
+                break;
+            }
+            let action = GraphUiAction::NodeMoved {
+                node_id,
+                before: start_pos + vec2(i as f32, 0.0),
+                after: start_pos + vec2((i + 1) as f32, 0.0),
+            };
+            stack.push_current(&view_graph, &[action]);
+            compacted = stack.undo_base_offset == 0;
+            assert_ranges_match_actions(&stack);
+        }
 
+        assert!(compacted, "compaction should have occurred");
         assert_eq!(stack.undo_base_offset, 0);
-        assert_ranges_match_actions(&stack);
     }
 
     #[test]
@@ -578,12 +599,15 @@ mod tests {
 
         for (range_idx, range) in stack.undo_stack.iter().enumerate() {
             let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
+            let decompressed = lz4_flex::decompress(bytes, 1024 * 1024).unwrap_or_else(|err| {
+                panic!("undo range {} failed to decompress: {}", range_idx, err)
+            });
             let (decoded, read) = bincode::serde::decode_from_slice::<Vec<GraphUiAction>, _>(
-                bytes,
+                &decompressed,
                 bincode::config::standard(),
             )
             .unwrap_or_else(|err| panic!("undo range {} failed to decode: {}", range_idx, err));
-            assert_eq!(read, bytes.len());
+            assert_eq!(read, decompressed.len());
             assert_eq!(decoded.len(), 1);
         }
 

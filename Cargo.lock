@@ -511,6 +511,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "bumpalo",
+ "lz4_flex",
  "mlua",
  "serde",
  "serde_json",
