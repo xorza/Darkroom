@@ -122,7 +122,7 @@ impl<'a> ConstBindFrame<'a> {
 
             let before = input.binding.clone();
             let Binding::Const(value) = &mut input.binding else {
-                continue;
+                unreachable!();
             };
 
             let mut const_bind_style = gui.style.node.const_bind_style.clone();
