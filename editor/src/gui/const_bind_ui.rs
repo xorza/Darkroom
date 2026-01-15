@@ -63,7 +63,6 @@ impl<'a> ConstBindFrame<'a> {
     ) {
         let port_radius = gui.style.node.port_radius;
         let padding = gui.style.padding;
-        let _small_padding = gui.style.small_padding;
         let mono_font = gui.style.mono_font.clone();
 
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -75,7 +74,6 @@ impl<'a> ConstBindFrame<'a> {
                 input_node_id: node.id,
                 input_idx,
             };
-
             let prev_hovered = *self.prev_hovered_connection == Some(connection_key);
 
             let input_center = node_layout.input_center(input_idx);
@@ -93,7 +91,6 @@ impl<'a> ConstBindFrame<'a> {
                 .update_points(connection_start, connection_end, gui.scale);
 
             let prev_broke = breaker.is_some() && curve.broke;
-
             let style =
                 ConnectionBezierStyle::build(&gui.style, PortKind::Input, prev_broke, prev_hovered);
 
@@ -108,15 +105,13 @@ impl<'a> ConstBindFrame<'a> {
             let mut currently_broke = curve.bezier.intersects_breaker(breaker);
 
             if response.double_clicked_by(PointerButton::Primary) {
-                let before = input.binding.clone();
-                input.binding = Binding::None;
-                let after = input.binding.clone();
                 ui_interaction.add_action(GraphUiAction::InputChanged {
                     node_id: node.id,
                     input_idx,
-                    before,
-                    after,
+                    before: input.binding.clone(),
+                    after: Binding::None,
                 });
+                input.binding = Binding::None;
                 return;
             }
 
@@ -125,32 +120,30 @@ impl<'a> ConstBindFrame<'a> {
                 unreachable!();
             };
 
-            let mut const_bind_style = gui.style.node.const_bind_style.clone();
-            if prev_broke || currently_broke {
-                const_bind_style.stroke.color = gui.style.connections.broke_clr;
+            let stroke_color = if prev_broke || currently_broke {
+                gui.style.connections.broke_clr
             } else if prev_hovered || currently_hovered {
-                const_bind_style.stroke.color = gui.style.node.output_hover_color;
+                gui.style.node.output_hover_color
             } else {
-                const_bind_style.stroke.color = gui.style.node.output_port_color;
-            }
+                gui.style.node.output_port_color
+            };
+            let mut const_bind_style = gui.style.node.const_bind_style.clone();
+            const_bind_style.stroke.color = stroke_color;
 
-            if let StaticValue::Int(value) = value {
-                let response = {
-                    DragValue::new(value)
-                        .font(mono_font.clone())
-                        .color(gui.style.text_color)
-                        .speed(1.0)
-                        .padding(vec2(padding, 0.0))
-                        .pos(connection_start)
-                        .align(Align2::RIGHT_CENTER)
-                        .style(const_bind_style)
-                        .show(gui, ("const_int_drag", node.id, input_idx))
-                };
+            if let StaticValue::Int(int_value) = value {
+                let response = DragValue::new(int_value)
+                    .font(mono_font.clone())
+                    .color(gui.style.text_color)
+                    .speed(1.0)
+                    .padding(vec2(padding, 0.0))
+                    .pos(connection_start)
+                    .align(Align2::RIGHT_CENTER)
+                    .style(const_bind_style)
+                    .show(gui, ("const_int_drag", node.id, input_idx));
 
                 if let Some(breaker) = breaker {
                     currently_broke |= breaker.intersects_rect(response.rect);
                 }
-
                 currently_hovered |= response.hovered();
 
                 let after = input.binding.clone();
