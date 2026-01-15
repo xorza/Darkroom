@@ -157,27 +157,61 @@ impl GraphUi {
             gui.set_scale(1.0);
             self.buttons(gui, &mut ctx, interaction);
 
-            if background_response.double_clicked_by(PointerButton::Primary)
-                && let Some(pos) = pointer_pos
-            {
-                self.new_node_ui.open(pos);
-            }
-
-            if let Some(func) = self.new_node_ui.show(gui, ctx.func_lib) {
-                let screen_pos = self.new_node_ui.position();
-                let origin = rect.min;
-                let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
-                let pos = graph_pos.to_pos2();
-
-                let (node, view_node) = ctx.view_graph.add_node_from_func(func);
-                view_node.pos = pos;
-
-                interaction.add_action(GraphUiAction::NodeAdded {
-                    view_node: view_node.clone(),
-                    node: node.clone(),
-                });
-            }
+            self.handle_new_node_popup(
+                gui,
+                &mut ctx,
+                pointer_pos,
+                interaction,
+                background_response,
+            );
         });
+    }
+
+    fn handle_new_node_popup(
+        &mut self,
+        gui: &mut Gui<'_>,
+        ctx: &mut GraphContext<'_>,
+        pointer_pos: Option<Pos2>,
+        interaction: &mut GraphUiInteraction,
+        background_response: Response,
+    ) {
+        // Close menu on any graph interaction
+        if self.new_node_ui.is_open() {
+            let newid = gui.ui().next_auto_id();
+            let rect = gui.rect;
+            let temp_background_response =
+                gui.ui()
+                    .interact(rect, newid, Sense::hover() | Sense::click());
+
+            let should_close = temp_background_response.is_pointer_button_down_on()
+                || self.state != InteractionState::Idle;
+            if should_close {
+                self.new_node_ui.close();
+            }
+        }
+
+        // Open menu on double-click
+        if background_response.double_clicked_by(PointerButton::Primary)
+            && let Some(pos) = pointer_pos
+        {
+            self.new_node_ui.open(pos);
+        }
+
+        // Show menu and handle selection
+        if let Some(func) = self.new_node_ui.show(gui, ctx.func_lib) {
+            let screen_pos = self.new_node_ui.position();
+            let origin = gui.rect.min;
+            let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
+            let pos = graph_pos.to_pos2();
+
+            let (node, view_node) = ctx.view_graph.add_node_from_func(func);
+            view_node.pos = pos;
+
+            interaction.add_action(GraphUiAction::NodeAdded {
+                view_node: view_node.clone(),
+                node: node.clone(),
+            });
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

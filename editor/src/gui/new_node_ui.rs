@@ -16,6 +16,14 @@ impl NewNodeUi {
         self.position = position;
     }
 
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+
     pub fn show<'a>(&mut self, gui: &mut Gui<'_>, func_lib: &'a FuncLib) -> Option<&'a Func> {
         if !self.open {
             return None;
