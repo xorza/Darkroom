@@ -21,7 +21,7 @@ use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{
-    AutorunCommand, EventSubscriberChange, GraphUiAction, GraphUiInteraction,
+    EventSubscriberChange, GraphUiAction, GraphUiInteraction, RunCommand,
 };
 use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
@@ -464,17 +464,21 @@ impl GraphUi {
                 let padding = gui.style.padding;
                 Frame::none().inner_margin(padding).show(gui, |gui| {
                     gui.horizontal(|gui| {
-                        interaction.run |= Button::default().text("run").show(gui).clicked();
+                        if Button::default().text("run").show(gui).clicked() {
+                            interaction.run_cmd = RunCommand::RunOnce;
+                        }
 
-                        Button::default()
+                        let response = Button::default()
                             .toggle(&mut self.autorun_enabled)
                             .text("autorun")
                             .show(gui);
 
-                        if self.autorun_enabled {
-                            interaction.autorun = AutorunCommand::Start;
-                        } else {
-                            interaction.autorun = AutorunCommand::Stop;
+                        if response.clicked() {
+                            if self.autorun_enabled {
+                                interaction.run_cmd = RunCommand::StartAutorun;
+                            } else {
+                                interaction.run_cmd = RunCommand::StopAutorun;
+                            }
                         }
                     });
                 });

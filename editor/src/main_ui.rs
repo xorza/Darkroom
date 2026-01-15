@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
+use crate::gui::graph_ui_interaction::RunCommand;
 use crate::gui::log_ui::LogUi;
 use crate::gui::style::Style;
 use crate::{app_data::AppData, gui::style_settings::StyleSettings};
@@ -216,9 +217,13 @@ impl MainUi {
         });
 
         if toggle_autorun_pressed {
-            app_data.autorun = !app_data.autorun;
+            if app_data.autorun {
+                app_data.interaction.run_cmd = RunCommand::StopAutorun;
+            } else {
+                app_data.interaction.run_cmd = RunCommand::StartAutorun;
+            }
         } else if run_once_pressed {
-            app_data.interaction.run = true;
+            app_data.interaction.run_cmd = RunCommand::RunOnce;
         }
     }
 }

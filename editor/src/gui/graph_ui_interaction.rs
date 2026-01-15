@@ -13,11 +13,12 @@ pub enum EventSubscriberChange {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum AutorunCommand {
+pub enum RunCommand {
     #[default]
     None,
-    Start,
-    Stop,
+    StartAutorun,
+    StopAutorun,
+    RunOnce,
 }
 
 #[derive(Debug, Default)]
@@ -25,8 +26,7 @@ pub(crate) struct GraphUiInteraction {
     actions1: Vec<GraphUiAction>,
     actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
-    pub run: bool,
-    pub autorun: AutorunCommand,
+    pub run_cmd: RunCommand,
 
     pending_action: Option<GraphUiAction>,
 }
@@ -83,8 +83,7 @@ impl GraphUiInteraction {
         self.actions1.clear();
         self.actions2.clear();
         self.errors.clear();
-        self.run = false;
-        self.autorun = AutorunCommand::None;
+        self.run_cmd = RunCommand::None;
     }
 
     pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {

@@ -1,6 +1,6 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
-use crate::gui::graph_ui_interaction::{AutorunCommand, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction, RunCommand};
 use crate::model::config::Config;
 use anyhow::Result;
 use common::{SerdeFormat, Shared};
@@ -216,22 +216,26 @@ impl AppData {
         self.graph_dirty |= self.handle_actions();
 
         let mut msgs: Vec<WorkerMessage> = Vec::default();
+        let mut run_once: bool = false;
 
-        match self.interaction.autorun {
-            AutorunCommand::Start => {
+        match self.interaction.run_cmd {
+            RunCommand::StartAutorun => {
+                println!("Starting autorun");
                 if !self.autorun {
                     msgs.push(WorkerMessage::StartEventLoop);
                 }
                 self.autorun = true;
             }
-            AutorunCommand::Stop => {
+            RunCommand::StopAutorun => {
+                println!("Stop autorun");
                 msgs.push(WorkerMessage::StopEventLoop);
                 self.autorun = false;
             }
-            AutorunCommand::None => {}
+            RunCommand::None => {}
+            RunCommand::RunOnce => run_once = true,
         }
 
-        let update_graph = self.graph_dirty && (self.autorun || self.interaction.run);
+        let update_graph = self.graph_dirty && (self.autorun || run_once);
 
         if update_graph {
             msgs.push(WorkerMessage::Update {
@@ -241,7 +245,7 @@ impl AppData {
             self.graph_dirty = false;
         }
 
-        if self.interaction.run || (self.autorun && update_graph) {
+        if run_once || (self.autorun && update_graph) {
             msgs.push(WorkerMessage::ExecuteTerminals);
         }
 
