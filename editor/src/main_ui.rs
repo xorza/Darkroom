@@ -68,7 +68,7 @@ impl MainUi {
             .add_filter("Lua", &["lua"])
             .add_filter("JSON", &["json"])
             .add_filter("YAML", &["yaml", "yml"])
-            .add_filter("Scn binary", &["scn"])
+            .add_filter("Scn compressed binary", &["scn"])
             .save_file();
 
         if let Some(path) = file {
@@ -78,11 +78,11 @@ impl MainUi {
 
     pub fn load(&mut self, app_data: &mut AppData) {
         let file = rfd::FileDialog::new()
-            .add_filter("All supported", &["yaml", "yml", "lua", "json"])
+            .add_filter("All supported", &["yaml", "yml", "lua", "json", "scn"])
             .add_filter("Lua", &["lua"])
             .add_filter("JSON", &["json"])
             .add_filter("YAML", &["yaml", "yml"])
-            .add_filter("Scn binary", &["scn"])
+            .add_filter("Scn compressed binary", &["scn"])
             .pick_file();
 
         if let Some(path) = file {
