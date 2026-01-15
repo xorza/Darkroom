@@ -11,7 +11,7 @@ use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 use crate::common::UiEquals;
 
 use crate::common::button::Button;
-use crate::common::toggle_button::ToggleButton;
+
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
@@ -425,7 +425,8 @@ impl GraphUi {
 
                             interaction.run |= Button::new().text("run").show(&mut gui).clicked();
                             gui.ui.add_space(gui.style.padding);
-                            ToggleButton::new(&mut self.autorun_enabled)
+                            Button::new()
+                                .toggle(&mut self.autorun_enabled)
                                 .text("autorun")
                                 .show(&mut gui);
 

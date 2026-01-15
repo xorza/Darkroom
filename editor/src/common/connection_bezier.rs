@@ -88,7 +88,7 @@ impl ConnectionBezier {
         } else {
             gui.ui().interact(Rect::NOTHING, id, Sense::hover())
         };
-        self.polyline.render(&gui.painter());
+        self.polyline.render(gui.painter());
         response
     }
 

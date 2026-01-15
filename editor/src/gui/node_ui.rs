@@ -1,7 +1,7 @@
 use std::any;
 
 use crate::common::button::Button;
-use crate::common::toggle_button::ToggleButton;
+
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
@@ -262,7 +262,8 @@ fn render_cache_btn(
     if visible {
         let mut checked = node.behavior == NodeBehavior::Once;
 
-        let response = ToggleButton::new(&mut checked)
+        let response = Button::new()
+            .toggle(&mut checked)
             .text("cache")
             .enabled(visible)
             .rect(node_layout.cache_button_rect)

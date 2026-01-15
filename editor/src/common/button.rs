@@ -9,6 +9,7 @@ pub struct ButtonBackground {
     idle_fill: Color32,
     hover_fill: Color32,
     active_fill: Color32,
+    checked_fill: Color32,
     inactive_stroke: Stroke,
     hovered_stroke: Stroke,
     radius: f32,
@@ -22,6 +23,7 @@ pub struct Button<'a> {
     background: Option<ButtonBackground>,
     rect: Option<Rect>,
     shapes: Vec<Shape>,
+    toggle_value: Option<&'a mut bool>,
 }
 
 impl<'a> Button<'a> {
@@ -33,6 +35,7 @@ impl<'a> Button<'a> {
             background: None,
             rect: None,
             shapes: Vec::new(),
+            toggle_value: None,
         }
     }
 
@@ -67,9 +70,18 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>) -> Response {
+    pub fn toggle(mut self, value: &'a mut bool) -> Self {
+        self.toggle_value = Some(value);
+        self
+    }
+
+    pub fn show(mut self, gui: &mut Gui<'_>) -> Response {
+        let is_checked = self.toggle_value.as_ref().map(|v| **v).unwrap_or(false);
+
         let text_color = if !self.enabled {
             gui.style.noninteractive_text_color
+        } else if is_checked {
+            gui.style.dark_text_color
         } else {
             gui.style.text_color
         };
@@ -103,6 +115,13 @@ impl<'a> Button<'a> {
             gui.ui().allocate_exact_size(button_size, sense)
         };
 
+        if response.clicked()
+            && self.enabled
+            && let Some(toggle_value) = self.toggle_value.as_mut()
+        {
+            **toggle_value = !**toggle_value;
+        }
+
         if response.hovered()
             && let Some(tooltip) = self.tooltip
             && !tooltip.is_empty()
@@ -115,6 +134,7 @@ impl<'a> Button<'a> {
             idle_fill: gui.style.inactive_bg_fill,
             hover_fill: gui.style.hover_bg_fill,
             active_fill: gui.style.active_bg_fill,
+            checked_fill: gui.style.checked_bg_fill,
             inactive_stroke: gui.style.inactive_bg_stroke,
             hovered_stroke: gui.style.active_bg_stroke,
             radius: gui.style.small_corner_radius,
@@ -122,6 +142,8 @@ impl<'a> Button<'a> {
 
         let fill = if !self.enabled {
             background.disabled_fill
+        } else if is_checked {
+            background.checked_fill
         } else if response.is_pointer_button_down_on() {
             background.active_fill
         } else if response.hovered() {

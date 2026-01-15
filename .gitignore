@@ -9,3 +9,4 @@
 style.toml
 config.toml
 log/
+.claude/settings.local.json

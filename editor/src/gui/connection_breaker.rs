@@ -96,7 +96,7 @@ impl ConnectionBreaker {
             self.built_len = point_len;
         }
 
-        self.mesh.render(&gui.painter());
+        self.mesh.render(gui.painter());
     }
 
     pub fn intersects_rect(&self, rect: Rect) -> bool {
