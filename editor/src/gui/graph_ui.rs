@@ -154,6 +154,10 @@ impl GraphUi {
 
             gui.set_scale(1.0);
             self.buttons(gui, &mut ctx, interaction);
+
+            if background_response.double_clicked_by(PointerButton::Primary) {
+                // popup menu here
+            }
         });
     }
 
