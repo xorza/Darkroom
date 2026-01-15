@@ -29,6 +29,7 @@ pub struct ConnectionBezier {
     end: Pos2,
     scale: f32,
     built_style: Option<ConnectionBezierStyle>,
+    bounding_rect: Rect,
 }
 
 impl ConnectionBezier {
@@ -63,6 +64,8 @@ impl ConnectionBezier {
             points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
         }
         bezier_helper::sample(points.as_mut_slice(), start, end, scale);
+
+        self.bounding_rect = points_bounds(points).unwrap_or(Rect::NOTHING);
     }
 
     pub fn show(
@@ -72,6 +75,13 @@ impl ConnectionBezier {
         id_salt: impl std::hash::Hash,
         style: ConnectionBezierStyle,
     ) -> Response {
+        let id = gui.ui().make_persistent_id(id_salt);
+
+        let expanded_rect = self.bounding_rect.expand(style.stroke_width * 0.5);
+        if !gui.ui().is_rect_visible(expanded_rect) {
+            return gui.ui().interact(Rect::NOTHING, id, Sense::hover());
+        }
+
         self.rebuild_mesh_if_needed(style);
 
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
@@ -79,12 +89,8 @@ impl ConnectionBezier {
             self.hit_test(pos, gui.style.connections.hover_detection_width * gui.scale)
         });
 
-        let id = gui.ui().make_persistent_id(id_salt);
         let response = if hit {
-            let rect = points_bounds(self.polyline.points())
-                .map(|rect| rect.expand(style.stroke_width * 0.5))
-                .unwrap_or(Rect::NOTHING);
-            gui.ui().interact(rect, id, sense)
+            gui.ui().interact(expanded_rect, id, sense)
         } else {
             gui.ui().interact(Rect::NOTHING, id, Sense::hover())
         };
@@ -184,6 +190,7 @@ impl Default for ConnectionBezier {
 
             inited: false,
             points_dirty: false,
+            bounding_rect: Rect::NOTHING,
         }
     }
 }
