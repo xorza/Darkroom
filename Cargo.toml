@@ -53,6 +53,7 @@ arc-swap = { version = "*" }
 bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "*", features = ["std"] }
 bincode = { version = "2", features = ["serde"] }
+rfd = { version = "*" }
 
 
 [profile.bench]

@@ -35,7 +35,7 @@ pub struct AppData {
     pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
 
-    pub current_path: PathBuf,
+    pub current_path: Option<PathBuf>,
     pub status: String,
 
     pub config: Config,
@@ -72,7 +72,7 @@ impl AppData {
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
 
-            current_path: std::env::temp_dir().join("scenarium-graph.lua"),
+            current_path: None,
             status: String::new(),
 
             config,
@@ -95,16 +95,22 @@ impl AppData {
         self.add_status("Created new graph");
     }
 
-    pub fn save_graph(&mut self) {
-        match self.save_to_file(&self.current_path) {
-            Ok(()) => self.add_status(format!("Saved graph to {}", self.current_path.display())),
+    pub fn save_graph(&mut self, path: &Path) {
+        match self.save_to_file(path) {
+            Ok(()) => {
+                self.current_path = Some(path.to_path_buf());
+                self.add_status(format!("Saved graph to {}", path.display()));
+            }
             Err(err) => self.add_status(format!("Save failed: {err}")),
         }
     }
 
-    pub fn load_graph(&mut self) {
-        match self.load_from_file(&self.current_path.clone()) {
-            Ok(()) => self.add_status(format!("Loaded graph from {}", self.current_path.display())),
+    pub fn load_graph(&mut self, path: &Path) {
+        match self.load_from_file(path) {
+            Ok(()) => {
+                self.current_path = Some(path.to_path_buf());
+                self.add_status(format!("Loaded graph from {}", path.display()));
+            }
             Err(err) => self.add_status(format!("Load failed: {err}")),
         }
     }

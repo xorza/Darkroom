@@ -56,12 +56,36 @@ impl MainUi {
     }
 
     fn save(&mut self, app_data: &mut AppData) {
-        app_data.save_graph();
+        if let Some(path) = app_data.current_path.clone() {
+            app_data.save_graph(&path);
+        } else {
+            self.save_as(app_data);
+        }
+    }
+
+    fn save_as(&mut self, app_data: &mut AppData) {
+        let file = rfd::FileDialog::new()
+            .add_filter("Lua", &["lua"])
+            .add_filter("JSON", &["json"])
+            .add_filter("YAML", &["yaml", "yml"])
+            .save_file();
+
+        if let Some(path) = file {
+            app_data.save_graph(&path);
+        }
     }
 
     pub fn load(&mut self, app_data: &mut AppData) {
-        self.graph_ui = GraphUi::default();
-        app_data.load_graph();
+        let file = rfd::FileDialog::new()
+            .add_filter("Lua", &["lua"])
+            .add_filter("JSON", &["json"])
+            .add_filter("YAML", &["yaml", "yml"])
+            .pick_file();
+
+        if let Some(path) = file {
+            self.graph_ui = GraphUi::default();
+            app_data.load_graph(&path);
+        }
     }
 
     pub fn test_graph(&mut self, app_data: &mut AppData) {
