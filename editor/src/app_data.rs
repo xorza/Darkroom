@@ -131,7 +131,10 @@ impl AppData {
                 self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Loaded graph from {}", path.display()));
             }
-            Err(err) => self.add_status(format!("Load failed: {err}")),
+            Err(err) => {
+                self.config.current_path = None;
+                self.add_status(format!("Load failed: {err}"));
+            }
         }
     }
 
