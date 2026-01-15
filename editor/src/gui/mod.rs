@@ -73,6 +73,19 @@ impl<'a> Gui<'a> {
         let style = Rc::clone(&self.style);
         self.ui.horizontal(|ui| {
             let mut gui = Gui::new(ui, &style);
+            gui.scale = self.scale;
+            add_contents(&mut gui)
+        })
+    }
+
+    pub fn vertical<R>(
+        &mut self,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let style = Rc::clone(&self.style);
+        self.ui.vertical(|ui| {
+            let mut gui = Gui::new(ui, &style);
+            gui.scale = self.scale;
             add_contents(&mut gui)
         })
     }
