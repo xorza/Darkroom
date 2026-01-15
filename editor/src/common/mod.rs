@@ -1,3 +1,4 @@
+pub mod area;
 pub mod bezier_helper;
 pub mod button;
 pub mod connection_bezier;

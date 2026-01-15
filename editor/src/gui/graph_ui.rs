@@ -2,9 +2,11 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Area, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
-    Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2, Rect,
+    Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
+
+use crate::common::area::Area;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -374,78 +376,63 @@ impl GraphUi {
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let _small_padding = gui.style.small_padding;
-        let padding = gui.style.padding;
         let rect = gui.rect;
         let egui_ctx = gui.ui().ctx().clone();
         let style = gui.style.clone();
 
-        Area::new(Id::new("graph_ui_top_buttons"))
+        Area::new(Id::new("graph_ui_top_buttons"), &style)
             .sizing_pass(false)
             .default_width(rect.width())
             .movable(false)
             .interactable(false)
             .fixed_pos(rect.min)
-            .show(&egui_ctx, |ui| {
-                Frame::NONE
-                    .fill(Color32::from_black_alpha(128))
-                    .inner_margin(padding)
-                    .show(ui, |ui| {
-                        ui.take_available_width();
+            .show(&egui_ctx, |gui| {
+                gui.ui().take_available_width();
 
-                        let mut gui = Gui::new(ui, &style);
-                        let btn_size = vec2(20.0, 20.0);
-                        gui.horizontal(|gui| {
-                            let mono_font = gui.style.mono_font.clone();
-                            fit_all = Button::default()
-                                .text("a")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui)
-                                .clicked();
-                            view_selected = Button::default()
-                                .text("s")
-                                .font(mono_font.clone())
-                                .size(btn_size)
-                                .show(gui)
-                                .clicked();
-                            reset_view = Button::default()
-                                .text("r")
-                                .font(mono_font)
-                                .size(btn_size)
-                                .show(gui)
-                                .clicked();
-                        });
-                    });
+                let btn_size = vec2(20.0, 20.0);
+                gui.horizontal(|gui| {
+                    let mono_font = gui.style.mono_font.clone();
+                    fit_all = Button::default()
+                        .text("a")
+                        .font(mono_font.clone())
+                        .size(btn_size)
+                        .show(gui)
+                        .clicked();
+                    view_selected = Button::default()
+                        .text("s")
+                        .font(mono_font.clone())
+                        .size(btn_size)
+                        .show(gui)
+                        .clicked();
+                    reset_view = Button::default()
+                        .text("r")
+                        .font(mono_font)
+                        .size(btn_size)
+                        .show(gui)
+                        .clicked();
+                });
             });
 
-        Area::new(Id::new("graph_ui_bottom_buttons"))
+        Area::new(Id::new("graph_ui_bottom_buttons"), &style)
             .fixed_pos(pos2(rect.left(), rect.bottom()))
             .pivot(Align2::LEFT_BOTTOM)
             .movable(false)
             .interactable(false)
-            .show(&egui_ctx, |ui| {
-                Frame::NONE
-                    // .fill(Color32::from_black_alpha(128))
-                    .inner_margin(padding)
-                    .show(ui, |ui| {
-                        let mut gui = Gui::new(ui, &style);
+            .show(&egui_ctx, |gui| {
+                gui.horizontal(|gui| {
+                    interaction.run |= Button::default().text("run").show(gui).clicked();
 
-                        gui.horizontal(|gui| {
-                            interaction.run |= Button::default().text("run").show(gui).clicked();
+                    Button::default()
+                        .toggle(&mut self.autorun_enabled)
+                        .text("autorun")
+                        .show(gui);
 
-                            Button::default()
-                                .toggle(&mut self.autorun_enabled)
-                                .text("autorun")
-                                .show(gui);
-
-                            if self.autorun_enabled {
-                                interaction.autorun = AutorunCommand::Start;
-                            } else {
-                                interaction.autorun = AutorunCommand::Stop;
-                            }
-                        });
-                    });
+                    if self.autorun_enabled {
+                        interaction.autorun = AutorunCommand::Start;
+                    } else {
+                        interaction.autorun = AutorunCommand::Stop;
+                    }
+                });
             });
 
         if reset_view {
