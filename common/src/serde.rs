@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{Read, Write};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -64,15 +64,37 @@ pub fn serialize_into<T: Serialize, W: Write>(
 }
 
 pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -> Result<T> {
+    let mut temp_buffer = Vec::new();
+    deserialize_from(
+        &mut std::io::Cursor::new(serialized),
+        format,
+        &mut temp_buffer,
+    )
+}
+
+pub fn deserialize_from<T: DeserializeOwned, R: Read>(
+    reader: &mut R,
+    format: FileFormat,
+    temp_buffer: &mut Vec<u8>,
+) -> Result<T> {
+    temp_buffer.clear();
+
     match format {
-        FileFormat::Yaml => Ok(serde_yml::from_slice(serialized)?),
-        FileFormat::Json => Ok(serde_json::from_slice(serialized)?),
-        FileFormat::Lua => Ok(serde_lua::from_slice(serialized)?),
-        FileFormat::Toml => Ok(toml::from_slice(serialized)?),
+        FileFormat::Yaml => Ok(serde_yml::from_reader(reader)?),
+        FileFormat::Json => Ok(serde_json::from_reader(reader)?),
+        FileFormat::Lua => {
+            reader.read_to_end(temp_buffer)?;
+            Ok(serde_lua::from_slice(temp_buffer)?)
+        }
+        FileFormat::Toml => {
+            reader.read_to_end(temp_buffer)?;
+            Ok(toml::from_slice(temp_buffer.as_slice())?)
+        }
         FileFormat::Bin => {
+            reader.read_to_end(temp_buffer)?;
             let uncompressed_size =
-                u32::from_le_bytes(serialized[0..4].try_into().unwrap()) as usize;
-            let decompressed = lz4_flex::decompress(&serialized[4..], uncompressed_size)?;
+                u32::from_le_bytes(temp_buffer[0..4].try_into().unwrap()) as usize;
+            let decompressed = lz4_flex::decompress(&temp_buffer[4..], uncompressed_size)?;
             let (decoded, read) =
                 bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())?;
 
