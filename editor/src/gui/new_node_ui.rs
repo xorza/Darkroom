@@ -61,11 +61,6 @@ impl NewNodeUi {
                             }
                         });
                     }
-
-                    gui.ui().separator();
-                    if gui.ui().button("Cancel").clicked() {
-                        self.open = false;
-                    }
                 });
             });
 
