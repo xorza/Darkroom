@@ -22,7 +22,7 @@ impl UiContext {
     pub fn request_redraw(&self) {
         self.ctx.request_repaint();
     }
-    pub fn exit(&self) {
+    pub fn close_app(&self) {
         self.ctx.send_viewport_cmd(ViewportCommand::Close);
     }
 }
@@ -142,7 +142,7 @@ impl MainUi {
                         }
                         if ui.button("Exit").clicked() {
                             ui.close();
-                            self.ui_context.exit();
+                            self.ui_context.close_app();
                         }
                     });
                 });
@@ -232,7 +232,7 @@ impl MainUi {
             .input(|input| input.key_pressed(egui::Key::Q) && input.modifiers.command);
 
         if quit_pressed {
-            self.ui_context.exit();
+            self.ui_context.close_app();
         }
     }
 }
