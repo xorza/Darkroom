@@ -406,6 +406,11 @@ impl GraphUi {
                             fit_all = make_button("a");
                             view_selected = make_button("s");
                             reset_view = make_button("r");
+
+                            // let mut gui = Gui::new(ui, style_clone.clone());
+                            // fit_all = Button::default().text("a").show(&mut gui).clicked();
+                            // view_selected = Button::default().text("s").show(&mut gui).clicked();
+                            // reset_view = Button::default().text("r").show(&mut gui).clicked();
                         });
                     });
             });
@@ -425,7 +430,7 @@ impl GraphUi {
 
                             interaction.run |=
                                 Button::default().text("run").show(&mut gui).clicked();
-                            gui.ui.add_space(gui.style.padding);
+
                             Button::default()
                                 .toggle(&mut self.autorun_enabled)
                                 .text("autorun")
