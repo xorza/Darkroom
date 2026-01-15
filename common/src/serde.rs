@@ -82,10 +82,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     match format {
         FileFormat::Yaml => Ok(serde_yml::from_reader(reader)?),
         FileFormat::Json => Ok(serde_json::from_reader(reader)?),
-        FileFormat::Lua => {
-            reader.read_to_end(temp_buffer)?;
-            Ok(serde_lua::from_slice(temp_buffer)?)
-        }
+        FileFormat::Lua => Ok(serde_lua::from_reader(reader)?),
         FileFormat::Toml => {
             reader.read_to_end(temp_buffer)?;
             Ok(toml::from_slice(temp_buffer.as_slice())?)

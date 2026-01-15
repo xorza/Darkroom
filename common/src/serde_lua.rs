@@ -12,12 +12,20 @@ pub enum SerdeLuaError {
     SerdeJson(#[from] serde_json::Error),
     #[error("Invalid UTF-8")]
     Utf8(#[from] std::str::Utf8Error),
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
 }
 
 pub type SerdeLuaResult<T> = Result<T, SerdeLuaError>;
 
 pub fn from_slice<T: DeserializeOwned>(serialized: &[u8]) -> SerdeLuaResult<T> {
     from_str(std::str::from_utf8(serialized)?)
+}
+
+pub fn from_reader<T: DeserializeOwned, R: std::io::Read>(reader: &mut R) -> SerdeLuaResult<T> {
+    let mut buf = Vec::new();
+    reader.read_to_end(&mut buf)?;
+    from_slice(&buf)
 }
 
 pub fn from_str<T: DeserializeOwned>(serialized: &str) -> SerdeLuaResult<T> {
