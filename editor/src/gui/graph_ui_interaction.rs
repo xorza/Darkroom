@@ -51,6 +51,10 @@ pub enum GraphUiAction {
         before: Binding,
         after: Binding,
     },
+    NodeAdded {
+        view_node: ViewNode,
+        node: Node,
+    },
     NodeRemoved {
         view_node: ViewNode,
         node: Node,
@@ -223,6 +227,10 @@ impl GraphUiAction {
                 );
                 node.inputs[*input_idx].binding = after.clone();
             }
+            GraphUiAction::NodeAdded { view_node, node } => {
+                view_graph.graph.add(node.clone());
+                view_graph.view_nodes.add(view_node.clone());
+            }
             GraphUiAction::NodeRemoved { node, .. } => {
                 view_graph.remove_node(&node.id);
             }
@@ -295,6 +303,9 @@ impl GraphUiAction {
                 );
                 node.inputs[*input_idx].binding = before.clone();
             }
+            GraphUiAction::NodeAdded { node, .. } => {
+                view_graph.remove_node(&node.id);
+            }
             GraphUiAction::NodeRemoved {
                 view_node,
                 node,
@@ -342,7 +353,8 @@ impl GraphUiAction {
 
     pub fn affects_computation(&self) -> bool {
         match self {
-            GraphUiAction::NodeRemoved { .. }
+            GraphUiAction::NodeAdded { .. }
+            | GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::InputChanged { .. }
             | GraphUiAction::CacheToggled { .. }
             | GraphUiAction::EventConnectionChanged { .. } => true,
@@ -356,6 +368,7 @@ impl GraphUiAction {
         match self {
             GraphUiAction::CacheToggled { .. }
             | GraphUiAction::InputChanged { .. }
+            | GraphUiAction::NodeAdded { .. }
             | GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::EventConnectionChanged { .. }
             | GraphUiAction::NodeSelected { .. } => true,

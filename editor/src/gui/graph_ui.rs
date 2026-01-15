@@ -23,6 +23,7 @@ use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{
     AutorunCommand, EventSubscriberChange, GraphUiAction, GraphUiInteraction,
 };
+use crate::gui::new_node_ui::NewNodeUi;
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -64,6 +65,7 @@ pub struct GraphUi {
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
     autorun_enabled: bool,
+    new_node_ui: NewNodeUi,
 }
 
 impl GraphUi {
@@ -155,8 +157,23 @@ impl GraphUi {
             gui.set_scale(1.0);
             self.buttons(gui, &mut ctx, interaction);
 
-            if background_response.double_clicked_by(PointerButton::Primary) {
-                // popup menu here
+            if background_response.double_clicked_by(PointerButton::Primary)
+                && let Some(pos) = pointer_pos
+            {
+                self.new_node_ui.open(pos);
+            }
+
+            if let Some(func) = self.new_node_ui.show(gui, ctx.func_lib) {
+                let node_id = ctx.view_graph.add_node_from_func(func);
+                let view_node = ctx.view_graph.view_nodes.by_key_mut(&node_id).unwrap();
+                let screen_pos = self.new_node_ui.position();
+                let origin = rect.min;
+                let graph_pos = (screen_pos - origin - ctx.view_graph.pan) / ctx.view_graph.scale;
+                view_node.pos = graph_pos.to_pos2();
+
+                let view_node = view_node.clone();
+                let node = ctx.view_graph.graph.by_id(&node_id).unwrap().clone();
+                interaction.add_action(GraphUiAction::NodeAdded { view_node, node });
             }
         });
     }

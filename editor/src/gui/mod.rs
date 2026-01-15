@@ -13,6 +13,7 @@ pub mod graph_layout;
 pub mod graph_ui;
 pub mod graph_ui_interaction;
 pub mod log_ui;
+pub mod new_node_ui;
 pub mod node_layout;
 pub mod node_ui;
 pub mod polyline_mesh;
