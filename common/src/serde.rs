@@ -36,8 +36,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
             serde_json::to_writer_pretty(writer, &value).unwrap();
         }
         FileFormat::Lua => {
-            let s = serde_lua::to_string(&value).unwrap().normalize();
-            writer.write_all(s.as_bytes()).unwrap();
+            serde_lua::to_writer(writer, &value).unwrap();
         }
         FileFormat::Bin => {
             bincode::serde::encode_into_std_write(value, temp_buffer, bincode::config::standard())

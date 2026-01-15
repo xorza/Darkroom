@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use mlua::{Lua, LuaSerdeExt, Value};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -20,101 +22,108 @@ pub fn from_str<T: DeserializeOwned>(serialized: &str) -> SerdeLuaResult<T> {
 }
 
 pub fn to_string<T: Serialize>(value: &T) -> SerdeLuaResult<String> {
-    let json_value = serde_json::to_value(value)?;
-    let mut out = String::new();
-    out.push_str("return ");
-    write_lua_value(&json_value, 0, &mut out);
-    out.push('\n');
-    Ok(out)
+    let mut out = Vec::new();
+    to_writer(&mut out, value)?;
+    Ok(String::from_utf8(out).expect("lua output should be valid utf-8"))
 }
 
-fn write_lua_value(value: &serde_json::Value, indent: usize, out: &mut String) {
+pub fn to_writer<W: Write, T: Serialize>(writer: &mut W, value: &T) -> SerdeLuaResult<()> {
+    let json_value = serde_json::to_value(value)?;
+    writer.write_all(b"return ").unwrap();
+    write_lua_value(&json_value, 0, writer);
+    writer.write_all(b"\n").unwrap();
+    Ok(())
+}
+
+fn write_lua_value<W: Write>(value: &serde_json::Value, indent: usize, out: &mut W) {
     match value {
-        serde_json::Value::Null => out.push_str("nil"),
+        serde_json::Value::Null => out.write_all(b"nil").unwrap(),
         serde_json::Value::Bool(value) => {
             if *value {
-                out.push_str("true");
+                out.write_all(b"true").unwrap();
             } else {
-                out.push_str("false");
+                out.write_all(b"false").unwrap();
             }
         }
-        serde_json::Value::Number(value) => out.push_str(&value.to_string()),
+        serde_json::Value::Number(value) => write!(out, "{}", value).unwrap(),
         serde_json::Value::String(value) => write_lua_string(value, out),
         serde_json::Value::Array(values) => write_lua_array(values, indent, out),
         serde_json::Value::Object(values) => write_lua_object(values, indent, out),
     }
 }
 
-fn write_lua_array(values: &[serde_json::Value], indent: usize, out: &mut String) {
+fn write_lua_array<W: Write>(values: &[serde_json::Value], indent: usize, out: &mut W) {
     if values.is_empty() {
-        out.push_str("{}");
+        out.write_all(b"{}").unwrap();
         return;
     }
 
-    out.push_str("{\n");
+    out.write_all(b"{\n").unwrap();
     let next_indent = indent + 1;
     for (index, value) in values.iter().enumerate() {
         push_indent(next_indent, out);
         write_lua_value(value, next_indent, out);
         if index + 1 != values.len() {
-            out.push(',');
+            out.write_all(b",").unwrap();
         }
-        out.push('\n');
+        out.write_all(b"\n").unwrap();
     }
     push_indent(indent, out);
-    out.push('}');
+    out.write_all(b"}").unwrap();
 }
 
-fn write_lua_object(
+fn write_lua_object<W: Write>(
     values: &serde_json::Map<String, serde_json::Value>,
     indent: usize,
-    out: &mut String,
+    out: &mut W,
 ) {
     if values.is_empty() {
-        out.push_str("{}");
+        out.write_all(b"{}").unwrap();
         return;
     }
 
-    out.push_str("{\n");
+    out.write_all(b"{\n").unwrap();
     let next_indent = indent + 1;
     let len = values.len();
     for (index, (key, value)) in values.iter().enumerate() {
         push_indent(next_indent, out);
         if is_lua_identifier(key) {
-            out.push_str(key);
+            out.write_all(key.as_bytes()).unwrap();
         } else {
-            out.push('[');
+            out.write_all(b"[").unwrap();
             write_lua_string(key, out);
-            out.push(']');
+            out.write_all(b"]").unwrap();
         }
-        out.push_str(" = ");
+        out.write_all(b" = ").unwrap();
         write_lua_value(value, next_indent, out);
         if index + 1 != len {
-            out.push(',');
+            out.write_all(b",").unwrap();
         }
-        out.push('\n');
+        out.write_all(b"\n").unwrap();
     }
     push_indent(indent, out);
-    out.push('}');
+    out.write_all(b"}").unwrap();
 }
 
-fn write_lua_string(value: &str, out: &mut String) {
-    out.push('"');
+fn write_lua_string<W: Write>(value: &str, out: &mut W) {
+    out.write_all(b"\"").unwrap();
     for ch in value.chars() {
         match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if ch.is_ascii_graphic() || ch == ' ' => out.push(ch),
+            '\\' => out.write_all(b"\\\\").unwrap(),
+            '"' => out.write_all(b"\\\"").unwrap(),
+            '\n' => out.write_all(b"\\n").unwrap(),
+            '\r' => out.write_all(b"\\r").unwrap(),
+            '\t' => out.write_all(b"\\t").unwrap(),
+            ch if ch.is_ascii_graphic() || ch == ' ' => {
+                let mut buf = [0u8; 4];
+                out.write_all(ch.encode_utf8(&mut buf).as_bytes()).unwrap();
+            }
             ch => {
-                use std::fmt::Write;
-                write!(out, "\\u{{{:x}}}", ch as u32).expect("writing to a string should not fail");
+                write!(out, "\\u{{{:x}}}", ch as u32).unwrap();
             }
         }
     }
-    out.push('"');
+    out.write_all(b"\"").unwrap();
 }
 
 fn is_lua_identifier(value: &str) -> bool {
@@ -136,8 +145,8 @@ fn is_lua_identifier_continue(ch: char) -> bool {
     ch == '_' || ch.is_ascii_alphanumeric()
 }
 
-fn push_indent(indent: usize, out: &mut String) {
+fn push_indent<W: Write>(indent: usize, out: &mut W) {
     for _ in 0..indent {
-        out.push_str("  ");
+        out.write_all(b"  ").unwrap();
     }
 }
