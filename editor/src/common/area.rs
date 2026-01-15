@@ -7,14 +7,12 @@ use crate::gui::{Gui, style::Style};
 #[derive(Debug)]
 pub struct Area {
     inner: egui::Area,
-    style: Rc<Style>,
 }
 
 impl Area {
-    pub fn new(id: Id, style: &Rc<Style>) -> Self {
+    pub fn new(id: Id) -> Self {
         Self {
             inner: egui::Area::new(id),
-            style: Rc::clone(style),
         }
     }
 
@@ -50,11 +48,11 @@ impl Area {
 
     pub fn show<R>(
         self,
-        ctx: &egui::Context,
+        gui: &mut Gui,
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
-        let style = self.style;
-        self.inner.show(ctx, |ui| {
+        let style = gui.style.clone();
+        self.inner.show(gui.ui().ctx(), |ui| {
             let mut gui = Gui::new(ui, &style);
             add_contents(&mut gui)
         })

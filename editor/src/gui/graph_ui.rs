@@ -377,16 +377,14 @@ impl GraphUi {
         let mut reset_view = false;
 
         let rect = gui.rect;
-        let egui_ctx = gui.ui().ctx().clone();
-        let style = gui.style.clone();
 
-        Area::new(Id::new("graph_ui_top_buttons"), &style)
+        Area::new(Id::new("graph_ui_top_buttons"))
             .sizing_pass(false)
             .default_width(rect.width())
             .movable(false)
             .interactable(false)
-            .fixed_pos(rect.min)
-            .show(&egui_ctx, |gui| {
+            .pivot(Align2::LEFT_TOP)
+            .show(gui, |gui| {
                 gui.ui().take_available_width();
 
                 let btn_size = vec2(20.0, 20.0);
@@ -413,12 +411,12 @@ impl GraphUi {
                 });
             });
 
-        Area::new(Id::new("graph_ui_bottom_buttons"), &style)
+        Area::new(Id::new("graph_ui_bottom_buttons"))
             .fixed_pos(pos2(rect.left(), rect.bottom()))
             .pivot(Align2::LEFT_BOTTOM)
             .movable(false)
             .interactable(false)
-            .show(&egui_ctx, |gui| {
+            .show(gui, |gui| {
                 gui.horizontal(|gui| {
                     interaction.run |= Button::default().text("run").show(gui).clicked();
 
