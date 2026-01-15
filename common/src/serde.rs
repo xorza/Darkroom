@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -12,28 +14,56 @@ pub fn is_false(value: &bool) -> bool {
 pub type Result<T> = anyhow::Result<T>;
 
 pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
-    match format {
-        FileFormat::Yaml => serde_yml::to_string(value)
-            .unwrap()
-            .normalize()
-            .into_bytes(),
-        FileFormat::Json => serde_json::to_string_pretty(value)
-            .unwrap()
-            .normalize()
-            .into_bytes(),
-        FileFormat::Lua => serde_lua::to_string(value)
-            .unwrap()
-            .normalize()
-            .into_bytes(),
-        FileFormat::Bin => {
-            let encoded =
-                bincode::serde::encode_to_vec(value, bincode::config::standard()).unwrap();
-            let compressed = lz4_flex::compress_prepend_size(&encoded);
+    let mut buffer = Vec::new();
+    let mut temp_buffer = Vec::new();
+    serialize_into(value, format, &mut buffer, &mut temp_buffer);
+    buffer
+}
 
-            println!("Compressed size: {}/{}", compressed.len(), encoded.len());
-            compressed
+pub fn serialize_into<T: Serialize, W: Write>(
+    value: &T,
+    format: FileFormat,
+    writer: &mut W,
+    temp_buffer: &mut Vec<u8>,
+) {
+    temp_buffer.clear();
+
+    match format {
+        FileFormat::Yaml => {
+            let s = serde_yml::to_string(value).unwrap().normalize();
+            writer.write_all(s.as_bytes()).unwrap();
         }
-        FileFormat::Toml => toml::to_string(value).unwrap().normalize().into_bytes(),
+        FileFormat::Json => {
+            let s = serde_json::to_string_pretty(value).unwrap().normalize();
+            writer.write_all(s.as_bytes()).unwrap();
+        }
+        FileFormat::Lua => {
+            let s = serde_lua::to_string(value).unwrap().normalize();
+            writer.write_all(s.as_bytes()).unwrap();
+        }
+        FileFormat::Bin => {
+            bincode::serde::encode_into_std_write(value, temp_buffer, bincode::config::standard())
+                .unwrap();
+
+            // Prepend uncompressed size (4 bytes, little-endian)
+            let uncompressed_size = temp_buffer.len();
+            writer
+                .write_all(&(uncompressed_size as u32).to_le_bytes())
+                .unwrap();
+
+            let max_compressed_size = lz4_flex::block::get_maximum_output_size(uncompressed_size);
+            temp_buffer.resize(uncompressed_size + max_compressed_size, 0);
+
+            let (input, output) = temp_buffer.split_at_mut(uncompressed_size);
+
+            let compressed = lz4_flex::compress_into(input, output).unwrap();
+            let written = writer.write(&output[..compressed]).unwrap();
+            assert_eq!(compressed, written);
+        }
+        FileFormat::Toml => {
+            let s = toml::to_string(value).unwrap().normalize();
+            writer.write_all(s.as_bytes()).unwrap();
+        }
     }
 }
 
