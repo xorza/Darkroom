@@ -2,7 +2,10 @@ use std::rc::Rc;
 
 use egui::{Color32, CornerRadius, InnerResponse, Margin, Stroke};
 
-use crate::gui::{Gui, style::Style};
+use crate::gui::{
+    Gui,
+    style::{PopupStyle, Style},
+};
 
 #[derive(Debug, Clone)]
 pub struct Frame {
@@ -13,6 +16,16 @@ impl Frame {
     pub fn none() -> Self {
         Self {
             inner: egui::Frame::NONE,
+        }
+    }
+
+    pub fn popup(style: &PopupStyle) -> Self {
+        Self {
+            inner: egui::Frame::NONE
+                .fill(style.fill)
+                .stroke(style.stroke)
+                .corner_radius(style.corner_radius)
+                .inner_margin(style.padding),
         }
     }
 

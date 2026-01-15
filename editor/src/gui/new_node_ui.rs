@@ -39,7 +39,7 @@ impl NewNodeUi {
             .fixed_pos(self.position)
             .order(Order::Foreground)
             .show(gui, |gui| {
-                Frame::none().show(gui, |gui| {
+                Frame::popup(&gui.style.popup).show(gui, |gui| {
                     gui.ui().set_min_width(150.0);
 
                     let mut categories: Vec<&str> =

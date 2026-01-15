@@ -47,6 +47,7 @@ pub struct Style {
     pub connections: ConnectionStyle,
     pub node: NodeStyle,
     pub menu: MenuStyle,
+    pub popup: PopupStyle,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -100,6 +101,14 @@ pub struct NodeStyle {
 #[derive(Debug, Clone, Default)]
 pub struct MenuStyle {
     pub button_padding: Vec2,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PopupStyle {
+    pub fill: Color32,
+    pub stroke: Stroke,
+    pub corner_radius: f32,
+    pub padding: f32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -258,6 +267,12 @@ impl Style {
         };
         self.menu = MenuStyle {
             button_padding: Vec2::new(scaled(12.0), scaled(3.0)),
+        };
+        self.popup = PopupStyle {
+            fill: settings.color_bg_noninteractive,
+            stroke: inactive_bg_stroke,
+            corner_radius: scaled(settings.corner_radius),
+            padding: scaled(settings.padding),
         };
     }
 
