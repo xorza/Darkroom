@@ -394,21 +394,25 @@ impl GraphUi {
                         ui.take_available_width();
 
                         let mut gui = Gui::new(ui, &style);
+                        let btn_size = vec2(20.0, 20.0);
                         gui.horizontal(|gui| {
                             let mono_font = gui.style.mono_font.clone();
                             fit_all = Button::default()
                                 .text("a")
                                 .font(mono_font.clone())
+                                .size(btn_size)
                                 .show(gui)
                                 .clicked();
                             view_selected = Button::default()
                                 .text("s")
                                 .font(mono_font.clone())
+                                .size(btn_size)
                                 .show(gui)
                                 .clicked();
                             reset_view = Button::default()
                                 .text("r")
                                 .font(mono_font)
+                                .size(btn_size)
                                 .show(gui)
                                 .clicked();
                         });

@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, vec2};
+use egui::{Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
 
 use crate::gui::Gui;
 
@@ -23,6 +23,7 @@ pub struct Button<'a> {
     tooltip: Option<&'a str>,
     background: Option<ButtonBackground>,
     rect: Option<Rect>,
+    size: Option<Vec2>,
     shapes: Vec<Shape>,
     toggle_value: Option<&'a mut bool>,
 }
@@ -36,6 +37,7 @@ impl<'a> Default for Button<'a> {
             tooltip: None,
             background: None,
             rect: None,
+            size: None,
             shapes: Vec::new(),
             toggle_value: None,
         }
@@ -55,6 +57,11 @@ impl<'a> Button<'a> {
 
     pub fn font(mut self, font: FontId) -> Self {
         self.font = Some(font);
+        self
+    }
+
+    pub fn size(mut self, size: Vec2) -> Self {
+        self.size = Some(size);
         self
     }
 
@@ -113,6 +120,8 @@ impl<'a> Button<'a> {
         let (rect, response) = if let Some(rect) = self.rect {
             let response = gui.ui().allocate_rect(rect, sense);
             (rect, response)
+        } else if let Some(size) = self.size {
+            gui.ui().allocate_exact_size(size, sense)
         } else {
             // Autosize: calculate button size based on text
             // todo also include provided shapes size
