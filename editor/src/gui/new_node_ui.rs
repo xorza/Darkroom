@@ -37,7 +37,7 @@ impl NewNodeUi {
 
         let popup_id = gui.ui().make_persistent_id("new_node_popup");
 
-        Area::new(popup_id)
+        let popup_response = Area::new(popup_id)
             .fixed_pos(self.position)
             .order(Order::Foreground)
             .show(gui, |gui| {
@@ -102,6 +102,16 @@ impl NewNodeUi {
                     });
                 });
             });
+
+        // Check for clicks outside the popup
+        if gui.ui().input(|i| i.pointer.any_pressed()) {
+            let popup_rect = popup_response.response.rect;
+            if let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
+                && !popup_rect.contains(pointer_pos)
+            {
+                self.open = false;
+            }
+        }
 
         if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
             self.open = false;

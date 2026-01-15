@@ -175,22 +175,6 @@ impl GraphUi {
         interaction: &mut GraphUiInteraction,
         background_response: Response,
     ) {
-        // Close menu on any graph bg interaction
-        if self.new_node_ui.is_open() {
-            let newid = gui.ui().next_auto_id();
-            let rect = gui.rect;
-            let temp_background_response =
-                gui.ui()
-                    .interact(rect, newid, Sense::hover() | Sense::click() | Sense::drag());
-
-            let should_close = temp_background_response.is_pointer_button_down_on()
-                || self.state != InteractionState::Idle;
-            if should_close {
-                self.new_node_ui.close();
-                return;
-            }
-        }
-
         // Open menu on double-click
         if background_response.double_clicked_by(PointerButton::Primary)
             && let Some(pos) = pointer_pos
