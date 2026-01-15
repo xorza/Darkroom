@@ -2,11 +2,12 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2, Rect,
-    Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Color32, FontId, Id, Key, Layout, Margin, PointerButton, Pos2, Rect, Response,
+    RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 
 use crate::common::area::Area;
+use crate::common::frame::Frame;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -387,28 +388,31 @@ impl GraphUi {
             .show(gui, |gui| {
                 gui.ui().take_available_width();
 
-                gui.horizontal(|gui| {
-                    let btn_size = vec2(20.0, 20.0);
-                    let mono_font = gui.style.mono_font.clone();
+                let padding = gui.style.padding;
+                Frame::none().inner_margin(padding).show(gui, |gui| {
+                    gui.horizontal(|gui| {
+                        let btn_size = vec2(20.0, 20.0);
+                        let mono_font = gui.style.mono_font.clone();
 
-                    fit_all = Button::default()
-                        .text("a")
-                        .font(mono_font.clone())
-                        .size(btn_size)
-                        .show(gui)
-                        .clicked();
-                    view_selected = Button::default()
-                        .text("s")
-                        .font(mono_font.clone())
-                        .size(btn_size)
-                        .show(gui)
-                        .clicked();
-                    reset_view = Button::default()
-                        .text("r")
-                        .font(mono_font)
-                        .size(btn_size)
-                        .show(gui)
-                        .clicked();
+                        fit_all = Button::default()
+                            .text("a")
+                            .font(mono_font.clone())
+                            .size(btn_size)
+                            .show(gui)
+                            .clicked();
+                        view_selected = Button::default()
+                            .text("s")
+                            .font(mono_font.clone())
+                            .size(btn_size)
+                            .show(gui)
+                            .clicked();
+                        reset_view = Button::default()
+                            .text("r")
+                            .font(mono_font)
+                            .size(btn_size)
+                            .show(gui)
+                            .clicked();
+                    });
                 });
             });
 
@@ -418,19 +422,22 @@ impl GraphUi {
             .movable(false)
             .interactable(false)
             .show(gui, |gui| {
-                gui.horizontal(|gui| {
-                    interaction.run |= Button::default().text("run").show(gui).clicked();
+                let padding = gui.style.padding;
+                Frame::none().inner_margin(padding).show(gui, |gui| {
+                    gui.horizontal(|gui| {
+                        interaction.run |= Button::default().text("run").show(gui).clicked();
 
-                    Button::default()
-                        .toggle(&mut self.autorun_enabled)
-                        .text("autorun")
-                        .show(gui);
+                        Button::default()
+                            .toggle(&mut self.autorun_enabled)
+                            .text("autorun")
+                            .show(gui);
 
-                    if self.autorun_enabled {
-                        interaction.autorun = AutorunCommand::Start;
-                    } else {
-                        interaction.autorun = AutorunCommand::Stop;
-                    }
+                        if self.autorun_enabled {
+                            interaction.autorun = AutorunCommand::Start;
+                        } else {
+                            interaction.autorun = AutorunCommand::Stop;
+                        }
+                    });
                 });
             });
 
