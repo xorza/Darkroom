@@ -87,9 +87,13 @@ impl ScenariumEditor {
             main_ui,
         };
 
-        app.main_ui.load(&mut app.app_data);
+        app.init();
 
         app
+    }
+
+    fn init(&mut self) {
+        self.main_ui.load(&mut self.app_data);
     }
 }
 

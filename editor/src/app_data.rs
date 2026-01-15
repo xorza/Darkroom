@@ -11,7 +11,7 @@ use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
 use graph::worker::WorkerMessage;
 use graph::worker::{EventRef, ProcessingCallback, Worker};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Notify;
 
@@ -35,7 +35,6 @@ pub struct AppData {
     pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
 
-    pub current_path: Option<PathBuf>,
     pub status: String,
 
     pub config: Config,
@@ -66,13 +65,12 @@ impl AppData {
         func_lib.merge(TimersFuncLib::default());
         func_lib.merge(EditorFuncLib::new());
 
-        Self {
+        let mut result = Self {
             func_lib,
             view_graph: ViewGraph::default(),
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
 
-            current_path: None,
             status: String::new(),
 
             config,
@@ -87,7 +85,13 @@ impl AppData {
             graph_dirty: true,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
+        };
+
+        if let Some(path) = result.config.current_path.clone() {
+            result.load_graph(&path);
         }
+
+        result
     }
 
     pub fn empty_graph(&mut self) {
@@ -98,7 +102,7 @@ impl AppData {
     pub fn save_graph(&mut self, path: &Path) {
         match self.save_to_file(path) {
             Ok(()) => {
-                self.current_path = Some(path.to_path_buf());
+                self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Saved graph to {}", path.display()));
             }
             Err(err) => self.add_status(format!("Save failed: {err}")),
@@ -106,9 +110,18 @@ impl AppData {
     }
 
     pub fn load_graph(&mut self, path: &Path) {
+        // let load = || {
+        //     let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
+        //         .map_err(anyhow::Error::from)?;
+        //     let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
+        //     self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
+
+        //     Ok(())
+        // };
+
         match self.load_from_file(path) {
             Ok(()) => {
-                self.current_path = Some(path.to_path_buf());
+                self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Loaded graph from {}", path.display()));
             }
             Err(err) => self.add_status(format!("Load failed: {err}")),

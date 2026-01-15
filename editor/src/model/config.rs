@@ -1,7 +1,11 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-pub(crate) struct Config {}
+pub(crate) struct Config {
+    pub current_path: Option<PathBuf>,
+}
 
 impl Config {
     pub fn load_or_default() -> Self {

@@ -56,7 +56,7 @@ impl MainUi {
     }
 
     fn save(&mut self, app_data: &mut AppData) {
-        if let Some(path) = app_data.current_path.clone() {
+        if let Some(path) = app_data.config.current_path.clone() {
             app_data.save_graph(&path);
         } else {
             self.save_as(app_data);
@@ -119,6 +119,10 @@ impl MainUi {
                         }
                         if ui.button("Save").clicked() {
                             self.save(app_data);
+                            ui.close();
+                        }
+                        if ui.button("Save as").clicked() {
+                            self.save_as(app_data);
                             ui.close();
                         }
                         if ui.button("Load").clicked() {
