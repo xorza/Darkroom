@@ -119,7 +119,7 @@ impl Style {
             ..Default::default()
         };
 
-        result.apply();
+        result.apply_scale();
 
         result
     }
@@ -129,10 +129,10 @@ impl Style {
         assert!(scale > 0.0, "style scale must be greater than 0");
 
         self.scale = scale;
-        self.apply();
+        self.apply_scale();
     }
 
-    pub fn apply(&mut self) {
+    fn apply_scale(&mut self) {
         let scale = self.scale;
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
@@ -262,6 +262,11 @@ impl Style {
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
+        egui_style.spacing.item_spacing = Vec2::splat(self.padding);
+        egui_style.spacing.button_padding = Vec2::new(self.padding, self.small_padding);
+        egui_style.spacing.indent = self.padding;
+        egui_style.spacing.window_margin = egui::Margin::same(self.padding as i8);
+
         let visuals = &mut egui_style.visuals;
         visuals.dark_mode = true;
         visuals.override_text_color = Some(self.text_color);
