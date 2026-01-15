@@ -66,6 +66,10 @@ impl NodeUi {
 
             let node_layout = body_drag(gui, ctx, graph_layout, ui_interaction, &node_id);
 
+            if !gui.ui().is_rect_visible(node_layout.body_rect) {
+                continue;
+            }
+
             let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
