@@ -67,36 +67,18 @@ impl ActionUndoStack {
             "undo stack should not store empty action batches"
         );
 
-        let start = buffer.len();
-
         temp_buffer.clear();
-        bincode::serde::encode_into_std_write(actions, temp_buffer, bincode::config::standard())
-            .expect("undo stack action batch should serialize via bincode");
-
-        let max_size = lz4_flex::block::get_maximum_output_size(temp_buffer.len());
-
-        buffer.resize(buffer.len() + max_size, 0);
-        let compressed_len =
-            lz4_flex::compress_into(temp_buffer.as_slice(), &mut buffer[start..]).unwrap();
-        let end = start + compressed_len;
-        buffer.truncate(end);
+        let start = buffer.len();
+        common::serde::serialize_into(actions, FileFormat::Bin, buffer, temp_buffer);
+        let end = buffer.len();
 
         start..end
     }
 
-    fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
-        temp_buffer.clear();
-        *temp_buffer = lz4_flex::decompress(bytes, 1024 * 1024)
-            .expect("undo stack action batch should decompress via lz4");
-        let (decoded, read) =
-            bincode::serde::decode_from_slice(temp_buffer, bincode::config::standard())
-                .expect("undo stack action batch should deserialize via bincode");
-        assert_eq!(
-            read,
-            temp_buffer.len(),
-            "undo stack action batch should decode fully"
-        );
-        decoded
+    fn deserialize_actions(bytes: &[u8], _temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
+        _temp_buffer.clear();
+
+        common::serde::deserialize(bytes, FileFormat::Bin).unwrap()
     }
 
     fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {
@@ -599,15 +581,10 @@ mod tests {
 
         for (range_idx, range) in stack.undo_stack.iter().enumerate() {
             let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
-            let decompressed = lz4_flex::decompress(bytes, 1024 * 1024).unwrap_or_else(|err| {
-                panic!("undo range {} failed to decompress: {}", range_idx, err)
-            });
-            let (decoded, read) = bincode::serde::decode_from_slice::<Vec<GraphUiAction>, _>(
-                &decompressed,
-                bincode::config::standard(),
-            )
-            .unwrap_or_else(|err| panic!("undo range {} failed to decode: {}", range_idx, err));
-            assert_eq!(read, decompressed.len());
+            let decoded: Vec<GraphUiAction> = common::serde::deserialize(bytes, FileFormat::Bin)
+                .unwrap_or_else(|err| {
+                    panic!("undo range {} failed to deserialize: {}", range_idx, err)
+                });
             assert_eq!(decoded.len(), 1);
         }
 

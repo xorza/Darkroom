@@ -21,7 +21,7 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
 }
 
 pub fn serialize_into<T: Serialize, W: Write>(
-    value: &T,
+    value: T,
     format: FileFormat,
     writer: &mut W,
     temp_buffer: &mut Vec<u8>,
@@ -30,15 +30,15 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
     match format {
         FileFormat::Yaml => {
-            let s = serde_yml::to_string(value).unwrap().normalize();
+            let s = serde_yml::to_string(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
         FileFormat::Json => {
-            let s = serde_json::to_string_pretty(value).unwrap().normalize();
+            let s = serde_json::to_string_pretty(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
         FileFormat::Lua => {
-            let s = serde_lua::to_string(value).unwrap().normalize();
+            let s = serde_lua::to_string(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
         FileFormat::Bin => {
@@ -60,7 +60,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
             writer.write_all(&output[..compressed_len]).unwrap();
         }
         FileFormat::Toml => {
-            let s = toml::to_string(value).unwrap().normalize();
+            let s = toml::to_string(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
     }
@@ -87,9 +87,7 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
         FileFormat::Bin => {
             let uncompressed_size =
                 u32::from_le_bytes(serialized[0..4].try_into().unwrap()) as usize;
-
             let decompressed = lz4_flex::decompress(&serialized[4..], uncompressed_size)?;
-
             let (decoded, read) =
                 bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())?;
 
