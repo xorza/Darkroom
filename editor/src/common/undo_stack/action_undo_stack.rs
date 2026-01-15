@@ -67,7 +67,6 @@ impl ActionUndoStack {
             "undo stack should not store empty action batches"
         );
 
-        temp_buffer.clear();
         let start = buffer.len();
         common::serde::serialize_into(actions, FileFormat::Bin, buffer, temp_buffer);
         let end = buffer.len();
@@ -75,10 +74,13 @@ impl ActionUndoStack {
         start..end
     }
 
-    fn deserialize_actions(bytes: &[u8], _temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
-        _temp_buffer.clear();
-
-        common::serde::deserialize(bytes, FileFormat::Bin).unwrap()
+    fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
+        common::serde::deserialize_from(
+            &mut std::io::Cursor::new(bytes),
+            FileFormat::Bin,
+            temp_buffer,
+        )
+        .unwrap()
     }
 
     fn append_bytes(target: &mut Vec<u8>, bytes: &[u8]) -> std::ops::Range<usize> {
