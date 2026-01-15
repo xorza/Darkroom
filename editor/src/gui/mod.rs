@@ -19,20 +19,10 @@ pub mod polyline_mesh;
 pub mod style;
 pub mod style_settings;
 
-#[derive(Clone)]
-struct GuiPainter(Painter);
-
-impl std::fmt::Debug for GuiPainter {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GuiPainter").finish()
-    }
-}
-
 // #[derive(Debug)]
 pub struct Gui<'a> {
     ui: &'a mut Ui,
     pub style: Style,
-    painter: GuiPainter,
     pub rect: Rect,
     pub scale: f32,
     _marker: PhantomData<&'a mut Ui>,
@@ -41,12 +31,10 @@ pub struct Gui<'a> {
 impl<'a> Gui<'a> {
     pub fn new(ui: &'a mut Ui, style: Style) -> Self {
         let rect = ui.available_rect_before_wrap();
-        let painter = GuiPainter(ui.painter_at(rect));
 
         Self {
             ui,
             style,
-            painter,
             rect,
             scale: 1.0,
             _marker: PhantomData,
@@ -57,8 +45,8 @@ impl<'a> Gui<'a> {
         self.ui
     }
 
-    pub fn painter(&self) -> Painter {
-        self.painter.0.clone()
+    pub fn painter(&self) -> &Painter {
+        self.ui.painter()
     }
 
     pub fn set_scale(&mut self, scale: f32) {
