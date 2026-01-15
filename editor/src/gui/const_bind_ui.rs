@@ -66,9 +66,6 @@ impl<'a> ConstBindFrame<'a> {
         let mono_font = gui.style.mono_font.clone();
 
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
-            // if !matches!(input.binding, Binding::Const(_)) {
-            //     continue;
-            // }
             let Binding::Const(value) = &mut input.binding else {
                 continue;
             };
@@ -140,7 +137,7 @@ impl<'a> ConstBindFrame<'a> {
                     .style(const_bind_style)
                     .show(gui, ("const_int_drag", node.id, input_idx))
             } else {
-                continue;
+                todo!();
             };
 
             if let Some(breaker) = breaker {
