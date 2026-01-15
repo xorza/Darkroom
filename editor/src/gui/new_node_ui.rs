@@ -1,9 +1,9 @@
-use egui::{Align, Color32, Key, Order, Pos2, Stroke, Vec2};
+use egui::{Align, Key, Order, Pos2, Vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
-use crate::common::button::{Button, ButtonBackground};
+use crate::common::button::Button;
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
@@ -59,16 +59,7 @@ impl NewNodeUi {
                                 }
                                 let btn_size = Vec2::new(gui.ui().available_width(), 20.0);
                                 if Button::default()
-                                    .background(ButtonBackground {
-                                        disabled_fill: Color32::TRANSPARENT,
-                                        idle_fill: Color32::TRANSPARENT,
-                                        hover_fill: gui.style.hover_bg_fill,
-                                        active_fill: gui.style.active_bg_fill,
-                                        checked_fill: Color32::TRANSPARENT,
-                                        inactive_stroke: Stroke::NONE,
-                                        hovered_stroke: Stroke::NONE,
-                                        radius: 0.0,
-                                    })
+                                    .background(gui.style.list_button)
                                     .size(btn_size)
                                     .text(&func.name)
                                     .align(Align::Min)

@@ -48,6 +48,7 @@ pub struct Style {
     pub node: NodeStyle,
     pub menu: MenuStyle,
     pub popup: PopupStyle,
+    pub list_button: ButtonStyle,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,18 @@ pub struct PopupStyle {
     pub stroke: Stroke,
     pub corner_radius: f32,
     pub padding: f32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ButtonStyle {
+    pub disabled_fill: Color32,
+    pub idle_fill: Color32,
+    pub hover_fill: Color32,
+    pub active_fill: Color32,
+    pub checked_fill: Color32,
+    pub inactive_stroke: Stroke,
+    pub hovered_stroke: Stroke,
+    pub radius: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +253,16 @@ impl Style {
                 stroke: inactive_bg_stroke,
                 corner_radius: scaled(style_settings.corner_radius),
                 padding: scaled(style_settings.padding),
+            },
+            list_button: ButtonStyle {
+                disabled_fill: Color32::TRANSPARENT,
+                idle_fill: Color32::TRANSPARENT,
+                hover_fill: style_settings.color_bg_hover,
+                active_fill: style_settings.color_bg_active,
+                checked_fill: Color32::TRANSPARENT,
+                inactive_stroke: Stroke::NONE,
+                hovered_stroke: Stroke::NONE,
+                radius: 0.0,
             },
             style_settings,
         }

@@ -1,19 +1,8 @@
 use eframe::egui;
-use egui::{Align, Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
+use egui::{Align, FontId, Rect, Response, Sense, Shape, StrokeKind, Vec2, vec2};
 
 use crate::gui::Gui;
-
-#[derive(Debug, Clone, Copy)]
-pub struct ButtonBackground {
-    pub disabled_fill: Color32,
-    pub idle_fill: Color32,
-    pub hover_fill: Color32,
-    pub active_fill: Color32,
-    pub checked_fill: Color32,
-    pub inactive_stroke: Stroke,
-    pub hovered_stroke: Stroke,
-    pub radius: f32,
-}
+use crate::gui::style::ButtonStyle;
 
 #[derive(Debug)]
 pub struct Button<'a> {
@@ -21,7 +10,7 @@ pub struct Button<'a> {
     text: Option<&'a str>,
     font: Option<FontId>,
     tooltip: Option<&'a str>,
-    background: Option<ButtonBackground>,
+    background: Option<ButtonStyle>,
     rect: Option<Rect>,
     size: Option<Vec2>,
     shapes: Vec<Shape>,
@@ -72,7 +61,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn background(mut self, background: ButtonBackground) -> Self {
+    pub fn background(mut self, background: ButtonStyle) -> Self {
         assert!(background.radius.is_finite());
         self.background = Some(background);
         self
@@ -156,7 +145,7 @@ impl<'a> Button<'a> {
             response.show_tooltip_text(tooltip);
         }
 
-        let background = self.background.unwrap_or(ButtonBackground {
+        let background = self.background.unwrap_or(ButtonStyle {
             disabled_fill: gui.style.noninteractive_bg_fill,
             idle_fill: gui.style.inactive_bg_fill,
             hover_fill: gui.style.hover_bg_fill,
