@@ -5,14 +5,14 @@ use crate::gui::Gui;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ButtonBackground {
-    disabled_fill: Color32,
-    idle_fill: Color32,
-    hover_fill: Color32,
-    active_fill: Color32,
-    checked_fill: Color32,
-    inactive_stroke: Stroke,
-    hovered_stroke: Stroke,
-    radius: f32,
+    pub disabled_fill: Color32,
+    pub idle_fill: Color32,
+    pub hover_fill: Color32,
+    pub active_fill: Color32,
+    pub checked_fill: Color32,
+    pub inactive_stroke: Stroke,
+    pub hovered_stroke: Stroke,
+    pub radius: f32,
 }
 
 #[derive(Debug)]

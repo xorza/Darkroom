@@ -1,9 +1,9 @@
-use egui::{Key, Order, Pos2};
+use egui::{Color32, Key, Order, Pos2, Stroke, Vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
-use crate::common::button::Button;
+use crate::common::button::{Button, ButtonBackground};
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
@@ -43,6 +43,7 @@ impl NewNodeUi {
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     gui.ui().set_min_width(150.0);
+                    gui.ui().set_max_width(150.0);
 
                     let mut categories: Vec<&str> =
                         func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
@@ -56,7 +57,23 @@ impl NewNodeUi {
                                 if func.category != category {
                                     continue;
                                 }
-                                if Button::default().text(&func.name).show(gui).clicked() {
+                                let btn_size = Vec2::new(gui.ui().available_width(), 20.0);
+                                if Button::default()
+                                    .background(ButtonBackground {
+                                        disabled_fill: Color32::TRANSPARENT,
+                                        idle_fill: Color32::TRANSPARENT,
+                                        hover_fill: gui.style.hover_bg_fill,
+                                        active_fill: gui.style.active_bg_fill,
+                                        checked_fill: Color32::TRANSPARENT,
+                                        inactive_stroke: Stroke::NONE,
+                                        hovered_stroke: Stroke::NONE,
+                                        radius: 0.0,
+                                    })
+                                    .size(btn_size)
+                                    .text(&func.name)
+                                    .show(gui)
+                                    .clicked()
+                                {
                                     selected_func = Some(func);
                                     self.open = false;
                                 }
