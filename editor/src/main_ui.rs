@@ -22,6 +22,9 @@ impl UiContext {
     pub fn request_redraw(&self) {
         self.ctx.request_repaint();
     }
+    pub fn exit(&self) {
+        self.ctx.send_viewport_cmd(ViewportCommand::Close);
+    }
 }
 
 #[derive(Debug)]
@@ -139,7 +142,7 @@ impl MainUi {
                         }
                         if ui.button("Exit").clicked() {
                             ui.close();
-                            ctx.send_viewport_cmd(ViewportCommand::Close);
+                            self.ui_context.exit();
                         }
                     });
                 });
@@ -165,6 +168,7 @@ impl MainUi {
         self.handle_undo_shortcut(app_data);
         self.handle_save_load_shortcuts(app_data);
         self.handle_run_shortcuts(app_data);
+        self.handle_quit_shortcuts(app_data);
     }
 
     fn handle_undo_shortcut(&mut self, app_data: &mut AppData) {
@@ -218,6 +222,17 @@ impl MainUi {
             }
         } else if run_once_pressed {
             app_data.interaction.run_cmd = RunCommand::RunOnce;
+        }
+    }
+
+    fn handle_quit_shortcuts(&mut self, _app_data: &mut AppData) {
+        let quit_pressed = self
+            .ui_context
+            .ctx
+            .input(|input| input.key_pressed(egui::Key::Q) && input.modifiers.command);
+
+        if quit_pressed {
+            self.ui_context.exit();
         }
     }
 }
