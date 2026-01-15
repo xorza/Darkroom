@@ -77,7 +77,7 @@ impl<'a> Button<'a> {
         self
     }
 
-    pub fn show(mut self, gui: &mut Gui<'_>) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let is_checked = self.toggle_value.as_deref().copied().unwrap_or(false);
 
         let text_color = if !self.enabled {
@@ -119,9 +119,9 @@ impl<'a> Button<'a> {
 
         if response.clicked()
             && self.enabled
-            && let Some(toggle_value) = self.toggle_value.as_mut()
+            && let Some(toggle_value) = self.toggle_value
         {
-            **toggle_value = !**toggle_value;
+            *toggle_value = !*toggle_value;
         }
 
         if response.hovered()
