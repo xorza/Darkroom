@@ -128,7 +128,7 @@ impl MainUi {
                             self.save_as(app_data);
                             ui.close();
                         }
-                        if ui.button("Load").clicked() {
+                        if ui.button("Open").clicked() {
                             self.load(app_data);
                             ui.close();
                         }
