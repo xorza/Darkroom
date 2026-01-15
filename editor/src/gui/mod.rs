@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr::NonNull};
+use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
 use egui::{FontId, Painter, Rect, Ui};
 
@@ -22,19 +22,19 @@ pub mod style_settings;
 // #[derive(Debug)]
 pub struct Gui<'a> {
     ui: &'a mut Ui,
-    pub style: Style,
+    pub style: Rc<Style>,
     pub rect: Rect,
     pub scale: f32,
     _marker: PhantomData<&'a mut Ui>,
 }
 
 impl<'a> Gui<'a> {
-    pub fn new(ui: &'a mut Ui, style: Style) -> Self {
+    pub fn new(ui: &'a mut Ui, style: &Rc<Style>) -> Self {
         let rect = ui.available_rect_before_wrap();
 
         Self {
             ui,
-            style,
+            style: Rc::clone(style),
             rect,
             scale: 1.0,
             _marker: PhantomData,
@@ -59,7 +59,7 @@ impl<'a> Gui<'a> {
         }
 
         self.scale = scale;
-        self.style.set_scale(scale);
+        Rc::make_mut(&mut self.style).set_scale(scale);
     }
 
     pub fn font_height(&mut self, font_id: FontId) -> f32 {

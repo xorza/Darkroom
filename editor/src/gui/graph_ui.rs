@@ -90,7 +90,7 @@ impl GraphUi {
             .ui()
             .new_child(egui::UiBuilder::new().id_salt("graph_ui").max_rect(rect));
 
-        let mut gui = Gui::new(&mut graph_ui, gui.style.clone());
+        let mut gui = Gui::new(&mut graph_ui, &gui.style);
         gui.ui().set_clip_rect(rect);
 
         let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
@@ -378,7 +378,7 @@ impl GraphUi {
         let padding = gui.style.padding;
         let rect = gui.rect;
         let egui_ctx = gui.ui().ctx().clone();
-        let style_clone = gui.style.clone();
+        let style = gui.style.clone();
 
         Area::new(Id::new("graph_ui_top_buttons"))
             .sizing_pass(false)
@@ -394,7 +394,7 @@ impl GraphUi {
                         ui.take_available_width();
 
                         ui.horizontal(|ui| {
-                            let mono_font = gui.style.mono_font.clone();
+                            let mono_font = style.mono_font.clone();
                             let mut make_button = |label| {
                                 let button_size = Vec2::splat(mono_font.size + small_padding * 2.0);
                                 ui.add_sized(
@@ -426,7 +426,7 @@ impl GraphUi {
                     .inner_margin(padding)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let mut gui = Gui::new(ui, style_clone);
+                            let mut gui = Gui::new(ui, &style);
 
                             interaction.run |=
                                 Button::default().text("run").show(&mut gui).clicked();

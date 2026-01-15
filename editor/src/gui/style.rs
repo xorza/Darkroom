@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
@@ -14,7 +16,7 @@ pub fn brighten(color: Color32, amount: f32) -> Color32 {
 
 #[derive(Debug, Clone, Default)]
 pub struct Style {
-    style_settings: StyleSettings,
+    style_settings: Rc<StyleSettings>,
     scale: f32,
 
     pub heading_font: FontId,
@@ -108,11 +110,11 @@ pub(crate) struct DragValueStyle {
 }
 
 impl Style {
-    pub fn new(settings: StyleSettings, scale: f32) -> Self {
+    pub fn new(style_settings: Rc<StyleSettings>, scale: f32) -> Self {
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
         let mut result = Self {
-            style_settings: settings,
+            style_settings,
             scale,
             ..Default::default()
         };

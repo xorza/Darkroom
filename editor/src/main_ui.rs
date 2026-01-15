@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::gui::Gui;
 use crate::gui::graph_ui::GraphUi;
 use crate::gui::log_ui::LogUi;
@@ -26,7 +28,7 @@ pub struct MainUi {
     pub graph_ui: GraphUi,
     pub log_ui: LogUi,
     pub ui_context: UiContext,
-    pub style_settings: StyleSettings,
+    pub style_settings: Rc<StyleSettings>,
 
     pub arena: bumpalo::Bump,
 }
@@ -39,7 +41,7 @@ impl MainUi {
             graph_ui: GraphUi::default(),
             log_ui: LogUi,
             ui_context: UiContext::new(ctx),
-            style_settings,
+            style_settings: Rc::new(style_settings),
             arena: bumpalo::Bump::new(),
         }
     }
@@ -68,7 +70,7 @@ impl MainUi {
     }
 
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
-        let style = Style::new(self.style_settings.clone(), 1.0);
+        let style = Rc::new(Style::new(self.style_settings.clone(), 1.0));
         ctx.style_mut(|egui_style| {
             style.apply_to_egui(egui_style);
         });
@@ -116,12 +118,12 @@ impl MainUi {
             .frame(Frame::NONE)
             .show(ctx, |ui| {
                 self.log_ui
-                    .render(&mut Gui::new(ui, style.clone()), &app_data.status);
+                    .render(&mut Gui::new(ui, &style), &app_data.status);
             });
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
             self.graph_ui.render(
-                &mut Gui::new(ui, style),
+                &mut Gui::new(ui, &style),
                 &mut app_data.view_graph,
                 app_data.execution_stats.as_ref(),
                 &app_data.func_lib,
