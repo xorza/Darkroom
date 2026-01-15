@@ -6,6 +6,7 @@ use egui::{
     RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 
+use crate::app_data::AppData;
 use crate::common::area::Area;
 use crate::common::frame::Frame;
 use graph::graph::NodeId;
@@ -64,19 +65,11 @@ pub struct GraphUi {
     connections: ConnectionUi,
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
-    autorun_enabled: bool,
     new_node_ui: NewNodeUi,
 }
 
 impl GraphUi {
-    pub fn render(
-        &mut self,
-        gui: &mut Gui<'_>,
-        view_graph: &mut model::ViewGraph,
-        execution_stats: Option<&ExecutionStats>,
-        func_lib: &FuncLib,
-        interaction: &mut GraphUiInteraction,
-    ) {
+    pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData) {
         let rect = gui
             .ui()
             .available_rect_before_wrap()
@@ -94,7 +87,11 @@ impl GraphUi {
         gui.new_child(UiBuilder::new().id_salt("graph_ui").max_rect(rect), |gui| {
             gui.ui().set_clip_rect(rect);
 
-            let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
+            let mut ctx = GraphContext::new(
+                &app_data.func_lib,
+                &mut app_data.view_graph,
+                app_data.execution_stats.as_ref(),
+            );
 
             let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
 
@@ -112,10 +109,12 @@ impl GraphUi {
             if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
                 let before = ctx.view_graph.selected_node_id;
                 ctx.view_graph.selected_node_id = None;
-                interaction.add_action(GraphUiAction::NodeSelected {
-                    before,
-                    after: None,
-                });
+                app_data
+                    .interaction
+                    .add_action(GraphUiAction::NodeSelected {
+                        before,
+                        after: None,
+                    });
             }
 
             self.update_zoom_and_pan(
@@ -123,19 +122,24 @@ impl GraphUi {
                 &mut ctx,
                 &background_response,
                 pointer_pos,
-                interaction,
+                &mut app_data.interaction,
             );
             gui.set_scale(ctx.view_graph.scale);
 
             self.graph_layout.update(gui, &ctx);
             self.dots_background.render(gui, &ctx);
-            self.render_connections(gui, &mut ctx, execution_stats, interaction);
+            self.render_connections(
+                gui,
+                &mut ctx,
+                app_data.execution_stats.as_ref(),
+                &mut app_data.interaction,
+            );
 
             let drag_port_info = self.node_ui.render_nodes(
                 gui,
                 &mut ctx,
                 &mut self.graph_layout,
-                interaction,
+                &mut app_data.interaction,
                 if self.state == InteractionState::BreakingConnections {
                     Some(&self.connection_breaker)
                 } else {
@@ -150,18 +154,18 @@ impl GraphUi {
                     &background_response,
                     pointer_pos,
                     drag_port_info,
-                    interaction,
+                    &mut app_data.interaction,
                 );
             }
 
             gui.set_scale(1.0);
-            self.buttons(gui, &mut ctx, interaction);
+            self.buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun);
 
             self.handle_new_node_popup(
                 gui,
                 &mut ctx,
                 pointer_pos,
-                interaction,
+                &mut app_data.interaction,
                 background_response,
             );
         });
@@ -411,6 +415,7 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         interaction: &mut GraphUiInteraction,
+        mut autorun: bool,
     ) {
         let mut fit_all = false;
         let mut view_selected = false;
@@ -469,12 +474,12 @@ impl GraphUi {
                         }
 
                         let response = Button::default()
-                            .toggle(&mut self.autorun_enabled)
+                            .toggle(&mut autorun)
                             .text("autorun")
                             .show(gui);
 
                         if response.clicked() {
-                            if self.autorun_enabled {
+                            if autorun {
                                 interaction.run_cmd = RunCommand::StartAutorun;
                             } else {
                                 interaction.run_cmd = RunCommand::StopAutorun;

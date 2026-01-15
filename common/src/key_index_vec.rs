@@ -527,8 +527,7 @@ mod tests {
         let (idx, _item) = compact.insert_with(&1, || TestItem { id: 1, value: 0 });
         assert_eq!(idx, 0);
 
-        let item = &compact[1];
-        println!("Inserted item {:?}", item);
+        let _item = &compact[1];
     }
 
     #[test]

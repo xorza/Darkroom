@@ -220,14 +220,12 @@ impl AppData {
 
         match self.interaction.run_cmd {
             RunCommand::StartAutorun => {
-                println!("Starting autorun");
                 if !self.autorun {
                     msgs.push(WorkerMessage::StartEventLoop);
                 }
                 self.autorun = true;
             }
             RunCommand::StopAutorun => {
-                println!("Stop autorun");
                 msgs.push(WorkerMessage::StopEventLoop);
                 self.autorun = false;
             }

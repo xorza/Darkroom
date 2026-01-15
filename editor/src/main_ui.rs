@@ -154,13 +154,7 @@ impl MainUi {
             });
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
-            self.graph_ui.render(
-                &mut Gui::new(ui, &style),
-                &mut app_data.view_graph,
-                app_data.execution_stats.as_ref(),
-                &app_data.func_lib,
-                &mut app_data.interaction,
-            )
+            self.graph_ui.render(&mut Gui::new(ui, &style), app_data)
         });
 
         app_data.handle_interaction();
