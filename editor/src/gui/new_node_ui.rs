@@ -43,36 +43,36 @@ impl NewNodeUi {
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     gui.ui().set_min_width(150.0);
-                    gui.ui().set_max_width(150.0);
+                    // gui.ui().set_max_width(150.0);
 
-                    let mut categories: Vec<&str> =
-                        func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
-                    categories.sort();
-                    categories.dedup();
+                    gui.horizontal(|gui| {
+                        let mut categories: Vec<&str> =
+                            func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
+                        categories.sort();
+                        categories.dedup();
 
-                    for category in categories {
-                        Expander::new(category).show(gui, |gui| {
-                            // Frame::none().inner_margin(10).show(gui, |gui| {
-                            for func in func_lib.funcs.iter() {
-                                if func.category != category {
-                                    continue;
-                                }
-                                let btn_size = Vec2::new(gui.ui().available_width(), 20.0);
-                                if Button::default()
-                                    .background(gui.style.list_button)
-                                    .size(btn_size)
-                                    .text(&func.name)
-                                    .align(Align::Min)
-                                    .show(gui)
-                                    .clicked()
-                                {
-                                    selected_func = Some(func);
-                                    self.open = false;
-                                }
-                            }
-                            // });
-                        });
-                    }
+                        for category in categories {
+                            gui.vertical(|gui| {
+                                Expander::new(category).show(gui, |gui| {
+                                    for func in func_lib.funcs.iter() {
+                                        if func.category != category {
+                                            continue;
+                                        }
+                                        if Button::default()
+                                            .background(gui.style.list_button)
+                                            .text(&func.name)
+                                            .align(Align::Min)
+                                            .show(gui)
+                                            .clicked()
+                                        {
+                                            selected_func = Some(func);
+                                            self.open = false;
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    });
                 });
             });
 
