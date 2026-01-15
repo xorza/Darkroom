@@ -14,7 +14,7 @@ pub fn brighten(color: Color32, amount: f32) -> Color32 {
     Color32::from_rgba_unmultiplied(lerp(color.r()), lerp(color.g()), lerp(color.b()), color.a())
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Style {
     style_settings: Rc<StyleSettings>,
     scale: f32,
@@ -50,7 +50,7 @@ pub struct Style {
     pub popup: PopupStyle,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct GraphBackgroundStyle {
     pub bg_color: Color32,
     pub dotted_color: Color32,
@@ -58,7 +58,7 @@ pub struct GraphBackgroundStyle {
     pub dotted_radius_base: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ConnectionStyle {
     pub feather: f32,
     pub stroke_width: f32,
@@ -68,7 +68,7 @@ pub struct ConnectionStyle {
     pub breaker_stroke: Stroke,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct NodeStyle {
     pub status_impure_color: Color32,
     pub status_dot_radius: f32,
@@ -98,12 +98,12 @@ pub struct NodeStyle {
     pub const_bind_style: DragValueStyle,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct MenuStyle {
     pub button_padding: Vec2,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PopupStyle {
     pub fill: Color32,
     pub stroke: Stroke,
@@ -111,7 +111,7 @@ pub struct PopupStyle {
     pub padding: f32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct DragValueStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
@@ -120,29 +120,14 @@ pub(crate) struct DragValueStyle {
 
 impl Style {
     pub fn new(style_settings: Rc<StyleSettings>, scale: f32) -> Self {
-        assert!(scale.is_finite(), "style scale must be finite");
-        assert!(scale > 0.0, "style scale must be greater than 0");
-        let mut result = Self {
-            style_settings,
-            scale,
-            ..Default::default()
-        };
-
-        result.apply_scale();
-
-        result
+        Self::build(&style_settings, scale)
     }
 
     pub fn set_scale(&mut self, scale: f32) {
-        assert!(scale.is_finite(), "style scale must be finite");
-        assert!(scale > 0.0, "style scale must be greater than 0");
-
-        self.scale = scale;
-        self.apply_scale();
+        *self = Self::build(&self.style_settings, scale);
     }
 
-    fn apply_scale(&mut self) {
-        let scale = self.scale;
+    fn build(style_settings: &Rc<StyleSettings>, scale: f32) -> Self {
         assert!(scale.is_finite(), "style scale must be finite");
         assert!(scale > 0.0, "style scale must be greater than 0");
 
@@ -156,124 +141,117 @@ impl Style {
             scaled_value as u8
         };
 
-        let settings = &self.style_settings;
+        let settings = style_settings;
         let inactive_bg_stroke = Stroke::new(
             scaled(settings.default_bg_stroke_width),
             settings.color_stroke_inactive,
         );
 
-        self.heading_font = FontId {
-            size: scaled(18.0),
-            family: FontFamily::Proportional,
-        };
-        self.body_font = FontId {
-            size: scaled(15.0),
-            family: FontFamily::Proportional,
-        };
-        self.sub_font = FontId {
-            size: scaled(13.0),
-            family: FontFamily::Proportional,
-        };
-        self.mono_font = FontId {
-            size: scaled(13.0),
-            family: FontFamily::Monospace,
-        };
-
-        self.text_color = settings.color_text;
-        self.noninteractive_text_color = settings.color_text_noninteractive;
-
-        self.noninteractive_bg_fill = settings.color_bg_noninteractive;
-        self.hover_bg_fill = settings.color_bg_hover;
-        self.inactive_bg_fill = settings.color_bg_inactive;
-        self.inactive_bg_stroke = inactive_bg_stroke;
-        self.active_bg_stroke = Stroke::new(
-            scaled(settings.default_bg_stroke_width),
-            settings.color_stroke_active,
-        );
-        self.active_bg_fill = settings.color_bg_active;
-
-        self.dark_text_color = settings.color_text_checked;
-        self.checked_bg_fill = settings.color_bg_checked;
-
-        self.big_padding = scaled(settings.big_padding);
-        self.padding = scaled(settings.padding);
-        self.small_padding = scaled(settings.small_padding);
-        self.corner_radius = scaled(settings.corner_radius);
-        self.small_corner_radius = scaled(settings.small_corner_radius);
-
-        self.graph_background = GraphBackgroundStyle {
-            dotted_color: settings.color_dotted,
-            dotted_base_spacing: settings.dotted_base_spacing,
-            dotted_radius_base: settings.dotted_radius_base,
-            bg_color: settings.color_bg_graph,
-        };
-        self.connections = ConnectionStyle {
-            feather: settings.connection_feather,
-            stroke_width: scaled(settings.connection_stroke_width),
-            highlight_feather: scaled(settings.connection_highlight_feather),
-            broke_clr: settings.color_stroke_broke,
-            hover_detection_width: settings.connection_hover_detection_width,
-            breaker_stroke: Stroke::new(
-                scaled(settings.connection_breaker_stroke_width),
-                settings.color_stroke_breaker,
+        Self {
+            style_settings: Rc::clone(style_settings),
+            scale,
+            heading_font: FontId {
+                size: scaled(18.0),
+                family: FontFamily::Proportional,
+            },
+            body_font: FontId {
+                size: scaled(15.0),
+                family: FontFamily::Proportional,
+            },
+            sub_font: FontId {
+                size: scaled(13.0),
+                family: FontFamily::Proportional,
+            },
+            mono_font: FontId {
+                size: scaled(13.0),
+                family: FontFamily::Monospace,
+            },
+            text_color: settings.color_text,
+            noninteractive_text_color: settings.color_text_noninteractive,
+            noninteractive_bg_fill: settings.color_bg_noninteractive,
+            hover_bg_fill: settings.color_bg_hover,
+            inactive_bg_fill: settings.color_bg_inactive,
+            inactive_bg_stroke,
+            active_bg_stroke: Stroke::new(
+                scaled(settings.default_bg_stroke_width),
+                settings.color_stroke_active,
             ),
-        };
-        self.node = NodeStyle {
-            status_dot_radius: scaled(settings.status_dot_radius),
-            status_impure_color: settings.color_dot_impure,
-
-            executed_shadow: Shadow {
-                color: settings.color_shadow_executed,
-                offset: [0, 0],
-                blur: scaled_u8(settings.shadow_blur),
-                spread: scaled_u8(settings.shadow_spread),
-            },
-            cached_shadow: Shadow {
-                color: settings.color_shadow_cached,
-                offset: [0, 0],
-                blur: scaled_u8(settings.shadow_blur),
-                spread: scaled_u8(settings.shadow_spread),
-            },
-            missing_inputs_shadow: Shadow {
-                color: settings.color_shadow_missing,
-                offset: [0, 0],
-                blur: scaled_u8(settings.shadow_blur),
-                spread: scaled_u8(settings.shadow_spread),
-            },
-
-            cache_btn_width: scaled(settings.cache_btn_width),
-            remove_btn_size: scaled(settings.remove_btn_size),
-
-            port_radius: scaled(settings.port_radius),
-            port_activation_radius: scaled(settings.port_activation_radius),
-            port_label_side_padding: scaled(settings.port_label_side_padding),
-            const_badge_offset: settings.const_badge_offset * scale,
-
-            input_port_color: settings.color_port_input,
-            output_port_color: settings.color_port_output,
-            input_hover_color: settings.color_port_input_hover,
-            output_hover_color: settings.color_port_output_hover,
-
-            trigger_port_color: settings.color_port_trigger,
-            event_port_color: settings.color_port_event,
-            trigger_hover_color: settings.color_port_trigger_hover,
-            event_hover_color: settings.color_port_event_hover,
-
-            const_bind_style: DragValueStyle {
-                fill: settings.color_bg_inactive,
-                stroke: inactive_bg_stroke,
-                radius: scaled(settings.small_corner_radius),
-            },
-        };
-        self.menu = MenuStyle {
-            button_padding: Vec2::new(scaled(12.0), scaled(3.0)),
-        };
-        self.popup = PopupStyle {
-            fill: settings.color_bg_noninteractive,
-            stroke: inactive_bg_stroke,
-            corner_radius: scaled(settings.corner_radius),
+            active_bg_fill: settings.color_bg_active,
+            dark_text_color: settings.color_text_checked,
+            checked_bg_fill: settings.color_bg_checked,
+            big_padding: scaled(settings.big_padding),
             padding: scaled(settings.padding),
-        };
+            small_padding: scaled(settings.small_padding),
+            corner_radius: scaled(settings.corner_radius),
+            small_corner_radius: scaled(settings.small_corner_radius),
+            graph_background: GraphBackgroundStyle {
+                dotted_color: settings.color_dotted,
+                dotted_base_spacing: settings.dotted_base_spacing,
+                dotted_radius_base: settings.dotted_radius_base,
+                bg_color: settings.color_bg_graph,
+            },
+            connections: ConnectionStyle {
+                feather: settings.connection_feather,
+                stroke_width: scaled(settings.connection_stroke_width),
+                highlight_feather: scaled(settings.connection_highlight_feather),
+                broke_clr: settings.color_stroke_broke,
+                hover_detection_width: settings.connection_hover_detection_width,
+                breaker_stroke: Stroke::new(
+                    scaled(settings.connection_breaker_stroke_width),
+                    settings.color_stroke_breaker,
+                ),
+            },
+            node: NodeStyle {
+                status_dot_radius: scaled(settings.status_dot_radius),
+                status_impure_color: settings.color_dot_impure,
+                executed_shadow: Shadow {
+                    color: settings.color_shadow_executed,
+                    offset: [0, 0],
+                    blur: scaled_u8(settings.shadow_blur),
+                    spread: scaled_u8(settings.shadow_spread),
+                },
+                cached_shadow: Shadow {
+                    color: settings.color_shadow_cached,
+                    offset: [0, 0],
+                    blur: scaled_u8(settings.shadow_blur),
+                    spread: scaled_u8(settings.shadow_spread),
+                },
+                missing_inputs_shadow: Shadow {
+                    color: settings.color_shadow_missing,
+                    offset: [0, 0],
+                    blur: scaled_u8(settings.shadow_blur),
+                    spread: scaled_u8(settings.shadow_spread),
+                },
+                cache_btn_width: scaled(settings.cache_btn_width),
+                remove_btn_size: scaled(settings.remove_btn_size),
+                port_radius: scaled(settings.port_radius),
+                port_activation_radius: scaled(settings.port_activation_radius),
+                port_label_side_padding: scaled(settings.port_label_side_padding),
+                const_badge_offset: settings.const_badge_offset * scale,
+                input_port_color: settings.color_port_input,
+                output_port_color: settings.color_port_output,
+                input_hover_color: settings.color_port_input_hover,
+                output_hover_color: settings.color_port_output_hover,
+                trigger_port_color: settings.color_port_trigger,
+                event_port_color: settings.color_port_event,
+                trigger_hover_color: settings.color_port_trigger_hover,
+                event_hover_color: settings.color_port_event_hover,
+                const_bind_style: DragValueStyle {
+                    fill: settings.color_bg_inactive,
+                    stroke: inactive_bg_stroke,
+                    radius: scaled(settings.small_corner_radius),
+                },
+            },
+            menu: MenuStyle {
+                button_padding: Vec2::new(scaled(12.0), scaled(3.0)),
+            },
+            popup: PopupStyle {
+                fill: settings.color_bg_noninteractive,
+                stroke: inactive_bg_stroke,
+                corner_radius: scaled(settings.corner_radius),
+                padding: scaled(settings.padding),
+            },
+        }
     }
 
     pub fn apply_to_egui(&self, egui_style: &mut egui::Style) {
