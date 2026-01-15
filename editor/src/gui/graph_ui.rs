@@ -423,9 +423,10 @@ impl GraphUi {
                         ui.horizontal(|ui| {
                             let mut gui = Gui::new(ui, style_clone);
 
-                            interaction.run |= Button::new().text("run").show(&mut gui).clicked();
+                            interaction.run |=
+                                Button::default().text("run").show(&mut gui).clicked();
                             gui.ui.add_space(gui.style.padding);
-                            Button::new()
+                            Button::default()
                                 .toggle(&mut self.autorun_enabled)
                                 .text("autorun")
                                 .show(&mut gui);

@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align2, Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
+use egui::{Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind, vec2};
 
 use crate::gui::Gui;
 
@@ -26,8 +26,8 @@ pub struct Button<'a> {
     toggle_value: Option<&'a mut bool>,
 }
 
-impl<'a> Button<'a> {
-    pub fn new() -> Self {
+impl<'a> Default for Button<'a> {
+    fn default() -> Self {
         Self {
             enabled: true,
             text: None,
@@ -38,7 +38,9 @@ impl<'a> Button<'a> {
             toggle_value: None,
         }
     }
+}
 
+impl<'a> Button<'a> {
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
         self
@@ -76,7 +78,7 @@ impl<'a> Button<'a> {
     }
 
     pub fn show(mut self, gui: &mut Gui<'_>) -> Response {
-        let is_checked = self.toggle_value.as_ref().map(|v| **v).unwrap_or(false);
+        let is_checked = self.toggle_value.as_deref().copied().unwrap_or(false);
 
         let text_color = if !self.enabled {
             gui.style.noninteractive_text_color

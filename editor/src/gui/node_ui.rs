@@ -262,7 +262,7 @@ fn render_cache_btn(
     if visible {
         let mut checked = node.behavior == NodeBehavior::Once;
 
-        let response = Button::new()
+        let response = Button::default()
             .toggle(&mut checked)
             .text("cache")
             .enabled(visible)
@@ -333,7 +333,7 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_layout: &NodeLayout) -> bool {
         Shape::line_segment([a, b], remove_stroke),
         Shape::line_segment([c, d], remove_stroke),
     ];
-    let remove = Button::new()
+    let remove = Button::default()
         .enabled(true)
         .tooltip("Remove node")
         .rect(remove_rect)
