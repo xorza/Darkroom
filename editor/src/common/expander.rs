@@ -35,8 +35,6 @@ impl Expander {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> CollapsingResponse<R> {
         let style = gui.style.clone();
-        let icon_spacing = gui.style.small_padding;
-        gui.ui().spacing_mut().icon_spacing = icon_spacing;
         egui::CollapsingHeader::new(&self.text)
             .id_salt(self.id)
             .default_open(self.default_open)
