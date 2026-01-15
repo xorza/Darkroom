@@ -138,9 +138,9 @@ impl AppData {
                     );
 
                     let message = if let Some(print_output) = print_out {
-                        format!("Compute output: {print_output} {summary}")
+                        format!("Compute output:\n{print_output}\n{summary}")
                     } else {
-                        format!("Compute finished {summary}")
+                        format!("Compute finished: {summary}")
                     };
 
                     self.status.push('\n');
@@ -298,7 +298,15 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
         get_b: Arc::new(|| 2),
         print: Arc::new(move |value| {
             let mut shared_status = shared_status.try_lock().unwrap();
-            shared_status.print_output = Some(value.to_string());
+            if shared_status.print_output.is_none() {
+                shared_status.print_output = Some(String::new());
+            }
+
+            let print_output = shared_status.print_output.as_mut().unwrap();
+            if !print_output.is_empty() {
+                print_output.push('\n');
+            }
+            print_output.push_str(&value.to_string());
         }),
     }
 }
