@@ -125,16 +125,16 @@ impl<'a> ConstBindFrame<'a> {
                 continue;
             };
 
-            if let StaticValue::Int(value) = value {
-                let mut const_bind_style = gui.style.node.const_bind_style.clone();
-                if prev_broke || currently_broke {
-                    const_bind_style.stroke.color = gui.style.connections.broke_clr;
-                } else if prev_hovered || currently_hovered {
-                    const_bind_style.stroke.color = gui.style.node.output_hover_color;
-                } else {
-                    const_bind_style.stroke.color = gui.style.node.output_port_color;
-                }
+            let mut const_bind_style = gui.style.node.const_bind_style.clone();
+            if prev_broke || currently_broke {
+                const_bind_style.stroke.color = gui.style.connections.broke_clr;
+            } else if prev_hovered || currently_hovered {
+                const_bind_style.stroke.color = gui.style.node.output_hover_color;
+            } else {
+                const_bind_style.stroke.color = gui.style.node.output_port_color;
+            }
 
+            if let StaticValue::Int(value) = value {
                 let response = {
                     DragValue::new(value)
                         .font(mono_font.clone())
@@ -153,10 +153,9 @@ impl<'a> ConstBindFrame<'a> {
 
                 currently_hovered |= response.hovered();
 
-                // Only process changed() if we're not actively editing (has_focus means still typing)
-                if response.changed() && !response.has_focus() {
+                let after = input.binding.clone();
+                if before != after {
                     currently_hovered = true;
-                    let after = input.binding.clone();
                     ui_interaction.add_action(GraphUiAction::InputChanged {
                         node_id: node.id,
                         input_idx,
