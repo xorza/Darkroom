@@ -66,9 +66,12 @@ impl<'a> ConstBindFrame<'a> {
         let mono_font = gui.style.mono_font.clone();
 
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
-            if !matches!(input.binding, Binding::Const(_)) {
+            // if !matches!(input.binding, Binding::Const(_)) {
+            //     continue;
+            // }
+            let Binding::Const(value) = &mut input.binding else {
                 continue;
-            }
+            };
 
             let connection_key = ConnectionKey::Input {
                 input_node_id: node.id,
@@ -115,11 +118,6 @@ impl<'a> ConstBindFrame<'a> {
                 return;
             }
 
-            let before = input.binding.clone();
-            let Binding::Const(value) = &mut input.binding else {
-                unreachable!();
-            };
-
             let stroke_color = if prev_broke || currently_broke {
                 gui.style.connections.broke_clr
             } else if prev_hovered || currently_hovered {
@@ -130,8 +128,9 @@ impl<'a> ConstBindFrame<'a> {
             let mut const_bind_style = gui.style.node.const_bind_style.clone();
             const_bind_style.stroke.color = stroke_color;
 
-            if let StaticValue::Int(int_value) = value {
-                let response = DragValue::new(int_value)
+            let before_value = value.clone();
+            let response = if let StaticValue::Int(int_value) = value {
+                DragValue::new(int_value)
                     .font(mono_font.clone())
                     .color(gui.style.text_color)
                     .speed(1.0)
@@ -139,23 +138,24 @@ impl<'a> ConstBindFrame<'a> {
                     .pos(connection_start)
                     .align(Align2::RIGHT_CENTER)
                     .style(const_bind_style)
-                    .show(gui, ("const_int_drag", node.id, input_idx));
+                    .show(gui, ("const_int_drag", node.id, input_idx))
+            } else {
+                continue;
+            };
 
-                if let Some(breaker) = breaker {
-                    currently_broke |= breaker.intersects_rect(response.rect);
-                }
-                currently_hovered |= response.hovered();
+            if let Some(breaker) = breaker {
+                currently_broke |= breaker.intersects_rect(response.rect);
+            }
+            currently_hovered |= response.hovered();
 
-                let after = input.binding.clone();
-                if before != after {
-                    currently_hovered = true;
-                    ui_interaction.add_action(GraphUiAction::InputChanged {
-                        node_id: node.id,
-                        input_idx,
-                        before,
-                        after,
-                    });
-                }
+            if before_value != *value {
+                currently_hovered = true;
+                ui_interaction.add_action(GraphUiAction::InputChanged {
+                    node_id: node.id,
+                    input_idx,
+                    before: Binding::Const(before_value),
+                    after: Binding::Const(value.clone()),
+                });
             }
 
             if currently_hovered {
