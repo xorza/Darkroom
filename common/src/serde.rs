@@ -92,9 +92,12 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
 
             let (decoded, read) =
                 bincode::serde::decode_from_slice(&decompressed, bincode::config::standard())?;
-            if read != decompressed.len() {
-                anyhow::bail!("binary payload should be fully consumed");
-            }
+
+            assert_eq!(
+                read, uncompressed_size,
+                "binary payload should be fully consumed"
+            );
+
             Ok(decoded)
         }
     }
