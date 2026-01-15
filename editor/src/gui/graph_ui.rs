@@ -187,6 +187,7 @@ impl GraphUi {
                 || self.state != InteractionState::Idle;
             if should_close {
                 self.new_node_ui.close();
+                return;
             }
         }
 
