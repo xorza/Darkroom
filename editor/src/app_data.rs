@@ -112,7 +112,7 @@ impl AppData {
                 self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Saved graph to {}", path.display()));
             }
-            Err(err) => self.add_status(format!("Save failed: {err}")),
+            Err(err) => self.add_status(format!("Save failed: {} {err}", path.display())),
         }
     }
 
@@ -133,7 +133,7 @@ impl AppData {
             }
             Err(err) => {
                 self.config.current_path = None;
-                self.add_status(format!("Load failed: {err}"));
+                self.add_status(format!("Load failed: {} {err}", path.display()));
             }
         }
     }
