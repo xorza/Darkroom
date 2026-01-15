@@ -78,8 +78,8 @@ impl<'a> Gui<'a> {
         Rc::make_mut(&mut self.style).set_scale(scale);
     }
 
-    pub fn font_height(&mut self, font_id: FontId) -> f32 {
-        self.ui.fonts_mut(|f| f.row_height(&font_id))
+    pub fn font_height(&mut self, font_id: &FontId) -> f32 {
+        self.ui.fonts_mut(|f| f.row_height(font_id))
     }
 
     pub fn horizontal<R>(

@@ -12,7 +12,7 @@ pub struct LogUi;
 
 impl LogUi {
     pub fn render(&mut self, gui: &mut Gui, status: &str) {
-        let line_height = gui.font_height(gui.style.body_font.clone());
+        let line_height = gui.font_height(&gui.style.body_font.clone());
         let style = &gui.style;
 
         gui.ui.horizontal(|ui| {

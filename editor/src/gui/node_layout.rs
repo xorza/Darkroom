@@ -167,7 +167,7 @@ impl NodeLayout {
         let port_label_side_padding = gui.style.node.port_label_side_padding;
 
         let mut max_row_width: f32 = 0.0;
-        let row_height: f32 = gui.font_height(label_font) + small_padding;
+        let row_height: f32 = gui.font_height(&label_font) + small_padding;
         for row in 0..row_count {
             let left = self
                 .input_galleys
