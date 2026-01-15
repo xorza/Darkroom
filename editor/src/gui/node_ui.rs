@@ -12,8 +12,8 @@ use common::BoolExt;
 use eframe::egui;
 use egui::epaint::CornerRadiusF32;
 use egui::{
-    Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind,
-    Vec2, pos2, vec2,
+    Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke,
+    StrokeKind, Vec2, pos2, vec2,
 };
 use graph::execution_graph::ExecutedNodeStats;
 use graph::graph::{Node, NodeId};
@@ -191,6 +191,18 @@ fn render_body(
 ) -> bool {
     let corner_radius = gui.style.corner_radius;
     let breaker_hit = breaker.is_some_and(|breaker| breaker.intersects_rect(node_layout.body_rect));
+
+    let scale = gui.scale();
+
+    gui.painter().add(Shape::Rect(
+        Shadow {
+            offset: [(4.0 * scale) as i8, (5.0 * scale) as i8],
+            blur: (6.0 * scale) as u8,
+            spread: (4.0 * scale) as u8,
+            color: Color32::from_black_alpha(128),
+        }
+        .as_shape(node_layout.body_rect, corner_radius),
+    ));
 
     let shadow = match *node_execution_info {
         NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
