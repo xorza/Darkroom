@@ -99,8 +99,8 @@ impl NodeLayout {
 
         let label_font = gui.style.sub_font.clone();
 
-        if !self.inited || !self.scale.ui_equals(&gui.scale) {
-            self.scale = gui.scale;
+        if !self.inited || !self.scale.ui_equals(gui.scale()) {
+            self.scale = gui.scale();
             self.inited = true;
 
             self.title_galley = gui.painter().layout_no_wrap(

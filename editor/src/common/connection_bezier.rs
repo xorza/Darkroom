@@ -45,9 +45,9 @@ impl ConnectionBezier {
 
     pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
         let needs_rebuild = !self.inited
-            || !self.start.ui_equals(&start)
-            || !self.end.ui_equals(&end)
-            || !self.scale.ui_equals(&scale);
+            || !self.start.ui_equals(start)
+            || !self.end.ui_equals(end)
+            || !self.scale.ui_equals(scale);
         if !needs_rebuild {
             return;
         }
@@ -86,7 +86,10 @@ impl ConnectionBezier {
 
         let pointer_pos = gui.ui().input(|input| input.pointer.hover_pos());
         let hit = pointer_pos.is_some_and(|pos| {
-            self.hit_test(pos, gui.style.connections.hover_detection_width * gui.scale)
+            self.hit_test(
+                pos,
+                gui.style.connections.hover_detection_width * gui.scale(),
+            )
         });
 
         let response = if hit {
@@ -199,8 +202,8 @@ impl PartialEq for ConnectionBezierStyle {
     fn eq(&self, other: &Self) -> bool {
         self.start_color == other.start_color
             && self.end_color == other.end_color
-            && self.stroke_width.ui_equals(&other.stroke_width)
-            && self.feather.ui_equals(&other.feather)
+            && self.stroke_width.ui_equals(other.stroke_width)
+            && self.feather.ui_equals(other.feather)
     }
 }
 

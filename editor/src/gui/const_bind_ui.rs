@@ -88,7 +88,7 @@ impl<'a> ConstBindFrame<'a> {
 
             curve
                 .bezier
-                .update_points(connection_start, connection_end, gui.scale);
+                .update_points(connection_start, connection_end, gui.scale());
 
             let prev_broke = breaker.is_some() && curve.broke;
             let style =

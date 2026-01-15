@@ -89,74 +89,72 @@ impl GraphUi {
         );
 
         let rect = rect.shrink(gui.style.corner_radius * 0.5);
-        let mut graph_ui = gui
-            .ui()
-            .new_child(egui::UiBuilder::new().id_salt("graph_ui").max_rect(rect));
+        gui.new_child(UiBuilder::new().id_salt("graph_ui").max_rect(rect), |gui| {
+            gui.ui().set_clip_rect(rect);
 
-        let mut gui = Gui::new(&mut graph_ui, &gui.style);
-        gui.ui().set_clip_rect(rect);
+            let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
 
-        let mut ctx = GraphContext::new(func_lib, view_graph, execution_stats);
+            let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
 
-        let graph_bg_id = gui.ui().make_persistent_id("graph_bg");
+            let rect = gui.rect;
+            let pointer_pos = gui
+                .ui()
+                .input(|input| input.pointer.hover_pos())
+                .and_then(|pos| rect.contains(pos).then_else(Some(pos), None));
+            let background_response = gui.ui().interact(
+                rect,
+                graph_bg_id,
+                Sense::hover() | Sense::drag() | Sense::click(),
+            );
 
-        let rect = gui.rect;
-        let pointer_pos = gui
-            .ui()
-            .input(|input| input.pointer.hover_pos())
-            .and_then(|pos| rect.contains(pos).then_else(Some(pos), None));
-        let background_response = gui.ui().interact(
-            rect,
-            graph_bg_id,
-            Sense::hover() | Sense::drag() | Sense::click(),
-        );
+            if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
+                let before = ctx.view_graph.selected_node_id;
+                ctx.view_graph.selected_node_id = None;
+                interaction.add_action(GraphUiAction::NodeSelected {
+                    before,
+                    after: None,
+                });
+            }
 
-        if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
-            let before = ctx.view_graph.selected_node_id;
-            ctx.view_graph.selected_node_id = None;
-            interaction.add_action(GraphUiAction::NodeSelected {
-                before,
-                after: None,
-            });
-        }
-
-        self.update_zoom_and_pan(
-            &mut gui,
-            &mut ctx,
-            &background_response,
-            pointer_pos,
-            interaction,
-        );
-
-        self.graph_layout.update(&mut gui, &ctx);
-        self.dots_background.render(&mut gui, &ctx);
-        self.render_connections(&mut gui, &mut ctx, execution_stats, interaction);
-
-        let drag_port_info = self.node_ui.render_nodes(
-            &mut gui,
-            &mut ctx,
-            &mut self.graph_layout,
-            interaction,
-            if self.state == InteractionState::BreakingConnections {
-                Some(&self.connection_breaker)
-            } else {
-                None
-            },
-        );
-
-        if let Some(pointer_pos) = pointer_pos {
-            self.process_connections(
-                &mut gui,
+            self.update_zoom_and_pan(
+                gui,
                 &mut ctx,
                 &background_response,
                 pointer_pos,
-                drag_port_info,
                 interaction,
             );
-        }
+            gui.set_scale(ctx.view_graph.scale);
 
-        gui.set_scale(1.0);
-        self.buttons(&mut gui, &mut ctx, interaction);
+            self.graph_layout.update(gui, &ctx);
+            self.dots_background.render(gui, &ctx);
+            self.render_connections(gui, &mut ctx, execution_stats, interaction);
+
+            let drag_port_info = self.node_ui.render_nodes(
+                gui,
+                &mut ctx,
+                &mut self.graph_layout,
+                interaction,
+                if self.state == InteractionState::BreakingConnections {
+                    Some(&self.connection_breaker)
+                } else {
+                    None
+                },
+            );
+
+            if let Some(pointer_pos) = pointer_pos {
+                self.process_connections(
+                    gui,
+                    &mut ctx,
+                    &background_response,
+                    pointer_pos,
+                    drag_port_info,
+                    interaction,
+                );
+            }
+
+            gui.set_scale(1.0);
+            self.buttons(gui, &mut ctx, interaction);
+        });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -507,10 +505,7 @@ impl GraphUi {
             _ => {}
         }
 
-        if !prev_scale.ui_equals(&ctx.view_graph.scale) || !prev_pan.ui_equals(&ctx.view_graph.pan)
-        {
-            gui.set_scale(ctx.view_graph.scale);
-
+        if !prev_scale.ui_equals(ctx.view_graph.scale) || !prev_pan.ui_equals(ctx.view_graph.pan) {
             interaction.add_action(GraphUiAction::ZoomPanChanged {
                 before_pan: prev_pan,
                 before_scale: prev_scale,

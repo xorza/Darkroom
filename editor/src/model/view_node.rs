@@ -28,7 +28,7 @@ impl KeyIndexKey<NodeId> for ViewNode {
 
 impl PartialEq for ViewNode {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.pos.ui_equals(&other.pos)
+        self.id == other.id && self.pos.ui_equals(other.pos)
     }
 }
 

@@ -192,8 +192,8 @@ impl PartialEq for ViewGraph {
     fn eq(&self, other: &Self) -> bool {
         self.view_nodes == other.view_nodes
             && self.graph == other.graph
-            && self.pan.ui_equals(&other.pan)
-            && self.scale.ui_equals(&other.scale)
+            && self.pan.ui_equals(other.pan)
+            && self.scale.ui_equals(other.scale)
             && self.selected_node_id == other.selected_node_id
     }
 }

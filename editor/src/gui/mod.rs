@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use egui::{FontId, InnerResponse, Painter, Rect, Ui};
+use egui::{FontId, InnerResponse, Painter, Rect, Ui, UiBuilder};
 
 use crate::{common::UiEquals, gui::style::Style};
 
@@ -24,7 +24,7 @@ pub struct Gui<'a> {
     ui: &'a mut Ui,
     pub style: Rc<Style>,
     pub rect: Rect,
-    pub scale: f32,
+    scale: f32,
     _marker: PhantomData<&'a mut Ui>,
 }
 
@@ -49,11 +49,15 @@ impl<'a> Gui<'a> {
         self.ui.painter()
     }
 
+    pub fn scale(&self) -> f32 {
+        self.scale
+    }
+
     pub fn set_scale(&mut self, scale: f32) {
         assert!(scale.is_finite(), "gui scale must be finite");
         assert!(scale > 0.0, "gui scale must be greater than 0");
 
-        if self.scale.ui_equals(&scale) {
+        if self.scale.ui_equals(scale) {
             self.scale = scale;
             return;
         }
@@ -73,7 +77,7 @@ impl<'a> Gui<'a> {
         let style = Rc::clone(&self.style);
         self.ui.horizontal(|ui| {
             let mut gui = Gui::new(ui, &style);
-            gui.scale = self.scale;
+            gui.set_scale(self.scale);
             add_contents(&mut gui)
         })
     }
@@ -85,8 +89,21 @@ impl<'a> Gui<'a> {
         let style = Rc::clone(&self.style);
         self.ui.vertical(|ui| {
             let mut gui = Gui::new(ui, &style);
-            gui.scale = self.scale;
+            gui.set_scale(self.scale);
             add_contents(&mut gui)
         })
+    }
+
+    pub fn new_child<R>(
+        &mut self,
+        builder: UiBuilder,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> R {
+        let style = Rc::clone(&self.style);
+        let scale = self.scale;
+        let mut child_ui = self.ui.new_child(builder);
+        let mut gui = Gui::new(&mut child_ui, &style);
+        gui.set_scale(scale);
+        add_contents(&mut gui)
     }
 }

@@ -156,7 +156,7 @@ fn body_drag<'a>(
     }
     if dragged {
         ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-            body_response.drag_delta() / gui.scale;
+            body_response.drag_delta() / gui.scale();
 
         node_layout.update(ctx, gui, graph_layout.origin);
     }
@@ -335,7 +335,7 @@ fn render_remove_btn(gui: &mut Gui<'_>, node_layout: &NodeLayout) -> bool {
         remove_rect.min.y + remove_margin,
     );
     let remove_color = gui.style.text_color;
-    let remove_stroke = Stroke::new(1.4 * gui.scale, remove_color);
+    let remove_stroke = Stroke::new(1.4 * gui.scale(), remove_color);
     let remove_shapes = [
         Shape::line_segment([a, b], remove_stroke),
         Shape::line_segment([c, d], remove_stroke),

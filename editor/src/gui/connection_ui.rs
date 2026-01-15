@@ -106,8 +106,8 @@ impl Default for ConnectionEndpoints {
 impl ConnectionEndpoints {
     fn update(&mut self, output_pos: Pos2, input_pos: Pos2) -> bool {
         let needs_rebuild = !self.inited
-            || !self.output_pos.ui_equals(&output_pos)
-            || !self.input_pos.ui_equals(&input_pos);
+            || !self.output_pos.ui_equals(output_pos)
+            || !self.input_pos.ui_equals(input_pos);
         if needs_rebuild {
             self.inited = true;
             self.output_pos = output_pos;
@@ -191,7 +191,7 @@ impl ConnectionUi {
                     };
                     missing_curve
                         .bezier
-                        .update_points(output_pos, input_pos, gui.scale);
+                        .update_points(output_pos, input_pos, gui.scale());
                     missing_curve.bezier.show(
                         gui,
                         Sense::empty(),
@@ -207,7 +207,7 @@ impl ConnectionUi {
 
                 data_curve
                     .bezier
-                    .update_points(output_pos, input_pos, gui.scale);
+                    .update_points(output_pos, input_pos, gui.scale());
                 data_curve.broke = data_curve.bezier.intersects_breaker(breaker);
 
                 let style = ConnectionBezierStyle::build(
@@ -284,7 +284,7 @@ impl ConnectionUi {
                         };
                         highlighted
                             .bezier
-                            .update_points(event_pos, trigger_pos, gui.scale);
+                            .update_points(event_pos, trigger_pos, gui.scale());
                         highlighted.bezier.show(
                             gui,
                             Sense::empty(),
@@ -298,7 +298,7 @@ impl ConnectionUi {
 
                     event_curve
                         .bezier
-                        .update_points(event_pos, trigger_pos, gui.scale);
+                        .update_points(event_pos, trigger_pos, gui.scale());
                     event_curve.broke = event_curve.bezier.intersects_breaker(breaker);
 
                     let style = ConnectionBezierStyle::build(
@@ -350,7 +350,7 @@ impl ConnectionUi {
             };
 
             self.temp_connection_bezier
-                .update_points(start, end, gui.scale);
+                .update_points(start, end, gui.scale());
             self.temp_connection_bezier.show(
                 gui,
                 Sense::hover(),
