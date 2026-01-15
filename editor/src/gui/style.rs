@@ -138,8 +138,8 @@ impl Style {
         assert!(scale > 0.0, "style scale must be greater than 0");
 
         let scaled = |value: f32| value * scale;
-        let scaled_u8 = |value: u8| {
-            let scaled_value = (f32::from(value) * scale).round();
+        let _scaled_u8 = |value: u8| {
+            let scaled_value = (f32::from(value) * scale).ceil();
             assert!(
                 scaled_value <= u8::MAX as f32,
                 "style scale too large for shadow values"
@@ -209,28 +209,28 @@ impl Style {
                 status_dot_radius: scaled(style_settings.status_dot_radius),
                 status_impure_color: style_settings.color_dot_impure,
                 shadow: Shadow {
-                    offset: [(3.0 * scale) as i8, (4.0 * scale) as i8],
-                    blur: (10.0 * scale) as u8,
-                    spread: (5.0 * scale) as u8,
+                    offset: [(3.0 * scale).ceil() as i8, (4.0 * scale).ceil() as i8],
+                    blur: (10.0 * scale).ceil() as u8,
+                    spread: (5.0 * scale).ceil() as u8,
                     color: Color32::from_black_alpha(96),
                 },
                 executed_shadow: Shadow {
                     color: style_settings.color_shadow_executed,
                     offset: [0, 0],
-                    blur: scaled_u8(style_settings.shadow_blur),
-                    spread: scaled_u8(style_settings.shadow_spread),
+                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
+                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
                 },
                 cached_shadow: Shadow {
                     color: style_settings.color_shadow_cached,
                     offset: [0, 0],
-                    blur: scaled_u8(style_settings.shadow_blur),
-                    spread: scaled_u8(style_settings.shadow_spread),
+                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
+                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
                 },
                 missing_inputs_shadow: Shadow {
                     color: style_settings.color_shadow_missing,
                     offset: [0, 0],
-                    blur: scaled_u8(style_settings.shadow_blur),
-                    spread: scaled_u8(style_settings.shadow_spread),
+                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
+                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
                 },
                 cache_btn_width: scaled(style_settings.cache_btn_width),
                 remove_btn_size: scaled(style_settings.remove_btn_size),
