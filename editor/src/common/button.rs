@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind, vec2};
+use egui::{Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, vec2};
 
 use crate::gui::Gui;
 
@@ -19,6 +19,7 @@ pub struct ButtonBackground {
 pub struct Button<'a> {
     enabled: bool,
     text: Option<&'a str>,
+    font: Option<FontId>,
     tooltip: Option<&'a str>,
     background: Option<ButtonBackground>,
     rect: Option<Rect>,
@@ -31,6 +32,7 @@ impl<'a> Default for Button<'a> {
         Self {
             enabled: true,
             text: None,
+            font: None,
             tooltip: None,
             background: None,
             rect: None,
@@ -48,6 +50,11 @@ impl<'a> Button<'a> {
 
     pub fn text(mut self, text: &'a str) -> Self {
         self.text = Some(text);
+        self
+    }
+
+    pub fn font(mut self, font: FontId) -> Self {
+        self.font = Some(font);
         self
     }
 
@@ -88,12 +95,10 @@ impl<'a> Button<'a> {
             gui.style.text_color
         };
         let galley = if let Some(text) = self.text {
-            let galley = gui.painter().layout_no_wrap(
-                text.to_string(),
-                gui.style.sub_font.clone(),
-                text_color,
-            );
-
+            let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
+            let galley = gui
+                .painter()
+                .layout_no_wrap(text.to_string(), font, text_color);
             Some(galley)
         } else {
             None
