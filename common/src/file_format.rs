@@ -17,15 +17,16 @@ pub fn get_file_extension(filename: &str) -> Option<&str> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FileFormat {
+pub enum SerdeFormat {
     Yaml,
     Json,
     Lua,
-    Bin,
+    Bincode,
     Toml,
+    Scn,
 }
 
-impl FileFormat {
+impl SerdeFormat {
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
         let extension = get_file_extension(file_name)
             .map(|ext| ext.to_ascii_lowercase())
@@ -35,7 +36,8 @@ impl FileFormat {
             "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
             "lua" => Ok(Self::Lua),
-            "bin" | "scn" => Ok(Self::Bin),
+            "bin" => Ok(Self::Bincode),
+            "scn" => Ok(Self::Scn),
             "toml" => Ok(Self::Toml),
             _ => Err(FileExtensionError::UnsupportedFileExtension(
                 file_name.to_string(),

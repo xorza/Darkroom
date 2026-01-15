@@ -3,7 +3,7 @@ use crate::elements::editor_funclib::EditorFuncLib;
 use crate::gui::graph_ui_interaction::{AutorunCommand, GraphUiAction, GraphUiInteraction};
 use crate::model::config::Config;
 use anyhow::Result;
-use common::{FileFormat, Shared};
+use common::{SerdeFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
 use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node, NodeId};
@@ -101,7 +101,7 @@ impl AppData {
 
     pub fn save_graph(&mut self, path: &Path) {
         fn save_to_file(this: &mut AppData, path: &Path) -> Result<()> {
-            let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
+            let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = this.view_graph.serialize(format);
             std::fs::write(path, payload).map_err(anyhow::Error::from)
@@ -118,7 +118,7 @@ impl AppData {
 
     pub fn load_graph(&mut self, path: &Path) {
         fn load_from_file(this: &mut AppData, path: &Path) -> Result<()> {
-            let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
+            let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
             this.apply_graph(ViewGraph::deserialize(format, &payload)?, true);

@@ -13,12 +13,12 @@ impl Config {
     }
 
     pub fn save(&self) {
-        let serialized = common::serde::serialize(self, common::FileFormat::Yaml);
+        let serialized = common::serde::serialize(self, common::SerdeFormat::Yaml);
         std::fs::write("config.toml", serialized).ok();
     }
 
     fn load() -> anyhow::Result<Self> {
         let serialized = std::fs::read("config.toml")?;
-        common::serde::deserialize(&serialized, common::FileFormat::Yaml)
+        common::serde::deserialize(&serialized, common::SerdeFormat::Yaml)
     }
 }

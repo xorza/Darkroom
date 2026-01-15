@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::file_format::FileFormat;
+use crate::file_format::SerdeFormat;
 use crate::normalize_string::NormalizeString;
 use crate::serde_lua;
 
@@ -13,7 +13,7 @@ pub fn is_false(value: &bool) -> bool {
 
 pub type Result<T> = anyhow::Result<T>;
 
-pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
+pub fn serialize<T: Serialize>(value: &T, format: SerdeFormat) -> Vec<u8> {
     let mut buffer = Vec::new();
     let mut temp_buffer = Vec::new();
     serialize_into(value, format, &mut buffer, &mut temp_buffer);
@@ -22,23 +22,23 @@ pub fn serialize<T: Serialize>(value: &T, format: FileFormat) -> Vec<u8> {
 
 pub fn serialize_into<T: Serialize, W: Write>(
     value: T,
-    format: FileFormat,
+    format: SerdeFormat,
     writer: &mut W,
     temp_buffer: &mut Vec<u8>,
 ) {
     temp_buffer.clear();
 
     match format {
-        FileFormat::Yaml => {
+        SerdeFormat::Yaml => {
             serde_yml::to_writer(writer, &value).unwrap();
         }
-        FileFormat::Json => {
+        SerdeFormat::Json => {
             serde_json::to_writer_pretty(writer, &value).unwrap();
         }
-        FileFormat::Lua => {
+        SerdeFormat::Lua => {
             serde_lua::to_writer(writer, &value).unwrap();
         }
-        FileFormat::Bin => {
+        SerdeFormat::Bincode => {
             bincode::serde::encode_into_std_write(value, temp_buffer, bincode::config::standard())
                 .unwrap();
 
@@ -55,15 +55,21 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
             let compressed_len = lz4_flex::compress_into(input, output).unwrap();
             writer.write_all(&output[..compressed_len]).unwrap();
+
+            println!(
+                "Compressed size: {} / {}",
+                compressed_len, uncompressed_size
+            );
         }
-        FileFormat::Toml => {
+        SerdeFormat::Toml => {
             let s = toml::to_string(&value).unwrap().normalize();
             writer.write_all(s.as_bytes()).unwrap();
         }
+        SerdeFormat::Scn => todo!(),
     }
 }
 
-pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -> Result<T> {
+pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: SerdeFormat) -> Result<T> {
     let mut temp_buffer = Vec::new();
     deserialize_from(
         &mut std::io::Cursor::new(serialized),
@@ -74,20 +80,20 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
 
 pub fn deserialize_from<T: DeserializeOwned, R: Read>(
     reader: &mut R,
-    format: FileFormat,
+    format: SerdeFormat,
     temp_buffer: &mut Vec<u8>,
 ) -> Result<T> {
     temp_buffer.clear();
 
     match format {
-        FileFormat::Yaml => Ok(serde_yml::from_reader(reader)?),
-        FileFormat::Json => Ok(serde_json::from_reader(reader)?),
-        FileFormat::Lua => Ok(serde_lua::from_reader(reader)?),
-        FileFormat::Toml => {
+        SerdeFormat::Yaml => Ok(serde_yml::from_reader(reader)?),
+        SerdeFormat::Json => Ok(serde_json::from_reader(reader)?),
+        SerdeFormat::Lua => Ok(serde_lua::from_reader(reader)?),
+        SerdeFormat::Toml => {
             reader.read_to_end(temp_buffer)?;
             Ok(toml::from_slice(temp_buffer.as_slice())?)
         }
-        FileFormat::Bin => {
+        SerdeFormat::Bincode => {
             reader.read_to_end(temp_buffer)?;
             let uncompressed_size =
                 u32::from_le_bytes(temp_buffer[0..4].try_into().unwrap()) as usize;
@@ -116,5 +122,6 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
 
             Ok(decoded)
         }
+        SerdeFormat::Scn => todo!(),
     }
 }

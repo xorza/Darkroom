@@ -21,7 +21,7 @@ pub use bool_ext::BoolExt;
 pub use bump_vec_deque::BumpVecDeque;
 pub use constants::EPSILON;
 pub use debug::is_debug;
-pub use file_format::{FileExtensionError, FileFormat, FileFormatResult, get_file_extension};
+pub use file_format::{FileExtensionError, FileFormatResult, SerdeFormat, get_file_extension};
 pub use ready_state::ReadyState;
 pub use serde::Result;
 pub use serde::{deserialize, is_false, serialize};

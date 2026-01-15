@@ -9,7 +9,7 @@ use crate::lambda::FuncLambda;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use common::{FileFormat, deserialize, serialize};
+use common::{SerdeFormat, deserialize, serialize};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -96,10 +96,10 @@ impl Func {
 }
 
 impl FuncLib {
-    pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
+    pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> anyhow::Result<Self> {
         deserialize(serialized, format)
     }
-    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
         serialize(&self, format)
     }
 
@@ -439,17 +439,17 @@ mod tests {
     use crate::execution_graph::OutputUsage;
     use crate::function::{InvokeCache, TestFuncHooks, test_func_lib};
     use crate::lambda::InvokeInput;
-    use common::FileFormat;
+    use common::SerdeFormat;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
         for format in [
-            FileFormat::Yaml,
-            FileFormat::Json,
-            FileFormat::Lua,
-            FileFormat::Bin,
+            SerdeFormat::Yaml,
+            SerdeFormat::Json,
+            SerdeFormat::Lua,
+            SerdeFormat::Bincode,
         ] {
             let serialized = func_lib.serialize(format);
             let deserialized = super::FuncLib::deserialize(&serialized, format)?;

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
-use common::{FileFormat, Result, deserialize, serialize};
+use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 
 id_type!(NodeId);
@@ -139,10 +139,10 @@ impl Graph {
         ordered
     }
 
-    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
         serialize(self, format)
     }
-    pub fn deserialize(serialized: &[u8], format: FileFormat) -> Result<Graph> {
+    pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> Result<Graph> {
         let graph: Self = deserialize(serialized, format)?;
         graph.validate();
         Ok(graph)
@@ -412,17 +412,17 @@ pub fn test_graph() -> Graph {
 #[cfg(test)]
 mod tests {
     use crate::graph::Graph;
-    use common::FileFormat;
+    use common::SerdeFormat;
 
     #[test]
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
 
         for format in [
-            FileFormat::Yaml,
-            FileFormat::Json,
-            FileFormat::Lua,
-            FileFormat::Bin,
+            SerdeFormat::Yaml,
+            SerdeFormat::Json,
+            SerdeFormat::Lua,
+            SerdeFormat::Bincode,
         ] {
             let serialized = graph.serialize(format);
             let deserialized = Graph::deserialize(&serialized, format)?;
@@ -430,8 +430,8 @@ mod tests {
             assert_eq!(serialized, serialized_again);
         }
 
-        let bin = graph.serialize(FileFormat::Bin);
-        let deserialized = Graph::deserialize(&bin, FileFormat::Bin)?;
+        let bin = graph.serialize(SerdeFormat::Bincode);
+        let deserialized = Graph::deserialize(&bin, SerdeFormat::Bincode)?;
         assert_eq!(graph, deserialized);
 
         Ok(())

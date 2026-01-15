@@ -385,7 +385,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FileFormat, deserialize, serialize};
+    use crate::{SerdeFormat, deserialize, serialize};
 
     #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq, Eq)]
     struct TestItem {
@@ -420,7 +420,7 @@ mod tests {
         vec.add(TestItem { id: 1, value: 10 });
         vec.add(TestItem { id: 2, value: 20 });
 
-        for format in [FileFormat::Yaml, FileFormat::Json, FileFormat::Lua] {
+        for format in [SerdeFormat::Yaml, SerdeFormat::Json, SerdeFormat::Lua] {
             let serialized = serialize(&vec, format);
             let deserialized: KeyIndexVec<u32, TestItem> =
                 deserialize(&serialized, format).unwrap();

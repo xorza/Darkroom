@@ -14,7 +14,7 @@ use crate::graph::{Binding, Event, Graph, Node, NodeBehavior, NodeId, PortAddres
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventRef;
-use common::{BoolExt, FileFormat, is_debug};
+use common::{BoolExt, SerdeFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
@@ -327,10 +327,10 @@ impl ExecutionGraph {
         self.e_nodes.iter_mut().find(|node| node.name == node_name)
     }
 
-    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
         common::serialize(self, format)
     }
-    pub fn deserialize(serialized: &[u8], format: FileFormat) -> anyhow::Result<Self> {
+    pub fn deserialize(serialized: &[u8], format: SerdeFormat) -> anyhow::Result<Self> {
         common::deserialize(serialized, format)
     }
 
@@ -961,7 +961,7 @@ mod tests {
     use crate::data::{DynamicValue, StaticValue};
     use crate::function::{TestFuncHooks, test_func_lib};
     use crate::graph::{NodeBehavior, test_graph};
-    use common::FileFormat;
+    use common::SerdeFormat;
     use tokio::sync::Mutex;
 
     fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String> {
@@ -1157,10 +1157,10 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
 
         for format in [
-            FileFormat::Yaml,
-            FileFormat::Json,
-            FileFormat::Lua,
-            FileFormat::Bin,
+            SerdeFormat::Yaml,
+            SerdeFormat::Json,
+            SerdeFormat::Lua,
+            SerdeFormat::Bincode,
         ] {
             let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(&serialized, format)?;

@@ -1,7 +1,7 @@
 use std::fmt::Debug;
 
 #[cfg(debug_assertions)]
-use common::FileFormat;
+use common::SerdeFormat;
 
 #[cfg(debug_assertions)]
 use crate::common::undo_stack::FullSerdeUndoStack;
@@ -68,7 +68,7 @@ impl ActionUndoStack {
         );
 
         let start = buffer.len();
-        common::serde::serialize_into(actions, FileFormat::Bin, buffer, temp_buffer);
+        common::serde::serialize_into(actions, SerdeFormat::Bincode, buffer, temp_buffer);
         let end = buffer.len();
 
         start..end
@@ -77,7 +77,7 @@ impl ActionUndoStack {
     fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
         common::serde::deserialize_from(
             &mut std::io::Cursor::new(bytes),
-            FileFormat::Bin,
+            SerdeFormat::Bincode,
             temp_buffer,
         )
         .unwrap()
@@ -198,7 +198,7 @@ mod tests {
     use crate::common::UiEquals;
     use crate::gui::graph_ui_interaction::EventSubscriberChange;
     use crate::model::view_graph::{IncomingConnection, IncomingEvent};
-    use common::FileFormat;
+    use common::SerdeFormat;
     use egui::{Pos2, Vec2, vec2};
     use graph::data::StaticValue;
     use graph::graph::{Binding, Event, Input, NodeBehavior};
@@ -282,7 +282,7 @@ mod tests {
     fn action_undo_redo_roundtrip() {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
-        let original = view_graph.serialize(FileFormat::Json);
+        let original = view_graph.serialize(SerdeFormat::Json);
 
         let node_id = view_graph.graph.nodes.iter().next().unwrap().id;
         let before_pos = view_graph.view_nodes.by_key(&node_id).unwrap().pos;
@@ -312,18 +312,18 @@ mod tests {
         for action in &actions {
             action.apply(&mut view_graph);
         }
-        let modified = view_graph.serialize(FileFormat::Json);
+        let modified = view_graph.serialize(SerdeFormat::Json);
 
         stack.push_current(&view_graph, &actions);
 
         assert_ranges_match_actions(&stack);
         assert!(stack.undo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
-        assert_eq!(view_graph.serialize(FileFormat::Json), original);
+        assert_eq!(view_graph.serialize(SerdeFormat::Json), original);
 
         assert!(stack.redo(&mut view_graph, &mut |_| {}));
         assert_ranges_match_actions(&stack);
-        assert_eq!(view_graph.serialize(FileFormat::Json), modified);
+        assert_eq!(view_graph.serialize(SerdeFormat::Json), modified);
     }
 
     #[test]
@@ -470,7 +470,7 @@ mod tests {
         }
 
         stack.reset_with(&view_graph);
-        let mut snapshots = vec![view_graph.serialize(FileFormat::Json)];
+        let mut snapshots = vec![view_graph.serialize(SerdeFormat::Json)];
 
         let cache_before = view_graph.graph.by_id(&primary_id).unwrap().behavior;
         let cache_after = match cache_before {
@@ -484,7 +484,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let event_node = view_graph
             .graph
@@ -512,7 +512,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let before_binding = Binding::None;
         let after_binding = Binding::Const(StaticValue::Int(123));
@@ -524,7 +524,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let moved_before = view_graph.view_nodes.by_key(&primary_id).unwrap().pos;
         let moved_after = moved_before + vec2(5.0, -3.0);
@@ -535,7 +535,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let selected_before = view_graph.selected_node_id;
         let selected_after = match selected_before {
@@ -548,7 +548,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let zoom_before_pan = view_graph.pan;
         let zoom_before_scale = view_graph.scale;
@@ -560,7 +560,7 @@ mod tests {
         };
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         let mut bound_targets = std::collections::HashSet::new();
         for node in view_graph.graph.nodes.iter() {
@@ -579,12 +579,12 @@ mod tests {
         view_graph.remove_node(&removed_node_id);
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
-        snapshots.push(view_graph.serialize(FileFormat::Json));
+        snapshots.push(view_graph.serialize(SerdeFormat::Json));
 
         for (range_idx, range) in stack.undo_stack.iter().enumerate() {
             let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
-            let decoded: Vec<GraphUiAction> = common::serde::deserialize(bytes, FileFormat::Bin)
-                .unwrap_or_else(|err| {
+            let decoded: Vec<GraphUiAction> =
+                common::serde::deserialize(bytes, SerdeFormat::Bincode).unwrap_or_else(|err| {
                     panic!("undo range {} failed to deserialize: {}", range_idx, err)
                 });
             assert_eq!(decoded.len(), 1);
@@ -593,7 +593,7 @@ mod tests {
         for snapshot_idx in (1..snapshots.len()).rev() {
             assert!(stack.undo(&mut view_graph, &mut |_| {}));
             let snapshot_graph =
-                ViewGraph::deserialize(FileFormat::Json, &snapshots[snapshot_idx - 1])
+                ViewGraph::deserialize(SerdeFormat::Json, &snapshots[snapshot_idx - 1])
                     .expect("snapshot should deserialize");
             assert_eq!(view_graph.graph, snapshot_graph.graph);
             assert_eq!(view_graph.view_nodes, snapshot_graph.view_nodes);

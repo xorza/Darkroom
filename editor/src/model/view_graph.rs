@@ -1,5 +1,5 @@
 use anyhow::{Result, bail};
-use common::{FileFormat, is_debug, key_index_vec::KeyIndexVec};
+use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use graph::function::Func;
 use graph::graph::{Binding, Node};
 use graph::prelude::{Graph as CoreGraph, NodeId};
@@ -117,12 +117,12 @@ impl ViewGraph {
         }
     }
 
-    pub fn serialize(&self, format: FileFormat) -> Vec<u8> {
+    pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
         self.validate();
         common::serialize(self, format)
     }
 
-    pub fn deserialize(format: FileFormat, input: &[u8]) -> Result<Self> {
+    pub fn deserialize(format: SerdeFormat, input: &[u8]) -> Result<Self> {
         if input.is_empty() {
             bail!("graph input is empty");
         }
@@ -272,17 +272,17 @@ mod tests {
 
     #[test]
     fn graph_roundtrip() {
-        assert_roundtrip(FileFormat::Json);
-        assert_roundtrip(FileFormat::Yaml);
-        assert_roundtrip(FileFormat::Lua);
-        assert_roundtrip(FileFormat::Bin);
+        assert_roundtrip(SerdeFormat::Json);
+        assert_roundtrip(SerdeFormat::Yaml);
+        assert_roundtrip(SerdeFormat::Lua);
+        assert_roundtrip(SerdeFormat::Bincode);
     }
 
     fn build_test_view() -> ViewGraph {
         core_test_graph().into()
     }
 
-    fn assert_roundtrip(format: FileFormat) {
+    fn assert_roundtrip(format: SerdeFormat) {
         let graph = build_test_view();
         let serialized = graph.serialize(format);
         assert!(
