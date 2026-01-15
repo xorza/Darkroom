@@ -53,7 +53,7 @@ impl NewNodeUi {
 
                         for category in categories {
                             gui.vertical(|gui| {
-                                Expander::new(category).show(gui, |gui| {
+                                Expander::new(category).default_open(true).show(gui, |gui| {
                                     for func in func_lib.funcs.iter() {
                                         if func.category != category {
                                             continue;
