@@ -104,7 +104,7 @@ impl MainUi {
 
         app_data.update_status();
 
-        self.handle_undo_shortcut(ctx, app_data);
+        self.handle_undo_shortcut(app_data);
         self.handle_save_load_shortcuts(app_data);
 
         egui::TopBottomPanel::top("top_panel")
@@ -167,11 +167,11 @@ impl MainUi {
         self.arena.reset();
     }
 
-    fn handle_undo_shortcut(&mut self, ctx: &egui::Context, app_data: &mut AppData) {
-        let undo_pressed = ctx.input(|input| {
+    fn handle_undo_shortcut(&mut self, app_data: &mut AppData) {
+        let undo_pressed = self.ui_context.ctx.input(|input| {
             input.key_pressed(egui::Key::Z) && input.modifiers.command && !input.modifiers.shift
         });
-        let redo_pressed = ctx.input(|input| {
+        let redo_pressed = self.ui_context.ctx.input(|input| {
             input.key_pressed(egui::Key::Z) && input.modifiers.command && input.modifiers.shift
         });
         if undo_pressed {
