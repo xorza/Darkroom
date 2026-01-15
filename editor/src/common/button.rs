@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Align2, Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2};
+use egui::{Align2, Color32, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
 
 use crate::gui::Gui;
 
@@ -97,12 +97,10 @@ impl<'a> Button<'a> {
         } else {
             // Autosize: calculate button size based on text
             // todo also include provided shapes size
-            let small_padding = gui.style.small_padding * 2.0;
-            let padding = gui.style.padding * 2.0;
             let text_size = galley.as_ref().map(|g| g.size()).unwrap_or_default();
-            let button_size = egui::vec2(text_size.x + padding, text_size.y + small_padding);
-            let (rect, response) = gui.ui().allocate_exact_size(button_size, sense);
-            (rect, response)
+            let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
+            let button_size = text_size + padding;
+            gui.ui().allocate_exact_size(button_size, sense)
         };
 
         if response.hovered()

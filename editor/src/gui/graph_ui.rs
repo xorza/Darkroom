@@ -2,14 +2,15 @@ use std::ptr::NonNull;
 
 use eframe::egui;
 use egui::{
-    Align, Align2, Area, Button, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton,
-    Pos2, Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
+    Align, Align2, Area, Color32, FontId, Frame, Id, Key, Layout, Margin, PointerButton, Pos2,
+    Rect, Response, RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
 use crate::common::UiEquals;
 
+use crate::common::button::Button;
 use crate::common::toggle_button::ToggleButton;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
@@ -416,15 +417,14 @@ impl GraphUi {
             .interactable(false)
             .show(&egui_ctx, |ui| {
                 Frame::NONE
-                    .fill(Color32::from_black_alpha(128))
+                    // .fill(Color32::from_black_alpha(128))
                     .inner_margin(padding)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             let mut gui = Gui::new(ui, style_clone);
 
-                            interaction.run |= gui.ui().button("run").clicked();
+                            interaction.run |= Button::new().text("run").show(&mut gui).clicked();
                             gui.ui.add_space(gui.style.padding);
-
                             ToggleButton::new(&mut self.autorun_enabled)
                                 .text("autorun")
                                 .show(&mut gui);

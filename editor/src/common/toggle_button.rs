@@ -85,7 +85,8 @@ impl<'a> ToggleButton<'a> {
         let (rect, response) = if let Some(rect) = self.rect {
             (rect, gui.ui().allocate_rect(rect, sense))
         } else {
-            let desired_size = galley.size() + vec2(gui.style.padding, gui.style.padding);
+            let padding = vec2(gui.style.padding * 2.0, gui.style.small_padding * 2.0);
+            let desired_size = galley.size() + padding;
             gui.ui().allocate_exact_size(desired_size, sense)
         };
 
