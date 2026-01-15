@@ -1,4 +1,4 @@
-use egui::{Pos2, Vec2};
+use egui::{Key, Pos2, Vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -59,7 +59,7 @@ impl NewNodeUi {
                 });
             });
 
-        if gui.ui().input(|i| i.key_pressed(egui::Key::Escape)) {
+        if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
             self.open = false;
         }
 

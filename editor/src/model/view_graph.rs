@@ -156,6 +156,35 @@ impl ViewGraph {
         (node, view_node)
     }
 
+    pub fn add_node_raw(
+        &mut self,
+        node_id: NodeId,
+        func_id: graph::function::FuncId,
+        name: String,
+        input_count: usize,
+        event_count: usize,
+        pos: egui::Pos2,
+    ) {
+        let node = Node {
+            id: node_id,
+            func_id,
+            name,
+            behavior: graph::graph::NodeBehavior::AsFunction,
+            inputs: (0..input_count)
+                .map(|_| graph::graph::Input {
+                    binding: Binding::None,
+                })
+                .collect(),
+            events: (0..event_count)
+                .map(|_| graph::graph::Event::default())
+                .collect(),
+        };
+        let mut view_node: ViewNode = (&node).into();
+        view_node.pos = pos;
+        self.view_nodes.add(view_node);
+        self.graph.add(node);
+    }
+
     pub fn removal_action(&self, node_id: &NodeId) -> GraphUiAction {
         let view_node = self
             .view_nodes
