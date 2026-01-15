@@ -387,9 +387,10 @@ impl GraphUi {
             .show(gui, |gui| {
                 gui.ui().take_available_width();
 
-                let btn_size = vec2(20.0, 20.0);
                 gui.horizontal(|gui| {
+                    let btn_size = vec2(20.0, 20.0);
                     let mono_font = gui.style.mono_font.clone();
+
                     fit_all = Button::default()
                         .text("a")
                         .font(mono_font.clone())
