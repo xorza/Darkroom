@@ -3,6 +3,8 @@ use graph::function::Func;
 use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
+use crate::common::button::Button;
+use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
 
@@ -48,17 +50,18 @@ impl NewNodeUi {
                     categories.dedup();
 
                     for category in categories {
-                        gui.ui().menu_button(category, |ui| {
+                        Expander::new(category).show(gui, |gui| {
+                            // Frame::none().inner_margin(10).show(gui, |gui| {
                             for func in func_lib.funcs.iter() {
                                 if func.category != category {
                                     continue;
                                 }
-                                if ui.button(&func.name).clicked() {
+                                if Button::default().text(&func.name).show(gui).clicked() {
                                     selected_func = Some(func);
                                     self.open = false;
-                                    ui.close();
                                 }
                             }
+                            // });
                         });
                     }
                 });
