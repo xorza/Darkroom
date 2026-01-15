@@ -393,23 +393,23 @@ impl GraphUi {
                     .show(ui, |ui| {
                         ui.take_available_width();
 
-                        ui.horizontal(|ui| {
-                            let mono_font = style.mono_font.clone();
-                            let mut gui = Gui::new(ui, &style);
+                        let mut gui = Gui::new(ui, &style);
+                        gui.horizontal(|gui| {
+                            let mono_font = gui.style.mono_font.clone();
                             fit_all = Button::default()
                                 .text("a")
                                 .font(mono_font.clone())
-                                .show(&mut gui)
+                                .show(gui)
                                 .clicked();
                             view_selected = Button::default()
                                 .text("s")
                                 .font(mono_font.clone())
-                                .show(&mut gui)
+                                .show(gui)
                                 .clicked();
                             reset_view = Button::default()
                                 .text("r")
                                 .font(mono_font)
-                                .show(&mut gui)
+                                .show(gui)
                                 .clicked();
                         });
                     });
