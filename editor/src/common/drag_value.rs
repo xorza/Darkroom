@@ -88,17 +88,17 @@ impl<'a> DragValue<'a> {
             .unwrap_or(gui.style.node.const_bind_style.clone());
         assert!(background.radius.is_finite());
 
-        let ui = gui.ui();
-
         // Check if we're currently dragging to display temporary value
-        let id = ui.make_persistent_id(&id_salt);
+        let id = gui.ui().make_persistent_id(&id_salt);
         let drag_temp_id = id.with("drag_temp");
-        let display_value = ui
+        let display_value = gui
+            .ui()
             .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
             .unwrap_or(*self.value);
 
         let value_text = display_value.to_string();
-        let galley = ui
+        let galley = gui
+            .ui()
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
         let size = galley.size() + padding * 2.0;
@@ -106,16 +106,21 @@ impl<'a> DragValue<'a> {
 
         let mut rect = self.align.anchor_size(self.pos, size);
 
-        let id = ui.make_persistent_id(id_salt);
+        if !gui.ui().is_rect_visible(rect) {
+            return gui.ui().allocate_rect(rect, Sense::hover());
+        }
+
+        let id = gui.ui().make_persistent_id(id_salt);
         let edit_id = id.with("edit");
         let edit_text_id = id.with("edit_text");
         let edit_original_id = id.with("edit_original");
         let drag_temp_id = id.with("drag_temp");
-        let mut edit_active = ui
+        let mut edit_active = gui
+            .ui()
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
 
-        ui.painter().rect(
+        gui.painter().rect(
             rect,
             background.radius,
             background.fill,
@@ -126,10 +131,12 @@ impl<'a> DragValue<'a> {
         rect = rect.expand(background.stroke.width);
 
         if edit_active {
-            let mut edit_text = ui
+            let mut edit_text = gui
+                .ui()
                 .data_mut(|data| data.get_temp::<String>(edit_text_id))
                 .unwrap_or_else(|| self.value.to_string());
-            let original_value = ui
+            let original_value = gui
+                .ui()
                 .data_mut(|data| data.get_temp::<i64>(edit_original_id))
                 .unwrap_or(*self.value);
 
@@ -142,12 +149,14 @@ impl<'a> DragValue<'a> {
                 .margin(padding)
                 .clip_text(true)
                 .frame(false);
-            let mut text_edit_response = ui.put(rect, text_edit);
+            let mut text_edit_response = gui.ui().put(rect, text_edit);
 
             let should_confirm = text_edit_response.lost_focus()
-                && ui.input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
-            let should_cancel =
-                text_edit_response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape));
+                && gui
+                    .ui()
+                    .input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
+            let should_cancel = text_edit_response.has_focus()
+                && gui.ui().input(|input| input.key_pressed(Key::Escape));
 
             let mut value_actually_changed = false;
             if should_confirm {
@@ -162,7 +171,7 @@ impl<'a> DragValue<'a> {
                 edit_active = false;
             }
 
-            ui.data_mut(|data| {
+            gui.ui().data_mut(|data| {
                 if edit_active {
                     data.insert_temp(edit_id, true);
                     data.insert_temp(edit_text_id, edit_text);
@@ -186,26 +195,29 @@ impl<'a> DragValue<'a> {
             return text_edit_response;
         }
 
-        let mut response = ui.allocate_rect(rect, Sense::click_and_drag() | Sense::hover());
+        let mut response = gui
+            .ui()
+            .allocate_rect(rect, Sense::click_and_drag() | Sense::hover());
 
         if response.clicked() {
-            ui.data_mut(|data| {
+            gui.ui().data_mut(|data| {
                 data.insert_temp(edit_id, true);
                 data.insert_temp(edit_text_id, self.value.to_string());
                 data.insert_temp(edit_original_id, *self.value);
             });
-            ui.memory_mut(|memory| memory.request_focus(edit_id));
+            gui.ui().memory_mut(|memory| memory.request_focus(edit_id));
         }
 
         if response.drag_started() {
-            ui.data_mut(|data| {
+            gui.ui().data_mut(|data| {
                 data.insert_temp(id, *self.value);
                 data.insert_temp(drag_temp_id, *self.value);
             });
         }
 
         if response.dragged() {
-            let start_value = ui
+            let start_value = gui
+                .ui()
                 .data_mut(|data| data.get_temp::<i64>(id))
                 .unwrap_or(*self.value);
             let delta = response
@@ -213,23 +225,26 @@ impl<'a> DragValue<'a> {
                 .expect("dragged response should have total delta")
                 .x;
             let new_value = start_value + (delta * self.speed).round() as i64;
-            let current_temp = ui
+            let current_temp = gui
+                .ui()
                 .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
                 .unwrap_or(*self.value);
             if new_value != current_temp {
-                ui.data_mut(|data| data.insert_temp(drag_temp_id, new_value));
+                gui.ui()
+                    .data_mut(|data| data.insert_temp(drag_temp_id, new_value));
             }
         }
 
         if response.drag_stopped() {
-            let final_value = ui
+            let final_value = gui
+                .ui()
                 .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
                 .unwrap_or(*self.value);
             if final_value != *self.value {
                 *self.value = final_value;
                 response.mark_changed();
             }
-            ui.data_mut(|data| {
+            gui.ui().data_mut(|data| {
                 data.remove::<i64>(id);
                 data.remove::<i64>(drag_temp_id);
             });
@@ -238,7 +253,7 @@ impl<'a> DragValue<'a> {
         let inner_rect = rect.shrink2(padding);
         let text_anchor = self.align.pos_in_rect(&inner_rect);
         let text_rect = self.align.anchor_size(text_anchor, galley.size());
-        ui.painter().galley(text_rect.min, galley, color);
+        gui.painter().galley(text_rect.min, galley, color);
 
         response
     }
