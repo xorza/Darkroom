@@ -82,11 +82,10 @@ impl<'a> ToggleButton<'a> {
         };
 
         if self.rect.is_none() {
-            // Autosize: calculate button size based on text
             let small_padding = gui.style.small_padding;
             let padding = gui.style.padding;
 
-            let mut prepared_layout = AtomLayout::new(galley.clone())
+            let mut prepared_layout = AtomLayout::new(galley)
                 .sense(sense)
                 .frame(
                     Frame::NONE.inner_margin(Margin::symmetric(padding as i8, small_padding as i8)),
@@ -131,59 +130,59 @@ impl<'a> ToggleButton<'a> {
                 *self.value = !*self.value;
             }
 
-            return response;
-        }
-
-        let rect = self.rect.unwrap();
-        let response = gui.ui().allocate_rect(rect, sense);
-
-        if response.clicked() && self.enabled {
-            *self.value = !*self.value;
-        }
-
-        if response.hovered()
-            && let Some(tooltip) = self.tooltip
-            && !tooltip.is_empty()
-        {
-            response.show_tooltip_text(tooltip);
-        }
-
-        let default_fill = if !self.enabled {
-            gui.style.noninteractive_bg_fill
-        } else if *self.value {
-            gui.style.checked_bg_fill
-        } else if response.is_pointer_button_down_on() {
-            gui.style.active_bg_fill
-        } else if response.hovered() {
-            gui.style.hover_bg_fill
+            response
         } else {
-            gui.style.inactive_bg_fill
-        };
+            let rect = self.rect.unwrap();
+            let response = gui.ui().allocate_rect(rect, sense);
 
-        let background = self.background.unwrap_or(ToggleButtonBackground {
-            fill: default_fill,
-            inactive_stroke: gui.style.inactive_bg_stroke,
-            hovered_stroke: gui.style.active_bg_stroke,
-            radius: gui.style.small_corner_radius,
-        });
+            if response.clicked() && self.enabled {
+                *self.value = !*self.value;
+            }
 
-        let stroke = if response.hovered() && self.enabled {
-            background.hovered_stroke
-        } else {
-            background.inactive_stroke
-        };
+            if response.hovered()
+                && let Some(tooltip) = self.tooltip
+                && !tooltip.is_empty()
+            {
+                response.show_tooltip_text(tooltip);
+            }
 
-        gui.painter().rect(
-            rect,
-            background.radius,
-            background.fill,
-            stroke,
-            StrokeKind::Inside,
-        );
-        let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
-        gui.painter()
-            .galley(text_pos, galley.clone(), gui.style.text_color);
+            let default_fill = if !self.enabled {
+                gui.style.noninteractive_bg_fill
+            } else if *self.value {
+                gui.style.checked_bg_fill
+            } else if response.is_pointer_button_down_on() {
+                gui.style.active_bg_fill
+            } else if response.hovered() {
+                gui.style.hover_bg_fill
+            } else {
+                gui.style.inactive_bg_fill
+            };
 
-        response
+            let background = self.background.unwrap_or(ToggleButtonBackground {
+                fill: default_fill,
+                inactive_stroke: gui.style.inactive_bg_stroke,
+                hovered_stroke: gui.style.active_bg_stroke,
+                radius: gui.style.small_corner_radius,
+            });
+
+            let stroke = if response.hovered() && self.enabled {
+                background.hovered_stroke
+            } else {
+                background.inactive_stroke
+            };
+
+            gui.painter().rect(
+                rect,
+                background.radius,
+                background.fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+            let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
+            gui.painter()
+                .galley(text_pos, galley.clone(), gui.style.text_color);
+
+            response
+        }
     }
 }
