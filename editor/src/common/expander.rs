@@ -73,14 +73,7 @@ impl Expander {
         }
 
         if open {
-            let style = gui.style.clone();
-            let indent = icon_size + icon_spacing;
-            gui.ui().indent(id, |ui| {
-                let current_indent = ui.spacing().indent;
-                ui.add_space(indent - current_indent);
-                let mut child_gui = Gui::new(ui, &style);
-                add_contents(&mut child_gui);
-            });
+            add_contents(gui);
         }
     }
 }

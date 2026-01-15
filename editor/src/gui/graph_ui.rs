@@ -181,7 +181,7 @@ impl GraphUi {
             let rect = gui.rect;
             let temp_background_response =
                 gui.ui()
-                    .interact(rect, newid, Sense::hover() | Sense::click());
+                    .interact(rect, newid, Sense::hover() | Sense::click() | Sense::drag());
 
             let should_close = temp_background_response.is_pointer_button_down_on()
                 || self.state != InteractionState::Idle;
