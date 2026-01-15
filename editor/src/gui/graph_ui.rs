@@ -374,7 +374,7 @@ impl GraphUi {
         let mut view_selected = false;
         let mut reset_view = false;
 
-        let small_padding = gui.style.small_padding;
+        let _small_padding = gui.style.small_padding;
         let padding = gui.style.padding;
         let rect = gui.rect;
         let egui_ctx = gui.ui().ctx().clone();
@@ -395,22 +395,22 @@ impl GraphUi {
 
                         ui.horizontal(|ui| {
                             let mono_font = style.mono_font.clone();
-                            let mut make_button = |label| {
-                                let button_size = Vec2::splat(mono_font.size + small_padding * 2.0);
-                                ui.add_sized(
-                                    button_size,
-                                    egui::Button::new(RichText::new(label).font(mono_font.clone())),
-                                )
-                                .clicked()
-                            };
-                            fit_all = make_button("a");
-                            view_selected = make_button("s");
-                            reset_view = make_button("r");
-
-                            // let mut gui = Gui::new(ui, style_clone.clone());
-                            // fit_all = Button::default().text("a").show(&mut gui).clicked();
-                            // view_selected = Button::default().text("s").show(&mut gui).clicked();
-                            // reset_view = Button::default().text("r").show(&mut gui).clicked();
+                            let mut gui = Gui::new(ui, &style);
+                            fit_all = Button::default()
+                                .text("a")
+                                .font(mono_font.clone())
+                                .show(&mut gui)
+                                .clicked();
+                            view_selected = Button::default()
+                                .text("s")
+                                .font(mono_font.clone())
+                                .show(&mut gui)
+                                .clicked();
+                            reset_view = Button::default()
+                                .text("r")
+                                .font(mono_font)
+                                .show(&mut gui)
+                                .clicked();
                         });
                     });
             });
