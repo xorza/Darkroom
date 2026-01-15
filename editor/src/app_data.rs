@@ -100,7 +100,14 @@ impl AppData {
     }
 
     pub fn save_graph(&mut self, path: &Path) {
-        match self.save_to_file(path) {
+        fn save_to_file(this: &mut AppData, path: &Path) -> Result<()> {
+            let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
+                .map_err(anyhow::Error::from)?;
+            let payload = this.view_graph.serialize(format);
+            std::fs::write(path, payload).map_err(anyhow::Error::from)
+        }
+
+        match save_to_file(self, path) {
             Ok(()) => {
                 self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Saved graph to {}", path.display()));
@@ -110,16 +117,16 @@ impl AppData {
     }
 
     pub fn load_graph(&mut self, path: &Path) {
-        // let load = || {
-        //     let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
-        //         .map_err(anyhow::Error::from)?;
-        //     let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
-        //     self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
+        fn load_from_file(this: &mut AppData, path: &Path) -> Result<()> {
+            let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
+                .map_err(anyhow::Error::from)?;
+            let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
+            this.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
 
-        //     Ok(())
-        // };
+            Ok(())
+        }
 
-        match self.load_from_file(path) {
+        match load_from_file(self, path) {
             Ok(()) => {
                 self.config.current_path = Some(path.to_path_buf());
                 self.add_status(format!("Loaded graph from {}", path.display()));
@@ -292,22 +299,6 @@ impl AppData {
         }
 
         graph_updated
-    }
-
-    fn save_to_file(&self, path: &Path) -> Result<()> {
-        let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
-            .map_err(anyhow::Error::from)?;
-        let payload = self.view_graph.serialize(format);
-        std::fs::write(path, payload).map_err(anyhow::Error::from)
-    }
-
-    fn load_from_file(&mut self, path: &Path) -> Result<()> {
-        let format = FileFormat::from_file_name(path.to_string_lossy().as_ref())
-            .map_err(anyhow::Error::from)?;
-        let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
-        self.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
-
-        Ok(())
     }
 }
 
