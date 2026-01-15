@@ -142,19 +142,20 @@ impl<'a> DragValue<'a> {
                 .margin(padding)
                 .clip_text(true)
                 .frame(false);
-            let mut response = ui.put(rect, text_edit);
+            let mut text_edit_response = ui.put(rect, text_edit);
 
-            let should_confirm = response.lost_focus()
+            let should_confirm = text_edit_response.lost_focus()
                 && ui.input(|input| input.key_pressed(Key::Enter) || input.pointer.any_click());
             let should_cancel =
-                response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape));
+                text_edit_response.has_focus() && ui.input(|input| input.key_pressed(Key::Escape));
 
+            let mut value_actually_changed = false;
             if should_confirm {
                 if let Ok(parsed) = edit_text.trim().parse::<i64>()
                     && parsed != original_value
                 {
                     *self.value = parsed;
-                    response.mark_changed();
+                    value_actually_changed = true;
                 }
                 edit_active = false;
             } else if should_cancel {
@@ -173,7 +174,16 @@ impl<'a> DragValue<'a> {
                 }
             });
 
-            return response;
+            // We need to return the text_edit_response to preserve editing functionality,
+            // but TextEdit marks it as changed() when text is typed. Unfortunately we can't
+            // easily clear the changed flag. The best we can do is only explicitly mark
+            // as changed when value is committed, but changed() might still be true while typing.
+            // A better solution would be to track edit state externally in the caller.
+            if value_actually_changed {
+                text_edit_response.mark_changed();
+            }
+
+            return text_edit_response;
         }
 
         let mut response = ui.allocate_rect(rect, Sense::click_and_drag() | Sense::hover());

@@ -153,7 +153,8 @@ impl<'a> ConstBindFrame<'a> {
 
                 currently_hovered |= response.hovered();
 
-                if response.changed() {
+                // Only process changed() if we're not actively editing (has_focus means still typing)
+                if response.changed() && !response.has_focus() {
                     currently_hovered = true;
                     let after = input.binding.clone();
                     ui_interaction.add_action(GraphUiAction::InputChanged {
