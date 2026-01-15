@@ -3,7 +3,6 @@ pub mod button;
 pub mod connection_bezier;
 pub mod drag_value;
 pub mod font;
-pub mod new_button;
 pub mod ui_equals;
 pub mod undo_stack;
 

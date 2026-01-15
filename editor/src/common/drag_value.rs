@@ -89,7 +89,15 @@ impl<'a> DragValue<'a> {
         assert!(background.radius.is_finite());
 
         let ui = gui.ui();
-        let value_text = self.value.to_string();
+
+        // Check if we're currently dragging to display temporary value
+        let id = ui.make_persistent_id(&id_salt);
+        let drag_temp_id = id.with("drag_temp");
+        let display_value = ui
+            .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+            .unwrap_or(*self.value);
+
+        let value_text = display_value.to_string();
         let galley = ui
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
@@ -101,6 +109,7 @@ impl<'a> DragValue<'a> {
         let id = ui.make_persistent_id(id_salt);
         let edit_id = id.with("edit");
         let edit_text_id = id.with("edit_text");
+        let drag_temp_id = id.with("drag_temp");
         let mut edit_active = ui
             .data_mut(|data| data.get_temp::<bool>(edit_id))
             .unwrap_or(false);
@@ -168,7 +177,10 @@ impl<'a> DragValue<'a> {
         }
 
         if response.drag_started() {
-            ui.data_mut(|data| data.insert_temp(id, *self.value));
+            ui.data_mut(|data| {
+                data.insert_temp(id, *self.value);
+                data.insert_temp(drag_temp_id, *self.value);
+            });
         }
 
         if response.dragged() {
@@ -180,14 +192,26 @@ impl<'a> DragValue<'a> {
                 .expect("dragged response should have total delta")
                 .x;
             let new_value = start_value + (delta * self.speed).round() as i64;
-            if new_value != *self.value {
-                *self.value = new_value;
-                response.mark_changed();
+            let current_temp = ui
+                .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+                .unwrap_or(*self.value);
+            if new_value != current_temp {
+                ui.data_mut(|data| data.insert_temp(drag_temp_id, new_value));
             }
         }
 
         if response.drag_stopped() {
-            ui.data_mut(|data| data.remove::<i64>(id));
+            let final_value = ui
+                .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+                .unwrap_or(*self.value);
+            if final_value != *self.value {
+                *self.value = final_value;
+                response.mark_changed();
+            }
+            ui.data_mut(|data| {
+                data.remove::<i64>(id);
+                data.remove::<i64>(drag_temp_id);
+            });
         }
 
         let inner_rect = rect.shrink2(padding);
