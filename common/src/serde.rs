@@ -65,22 +65,13 @@ pub fn serialize_into<T: Serialize, W: Write>(
 
 pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -> Result<T> {
     match format {
-        FileFormat::Yaml => {
-            let text = std::str::from_utf8(serialized)?;
-            Ok(serde_yml::from_str(text)?)
-        }
-        FileFormat::Json => {
-            let text = std::str::from_utf8(serialized)?;
-            Ok(serde_json::from_str(text)?)
-        }
+        FileFormat::Yaml => Ok(serde_yml::from_slice(serialized)?),
+        FileFormat::Json => Ok(serde_json::from_slice(serialized)?),
         FileFormat::Lua => {
             let text = std::str::from_utf8(serialized)?;
             Ok(serde_lua::from_str(text)?)
         }
-        FileFormat::Toml => {
-            let text = std::str::from_utf8(serialized)?;
-            Ok(toml::from_str(text)?)
-        }
+        FileFormat::Toml => Ok(toml::from_slice(serialized)?),
         FileFormat::Bin => {
             let uncompressed_size =
                 u32::from_le_bytes(serialized[0..4].try_into().unwrap()) as usize;
