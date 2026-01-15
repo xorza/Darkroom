@@ -105,6 +105,7 @@ impl MainUi {
         app_data.update_status();
 
         self.handle_undo_shortcut(ctx, app_data);
+        self.handle_save_load_shortcuts(app_data);
 
         egui::TopBottomPanel::top("top_panel")
             .show_separator_line(false)
@@ -177,6 +178,27 @@ impl MainUi {
             app_data.undo();
         } else if redo_pressed {
             app_data.redo();
+        }
+    }
+
+    fn handle_save_load_shortcuts(&mut self, app_data: &mut AppData) {
+        let save_as_pressed = self.ui_context.ctx.input(|input| {
+            input.key_pressed(egui::Key::S) && input.modifiers.command && input.modifiers.shift
+        });
+        let save_pressed = self.ui_context.ctx.input(|input| {
+            input.key_pressed(egui::Key::S) && input.modifiers.command && !input.modifiers.shift
+        });
+        let open_pressed = self
+            .ui_context
+            .ctx
+            .input(|input| input.key_pressed(egui::Key::O) && input.modifiers.command);
+
+        if save_as_pressed {
+            self.save_as(app_data);
+        } else if save_pressed {
+            self.save(app_data);
+        } else if open_pressed {
+            self.load(app_data);
         }
     }
 }
