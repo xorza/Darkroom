@@ -1,6 +1,7 @@
 use eframe::egui;
 use egui::{
-    Align2, AtomLayout, Color32, Frame, Margin, Rect, Response, Sense, Stroke, StrokeKind, Vec2,
+    Align2, AllocatedAtomLayout, AtomLayout, Color32, Frame, Margin, Rect, Response, Sense, Stroke,
+    StrokeKind, Vec2,
 };
 
 use crate::gui::Gui;
@@ -80,6 +81,83 @@ impl<'a> ToggleButton<'a> {
         } else {
             Sense::hover()
         };
+
+        let mut atom_layout: Option<AllocatedAtomLayout> = None;
+        let response = if let Some(rect) = self.rect {
+            gui.ui().allocate_rect(rect, sense)
+        } else {
+            let small_padding = gui.style.small_padding;
+            let padding = gui.style.padding;
+
+            let prepared_layout = AtomLayout::new(galley.clone())
+                .sense(sense)
+                .frame(
+                    Frame::NONE.inner_margin(Margin::symmetric(padding as i8, small_padding as i8)),
+                )
+                // .min_size(min_size)
+                .allocate(gui.ui());
+            let response = prepared_layout.response.clone();
+            atom_layout = Some(prepared_layout);
+            response
+        };
+
+        let default_fill = if !self.enabled {
+            gui.style.noninteractive_bg_fill
+        } else if *self.value {
+            gui.style.checked_bg_fill
+        } else if response.is_pointer_button_down_on() {
+            gui.style.active_bg_fill
+        } else if response.hovered() {
+            gui.style.hover_bg_fill
+        } else {
+            gui.style.inactive_bg_fill
+        };
+
+        let background = self.background.unwrap_or(ToggleButtonBackground {
+            fill: default_fill,
+            inactive_stroke: gui.style.inactive_bg_stroke,
+            hovered_stroke: gui.style.active_bg_stroke,
+            radius: gui.style.small_corner_radius,
+        });
+
+        let stroke = if response.hovered() && self.enabled {
+            background.hovered_stroke
+        } else {
+            background.inactive_stroke
+        };
+
+        if response.clicked() && self.enabled {
+            *self.value = !*self.value;
+        }
+        if response.hovered()
+            && let Some(tooltip) = self.tooltip
+            && !tooltip.is_empty()
+        {
+            response.show_tooltip_text(tooltip);
+        }
+
+        if let Some(rect) = self.rect {
+            gui.painter().rect(
+                rect,
+                background.radius,
+                background.fill,
+                stroke,
+                StrokeKind::Inside,
+            );
+            let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
+            gui.painter()
+                .galley(text_pos, galley.clone(), gui.style.text_color);
+        } else {
+            let mut atom_layout = atom_layout.unwrap();
+            atom_layout.frame = atom_layout
+                .frame
+                .fill(background.fill)
+                .stroke(stroke)
+                .corner_radius(background.radius);
+
+            atom_layout.paint(gui.ui());
+        }
+        return response;
 
         if self.rect.is_none() {
             let small_padding = gui.style.small_padding;
