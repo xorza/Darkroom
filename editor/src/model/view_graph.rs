@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn graph_roundtrip() {
-        for format in SerdeFormat::all_slice() {
+        for format in SerdeFormat::all_formats_for_testing() {
             assert_roundtrip(format);
         }
     }

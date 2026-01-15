@@ -418,12 +418,7 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let graph = super::test_graph();
 
-        for format in [
-            SerdeFormat::Yaml,
-            SerdeFormat::Json,
-            SerdeFormat::Lua,
-            SerdeFormat::Bincode,
-        ] {
+        for format in SerdeFormat::all_formats_for_testing() {
             let serialized = graph.serialize(format);
             let deserialized = Graph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);

@@ -420,7 +420,7 @@ mod tests {
         vec.add(TestItem { id: 1, value: 10 });
         vec.add(TestItem { id: 2, value: 20 });
 
-        for format in SerdeFormat::all_slice() {
+        for format in SerdeFormat::all_formats_for_testing() {
             let serialized = serialize(&vec, format);
             let deserialized: KeyIndexVec<u32, TestItem> =
                 deserialize(&serialized, format).unwrap();

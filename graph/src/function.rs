@@ -445,12 +445,7 @@ mod tests {
     fn roundtrip_serialization() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks::default());
 
-        for format in [
-            SerdeFormat::Yaml,
-            SerdeFormat::Json,
-            SerdeFormat::Lua,
-            SerdeFormat::Bincode,
-        ] {
+        for format in SerdeFormat::all_formats_for_testing() {
             let serialized = func_lib.serialize(format);
             let deserialized = super::FuncLib::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);

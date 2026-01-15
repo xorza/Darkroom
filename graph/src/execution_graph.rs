@@ -1156,12 +1156,7 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
 
-        for format in [
-            SerdeFormat::Yaml,
-            SerdeFormat::Json,
-            SerdeFormat::Lua,
-            SerdeFormat::Bincode,
-        ] {
+        for format in SerdeFormat::all_formats_for_testing() {
             let serialized = execution_graph.serialize(format);
             let deserialized = ExecutionGraph::deserialize(&serialized, format)?;
             let serialized_again = deserialized.serialize(format);

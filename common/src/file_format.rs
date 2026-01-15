@@ -27,7 +27,7 @@ pub enum SerdeFormat {
 }
 
 impl SerdeFormat {
-    pub fn all_slice() -> [Self; 5] {
+    pub fn all_formats_for_testing() -> [Self; 5] {
         [Self::Yaml, Self::Json, Self::Lua, Self::Bincode, Self::Scn]
     }
 
