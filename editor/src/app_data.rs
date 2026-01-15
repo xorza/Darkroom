@@ -311,10 +311,6 @@ fn add_node_from_func_id(view_graph: &mut ViewGraph, func_lib: &FuncLib, func_id
         .all(|node| node.func_id != func_id)
     {
         let func = func_lib.by_id(&func_id).unwrap();
-        let node: Node = func.into();
-        let view_node: ViewNode = (&node).into();
-
-        view_graph.view_nodes.add(view_node);
-        view_graph.graph.add(node);
+        view_graph.add_node_from_func(func);
     }
 }

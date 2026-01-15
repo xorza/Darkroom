@@ -594,8 +594,8 @@ mod tests {
                     .expect("snapshot should deserialize");
             assert_eq!(view_graph.graph, snapshot_graph.graph);
             assert_eq!(view_graph.view_nodes, snapshot_graph.view_nodes);
-            assert!(view_graph.pan.ui_equals(&snapshot_graph.pan));
-            assert!(view_graph.scale.ui_equals(&snapshot_graph.scale));
+            assert!(view_graph.pan.ui_equals(snapshot_graph.pan));
+            assert!(view_graph.scale.ui_equals(snapshot_graph.scale));
             assert_eq!(view_graph.selected_node_id, snapshot_graph.selected_node_id);
         }
         assert!(!stack.undo(&mut view_graph, &mut |_| {}));
