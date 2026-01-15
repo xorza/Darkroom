@@ -169,6 +169,7 @@ impl MainUi {
     fn handle_shortcuts(&mut self, app_data: &mut AppData) {
         self.handle_undo_shortcut(app_data);
         self.handle_save_load_shortcuts(app_data);
+        self.handle_run_shortcuts(app_data);
     }
 
     fn handle_undo_shortcut(&mut self, app_data: &mut AppData) {
@@ -203,6 +204,21 @@ impl MainUi {
             self.save(app_data);
         } else if open_pressed {
             self.load(app_data);
+        }
+    }
+
+    fn handle_run_shortcuts(&mut self, app_data: &mut AppData) {
+        let toggle_autorun_pressed = self.ui_context.ctx.input(|input| {
+            input.key_pressed(egui::Key::Space) && input.modifiers.command && input.modifiers.shift
+        });
+        let run_once_pressed = self.ui_context.ctx.input(|input| {
+            input.key_pressed(egui::Key::Space) && input.modifiers.command && !input.modifiers.shift
+        });
+
+        if toggle_autorun_pressed {
+            app_data.autorun = !app_data.autorun;
+        } else if run_once_pressed {
+            app_data.interaction.run = true;
         }
     }
 }
