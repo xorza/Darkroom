@@ -122,6 +122,10 @@ impl<'a> Button<'a> {
             gui.ui().allocate_exact_size(button_size, sense)
         };
 
+        if !gui.ui().is_rect_visible(rect) {
+            return response;
+        }
+
         if response.clicked()
             && self.enabled
             && let Some(toggle_value) = self.toggle_value
