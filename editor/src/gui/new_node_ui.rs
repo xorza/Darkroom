@@ -1,4 +1,4 @@
-use egui::{Color32, Key, Order, Pos2, Stroke, Vec2};
+use egui::{Align, Color32, Key, Order, Pos2, Stroke, Vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -71,6 +71,7 @@ impl NewNodeUi {
                                     })
                                     .size(btn_size)
                                     .text(&func.name)
+                                    .align(Align::Min)
                                     .show(gui)
                                     .clicked()
                                 {

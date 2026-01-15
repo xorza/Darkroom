@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui::{Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
+use egui::{Align, Color32, FontId, Rect, Response, Sense, Shape, Stroke, StrokeKind, Vec2, vec2};
 
 use crate::gui::Gui;
 
@@ -26,6 +26,7 @@ pub struct Button<'a> {
     size: Option<Vec2>,
     shapes: Vec<Shape>,
     toggle_value: Option<&'a mut bool>,
+    content_align: Align,
 }
 
 impl<'a> Default for Button<'a> {
@@ -40,6 +41,7 @@ impl<'a> Default for Button<'a> {
             size: None,
             shapes: Vec::new(),
             toggle_value: None,
+            content_align: Align::Center,
         }
     }
 }
@@ -88,6 +90,11 @@ impl<'a> Button<'a> {
 
     pub fn toggle(mut self, value: &'a mut bool) -> Self {
         self.toggle_value = Some(value);
+        self
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.content_align = align;
         self
     }
 
@@ -185,8 +192,14 @@ impl<'a> Button<'a> {
             gui.painter().extend(self.shapes);
         }
         if let Some(galley) = galley {
-            let text_pos = rect.min + (rect.size() - galley.size()) * 0.5;
-            gui.painter().galley(text_pos, galley, text_color);
+            let text_x = match self.content_align {
+                Align::Min => rect.min.x + gui.style.padding,
+                Align::Center => rect.min.x + (rect.width() - galley.size().x) * 0.5,
+                Align::Max => rect.max.x - galley.size().x - gui.style.padding,
+            };
+            let text_y = rect.min.y + (rect.height() - galley.size().y) * 0.5;
+            gui.painter()
+                .galley(egui::pos2(text_x, text_y), galley, text_color);
         }
 
         response
