@@ -67,10 +67,7 @@ pub fn deserialize<T: DeserializeOwned>(serialized: &[u8], format: FileFormat) -
     match format {
         FileFormat::Yaml => Ok(serde_yml::from_slice(serialized)?),
         FileFormat::Json => Ok(serde_json::from_slice(serialized)?),
-        FileFormat::Lua => {
-            let text = std::str::from_utf8(serialized)?;
-            Ok(serde_lua::from_str(text)?)
-        }
+        FileFormat::Lua => Ok(serde_lua::from_slice(serialized)?),
         FileFormat::Toml => Ok(toml::from_slice(serialized)?),
         FileFormat::Bin => {
             let uncompressed_size =
