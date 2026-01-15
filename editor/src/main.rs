@@ -92,9 +92,7 @@ impl ScenariumEditor {
         app
     }
 
-    fn init(&mut self) {
-        self.main_ui.load(&mut self.app_data);
-    }
+    fn init(&mut self) {}
 }
 
 impl eframe::App for ScenariumEditor {
