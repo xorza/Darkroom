@@ -9,6 +9,8 @@ use egui::{
 use crate::app_data::AppData;
 use crate::common::area::Area;
 use crate::common::frame::Frame;
+use crate::model::EventSubscriberChange;
+use crate::model::graph_ui_action::GraphUiAction;
 use graph::graph::NodeId;
 use graph::prelude::{Binding, ExecutionStats, FuncLib, PortAddress};
 
@@ -21,9 +23,7 @@ use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
-use crate::gui::graph_ui_interaction::{
-    EventSubscriberChange, GraphUiAction, GraphUiInteraction, RunCommand,
-};
+use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::{NodeUi, PortDragInfo};

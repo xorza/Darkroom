@@ -12,8 +12,10 @@ use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
-use crate::gui::graph_ui_interaction::{EventSubscriberChange, GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_ui::PortDragInfo;
+use crate::model::EventSubscriberChange;
+use crate::model::graph_ui_action::GraphUiAction;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ConnectionKey {

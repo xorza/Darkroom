@@ -1,8 +1,9 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction, RunCommand};
+use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
 use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
+use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::{SerdeFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};

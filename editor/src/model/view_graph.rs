@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::common::UiEquals;
+use crate::model::graph_ui_action::GraphUiAction;
 
 use super::ViewNode;
-use crate::gui::graph_ui_interaction::GraphUiAction;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IncomingConnection {

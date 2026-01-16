@@ -1,7 +1,6 @@
 use graph::graph::NodeId;
 
-use crate::gui::graph_ui::Error;
-use crate::model::GraphUiAction;
+use crate::{gui::graph_ui::Error, model::graph_ui_action::GraphUiAction};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum RunCommand {

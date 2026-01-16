@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::common::undo_stack::UndoStack;
-use crate::gui::graph_ui_interaction::GraphUiAction;
+use crate::model::graph_ui_action::GraphUiAction;
 
 #[derive(Debug)]
 pub struct FullSerdeUndoStack<T: Debug> {

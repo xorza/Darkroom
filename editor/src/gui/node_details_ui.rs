@@ -7,8 +7,9 @@ use crate::common::area::Area;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::model::ArgumentValuesCache;
+use crate::model::graph_ui_action::GraphUiAction;
 
 const PANEL_WIDTH: f32 = 250.0;
 

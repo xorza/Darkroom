@@ -11,8 +11,9 @@ use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
 
-use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction};
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_layout::NodeLayout;
+use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 

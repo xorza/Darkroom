@@ -6,8 +6,8 @@ use common::SerdeFormat;
 #[cfg(debug_assertions)]
 use crate::common::undo_stack::FullSerdeUndoStack;
 use crate::common::undo_stack::UndoStack;
-use crate::gui::graph_ui_interaction::GraphUiAction;
 use crate::model::ViewGraph;
+use crate::model::graph_ui_action::GraphUiAction;
 
 #[derive(Debug)]
 pub struct ActionUndoStack {
@@ -196,7 +196,8 @@ impl UndoStack<ViewGraph> for ActionUndoStack {
 mod tests {
     use super::*;
     use crate::common::UiEquals;
-    use crate::gui::graph_ui_interaction::EventSubscriberChange;
+    use crate::model::EventSubscriberChange;
+    use crate::model::graph_ui_action::GraphUiAction;
     use crate::model::view_graph::{IncomingConnection, IncomingEvent};
     use common::SerdeFormat;
     use egui::{Pos2, Vec2, vec2};
