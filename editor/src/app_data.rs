@@ -26,7 +26,6 @@ use graph::execution_graph::ArgumentValues;
 #[derive(Debug, Default)]
 pub struct Status {
     print_output: Option<String>,
-    argument_values_response: Option<(NodeId, Option<ArgumentValues>)>,
 }
 
 pub type SharedStatus = Shared<Status>;
@@ -57,7 +56,8 @@ pub struct AppData {
     pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
 
-    pub execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
+    execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
+    argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
 }
 
 impl AppData {
@@ -66,6 +66,7 @@ impl AppData {
 
         let shared_status = Shared::default();
         let (worker, execution_stats_rx) = Self::create_worker(ui_context.clone());
+        let argument_values_rx = Slot::default();
 
         let run_event = Arc::new(Notify::new());
 
@@ -96,6 +97,7 @@ impl AppData {
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
             execution_stats_rx,
+            argument_values_rx,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -193,12 +195,8 @@ impl AppData {
             }
         }
 
-        let Ok(mut shared_status) = self.shared_status.try_lock() else {
-            return;
-        };
-
         // Process argument values response
-        if let Some((node_id, Some(values))) = shared_status.argument_values_response.take() {
+        if let Some((node_id, Some(values))) = self.argument_values_rx.take() {
             self.argument_values_cache.insert(node_id, values);
         }
     }
@@ -269,14 +267,16 @@ impl AppData {
 
         // Handle argument values request
         if let Some(node_id) = self.interaction.request_argument_values {
-            let shared_status = self.shared_status.clone();
-            let ui_context = self.ui_context.clone();
             msgs.push(WorkerMessage::RequestArgumentValues {
                 node_id,
-                callback: ArgumentValuesCallback::new(move |values| {
-                    let mut status = shared_status.try_lock().unwrap();
-                    status.argument_values_response = Some((node_id, values));
-                    ui_context.request_redraw();
+                callback: ArgumentValuesCallback::new({
+                    let ui_context = self.ui_context.clone();
+                    let slot = self.argument_values_rx.clone();
+
+                    move |values| {
+                        slot.send((node_id, values));
+                        ui_context.request_redraw();
+                    }
                 }),
             });
         }
