@@ -962,7 +962,7 @@ impl ExecutionGraph {
         }
     }
 
-    pub fn get_input_output_values(
+    pub fn get_argument_values(
         &self,
         node_id: &NodeId,
     ) -> Option<(Vec<Option<DynamicValue>>, Vec<DynamicValue>)> {
@@ -1817,7 +1817,7 @@ mod tests {
         let nonexistent_id: NodeId = "00000000-0000-0000-0000-000000000000".into();
         assert!(
             execution_graph
-                .get_input_output_values(&nonexistent_id)
+                .get_argument_values(&nonexistent_id)
                 .is_none()
         );
 
@@ -1843,7 +1843,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
-        let (inputs, outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+        let (inputs, outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(inputs.len(), 2);
         assert!(matches!(inputs[0], Some(DynamicValue::Int(3))));
@@ -1872,7 +1872,7 @@ mod tests {
         // sum node: inputs from get_a (2.0) and get_b (5.0), output = 7
         // Note: test functions output Float values even though declared as Int
         let sum_id = graph.by_name("sum").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_input_output_values(&sum_id).unwrap();
+        let (inputs, outputs) = execution_graph.get_argument_values(&sum_id).unwrap();
 
         assert_eq!(inputs.len(), 2);
         assert!(matches!(inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0)));
@@ -1883,7 +1883,7 @@ mod tests {
 
         // mult node: inputs from sum (7) and get_b (5.0), output = 35
         let mult_id = graph.by_name("mult").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+        let (inputs, outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(inputs.len(), 2);
         assert!(matches!(inputs[0], Some(DynamicValue::Int(7))));
@@ -1894,7 +1894,7 @@ mod tests {
 
         // print node: input from mult (35), no outputs
         let print_id = graph.by_name("print").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_input_output_values(&print_id).unwrap();
+        let (inputs, outputs) = execution_graph.get_argument_values(&print_id).unwrap();
 
         assert_eq!(inputs.len(), 1);
         assert!(matches!(inputs[0], Some(DynamicValue::Int(35))));
@@ -1923,7 +1923,7 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
-        let (inputs, _outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+        let (inputs, _outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
 
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].is_some()); // from sum
@@ -1942,7 +1942,7 @@ mod tests {
 
         // Before execution, bound inputs should return None (no output values yet)
         let sum_id = graph.by_name("sum").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_input_output_values(&sum_id).unwrap();
+        let (inputs, outputs) = execution_graph.get_argument_values(&sum_id).unwrap();
 
         assert_eq!(inputs.len(), 2);
         assert!(inputs[0].is_none()); // get_a hasn't executed
