@@ -66,6 +66,8 @@ pub struct GraphUi {
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
+    /// When set, a new node selection will connect its first output to this input port
+    pending_connection_input: Option<PortRef>,
 }
 
 impl GraphUi {
@@ -187,6 +189,7 @@ impl GraphUi {
         }
 
         // Show menu and handle selection
+        let was_open = self.new_node_ui.is_open();
         if let Some(func) = self.new_node_ui.show(gui, ctx.func_lib) {
             let screen_pos = self.new_node_ui.position();
             let origin = gui.rect.min;
@@ -200,6 +203,25 @@ impl GraphUi {
                 view_node: view_node.clone(),
                 node: node.clone(),
             });
+
+            // If there's a pending connection, connect the new node's first output to the input
+            if let Some(input_port) = self.pending_connection_input.take()
+                && !func.outputs.is_empty()
+            {
+                let output_port = PortRef {
+                    node_id: node.id,
+                    port_idx: 0,
+                    kind: PortKind::Output,
+                };
+                let result = apply_data_connection(ctx.view_graph, input_port, output_port);
+                match result {
+                    Ok(action) => interaction.add_action(action),
+                    Err(err) => interaction.add_error(err),
+                }
+            }
+        } else if was_open && !self.new_node_ui.is_open() {
+            // New node UI was closed without selection, clear pending connection
+            self.pending_connection_input = None;
         }
     }
 
@@ -337,19 +359,9 @@ impl GraphUi {
 
                         self.state = InteractionState::Idle;
 
-                        let input_node =
-                            ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-                        let input = &mut input_node.inputs[input_port.port_idx];
-                        let before = input.binding.clone();
-                        input.binding = Binding::Const(0.into());
-                        let after = input.binding.clone();
-
-                        interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: input_port.node_id,
-                            input_idx: input_port.port_idx,
-                            before,
-                            after,
-                        })
+                        // Open new_node_ui to let user select a node to connect
+                        self.new_node_ui.open(pointer_pos);
+                        self.pending_connection_input = Some(input_port);
                     }
                     ConnectionDragUpdate::FinishedWith {
                         input_port,
