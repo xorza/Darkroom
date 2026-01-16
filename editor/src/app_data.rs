@@ -5,6 +5,7 @@ use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
+use common::slot::Slot;
 use common::{SerdeFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
 use graph::execution_graph::{self, Result as ExecutionGraphResult};
@@ -56,7 +57,7 @@ pub struct AppData {
     pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
 
-    pub execution_stats_rx: watch::Receiver<Option<Result<ExecutionStats, execution_graph::Error>>>,
+    pub execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
 }
 
 impl AppData {
@@ -64,7 +65,7 @@ impl AppData {
         let config = Config::load_or_default();
 
         let shared_status = Shared::default();
-        let (worker, receiver) = Self::create_worker(ui_context.clone());
+        let (worker, execution_stats_rx) = Self::create_worker(ui_context.clone());
 
         let run_event = Arc::new(Notify::new());
 
@@ -94,7 +95,7 @@ impl AppData {
             graph_dirty: true,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
-            execution_stats_rx: receiver,
+            execution_stats_rx,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -162,34 +163,32 @@ impl AppData {
     }
 
     pub fn update_shared_status(&mut self) {
-        if self.execution_stats_rx.has_changed().unwrap() {
-            if let Some(execution_stats) = self.execution_stats_rx.borrow_and_update().take() {
-                match execution_stats {
-                    Ok(execution_stats) => {
-                        let message = format!(
-                            "Compute finished: {} nodes, {:.0}s",
-                            execution_stats.executed_nodes.len(),
-                            execution_stats.elapsed_secs
-                        );
+        if let Some(execution_stats) = self.execution_stats_rx.take() {
+            match execution_stats {
+                Ok(execution_stats) => {
+                    let message = format!(
+                        "Compute finished: {} nodes, {:.0}s",
+                        execution_stats.executed_nodes.len(),
+                        execution_stats.elapsed_secs
+                    );
 
-                        self.argument_values_cache
-                            .invalidate_changed(&execution_stats);
-                        self.execution_stats = Some(execution_stats);
+                    self.argument_values_cache
+                        .invalidate_changed(&execution_stats);
+                    self.execution_stats = Some(execution_stats);
 
-                        // let print_out = shared_status.print_output.take();
-                        //     if let Some(print_output) = print_out {
-                        //     format!("Compute output:\n{print_output}\n{summary}")
-                        // } else {
-                        //     format!("Compute finished: {summary}")
-                        // };
+                    // let print_out = shared_status.print_output.take();
+                    //     if let Some(print_output) = print_out {
+                    //     format!("Compute output:\n{print_output}\n{summary}")
+                    // } else {
+                    //     format!("Compute finished: {summary}")
+                    // };
 
-                        self.status.push('\n');
-                        self.status.push_str(&message);
-                    }
-                    Err(err) => {
-                        self.status.push('\n');
-                        self.status.push_str(&format!("Compute failed: {err}"));
-                    }
+                    self.status.push('\n');
+                    self.status.push_str(&message);
+                }
+                Err(err) => {
+                    self.status.push('\n');
+                    self.status.push_str(&format!("Compute failed: {err}"));
                 }
             }
         }
@@ -296,19 +295,18 @@ impl AppData {
 
     fn create_worker(
         ui_refresh: UiContext,
-    ) -> (
-        Worker,
-        watch::Receiver<Option<Result<ExecutionStats, execution_graph::Error>>>,
-    ) {
-        let (tx, rx) =
-            watch::channel::<Option<Result<ExecutionStats, execution_graph::Error>>>(None);
+    ) -> (Worker, Slot<Result<ExecutionStats, execution_graph::Error>>) {
+        let slot = Slot::default();
 
         (
-            Worker::new(move |result| {
-                tx.send(Some(result)).unwrap();
-                ui_refresh.request_redraw();
+            Worker::new({
+                // let slot = slot.clone();
+                move |result| {
+                    // slot.send(result);
+                    ui_refresh.request_redraw();
+                }
             }),
-            rx,
+            slot,
         )
     }
 

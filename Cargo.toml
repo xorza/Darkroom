@@ -54,7 +54,6 @@ bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "*", features = ["std"] }
 bincode = { version = "*", features = ["serde"] }
 rfd = { version = "*" }
-arc-swap  = { version="*" }
 
 
 [profile.bench]
