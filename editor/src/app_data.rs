@@ -7,7 +7,7 @@ use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::{SerdeFormat, Shared};
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
-use graph::execution_graph::Result as ExecutionGraphResult;
+use graph::execution_graph::{self, Result as ExecutionGraphResult};
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
@@ -15,7 +15,7 @@ use graph::worker::{ArgumentValuesCallback, WorkerMessage};
 use graph::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, watch};
 
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
@@ -24,7 +24,6 @@ use graph::execution_graph::ArgumentValues;
 
 #[derive(Debug, Default)]
 pub struct Status {
-    execution_stats: Option<ExecutionGraphResult<ExecutionStats>>,
     print_output: Option<String>,
     argument_values_response: Option<(NodeId, Option<ArgumentValues>)>,
 }
@@ -49,12 +48,15 @@ pub struct AppData {
 
     pub ui_context: UiContext,
 
-    pub shared_status: SharedStatus,
-    pub run_event: Arc<Notify>,
     pub autorun: bool,
     pub graph_dirty: bool,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
+
+    pub shared_status: SharedStatus,
+    pub run_event: Arc<Notify>,
+
+    pub execution_stats_rx: watch::Receiver<Option<Result<ExecutionStats, execution_graph::Error>>>,
 }
 
 impl AppData {
@@ -62,7 +64,7 @@ impl AppData {
         let config = Config::load_or_default();
 
         let shared_status = Shared::default();
-        let worker = Self::create_worker(shared_status.clone(), ui_context.clone());
+        let (worker, receiver) = Self::create_worker(ui_context.clone());
 
         let run_event = Arc::new(Notify::new());
 
@@ -92,6 +94,7 @@ impl AppData {
             graph_dirty: true,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
+            execution_stats_rx: receiver,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -159,40 +162,41 @@ impl AppData {
     }
 
     pub fn update_shared_status(&mut self) {
-        let Ok(mut shared_status) = self.shared_status.try_lock() else {
-            return;
-        };
+        if self.execution_stats_rx.has_changed().unwrap() {
+            if let Some(execution_stats) = self.execution_stats_rx.borrow_and_update().as_ref() {
+                match execution_stats {
+                    Ok(execution_stats) => {
+                        self.execution_stats = Some(execution_stats.clone());
+                        self.argument_values_cache
+                            .invalidate_changed(execution_stats);
 
-        let print_out = shared_status.print_output.take();
+                        let message = format!(
+                            "Compute finished: {} nodes, {:.0}s",
+                            execution_stats.executed_nodes.len(),
+                            execution_stats.elapsed_secs
+                        );
 
-        if let Some(execution_stats) = shared_status.execution_stats.take() {
-            match execution_stats {
-                Ok(execution_stats) => {
-                    self.execution_stats = Some(execution_stats);
-                    self.argument_values_cache
-                        .invalidate_changed(self.execution_stats.as_ref().unwrap());
+                        // let print_out = shared_status.print_output.take();
+                        //     if let Some(print_output) = print_out {
+                        //     format!("Compute output:\n{print_output}\n{summary}")
+                        // } else {
+                        //     format!("Compute finished: {summary}")
+                        // };
 
-                    let summary = format!(
-                        "({} nodes, {:.0}s)",
-                        self.execution_stats.as_ref().unwrap().executed_nodes.len(),
-                        self.execution_stats.as_ref().unwrap().elapsed_secs
-                    );
-
-                    let message = if let Some(print_output) = print_out {
-                        format!("Compute output:\n{print_output}\n{summary}")
-                    } else {
-                        format!("Compute finished: {summary}")
-                    };
-
-                    self.status.push('\n');
-                    self.status.push_str(&message);
-                }
-                Err(err) => {
-                    self.status.push('\n');
-                    self.status.push_str(&format!("Compute failed: {err}"));
+                        self.status.push('\n');
+                        self.status.push_str(&message);
+                    }
+                    Err(err) => {
+                        self.status.push('\n');
+                        self.status.push_str(&format!("Compute failed: {err}"));
+                    }
                 }
             }
         }
+
+        let Ok(mut shared_status) = self.shared_status.try_lock() else {
+            return;
+        };
 
         // Process argument values response
         if let Some((node_id, Some(values))) = shared_status.argument_values_response.take() {
@@ -290,15 +294,22 @@ impl AppData {
         self.worker.exit();
     }
 
-    fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
-        Worker::new(move |result| {
-            let Ok(mut shared_status) = shared_status.try_lock() else {
-                return;
-            };
-            shared_status.execution_stats = Some(result);
+    fn create_worker(
+        ui_refresh: UiContext,
+    ) -> (
+        Worker,
+        watch::Receiver<Option<Result<ExecutionStats, execution_graph::Error>>>,
+    ) {
+        let (tx, rx) =
+            watch::channel::<Option<Result<ExecutionStats, execution_graph::Error>>>(None);
 
-            ui_refresh.request_redraw();
-        })
+        (
+            Worker::new(move |result| {
+                tx.send(Some(result)).unwrap();
+                ui_refresh.request_redraw();
+            }),
+            rx,
+        )
     }
 
     fn add_status(&mut self, message: impl AsRef<str>) {
