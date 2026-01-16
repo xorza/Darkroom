@@ -170,6 +170,8 @@ impl GraphUi {
                 &mut app_data.interaction,
                 background_response,
             );
+
+            self.node_details_panel(gui, ctx);
         });
     }
 
@@ -599,6 +601,12 @@ impl GraphUi {
                 after_scale: ctx.view_graph.scale,
             });
         }
+    }
+
+    fn node_details_panel(&self, gui: &mut Gui<'_>, ctx: GraphContext<'_>) -> _ {
+        //
+
+        //
     }
 }
 
