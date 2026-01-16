@@ -157,7 +157,7 @@ impl AppData {
         self.add_status("Loaded sample test graph");
     }
 
-    pub fn update_status(&mut self) {
+    pub fn update_shared_status(&mut self) {
         let mut shared_status = self.shared_status.try_lock().unwrap();
         let print_out = shared_status.print_output.take();
 
@@ -322,7 +322,7 @@ impl AppData {
     fn handle_actions(&mut self) -> bool {
         let mut graph_updated = false;
 
-        for actions in self.interaction.actions_stacks() {
+        for actions in self.interaction.action_stacks() {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
 

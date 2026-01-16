@@ -106,7 +106,7 @@ impl MainUi {
             style.apply_to_egui(egui_style);
         });
 
-        app_data.update_status();
+        app_data.update_shared_status();
 
         self.handle_shortcuts(app_data);
 

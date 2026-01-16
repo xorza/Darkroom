@@ -93,7 +93,7 @@ impl GraphUiInteraction {
         self.request_argument_values = None;
     }
 
-    pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
+    pub fn action_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
         [
             (!self.actions1.is_empty()).then_some(self.actions1.as_slice()),
             (!self.actions2.is_empty()).then_some(self.actions2.as_slice()),
