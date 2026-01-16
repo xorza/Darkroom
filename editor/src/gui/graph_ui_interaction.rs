@@ -76,6 +76,11 @@ pub enum GraphUiAction {
         after_pan: Vec2,
         after_scale: f32,
     },
+    NodeNameChanged {
+        node_id: NodeId,
+        before: String,
+        after: String,
+    },
 }
 
 impl GraphUiInteraction {
@@ -248,6 +253,10 @@ impl GraphUiAction {
                 view_graph.pan = *after_pan;
                 view_graph.scale = *after_scale;
             }
+            GraphUiAction::NodeNameChanged { node_id, after, .. } => {
+                let node = view_graph.graph.by_id_mut(node_id).unwrap();
+                node.name = after.clone();
+            }
         }
     }
 
@@ -347,6 +356,12 @@ impl GraphUiAction {
                 view_graph.pan = *before_pan;
                 view_graph.scale = *before_scale;
             }
+            GraphUiAction::NodeNameChanged {
+                node_id, before, ..
+            } => {
+                let node = view_graph.graph.by_id_mut(node_id).unwrap();
+                node.name = before.clone();
+            }
         }
     }
 
@@ -360,7 +375,8 @@ impl GraphUiAction {
 
             GraphUiAction::NodeMoved { .. }
             | GraphUiAction::NodeSelected { .. }
-            | GraphUiAction::ZoomPanChanged { .. } => false,
+            | GraphUiAction::ZoomPanChanged { .. }
+            | GraphUiAction::NodeNameChanged { .. } => false,
         }
     }
     pub fn immediate(&self) -> bool {
@@ -370,7 +386,8 @@ impl GraphUiAction {
             | GraphUiAction::NodeAdded { .. }
             | GraphUiAction::NodeRemoved { .. }
             | GraphUiAction::EventConnectionChanged { .. }
-            | GraphUiAction::NodeSelected { .. } => true,
+            | GraphUiAction::NodeSelected { .. }
+            | GraphUiAction::NodeNameChanged { .. } => true,
             GraphUiAction::NodeMoved { .. } | GraphUiAction::ZoomPanChanged { .. } => false,
         }
     }

@@ -25,6 +25,7 @@ use crate::gui::graph_ui_interaction::{
     EventSubscriberChange, GraphUiAction, GraphUiInteraction, RunCommand,
 };
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
+use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::{NodeUi, PortDragInfo};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
@@ -66,6 +67,7 @@ pub struct GraphUi {
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
+    node_details_ui: NodeDetailsUi,
     /// When set, a new node selection will connect its first output to this input port
     pending_connection_input: Option<PortRef>,
 }
@@ -171,7 +173,8 @@ impl GraphUi {
                 background_response,
             );
 
-            self.node_details_ui(gui, ctx);
+            self.node_details_ui
+                .show(gui, &mut ctx, rect, &mut app_data.interaction);
         });
     }
 
@@ -601,16 +604,6 @@ impl GraphUi {
                 after_scale: ctx.view_graph.scale,
             });
         }
-    }
-
-    fn node_details_ui(&self, gui: &mut Gui<'_>, ctx: GraphContext<'_>) -> _ {
-        if ctx.view_graph.selected_node_id.is_none() {
-            return;
-        }
-
-        //
-
-        //
     }
 }
 
