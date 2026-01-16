@@ -310,6 +310,9 @@ impl AppData {
             self.status.push('\n');
         }
         self.status.push_str(message.as_ref());
+        if self.status.len() > 2000 {
+            self.status.drain(..self.status.len() - 2000);
+        }
     }
 
     fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
