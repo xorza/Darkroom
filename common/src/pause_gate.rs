@@ -41,6 +41,7 @@ impl PauseGate {
     /// Closes the gate immediately, blocking new waiters.
     /// Does not wait for current waiters to finish.
     /// Returns a guard that keeps the gate closed until dropped.
+    #[must_use = "gate reopens immediately if guard is dropped"]
     pub fn close(&self) -> PauseGateCloseGuard {
         self.inner.closed.store(true, Ordering::Release);
         PauseGateCloseGuard {
