@@ -21,15 +21,13 @@ impl ArgumentValuesCache {
     }
 
     pub fn invalidate_changed(&mut self, execution_stats: &ExecutionStats) {
-        let stats = execution_stats;
-
         // Remove cached values for executed nodes (their values may have changed)
-        for executed in &stats.executed_nodes {
+        for executed in &execution_stats.executed_nodes {
             self.values.remove(&executed.node_id);
         }
 
         // Remove cached values for nodes with missing inputs
-        for port_address in &stats.missing_inputs {
+        for port_address in &execution_stats.missing_inputs {
             self.values.remove(&port_address.target_id);
         }
     }
