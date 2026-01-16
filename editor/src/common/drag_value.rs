@@ -159,7 +159,10 @@ impl<'a> DragValue<'a> {
                 .clip_text(true)
                 .margin(0.0)
                 .frame(false);
-            let mut text_edit_response = gui.ui().put(inner_rect, text_edit);
+            let mut text_edit_response = gui
+                .new_child(egui::UiBuilder::new().max_rect(inner_rect), |gui| {
+                    text_edit.show(gui).response
+                });
 
             // gui.painter().rect(
             //     text_edit_response.rect,

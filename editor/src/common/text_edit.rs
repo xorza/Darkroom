@@ -10,13 +10,15 @@ use epaint::{
 use egui::{
     Align, Align2, Color32, Context, CursorIcon, Event, EventFilter, FontSelection, Id, ImeEvent,
     Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Response, Sense, Shape, TextBuffer,
-    TextStyle, TextWrapMode, Ui, Vec2, Widget, WidgetInfo, WidgetText, WidgetWithState, epaint,
+    TextStyle, TextWrapMode, Ui, Vec2, WidgetInfo, WidgetText, WidgetWithState, epaint,
     os::OperatingSystem,
     output::OutputEvent,
     response, text_selection,
     text_selection::{CCursorRange, text_cursor_state::cursor_rect, visuals::paint_text_selection},
     vec2,
 };
+
+use crate::gui::Gui;
 
 use egui::text_selection::TextCursorState;
 use serde::{Deserialize, Serialize};
@@ -493,38 +495,20 @@ impl<'t> TextEdit<'t> {
 
 // ----------------------------------------------------------------------------
 
-impl Widget for TextEdit<'_> {
-    fn ui(self, ui: &mut Ui) -> Response {
-        self.show(ui).response
-    }
-}
-
 impl TextEdit<'_> {
     /// Show the [`TextEdit`], returning a rich [`TextEditOutput`].
-    ///
-    /// ```
-    /// # egui::__run_test_ui(|ui| {
-    /// # let mut my_string = String::new();
-    /// let output = egui::TextEdit::singleline(&mut my_string).show(ui);
-    /// if let Some(text_cursor_range) = output.cursor_range {
-    ///     use egui::TextBuffer as _;
-    ///     let selected_chars = text_cursor_range.as_sorted_char_range();
-    ///     let selected_text = my_string.char_range(selected_chars);
-    ///     ui.label("Selected text: ");
-    ///     ui.monospace(selected_text);
-    /// }
-    /// # });
-    /// ```
-    pub fn show(self, ui: &mut Ui) -> TextEditOutput {
+    pub fn show(self, gui: &mut Gui<'_>) -> TextEditOutput {
+        let ui = gui.ui();
         let is_mutable = self.text.is_mutable();
         let frame = self.frame;
         let where_to_put_background = ui.painter().add(Shape::Noop);
         let background_color = self
             .background_color
             .unwrap_or_else(|| ui.visuals().text_edit_bg_color());
-        let output = self.show_content(ui);
+        let output = self.show_content(gui);
 
         if frame {
+            let ui = gui.ui();
             let visuals = ui.style().interact(&output.response);
             let frame_rect = output.response.rect.expand(visuals.expansion);
             let shape = if is_mutable {
@@ -561,7 +545,8 @@ impl TextEdit<'_> {
         output
     }
 
-    fn show_content(self, ui: &mut Ui) -> TextEditOutput {
+    fn show_content(self, gui: &mut Gui<'_>) -> TextEditOutput {
+        let ui = gui.ui();
         let TextEdit {
             text,
             hint_text,
