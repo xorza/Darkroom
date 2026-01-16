@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
-    Vec2, vec2,
+    UiBuilder, Vec2, vec2,
 };
 
 use crate::{
@@ -132,13 +132,6 @@ impl<'a> DragValue<'a> {
             background.stroke,
             StrokeKind::Outside,
         );
-        // gui.painter().rect(
-        //     inner_rect,
-        //     0.0,
-        //     Color32::TRANSPARENT,
-        //     gui.style.active_bg_stroke,
-        //     StrokeKind::Middle,
-        // );
 
         if edit_active {
             let mut edit_text = gui
@@ -159,18 +152,11 @@ impl<'a> DragValue<'a> {
                 .clip_text(true)
                 .margin(0.0)
                 .frame(false);
+
             let mut text_edit_response = gui
-                .new_child(egui::UiBuilder::new().max_rect(inner_rect), |gui| {
+                .new_child(UiBuilder::new().max_rect(inner_rect), |gui| {
                     text_edit.show(gui).response
                 });
-
-            // gui.painter().rect(
-            //     text_edit_response.rect,
-            //     0.0,
-            //     Color32::TRANSPARENT,
-            //     gui.style.active_bg_stroke,
-            //     StrokeKind::Middle,
-            // );
 
             let should_confirm = text_edit_response.lost_focus()
                 && gui
