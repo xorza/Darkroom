@@ -28,7 +28,7 @@ impl<T> Clone for Slot<T> {
     }
 }
 
-impl<T: Clone> Slot<T> {
+impl<T> Slot<T> {
     /// Stores a value, replacing any existing value.
     pub fn send(&mut self, val: T) {
         self.value.store(Some(Arc::new(val)));
@@ -42,8 +42,6 @@ impl<T: Clone> Slot<T> {
         };
 
         Some(Arc::into_inner(a).unwrap())
-
-        //.map(|arc| Arc::into_inner(arc))
     }
 
     /// Returns true if there is a value present.
