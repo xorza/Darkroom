@@ -30,12 +30,12 @@ impl<T> Clone for Slot<T> {
 
 impl<T> Slot<T> {
     /// Stores a value, replacing any existing value.
-    pub fn send(&mut self, val: T) {
+    pub fn send(&self, val: T) {
         self.value.store(Some(Arc::new(val)));
     }
 
     /// Takes the value if present, leaving the slot empty.
-    pub fn take(&mut self) -> Option<T> {
+    pub fn take(&self) -> Option<T> {
         self.value.swap(None).map(|a| Arc::into_inner(a).unwrap())
     }
 
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn send_and_take() {
-        let mut slot = Slot::default();
+        let slot = Slot::default();
         assert!(!slot.has_value());
 
         slot.send(42);
@@ -64,13 +64,13 @@ mod tests {
 
     #[test]
     fn take_empty_returns_none() {
-        let mut slot: Slot<i32> = Slot::default();
+        let slot: Slot<i32> = Slot::default();
         assert!(slot.take().is_none());
     }
 
     #[test]
     fn send_overwrites_previous() {
-        let mut slot = Slot::default();
+        let slot = Slot::default();
         slot.send(1);
         slot.send(2);
         slot.send(3);
@@ -85,8 +85,8 @@ mod tests {
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
 
-        let mut sender_slot = Slot::default();
-        let mut receiver_slot = sender_slot.clone();
+        let sender_slot = Slot::default();
+        let receiver_slot = sender_slot.clone();
         let received_count = Arc::new(AtomicUsize::new(0));
         let received_count_clone = Arc::clone(&received_count);
 

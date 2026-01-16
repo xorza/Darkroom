@@ -300,9 +300,9 @@ impl AppData {
 
         (
             Worker::new({
-                // let slot = slot.clone();
+                let slot = slot.clone();
                 move |result| {
-                    // slot.send(result);
+                    slot.send(result);
                     ui_refresh.request_redraw();
                 }
             }),
