@@ -1,7 +1,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::event::EventLambda;
-use crate::execution_graph::{ExecutionGraph, ExecutionStats, Result};
+use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::{ReadyState, Shared};
@@ -14,20 +14,38 @@ const MAX_EVENTS_PER_LOOP: usize = 10;
 #[derive(Debug)]
 pub enum WorkerMessage {
     Exit,
-    Event { event_id: EventRef },
-    Events { event_ids: Vec<EventRef> },
-    Update { graph: Graph, func_lib: FuncLib },
+    Event {
+        event_id: EventRef,
+    },
+    Events {
+        event_ids: Vec<EventRef>,
+    },
+    Update {
+        graph: Graph,
+        func_lib: FuncLib,
+    },
     Clear,
     ExecuteTerminals,
     StartEventLoop,
     StopEventLoop,
-    ProcessingCallback { callback: ProcessingCallback },
-    Multi { msgs: Vec<WorkerMessage> },
+    ProcessingCallback {
+        callback: ProcessingCallback,
+    },
+    Multi {
+        msgs: Vec<WorkerMessage>,
+    },
+    RequestArgumentValues {
+        node_id: NodeId,
+        callback: ArgumentValuesCallback,
+    },
 }
 
-#[derive()]
 pub struct ProcessingCallback {
     inner: Box<dyn Fn() + Send + Sync + 'static>,
+}
+
+pub struct ArgumentValuesCallback {
+    inner: Box<dyn FnOnce(Option<ArgumentValues>) + Send + 'static>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -157,6 +175,10 @@ async fn worker_loop<Callback>(
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
                 WorkerMessage::ProcessingCallback { callback } => {
                     processing_callback = Some(callback)
+                }
+                WorkerMessage::RequestArgumentValues { node_id, callback } => {
+                    let values = execution_graph.get_argument_values(&node_id);
+                    callback.call(values);
                 }
             }
         }
@@ -307,6 +329,18 @@ impl ProcessingCallback {
     }
 }
 
+impl ArgumentValuesCallback {
+    pub fn new(callback: impl FnOnce(Option<ArgumentValues>) + Send + 'static) -> Self {
+        Self {
+            inner: Box::new(callback),
+        }
+    }
+
+    fn call(self, values: Option<ArgumentValues>) {
+        (self.inner)(values);
+    }
+}
+
 impl EventLoopHandle {
     async fn stop(&mut self) {
         for ah in self.join_handles.drain(..) {
@@ -324,7 +358,13 @@ impl EventLoopHandle {
 
 impl std::fmt::Debug for ProcessingCallback {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("EventLoopCallback").finish()
+        f.debug_struct("ProcessingCallback").finish()
+    }
+}
+
+impl std::fmt::Debug for ArgumentValuesCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ArgumentValuesCallback").finish()
     }
 }
 

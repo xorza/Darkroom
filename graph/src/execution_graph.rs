@@ -41,6 +41,12 @@ pub struct ExecutionStats {
     pub cached_nodes: Vec<NodeId>,
     pub triggered_events: Vec<EventRef>,
 }
+
+#[derive(Debug, Default)]
+pub struct ArgumentValues {
+    pub inputs: Vec<Option<DynamicValue>>,
+    pub outputs: Vec<DynamicValue>,
+}
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum InputState {
     #[default]
@@ -962,14 +968,11 @@ impl ExecutionGraph {
         }
     }
 
-    pub fn get_argument_values(
-        &self,
-        node_id: &NodeId,
-    ) -> Option<(Vec<Option<DynamicValue>>, Vec<DynamicValue>)> {
+    pub fn get_argument_values(&self, node_id: &NodeId) -> Option<ArgumentValues> {
         let e_node_idx = self.e_nodes.index_of_key(node_id)?;
         let e_node = &self.e_nodes[e_node_idx];
 
-        let input_values: Vec<Option<DynamicValue>> = e_node
+        let inputs: Vec<Option<DynamicValue>> = e_node
             .inputs
             .iter()
             .map(|input| match &input.binding {
@@ -988,13 +991,13 @@ impl ExecutionGraph {
             })
             .collect();
 
-        let output_values: Vec<DynamicValue> = e_node
+        let outputs: Vec<DynamicValue> = e_node
             .output_values
             .as_ref()
             .map(|outputs| outputs.to_vec())
             .unwrap_or_default();
 
-        Some((input_values, output_values))
+        Some(ArgumentValues { inputs, outputs })
     }
 }
 
@@ -1843,14 +1846,14 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
-        let (inputs, outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
+        let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
-        assert_eq!(inputs.len(), 2);
-        assert!(matches!(inputs[0], Some(DynamicValue::Int(3))));
-        assert!(matches!(inputs[1], Some(DynamicValue::Int(5))));
+        assert_eq!(values.inputs.len(), 2);
+        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(3))));
+        assert!(matches!(values.inputs[1], Some(DynamicValue::Int(5))));
 
-        assert_eq!(outputs.len(), 1);
-        assert!(matches!(outputs[0], DynamicValue::Int(15)));
+        assert_eq!(values.outputs.len(), 1);
+        assert!(matches!(values.outputs[0], DynamicValue::Int(15)));
 
         Ok(())
     }
@@ -1872,33 +1875,39 @@ mod tests {
         // sum node: inputs from get_a (2.0) and get_b (5.0), output = 7
         // Note: test functions output Float values even though declared as Int
         let sum_id = graph.by_name("sum").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_argument_values(&sum_id).unwrap();
+        let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
-        assert_eq!(inputs.len(), 2);
-        assert!(matches!(inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0)));
-        assert!(matches!(inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0)));
+        assert_eq!(values.inputs.len(), 2);
+        assert!(
+            matches!(values.inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0))
+        );
+        assert!(
+            matches!(values.inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0))
+        );
 
-        assert_eq!(outputs.len(), 1);
-        assert!(matches!(outputs[0], DynamicValue::Int(7)));
+        assert_eq!(values.outputs.len(), 1);
+        assert!(matches!(values.outputs[0], DynamicValue::Int(7)));
 
         // mult node: inputs from sum (7) and get_b (5.0), output = 35
         let mult_id = graph.by_name("mult").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
+        let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
-        assert_eq!(inputs.len(), 2);
-        assert!(matches!(inputs[0], Some(DynamicValue::Int(7))));
-        assert!(matches!(inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0)));
+        assert_eq!(values.inputs.len(), 2);
+        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(7))));
+        assert!(
+            matches!(values.inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0))
+        );
 
-        assert_eq!(outputs.len(), 1);
-        assert!(matches!(outputs[0], DynamicValue::Int(35)));
+        assert_eq!(values.outputs.len(), 1);
+        assert!(matches!(values.outputs[0], DynamicValue::Int(35)));
 
         // print node: input from mult (35), no outputs
         let print_id = graph.by_name("print").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_argument_values(&print_id).unwrap();
+        let values = execution_graph.get_argument_values(&print_id).unwrap();
 
-        assert_eq!(inputs.len(), 1);
-        assert!(matches!(inputs[0], Some(DynamicValue::Int(35))));
-        assert!(outputs.is_empty());
+        assert_eq!(values.inputs.len(), 1);
+        assert!(matches!(values.inputs[0], Some(DynamicValue::Int(35))));
+        assert!(values.outputs.is_empty());
 
         Ok(())
     }
@@ -1923,11 +1932,11 @@ mod tests {
         execution_graph.update(&graph, &func_lib);
         execution_graph.execute_terminals().await?;
 
-        let (inputs, _outputs) = execution_graph.get_argument_values(&mult_id).unwrap();
+        let values = execution_graph.get_argument_values(&mult_id).unwrap();
 
-        assert_eq!(inputs.len(), 2);
-        assert!(inputs[0].is_some()); // from sum
-        assert!(inputs[1].is_none()); // None binding
+        assert_eq!(values.inputs.len(), 2);
+        assert!(values.inputs[0].is_some()); // from sum
+        assert!(values.inputs[1].is_none()); // None binding
 
         Ok(())
     }
@@ -1942,12 +1951,12 @@ mod tests {
 
         // Before execution, bound inputs should return None (no output values yet)
         let sum_id = graph.by_name("sum").unwrap().id;
-        let (inputs, outputs) = execution_graph.get_argument_values(&sum_id).unwrap();
+        let values = execution_graph.get_argument_values(&sum_id).unwrap();
 
-        assert_eq!(inputs.len(), 2);
-        assert!(inputs[0].is_none()); // get_a hasn't executed
-        assert!(inputs[1].is_none()); // get_b hasn't executed
-        assert!(outputs.is_empty()); // sum hasn't executed
+        assert_eq!(values.inputs.len(), 2);
+        assert!(values.inputs[0].is_none()); // get_a hasn't executed
+        assert!(values.inputs[1].is_none()); // get_b hasn't executed
+        assert!(values.outputs.is_empty()); // sum hasn't executed
 
         Ok(())
     }
