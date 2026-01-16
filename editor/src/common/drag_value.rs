@@ -101,7 +101,7 @@ impl<'a> DragValue<'a> {
             .ui()
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
-        let mut size = galley.size() + padding * 2.0 + vec2(0.0, 4.0);
+        let mut size = galley.size() + padding * 2.0; //+ vec2(0.0, 4.0 * gui.scale());
         size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());
 
@@ -129,6 +129,13 @@ impl<'a> DragValue<'a> {
             background.stroke,
             StrokeKind::Outside,
         );
+        // gui.painter().rect(
+        //     inner_rect,
+        //     0.0,
+        //     Color32::TRANSPARENT,
+        //     gui.style.active_bg_stroke,
+        //     StrokeKind::Middle,
+        // );
 
         if edit_active {
             let mut edit_text = gui
@@ -149,6 +156,14 @@ impl<'a> DragValue<'a> {
                 .clip_text(true)
                 .frame(false);
             let mut text_edit_response = gui.ui().put(inner_rect, text_edit);
+
+            // gui.painter().rect(
+            //     text_edit_response.rect,
+            //     0.0,
+            //     Color32::TRANSPARENT,
+            //     gui.style.active_bg_stroke,
+            //     StrokeKind::Middle,
+            // );
 
             let should_confirm = text_edit_response.lost_focus()
                 && gui

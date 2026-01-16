@@ -63,6 +63,7 @@ impl<'a> ConstBindFrame<'a> {
     ) {
         let port_radius = gui.style.node.port_radius;
         let padding = gui.style.padding;
+        let small_padding = gui.style.small_padding;
         let mono_font = gui.style.mono_font.clone();
 
         for (input_idx, input) in node.inputs.iter_mut().enumerate() {
@@ -131,7 +132,7 @@ impl<'a> ConstBindFrame<'a> {
                     .font(mono_font.clone())
                     .color(gui.style.text_color)
                     .speed(1.0)
-                    .padding(vec2(padding, 0.0))
+                    .padding(vec2(small_padding, 0.0))
                     .pos(connection_start)
                     .align(Align2::RIGHT_CENTER)
                     .style(const_bind_style)
