@@ -173,8 +173,13 @@ impl GraphUi {
                 background_response,
             );
 
-            self.node_details_ui
-                .show(gui, &mut ctx, rect, &mut app_data.interaction);
+            self.node_details_ui.show(
+                gui,
+                &mut ctx,
+                rect,
+                &mut app_data.interaction,
+                &app_data.argument_values_cache,
+            );
         });
     }
 

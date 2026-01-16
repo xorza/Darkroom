@@ -1,6 +1,7 @@
 use crate::common::undo_stack::{ActionUndoStack, UndoStack};
 use crate::elements::editor_funclib::EditorFuncLib;
 use crate::gui::graph_ui_interaction::{GraphUiAction, GraphUiInteraction, RunCommand};
+use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use anyhow::Result;
 use common::{SerdeFormat, Shared};
@@ -9,7 +10,7 @@ use graph::execution_graph::Result as ExecutionGraphResult;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
 use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
-use graph::worker::WorkerMessage;
+use graph::worker::{ArgumentValuesCallback, WorkerMessage};
 use graph::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::Path;
 use std::sync::Arc;
@@ -18,10 +19,13 @@ use tokio::sync::Notify;
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
 
+use graph::execution_graph::ArgumentValues;
+
 #[derive(Debug, Default)]
 pub struct Status {
     execution_stats: Option<ExecutionGraphResult<ExecutionStats>>,
     print_output: Option<String>,
+    argument_values_response: Option<(NodeId, Option<ArgumentValues>)>,
 }
 
 pub type SharedStatus = Shared<Status>;
@@ -34,6 +38,7 @@ pub struct AppData {
     pub view_graph: ViewGraph,
     pub interaction: GraphUiInteraction,
     pub execution_stats: Option<ExecutionStats>,
+    pub argument_values_cache: ArgumentValuesCache,
 
     pub status: String,
 
@@ -41,7 +46,7 @@ pub struct AppData {
 
     pub worker: Worker,
 
-    pub _ui_context: UiContext,
+    pub ui_context: UiContext,
 
     pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
@@ -70,6 +75,7 @@ impl AppData {
             view_graph: ViewGraph::default(),
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
+            argument_values_cache: ArgumentValuesCache::default(),
 
             status: String::new(),
 
@@ -77,7 +83,7 @@ impl AppData {
 
             worker,
 
-            _ui_context: ui_context,
+            ui_context,
 
             shared_status,
             run_event,
@@ -181,6 +187,11 @@ impl AppData {
                 }
             }
         }
+
+        // Process argument values response
+        if let Some((node_id, Some(values))) = shared_status.argument_values_response.take() {
+            self.argument_values_cache.insert(node_id, values);
+        }
     }
 
     pub fn undo(&mut self) {
@@ -247,6 +258,20 @@ impl AppData {
             msgs.push(WorkerMessage::ExecuteTerminals);
         }
 
+        // Handle argument values request
+        if let Some(node_id) = self.interaction.request_argument_values {
+            let shared_status = self.shared_status.clone();
+            let ui_context = self.ui_context.clone();
+            msgs.push(WorkerMessage::RequestArgumentValues {
+                node_id,
+                callback: ArgumentValuesCallback::new(move |values| {
+                    let mut status = shared_status.try_lock().unwrap();
+                    status.argument_values_response = Some((node_id, values));
+                    ui_context.request_redraw();
+                }),
+            });
+        }
+
         if !msgs.is_empty() {
             self.worker.send(WorkerMessage::Multi { msgs });
         }
@@ -263,6 +288,7 @@ impl AppData {
         Worker::new(move |result| {
             let mut shared_status = shared_status.try_lock().unwrap();
             shared_status.execution_stats = Some(result);
+            // todo invalidate argument values cache only nodes which arent cached
 
             ui_refresh.request_redraw();
         })
@@ -288,6 +314,7 @@ impl AppData {
     fn refresh_after_graph_change(&mut self) {
         self.graph_dirty = true;
         self.execution_stats = None;
+        self.argument_values_cache.clear();
     }
 
     fn handle_actions(&mut self) -> bool {

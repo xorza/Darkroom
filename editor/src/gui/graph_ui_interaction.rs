@@ -1,4 +1,4 @@
-use egui::{Pos2, SliderOrientation, Vec2};
+use egui::{Pos2, Vec2};
 use graph::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,7 @@ pub(crate) struct GraphUiInteraction {
     actions2: Vec<GraphUiAction>,
     pub errors: Vec<Error>,
     pub run_cmd: RunCommand,
+    pub request_argument_values: Option<NodeId>,
 
     pending_action: Option<GraphUiAction>,
 }
@@ -89,6 +90,7 @@ impl GraphUiInteraction {
         self.actions2.clear();
         self.errors.clear();
         self.run_cmd = RunCommand::None;
+        self.request_argument_values = None;
     }
 
     pub fn actions_stacks(&self) -> impl Iterator<Item = &'_ [GraphUiAction]> {
