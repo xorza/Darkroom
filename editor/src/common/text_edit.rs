@@ -224,7 +224,7 @@ impl<'t> TextEdit<'t> {
             layouter: None,
             password: false,
             frame: true,
-            margin: Margin::symmetric(4, 2),
+            margin: 0.0.into(),
             multiline: true,
             interactive: true,
             desired_width: None,
