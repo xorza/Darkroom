@@ -204,7 +204,7 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let events_triggers = fun_name(&execution_graph);
+                let events_triggers = collect_active_event_triggers(&execution_graph);
                 if !events_triggers.is_empty() {
                     event_loop_handle =
                         Some(start_event_loop(worker_message_tx.clone(), events_triggers).await);
@@ -299,7 +299,7 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     }
 }
 
-fn fun_name(execution_graph: &ExecutionGraph) -> Vec<(EventRef, EventLambda)> {
+fn collect_active_event_triggers(execution_graph: &ExecutionGraph) -> Vec<(EventRef, EventLambda)> {
     let events_triggers: Vec<(EventRef, EventLambda)> = execution_graph
         .e_nodes
         .iter()
