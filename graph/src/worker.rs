@@ -204,26 +204,7 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let events_triggers: Vec<(EventRef, EventLambda)> = execution_graph
-                    .e_nodes
-                    .iter()
-                    .flat_map(|e_node| {
-                        e_node
-                            .events
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(event_idx, event)| {
-                                (!event.subscribers.is_empty() && !event.lambda.is_none())
-                                    .then_some((
-                                        EventRef {
-                                            node_id: e_node.id,
-                                            event_idx,
-                                        },
-                                        event.lambda.clone(),
-                                    ))
-                            })
-                    })
-                    .collect();
+                let events_triggers = fun_name(&execution_graph);
                 if !events_triggers.is_empty() {
                     event_loop_handle =
                         Some(start_event_loop(worker_message_tx.clone(), events_triggers).await);
@@ -316,6 +297,29 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
         event_loop_handle.stop().await;
         tracing::info!("Event loop stopped");
     }
+}
+
+fn fun_name(execution_graph: &ExecutionGraph) -> Vec<(EventRef, EventLambda)> {
+    let events_triggers: Vec<(EventRef, EventLambda)> = execution_graph
+        .e_nodes
+        .iter()
+        .flat_map(|e_node| {
+            e_node
+                .events
+                .iter()
+                .enumerate()
+                .filter_map(|(event_idx, event)| {
+                    (!event.subscribers.is_empty() && !event.lambda.is_none()).then_some((
+                        EventRef {
+                            node_id: e_node.id,
+                            event_idx,
+                        },
+                        event.lambda.clone(),
+                    ))
+                })
+        })
+        .collect();
+    events_triggers
 }
 
 impl ProcessingCallback {
