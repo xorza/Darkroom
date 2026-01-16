@@ -9,10 +9,7 @@ function execution. Written in Rust.
 - **graph** – the main graph library
 - **editor** – visual editor for building and executing graphs
 
-Implementation details, recent editor behavior changes, execution status updates, and UI action tracking are documented
-in `NOTES-AI.md`.
-
 ## License
 
-This project is licensed under the terms of the MIT license.
+This project is licensed under the terms of the AGPL license.
 See [LICENSE](LICENSE) for more information.
