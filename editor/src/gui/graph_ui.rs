@@ -171,7 +171,7 @@ impl GraphUi {
                 background_response,
             );
 
-            self.node_details_panel(gui, ctx);
+            self.node_details_ui(gui, ctx);
         });
     }
 
@@ -603,7 +603,11 @@ impl GraphUi {
         }
     }
 
-    fn node_details_panel(&self, gui: &mut Gui<'_>, ctx: GraphContext<'_>) -> _ {
+    fn node_details_ui(&self, gui: &mut Gui<'_>, ctx: GraphContext<'_>) -> _ {
+        if ctx.view_graph.selected_node_id.is_none() {
+            return;
+        }
+
         //
 
         //
