@@ -213,13 +213,14 @@ async fn worker_loop<Callback>(
                             .iter()
                             .enumerate()
                             .filter_map(|(event_idx, event)| {
-                                (!event.subscribers.is_empty()).then_some((
-                                    EventRef {
-                                        node_id: e_node.id,
-                                        event_idx,
-                                    },
-                                    event.lambda.clone(),
-                                ))
+                                (!event.subscribers.is_empty() && !event.lambda.is_none())
+                                    .then_some((
+                                        EventRef {
+                                            node_id: e_node.id,
+                                            event_idx,
+                                        },
+                                        event.lambda.clone(),
+                                    ))
                             })
                     })
                     .collect();
