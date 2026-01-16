@@ -53,7 +53,7 @@ mod tests {
 
     #[tokio::test]
     async fn waiters_proceed_when_open() {
-        let gate = PauseGate::new();
+        let gate = PauseGate::default();
 
         let _guard = gate.wait().await;
         // Should not block
@@ -61,7 +61,7 @@ mod tests {
 
     #[tokio::test]
     async fn waiters_block_when_closed() {
-        let gate = PauseGate::new();
+        let gate = PauseGate::default();
         let counter = Arc::new(AtomicUsize::new(0));
 
         let _close_guard = gate.close().await;
@@ -96,7 +96,7 @@ mod tests {
 
     #[tokio::test]
     async fn multiple_waiters_proceed_concurrently() {
-        let gate = PauseGate::new();
+        let gate = PauseGate::default();
         let counter = Arc::new(AtomicUsize::new(0));
 
         let mut handles = vec![];
