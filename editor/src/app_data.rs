@@ -16,19 +16,14 @@ use graph::worker::{ArgumentValuesCallback, WorkerMessage};
 use graph::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Notify, watch};
 
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
 
 use graph::execution_graph::ArgumentValues;
-
-#[derive(Debug, Default)]
-pub struct Status {
-    print_output: Option<String>,
-}
-
-pub type SharedStatus = Shared<Status>;
 
 const UNDO_MAX_STEPS: usize = 256;
 
@@ -53,25 +48,25 @@ pub struct AppData {
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 
-    pub shared_status: SharedStatus,
     pub run_event: Arc<Notify>,
 
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
+    print_out_rx: UnboundedReceiver<String>,
 }
 
 impl AppData {
     pub fn new(ui_context: UiContext) -> Self {
         let config = Config::load_or_default();
 
-        let shared_status = Shared::default();
         let (worker, execution_stats_rx) = Self::create_worker(ui_context.clone());
         let argument_values_rx = Slot::default();
+        let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
 
         let run_event = Arc::new(Notify::new());
 
         let mut func_lib = FuncLib::default();
-        func_lib.merge(test_func_lib(sample_test_hooks(shared_status.clone())));
+        func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
         func_lib.merge(TimersFuncLib::default());
         func_lib.merge(EditorFuncLib::new());
 
@@ -81,23 +76,21 @@ impl AppData {
             interaction: GraphUiInteraction::default(),
             execution_stats: None,
             argument_values_cache: ArgumentValuesCache::default(),
-
-            status: String::new(),
-
             config,
-
             worker,
 
-            ui_context,
-
-            shared_status,
-            run_event,
             autorun: false,
             graph_dirty: true,
 
             undo_stack: Box::new(ActionUndoStack::new(UNDO_MAX_STEPS)),
+
+            status: String::new(),
+
+            ui_context,
+            run_event,
             execution_stats_rx,
             argument_values_rx,
+            print_out_rx,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -165,6 +158,15 @@ impl AppData {
     }
 
     pub fn update_shared_status(&mut self) {
+        loop {
+            let result = self.print_out_rx.try_recv();
+            match result {
+                Ok(print_out) => self.add_status(print_out),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => panic!("Print output channel disconnected"),
+            }
+        }
+
         if let Some(execution_stats) = self.execution_stats_rx.take() {
             match execution_stats {
                 Ok(execution_stats) => {
@@ -358,24 +360,12 @@ impl AppData {
     }
 }
 
-fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
+fn sample_test_hooks(print_out_tx: UnboundedSender<String>) -> TestFuncHooks {
     TestFuncHooks {
         get_a: Arc::new(|| 21),
         get_b: Arc::new(|| 2),
         print: Arc::new(move |value| {
-            let Ok(mut shared_status) = shared_status.try_lock() else {
-                return;
-            };
-
-            if shared_status.print_output.is_none() {
-                shared_status.print_output = Some(String::new());
-            }
-
-            let print_output = shared_status.print_output.as_mut().unwrap();
-            if !print_output.is_empty() {
-                print_output.push('\n');
-            }
-            print_output.push_str(&value.to_string());
+            print_out_tx.send(value.to_string()).unwrap();
         }),
     }
 }
