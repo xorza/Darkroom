@@ -1,39 +1,64 @@
-use egui::{Align, Key, Order, Pos2, Vec2, vec2};
+use egui::{Align, Key, Order, Pos2, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
-use crate::common::button::{self, Button};
+use crate::common::button::Button;
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
+
+/// Result of showing the new node UI
+#[derive(Debug)]
+pub enum NewNodeSelection<'a> {
+    /// User selected a function to create a node
+    Func(&'a Func),
+    /// User selected to create a const binding (only available when opened from connection)
+    ConstBind,
+}
 
 #[derive(Debug, Default)]
 pub struct NewNodeUi {
     open: bool,
     position: Pos2,
+    /// Whether this was opened from a connection drag (enables const bind option)
+    from_connection: bool,
 }
 
 impl NewNodeUi {
     pub fn open(&mut self, position: Pos2) {
         self.open = true;
         self.position = position;
+        self.from_connection = false;
+    }
+
+    /// Open the UI from a connection drag, which enables the const bind option
+    pub fn open_from_connection(&mut self, position: Pos2) {
+        self.open = true;
+        self.position = position;
+        self.from_connection = true;
     }
 
     pub fn close(&mut self) {
         self.open = false;
+        self.from_connection = false;
     }
 
     pub fn is_open(&self) -> bool {
         self.open
     }
 
-    pub fn show<'a>(&mut self, gui: &mut Gui<'_>, func_lib: &'a FuncLib) -> Option<&'a Func> {
+    pub fn show<'a>(
+        &mut self,
+        gui: &mut Gui<'_>,
+        func_lib: &'a FuncLib,
+    ) -> Option<NewNodeSelection<'a>> {
         if !self.open {
             return None;
         }
 
-        let mut selected_func = None;
+        let mut selection: Option<NewNodeSelection<'a>> = None;
+        let from_connection = self.from_connection;
 
         let popup_id = gui.ui().make_persistent_id("new_node_popup");
 
@@ -46,6 +71,31 @@ impl NewNodeUi {
                     gui.ui().set_min_height(150.0);
 
                     gui.horizontal(|gui| {
+                        // Show const bind option if opened from connection
+                        if from_connection {
+                            gui.vertical(|gui| {
+                                let padding = gui.style.padding;
+                                let small_padding = gui.style.small_padding;
+                                gui.ui().set_min_width(80.0 + padding * 2.0);
+
+                                let btn_font = gui.style.sub_font.clone();
+                                let button_width = 80.0 + padding * 2.0;
+                                let button_height =
+                                    gui.font_height(&btn_font) + small_padding * 2.0;
+
+                                if Button::default()
+                                    .background(gui.style.list_button)
+                                    .text("Const")
+                                    .size(vec2(button_width, button_height))
+                                    .align(Align::Min)
+                                    .show(gui)
+                                    .clicked()
+                                {
+                                    selection = Some(NewNodeSelection::ConstBind);
+                                }
+                            });
+                        }
+
                         let mut categories: Vec<&str> =
                             func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
                         categories.sort();
@@ -53,7 +103,8 @@ impl NewNodeUi {
 
                         for category in categories {
                             gui.vertical(|gui| {
-                                gui.ui.set_min_width(80.0 + gui.style.padding * 2.0);
+                                let padding = gui.style.padding;
+                                gui.ui().set_min_width(80.0 + padding * 2.0);
 
                                 Expander::new(category).default_open(true).show(gui, |gui| {
                                     for func in func_lib.funcs.iter() {
@@ -92,8 +143,7 @@ impl NewNodeUi {
                                             .show(gui)
                                             .clicked()
                                         {
-                                            selected_func = Some(func);
-                                            self.open = false;
+                                            selection = Some(NewNodeSelection::Func(func));
                                         }
                                     }
                                 });
@@ -109,19 +159,19 @@ impl NewNodeUi {
             if let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
                 && !popup_rect.contains(pointer_pos)
             {
-                self.open = false;
+                self.close();
             }
         }
 
         if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
-            self.open = false;
+            self.close();
         }
 
-        if selected_func.is_some() {
-            self.open = false;
+        if selection.is_some() {
+            self.close();
         }
 
-        selected_func
+        selection
     }
 
     pub fn position(&self) -> Pos2 {
