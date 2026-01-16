@@ -175,6 +175,7 @@ impl Graph {
         for node in self.nodes.iter() {
             let func = func_lib.by_id(&node.func_id).unwrap();
             assert_eq!(node.inputs.len(), func.inputs.len());
+            assert_eq!(node.events.len(), func.events.len());
 
             for input in node.inputs.iter() {
                 if let Binding::Bind(port_address) = &input.binding {

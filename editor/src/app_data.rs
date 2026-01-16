@@ -328,9 +328,12 @@ impl AppData {
             self.undo_stack.push_current(&self.view_graph, actions);
 
             if actions.iter().any(|action| action.affects_computation()) {
-                self.execution_stats = None;
                 graph_updated = true;
             }
+        }
+
+        if graph_updated {
+            self.reinit_graph();
         }
 
         graph_updated
