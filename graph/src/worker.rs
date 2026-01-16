@@ -4,6 +4,7 @@ use crate::event::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
+use common::pause_gate::PauseGate;
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
@@ -132,6 +133,7 @@ async fn worker_loop<Callback>(
     let mut event_ids: HashSet<EventRef> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
     let mut processing_callback: Option<ProcessingCallback> = None;
+    let event_loop_pause_gate = PauseGate::default();
 
     loop {
         assert!(msgs.is_empty());
@@ -146,6 +148,9 @@ async fn worker_loop<Callback>(
         {
             return;
         }
+
+        event_loop_pause_gate.close();
+
         msgs.extend(msgs_vec.drain(..));
 
         let mut execute_terminals: bool = false;
@@ -206,8 +211,14 @@ async fn worker_loop<Callback>(
                 stop_event_loop(&mut event_loop_handle).await;
                 let events_triggers = collect_active_event_triggers(&execution_graph);
                 if !events_triggers.is_empty() {
-                    event_loop_handle =
-                        Some(start_event_loop(worker_message_tx.clone(), events_triggers).await);
+                    event_loop_handle = Some(
+                        start_event_loop(
+                            worker_message_tx.clone(),
+                            events_triggers,
+                            event_loop_pause_gate.clone(),
+                        )
+                        .await,
+                    );
                     tracing::info!("Event loop started");
                 }
             }
@@ -225,6 +236,7 @@ async fn worker_loop<Callback>(
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
     events: Vec<(EventRef, EventLambda)>,
+    pause_gate: PauseGate,
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
@@ -268,6 +280,7 @@ async fn start_event_loop(
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();
+            let pause_gate = pause_gate.clone();
 
             async move {
                 ready.signal();
@@ -280,6 +293,7 @@ async fn start_event_loop(
                     }
 
                     tokio::task::yield_now().await;
+                    pause_gate.wait().await;
                 }
             }
         });
@@ -378,6 +392,7 @@ mod tests {
     use std::sync::Arc;
 
     use common::output_stream::OutputStream;
+    use common::pause_gate::PauseGate;
     use tokio::sync::Notify;
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::time::{Duration, timeout};
@@ -508,6 +523,7 @@ mod tests {
                 },
                 event_lambda,
             )],
+            PauseGate::default(),
         )
         .await;
 
@@ -553,6 +569,7 @@ mod tests {
                 },
                 event_lambda,
             )],
+            PauseGate::default(),
         )
         .await;
 
