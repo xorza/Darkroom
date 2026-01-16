@@ -76,6 +76,7 @@ impl NodeDetailsUi {
             TextEdit::singleline(&mut name)
                 .font(font)
                 .text_color(text_color)
+                .char_limit(20)
                 .show(gui);
         });
 

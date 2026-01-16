@@ -99,7 +99,7 @@ impl NodeLayout {
 
         let label_font = gui.style.sub_font.clone();
 
-        if self.title_galley.text() != node.name {
+        if self.title_galley.text() != node.name || !self.scale.ui_equals(gui.scale()) {
             self.title_galley = gui.painter().layout_no_wrap(
                 node.name.clone(),
                 gui.style.body_font.clone(),
@@ -205,7 +205,7 @@ impl NodeLayout {
         let header_row_height = header_height + small_padding * 2.0;
         let port_row_height = row_height.max(gui.style.node.port_radius * 2.0);
 
-        let node_width = header_width.max(max_row_width).max(80.0);
+        let node_width = header_width.max(max_row_width).max(80.0 * gui.scale());
         let node_height = header_row_height
             + cache_row_height
             + port_row_height * row_count as f32
