@@ -180,13 +180,6 @@ impl AppData {
                         .invalidate_changed(&execution_stats);
                     self.execution_stats = Some(execution_stats);
 
-                    // let print_out = shared_status.print_output.take();
-                    //     if let Some(print_output) = print_out {
-                    //     format!("Compute output:\n{print_output}\n{summary}")
-                    // } else {
-                    //     format!("Compute finished: {summary}")
-                    // };
-
                     self.status.push('\n');
                     self.status.push_str(&message);
                 }
