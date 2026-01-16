@@ -315,6 +315,8 @@ impl AppData {
     }
 
     fn reinit_graph(&mut self) {
+        self.view_graph.validate_with(&self.func_lib);
+
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();

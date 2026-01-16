@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
 use graph::function::Func;
 use graph::graph::{Binding, Node};
-use graph::prelude::{Graph as CoreGraph, NodeId};
+use graph::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -115,6 +115,16 @@ impl ViewGraph {
                 panic!("graph view missing node position");
             }
         }
+    }
+
+    pub fn validate_with(&self, func_lib: &FuncLib) {
+        if !is_debug() {
+            return;
+        }
+
+        self.validate();
+
+        self.graph.validate_with(func_lib);
     }
 
     pub fn serialize(&self, format: SerdeFormat) -> Vec<u8> {
