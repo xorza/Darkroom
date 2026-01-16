@@ -1,61 +1,76 @@
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::Notify;
 
 /// A synchronization primitive that allows one side to pause waiters.
 ///
 /// The controller can pause/resume, and waiters will block when paused.
 /// Multiple waiters can proceed concurrently when not paused.
+/// Closing the gate is instant and does not wait for current waiters.
+#[derive(Debug)]
+struct PauseGateInner {
+    closed: AtomicBool,
+    notify: Notify,
+}
+
 #[derive(Debug, Clone)]
 pub struct PauseGate {
-    lock: Arc<RwLock<()>>,
+    inner: Arc<PauseGateInner>,
 }
 
 impl Default for PauseGate {
     fn default() -> Self {
         Self {
-            lock: Arc::new(RwLock::new(())),
+            inner: Arc::new(PauseGateInner {
+                closed: AtomicBool::new(false),
+                notify: Notify::new(),
+            }),
         }
     }
 }
 
 impl PauseGate {
-    /// Waits until the gate is open, then returns a guard.
-    /// While the guard is held, the gate cannot be closed.
-    pub async fn wait(&self) -> PauseGateGuard<'_> {
-        let guard = self.lock.read().await;
-        PauseGateGuard { _guard: guard }
+    /// Waits until the gate is open.
+    /// Does not hold any lock - the gate can be closed while caller proceeds.
+    pub async fn wait(&self) {
+        while self.inner.closed.load(Ordering::Acquire) {
+            self.inner.notify.notified().await;
+        }
     }
 
-    /// Closes the gate, blocking new waiters.
+    /// Closes the gate immediately, blocking new waiters.
+    /// Does not wait for current waiters to finish.
     /// Returns a guard that keeps the gate closed until dropped.
-    /// Waits for all current wait() guards to be dropped before returning.
-    pub async fn close(&self) -> PauseGateCloseGuard<'_> {
-        let guard = self.lock.write().await;
-        PauseGateCloseGuard { _guard: guard }
+    pub fn close(&self) -> PauseGateCloseGuard {
+        self.inner.closed.store(true, Ordering::Release);
+        PauseGateCloseGuard {
+            inner: Arc::clone(&self.inner),
+        }
     }
 }
 
 #[derive(Debug)]
-pub struct PauseGateGuard<'a> {
-    _guard: tokio::sync::RwLockReadGuard<'a, ()>,
+pub struct PauseGateCloseGuard {
+    inner: Arc<PauseGateInner>,
 }
 
-#[derive(Debug)]
-pub struct PauseGateCloseGuard<'a> {
-    _guard: tokio::sync::RwLockWriteGuard<'a, ()>,
+impl Drop for PauseGateCloseGuard {
+    fn drop(&mut self) {
+        self.inner.closed.store(false, Ordering::Release);
+        self.inner.notify.notify_waiters();
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicUsize;
     use std::time::Duration;
 
     #[tokio::test]
     async fn waiters_proceed_when_open() {
         let gate = PauseGate::default();
-
-        let _guard = gate.wait().await;
+        gate.wait().await;
         // Should not block
     }
 
@@ -64,12 +79,12 @@ mod tests {
         let gate = PauseGate::default();
         let counter = Arc::new(AtomicUsize::new(0));
 
-        let _close_guard = gate.close().await;
+        let close_guard = gate.close();
 
         let gate_clone = gate.clone();
         let counter_clone = counter.clone();
         let handle = tokio::spawn(async move {
-            let _guard = gate_clone.wait().await;
+            gate_clone.wait().await;
             counter_clone.fetch_add(1, Ordering::SeqCst);
         });
 
@@ -80,7 +95,7 @@ mod tests {
             "waiter should be blocked"
         );
 
-        drop(_close_guard);
+        drop(close_guard);
 
         tokio::time::timeout(Duration::from_millis(100), handle)
             .await
@@ -104,7 +119,7 @@ mod tests {
             let gate_clone = gate.clone();
             let counter_clone = counter.clone();
             handles.push(tokio::spawn(async move {
-                let _guard = gate_clone.wait().await;
+                gate_clone.wait().await;
                 counter_clone.fetch_add(1, Ordering::SeqCst);
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }));
@@ -115,5 +130,35 @@ mod tests {
         }
 
         assert_eq!(counter.load(Ordering::SeqCst), 5);
+    }
+
+    #[tokio::test]
+    async fn close_does_not_wait_for_current_waiters() {
+        let gate = PauseGate::default();
+        let in_wait = Arc::new(AtomicBool::new(false));
+
+        let gate_clone = gate.clone();
+        let in_wait_clone = in_wait.clone();
+        let _handle = tokio::spawn(async move {
+            gate_clone.wait().await;
+            in_wait_clone.store(true, Ordering::SeqCst);
+            // Simulate long work after wait
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        // Wait for spawned task to pass wait()
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(
+            in_wait.load(Ordering::SeqCst),
+            "task should have passed wait"
+        );
+
+        // close() should return immediately, not wait for the task
+        let start = std::time::Instant::now();
+        let _guard = gate.close();
+        assert!(
+            start.elapsed() < Duration::from_millis(50),
+            "close should be instant"
+        );
     }
 }
