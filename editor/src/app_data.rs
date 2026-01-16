@@ -163,18 +163,18 @@ impl AppData {
 
     pub fn update_shared_status(&mut self) {
         if self.execution_stats_rx.has_changed().unwrap() {
-            if let Some(execution_stats) = self.execution_stats_rx.borrow_and_update().as_ref() {
+            if let Some(execution_stats) = self.execution_stats_rx.borrow_and_update().take() {
                 match execution_stats {
                     Ok(execution_stats) => {
-                        self.execution_stats = Some(execution_stats.clone());
-                        self.argument_values_cache
-                            .invalidate_changed(execution_stats);
-
                         let message = format!(
                             "Compute finished: {} nodes, {:.0}s",
                             execution_stats.executed_nodes.len(),
                             execution_stats.elapsed_secs
                         );
+
+                        self.argument_values_cache
+                            .invalidate_changed(&execution_stats);
+                        self.execution_stats = Some(execution_stats);
 
                         // let print_out = shared_status.print_output.take();
                         //     if let Some(print_output) = print_out {
