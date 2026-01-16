@@ -9,6 +9,7 @@ pub mod float_ext;
 pub mod key_index_vec;
 pub mod normalize_string;
 pub mod output_stream;
+pub mod pause_gate;
 pub mod ready_state;
 pub mod scoped_ref;
 pub mod serde;
