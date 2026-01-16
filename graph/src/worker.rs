@@ -407,9 +407,14 @@ mod tests {
             inputs: vec![Input {
                 binding: Binding::None,
             }],
-            events: vec![Event {
-                subscribers: vec![print_node_id],
-            }],
+            events: vec![
+                Event {
+                    subscribers: vec![print_node_id],
+                },
+                Event {
+                    subscribers: vec![],
+                },
+            ],
         });
 
         graph.add(Node {
