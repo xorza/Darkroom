@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::data::StaticValue;
 use crate::function::{Func, FuncId, FuncLib};
+use crate::prelude::{TestFuncHooks, test_func_lib};
 use common::{Result, SerdeFormat, deserialize, serialize};
 use common::{id_type, is_debug};
 
@@ -25,12 +26,15 @@ pub enum Binding {
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Input {
+    pub name: String,
+
     #[serde(default)]
     pub binding: Binding,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
+    pub name: String,
     pub subscribers: Vec<NodeId>,
 }
 
@@ -206,12 +210,20 @@ impl From<&Func> for Node {
         let inputs: Vec<Input> = func
             .inputs
             .iter()
-            .map(|_input| Input {
+            .map(|func_input| Input {
                 binding: Binding::None,
+                name: func_input.name.clone(),
             })
             .collect();
 
-        let events: Vec<Event> = func.events.iter().map(|_| Event::default()).collect();
+        let events: Vec<Event> = func
+            .events
+            .iter()
+            .map(|func_event| Event {
+                name: func_event.name.clone(),
+                subscribers: Vec::default(),
+            })
+            .collect();
 
         Node {
             id: NodeId::unique(),
@@ -327,83 +339,48 @@ impl NodeBehavior {
 }
 
 pub fn test_graph() -> Graph {
+    let func_lib = test_func_lib(TestFuncHooks::default());
+
     let mut graph = Graph::default();
 
     let mult_node_id: NodeId = "579ae1d6-10a3-4906-8948-135cb7d7508b".into();
-    let mult_func_id: FuncId = "432b9bf1-f478-476c-a9c9-9a6e190124fc".into();
-
     let get_a_node_id: NodeId = "5f110618-8faa-4629-8f5d-473c236de7d1".into();
-    let get_a_func_id: FuncId = "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into();
-
     let get_b_node_id: NodeId = "6fc6b533-c375-451c-ba3a-a14ea217cb30".into();
-    let get_b_func_id: FuncId = "a937baff-822d-48fd-9154-58751539b59b".into();
-
     let sum_node_id: NodeId = "999c4d37-e0eb-4856-be3f-ad2090c84d8c".into();
-    let sum_func_id: FuncId = "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into();
-
     let print_node_id: NodeId = "b88ab7e2-17b7-46cb-bc8e-b428bb45141e".into();
-    let print_func_id: FuncId = "f22cd316-1cdf-4a80-b86c-1277acd1408a".into();
 
-    graph.add(Node {
-        id: mult_node_id,
-        func_id: mult_func_id,
-        name: "mult".to_string(),
-        behavior: NodeBehavior::AsFunction,
-        inputs: vec![
-            Input {
-                binding: (sum_node_id, 0).into(),
-            },
-            Input {
-                binding: (get_b_node_id, 0).into(),
-            },
-        ],
-        events: vec![],
-    });
+    let get_a_func = func_lib.by_name("get_a").unwrap();
+    let get_b_func = func_lib.by_name("get_b").unwrap();
+    let sum_func = func_lib.by_name("sum").unwrap();
+    let mult_func = func_lib.by_name("mult").unwrap();
+    let print_func = func_lib.by_name("print").unwrap();
 
-    graph.add(Node {
-        id: get_a_node_id,
-        func_id: get_a_func_id,
-        name: "get_a".to_string(),
-        behavior: NodeBehavior::Once,
-        inputs: vec![],
-        events: vec![],
-    });
+    let mut get_a_node: Node = get_a_func.into();
+    get_a_node.id = get_a_node_id;
+    get_a_node.behavior = NodeBehavior::Once;
+    graph.add(get_a_node);
 
-    graph.add(Node {
-        id: get_b_node_id,
-        func_id: get_b_func_id,
-        name: "get_b".to_string(),
-        behavior: NodeBehavior::Once,
-        inputs: vec![],
-        events: vec![],
-    });
+    let mut get_b_node: Node = get_b_func.into();
+    get_b_node.id = get_b_node_id;
+    get_b_node.behavior = NodeBehavior::Once;
+    graph.add(get_b_node);
 
-    graph.add(Node {
-        id: sum_node_id,
-        func_id: sum_func_id,
-        name: "sum".to_string(),
-        behavior: NodeBehavior::AsFunction,
-        inputs: vec![
-            Input {
-                binding: (get_a_node_id, 0).into(),
-            },
-            Input {
-                binding: (get_b_node_id, 0).into(),
-            },
-        ],
-        events: vec![],
-    });
+    let mut sum_node: Node = sum_func.into();
+    sum_node.id = sum_node_id;
+    sum_node.inputs[0].binding = (get_a_node_id, 0).into();
+    sum_node.inputs[1].binding = (get_b_node_id, 0).into();
+    graph.add(sum_node);
 
-    graph.add(Node {
-        id: print_node_id,
-        func_id: print_func_id,
-        name: "print".to_string(),
-        behavior: NodeBehavior::AsFunction,
-        inputs: vec![Input {
-            binding: (mult_node_id, 0).into(),
-        }],
-        events: vec![],
-    });
+    let mut mult_node: Node = mult_func.into();
+    mult_node.id = mult_node_id;
+    mult_node.inputs[0].binding = (sum_node_id, 0).into();
+    mult_node.inputs[1].binding = (get_b_node_id, 0).into();
+    graph.add(mult_node);
+
+    let mut print_node: Node = print_func.into();
+    print_node.id = print_node_id;
+    print_node.inputs[0].binding = (mult_node_id, 0).into();
+    graph.add(print_node);
 
     graph.validate();
 
@@ -469,8 +446,8 @@ mod tests {
         let mult = get_id("mult");
         let print = get_id("print");
 
-        assert_eq!(graph.dependent_nodes(&get_a), vec![mult, sum, print]);
-        assert_eq!(graph.dependent_nodes(&get_b), vec![mult, sum, print]);
+        assert_eq!(graph.dependent_nodes(&get_a), vec![sum, mult, print]);
+        assert_eq!(graph.dependent_nodes(&get_b), vec![sum, mult, print]);
         assert_eq!(graph.dependent_nodes(&sum), vec![mult, print]);
         assert_eq!(graph.dependent_nodes(&mult), vec![print]);
         assert!(graph.dependent_nodes(&print).is_empty());

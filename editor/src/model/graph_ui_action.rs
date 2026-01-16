@@ -40,6 +40,7 @@ pub enum GraphUiAction {
         node: Node,
         incoming_connections: Vec<IncomingConnection>,
         incoming_events: Vec<IncomingEvent>,
+        was_selected: bool,
     },
     NodeMoved {
         node_id: NodeId,
@@ -201,6 +202,7 @@ impl GraphUiAction {
                 node,
                 incoming_connections,
                 incoming_events,
+                was_selected,
             } => {
                 let removed_node_id = node.id;
                 assert!(
@@ -219,6 +221,9 @@ impl GraphUiAction {
 
                     let subscribers = &mut node.events[event.event_idx].subscribers;
                     subscribers.push(removed_node_id);
+                }
+                if *was_selected {
+                    view_graph.selected_node_id = Some(removed_node_id);
                 }
             }
             GraphUiAction::NodeMoved {

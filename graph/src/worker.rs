@@ -379,65 +379,38 @@ mod tests {
     use tokio::time::{Duration, timeout};
 
     use crate::elements::basic_funclib::BasicFuncLib;
-    use crate::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
+    use crate::elements::timers_funclib::TimersFuncLib;
     use crate::event::EventLambda;
-    use crate::function::FuncId;
-    use crate::graph::{Binding, Graph, Input, Node, NodeBehavior};
-    use crate::graph::{Event, NodeId};
+    use crate::function::FuncLib;
+    use crate::graph::{Graph, Node, NodeId};
 
     use crate::worker::{EventRef, ProcessingCallback, Worker, WorkerMessage};
 
-    fn log_frame_no_graph() -> Graph {
+    fn log_frame_no_graph(func_lib: &FuncLib) -> Graph {
         let mut graph = Graph::default();
 
         let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
-        let frame_event_func_id: FuncId = FRAME_EVENT_FUNC_ID;
-
         let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
-        let float_to_string_func_id: FuncId = "01896a88-bf15-dead-4a15-5969da5a9e65".into();
-
         let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
-        let print_func_id: FuncId = "01896910-0790-ad1b-aa12-3f1437196789".into();
 
-        graph.add(Node {
-            id: frame_event_node_id,
-            func_id: frame_event_func_id,
-            name: "frame event".to_string(),
-            behavior: NodeBehavior::AsFunction,
-            inputs: vec![Input {
-                binding: Binding::None,
-            }],
-            events: vec![
-                Event {
-                    subscribers: vec![print_node_id],
-                },
-                Event {
-                    subscribers: vec![],
-                },
-            ],
-        });
+        let frame_event_func = func_lib.by_name("frame event").unwrap();
+        let float_to_string_func = func_lib.by_name("float to string").unwrap();
+        let print_func = func_lib.by_name("print").unwrap();
 
-        graph.add(Node {
-            id: float_to_string_node_id,
-            func_id: float_to_string_func_id,
-            name: "float to string".to_string(),
-            behavior: NodeBehavior::AsFunction,
-            inputs: vec![Input {
-                binding: (frame_event_node_id, 1).into(),
-            }],
-            events: vec![],
-        });
+        let mut frame_event_node: Node = frame_event_func.into();
+        frame_event_node.id = frame_event_node_id;
+        frame_event_node.events[0].subscribers.push(print_node_id);
+        graph.add(frame_event_node);
 
-        graph.add(Node {
-            id: print_node_id,
-            func_id: print_func_id,
-            name: "print".to_string(),
-            behavior: NodeBehavior::AsFunction,
-            inputs: vec![Input {
-                binding: (float_to_string_node_id, 0).into(),
-            }],
-            events: vec![],
-        });
+        let mut float_to_string_node: Node = float_to_string_func.into();
+        float_to_string_node.id = float_to_string_node_id;
+        float_to_string_node.inputs[0].binding = (frame_event_node_id, 1).into();
+        graph.add(float_to_string_node);
+
+        let mut print_node: Node = print_func.into();
+        print_node.id = print_node_id;
+        print_node.inputs[0].binding = (float_to_string_node_id, 0).into();
+        graph.add(print_node);
 
         graph
     }
@@ -452,7 +425,7 @@ mod tests {
         let mut func_lib = basic_invoker.into_func_lib();
         func_lib.merge(timers_invoker.into_func_lib());
 
-        let graph = log_frame_no_graph();
+        let graph = log_frame_no_graph(&func_lib);
         let frame_event_node_id = graph.by_name("frame event").unwrap().id;
 
         let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);

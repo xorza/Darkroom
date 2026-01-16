@@ -436,6 +436,7 @@ mod tests {
                 .expect("primary node must exist");
             node.events.push(Event {
                 subscribers: Vec::new(),
+                name: "input a".into(),
             });
         }
         if view_graph
@@ -450,6 +451,7 @@ mod tests {
                 .expect("primary node must exist");
             node.inputs.push(Input {
                 binding: Binding::None,
+                name: "input a".into(),
             });
         }
         let input_node_id = view_graph
@@ -575,7 +577,6 @@ mod tests {
             .find(|node_id| !bound_targets.contains(node_id))
             .unwrap_or(secondary_id);
         let action = view_graph.removal_action(&removed_node_id);
-        view_graph.remove_node(&removed_node_id);
         action.apply(&mut view_graph);
         stack.push_current(&view_graph, std::slice::from_ref(&action));
         snapshots.push(view_graph.serialize(SerdeFormat::Json));
