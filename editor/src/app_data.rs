@@ -305,6 +305,8 @@ impl AppData {
     }
 
     fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
+        view_graph.update_from_func_lib(&self.func_lib);
+
         self.view_graph = view_graph;
 
         if reset_undo {
