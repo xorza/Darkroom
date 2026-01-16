@@ -159,7 +159,10 @@ impl AppData {
     }
 
     pub fn update_shared_status(&mut self) {
-        let mut shared_status = self.shared_status.try_lock().unwrap();
+        let Ok(mut shared_status) = self.shared_status.try_lock() else {
+            return;
+        };
+
         let print_out = shared_status.print_output.take();
 
         if let Some(execution_stats) = shared_status.execution_stats.take() {
@@ -289,7 +292,9 @@ impl AppData {
 
     fn create_worker(shared_status: SharedStatus, ui_refresh: UiContext) -> Worker {
         Worker::new(move |result| {
-            let mut shared_status = shared_status.try_lock().unwrap();
+            let Ok(mut shared_status) = shared_status.try_lock() else {
+                return;
+            };
             shared_status.execution_stats = Some(result);
             // todo invalidate argument values cache only nodes which arent cached
 
@@ -305,7 +310,7 @@ impl AppData {
     }
 
     fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
-        todo!();
+        // todo!();
         // view_graph.update_from_func_lib(&self.func_lib);
 
         self.view_graph = view_graph;
@@ -350,7 +355,10 @@ fn sample_test_hooks(shared_status: SharedStatus) -> TestFuncHooks {
         get_a: Arc::new(|| 21),
         get_b: Arc::new(|| 2),
         print: Arc::new(move |value| {
-            let mut shared_status = shared_status.try_lock().unwrap();
+            let Ok(mut shared_status) = shared_status.try_lock() else {
+                return;
+            };
+
             if shared_status.print_output.is_none() {
                 shared_status.print_output = Some(String::new());
             }
