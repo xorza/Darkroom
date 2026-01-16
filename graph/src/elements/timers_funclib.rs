@@ -68,11 +68,11 @@ impl Default for TimersFuncLib {
             events: vec![
                 FuncEvent {
                     name: "always".into(),
-                    event_lambda: EventLambda::None,
-                },
-                FuncEvent {
-                    name: "once".into(),
-                    event_lambda: EventLambda::None,
+                    event_lambda: EventLambda::new(|| {
+                        Box::pin(async move {
+                            //
+                        })
+                    }),
                 },
                 FuncEvent {
                     name: "fps".into(),
