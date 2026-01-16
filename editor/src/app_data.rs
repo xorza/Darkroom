@@ -329,6 +329,7 @@ impl AppData {
 
             if actions.iter().any(|action| action.affects_computation()) {
                 self.execution_stats = None;
+                self.argument_values_cache.clear();
                 graph_updated = true;
             }
         }
