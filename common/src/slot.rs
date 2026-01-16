@@ -36,12 +36,7 @@ impl<T> Slot<T> {
 
     /// Takes the value if present, leaving the slot empty.
     pub fn take(&mut self) -> Option<T> {
-        let a = self.value.swap(None);
-        let Some(a) = a else {
-            return None;
-        };
-
-        Some(Arc::into_inner(a).unwrap())
+        self.value.swap(None).map(|a| Arc::into_inner(a).unwrap())
     }
 
     /// Returns true if there is a value present.
