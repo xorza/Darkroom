@@ -149,7 +149,7 @@ async fn worker_loop<Callback>(
             return;
         }
 
-        event_loop_pause_gate.close();
+        let event_loop_pause_guard = event_loop_pause_gate.close();
 
         msgs.extend(msgs_vec.drain(..));
 
@@ -230,6 +230,9 @@ async fn worker_loop<Callback>(
         if let Some(callback) = processing_callback.take() {
             callback.call();
         }
+
+        drop(event_loop_pause_guard);
+        tokio::task::yield_now().await;
     }
 }
 
