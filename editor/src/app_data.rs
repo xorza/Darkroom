@@ -165,6 +165,8 @@ impl AppData {
             match execution_stats {
                 Ok(execution_stats) => {
                     self.execution_stats = Some(execution_stats);
+                    self.argument_values_cache
+                        .invalidate_changed(self.execution_stats.as_ref().unwrap());
 
                     let summary = format!(
                         "({} nodes, {:.0}s)",
@@ -204,7 +206,7 @@ impl AppData {
         });
         self.view_graph.validate();
         if undid && affects_computation {
-            self.refresh_after_graph_change();
+            self.reinit_graph();
         }
     }
 
@@ -215,7 +217,7 @@ impl AppData {
         });
         self.view_graph.validate();
         if redid && affects_computation {
-            self.refresh_after_graph_change();
+            self.reinit_graph();
         }
     }
 
@@ -308,10 +310,10 @@ impl AppData {
             self.undo_stack.reset_with(&self.view_graph);
         }
 
-        self.refresh_after_graph_change();
+        self.reinit_graph();
     }
 
-    fn refresh_after_graph_change(&mut self) {
+    fn reinit_graph(&mut self) {
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();

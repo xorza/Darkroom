@@ -1,4 +1,4 @@
-use graph::execution_graph::ArgumentValues;
+use graph::execution_graph::{ArgumentValues, ExecutionStats};
 use graph::graph::NodeId;
 use hashbrown::HashMap;
 
@@ -18,5 +18,19 @@ impl ArgumentValuesCache {
 
     pub fn clear(&mut self) {
         self.values.clear();
+    }
+
+    pub fn invalidate_changed(&mut self, execution_stats: &ExecutionStats) {
+        let stats = execution_stats;
+
+        // Remove cached values for executed nodes (their values may have changed)
+        for executed in &stats.executed_nodes {
+            self.values.remove(&executed.node_id);
+        }
+
+        // Remove cached values for nodes with missing inputs
+        for port_address in &stats.missing_inputs {
+            self.values.remove(&port_address.target_id);
+        }
     }
 }
