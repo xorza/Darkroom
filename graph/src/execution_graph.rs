@@ -961,6 +961,41 @@ impl ExecutionGraph {
             }
         }
     }
+
+    pub fn get_input_output_values(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<(Vec<Option<DynamicValue>>, Vec<DynamicValue>)> {
+        let e_node_idx = self.e_nodes.index_of_key(node_id)?;
+        let e_node = &self.e_nodes[e_node_idx];
+
+        let input_values: Vec<Option<DynamicValue>> = e_node
+            .inputs
+            .iter()
+            .map(|input| match &input.binding {
+                ExecutionBinding::Undefined | ExecutionBinding::None => None,
+                ExecutionBinding::Const(static_value) => {
+                    Some(DynamicValue::from(static_value.clone()))
+                }
+                ExecutionBinding::Bind(port_address) => {
+                    let source_node = &self.e_nodes[port_address.target_idx];
+                    source_node
+                        .output_values
+                        .as_ref()
+                        .and_then(|outputs| outputs.get(port_address.port_idx))
+                        .cloned()
+                }
+            })
+            .collect();
+
+        let output_values: Vec<DynamicValue> = e_node
+            .output_values
+            .as_ref()
+            .map(|outputs| outputs.to_vec())
+            .unwrap_or_default();
+
+        Some((input_values, output_values))
+    }
 }
 
 #[cfg(test)]
