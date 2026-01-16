@@ -30,7 +30,7 @@ pub struct ProcessingCallback {
     inner: Box<dyn Fn() + Send + Sync + 'static>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct EventRef {
     pub node_id: NodeId,
     pub event_idx: usize,
@@ -182,11 +182,24 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let events_triggers: Vec<(NodeId, EventLambda)> = execution_graph
+                let events_triggers: Vec<(EventRef, EventLambda)> = execution_graph
                     .e_nodes
                     .iter()
-                    .filter(|&e_node| !e_node.event_lambda.is_none())
-                    .map(|e_node| (e_node.id, e_node.event_lambda.clone()))
+                    .flat_map(|e_node| {
+                        e_node
+                            .events
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(event_idx, event)| {
+                                (!event.subscribers.is_empty()).then_some((
+                                    EventRef {
+                                        node_id: e_node.id,
+                                        event_idx,
+                                    },
+                                    event.lambda.clone(),
+                                ))
+                            })
+                    })
                     .collect();
                 if !events_triggers.is_empty() {
                     event_loop_handle =
@@ -207,7 +220,7 @@ async fn worker_loop<Callback>(
 
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
-    events: Vec<(NodeId, EventLambda)>,
+    events: Vec<(EventRef, EventLambda)>,
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
@@ -229,7 +242,7 @@ async fn start_event_loop(
                 }
                 let result = if event_ids.len() == 1 {
                     worker_message_tx.send(WorkerMessage::Event {
-                        event_id: event_ids[0].clone(),
+                        event_id: event_ids[0],
                     })
                 } else {
                     worker_message_tx.send(WorkerMessage::Events {
@@ -247,7 +260,7 @@ async fn start_event_loop(
 
     let ready = ReadyState::new(events.len());
 
-    for (node_id, event_lambda) in events {
+    for (event_ref, event_lambda) in events {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();
@@ -256,8 +269,8 @@ async fn start_event_loop(
                 ready.signal();
 
                 loop {
-                    let event_idx = event_lambda.invoke().await;
-                    let result = event_tx.send(EventRef { node_id, event_idx }).await;
+                    event_lambda.invoke().await;
+                    let result = event_tx.send(event_ref).await;
                     if result.is_err() {
                         return;
                     }
@@ -460,10 +473,20 @@ mod tests {
     #[tokio::test]
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
-        let event_lambda = EventLambda::new(|| Box::pin(async move { 1 }));
+        let event_lambda = EventLambda::new(|| Box::pin(async move {}));
 
         let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]).await;
+        let mut handle = super::start_event_loop(
+            tx,
+            vec![(
+                EventRef {
+                    node_id,
+                    event_idx: 0,
+                },
+                event_lambda,
+            )],
+        )
+        .await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
         let WorkerMessage::Event { event_id } = msg else {
@@ -473,7 +496,7 @@ mod tests {
             event_id,
             EventRef {
                 node_id,
-                event_idx: 1
+                event_idx: 0
             }
         );
 
@@ -489,7 +512,6 @@ mod tests {
             let notify = Arc::clone(&notify_for_event);
             Box::pin(async move {
                 notify.notified().await;
-                0
             })
         });
 
@@ -499,7 +521,17 @@ mod tests {
         });
 
         let (tx, mut rx) = unbounded_channel();
-        let mut handle = super::start_event_loop(tx, vec![(node_id, event_lambda)]).await;
+        let mut handle = super::start_event_loop(
+            tx,
+            vec![(
+                EventRef {
+                    node_id,
+                    event_idx: 0,
+                },
+                event_lambda,
+            )],
+        )
+        .await;
 
         callback.call();
 

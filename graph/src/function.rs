@@ -1,5 +1,4 @@
 use std::any::Any;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::context::ContextType;
@@ -47,6 +46,9 @@ pub struct FuncOutput {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FuncEvent {
     pub name: String,
+
+    #[serde(skip, default)]
+    pub event_lambda: EventLambda,
 }
 
 id_type!(FuncId);
@@ -73,8 +75,6 @@ pub struct Func {
 
     #[serde(skip, default)]
     pub lambda: FuncLambda,
-    #[serde(skip, default)]
-    pub event_lambda: EventLambda,
 }
 impl KeyIndexKey<FuncId> for Func {
     fn key(&self) -> &FuncId {
@@ -133,14 +133,6 @@ impl FuncLib {
     }
 }
 
-impl From<&str> for FuncEvent {
-    fn from(s: &str) -> Self {
-        FuncEvent {
-            name: s.to_string(),
-        }
-    }
-}
-
 impl<It> From<It> for FuncLib
 where
     It: IntoIterator<Item = Func>,
@@ -151,16 +143,6 @@ where
             func_lib.add(func);
         }
         func_lib
-    }
-}
-
-impl FromStr for FuncEvent {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(FuncEvent {
-            name: s.to_string(),
-        })
     }
 }
 
@@ -312,7 +294,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
                 Ok(())
             }),
-            ..Default::default()
         },
         Func {
             id: "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into(),
@@ -335,7 +316,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
-            ..Default::default()
         },
         Func {
             id: "a937baff-822d-48fd-9154-58751539b59b".into(),
@@ -358,7 +338,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
-            ..Default::default()
         },
         Func {
             id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into(),
@@ -399,7 +378,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 outputs[0] = (a + b).into();
                 Ok(())
             }),
-            ..Default::default()
         },
         Func {
             id: "f22cd316-1cdf-4a80-b86c-1277acd1408a".into(),
@@ -426,7 +404,6 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
-            ..Default::default()
         },
     ]
     .into()

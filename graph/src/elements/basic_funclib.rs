@@ -133,7 +133,6 @@ impl Default for BasicFuncLib {
                     Ok(())
                 }
             ),
-            ..Default::default()
         });
         // math two argument operation
         func_lib.add(Func {
@@ -183,7 +182,6 @@ impl Default for BasicFuncLib {
                 Ok(())
             }),
             description: None,
-            ..Default::default()
         });
         // to string
         func_lib.add(Func {
@@ -216,7 +214,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::String(result);
                 Ok(())
             }),
-            ..Default::default()
         });
 
         // random
@@ -263,7 +260,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
             }),
-            ..Default::default()
         });
         //add
         func_lib.add(Func {
@@ -306,7 +302,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
             }),
-            ..Default::default()
         });
         //subtract
         func_lib.add(Func {
@@ -349,7 +344,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
             }),
-            ..Default::default()
         });
         //multiply
         func_lib.add(Func {
@@ -392,7 +386,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(result);
                 Ok(())
             }),
-            ..Default::default()
         });
         //divide
         func_lib.add(Func {
@@ -443,7 +436,6 @@ impl Default for BasicFuncLib {
                 outputs[1] = DynamicValue::Float(modulo);
                 Ok(())
             }),
-            ..Default::default()
         });
         // power
         func_lib.add(Func {
@@ -486,7 +478,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(power);
                 Ok(())
             }),
-            ..Default::default()
         });
         // sqrt
         func_lib.add(Func {
@@ -519,7 +510,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(sqrt);
                 Ok(())
             }),
-            ..Default::default()
         });
         // sin
         func_lib.add(Func {
@@ -552,7 +542,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(sin);
                 Ok(())
             }),
-            ..Default::default()
         });
         // cos
         func_lib.add(Func {
@@ -585,7 +574,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(cos);
                 Ok(())
             }),
-            ..Default::default()
         });
         // tan
         func_lib.add(Func {
@@ -618,7 +606,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(tan);
                 Ok(())
             }),
-            ..Default::default()
         });
         // asin
         func_lib.add(Func {
@@ -651,7 +638,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(asin);
                 Ok(())
             }),
-            ..Default::default()
         });
         // acos
         func_lib.add(Func {
@@ -684,7 +670,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(acos);
                 Ok(())
             }),
-            ..Default::default()
         });
         // atan
         func_lib.add(Func {
@@ -717,7 +702,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(atan);
                 Ok(())
             }),
-            ..Default::default()
         });
         // log
         func_lib.add(Func {
@@ -760,7 +744,6 @@ impl Default for BasicFuncLib {
                 outputs[0] = DynamicValue::Float(log);
                 Ok(())
             }),
-            ..Default::default()
         });
 
         Self {

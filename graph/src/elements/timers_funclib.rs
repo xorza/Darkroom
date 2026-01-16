@@ -4,7 +4,7 @@ use std::time::Instant;
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
 use crate::event::EventLambda;
-use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
+use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::BoolExt;
@@ -65,7 +65,20 @@ impl Default for TimersFuncLib {
                     data_type: DataType::Int,
                 },
             ],
-            events: vec!["always".into(), "once".into(), "fps".into()],
+            events: vec![
+                FuncEvent {
+                    name: "always".into(),
+                    event_lambda: EventLambda::None,
+                },
+                FuncEvent {
+                    name: "once".into(),
+                    event_lambda: EventLambda::None,
+                },
+                FuncEvent {
+                    name: "fps".into(),
+                    event_lambda: EventLambda::None,
+                },
+            ],
             required_contexts: vec![],
             lambda: async_lambda!(move |_context_manager,
                                         cache,
@@ -103,7 +116,6 @@ impl Default for TimersFuncLib {
                 outputs[1] = DynamicValue::Int(frame_no);
                 Ok(())
             }),
-            ..Default::default()
         });
 
         let run_event = Arc::new(Notify::new());
@@ -117,19 +129,20 @@ impl Default for TimersFuncLib {
             terminal: false,
             inputs: vec![],
             outputs: vec![],
-            events: vec!["run".into()],
+            events: vec![FuncEvent {
+                name: "run".into(),
+                event_lambda: EventLambda::new({
+                    let run_event = Arc::clone(&run_event);
+                    move || {
+                        let run_event = Arc::clone(&run_event);
+                        Box::pin(async move {
+                            run_event.notified().await;
+                        })
+                    }
+                }),
+            }],
             required_contexts: vec![],
             lambda: FuncLambda::None,
-            event_lambda: EventLambda::new({
-                let run_event = Arc::clone(&run_event);
-                move || {
-                    let run_event = Arc::clone(&run_event);
-                    Box::pin(async move {
-                        run_event.notified().await;
-                        0
-                    })
-                }
-            }),
         });
 
         TimersFuncLib {

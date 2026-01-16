@@ -1,6 +1,6 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-type AsyncEventFuture = Pin<Box<dyn Future<Output = usize> + Send>>;
+type AsyncEventFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 pub trait AsyncEventFn: Fn() -> AsyncEventFuture + Send + Sync + 'static {}
 
@@ -23,7 +23,7 @@ impl EventLambda {
         Self::Lambda(Arc::new(lambda))
     }
 
-    pub async fn invoke(&self) -> usize {
+    pub async fn invoke(&self) {
         match self {
             EventLambda::None => {
                 panic!("Func missing lambda");

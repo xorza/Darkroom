@@ -10,7 +10,7 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::elements::timers_funclib::TimersFuncLib;
 use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
-use crate::graph::{Binding, Event, Graph, Node, NodeBehavior, NodeId, PortAddress};
+use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventRef;
@@ -64,6 +64,13 @@ pub struct ExecutionInput {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ExecutionOutput {
     usage_count: usize,
+}
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct ExecutionEvent {
+    pub subscribers: Vec<NodeId>,
+
+    #[serde(skip, default)]
+    pub lambda: EventLambda,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -122,7 +129,7 @@ pub struct ExecutionNode {
 
     pub inputs: Vec<ExecutionInput>,
     pub outputs: Vec<ExecutionOutput>,
-    pub events: Vec<Event>,
+    pub events: Vec<ExecutionEvent>,
 
     pub func_id: FuncId,
 
@@ -136,8 +143,6 @@ pub struct ExecutionNode {
 
     #[serde(skip)]
     pub lambda: FuncLambda,
-    #[serde(skip)]
-    pub event_lambda: EventLambda,
 
     #[cfg(debug_assertions)]
     pub name: String,
@@ -214,7 +219,6 @@ impl ExecutionNode {
             self.inited = true;
             self.func_id = func.id;
             self.lambda = func.lambda.clone();
-            self.event_lambda = func.event_lambda.clone();
 
             self.inputs
                 .resize(func.inputs.len(), ExecutionInput::default());
@@ -228,7 +232,13 @@ impl ExecutionNode {
             }
 
             self.events.clear();
-            self.events.resize(node.events.len(), Event::default());
+            self.events.reserve(func.events.len());
+            for func_event in func.events.iter() {
+                self.events.push(ExecutionEvent {
+                    subscribers: Vec::new(),
+                    lambda: func_event.event_lambda.clone(),
+                });
+            }
         }
 
         self.terminal = func.terminal;
