@@ -607,4 +607,76 @@ mod tests {
 
         handle.stop().await;
     }
+
+    #[tokio::test]
+    async fn pause_gate_blocks_event_loop_iterations() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let node_id = NodeId::unique();
+        let invoke_count = Arc::new(AtomicUsize::new(0));
+        let invoke_count_clone = Arc::clone(&invoke_count);
+
+        let event_lambda = EventLambda::new(move || {
+            let invoke_count = Arc::clone(&invoke_count_clone);
+            Box::pin(async move {
+                invoke_count.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+
+        let pause_gate = PauseGate::default();
+        let (tx, mut rx) = unbounded_channel();
+
+        let mut handle = super::start_event_loop(
+            tx,
+            vec![(
+                EventRef {
+                    node_id,
+                    event_idx: 0,
+                },
+                event_lambda,
+            )],
+            pause_gate.clone(),
+        )
+        .await;
+
+        // Wait for first event to arrive
+        let _ = timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("Expected first event");
+
+        // Close the gate - event loop should pause
+        let _guard = pause_gate.close();
+
+        // Record count after closing gate
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        let count_at_close = invoke_count.load(Ordering::SeqCst);
+
+        // Wait and verify no new invocations while gate is closed
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let count_while_closed = invoke_count.load(Ordering::SeqCst);
+
+        // At most one more invocation might have slipped through
+        assert!(
+            count_while_closed <= count_at_close + 1,
+            "Event loop should pause when gate is closed. Count at close: {}, count while closed: {}",
+            count_at_close,
+            count_while_closed
+        );
+
+        // Drop guard to reopen gate
+        drop(_guard);
+
+        // Wait for more events to flow
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let count_after_reopen = invoke_count.load(Ordering::SeqCst);
+
+        assert!(
+            count_after_reopen > count_while_closed,
+            "Event loop should resume after gate reopens. Count while closed: {}, count after reopen: {}",
+            count_while_closed,
+            count_after_reopen
+        );
+
+        handle.stop().await;
+    }
 }
