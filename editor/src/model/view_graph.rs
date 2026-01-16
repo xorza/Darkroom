@@ -201,11 +201,13 @@ impl ViewGraph {
                 }
             }
         }
+        let was_selected = self.selected_node_id == Some(*node_id);
         GraphUiAction::NodeRemoved {
             view_node,
             node,
             incoming_connections,
             incoming_events,
+            was_selected,
         }
     }
 }
