@@ -1,10 +1,13 @@
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
-    TextEdit, Vec2, vec2,
+    Vec2, vec2,
 };
 
-use crate::gui::{Gui, style::DragValueStyle};
+use crate::{
+    common::TextEdit,
+    gui::{Gui, style::DragValueStyle},
+};
 
 #[derive(Debug)]
 pub struct DragValue<'a> {
