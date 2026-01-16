@@ -598,7 +598,7 @@ impl TextEdit<'_> {
 
         let font_id = font_selection.resolve(ui.style());
         let row_height = ui.fonts_mut(|f| f.row_height(&font_id));
-        const MIN_WIDTH: f32 = 24.0; // Never make a [`TextEdit`] more narrow than this.
+        const MIN_WIDTH: f32 = 1.0; // Never make a [`TextEdit`] more narrow than this.
         let available_width = (ui.available_width() - margin.sum().x).at_least(MIN_WIDTH);
         let desired_width = desired_width.unwrap_or_else(|| ui.spacing().text_edit_width);
         let wrap_width = if ui.layout().horizontal_justify() {
