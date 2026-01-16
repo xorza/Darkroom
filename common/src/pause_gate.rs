@@ -33,8 +33,14 @@ impl PauseGate {
     /// Waits until the gate is open.
     /// Does not hold any lock - the gate can be closed while caller proceeds.
     pub async fn wait(&self) {
-        while self.inner.closed.load(Ordering::Acquire) {
-            self.inner.notify.notified().await;
+        loop {
+            // Register for notification BEFORE checking the flag to avoid race condition.
+            // Otherwise: check closed (true) → guard drops & notifies → we call notified() → miss it
+            let notified = self.inner.notify.notified();
+            if !self.inner.closed.load(Ordering::Acquire) {
+                return;
+            }
+            notified.await;
         }
     }
 
@@ -160,6 +166,57 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(50),
             "close should be instant"
+        );
+    }
+
+    /// Stress test for race condition between wait() and close()/drop().
+    /// Without proper synchronization, waiters can miss notifications and block forever.
+    #[tokio::test]
+    async fn stress_test_no_missed_notifications() {
+        let gate = PauseGate::default();
+        let iterations = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+
+        // Spawn multiple waiters that spin on wait()
+        let mut handles = vec![];
+        for _ in 0..4 {
+            let gate = gate.clone();
+            let iterations = iterations.clone();
+            let stop = stop.clone();
+            handles.push(tokio::spawn(async move {
+                while !stop.load(Ordering::Relaxed) {
+                    gate.wait().await;
+                    iterations.fetch_add(1, Ordering::Relaxed);
+                    tokio::task::yield_now().await;
+                }
+            }));
+        }
+
+        // Rapidly close and reopen the gate
+        for _ in 0..1000 {
+            let _guard = gate.close();
+            tokio::task::yield_now().await;
+            drop(_guard);
+            tokio::task::yield_now().await;
+        }
+
+        // Let waiters run a bit more
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        stop.store(true, Ordering::Relaxed);
+
+        // If there's a race condition, waiters will be stuck and this will timeout
+        for handle in handles {
+            tokio::time::timeout(Duration::from_millis(500), handle)
+                .await
+                .expect("waiter should not be stuck")
+                .expect("waiter should not panic");
+        }
+
+        let total = iterations.load(Ordering::Relaxed);
+        assert!(
+            total > 100,
+            "waiters should have completed many iterations, got {}",
+            total
         );
     }
 }
