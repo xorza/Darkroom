@@ -25,23 +25,29 @@ impl NodeDetailsUi {
             return;
         };
 
+        let big_padding = gui.style.big_padding;
         let panel_rect = Rect::from_min_size(
-            Pos2::new(graph_rect.right() - PANEL_WIDTH, graph_rect.top()),
-            Vec2::new(PANEL_WIDTH, graph_rect.height()),
+            Pos2::new(
+                graph_rect.right() - PANEL_WIDTH,
+                graph_rect.top() + big_padding,
+            ),
+            Vec2::new(
+                PANEL_WIDTH - big_padding,
+                graph_rect.height() - big_padding * 2.0,
+            ),
         );
 
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
 
         Area::new(popup_id)
             .fixed_pos(panel_rect.min)
-            .order(Order::Foreground)
             .movable(false)
             .interactable(true)
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     let padding = gui.style.padding;
-                    gui.ui().set_min_width(panel_rect.width() - padding * 2.0);
-                    gui.ui().set_min_height(panel_rect.height() - padding * 2.0);
+                    gui.ui().set_width(panel_rect.width() - padding * 2.0);
+                    gui.ui().set_height(panel_rect.height() - padding * 2.0);
 
                     self.show_content(gui, ctx, selected_node_id, interaction);
                 });
