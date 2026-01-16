@@ -245,7 +245,15 @@ async fn start_event_loop(
 
     let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
 
+    // Bounded channel provides backpressure for event lambdas.
+    // When the event loop is stopped, this channel is dropped along with event_rx,
+    // causing all event lambda tasks to exit. A new event loop gets a fresh channel,
+    // so old events don't leak into the new one.
     let (event_tx, mut event_rx) = channel::<EventRef>(MAX_EVENTS_PER_LOOP);
+
+    // Forwarder task: batches events from the bounded channel and forwards them
+    // to the main worker queue. This decouples the bounded backpressure from the
+    // unbounded worker queue while allowing efficient batching.
     let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
@@ -279,6 +287,8 @@ async fn start_event_loop(
 
     let ready = ReadyState::new(events.len());
 
+    // Spawn one task per event lambda. Each task repeatedly invokes its lambda
+    // and sends the event to the bounded channel.
     for (event_ref, event_lambda) in events {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
@@ -296,6 +306,8 @@ async fn start_event_loop(
                     }
 
                     tokio::task::yield_now().await;
+                    // Pause gate blocks new iterations while the main worker is processing.
+                    // This prevents event buildup during graph execution.
                     pause_gate.wait().await;
                 }
             }
