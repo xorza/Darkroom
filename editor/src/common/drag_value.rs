@@ -150,6 +150,7 @@ impl<'a> DragValue<'a> {
                 .horizontal_align(self.align.x())
                 .vertical_align(self.align.y())
                 .clip_text(true)
+                .margin(0.0)
                 .frame(false);
 
             let mut text_edit_response = gui

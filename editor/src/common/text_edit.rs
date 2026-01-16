@@ -171,7 +171,7 @@ pub struct TextEdit<'t> {
     layouter: Option<LayouterFn<'t>>,
     password: bool,
     frame: bool,
-    margin: Margin,
+    margin: Option<Margin>,
     multiline: bool,
     interactive: bool,
     desired_width: Option<f32>,
@@ -224,7 +224,7 @@ impl<'t> TextEdit<'t> {
             layouter: None,
             password: false,
             frame: true,
-            margin: 0.0.into(),
+            margin: None,
             multiline: true,
             interactive: true,
             desired_width: None,
@@ -392,10 +392,10 @@ impl<'t> TextEdit<'t> {
         self
     }
 
-    /// Set margin of text. Default is `Margin::symmetric(4.0, 2.0)`
+    /// Set margin of text. If not specified, uses `gui.style.padding`.
     #[inline]
     pub fn margin(mut self, margin: impl Into<Margin>) -> Self {
-        self.margin = margin.into();
+        self.margin = Some(margin.into());
         self
     }
 
@@ -546,6 +546,7 @@ impl TextEdit<'_> {
     }
 
     fn show_content(self, gui: &mut Gui<'_>) -> TextEditOutput {
+        let margin = self.margin.unwrap_or_else(|| gui.style.padding.into());
         let ui = gui.ui();
         let TextEdit {
             text,
@@ -558,7 +559,7 @@ impl TextEdit<'_> {
             layouter,
             password,
             frame: _,
-            margin,
+            margin: _,
             multiline,
             interactive,
             desired_width,
