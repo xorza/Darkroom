@@ -296,7 +296,6 @@ impl AppData {
                 return;
             };
             shared_status.execution_stats = Some(result);
-            // todo invalidate argument values cache only nodes which arent cached
 
             ui_refresh.request_redraw();
         })
