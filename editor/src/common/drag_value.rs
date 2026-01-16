@@ -101,10 +101,12 @@ impl<'a> DragValue<'a> {
             .ui()
             .painter()
             .layout_no_wrap(value_text.clone(), font.clone(), color);
-        let size = galley.size() + padding * 2.0;
+        let mut size = galley.size() + padding * 2.0 + vec2(0.0, 4.0);
+        size.x = size.x.max(30.0 * gui.scale());
         assert!(size.x.is_finite() && size.y.is_finite());
 
-        let mut rect = self.align.anchor_size(self.pos, size);
+        let rect = self.align.anchor_size(self.pos, size);
+        let inner_rect = rect.shrink2(padding);
 
         if !gui.ui().is_rect_visible(rect) {
             return gui.ui().allocate_rect(rect, Sense::hover());
@@ -128,8 +130,6 @@ impl<'a> DragValue<'a> {
             StrokeKind::Outside,
         );
 
-        rect = rect.expand(background.stroke.width);
-
         if edit_active {
             let mut edit_text = gui
                 .ui()
@@ -143,13 +143,12 @@ impl<'a> DragValue<'a> {
             let text_edit = TextEdit::singleline(&mut edit_text)
                 .id(edit_id)
                 .font(font.clone())
-                .desired_width(rect.width())
-                .vertical_align(Align::Center)
+                .desired_width(inner_rect.width())
                 .horizontal_align(self.align.x())
-                .margin(padding)
+                .vertical_align(self.align.y())
                 .clip_text(true)
                 .frame(false);
-            let mut text_edit_response = gui.ui().put(rect, text_edit);
+            let mut text_edit_response = gui.ui().put(inner_rect, text_edit);
 
             let should_confirm = text_edit_response.lost_focus()
                 && gui
@@ -197,7 +196,7 @@ impl<'a> DragValue<'a> {
 
         let mut response = gui
             .ui()
-            .allocate_rect(rect, Sense::click_and_drag() | Sense::hover());
+            .allocate_rect(inner_rect, Sense::click_and_drag() | Sense::hover());
 
         if response.clicked() {
             gui.ui().data_mut(|data| {
@@ -250,7 +249,6 @@ impl<'a> DragValue<'a> {
             });
         }
 
-        let inner_rect = rect.shrink2(padding);
         let text_anchor = self.align.pos_in_rect(&inner_rect);
         let text_rect = self.align.anchor_size(text_anchor, galley.size());
         gui.painter().galley(text_rect.min, galley, color);
