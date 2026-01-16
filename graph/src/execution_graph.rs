@@ -1006,7 +1006,7 @@ mod tests {
     use crate::data::{DynamicValue, StaticValue};
     use crate::function::{TestFuncHooks, test_func_lib};
     use crate::graph::{NodeBehavior, test_graph};
-    use common::SerdeFormat;
+    use common::{FloatExt, SerdeFormat};
     use tokio::sync::Mutex;
 
     fn execution_node_names_in_order(execution_graph: &ExecutionGraph) -> Vec<String> {
@@ -1802,6 +1802,152 @@ mod tests {
             ["sum", "mult", "print"],
             "now sum should be used again"
         );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_input_output_values_returns_none_for_nonexistent_node() -> anyhow::Result<()> {
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut execution_graph = ExecutionGraph::default();
+
+        execution_graph.update(&graph, &func_lib);
+
+        let nonexistent_id: NodeId = "00000000-0000-0000-0000-000000000000".into();
+        assert!(
+            execution_graph
+                .get_input_output_values(&nonexistent_id)
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_input_output_values_with_const_bindings() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || unreachable!()),
+            get_b: Arc::new(move || unreachable!()),
+            print: Arc::new(move |_| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[0].binding = Binding::Const(StaticValue::Int(3));
+        mult.inputs[1].binding = Binding::Const(StaticValue::Int(5));
+        let mult_id = mult.id;
+
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.execute_terminals().await?;
+
+        let (inputs, outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert!(matches!(inputs[0], Some(DynamicValue::Int(3))));
+        assert!(matches!(inputs[1], Some(DynamicValue::Int(5))));
+
+        assert_eq!(outputs.len(), 1);
+        assert!(matches!(outputs[0], DynamicValue::Int(15)));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_input_output_values_with_bound_outputs() -> anyhow::Result<()> {
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 2),
+            get_b: Arc::new(move || 5),
+            print: Arc::new(move |_| {}),
+        });
+
+        let graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.execute_terminals().await?;
+
+        // sum node: inputs from get_a (2.0) and get_b (5.0), output = 7
+        // Note: test functions output Float values even though declared as Int
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let (inputs, outputs) = execution_graph.get_input_output_values(&sum_id).unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert!(matches!(inputs[0], Some(DynamicValue::Float(v)) if v.approximately_eq(2.0)));
+        assert!(matches!(inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0)));
+
+        assert_eq!(outputs.len(), 1);
+        assert!(matches!(outputs[0], DynamicValue::Int(7)));
+
+        // mult node: inputs from sum (7) and get_b (5.0), output = 35
+        let mult_id = graph.by_name("mult").unwrap().id;
+        let (inputs, outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert!(matches!(inputs[0], Some(DynamicValue::Int(7))));
+        assert!(matches!(inputs[1], Some(DynamicValue::Float(v)) if v.approximately_eq(5.0)));
+
+        assert_eq!(outputs.len(), 1);
+        assert!(matches!(outputs[0], DynamicValue::Int(35)));
+
+        // print node: input from mult (35), no outputs
+        let print_id = graph.by_name("print").unwrap().id;
+        let (inputs, outputs) = execution_graph.get_input_output_values(&print_id).unwrap();
+
+        assert_eq!(inputs.len(), 1);
+        assert!(matches!(inputs[0], Some(DynamicValue::Int(35))));
+        assert!(outputs.is_empty());
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn get_input_output_values_with_none_binding() -> anyhow::Result<()> {
+        let mut func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(move || 1),
+            get_b: Arc::new(move || 11),
+            print: Arc::new(move |_| {}),
+        });
+
+        let mut graph = test_graph();
+        let mut execution_graph = ExecutionGraph::default();
+
+        // Make mult's second input optional and set to None
+        func_lib.by_name_mut("mult").unwrap().inputs[1].required = false;
+        let mult = graph.by_name_mut("mult").unwrap();
+        mult.inputs[1].binding = Binding::None;
+        let mult_id = mult.id;
+
+        execution_graph.update(&graph, &func_lib);
+        execution_graph.execute_terminals().await?;
+
+        let (inputs, _outputs) = execution_graph.get_input_output_values(&mult_id).unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs[0].is_some()); // from sum
+        assert!(inputs[1].is_none()); // None binding
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_input_output_values_before_execution() -> anyhow::Result<()> {
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks::default());
+        let mut execution_graph = ExecutionGraph::default();
+
+        execution_graph.update(&graph, &func_lib);
+
+        // Before execution, bound inputs should return None (no output values yet)
+        let sum_id = graph.by_name("sum").unwrap().id;
+        let (inputs, outputs) = execution_graph.get_input_output_values(&sum_id).unwrap();
+
+        assert_eq!(inputs.len(), 2);
+        assert!(inputs[0].is_none()); // get_a hasn't executed
+        assert!(inputs[1].is_none()); // get_b hasn't executed
+        assert!(outputs.is_empty()); // sum hasn't executed
 
         Ok(())
     }
