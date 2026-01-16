@@ -265,12 +265,10 @@ impl AppData {
             msgs.push(WorkerMessage::RequestArgumentValues {
                 node_id,
                 callback: ArgumentValuesCallback::new({
-                    let ui_context = self.ui_context.clone();
                     let slot = self.argument_values_rx.clone();
 
                     move |values| {
                         slot.send((node_id, values));
-                        ui_context.request_redraw();
                     }
                 }),
             });
