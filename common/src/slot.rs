@@ -1,3 +1,4 @@
+use arc_swap::ArcSwapOption;
 use std::sync::Arc;
 
 /// A lockless single-value slot for cross-thread communication.
@@ -8,13 +9,13 @@ use std::sync::Arc;
 /// `Slot` is cheaply cloneable - all clones share the same underlying storage.
 #[derive(Debug)]
 pub struct Slot<T> {
-    value: Arc<Option<T>>,
+    value: Arc<ArcSwapOption<T>>,
 }
 
 impl<T> Default for Slot<T> {
     fn default() -> Self {
         Self {
-            value: Arc::new(None),
+            value: Arc::new(ArcSwapOption::empty()),
         }
     }
 }
@@ -27,27 +28,27 @@ impl<T> Clone for Slot<T> {
     }
 }
 
-impl<T> Slot<T> {
+impl<T: Clone> Slot<T> {
     /// Stores a value, replacing any existing value.
     pub fn send(&mut self, val: T) {
-        self.value = Arc::new(Some(val));
+        self.value.store(Some(Arc::new(val)));
     }
 
     /// Takes the value if present, leaving the slot empty.
     pub fn take(&mut self) -> Option<T> {
-        let clone = Arc::clone(&self.value);
-        self.value = Arc::new(None);
+        let a = self.value.swap(None);
+        let Some(a) = a else {
+            return None;
+        };
 
-        if clone.is_some() {
-            Arc::into_inner(clone).expect("Arc::into_inner failed")
-        } else {
-            None
-        }
+        Some(Arc::into_inner(a).unwrap())
+
+        //.map(|arc| Arc::into_inner(arc))
     }
 
     /// Returns true if there is a value present.
     pub fn has_value(&self) -> bool {
-        self.value.is_some()
+        self.value.load().is_some()
     }
 }
 
@@ -84,5 +85,42 @@ mod tests {
         let val = slot.take();
         assert_eq!(val.unwrap(), 3);
         assert!(slot.take().is_none());
+    }
+
+    #[test]
+    fn multithreaded_send_and_take() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::thread;
+
+        let mut sender_slot = Slot::default();
+        let mut receiver_slot = sender_slot.clone();
+        let received_count = Arc::new(AtomicUsize::new(0));
+        let received_count_clone = Arc::clone(&received_count);
+
+        let sender = thread::spawn(move || {
+            for i in 0..1000 {
+                sender_slot.send(i);
+                thread::yield_now();
+            }
+        });
+
+        let receiver = thread::spawn(move || {
+            loop {
+                if let Some(val) = receiver_slot.take() {
+                    received_count_clone.fetch_add(1, Ordering::Relaxed);
+                    if val == 999 {
+                        break;
+                    }
+                }
+                thread::yield_now();
+            }
+        });
+
+        sender.join().unwrap();
+        receiver.join().unwrap();
+
+        let count = received_count.load(Ordering::Relaxed);
+        assert!(count >= 1, "should have received at least one value");
+        assert!(count <= 1000, "should not receive more than sent");
     }
 }
