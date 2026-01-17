@@ -1,5 +1,6 @@
 use arc_swap::ArcSwapOption;
 use std::sync::Arc;
+use tokio::sync::Notify;
 
 /// A lockless single-value slot for cross-thread communication.
 ///
@@ -10,12 +11,14 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct Slot<T> {
     value: Arc<ArcSwapOption<T>>,
+    notify: Arc<Notify>,
 }
 
 impl<T> Default for Slot<T> {
     fn default() -> Self {
         Self {
             value: Arc::new(ArcSwapOption::empty()),
+            notify: Arc::new(Notify::new()),
         }
     }
 }
@@ -24,6 +27,7 @@ impl<T> Clone for Slot<T> {
     fn clone(&self) -> Self {
         Self {
             value: Arc::clone(&self.value),
+            notify: Arc::clone(&self.notify),
         }
     }
 }
@@ -32,11 +36,27 @@ impl<T> Slot<T> {
     /// Stores a value, replacing any existing value.
     pub fn send(&self, val: T) {
         self.value.store(Some(Arc::new(val)));
+        self.notify.notify_waiters();
     }
 
     /// Takes the value if present, leaving the slot empty.
     pub fn take(&self) -> Option<T> {
         self.value.swap(None).map(|a| Arc::into_inner(a).unwrap())
+    }
+
+    /// Returns a clone of the value if present, without removing it.
+    pub fn peek(&self) -> Option<Arc<T>> {
+        self.value.load_full()
+    }
+
+    /// Returns a clone of the value, waiting asynchronously if none exists.
+    pub async fn peek_or_wait(&self) -> Arc<T> {
+        loop {
+            if let Some(val) = self.value.load_full() {
+                return val;
+            }
+            self.notify.notified().await;
+        }
     }
 
     /// Returns true if there is a value present.

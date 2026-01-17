@@ -89,10 +89,7 @@ impl Default for TimersFuncLib {
                         move || {
                             let fps_state_slot = fps_state_slot.clone();
                             Box::pin(async move {
-                                let state = fps_state_slot.take().unwrap_or(FpsEventState {
-                                    frequency: 30.0,
-                                    last_execution: Instant::now(),
-                                });
+                                let state = fps_state_slot.peek_or_wait().await;
 
                                 let desired_duration =
                                     Duration::from_secs_f64(1.0 / state.frequency);
