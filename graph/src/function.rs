@@ -256,7 +256,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "432b9bf1-f478-476c-a9c9-9a6e190124fc".into(),
             name: "mult".to_string(),
-            description: None,
+            description: Some("Multiplies two integer values (A * B)".to_string()),
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
             terminal: false,
@@ -298,7 +298,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into(),
             name: "get_a".to_string(),
-            description: None,
+            description: Some("Returns the value from test hook A".to_string()),
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
             terminal: false,
@@ -320,7 +320,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "a937baff-822d-48fd-9154-58751539b59b".into(),
             name: "get_b".to_string(),
-            description: None,
+            description: Some("Returns the value from test hook B (impure)".to_string()),
             category: "Debug".to_string(),
             behavior: FuncBehavior::Impure,
             terminal: false,
@@ -342,7 +342,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into(),
             name: "sum".to_string(),
-            description: None,
+            description: Some("Adds two integer values (A + B)".to_string()),
             category: "Debug".to_string(),
             behavior: FuncBehavior::Pure,
             terminal: false,
@@ -382,7 +382,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
         Func {
             id: "f22cd316-1cdf-4a80-b86c-1277acd1408a".into(),
             name: "print".to_string(),
-            description: None,
+            description: Some("Outputs an integer value via the test print hook".to_string()),
             category: "Debug".to_string(),
             behavior: FuncBehavior::Impure,
             terminal: true,
