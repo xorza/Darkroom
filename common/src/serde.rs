@@ -39,8 +39,8 @@ pub fn serialize_into<T: Serialize, W: Write>(
             serde_lua::to_writer(writer, &value).unwrap();
         }
         SerdeFormat::Bincode => {
-            bincode::serde::encode_into_std_write(value, writer, bincode::config::standard())
-                .unwrap();
+            let encoded = bitcode::serialize(&value).unwrap();
+            writer.write_all(&encoded).unwrap();
         }
         SerdeFormat::Toml => {
             let s = toml::to_string(&value).unwrap().normalize();
@@ -90,14 +90,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
         }
         SerdeFormat::Bincode => {
             reader.read_to_end(temp_buffer)?;
-
-            let (decoded, read) = bincode::serde::decode_from_slice(
-                temp_buffer.as_slice(),
-                bincode::config::standard(),
-            )?;
-            assert_eq!(read, temp_buffer.len());
-
-            Ok(decoded)
+            Ok(bitcode::deserialize(temp_buffer.as_slice())?)
         }
         SerdeFormat::Scn => {
             reader.read_to_end(temp_buffer)?;
