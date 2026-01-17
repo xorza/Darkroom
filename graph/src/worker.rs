@@ -143,6 +143,7 @@ async fn worker_loop<Callback>(
     let mut processing_callback: Option<ProcessingCallback> = None;
     let event_loop_pause_gate = PauseGate::default();
     let mut current_loop_id: u64 = 0;
+    let mut execution_graph_clear = true;
 
     loop {
         assert!(events.is_empty());
@@ -207,6 +208,7 @@ async fn worker_loop<Callback>(
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                     execution_graph.clear();
+                    execution_graph_clear = true;
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
@@ -234,6 +236,7 @@ async fn worker_loop<Callback>(
         if let Some((graph, func_lib)) = update_graph.take() {
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
+            execution_graph_clear = false;
         }
 
         events.extend(
@@ -243,38 +246,46 @@ async fn worker_loop<Callback>(
         );
 
         if execute_terminals || !events.is_empty() {
-            let result = execution_graph
-                .execute(
-                    execute_terminals,
-                    event_loop_handle.is_some(),
-                    events.drain(),
-                )
-                .await;
-            (execution_callback.lock().await)(result);
+            if execution_graph_clear {
+                tracing::error!("Execution graph is clear, cannot execute graph");
+            } else {
+                let result = execution_graph
+                    .execute(
+                        execute_terminals,
+                        event_loop_handle.is_some(),
+                        events.drain(),
+                    )
+                    .await;
+                (execution_callback.lock().await)(result);
+            }
         }
 
         if should_start_event_loop {
             assert!(event_loop_handle.is_none());
 
-            let result = execution_graph.execute(false, true, []).await;
-            let ok = result.is_ok();
-            (execution_callback.lock().await)(result);
+            if execution_graph_clear {
+                tracing::error!("Execution graph is clear, cannot start event loop");
+            } else {
+                let result = execution_graph.execute(false, true, []).await;
+                let ok = result.is_ok();
+                (execution_callback.lock().await)(result);
 
-            if ok {
-                let events_triggers = collect_active_event_triggers(&mut execution_graph);
+                if ok {
+                    let events_triggers = collect_active_event_triggers(&mut execution_graph);
 
-                if !events_triggers.is_empty() {
-                    event_loop_handle = Some(
-                        start_event_loop(
-                            worker_message_tx.clone(),
-                            events_triggers,
-                            event_loop_pause_gate.clone(),
-                            current_loop_id,
-                        )
-                        .await,
-                    );
+                    if !events_triggers.is_empty() {
+                        event_loop_handle = Some(
+                            start_event_loop(
+                                worker_message_tx.clone(),
+                                events_triggers,
+                                event_loop_pause_gate.clone(),
+                                current_loop_id,
+                            )
+                            .await,
+                        );
 
-                    tracing::info!("Event loop started");
+                        tracing::info!("Event loop started");
+                    }
                 }
             }
         }

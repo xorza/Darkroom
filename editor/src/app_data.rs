@@ -109,7 +109,7 @@ impl AppData {
     }
 
     pub fn empty_graph(&mut self) {
-        self.apply_graph(ViewGraph::default(), true);
+        self.apply_mew_graph(ViewGraph::default(), true);
         self.add_status("Created new graph");
     }
 
@@ -135,7 +135,7 @@ impl AppData {
             let format = SerdeFormat::from_file_name(path.to_string_lossy().as_ref())
                 .map_err(anyhow::Error::from)?;
             let payload = std::fs::read(path).map_err(anyhow::Error::from)?;
-            this.apply_graph(ViewGraph::deserialize(format, &payload)?, true);
+            this.apply_mew_graph(ViewGraph::deserialize(format, &payload)?, true);
 
             Ok(())
         }
@@ -160,7 +160,7 @@ impl AppData {
         add_node_from_func_id(&mut view_graph, &self.func_lib, FRAME_EVENT_FUNC_ID);
 
         view_graph.auto_place_nodes();
-        self.apply_graph(view_graph, true);
+        self.apply_mew_graph(view_graph, true);
 
         self.add_status("Loaded sample test graph");
     }
@@ -214,7 +214,7 @@ impl AppData {
         });
         self.view_graph.validate();
         if undid && affects_computation {
-            self.reinit_graph();
+            self.refresh_graph();
         }
     }
 
@@ -225,7 +225,7 @@ impl AppData {
         });
         self.view_graph.validate();
         if redid && affects_computation {
-            self.reinit_graph();
+            self.refresh_graph();
         }
     }
 
@@ -325,7 +325,7 @@ impl AppData {
         }
     }
 
-    fn apply_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
+    fn apply_mew_graph(&mut self, view_graph: ViewGraph, reset_undo: bool) {
         // todo!();
         // view_graph.update_from_func_lib(&self.func_lib);
 
@@ -335,17 +335,17 @@ impl AppData {
             self.undo_stack.reset_with(&self.view_graph);
         }
 
-        self.reinit_graph();
+        self.worker.send(WorkerMessage::Clear);
+        self.refresh_graph();
     }
 
-    fn reinit_graph(&mut self) {
+    fn refresh_graph(&mut self) {
         self.view_graph.validate_with(&self.func_lib);
 
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();
         self.reset_frame_event.call();
-        self.worker.send(WorkerMessage::Clear);
     }
 
     fn handle_actions(&mut self) -> bool {
@@ -361,7 +361,7 @@ impl AppData {
         }
 
         if graph_updated {
-            self.reinit_graph();
+            self.refresh_graph();
         }
 
         graph_updated
