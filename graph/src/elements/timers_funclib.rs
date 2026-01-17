@@ -118,7 +118,7 @@ impl Default for TimersFuncLib {
 
                     // Get delta from previous state if available
                     let delta = fps_state_slot
-                        .take()
+                        .peek()
                         .map(|state| state.last_execution.elapsed().as_secs_f64())
                         .unwrap_or(1.0 / frequency);
 

@@ -40,8 +40,9 @@ impl<T> Slot<T> {
     }
 
     /// Takes the value if present, leaving the slot empty.
+    /// Returns `None` if slot is empty or if other references exist (from `peek`/`peek_or_wait`).
     pub fn take(&self) -> Option<T> {
-        self.value.swap(None).map(|a| Arc::into_inner(a).unwrap())
+        self.value.swap(None).and_then(Arc::into_inner)
     }
 
     /// Returns a clone of the value if present, without removing it.
