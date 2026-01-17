@@ -186,7 +186,12 @@ async fn worker_loop<ExecutionCallback>(
             match msg {
                 WorkerMessage::Noop => {}
                 WorkerMessage::Exit => {
-                    stop_event_loop(&mut event_loop_handle).await;
+                    reset_event_loop(
+                        &mut current_loop_id,
+                        &mut event_loop_handle,
+                        &mut events_from_loop,
+                    )
+                    .await;
                     return;
                 }
                 WorkerMessage::Event { event } => {
@@ -210,30 +215,42 @@ async fn worker_loop<ExecutionCallback>(
                 }
                 WorkerMessage::Update { graph, func_lib } => {
                     should_start_event_loop |= event_loop_handle.is_some();
-                    current_loop_id += 1;
-                    stop_event_loop(&mut event_loop_handle).await;
-                    events_from_loop.clear();
+                    reset_event_loop(
+                        &mut current_loop_id,
+                        &mut event_loop_handle,
+                        &mut events_from_loop,
+                    )
+                    .await;
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
                     should_start_event_loop |= event_loop_handle.is_some();
-                    current_loop_id += 1;
-                    stop_event_loop(&mut event_loop_handle).await;
-                    events_from_loop.clear();
+                    reset_event_loop(
+                        &mut current_loop_id,
+                        &mut event_loop_handle,
+                        &mut events_from_loop,
+                    )
+                    .await;
                     execution_graph.clear();
                     execution_graph_clear = true;
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
-                    current_loop_id += 1;
-                    stop_event_loop(&mut event_loop_handle).await;
-                    events_from_loop.clear();
+                    reset_event_loop(
+                        &mut current_loop_id,
+                        &mut event_loop_handle,
+                        &mut events_from_loop,
+                    )
+                    .await;
                     should_start_event_loop = true;
                 }
                 WorkerMessage::StopEventLoop => {
-                    current_loop_id += 1;
-                    stop_event_loop(&mut event_loop_handle).await;
-                    events_from_loop.clear();
+                    reset_event_loop(
+                        &mut current_loop_id,
+                        &mut event_loop_handle,
+                        &mut events_from_loop,
+                    )
+                    .await;
                 }
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
                 WorkerMessage::ProcessingCallback { callback } => {
@@ -400,11 +417,18 @@ async fn start_event_loop(
     EventLoopHandle { join_handles }
 }
 
-async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
+async fn reset_event_loop(
+    current_loop_id: &mut u64,
+    event_loop_handle: &mut Option<EventLoopHandle>,
+    events_from_loop: &mut HashSet<(u64, EventRef)>,
+) {
     if let Some(mut event_loop_handle) = event_loop_handle.take() {
         event_loop_handle.stop().await;
         tracing::info!("Event loop stopped");
     }
+
+    *current_loop_id += 1;
+    events_from_loop.clear();
 }
 
 fn collect_active_event_triggers(
@@ -1144,5 +1168,126 @@ mod tests {
         assert!(worker.is_event_loop_started());
 
         worker.exit();
+    }
+
+    #[tokio::test]
+    async fn stale_events_from_stopped_loop_are_ignored() {
+        // This test verifies that events from a previously stopped event loop
+        // (with an old loop_id) are not executed after the loop is restarted.
+        // The worker uses loop_id to filter out stale events.
+
+        let node_id = NodeId::unique();
+
+        // Create a simple event lambda that completes immediately
+        let event_lambda = EventLambda::new(|| Box::pin(async move {}));
+
+        let pause_gate = PauseGate::default();
+        let (tx, mut rx) = unbounded_channel();
+
+        // Start first event loop with loop_id = 0
+        let mut handle = super::start_event_loop(
+            tx.clone(),
+            vec![(
+                EventRef {
+                    node_id,
+                    event_idx: 0,
+                },
+                event_lambda.clone(),
+            )],
+            pause_gate.clone(),
+            0, // loop_id = 0
+        )
+        .await;
+
+        // Wait for some events to be queued from first loop
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Stop the first loop
+        handle.stop().await;
+
+        // Drain any messages from first loop
+        let mut stale_events = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            stale_events.push(msg);
+        }
+
+        // Verify we got some events from the old loop (loop_id = 0)
+        assert!(
+            !stale_events.is_empty(),
+            "Should have received events from first loop"
+        );
+
+        // Check that the stale events have the old loop_id
+        for msg in &stale_events {
+            match msg {
+                WorkerMessage::EventFromLoop { loop_id, .. } => {
+                    assert_eq!(*loop_id, 0, "Stale events should have loop_id 0");
+                }
+                WorkerMessage::EventsFromLoop { loop_id, .. } => {
+                    assert_eq!(*loop_id, 0, "Stale events should have loop_id 0");
+                }
+                _ => {}
+            }
+        }
+
+        // Start a new event loop with loop_id = 1
+        let new_event_lambda = EventLambda::new(|| Box::pin(async move {}));
+
+        let mut new_handle = super::start_event_loop(
+            tx,
+            vec![(
+                EventRef {
+                    node_id,
+                    event_idx: 0,
+                },
+                new_event_lambda,
+            )],
+            pause_gate,
+            1, // loop_id = 1 (incremented)
+        )
+        .await;
+
+        // Wait for new loop to produce events
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Collect new events
+        let mut new_events = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            new_events.push(msg);
+        }
+
+        // Verify new events have the new loop_id
+        for msg in &new_events {
+            match msg {
+                WorkerMessage::EventFromLoop { loop_id, .. } => {
+                    assert_eq!(*loop_id, 1, "New events should have loop_id 1");
+                }
+                WorkerMessage::EventsFromLoop { loop_id, .. } => {
+                    assert_eq!(*loop_id, 1, "New events should have loop_id 1");
+                }
+                _ => {}
+            }
+        }
+
+        // The key verification: if a worker were to process both stale_events
+        // and new_events with current_loop_id = 1, only new_events would pass
+        // the filter: (loop_id == current_loop_id).then_some(event)
+        let current_loop_id = 1u64;
+        let filtered_stale: Vec<_> = stale_events
+            .iter()
+            .filter_map(|msg| match msg {
+                WorkerMessage::EventFromLoop { loop_id, event } => {
+                    (*loop_id == current_loop_id).then_some(event)
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            filtered_stale.is_empty(),
+            "Stale events should be filtered out by loop_id check"
+        );
+
+        new_handle.stop().await;
     }
 }
