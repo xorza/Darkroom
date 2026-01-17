@@ -1,9 +1,7 @@
 use std::fmt::Debug;
 
-#[cfg(debug_assertions)]
 use common::SerdeFormat;
 
-#[cfg(debug_assertions)]
 use crate::common::undo_stack::FullSerdeUndoStack;
 use crate::common::undo_stack::UndoStack;
 use crate::model::ViewGraph;
