@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 use crate::event::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
@@ -12,8 +12,10 @@ use tokio::task::JoinHandle;
 
 const MAX_EVENTS_PER_LOOP: usize = 10;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum WorkerMessage {
+    #[default]
+    Noop,
     Exit,
     Event {
         event: EventRef,
@@ -130,8 +132,7 @@ async fn worker_loop<Callback>(
 {
     let mut execution_graph = ExecutionGraph::default();
 
-    let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(MAX_EVENTS_PER_LOOP);
-    let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
+    let mut msgs: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
     let mut events: HashSet<EventRef> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
@@ -139,13 +140,12 @@ async fn worker_loop<Callback>(
     let event_loop_pause_gate = PauseGate::default();
 
     loop {
-        assert!(msgs.is_empty());
-        assert!(msgs_vec.is_empty());
         assert!(events.is_empty());
         assert!(processing_callback.is_none());
 
+        msgs.clear();
         if worker_message_rx
-            .recv_many(&mut msgs_vec, MAX_EVENTS_PER_LOOP)
+            .recv_many(&mut msgs, MAX_EVENTS_PER_LOOP)
             .await
             == 0
         {
@@ -154,14 +154,17 @@ async fn worker_loop<Callback>(
 
         let event_loop_pause_guard = event_loop_pause_gate.close();
 
-        msgs.extend(msgs_vec.drain(..));
-
         let mut execute_terminals: bool = false;
         let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
 
-        while let Some(msg) = msgs.pop_front() {
+        let mut msg_idx = 0;
+        while msg_idx < msgs.len() {
+            let msg = std::mem::take(&mut msgs[msg_idx]);
+            msg_idx += 1;
+
             match msg {
+                WorkerMessage::Noop => {}
                 WorkerMessage::Exit => {
                     stop_event_loop(&mut event_loop_handle).await;
                     return;
