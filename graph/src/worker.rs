@@ -2,8 +2,8 @@ use crate::event::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
-use common::pause_gate::PauseGate;
 use common::ReadyState;
+use common::pause_gate::PauseGate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::mem::take;
@@ -103,11 +103,12 @@ impl Worker {
     }
 
     pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(&self, msgs: T) {
-        self.tx
-            .send(WorkerMessage::Multi {
-                msgs: msgs.into_iter().collect(),
-            })
-            .expect("Failed to send message to worker, it probably exited");
+        let msgs: Vec<WorkerMessage> = msgs.into_iter().collect();
+        if !msgs.is_empty() {
+            self.tx
+                .send(WorkerMessage::Multi { msgs })
+                .expect("Failed to send message to worker, it probably exited");
+        }
     }
 
     pub fn exit(&mut self) {

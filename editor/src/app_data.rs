@@ -287,7 +287,7 @@ impl AppData {
         }
 
         if !msgs.is_empty() {
-            self.worker.send(WorkerMessage::Multi { msgs });
+            self.worker.send_many(msgs);
         }
 
         self.interaction.clear();
