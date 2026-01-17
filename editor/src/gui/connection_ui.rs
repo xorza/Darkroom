@@ -57,7 +57,7 @@ pub(crate) struct ConnectionDrag {
     pub(crate) current_pos: Pos2,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum ConnectionDragUpdate {
     InProgress,
     Finished,
@@ -102,7 +102,7 @@ impl ConnectionCurve {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 struct ConnectionEndpoints {
     inited: bool,
     output_pos: Pos2,

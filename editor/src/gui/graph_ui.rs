@@ -64,9 +64,12 @@ pub(crate) enum Error {
 #[derive(Debug, Default)]
 pub struct GraphUi {
     state: InteractionState,
-    graph_layout: GraphLayout,
+
     connection_breaker: ConnectionBreaker,
     connections: ConnectionUi,
+
+    graph_layout: GraphLayout,
+
     node_ui: NodeUi,
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
