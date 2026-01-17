@@ -235,8 +235,8 @@ impl AppData {
         }
 
         self.graph_dirty |= self.handle_actions();
-        let mut update_if_dirty = false;
 
+        let mut update_if_dirty = false;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
         match self.interaction.run_cmd {
