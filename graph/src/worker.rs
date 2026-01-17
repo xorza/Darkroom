@@ -3,7 +3,7 @@ use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Res
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::pause_gate::PauseGate;
-use common::{ReadyState, Shared};
+use common::ReadyState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::mem::take;
@@ -82,7 +82,6 @@ impl Worker {
     where
         ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
     {
-        let callback: Shared<ExecutionCallback> = Shared::new(callback);
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
         let thread_handle: JoinHandle<()> = tokio::spawn({
             let tx = tx.clone();
@@ -126,12 +125,12 @@ impl Drop for Worker {
     }
 }
 
-async fn worker_loop<Callback>(
+async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
     worker_message_tx: UnboundedSender<WorkerMessage>,
-    execution_callback: Shared<Callback>,
+    execution_callback: ExecutionCallback,
 ) where
-    Callback: Fn(Result<ExecutionStats>) + Send + 'static,
+    ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
     let mut execution_graph = ExecutionGraph::default();
 
@@ -256,7 +255,7 @@ async fn worker_loop<Callback>(
                         events.drain(),
                     )
                     .await;
-                (execution_callback.lock().await)(result);
+                (execution_callback)(result);
             }
         }
 
@@ -268,7 +267,7 @@ async fn worker_loop<Callback>(
             } else {
                 let result = execution_graph.execute(false, true, []).await;
                 let ok = result.is_ok();
-                (execution_callback.lock().await)(result);
+                (execution_callback)(result);
 
                 if ok {
                     let events_triggers = collect_active_event_triggers(&mut execution_graph);
