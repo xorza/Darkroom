@@ -46,10 +46,6 @@ impl NodeDetailsUi {
                 Frame::popup(&gui.style.popup)
                     .inner_margin(gui.style.padding)
                     .show(gui, |gui| {
-                        // let padding = gui.style.padding;
-                        // gui.ui().set_width(panel_rect.width() - padding * 2.0);
-                        // gui.ui().set_height(panel_rect.height() - padding * 2.0);
-
                         self.show_content(
                             gui,
                             ctx,
