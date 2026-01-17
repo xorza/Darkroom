@@ -5,6 +5,7 @@ use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
+use common::lambda::Lambda;
 use common::slot::Slot;
 use common::{SerdeFormat, Shared};
 use graph::elements::basic_funclib::BasicFuncLib;
@@ -50,6 +51,7 @@ pub struct AppData {
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 
     pub run_event: Arc<Notify>,
+    pub reset_frame_event: Lambda,
 
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
@@ -64,13 +66,15 @@ impl AppData {
         let argument_values_rx = Slot::default();
         let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
 
-        let run_event = Arc::new(Notify::new());
+        let timers_func_lib = TimersFuncLib::default();
+        let reset_frame_no = timers_func_lib.reset_frame_event.clone();
+        let run_event = timers_func_lib.run_event.clone();
 
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
-        func_lib.merge(TimersFuncLib::default());
         func_lib.merge(EditorFuncLib::default());
         func_lib.merge(BasicFuncLib::default());
+        func_lib.merge(timers_func_lib);
 
         let mut result = Self {
             func_lib,
@@ -89,10 +93,12 @@ impl AppData {
             status: String::new(),
 
             ui_context,
-            run_event,
             execution_stats_rx,
             argument_values_rx,
             print_out_rx,
+
+            run_event,
+            reset_frame_event: reset_frame_no,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -236,6 +242,7 @@ impl AppData {
         match self.interaction.run_cmd {
             RunCommand::StartAutorun => {
                 if !self.autorun {
+                    self.reset_frame_event.call();
                     msgs.push(WorkerMessage::StartEventLoop);
                 }
                 self.autorun = true;
@@ -336,6 +343,7 @@ impl AppData {
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();
+        self.reset_frame_event.call();
         self.worker.send(WorkerMessage::Clear);
     }
 

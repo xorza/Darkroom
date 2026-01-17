@@ -7,6 +7,7 @@ pub mod debug;
 pub mod file_format;
 pub mod float_ext;
 pub mod key_index_vec;
+pub mod lambda;
 pub mod normalize_string;
 pub mod output_stream;
 pub mod pause_gate;

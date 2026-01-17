@@ -7,6 +7,7 @@ use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOut
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::BoolExt;
+use common::lambda::Lambda;
 use common::slot::Slot;
 use tokio::sync::Notify;
 
@@ -17,10 +18,10 @@ pub struct TimersFuncLib {
     func_lib: FuncLib,
 
     pub run_event: Arc<Notify>,
-    fps_state_slot: Slot<FpsEventState>,
+    pub reset_frame_event: Lambda,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct FpsEventState {
     frequency: f64,
     last_execution: Instant,
@@ -36,11 +37,6 @@ impl TimersFuncLib {
 
     pub fn into_func_lib(self) -> FuncLib {
         self.func_lib
-    }
-
-    /// Resets the fps event state (frame_no and last_execution time).
-    pub fn reset_fps_state(&self) {
-        self.fps_state_slot.take();
     }
 }
 
@@ -174,10 +170,27 @@ impl Default for TimersFuncLib {
             lambda: FuncLambda::None,
         });
 
+        let reset_fps_state = Lambda::new({
+            let fps_state_slot = fps_state_slot.clone();
+            move || {
+                fps_state_slot.send(FpsEventState::default());
+            }
+        });
+
         TimersFuncLib {
             func_lib,
             run_event,
-            fps_state_slot,
+            reset_frame_event: reset_fps_state,
+        }
+    }
+}
+
+impl Default for FpsEventState {
+    fn default() -> Self {
+        Self {
+            frequency: 1.0,
+            last_execution: Instant::now(),
+            frame_no: 0,
         }
     }
 }
