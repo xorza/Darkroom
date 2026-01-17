@@ -252,7 +252,10 @@ impl AppData {
                 self.autorun = false;
             }
             RunCommand::None => {}
-            RunCommand::RunOnce => run_once = true,
+            RunCommand::RunOnce => {
+                self.reset_frame_event.call();
+                run_once = true;
+            }
         }
 
         let update_graph = self.graph_dirty && (self.autorun || run_once);
