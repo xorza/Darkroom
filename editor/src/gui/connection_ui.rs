@@ -39,6 +39,17 @@ pub(crate) enum PortKind {
     Event,
 }
 
+/// Returns (input_port, output_port) from two ports of opposite kinds.
+fn order_ports(port_a: PortRef, port_b: PortRef) -> (PortRef, PortRef) {
+    match (port_a.kind, port_b.kind) {
+        (PortKind::Output, PortKind::Input) => (port_b, port_a),
+        (PortKind::Input, PortKind::Output) => (port_a, port_b),
+        (PortKind::Event, PortKind::Trigger) => (port_b, port_a),
+        (PortKind::Trigger, PortKind::Event) => (port_a, port_b),
+        _ => unreachable!("ports must be of opposite types"),
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ConnectionDrag {
     pub(crate) start_port: PortInfo,
@@ -375,10 +386,7 @@ impl ConnectionUi {
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
     ) -> ConnectionDragUpdate {
-        tracing::info!("update_drag: {:?}", port_interact_cmd);
-
         if let PortInteractCommand::DragStart(port_info) = port_interact_cmd {
-            tracing::info!("PortInteractCommand::DragStart");
             self.temp_connection = Some(ConnectionDrag::new(port_info));
             return ConnectionDragUpdate::InProgress;
         }
@@ -406,25 +414,9 @@ impl ConnectionUi {
                 ConnectionDragUpdate::InProgress
             }
             PortInteractCommand::DragStop => {
-                
-
                 if let Some(port_info) = drag.end_port {
                     let (input_port, output_port) =
-                        match (drag.start_port.port.kind, port_info.port.kind) {
-                            (PortKind::Output, PortKind::Input) => {
-                                (port_info.port, drag.start_port.port)
-                            }
-                            (PortKind::Input, PortKind::Output) => {
-                                (drag.start_port.port, port_info.port)
-                            }
-                            (PortKind::Event, PortKind::Trigger) => {
-                                (port_info.port, drag.start_port.port)
-                            }
-                            (PortKind::Trigger, PortKind::Event) => {
-                                (drag.start_port.port, port_info.port)
-                            }
-                            _ => unreachable!("ports must be of opposite types"),
-                        };
+                        order_ports(drag.start_port.port, port_info.port);
 
                     ConnectionDragUpdate::FinishedWith {
                         input_port,
@@ -443,29 +435,13 @@ impl ConnectionUi {
                 }
             }
             PortInteractCommand::Click(port_info) => {
-                tracing::info!("PortInteractCommand::Click");
-                //
                 drag.end_port = None;
                 if drag.start_port.port.kind.opposite() == port_info.port.kind {
                     drag.end_port = Some(port_info);
                     drag.current_pos = port_info.center;
 
                     let (input_port, output_port) =
-                        match (drag.start_port.port.kind, port_info.port.kind) {
-                            (PortKind::Output, PortKind::Input) => {
-                                (port_info.port, drag.start_port.port)
-                            }
-                            (PortKind::Input, PortKind::Output) => {
-                                (drag.start_port.port, port_info.port)
-                            }
-                            (PortKind::Event, PortKind::Trigger) => {
-                                (port_info.port, drag.start_port.port)
-                            }
-                            (PortKind::Trigger, PortKind::Event) => {
-                                (drag.start_port.port, port_info.port)
-                            }
-                            _ => unreachable!("ports must be of opposite types"),
-                        };
+                        order_ports(drag.start_port.port, port_info.port);
 
                     ConnectionDragUpdate::FinishedWith {
                         input_port,

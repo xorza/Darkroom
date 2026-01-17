@@ -410,16 +410,12 @@ fn render_ports(
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {
-            tracing::info!("Drag started");
             PortInteractCommand::DragStart(port_info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
-            tracing::info!("Drag stopped");
             PortInteractCommand::DragStop
         } else if !response.dragged() && response.clicked_by(PointerButton::Primary) {
-            tracing::info!("Drag clicked");
             PortInteractCommand::Click(port_info)
         } else if is_hovered {
-            // tracing::info!("Drag hovered");
             PortInteractCommand::Hover(port_info)
         } else {
             PortInteractCommand::None

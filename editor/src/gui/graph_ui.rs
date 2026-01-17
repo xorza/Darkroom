@@ -219,23 +219,24 @@ impl GraphUi {
                 NewNodeSelection::ConstBind => {
                     // Create a const binding for the pending input
                     if let Some(connection_drag) = self.connections.temp_connection.take()
-                        && connection_drag.start_port.port.kind == PortKind::Input {
-                            let input_port = connection_drag.start_port.port;
+                        && connection_drag.start_port.port.kind == PortKind::Input
+                    {
+                        let input_port = connection_drag.start_port.port;
 
-                            let input_node =
-                                ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-                            let input = &mut input_node.inputs[input_port.port_idx];
-                            let before = input.binding.clone();
-                            input.binding = Binding::Const(0.into());
-                            let after = input.binding.clone();
+                        let input_node =
+                            ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+                        let input = &mut input_node.inputs[input_port.port_idx];
+                        let before = input.binding.clone();
+                        input.binding = Binding::Const(0.into());
+                        let after = input.binding.clone();
 
-                            interaction.add_action(GraphUiAction::InputChanged {
-                                node_id: input_port.node_id,
-                                input_idx: input_port.port_idx,
-                                before,
-                                after,
-                            });
-                        }
+                        interaction.add_action(GraphUiAction::InputChanged {
+                            node_id: input_port.node_id,
+                            input_idx: input_port.port_idx,
+                            before,
+                            after,
+                        });
+                    }
                 }
             }
         }
