@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Align, Galley, Key, Layout, Order, Pos2, vec2};
+use egui::{Align, Galley, Id, Key, Layout, Order, Pos2, Sense, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -69,6 +69,12 @@ impl NewNodeUi {
         if !self.open {
             return None;
         }
+
+        let _response = gui.ui.interact(
+            gui.rect,
+            Id::new("temp background for new node ui"),
+            Sense::all(),
+        );
 
         let mut selection: Option<NewNodeSelection<'a>> = None;
         let from_connection = self.from_connection;

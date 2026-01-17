@@ -368,6 +368,12 @@ impl GraphUi {
                 }
             }
             InteractionState::DraggingNewConnection => {
+                let _response = gui.ui.interact(
+                    gui.rect,
+                    Id::new("temp background for new connection"),
+                    Sense::all(),
+                );
+
                 match self.connections.update_drag(pointer_pos, port_interact_cmd) {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
