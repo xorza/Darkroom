@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use crate::event::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
@@ -7,6 +5,8 @@ use crate::graph::{Graph, NodeId};
 use common::pause_gate::PauseGate;
 use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::mem::take;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::JoinHandle;
 
@@ -44,11 +44,11 @@ pub enum WorkerMessage {
 }
 
 pub struct ProcessingCallback {
-    inner: Box<dyn Fn() + Send + Sync + 'static>,
+    inner: Box<dyn FnOnce() + Send + Sync + 'static>,
 }
 
 pub struct ArgumentValuesCallback {
-    inner: Box<dyn FnOnce(Option<ArgumentValues>) + Send + 'static>,
+    inner: Box<dyn FnOnce(Option<ArgumentValues>) + Send + Sync + 'static>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -117,12 +117,6 @@ impl Drop for Worker {
     }
 }
 
-#[derive(Debug, Clone)]
-enum EventLoopCommand {
-    None,
-    Start,
-}
-
 async fn worker_loop<Callback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
     worker_message_tx: UnboundedSender<WorkerMessage>,
@@ -155,12 +149,12 @@ async fn worker_loop<Callback>(
         let event_loop_pause_guard = event_loop_pause_gate.close();
 
         let mut execute_terminals: bool = false;
-        let mut event_loop_cmd = EventLoopCommand::None;
         let mut update_graph: Option<(Graph, FuncLib)> = None;
+        let mut should_start_event_loop = false;
 
         let mut msg_idx = 0;
         while msg_idx < msgs.len() {
-            let msg = std::mem::take(&mut msgs[msg_idx]);
+            let msg = take(&mut msgs[msg_idx]);
             msg_idx += 1;
 
             match msg {
@@ -174,19 +168,26 @@ async fn worker_loop<Callback>(
                 }
                 WorkerMessage::Events { events: new_events } => events.extend(new_events),
                 WorkerMessage::Update { graph, func_lib } => {
+                    should_start_event_loop = event_loop_handle.is_some();
                     stop_event_loop(&mut event_loop_handle).await;
                     events.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
+                    should_start_event_loop = event_loop_handle.is_some();
                     stop_event_loop(&mut event_loop_handle).await;
                     events.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
-                WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
+                WorkerMessage::StartEventLoop => {
+                    stop_event_loop(&mut event_loop_handle).await;
+                    events.clear();
+                    should_start_event_loop = true;
+                }
                 WorkerMessage::StopEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
+                    events.clear();
                 }
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
                 WorkerMessage::ProcessingCallback { callback } => {
@@ -200,10 +201,6 @@ async fn worker_loop<Callback>(
         }
 
         if let Some((graph, func_lib)) = update_graph.take() {
-            if event_loop_handle.is_some() && matches!(event_loop_cmd, EventLoopCommand::None) {
-                event_loop_cmd = EventLoopCommand::Start;
-            }
-
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
         }
@@ -219,30 +216,27 @@ async fn worker_loop<Callback>(
             (execution_callback.lock().await)(result);
         }
 
-        match event_loop_cmd {
-            EventLoopCommand::None => {}
-            EventLoopCommand::Start => {
-                stop_event_loop(&mut event_loop_handle).await;
+        if should_start_event_loop {
+            assert!(event_loop_handle.is_none());
 
-                let result = execution_graph.execute(false, true, []).await;
-                let ok = result.is_ok();
-                (execution_callback.lock().await)(result);
+            let result = execution_graph.execute(false, true, []).await;
+            let ok = result.is_ok();
+            (execution_callback.lock().await)(result);
 
-                if ok {
-                    let events_triggers = collect_active_event_triggers(&mut execution_graph);
+            if ok {
+                let events_triggers = collect_active_event_triggers(&mut execution_graph);
 
-                    if !events_triggers.is_empty() {
-                        event_loop_handle = Some(
-                            start_event_loop(
-                                worker_message_tx.clone(),
-                                events_triggers,
-                                event_loop_pause_gate.clone(),
-                            )
-                            .await,
-                        );
+                if !events_triggers.is_empty() {
+                    event_loop_handle = Some(
+                        start_event_loop(
+                            worker_message_tx.clone(),
+                            events_triggers,
+                            event_loop_pause_gate.clone(),
+                        )
+                        .await,
+                    );
 
-                        tracing::info!("Event loop started");
-                    }
+                    tracing::info!("Event loop started");
                 }
             }
         }
@@ -284,12 +278,13 @@ async fn start_event_loop(
                 if event_rx.recv_many(&mut events, MAX_EVENTS_PER_LOOP).await == 0 {
                     return;
                 }
+
+                seen.clear();
+                events.retain(|event| seen.insert(*event));
+
                 let result = if events.len() == 1 {
                     worker_message_tx.send(WorkerMessage::Event { event: events[0] })
                 } else {
-                    seen.clear();
-                    events.retain(|event| seen.insert(*event));
-
                     worker_message_tx.send(WorkerMessage::Events {
                         events: std::mem::take(&mut events),
                     })
@@ -318,7 +313,6 @@ async fn start_event_loop(
 
                 loop {
                     event_lambda.invoke().await;
-
                     let result = event_tx.send(event_ref).await;
                     if result.is_err() {
                         return;
@@ -371,19 +365,19 @@ fn collect_active_event_triggers(
 }
 
 impl ProcessingCallback {
-    pub fn new(callback: impl Fn() + Send + Sync + 'static) -> Self {
+    pub fn new(callback: impl FnOnce() + Send + Sync + 'static) -> Self {
         Self {
             inner: Box::new(callback),
         }
     }
 
-    fn call(&self) {
+    fn call(self) {
         (self.inner)();
     }
 }
 
 impl ArgumentValuesCallback {
-    pub fn new(callback: impl FnOnce(Option<ArgumentValues>) + Send + 'static) -> Self {
+    pub fn new(callback: impl FnOnce(Option<ArgumentValues>) + Send + Sync + 'static) -> Self {
         Self {
             inner: Box::new(callback),
         }
