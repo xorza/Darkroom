@@ -236,7 +236,7 @@ impl AppData {
 
         self.graph_dirty |= self.handle_actions();
 
-        let mut update_if_dirty = false;
+        let mut update_if_dirty = self.autorun;
         let mut msgs: Vec<WorkerMessage> = Vec::default();
 
         match self.interaction.run_cmd {
@@ -355,9 +355,7 @@ impl AppData {
             self.undo_stack.clear_redo();
             self.undo_stack.push_current(&self.view_graph, actions);
 
-            if actions.iter().any(|action| action.affects_computation()) {
-                graph_updated = true;
-            }
+            graph_updated |= actions.iter().any(|action| action.affects_computation());
         }
 
         if graph_updated {
