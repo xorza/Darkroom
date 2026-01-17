@@ -35,16 +35,16 @@ pub struct AppData {
     pub execution_stats: Option<ExecutionStats>,
     pub argument_values_cache: ArgumentValuesCache,
 
-    pub status: String,
+    status: String,
 
     pub config: Config,
 
-    pub worker: Worker,
+    worker: Worker,
 
     pub ui_context: UiContext,
 
     pub autorun: bool,
-    pub graph_dirty: bool,
+    graph_dirty: bool,
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 
@@ -334,6 +334,7 @@ impl AppData {
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();
+        self.worker.send(WorkerMessage::Clear);
     }
 
     fn handle_actions(&mut self) -> bool {
