@@ -55,7 +55,7 @@ impl Default for TimersFuncLib {
             terminal: false,
             inputs: vec![FuncInput {
                 name: "frequency".to_string(),
-                required: false,
+                required: true,
                 data_type: DataType::Float,
                 default_value: Some((30.0).into()),
                 value_options: vec![],

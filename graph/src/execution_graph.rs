@@ -729,6 +729,9 @@ impl ExecutionGraph {
 
         for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
+            if e_node.lambda.is_none() {
+                continue;
+            }
 
             inputs.clear();
             for input in e_node.inputs.iter() {

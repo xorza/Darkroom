@@ -67,6 +67,10 @@ impl FuncLambda {
         Self::Lambda(Arc::new(lambda))
     }
 
+    pub fn is_none(&self) -> bool {
+        return matches!(self, Self::None);
+    }
+
     pub async fn invoke(
         &self,
         ctx_manager: &mut ContextManager,

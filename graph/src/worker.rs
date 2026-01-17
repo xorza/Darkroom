@@ -198,7 +198,11 @@ async fn worker_loop<Callback>(
 
         if execute_terminals || !events.is_empty() {
             let result = execution_graph
-                .execute(execute_terminals, false, events.drain())
+                .execute(
+                    execute_terminals,
+                    event_loop_handle.is_some(),
+                    events.drain(),
+                )
                 .await;
             (execution_callback.lock().await)(result);
         }
