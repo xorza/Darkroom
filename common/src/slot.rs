@@ -52,10 +52,14 @@ impl<T> Slot<T> {
     /// Returns a clone of the value, waiting asynchronously if none exists.
     pub async fn peek_or_wait(&self) -> Arc<T> {
         loop {
+            // Register for notification BEFORE checking value to avoid race condition
+            let notified = self.notify.notified();
+
             if let Some(val) = self.value.load_full() {
                 return val;
             }
-            self.notify.notified().await;
+
+            notified.await;
         }
     }
 
