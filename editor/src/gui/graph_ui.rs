@@ -255,7 +255,9 @@ impl GraphUi {
                     }
                 }
             }
-        } else if was_open && !self.new_node_ui.is_open() {
+        }
+
+        if was_open && !self.new_node_ui.is_open() {
             self.reset_to(InteractionState::Idle);
         }
     }
@@ -607,6 +609,7 @@ impl GraphUi {
     }
 
     fn reset_to(&mut self, new_state: InteractionState) {
+        tracing::info!("Resetting graph UI to state {:?}", new_state);
         self.connections.stop_drag();
         self.connection_breaker.reset();
         self.state = new_state;
