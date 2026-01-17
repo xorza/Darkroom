@@ -600,9 +600,6 @@ impl GraphUi {
     }
 
     fn reset_to(&mut self, new_state: InteractionState) {
-        if self.state == new_state {
-            return;
-        }
         self.connections.stop_drag();
         self.connection_breaker.reset();
         self.state = new_state;
