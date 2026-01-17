@@ -352,7 +352,7 @@ async fn start_event_loop(
                     })
                 } else {
                     worker_message_tx.send(WorkerMessage::EventsFromLoop {
-                        events: std::mem::take(&mut events),
+                        events: take(&mut events),
                         loop_id,
                     })
                 };
@@ -767,5 +767,382 @@ mod tests {
         );
 
         handle.stop().await;
+    }
+
+    #[tokio::test]
+    async fn clear_resets_execution_graph() {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        // Setup and execute once
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+        ]);
+
+        let _ = compute_finish_rx.recv().await;
+        assert_eq!(output_stream.take().await, ["1"]);
+
+        // Clear the graph
+        worker.send(WorkerMessage::Clear);
+
+        // Try to execute - should not produce output since graph is cleared
+        worker.send(WorkerMessage::Event {
+            event: EventRef {
+                node_id: frame_event_node_id,
+                event_idx: 0,
+            },
+        });
+
+        // Give it time to process - no callback expected since graph is clear
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(output_stream.take().await.is_empty());
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn multi_message_processes_nested_messages() {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        // Send nested Multi messages
+        worker.send(WorkerMessage::Multi {
+            msgs: vec![
+                WorkerMessage::Update {
+                    graph: graph.clone(),
+                    func_lib: func_lib.clone(),
+                },
+                WorkerMessage::Multi {
+                    msgs: vec![WorkerMessage::Event {
+                        event: EventRef {
+                            node_id: frame_event_node_id,
+                            event_idx: 0,
+                        },
+                    }],
+                },
+            ],
+        });
+
+        let executed = compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
+
+        assert_eq!(executed.executed_nodes.len(), 3);
+        assert_eq!(output_stream.take().await, ["1"]);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn events_are_deduplicated() {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send(WorkerMessage::Update {
+            graph: graph.clone(),
+            func_lib: func_lib.clone(),
+        });
+
+        // Send the same event multiple times in one batch
+        let event = EventRef {
+            node_id: frame_event_node_id,
+            event_idx: 0,
+        };
+        worker.send(WorkerMessage::Events {
+            events: vec![event, event, event],
+        });
+
+        let _ = compute_finish_rx.recv().await;
+
+        // Should only print once since duplicate events are deduplicated
+        assert_eq!(output_stream.take().await, ["1"]);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn execute_terminals_triggers_terminal_nodes() {
+        use crate::data::StaticValue;
+
+        let output_stream = OutputStream::new();
+
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+        let func_lib = basic_invoker.into_func_lib();
+
+        // Create a simple graph with a terminal print node
+        let mut graph = Graph::default();
+        let print_func = func_lib.by_name("print").unwrap();
+
+        let mut print_node: Node = print_func.into();
+        print_node.id = NodeId::unique();
+        // print function is already terminal by definition
+        print_node.inputs[0].binding = StaticValue::String("hello".to_string()).into();
+        graph.add(print_node);
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::ExecuteTerminals,
+        ]);
+
+        let executed = compute_finish_rx
+            .recv()
+            .await
+            .expect("Missing compute completion")
+            .expect("Unsuccessful compute");
+
+        assert_eq!(executed.executed_nodes.len(), 1);
+        assert_eq!(output_stream.take().await, ["hello"]);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn start_stop_event_loop() {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::StartEventLoop,
+        ]);
+
+        // Wait for event loop to start and produce some output
+        let _ = compute_finish_rx.recv().await; // Initial execution
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        assert!(worker.is_event_loop_started());
+
+        // Stop the event loop
+        worker.send(WorkerMessage::StopEventLoop);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(!worker.is_event_loop_started());
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn request_argument_values_invokes_callback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+        ]);
+
+        // Wait for execution
+        let _ = compute_finish_rx.recv().await;
+
+        let callback_invoked = Arc::new(AtomicBool::new(false));
+        let callback_invoked_clone = Arc::clone(&callback_invoked);
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+        worker.send(WorkerMessage::RequestArgumentValues {
+            node_id: frame_event_node_id,
+            callback: super::ArgumentValuesCallback::new(move |values| {
+                callback_invoked_clone.store(true, Ordering::SeqCst);
+                tx.try_send(values).ok();
+            }),
+        });
+
+        let values = timeout(Duration::from_millis(200), rx.recv())
+            .await
+            .expect("Callback timeout")
+            .expect("Channel closed");
+
+        assert!(callback_invoked.load(Ordering::SeqCst));
+        assert!(values.is_some());
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn processing_callback_is_invoked_after_execution() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::default();
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+        let frame_event_node_id = graph.by_name("frame event").unwrap().id;
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(8);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        let callback_count = Arc::new(AtomicUsize::new(0));
+        let callback_count_clone = Arc::clone(&callback_count);
+
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+            WorkerMessage::ProcessingCallback {
+                callback: ProcessingCallback::new(move || {
+                    callback_count_clone.fetch_add(1, Ordering::SeqCst);
+                }),
+            },
+        ]);
+
+        // Wait for execution
+        let _ = compute_finish_rx.recv().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(callback_count.load(Ordering::SeqCst), 1);
+
+        worker.exit();
+    }
+
+    #[tokio::test]
+    async fn update_restarts_event_loop_if_running() {
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        let graph = log_frame_no_graph(&func_lib);
+
+        let (compute_finish_tx, mut compute_finish_rx) = tokio::sync::mpsc::channel(32);
+        let mut worker = Worker::new(move |result| {
+            compute_finish_tx.try_send(result).ok();
+        });
+
+        // Start with event loop
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
+            },
+            WorkerMessage::StartEventLoop,
+        ]);
+
+        let _ = compute_finish_rx.recv().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(worker.is_event_loop_started());
+
+        // Update graph - should restart event loop
+        worker.send(WorkerMessage::Update {
+            graph: graph.clone(),
+            func_lib: func_lib.clone(),
+        });
+
+        // Drain the channel
+        while compute_finish_rx.try_recv().is_ok() {}
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Event loop should still be running after update
+        assert!(worker.is_event_loop_started());
+
+        worker.exit();
     }
 }
