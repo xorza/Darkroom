@@ -35,7 +35,7 @@ pub struct AppData {
     pub execution_stats: Option<ExecutionStats>,
     pub argument_values_cache: ArgumentValuesCache,
 
-    status: String,
+    pub status: String,
 
     pub config: Config,
 
