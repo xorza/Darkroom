@@ -113,7 +113,7 @@ impl<'a> Button<'a> {
                 .layout_no_wrap(text.to_string(), font, text_color);
             Some(galley)
         } else {
-            self.custom_galley.as_ref().and_then(|g| Some(g.clone()))
+            self.custom_galley.as_ref().map(|g| g.clone())
         };
 
         let sense = if self.enabled {

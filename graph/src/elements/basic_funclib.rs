@@ -105,7 +105,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01896910-0790-AD1B-AA12-3F1437196789".into(),
             name: "print".to_string(),
-            description: None,
+            description: Some("Outputs a string value to the output stream".to_string()),
             behavior: FuncBehavior::Impure,
             terminal: true,
             category: "math".to_string(),
@@ -138,6 +138,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01896910-4BC9-77AA-6973-64CC1C56B9CE".into(),
             name: "2 arg math".to_string(),
+            description: Some("Performs a two-argument math operation (add, subtract, multiply, divide, modulo, power, log)".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -181,13 +182,12 @@ impl Default for BasicFuncLib {
                     .expect("failed to invoke math two argument operation");
                 Ok(())
             }),
-            description: None,
         });
         // to string
         func_lib.add(Func {
             id: "01896a88-bf15-dead-4a15-5969da5a9e65".into(),
             name: "float to string".to_string(),
-            description: None,
+            description: Some("Converts a float value to its string representation".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -220,7 +220,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897928-66cd-52cb-abeb-a5bfd7f3763e".into(),
             name: "random".to_string(),
-            description: None,
+            description: Some("Generates a random float between min and max values".to_string()),
             behavior: FuncBehavior::Impure,
             terminal: false,
             category: "math".to_string(),
@@ -265,7 +265,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c4c-ac6a-84c0-d0b7-17d49e1ae2ee".into(),
             name: "add".to_string(),
-            description: None,
+            description: Some("Adds two float values (a + b)".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -307,7 +307,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c50-229e-f5e4-1c60-7f1e14531da2".into(),
             name: "subtract".to_string(),
-            description: None,
+            description: Some("Subtracts the second value from the first (a - b)".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -349,7 +349,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c50-d510-55bf-8cb9-545a62cc76cc".into(),
             name: "multiply".to_string(),
-            description: None,
+            description: Some("Multiplies two float values (a * b)".to_string()),
             behavior: FuncBehavior::Pure,
             category: "math".to_string(),
             terminal: false,
@@ -391,7 +391,10 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c50-2b4e-4f0e-8f0a-5b0b8b2b4b4b".into(),
             name: "divide".to_string(),
-            description: None,
+            description: Some(
+                "Divides the first value by the second, outputs both quotient and modulo"
+                    .to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             category: "math".to_string(),
             terminal: false,
@@ -441,7 +444,9 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c52-ac50-733e-aeeb-7018fd84c264".into(),
             name: "power".to_string(),
-            description: None,
+            description: Some(
+                "Raises the first value to the power of the second (a^b)".to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -483,7 +488,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c53-a3d7-e716-b80a-0ba98661413a".into(),
             name: "sqrt".to_string(),
-            description: None,
+            description: Some("Calculates the square root of a value".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -515,7 +520,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c54-8671-5d7c-db4c-aca72865a5a6".into(),
             name: "sin".to_string(),
-            description: None,
+            description: Some("Calculates the sine of an angle in radians".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -547,7 +552,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c54-ceb5-e603-ebde-c6904a8ef6e5".into(),
             name: "cos".to_string(),
-            description: None,
+            description: Some("Calculates the cosine of an angle in radians".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -579,7 +584,7 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c55-1fda-2837-f4bd-75bea812a70e".into(),
             name: "tan".to_string(),
-            description: None,
+            description: Some("Calculates the tangent of an angle in radians".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -611,7 +616,9 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c55-6920-1641-593c-5a1d91c033cb".into(),
             name: "asin".to_string(),
-            description: None,
+            description: Some(
+                "Calculates the arc sine (inverse sine), returns angle in radians".to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -643,7 +650,9 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c55-a3ef-681e-6fbb-5133c96f720c".into(),
             name: "acos".to_string(),
-            description: None,
+            description: Some(
+                "Calculates the arc cosine (inverse cosine), returns angle in radians".to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -675,7 +684,10 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c55-e6f4-726c-5d4e-a2f90c4fc43b".into(),
             name: "atan".to_string(),
-            description: None,
+            description: Some(
+                "Calculates the arc tangent (inverse tangent), returns angle in radians"
+                    .to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
@@ -707,7 +719,9 @@ impl Default for BasicFuncLib {
         func_lib.add(Func {
             id: "01897c56-8dde-c5f3-a389-f326fdf81b3a".into(),
             name: "log".to_string(),
-            description: None,
+            description: Some(
+                "Calculates the logarithm of a value with the given base".to_string(),
+            ),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "math".to_string(),
