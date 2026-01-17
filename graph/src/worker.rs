@@ -255,26 +255,21 @@ async fn start_event_loop(
     let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
-            let mut events_vec = Vec::default();
-            let mut events_hashset: HashSet<EventRef> = HashSet::default();
+            let mut events = Vec::default();
+            let mut seen: HashSet<EventRef> = HashSet::default();
             loop {
-                events_vec.clear();
-                if event_rx
-                    .recv_many(&mut events_vec, MAX_EVENTS_PER_LOOP)
-                    .await
-                    == 0
-                {
+                events.clear();
+                if event_rx.recv_many(&mut events, MAX_EVENTS_PER_LOOP).await == 0 {
                     return;
                 }
-                let result = if events_vec.len() == 1 {
-                    worker_message_tx.send(WorkerMessage::Event {
-                        event: events_vec[0],
-                    })
+                let result = if events.len() == 1 {
+                    worker_message_tx.send(WorkerMessage::Event { event: events[0] })
                 } else {
-                    events_hashset.extend(events_vec.drain(..));
-                    events_vec.extend(events_hashset.drain());
+                    seen.clear();
+                    events.retain(|event| seen.insert(*event));
+
                     worker_message_tx.send(WorkerMessage::Events {
-                        events: std::mem::take(&mut events_vec),
+                        events: std::mem::take(&mut events),
                     })
                 };
 
