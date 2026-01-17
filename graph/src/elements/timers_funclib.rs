@@ -57,7 +57,7 @@ impl Default for TimersFuncLib {
                 name: "frequency".to_string(),
                 required: true,
                 data_type: DataType::Float,
-                default_value: Some((30.0).into()),
+                default_value: Some((1.0).into()),
                 value_options: vec![],
             }],
             outputs: vec![
