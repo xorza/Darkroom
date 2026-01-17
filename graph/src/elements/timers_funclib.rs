@@ -6,9 +6,9 @@ use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
+use common::FloatExt;
 use common::lambda::Lambda;
 use common::slot::Slot;
-use common::{BoolExt, FloatExt};
 use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
@@ -98,6 +98,7 @@ impl Default for TimersFuncLib {
                                 if elapsed < desired_duration {
                                     tokio::time::sleep(desired_duration - elapsed).await;
                                 }
+
                                 // If elapsed >= desired_duration, fire immediately (no sleep)
                             })
                         }
@@ -113,23 +114,20 @@ impl Default for TimersFuncLib {
                     Box::pin(async move {
                         let now = Instant::now();
 
-                        let frequency = inputs[0]
-                            .value
-                            .is_none()
-                            .then_else_with(|| 30.0, || inputs[0].value.as_f64());
+                        let frequency = inputs[0].value.unwrap_or_f64(1.0);
 
                         // Get previous state if available
-                        let prev_state = fps_state_slot.peek();
+                        let prev_state = fps_state_slot.peek().unwrap_or_else(|| {
+                            tracing::info!("Creating new FPS state");
+                            Arc::new(FpsEventState {
+                                frequency,
+                                last_execution: now,
+                                frame_no: 0,
+                            })
+                        });
 
-                        let delta = prev_state
-                            .as_ref()
-                            .map(|state| state.last_execution.elapsed().as_secs_f64())
-                            .unwrap_or(1.0 / frequency);
-
-                        let frame_no = prev_state
-                            .as_ref()
-                            .map(|state| state.frame_no + 1)
-                            .unwrap_or(1);
+                        let delta = prev_state.last_execution.elapsed().as_secs_f64();
+                        let frame_no = prev_state.frame_no + 1;
 
                         // Send new state for the fps event
                         fps_state_slot.send(FpsEventState {
