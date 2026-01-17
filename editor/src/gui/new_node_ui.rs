@@ -135,14 +135,16 @@ impl NewNodeUi {
                                         let button_height = gui.font_height(&btn_font)
                                             + gui.style.small_padding * 2.0;
 
-                                        if Button::default()
+                                        let mut btn = Button::default()
                                             .background(gui.style.list_button)
                                             .text(&func.name)
                                             .size(vec2(button_width, button_height))
-                                            .align(Align::Min)
-                                            .show(gui)
-                                            .clicked()
-                                        {
+                                            .align(Align::Min);
+                                        if let Some(tooltip) = func.description.as_ref() {
+                                            btn = btn.tooltip(tooltip);
+                                        }
+
+                                        if btn.show(gui).clicked() {
                                             selection = Some(NewNodeSelection::Func(func));
                                         }
                                     }
