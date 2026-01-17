@@ -14,9 +14,6 @@ use crate::common::frame::Frame;
 use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 
-/// Maximum height for the function list scroll area
-const MAX_SCROLL_HEIGHT: f32 = 300.0;
-
 /// Result of showing the new node UI
 #[derive(Debug)]
 pub enum NewNodeSelection<'a> {
