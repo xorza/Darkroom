@@ -211,17 +211,25 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
-                let events_triggers = collect_active_event_triggers(&execution_graph);
-                if !events_triggers.is_empty() {
-                    event_loop_handle = Some(
-                        start_event_loop(
-                            worker_message_tx.clone(),
-                            events_triggers,
-                            event_loop_pause_gate.clone(),
-                        )
-                        .await,
-                    );
-                    tracing::info!("Event loop started");
+                let result = execution_graph.execute(false, true, []).await;
+                let ok = result.is_ok();
+                (execution_callback.lock().await)(result);
+
+                if ok {
+                    let events_triggers = collect_active_event_triggers(&mut execution_graph);
+
+                    if !events_triggers.is_empty() {
+                        event_loop_handle = Some(
+                            start_event_loop(
+                                worker_message_tx.clone(),
+                                events_triggers,
+                                event_loop_pause_gate.clone(),
+                            )
+                            .await,
+                        );
+
+                        tracing::info!("Event loop started");
+                    }
                 }
             }
             EventLoopCommand::Stop => {
@@ -328,10 +336,12 @@ async fn stop_event_loop(event_loop_handle: &mut Option<EventLoopHandle>) {
     }
 }
 
-fn collect_active_event_triggers(execution_graph: &ExecutionGraph) -> Vec<(EventRef, EventLambda)> {
-    let events_triggers: Vec<(EventRef, EventLambda)> = execution_graph
-        .e_nodes
-        .iter()
+fn collect_active_event_triggers(
+    execution_graph: &mut ExecutionGraph,
+) -> Vec<(EventRef, EventLambda)> {
+    let result = execution_graph.collect_nodes_ready_for_execution();
+
+    result
         .flat_map(|e_node| {
             e_node
                 .events
@@ -347,8 +357,7 @@ fn collect_active_event_triggers(execution_graph: &ExecutionGraph) -> Vec<(Event
                     ))
                 })
         })
-        .collect();
-    events_triggers
+        .collect()
 }
 
 impl ProcessingCallback {

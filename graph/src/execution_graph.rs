@@ -533,6 +533,13 @@ impl ExecutionGraph {
         Ok(())
     }
 
+    pub fn collect_nodes_ready_for_execution(&mut self) -> impl Iterator<Item = &ExecutionNode> {
+        self.e_node_execute_order
+            .iter()
+            .copied()
+            .map(|e_node_idx| &self.e_nodes[e_node_idx])
+    }
+
     // Walk backward from terminal nodes to collect process order and detect cycles.
     fn backward1(&mut self) -> Result<()> {
         self.e_node_process_order.clear();
