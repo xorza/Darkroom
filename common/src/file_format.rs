@@ -21,14 +21,14 @@ pub enum SerdeFormat {
     Yaml,
     Json,
     Lua,
-    Bincode,
+    Bitcode,
     Toml,
     Scn,
 }
 
 impl SerdeFormat {
     pub fn all_formats_for_testing() -> [Self; 5] {
-        [Self::Yaml, Self::Json, Self::Lua, Self::Bincode, Self::Scn]
+        [Self::Yaml, Self::Json, Self::Lua, Self::Bitcode, Self::Scn]
     }
 
     pub fn from_file_name(file_name: &str) -> FileFormatResult<Self> {
@@ -40,7 +40,7 @@ impl SerdeFormat {
             "yaml" | "yml" => Ok(Self::Yaml),
             "json" => Ok(Self::Json),
             "lua" => Ok(Self::Lua),
-            "bin" => Ok(Self::Bincode),
+            "bin" => Ok(Self::Bitcode),
             "scn" => Ok(Self::Scn),
             "toml" => Ok(Self::Toml),
             _ => Err(FileExtensionError::UnsupportedFileExtension(

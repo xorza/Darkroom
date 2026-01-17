@@ -38,7 +38,7 @@ pub fn serialize_into<T: Serialize, W: Write>(
         SerdeFormat::Lua => {
             serde_lua::to_writer(writer, &value).unwrap();
         }
-        SerdeFormat::Bincode => {
+        SerdeFormat::Bitcode => {
             let encoded = bitcode::serialize(&value).unwrap();
             writer.write_all(&encoded).unwrap();
         }
@@ -88,7 +88,7 @@ pub fn deserialize_from<T: DeserializeOwned, R: Read>(
             reader.read_to_end(temp_buffer)?;
             Ok(toml::from_slice(temp_buffer.as_slice())?)
         }
-        SerdeFormat::Bincode => {
+        SerdeFormat::Bitcode => {
             reader.read_to_end(temp_buffer)?;
             Ok(bitcode::deserialize(temp_buffer.as_slice())?)
         }

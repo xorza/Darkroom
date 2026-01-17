@@ -68,7 +68,7 @@ impl ActionUndoStack {
         );
 
         let start = buffer.len();
-        common::serde::serialize_into(actions, SerdeFormat::Bincode, buffer, temp_buffer);
+        common::serde::serialize_into(actions, SerdeFormat::Bitcode, buffer, temp_buffer);
         let end = buffer.len();
 
         start..end
@@ -77,7 +77,7 @@ impl ActionUndoStack {
     fn deserialize_actions(bytes: &[u8], temp_buffer: &mut Vec<u8>) -> Vec<GraphUiAction> {
         common::serde::deserialize_from(
             &mut std::io::Cursor::new(bytes),
-            SerdeFormat::Bincode,
+            SerdeFormat::Bitcode,
             temp_buffer,
         )
         .unwrap()
@@ -584,7 +584,7 @@ mod tests {
         for (range_idx, range) in stack.undo_stack.iter().enumerate() {
             let bytes = ActionUndoStack::slice_bytes(&stack.undo_actions, range);
             let decoded: Vec<GraphUiAction> =
-                common::serde::deserialize(bytes, SerdeFormat::Bincode).unwrap_or_else(|err| {
+                common::serde::deserialize(bytes, SerdeFormat::Bitcode).unwrap_or_else(|err| {
                     panic!("undo range {} failed to deserialize: {}", range_idx, err)
                 });
             assert_eq!(decoded.len(), 1);

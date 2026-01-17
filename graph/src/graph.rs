@@ -408,8 +408,8 @@ mod tests {
             assert_eq!(serialized, serialized_again);
         }
 
-        let bin = graph.serialize(SerdeFormat::Bincode);
-        let deserialized = Graph::deserialize(&bin, SerdeFormat::Bincode)?;
+        let bin = graph.serialize(SerdeFormat::Bitcode);
+        let deserialized = Graph::deserialize(&bin, SerdeFormat::Bitcode)?;
         assert_eq!(graph, deserialized);
 
         Ok(())
