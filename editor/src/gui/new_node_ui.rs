@@ -14,6 +14,12 @@ use crate::common::expander::Expander;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
 
+const POPUP_MIN_WIDTH: f32 = 150.0;
+const POPUP_MIN_HEIGHT: f32 = 150.0;
+const POPUP_MAX_HEIGHT: f32 = 300.0;
+const BUTTON_MIN_WIDTH: f32 = 80.0;
+const MAX_COLUMNS: usize = 2;
+
 /// Result of showing the new node UI
 #[derive(Debug)]
 pub enum NewNodeSelection<'a> {
@@ -74,9 +80,9 @@ impl NewNodeUi {
             .order(Order::Foreground)
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
-                    gui.ui().set_min_width(150.0);
-                    gui.ui().set_min_height(150.0);
-                    gui.ui().set_max_height(300.0);
+                    gui.ui().set_min_width(POPUP_MIN_WIDTH);
+                    gui.ui().set_min_height(POPUP_MIN_HEIGHT);
+                    gui.ui().set_max_height(POPUP_MAX_HEIGHT);
 
                     gui.horizontal_justified(|gui| {
                         // Show const bind option if opened from connection
@@ -127,17 +133,14 @@ impl NewNodeUi {
                                         )
                                     }));
 
-                                    const MIN_WIDTH: f32 = 80.0;
-                                    const MAX_COLUMNS: usize = 2;
-
                                     let max_width = galleys
                                         .iter()
                                         .map(|galley| galley.size().x)
                                         .max_by(|&a, &b| {
                                             a.partial_cmp(&b).unwrap_or(Ordering::Equal)
                                         })
-                                        .unwrap_or(MIN_WIDTH)
-                                        .max(MIN_WIDTH);
+                                        .unwrap_or(BUTTON_MIN_WIDTH)
+                                        .max(BUTTON_MIN_WIDTH);
 
                                     let button_width = max_width + gui.style.padding * 2.0;
                                     let button_height =
