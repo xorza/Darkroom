@@ -1,12 +1,14 @@
 use common::BoolExt;
+use common::key_index_vec::KeyIndexKey;
 use eframe::egui;
 use egui::{Galley, Pos2, Rect, Vec2, pos2, vec2};
 use graph::graph::NodeId;
 use std::sync::Arc;
 
 use crate::common::UiEquals;
+use crate::gui::connection_ui::PortKind;
+use crate::gui::graph_layout::PortRef;
 use crate::gui::{Gui, graph_ctx::GraphContext};
-use common::key_index_vec::KeyIndexKey;
 
 #[derive(Debug)]
 pub struct NodeLayout {
@@ -45,6 +47,15 @@ impl NodeLayout {
             self.output_first_center.x,
             self.output_first_center.y + self.port_row_height * index as f32,
         )
+    }
+
+    pub fn port_center(&self, port: &PortRef) -> Pos2 {
+        match port.kind {
+            PortKind::Input => self.input_center(port.port_idx),
+            PortKind::Output => self.output_center(port.port_idx),
+            PortKind::Event => self.event_center(port.port_idx),
+            PortKind::Trigger => self.trigger_center(),
+        }
     }
 
     pub fn trigger_center(&self) -> Pos2 {

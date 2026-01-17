@@ -77,7 +77,7 @@ impl GraphUi {
         let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
 
         if secondary_pressed || esc_pressed {
-            self.to_idle();
+            self.reset_to_idle();
         }
 
         let rect = gui
@@ -248,7 +248,7 @@ impl GraphUi {
                 }
             }
         } else if was_open && !self.new_node_ui.is_open() {
-            self.to_idle();
+            self.reset_to_idle();
         }
     }
 
@@ -299,7 +299,7 @@ impl GraphUi {
                 if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
-                    self.to_idle();
+                    self.reset_to_idle();
 
                     let iter = self
                         .connections
@@ -367,7 +367,7 @@ impl GraphUi {
                 match update {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
-                        self.to_idle();
+                        self.reset_to_idle();
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                         assert_eq!(input_port.kind, PortKind::Input);
@@ -408,14 +408,14 @@ impl GraphUi {
                             _ => unreachable!(),
                         }
 
-                        self.to_idle();
+                        self.reset_to_idle();
                     }
                 }
             }
         }
     }
 
-    fn to_idle(&mut self) {
+    fn reset_to_idle(&mut self) {
         self.state = InteractionState::Idle;
         self.connections.stop_drag();
         self.connection_breaker.reset();
@@ -586,7 +586,7 @@ impl GraphUi {
             }
             InteractionState::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.to_idle();
+                    self.reset_to_idle();
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();
