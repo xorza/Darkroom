@@ -171,7 +171,7 @@ impl Default for TimersFuncLib {
             lambda: FuncLambda::None,
         });
 
-        let reset_fps_state = Lambda::new({
+        let reset_frame_event = Lambda::new({
             let fps_state_slot = fps_state_slot.clone();
             move || {
                 fps_state_slot.take();
@@ -181,7 +181,7 @@ impl Default for TimersFuncLib {
         TimersFuncLib {
             func_lib,
             run_event,
-            reset_frame_event: reset_fps_state,
+            reset_frame_event,
         }
     }
 }
