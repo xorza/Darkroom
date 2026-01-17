@@ -121,15 +121,18 @@ impl GraphUi {
                 Sense::hover() | Sense::drag() | Sense::click(),
             );
 
-            if background_response.clicked() && ctx.view_graph.selected_node_id.is_some() {
-                let before = ctx.view_graph.selected_node_id;
-                ctx.view_graph.selected_node_id = None;
-                app_data
-                    .interaction
-                    .add_action(GraphUiAction::NodeSelected {
-                        before,
-                        after: None,
-                    });
+            if background_response.clicked() {
+                self.reset_to(InteractionState::Idle);
+                if ctx.view_graph.selected_node_id.is_some() {
+                    let before = ctx.view_graph.selected_node_id;
+                    ctx.view_graph.selected_node_id = None;
+                    app_data
+                        .interaction
+                        .add_action(GraphUiAction::NodeSelected {
+                            before,
+                            after: None,
+                        });
+                }
             }
 
             self.update_zoom_and_pan(
@@ -286,6 +289,7 @@ impl GraphUi {
             primary_state,
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
+        let primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
 
         match self.state {
             InteractionState::PanningGraph => {}
@@ -368,12 +372,6 @@ impl GraphUi {
                 }
             }
             InteractionState::DraggingNewConnection => {
-                let _response = gui.ui.interact(
-                    gui.rect,
-                    Id::new("temp background for new connection"),
-                    Sense::all(),
-                );
-
                 match self.connections.update_drag(pointer_pos, port_interact_cmd) {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
@@ -420,6 +418,9 @@ impl GraphUi {
 
                         self.reset_to(InteractionState::Idle);
                     }
+                }
+                if primary_pressed && !pointer_on_background {
+                    self.reset_to(InteractionState::Idle);
                 }
             }
         }
