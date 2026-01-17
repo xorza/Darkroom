@@ -460,13 +460,15 @@ impl ExecutionGraph {
     ) -> Result<ExecutionStats> {
         let mut events: Vec<EventRef> = events.into_iter().collect();
 
-        // add run event subscribers
-        events.extend(self.e_nodes.iter().filter_map(|e_node| {
-            (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventRef {
-                node_id: e_node.id,
-                event_idx: 0,
-            })
-        }));
+        // treat run event subscribers as terminals
+        if terminals {
+            events.extend(self.e_nodes.iter().filter_map(|e_node| {
+                (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventRef {
+                    node_id: e_node.id,
+                    event_idx: 0,
+                })
+            }));
+        }
 
         self.prepare_execution(terminals, event_triggers, &events)?;
 
