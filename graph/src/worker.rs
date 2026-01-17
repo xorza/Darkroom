@@ -7,6 +7,8 @@ use common::pause_gate::PauseGate;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::mem::take;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, channel, unbounded_channel};
 use tokio::task::JoinHandle;
 
@@ -70,6 +72,7 @@ pub struct EventRef {
 pub struct Worker {
     thread_handle: Option<JoinHandle<()>>,
     tx: UnboundedSender<WorkerMessage>,
+    event_loop_started: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
@@ -83,17 +86,24 @@ impl Worker {
         ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
     {
         let (tx, rx) = unbounded_channel::<WorkerMessage>();
+        let event_loop_started = Arc::new(AtomicBool::new(false));
         let thread_handle: JoinHandle<()> = tokio::spawn({
             let tx = tx.clone();
+            let event_loop_started = event_loop_started.clone();
             async move {
-                worker_loop(rx, tx, callback).await;
+                worker_loop(rx, tx, callback, event_loop_started).await;
             }
         });
 
         Self {
             thread_handle: Some(thread_handle),
             tx,
+            event_loop_started,
         }
+    }
+
+    pub fn is_event_loop_started(&self) -> bool {
+        self.event_loop_started.load(Ordering::Relaxed)
     }
 
     pub fn send(&self, msg: WorkerMessage) {
@@ -130,6 +140,7 @@ async fn worker_loop<ExecutionCallback>(
     mut worker_message_rx: UnboundedReceiver<WorkerMessage>,
     worker_message_tx: UnboundedSender<WorkerMessage>,
     execution_callback: ExecutionCallback,
+    event_loop_started: Arc<AtomicBool>,
 ) where
     ExecutionCallback: Fn(Result<ExecutionStats>) + Send + 'static,
 {
@@ -149,6 +160,8 @@ async fn worker_loop<ExecutionCallback>(
         assert!(events.is_empty());
         assert!(events_from_loop.is_empty());
         assert!(processing_callback.is_none());
+
+        event_loop_started.store(event_loop_handle.is_some(), Ordering::Relaxed);
 
         msgs.clear();
         if worker_message_rx

@@ -166,6 +166,8 @@ impl AppData {
     }
 
     pub fn update_shared_status(&mut self) {
+        self.autorun = self.worker.is_event_loop_started();
+
         loop {
             let result = self.print_out_rx.try_recv();
             match result {
