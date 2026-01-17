@@ -9,9 +9,9 @@ use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
 use crate::common::button::Button;
+use crate::common::column_flow::ColumnFlow;
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
-use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 
 /// Result of showing the new node UI
@@ -143,66 +143,30 @@ impl NewNodeUi {
                                     let button_height =
                                         gui.font_height(&btn_font) + gui.style.small_padding * 2.0;
 
-                                    // Calculate how many items fit in available height
-                                    let available_height = gui.ui().available_height();
-                                    let max_items_per_column =
-                                        (available_height / button_height).floor().max(1.0)
-                                            as usize;
-
-                                    // Use minimum columns needed to fit all items without scrolling
-                                    let num_columns = if funcs.len() <= max_items_per_column {
-                                        1
-                                    } else if funcs.len() <= max_items_per_column * MAX_COLUMNS {
-                                        // Items fit in multiple columns without scrolling
-                                        MAX_COLUMNS
-                                    } else {
-                                        // Need scrolling anyway, use max columns
-                                        MAX_COLUMNS
-                                    };
-                                    // Distribute items evenly across columns
-                                    let rows_per_column = funcs.len().div_ceil(num_columns);
-
-                                    // Limit width to actual number of columns used
-                                    let total_width = button_width * num_columns as f32;
-                                    gui.ui().set_max_width(total_width);
-
-                                    ScrollArea::vertical()
+                                    ColumnFlow::new(button_width, button_height)
                                         .id(gui.ui.make_persistent_id((
                                             "new_node_ui_funcs_category_scroll",
                                             category,
                                         )))
-                                        .show(gui, |gui| {
-                                            gui.horizontal(|gui| {
-                                                let mut items: BumpVec<_> = BumpVec::new_in(arena);
-                                                items.extend(galleys.iter().zip(&funcs));
-
-                                                for column_items in items.chunks(rows_per_column) {
-                                                    gui.vertical(|gui| {
-                                                        for (galley, func) in column_items {
-                                                            let mut btn = Button::default()
-                                                                .background(gui.style.list_button)
-                                                                .galley((*galley).clone())
-                                                                .size(vec2(
-                                                                    button_width,
-                                                                    button_height,
-                                                                ))
-                                                                .align(Align::Min);
-                                                            if let Some(tooltip) =
-                                                                func.description.as_ref()
-                                                            {
-                                                                btn = btn.tooltip(tooltip);
-                                                            }
-
-                                                            if btn.show(gui).clicked() {
-                                                                selection = Some(
-                                                                    NewNodeSelection::Func(func),
-                                                                );
-                                                            }
-                                                        }
-                                                    });
+                                        .max_columns(MAX_COLUMNS)
+                                        .show(
+                                            gui,
+                                            galleys.iter().zip(funcs.iter()),
+                                            |gui, (galley, func)| {
+                                                let mut btn = Button::default()
+                                                    .background(gui.style.list_button)
+                                                    .galley((*galley).clone())
+                                                    .size(vec2(button_width, button_height))
+                                                    .align(Align::Min);
+                                                if let Some(tooltip) = func.description.as_ref() {
+                                                    btn = btn.tooltip(tooltip);
                                                 }
-                                            });
-                                        });
+
+                                                if btn.show(gui).clicked() {
+                                                    selection = Some(NewNodeSelection::Func(func));
+                                                }
+                                            },
+                                        );
                                 });
                             });
                         }
