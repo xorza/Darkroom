@@ -23,11 +23,12 @@ use crate::gui::const_bind_ui::ConstBindUi;
 use crate::gui::{Gui, graph_ctx::GraphContext, graph_ui_interaction::GraphUiInteraction};
 
 #[derive(Debug, Clone)]
-pub enum PortDragInfo {
+pub enum PortInteractCommand {
     None,
     Hover(PortInfo),
     DragStart(PortInfo),
     DragStop,
+    Click(PortInfo),
 }
 
 #[derive(Debug, Default)]
@@ -53,11 +54,11 @@ impl NodeUi {
         graph_layout: &mut GraphLayout,
         ui_interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
-    ) -> PortDragInfo {
+    ) -> PortInteractCommand {
         self.node_ids_to_remove.clear();
         self.node_ids_hit_breaker.clear();
 
-        let mut drag_port_info: PortDragInfo = PortDragInfo::None;
+        let mut drag_port_info: PortInteractCommand = PortInteractCommand::None;
         let mut const_bind_frame = self.const_bind_ui.start();
 
         let view_node_count = ctx.view_graph.view_nodes.len();
@@ -367,7 +368,7 @@ fn render_ports(
     node_layout: &NodeLayout,
     node: &Node,
     func: &Func,
-) -> PortDragInfo {
+) -> PortInteractCommand {
     let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
 
@@ -386,11 +387,15 @@ fn render_ports(
                          idx: usize,
                          base_color: Color32,
                          hover_color: Color32|
-     -> PortDragInfo {
+     -> PortInteractCommand {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let ui = gui.ui();
         let port_id = ui.make_persistent_id(("node_port", kind, node.id, idx));
-        let response = ui.interact(port_rect, port_id, Sense::drag() | Sense::hover());
+        let response = ui.interact(
+            port_rect,
+            port_id,
+            Sense::drag() | Sense::hover() | Sense::click(),
+        );
         let is_hovered = ui.rect_contains_pointer(port_rect);
 
         let color = is_hovered.then_else(hover_color, base_color);
@@ -405,49 +410,58 @@ fn render_ports(
             center,
         };
         if response.drag_started_by(PointerButton::Primary) {
-            PortDragInfo::DragStart(port_info)
+            tracing::info!("Drag started");
+            PortInteractCommand::DragStart(port_info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
-            PortDragInfo::DragStop
+            tracing::info!("Drag stopped");
+            PortInteractCommand::DragStop
+        } else if !response.dragged() && response.clicked_by(PointerButton::Primary) {
+            tracing::info!("Drag clicked");
+            PortInteractCommand::Click(port_info)
         } else if is_hovered {
-            PortDragInfo::Hover(port_info)
+            // tracing::info!("Drag hovered");
+            PortInteractCommand::Hover(port_info)
         } else {
-            PortDragInfo::None
+            PortInteractCommand::None
         }
     };
 
-    let mut port_drag_info: PortDragInfo = PortDragInfo::None;
+    let mut final_port_interact_cmd: PortInteractCommand = PortInteractCommand::None;
 
     if func.terminal {
         let center = node_layout.trigger_center();
-        port_drag_info = draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
-            .prefer(port_drag_info);
+        final_port_interact_cmd =
+            draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
+                .prefer(final_port_interact_cmd);
     }
 
     for input_idx in 0..node_layout.input_galleys.len() {
         let center = node_layout.input_center(input_idx);
-        let drag_info = draw_port(center, PortKind::Input, input_idx, input_base, input_hover);
-        port_drag_info = port_drag_info.prefer(drag_info);
+        let port_interact_cmd =
+            draw_port(center, PortKind::Input, input_idx, input_base, input_hover);
+        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
     for output_idx in 0..node_layout.output_galleys.len() {
         let center = node_layout.output_center(output_idx);
-        let drag_info = draw_port(
+        let port_interact_cmd = draw_port(
             center,
             PortKind::Output,
             output_idx,
             output_base,
             output_hover,
         );
-        port_drag_info = port_drag_info.prefer(drag_info);
+        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
     for event_idx in 0..node_layout.event_galleys.len() {
         let center = node_layout.event_center(event_idx);
-        let drag_info = draw_port(center, PortKind::Event, event_idx, event_base, event_hover);
-        port_drag_info = port_drag_info.prefer(drag_info);
+        let port_interact_cmd =
+            draw_port(center, PortKind::Event, event_idx, event_base, event_hover);
+        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
-    port_drag_info
+    final_port_interact_cmd
 }
 
 fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
@@ -505,13 +519,14 @@ fn node_execution_info<'a>(
     NodeExecutionInfo::None
 }
 
-impl PortDragInfo {
-    fn prio(&self) -> u32 {
+impl PortInteractCommand {
+    fn prio(&self) -> u8 {
         match self {
-            PortDragInfo::None => 0,
-            PortDragInfo::Hover(_) => 5,
-            PortDragInfo::DragStart(_) => 8,
-            PortDragInfo::DragStop => 10,
+            PortInteractCommand::None => 0,
+            PortInteractCommand::Hover(_) => 5,
+            PortInteractCommand::DragStart(_) => 8,
+            PortInteractCommand::DragStop => 10,
+            PortInteractCommand::Click(_) => 15,
         }
     }
 

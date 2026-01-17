@@ -27,7 +27,7 @@ use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
 use crate::gui::node_details_ui::NodeDetailsUi;
-use crate::gui::node_ui::{NodeUi, PortDragInfo};
+use crate::gui::node_ui::{NodeUi, PortInteractCommand};
 use crate::{gui::Gui, gui::graph_ctx::GraphContext, model};
 use common::BoolExt;
 
@@ -69,10 +69,6 @@ pub struct GraphUi {
     dots_background: GraphBackgroundRenderer,
     new_node_ui: NewNodeUi,
     node_details_ui: NodeDetailsUi,
-    /// When set, a new node selection will connect its first output to this input port
-    pending_connection_input: Option<PortRef>,
-    /// When set, a new node selection will connect its first input to this output port
-    pending_connection_output: Option<PortRef>,
 }
 
 impl GraphUi {
@@ -142,7 +138,7 @@ impl GraphUi {
                 &mut app_data.interaction,
             );
 
-            let drag_port_info = self.node_ui.render_nodes(
+            let port_interact_cmd = self.node_ui.render_nodes(
                 gui,
                 &mut ctx,
                 &mut self.graph_layout,
@@ -160,7 +156,7 @@ impl GraphUi {
                     &mut ctx,
                     &background_response,
                     pointer_pos,
-                    drag_port_info,
+                    port_interact_cmd,
                     &mut app_data.interaction,
                 );
             }
@@ -203,7 +199,6 @@ impl GraphUi {
         }
 
         // Show menu and handle selection
-        let was_open = self.new_node_ui.is_open();
         if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
             match selection {
                 NewNodeSelection::Func(func) => {
@@ -215,68 +210,35 @@ impl GraphUi {
 
                     let (node, view_node) = ctx.view_graph.add_node_from_func(func);
                     view_node.pos = pos;
-                    let new_node_id = node.id;
 
                     interaction.add_action(GraphUiAction::NodeAdded {
                         view_node: view_node.clone(),
                         node: node.clone(),
                     });
-
-                    // If there's a pending connection, connect the new node's first output to the input
-                    if let Some(input_port) = self.pending_connection_input.take()
-                        && !func.outputs.is_empty()
-                    {
-                        let output_port = PortRef {
-                            node_id: new_node_id,
-                            port_idx: 0,
-                            kind: PortKind::Output,
-                        };
-                        let result = apply_data_connection(ctx.view_graph, input_port, output_port);
-                        match result {
-                            Ok(action) => interaction.add_action(action),
-                            Err(err) => interaction.add_error(err),
-                        }
-                    }
-
-                    // If there's a pending output connection, connect it to the new node's first input
-                    if let Some(output_port) = self.pending_connection_output.take()
-                        && !func.inputs.is_empty()
-                    {
-                        let input_port = PortRef {
-                            node_id: new_node_id,
-                            port_idx: 0,
-                            kind: PortKind::Input,
-                        };
-                        let result = apply_data_connection(ctx.view_graph, input_port, output_port);
-                        match result {
-                            Ok(action) => interaction.add_action(action),
-                            Err(err) => interaction.add_error(err),
-                        }
-                    }
                 }
                 NewNodeSelection::ConstBind => {
                     // Create a const binding for the pending input
-                    if let Some(input_port) = self.pending_connection_input.take() {
-                        let input_node =
-                            ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
-                        let input = &mut input_node.inputs[input_port.port_idx];
-                        let before = input.binding.clone();
-                        input.binding = Binding::Const(0.into());
-                        let after = input.binding.clone();
+                    if let Some(connection_drag) = self.connections.temp_connection.take() {
+                        if connection_drag.start_port.port.kind == PortKind::Input {
+                            let input_port = connection_drag.start_port.port;
 
-                        interaction.add_action(GraphUiAction::InputChanged {
-                            node_id: input_port.node_id,
-                            input_idx: input_port.port_idx,
-                            before,
-                            after,
-                        });
+                            let input_node =
+                                ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+                            let input = &mut input_node.inputs[input_port.port_idx];
+                            let before = input.binding.clone();
+                            input.binding = Binding::Const(0.into());
+                            let after = input.binding.clone();
+
+                            interaction.add_action(GraphUiAction::InputChanged {
+                                node_id: input_port.node_id,
+                                input_idx: input_port.port_idx,
+                                before,
+                                after,
+                            });
+                        }
                     }
                 }
             }
-        } else if was_open && !self.new_node_ui.is_open() {
-            // New node UI was closed without selection, clear pending connections
-            self.pending_connection_input = None;
-            self.pending_connection_output = None;
         }
     }
 
@@ -287,7 +249,7 @@ impl GraphUi {
         ctx: &mut GraphContext<'_>,
         background_response: &Response,
         pointer_pos: Pos2,
-        drag_port_info: PortDragInfo,
+        port_interact_cmd: PortInteractCommand,
         interaction: &mut GraphUiInteraction,
     ) {
         let primary_state = gui.ui().input(|input| {
@@ -306,7 +268,6 @@ impl GraphUi {
         let pointer_on_background =
             background_response.hovered() && !self.connections.any_hovered();
 
-        let primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
         let primary_down = matches!(
             primary_state,
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
@@ -324,9 +285,9 @@ impl GraphUi {
         match self.state {
             InteractionState::PanningGraph => {}
             InteractionState::Idle => {
-                if primary_pressed {
-                    if let PortDragInfo::DragStart(_) = drag_port_info {
-                        self.connections.update_drag(pointer_pos, drag_port_info);
+                if primary_down {
+                    if let PortInteractCommand::DragStart(_) = port_interact_cmd {
+                        self.connections.update_drag(pointer_pos, port_interact_cmd);
                         self.state = InteractionState::DraggingNewConnection;
                     } else if pointer_on_background {
                         self.state = InteractionState::BreakingConnections;
@@ -403,29 +364,24 @@ impl GraphUi {
                 }
             }
             InteractionState::DraggingNewConnection => {
-                let update = self.connections.update_drag(pointer_pos, drag_port_info);
+                let update = self.connections.update_drag(pointer_pos, port_interact_cmd);
                 match update {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
+                        self.connections.stop_drag();
                         self.state = InteractionState::Idle;
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                         assert_eq!(input_port.kind, PortKind::Input);
 
-                        self.state = InteractionState::Idle;
-
                         // Open new_node_ui to let user select a node to connect (with const bind option)
                         self.new_node_ui.open_from_connection(pointer_pos);
-                        self.pending_connection_input = Some(input_port);
                     }
                     ConnectionDragUpdate::FinishedWithEmptyInput { output_port } => {
                         assert_eq!(output_port.kind, PortKind::Output);
 
-                        self.state = InteractionState::Idle;
-
                         // Open new_node_ui to let user select a node to connect
                         self.new_node_ui.open(pointer_pos);
-                        self.pending_connection_output = Some(output_port);
                     }
                     ConnectionDragUpdate::FinishedWith {
                         input_port,
@@ -455,6 +411,8 @@ impl GraphUi {
                             }
                             _ => unreachable!(),
                         }
+
+                        self.connections.stop_drag();
                     }
                 }
             }

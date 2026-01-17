@@ -13,7 +13,7 @@ use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
 
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
-use crate::gui::node_ui::PortDragInfo;
+use crate::gui::node_ui::PortInteractCommand;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 
@@ -128,7 +128,7 @@ pub(crate) struct ConnectionUi {
     missing_data_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
     highlighted_event_curves: KeyIndexVec<ConnectionKey, ConnectionCurve>,
 
-    temp_connection: Option<ConnectionDrag>,
+    pub temp_connection: Option<ConnectionDrag>,
     temp_connection_bezier: ConnectionBezier,
 }
 
@@ -373,9 +373,12 @@ impl ConnectionUi {
     pub(crate) fn update_drag(
         &mut self,
         pointer_pos: Pos2,
-        drag_port_info: PortDragInfo,
+        port_interact_cmd: PortInteractCommand,
     ) -> ConnectionDragUpdate {
-        if let PortDragInfo::DragStart(port_info) = drag_port_info {
+        tracing::info!("update_drag: {:?}", port_interact_cmd);
+
+        if let PortInteractCommand::DragStart(port_info) = port_interact_cmd {
+            tracing::info!("PortInteractCommand::DragStart");
             self.temp_connection = Some(ConnectionDrag::new(port_info));
             return ConnectionDragUpdate::InProgress;
         }
@@ -387,13 +390,13 @@ impl ConnectionUi {
         let drag = self.temp_connection.as_mut().unwrap();
         drag.current_pos = pointer_pos;
 
-        match drag_port_info {
-            PortDragInfo::None => {
+        match port_interact_cmd {
+            PortInteractCommand::None => {
                 drag.end_port = None;
                 ConnectionDragUpdate::InProgress
             }
-            PortDragInfo::DragStart(_) => unreachable!(),
-            PortDragInfo::Hover(port_info) => {
+            PortInteractCommand::DragStart(_) => unreachable!(),
+            PortInteractCommand::Hover(port_info) => {
                 drag.end_port = None;
                 if drag.start_port.port.kind.opposite() == port_info.port.kind {
                     drag.end_port = Some(port_info);
@@ -402,7 +405,7 @@ impl ConnectionUi {
 
                 ConnectionDragUpdate::InProgress
             }
-            PortDragInfo::DragStop => {
+            PortInteractCommand::DragStop => {
                 let update = if let Some(port_info) = drag.end_port {
                     let (input_port, output_port) =
                         match (drag.start_port.port.kind, port_info.port.kind) {
@@ -437,9 +440,40 @@ impl ConnectionUi {
                     ConnectionDragUpdate::Finished
                 };
 
-                self.stop_drag();
-
                 update
+            }
+            PortInteractCommand::Click(port_info) => {
+                tracing::info!("PortInteractCommand::Click");
+                //
+                drag.end_port = None;
+                if drag.start_port.port.kind.opposite() == port_info.port.kind {
+                    drag.end_port = Some(port_info);
+                    drag.current_pos = port_info.center;
+
+                    let (input_port, output_port) =
+                        match (drag.start_port.port.kind, port_info.port.kind) {
+                            (PortKind::Output, PortKind::Input) => {
+                                (port_info.port, drag.start_port.port)
+                            }
+                            (PortKind::Input, PortKind::Output) => {
+                                (drag.start_port.port, port_info.port)
+                            }
+                            (PortKind::Event, PortKind::Trigger) => {
+                                (port_info.port, drag.start_port.port)
+                            }
+                            (PortKind::Trigger, PortKind::Event) => {
+                                (drag.start_port.port, port_info.port)
+                            }
+                            _ => unreachable!("ports must be of opposite types"),
+                        };
+
+                    ConnectionDragUpdate::FinishedWith {
+                        input_port,
+                        output_port,
+                    }
+                } else {
+                    ConnectionDragUpdate::Finished
+                }
             }
         }
     }
