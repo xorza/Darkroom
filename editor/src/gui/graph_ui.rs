@@ -199,6 +199,7 @@ impl GraphUi {
         }
 
         // Show menu and handle selection
+        let was_open = self.new_node_ui.is_open();
         if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
             match selection {
                 NewNodeSelection::Func(func) => {
@@ -239,6 +240,9 @@ impl GraphUi {
                     }
                 }
             }
+        } else if was_open && !self.new_node_ui.is_open() {
+            self.state = InteractionState::Idle;
+            self.connections.stop_drag();
         }
     }
 
