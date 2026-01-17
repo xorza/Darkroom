@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Align, Galley, Key, Order, Pos2, vec2};
+use egui::{Align, Galley, Key, Layout, Order, Pos2, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -111,9 +111,6 @@ impl NewNodeUi {
 
                         for category in categories {
                             gui.vertical(|gui| {
-                                let padding = gui.style.padding;
-                                gui.ui().set_min_width(80.0 + padding * 2.0);
-
                                 Expander::new(category).default_open(true).show(gui, |gui| {
                                     let mut funcs: BumpVec<&Func> = BumpVec::new_in(arena);
                                     funcs.extend(
@@ -131,6 +128,8 @@ impl NewNodeUi {
                                     }));
 
                                     const MIN_WIDTH: f32 = 80.0;
+                                    const MAX_COLUMNS: usize = 2;
+
                                     let max_width = galleys
                                         .iter()
                                         .map(|galley| galley.size().x)
@@ -140,33 +139,69 @@ impl NewNodeUi {
                                         .unwrap_or(MIN_WIDTH)
                                         .max(MIN_WIDTH);
 
+                                    let button_width = max_width + gui.style.padding * 2.0;
+                                    let button_height =
+                                        gui.font_height(&btn_font) + gui.style.small_padding * 2.0;
+
+                                    // Calculate how many items fit in available height
+                                    let available_height = gui.ui().available_height();
+                                    let max_items_per_column =
+                                        (available_height / button_height).floor().max(1.0)
+                                            as usize;
+
+                                    // Use minimum columns needed to fit all items without scrolling
+                                    let num_columns = if funcs.len() <= max_items_per_column {
+                                        1
+                                    } else if funcs.len() <= max_items_per_column * MAX_COLUMNS {
+                                        // Items fit in multiple columns without scrolling
+                                        MAX_COLUMNS
+                                    } else {
+                                        // Need scrolling anyway, use max columns
+                                        MAX_COLUMNS
+                                    };
+                                    // Distribute items evenly across columns
+                                    let rows_per_column = funcs.len().div_ceil(num_columns);
+
+                                    // Limit width to actual number of columns used
+                                    let total_width = button_width * num_columns as f32;
+                                    gui.ui().set_max_width(total_width);
+
                                     ScrollArea::vertical()
                                         .id(gui.ui.make_persistent_id((
                                             "new_node_ui_funcs_category_scroll",
                                             category,
                                         )))
-                                        .max_width(max_width)
-                                        // .max_height(MAX_SCROLL_HEIGHT)
                                         .show(gui, |gui| {
-                                            for (galley, func) in galleys.iter().zip(&funcs) {
-                                                let button_width =
-                                                    max_width + gui.style.padding * 2.0;
-                                                let button_height = gui.font_height(&btn_font)
-                                                    + gui.style.small_padding * 2.0;
+                                            gui.horizontal(|gui| {
+                                                let mut items: BumpVec<_> = BumpVec::new_in(arena);
+                                                items.extend(galleys.iter().zip(&funcs));
 
-                                                let mut btn = Button::default()
-                                                    .background(gui.style.list_button)
-                                                    .galley(galley.clone())
-                                                    .size(vec2(button_width, button_height))
-                                                    .align(Align::Min);
-                                                if let Some(tooltip) = func.description.as_ref() {
-                                                    btn = btn.tooltip(tooltip);
-                                                }
+                                                for column_items in items.chunks(rows_per_column) {
+                                                    gui.vertical(|gui| {
+                                                        for (galley, func) in column_items {
+                                                            let mut btn = Button::default()
+                                                                .background(gui.style.list_button)
+                                                                .galley((*galley).clone())
+                                                                .size(vec2(
+                                                                    button_width,
+                                                                    button_height,
+                                                                ))
+                                                                .align(Align::Min);
+                                                            if let Some(tooltip) =
+                                                                func.description.as_ref()
+                                                            {
+                                                                btn = btn.tooltip(tooltip);
+                                                            }
 
-                                                if btn.show(gui).clicked() {
-                                                    selection = Some(NewNodeSelection::Func(func));
+                                                            if btn.show(gui).clicked() {
+                                                                selection = Some(
+                                                                    NewNodeSelection::Func(func),
+                                                                );
+                                                            }
+                                                        }
+                                                    });
                                                 }
-                                            }
+                                            });
                                         });
                                 });
                             });
