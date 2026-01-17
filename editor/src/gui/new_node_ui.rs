@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Align, Color32, Galley, Key, Order, Pos2, Shape, pos2, vec2};
+use egui::{Align, Galley, Key, Order, Pos2, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -144,11 +144,7 @@ impl NewNodeUi {
 
                                         let mut btn = Button::default()
                                             .background(gui.style.list_button)
-                                            .shapes([Shape::galley(
-                                                pos2(0.0, 0.0),
-                                                galley.clone(),
-                                                Color32::WHITE,
-                                            )])
+                                            .galley(galley.clone())
                                             .size(vec2(button_width, button_height))
                                             .align(Align::Min);
                                         if let Some(tooltip) = func.description.as_ref() {

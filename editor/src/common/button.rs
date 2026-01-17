@@ -1,21 +1,24 @@
+use std::sync::Arc;
+
 use eframe::egui;
-use egui::{Align, FontId, Rect, Response, Sense, Shape, StrokeKind, Vec2, vec2};
+use egui::{Align, FontId, Galley, Rect, Response, Sense, Shape, StrokeKind, Vec2, vec2};
 
 use crate::gui::Gui;
 use crate::gui::style::ButtonStyle;
 
-#[derive(Debug)]
 pub struct Button<'a> {
     enabled: bool,
-    text: Option<&'a str>,
     font: Option<FontId>,
     tooltip: Option<&'a str>,
     background: Option<ButtonStyle>,
     rect: Option<Rect>,
     size: Option<Vec2>,
-    shapes: Vec<Shape>,
     toggle_value: Option<&'a mut bool>,
     content_align: Align,
+
+    text: Option<&'a str>,
+    custom_galley: Option<Arc<Galley>>,
+    shapes: Vec<Shape>,
 }
 
 impl<'a> Default for Button<'a> {
@@ -31,6 +34,7 @@ impl<'a> Default for Button<'a> {
             shapes: Vec::new(),
             toggle_value: None,
             content_align: Align::Center,
+            custom_galley: None,
         }
     }
 }
@@ -87,6 +91,11 @@ impl<'a> Button<'a> {
         self
     }
 
+    pub fn galley(mut self, galley: Arc<Galley>) -> Self {
+        self.custom_galley = Some(galley);
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let is_checked = self.toggle_value.as_deref().copied().unwrap_or(false);
 
@@ -104,7 +113,7 @@ impl<'a> Button<'a> {
                 .layout_no_wrap(text.to_string(), font, text_color);
             Some(galley)
         } else {
-            None
+            self.custom_galley.as_ref().and_then(|g| Some(g.clone()))
         };
 
         let sense = if self.enabled {
