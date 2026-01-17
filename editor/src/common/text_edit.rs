@@ -303,7 +303,6 @@ impl<'t> TextEdit<'t> {
     }
 
     /// Set the background color of the [`TextEdit`]. The default is [`crate::Visuals::text_edit_bg_color`].
-    // TODO(bircni): remove this once #3284 is implemented
     #[inline]
     pub fn background_color(mut self, color: Color32) -> Self {
         self.background_color = Some(color);
@@ -525,7 +524,7 @@ impl TextEdit<'_> {
                         frame_rect,
                         visuals.corner_radius,
                         background_color,
-                        visuals.bg_stroke, // TODO(emilk): we want to show something here, or a text-edit field doesn't "pop".
+                        visuals.bg_stroke,
                         StrokeKind::Inside,
                     )
                 }
@@ -534,7 +533,7 @@ impl TextEdit<'_> {
                 epaint::RectShape::stroke(
                     frame_rect,
                     visuals.corner_radius,
-                    visuals.bg_stroke, // TODO(emilk): we want to show something here, or a text-edit field doesn't "pop".
+                    visuals.bg_stroke,
                     StrokeKind::Inside,
                 )
             };
@@ -656,8 +655,6 @@ impl TextEdit<'_> {
             if response.hovered() && text.is_mutable() {
                 ui.output_mut(|o| o.mutable_text_under_cursor = true);
             }
-
-            // TODO(emilk): drag selected text to either move or clone (ctrl on windows, alt on mac)
 
             let cursor_at_pointer =
                 galley.cursor_from_pos(pointer_pos - rect.min + state.text_offset);
@@ -1050,7 +1047,6 @@ fn events(
             } if multiline => {
                 let mut ccursor = text.delete_selected(&cursor_range);
                 if modifiers.shift {
-                    // TODO(emilk): support removing indentation over a selection?
                     text.decrease_indentation(&mut ccursor);
                 } else {
                     text.insert_text_at(&mut ccursor, "\t", char_limit);
@@ -1069,7 +1065,6 @@ fn events(
                 if multiline {
                     let mut ccursor = text.delete_selected(&cursor_range);
                     text.insert_text_at(&mut ccursor, "\n", char_limit);
-                    // TODO(emilk): if code editor, auto-indent by same leading tabs, + one if the lines end on an opening bracket
                     Some(CCursorRange::one(ccursor))
                 } else {
                     ui.memory_mut(|mem| mem.surrender_focus(id)); // End input with enter

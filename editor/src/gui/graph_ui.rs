@@ -41,6 +41,8 @@ enum InteractionState {
     Idle,
     BreakingConnections,
     DraggingNewConnection,
+
+    // todo try and remove
     PanningGraph,
 }
 
