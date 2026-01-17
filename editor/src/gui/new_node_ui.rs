@@ -11,7 +11,11 @@ use crate::common::area::Area;
 use crate::common::button::Button;
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
+use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
+
+/// Maximum height for the function list scroll area
+const MAX_SCROLL_HEIGHT: f32 = 300.0;
 
 /// Result of showing the new node UI
 #[derive(Debug)]
@@ -138,24 +142,34 @@ impl NewNodeUi {
                                         .unwrap_or(MIN_WIDTH)
                                         .max(MIN_WIDTH);
 
-                                    for (galley, func) in galleys.iter().zip(funcs) {
-                                        let button_width = max_width + gui.style.padding * 2.0;
-                                        let button_height = gui.font_height(&btn_font)
-                                            + gui.style.small_padding * 2.0;
+                                    ScrollArea::vertical()
+                                        .id(gui.ui.make_persistent_id((
+                                            "new_node_ui_funcs_category_scroll",
+                                            category,
+                                        )))
+                                        .max_width(max_width)
+                                        // .max_height(MAX_SCROLL_HEIGHT)
+                                        .show(gui, |gui| {
+                                            for (galley, func) in galleys.iter().zip(&funcs) {
+                                                let button_width =
+                                                    max_width + gui.style.padding * 2.0;
+                                                let button_height = gui.font_height(&btn_font)
+                                                    + gui.style.small_padding * 2.0;
 
-                                        let mut btn = Button::default()
-                                            .background(gui.style.list_button)
-                                            .galley(galley.clone())
-                                            .size(vec2(button_width, button_height))
-                                            .align(Align::Min);
-                                        if let Some(tooltip) = func.description.as_ref() {
-                                            btn = btn.tooltip(tooltip);
-                                        }
+                                                let mut btn = Button::default()
+                                                    .background(gui.style.list_button)
+                                                    .galley(galley.clone())
+                                                    .size(vec2(button_width, button_height))
+                                                    .align(Align::Min);
+                                                if let Some(tooltip) = func.description.as_ref() {
+                                                    btn = btn.tooltip(tooltip);
+                                                }
 
-                                        if btn.show(gui).clicked() {
-                                            selection = Some(NewNodeSelection::Func(func));
-                                        }
-                                    }
+                                                if btn.show(gui).clicked() {
+                                                    selection = Some(NewNodeSelection::Func(func));
+                                                }
+                                            }
+                                        });
                                 });
                             });
                         }
