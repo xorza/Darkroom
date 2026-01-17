@@ -1,6 +1,11 @@
 use arc_swap::ArcSwapOption;
 use std::sync::Arc;
+use thiserror::Error;
 use tokio::sync::Notify;
+
+#[derive(Debug, Error)]
+#[error("Cannot take value: other references exist")]
+pub struct Error;
 
 /// A lockless single-value slot for cross-thread communication.
 ///
@@ -43,6 +48,20 @@ impl<T> Slot<T> {
     /// Returns `None` if slot is empty or if other references exist (from `peek`/`peek_or_wait`).
     pub fn take(&self) -> Option<T> {
         self.value.swap(None).and_then(Arc::into_inner)
+    }
+
+    /// Takes the value, waiting asynchronously if none exists.
+    /// Returns error if other references exist (from `peek`/`peek_or_wait`).
+    pub async fn take_or_wait(&self) -> Result<T, Error> {
+        loop {
+            let notified = self.notify.notified();
+
+            if let Some(arc) = self.value.swap(None) {
+                return Arc::into_inner(arc).ok_or(Error);
+            }
+
+            notified.await;
+        }
     }
 
     /// Returns a clone of the value if present, without removing it.
@@ -224,5 +243,54 @@ mod tests {
             let result = handle.await.unwrap();
             assert_eq!(result, 999);
         }
+    }
+
+    #[tokio::test]
+    async fn take_or_wait_returns_immediately_if_value_exists() {
+        let slot = Slot::default();
+        slot.send(42);
+
+        let val = slot.take_or_wait().await;
+        assert_eq!(val.unwrap(), 42);
+
+        // Value should be gone
+        assert!(!slot.has_value());
+    }
+
+    #[tokio::test]
+    async fn take_or_wait_waits_for_value() {
+        let slot = Slot::default();
+        let slot_clone = slot.clone();
+
+        let handle = tokio::spawn(async move { slot_clone.take_or_wait().await });
+
+        // Give the task a moment to start waiting
+        tokio::task::yield_now().await;
+
+        // Value shouldn't be there yet, task should be waiting
+        assert!(!slot.has_value());
+
+        // Send the value
+        slot.send(123);
+
+        // Task should complete with the value
+        let result = handle.await.unwrap();
+        assert_eq!(result.unwrap(), 123);
+
+        // Value should be gone
+        assert!(!slot.has_value());
+    }
+
+    #[tokio::test]
+    async fn take_or_wait_returns_error_when_references_exist() {
+        let slot = Slot::default();
+        slot.send(42);
+
+        // Hold a reference via peek
+        let _peeked = slot.peek().unwrap();
+
+        // take_or_wait should return error since reference exists
+        let result = slot.take_or_wait().await;
+        assert!(result.is_err());
     }
 }
