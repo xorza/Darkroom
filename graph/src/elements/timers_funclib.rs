@@ -6,9 +6,9 @@ use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
-use common::BoolExt;
 use common::lambda::Lambda;
 use common::slot::Slot;
+use common::{BoolExt, FloatExt};
 use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
@@ -87,6 +87,9 @@ impl Default for TimersFuncLib {
                             let fps_state_slot = fps_state_slot.clone();
                             Box::pin(async move {
                                 let state = fps_state_slot.peek_or_wait().await;
+                                if state.frequency.approximately_eq(0.0) {
+                                    std::future::pending::<()>().await;
+                                }
 
                                 let desired_duration =
                                     Duration::from_secs_f64(1.0 / state.frequency);
@@ -173,7 +176,7 @@ impl Default for TimersFuncLib {
         let reset_fps_state = Lambda::new({
             let fps_state_slot = fps_state_slot.clone();
             move || {
-                fps_state_slot.send(FpsEventState::default());
+                fps_state_slot.take();
             }
         });
 
