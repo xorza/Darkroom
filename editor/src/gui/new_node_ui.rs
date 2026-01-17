@@ -128,14 +128,15 @@ impl NewNodeUi {
                                         )
                                     }));
 
+                                    const MIN_WIDTH: f32 = 80.0;
                                     let max_width = galleys
                                         .iter()
                                         .map(|galley| galley.size().x)
                                         .max_by(|&a, &b| {
                                             a.partial_cmp(&b).unwrap_or(Ordering::Equal)
                                         })
-                                        .unwrap_or(80.0)
-                                        .max(80.0);
+                                        .unwrap_or(MIN_WIDTH)
+                                        .max(MIN_WIDTH);
 
                                     for (galley, func) in galleys.iter().zip(funcs) {
                                         let button_width = max_width + gui.style.padding * 2.0;
