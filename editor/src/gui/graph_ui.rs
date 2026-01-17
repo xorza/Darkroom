@@ -71,6 +71,8 @@ pub struct GraphUi {
     node_details_ui: NodeDetailsUi,
     /// When set, a new node selection will connect its first output to this input port
     pending_connection_input: Option<PortRef>,
+    /// When set, a new node selection will connect its first input to this output port
+    pending_connection_output: Option<PortRef>,
 }
 
 impl GraphUi {
@@ -213,6 +215,7 @@ impl GraphUi {
 
                     let (node, view_node) = ctx.view_graph.add_node_from_func(func);
                     view_node.pos = pos;
+                    let new_node_id = node.id;
 
                     interaction.add_action(GraphUiAction::NodeAdded {
                         view_node: view_node.clone(),
@@ -224,9 +227,25 @@ impl GraphUi {
                         && !func.outputs.is_empty()
                     {
                         let output_port = PortRef {
-                            node_id: node.id,
+                            node_id: new_node_id,
                             port_idx: 0,
                             kind: PortKind::Output,
+                        };
+                        let result = apply_data_connection(ctx.view_graph, input_port, output_port);
+                        match result {
+                            Ok(action) => interaction.add_action(action),
+                            Err(err) => interaction.add_error(err),
+                        }
+                    }
+
+                    // If there's a pending output connection, connect it to the new node's first input
+                    if let Some(output_port) = self.pending_connection_output.take()
+                        && !func.inputs.is_empty()
+                    {
+                        let input_port = PortRef {
+                            node_id: new_node_id,
+                            port_idx: 0,
+                            kind: PortKind::Input,
                         };
                         let result = apply_data_connection(ctx.view_graph, input_port, output_port);
                         match result {
@@ -255,8 +274,9 @@ impl GraphUi {
                 }
             }
         } else if was_open && !self.new_node_ui.is_open() {
-            // New node UI was closed without selection, clear pending connection
+            // New node UI was closed without selection, clear pending connections
             self.pending_connection_input = None;
+            self.pending_connection_output = None;
         }
     }
 
@@ -397,6 +417,15 @@ impl GraphUi {
                         // Open new_node_ui to let user select a node to connect (with const bind option)
                         self.new_node_ui.open_from_connection(pointer_pos);
                         self.pending_connection_input = Some(input_port);
+                    }
+                    ConnectionDragUpdate::FinishedWithEmptyInput { output_port } => {
+                        assert_eq!(output_port.kind, PortKind::Output);
+
+                        self.state = InteractionState::Idle;
+
+                        // Open new_node_ui to let user select a node to connect
+                        self.new_node_ui.open(pointer_pos);
+                        self.pending_connection_output = Some(output_port);
                     }
                     ConnectionDragUpdate::FinishedWith {
                         input_port,

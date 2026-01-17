@@ -53,6 +53,9 @@ pub(crate) enum ConnectionDragUpdate {
     FinishedWithEmptyOutput {
         input_port: PortRef,
     },
+    FinishedWithEmptyInput {
+        output_port: PortRef,
+    },
     FinishedWith {
         input_port: PortRef,
         output_port: PortRef,
@@ -425,6 +428,10 @@ impl ConnectionUi {
                 } else if drag.start_port.port.kind == PortKind::Input {
                     ConnectionDragUpdate::FinishedWithEmptyOutput {
                         input_port: drag.start_port.port,
+                    }
+                } else if drag.start_port.port.kind == PortKind::Output {
+                    ConnectionDragUpdate::FinishedWithEmptyInput {
+                        output_port: drag.start_port.port,
                     }
                 } else {
                     ConnectionDragUpdate::Finished
