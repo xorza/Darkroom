@@ -87,6 +87,7 @@ impl Default for TimersFuncLib {
                             let fps_state_slot = fps_state_slot.clone();
                             Box::pin(async move {
                                 let state = fps_state_slot.peek_or_wait().await;
+
                                 if state.frequency.approximately_eq(0.0) {
                                     std::future::pending::<()>().await;
                                 }
