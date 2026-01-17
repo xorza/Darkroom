@@ -23,6 +23,15 @@ pub enum WorkerMessage {
     Events {
         events: Vec<EventRef>,
     },
+    EventFromLoop {
+        loop_id: u64,
+        event: EventRef,
+    },
+    EventsFromLoop {
+        loop_id: u64,
+        events: Vec<EventRef>,
+    },
+
     Update {
         graph: Graph,
         func_lib: FuncLib,
@@ -129,12 +138,15 @@ async fn worker_loop<Callback>(
     let mut msgs: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
     let mut events: HashSet<EventRef> = HashSet::default();
+    let mut events_from_loop: HashSet<(u64, EventRef)> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
     let mut processing_callback: Option<ProcessingCallback> = None;
     let event_loop_pause_gate = PauseGate::default();
+    let mut current_loop_id: u64 = 0;
 
     loop {
         assert!(events.is_empty());
+        assert!(events_from_loop.is_empty());
         assert!(processing_callback.is_none());
 
         msgs.clear();
@@ -167,27 +179,42 @@ async fn worker_loop<Callback>(
                     events.insert(event);
                 }
                 WorkerMessage::Events { events: new_events } => events.extend(new_events),
+                WorkerMessage::EventFromLoop { loop_id, event } => {
+                    if current_loop_id == loop_id {
+                        events_from_loop.insert((loop_id, event));
+                    }
+                }
+                WorkerMessage::EventsFromLoop {
+                    loop_id,
+                    events: mut new_events,
+                } => {
+                    if current_loop_id == loop_id {
+                        for event in new_events.drain(..) {
+                            events_from_loop.insert((loop_id, event));
+                        }
+                    }
+                }
                 WorkerMessage::Update { graph, func_lib } => {
                     should_start_event_loop = event_loop_handle.is_some();
                     stop_event_loop(&mut event_loop_handle).await;
-                    events.clear();
+                    events_from_loop.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
                     should_start_event_loop = event_loop_handle.is_some();
                     stop_event_loop(&mut event_loop_handle).await;
-                    events.clear();
+                    events_from_loop.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
-                    events.clear();
+                    events_from_loop.clear();
                     should_start_event_loop = true;
                 }
                 WorkerMessage::StopEventLoop => {
                     stop_event_loop(&mut event_loop_handle).await;
-                    events.clear();
+                    events_from_loop.clear();
                 }
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
                 WorkerMessage::ProcessingCallback { callback } => {
@@ -204,6 +231,12 @@ async fn worker_loop<Callback>(
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
         }
+
+        events.extend(
+            events_from_loop
+                .drain()
+                .filter_map(|(loop_id, event)| (loop_id == current_loop_id).then_some(event)),
+        );
 
         if execute_terminals || !events.is_empty() {
             let result = execution_graph
@@ -227,11 +260,13 @@ async fn worker_loop<Callback>(
                 let events_triggers = collect_active_event_triggers(&mut execution_graph);
 
                 if !events_triggers.is_empty() {
+                    current_loop_id += 1;
                     event_loop_handle = Some(
                         start_event_loop(
                             worker_message_tx.clone(),
                             events_triggers,
                             event_loop_pause_gate.clone(),
+                            current_loop_id,
                         )
                         .await,
                     );
@@ -254,6 +289,7 @@ async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
     events: Vec<(EventRef, EventLambda)>,
     pause_gate: PauseGate,
+    loop_id: u64,
 ) -> EventLoopHandle {
     assert!(!events.is_empty());
 
@@ -283,10 +319,14 @@ async fn start_event_loop(
                 events.retain(|event| seen.insert(*event));
 
                 let result = if events.len() == 1 {
-                    worker_message_tx.send(WorkerMessage::Event { event: events[0] })
+                    worker_message_tx.send(WorkerMessage::EventFromLoop {
+                        event: events[0],
+                        loop_id,
+                    })
                 } else {
-                    worker_message_tx.send(WorkerMessage::Events {
+                    worker_message_tx.send(WorkerMessage::EventsFromLoop {
                         events: std::mem::take(&mut events),
+                        loop_id,
                     })
                 };
 
@@ -558,11 +598,12 @@ mod tests {
                 event_lambda,
             )],
             PauseGate::default(),
+            0,
         )
         .await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::Event { event } = msg else {
+        let WorkerMessage::EventFromLoop { event, .. } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
@@ -604,6 +645,7 @@ mod tests {
                 event_lambda,
             )],
             PauseGate::default(),
+            0,
         )
         .await;
 
@@ -613,7 +655,7 @@ mod tests {
             .await
             .expect("Expected event message")
             .expect("Event channel closed");
-        let WorkerMessage::Event { event } = msg else {
+        let WorkerMessage::EventFromLoop { event, .. } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
@@ -655,6 +697,7 @@ mod tests {
                 event_lambda,
             )],
             pause_gate.clone(),
+            0,
         )
         .await;
 
