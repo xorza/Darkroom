@@ -403,11 +403,9 @@ impl ConnectionUi {
             return ConnectionDragUpdate::InProgress;
         }
 
-        if self.temp_connection.is_none() {
-            return ConnectionDragUpdate::Finished;
-        }
-
-        let drag = self.temp_connection.as_mut().unwrap();
+        let Some(drag) = self.temp_connection.as_mut() else {
+            unreachable!("Didn't receive PortInteractCommand::DragStart")
+        };
         drag.current_pos = pointer_pos;
 
         match port_interact_cmd {
