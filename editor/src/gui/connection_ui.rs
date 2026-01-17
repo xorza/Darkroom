@@ -353,7 +353,26 @@ impl ConnectionUi {
             }
         }
 
-        if let Some(temp_connection) = &self.temp_connection {
+        if let Some(temp_connection) = &mut self.temp_connection {
+            {
+                let layout1 = graph_layout.node_layout(&temp_connection.start_port.port.node_id);
+                if temp_connection.start_port.port.kind == PortKind::Input {
+                    temp_connection.start_port.center =
+                        layout1.input_center(temp_connection.start_port.port.port_idx);
+                } else {
+                    temp_connection.start_port.center =
+                        layout1.output_center(temp_connection.start_port.port.port_idx);
+                }
+                if let Some(end) = temp_connection.end_port.as_mut() {
+                    let layout1 = graph_layout.node_layout(&end.port.node_id);
+                    if end.port.kind == PortKind::Input {
+                        end.center = layout1.input_center(end.port.port_idx);
+                    } else {
+                        end.center = layout1.output_center(end.port.port_idx);
+                    }
+                }
+            }
+
             let (start, end) = match temp_connection.start_port.port.kind {
                 PortKind::Trigger | PortKind::Input => (
                     temp_connection.current_pos,

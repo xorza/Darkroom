@@ -73,6 +73,13 @@ pub struct GraphUi {
 
 impl GraphUi {
     pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData, arena: &Bump) {
+        let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
+        let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
+
+        if secondary_pressed || esc_pressed {
+            self.to_idle();
+        }
+
         let rect = gui
             .ui()
             .available_rect_before_wrap()
@@ -241,8 +248,7 @@ impl GraphUi {
                 }
             }
         } else if was_open && !self.new_node_ui.is_open() {
-            self.state = InteractionState::Idle;
-            self.connections.stop_drag();
+            self.to_idle();
         }
     }
 
@@ -267,7 +273,6 @@ impl GraphUi {
                 None
             }
         });
-        let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
 
         let pointer_on_background =
             background_response.hovered() && !self.connections.any_hovered();
@@ -276,15 +281,6 @@ impl GraphUi {
             primary_state,
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
-
-        let esc_pressed = gui.ui().input(|input| input.key_pressed(Key::Escape));
-
-        if secondary_pressed || esc_pressed {
-            self.connection_breaker.reset();
-            self.state = InteractionState::Idle;
-            self.connections.stop_drag();
-            return;
-        }
 
         match self.state {
             InteractionState::PanningGraph => {}
@@ -303,8 +299,7 @@ impl GraphUi {
                 if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
-                    self.connection_breaker.reset();
-                    self.state = InteractionState::Idle;
+                    self.to_idle();
 
                     let iter = self
                         .connections
@@ -372,8 +367,7 @@ impl GraphUi {
                 match update {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
-                        self.connections.stop_drag();
-                        self.state = InteractionState::Idle;
+                        self.to_idle();
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                         assert_eq!(input_port.kind, PortKind::Input);
@@ -392,8 +386,6 @@ impl GraphUi {
                         output_port,
                     } => {
                         assert_eq!(input_port.kind, output_port.kind.opposite());
-
-                        self.state = InteractionState::Idle;
 
                         match output_port.kind {
                             PortKind::Output => {
@@ -416,11 +408,17 @@ impl GraphUi {
                             _ => unreachable!(),
                         }
 
-                        self.connections.stop_drag();
+                        self.to_idle();
                     }
                 }
             }
         }
+    }
+
+    fn to_idle(&mut self) {
+        self.state = InteractionState::Idle;
+        self.connections.stop_drag();
+        self.connection_breaker.reset();
     }
 
     fn render_connections(
@@ -588,7 +586,7 @@ impl GraphUi {
             }
             InteractionState::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.state = InteractionState::Idle;
+                    self.to_idle();
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();
