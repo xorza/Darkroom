@@ -296,14 +296,14 @@ async fn start_event_loop(
 
                 loop {
                     event_lambda.invoke().await;
-                    // Pause gate blocks new iterations while the main worker is processing.
-                    // This prevents event buildup during graph execution.
-                    pause_gate.wait().await;
+
                     let result = event_tx.send(event_ref).await;
                     if result.is_err() {
                         return;
                     }
-
+                    // Pause gate blocks new iterations while the main worker is processing.
+                    // This prevents event buildup during graph execution.
+                    pause_gate.wait().await;
                     tokio::task::yield_now().await;
                 }
             }
