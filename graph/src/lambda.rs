@@ -68,7 +68,7 @@ impl FuncLambda {
     }
 
     pub fn is_none(&self) -> bool {
-        return matches!(self, Self::None);
+        matches!(self, Self::None)
     }
 
     pub async fn invoke(
