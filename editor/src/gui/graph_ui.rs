@@ -368,8 +368,7 @@ impl GraphUi {
                 }
             }
             InteractionState::DraggingNewConnection => {
-                let update = self.connections.update_drag(pointer_pos, port_interact_cmd);
-                match update {
+                match self.connections.update_drag(pointer_pos, port_interact_cmd) {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
                         self.reset_to(InteractionState::Idle);
