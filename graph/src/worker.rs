@@ -92,8 +92,12 @@ impl Worker {
             .expect("Failed to send message to worker, it probably exited");
     }
 
-    pub fn update(&self, graph: Graph, func_lib: FuncLib) {
-        self.send(WorkerMessage::Update { graph, func_lib });
+    pub fn send_many<T: IntoIterator<Item = WorkerMessage>>(&self, msgs: T) {
+        self.tx
+            .send(WorkerMessage::Multi {
+                msgs: msgs.into_iter().collect(),
+            })
+            .expect("Failed to send message to worker, it probably exited");
     }
 
     pub fn exit(&mut self) {
@@ -478,13 +482,18 @@ mod tests {
                 .expect("Failed to send a compute callback event");
         });
 
-        worker.update(graph.clone(), func_lib.clone());
-        worker.send(WorkerMessage::Event {
-            event: EventRef {
-                node_id: frame_event_node_id,
-                event_idx: 0,
+        worker.send_many([
+            WorkerMessage::Update {
+                graph: graph.clone(),
+                func_lib: func_lib.clone(),
             },
-        });
+            WorkerMessage::Event {
+                event: EventRef {
+                    node_id: frame_event_node_id,
+                    event_idx: 0,
+                },
+            },
+        ]);
 
         let executed = compute_finish_rx
             .recv()
