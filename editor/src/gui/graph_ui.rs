@@ -289,7 +289,7 @@ impl GraphUi {
             primary_state,
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
-        let primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
+        let _primary_pressed = matches!(primary_state, Some(PointerButtonState::Pressed));
 
         match self.state {
             InteractionState::PanningGraph => {}
@@ -418,9 +418,6 @@ impl GraphUi {
 
                         self.reset_to(InteractionState::Idle);
                     }
-                }
-                if primary_pressed && !pointer_on_background {
-                    self.reset_to(InteractionState::Idle);
                 }
             }
         }
