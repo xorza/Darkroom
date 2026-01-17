@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
@@ -8,6 +8,7 @@ use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOut
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::BoolExt;
+use common::slot::Slot;
 use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
@@ -21,8 +22,13 @@ pub struct TimersFuncLib {
 
 #[derive(Debug)]
 struct FrameEventCache {
-    last_frame: Instant,
     frame_no: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FpsEventState {
+    frequency: f64,
+    last_execution: Instant,
 }
 
 impl TimersFuncLib {
@@ -40,6 +46,8 @@ impl TimersFuncLib {
 impl Default for TimersFuncLib {
     fn default() -> TimersFuncLib {
         let mut func_lib = FuncLib::default();
+
+        let fps_state_slot: Slot<FpsEventState> = Slot::default();
 
         func_lib.add(Func {
             id: FRAME_EVENT_FUNC_ID,
@@ -76,46 +84,69 @@ impl Default for TimersFuncLib {
                 },
                 FuncEvent {
                     name: "fps".into(),
-                    event_lambda: EventLambda::None,
+                    event_lambda: EventLambda::new({
+                        let fps_state_slot = fps_state_slot.clone();
+                        move || {
+                            let fps_state_slot = fps_state_slot.clone();
+                            Box::pin(async move {
+                                let state = fps_state_slot.take().unwrap_or(FpsEventState {
+                                    frequency: 30.0,
+                                    last_execution: Instant::now(),
+                                });
+
+                                let desired_duration =
+                                    Duration::from_secs_f64(1.0 / state.frequency);
+                                let elapsed = state.last_execution.elapsed();
+
+                                if elapsed < desired_duration {
+                                    tokio::time::sleep(desired_duration - elapsed).await;
+                                }
+                                // If elapsed >= desired_duration, fire immediately (no sleep)
+                            })
+                        }
+                    }),
                 },
             ],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_context_manager,
-                                        cache,
-                                        inputs,
-                                        _output_usage,
-                                        outputs| {
-                let now = Instant::now();
+            lambda: async_lambda!(
+                move |_context_manager, cache, inputs, _output_usage, outputs| {
+                    fps_state_slot = fps_state_slot.clone(),
+                } => {
+                    let now = Instant::now();
 
-                let (delta, frame_no) = {
-                    if let Some(frame_event_cache) = cache.get_mut::<FrameEventCache>() {
-                        let delta = now
-                            .duration_since(frame_event_cache.last_frame)
-                            .as_secs_f64();
-                        let frame_no = frame_event_cache.frame_no;
+                    let frequency = inputs[0]
+                        .value
+                        .is_none()
+                        .then_else_with(|| 30.0, || inputs[0].value.as_f64());
 
-                        frame_event_cache.last_frame = now;
-                        frame_event_cache.frame_no += 1;
+                    // Get delta from previous state if available
+                    let delta = fps_state_slot
+                        .take()
+                        .map(|state| state.last_execution.elapsed().as_secs_f64())
+                        .unwrap_or(1.0 / frequency);
 
-                        (delta, frame_no)
-                    } else {
-                        cache.set(FrameEventCache {
-                            last_frame: now,
-                            frame_no: 2,
-                        });
+                    // Send new state for the fps event
+                    fps_state_slot.send(FpsEventState {
+                        frequency,
+                        last_execution: now,
+                    });
 
-                        let frequency = inputs[0]
-                            .value
-                            .is_none()
-                            .then_else_with(|| 30.0, || inputs[0].value.as_f64());
-                        (1.0 / frequency, 1)
-                    }
-                };
+                    let frame_no = {
+                        if let Some(frame_event_cache) = cache.get_mut::<FrameEventCache>() {
+                            let frame_no = frame_event_cache.frame_no;
+                            frame_event_cache.frame_no += 1;
+                            frame_no
+                        } else {
+                            cache.set(FrameEventCache { frame_no: 2 });
+                            1
+                        }
+                    };
 
-                outputs[0] = DynamicValue::Float(delta);
-                outputs[1] = DynamicValue::Int(frame_no);
-                Ok(())
-            }),
+                    outputs[0] = DynamicValue::Float(delta);
+                    outputs[1] = DynamicValue::Int(frame_no);
+                    Ok(())
+                }
+            ),
         });
 
         let run_event = Arc::new(Notify::new());
