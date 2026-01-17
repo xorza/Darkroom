@@ -119,7 +119,6 @@ impl Drop for Worker {
 enum EventLoopCommand {
     None,
     Start,
-    Stop,
 }
 
 async fn worker_loop<Callback>(
@@ -163,22 +162,29 @@ async fn worker_loop<Callback>(
 
         while let Some(msg) = msgs.pop_front() {
             match msg {
-                WorkerMessage::Exit => return,
+                WorkerMessage::Exit => {
+                    stop_event_loop(&mut event_loop_handle).await;
+                    return;
+                }
                 WorkerMessage::Event { event } => {
                     events.insert(event);
                 }
                 WorkerMessage::Events { events: new_events } => events.extend(new_events),
                 WorkerMessage::Update { graph, func_lib } => {
+                    stop_event_loop(&mut event_loop_handle).await;
                     events.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
+                    stop_event_loop(&mut event_loop_handle).await;
                     events.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => event_loop_cmd = EventLoopCommand::Start,
-                WorkerMessage::StopEventLoop => event_loop_cmd = EventLoopCommand::Stop,
+                WorkerMessage::StopEventLoop => {
+                    stop_event_loop(&mut event_loop_handle).await;
+                }
                 WorkerMessage::Multi { msgs: new_msgs } => msgs.extend(new_msgs),
                 WorkerMessage::ProcessingCallback { callback } => {
                     processing_callback = Some(callback)
@@ -194,7 +200,6 @@ async fn worker_loop<Callback>(
             if event_loop_handle.is_some() && matches!(event_loop_cmd, EventLoopCommand::None) {
                 event_loop_cmd = EventLoopCommand::Start;
             }
-            stop_event_loop(&mut event_loop_handle).await;
 
             tracing::info!("Graph updated");
             execution_graph.update(&graph, &func_lib);
@@ -215,6 +220,7 @@ async fn worker_loop<Callback>(
             EventLoopCommand::None => {}
             EventLoopCommand::Start => {
                 stop_event_loop(&mut event_loop_handle).await;
+
                 let result = execution_graph.execute(false, true, []).await;
                 let ok = result.is_ok();
                 (execution_callback.lock().await)(result);
@@ -235,9 +241,6 @@ async fn worker_loop<Callback>(
                         tracing::info!("Event loop started");
                     }
                 }
-            }
-            EventLoopCommand::Stop => {
-                stop_event_loop(&mut event_loop_handle).await;
             }
         }
 
