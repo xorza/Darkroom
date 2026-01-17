@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ptr::NonNull, rc::Rc};
 
-use egui::{FontId, InnerResponse, Painter, Rect, Ui, UiBuilder};
+use egui::{Align, FontId, InnerResponse, Layout, Painter, Rect, Ui, UiBuilder};
 
 use crate::{common::UiEquals, gui::style::Style};
 
@@ -92,6 +92,22 @@ impl<'a> Gui<'a> {
             let mut gui = Gui::new_with_scale(ui, &style, self.scale);
             add_contents(&mut gui)
         })
+    }
+
+    /// Horizontal layout where children are stretched to fill the cross-axis (vertical) space.
+    /// This allows ScrollAreas inside to expand to the full available height.
+    pub fn horizontal_justified<R>(
+        &mut self,
+        add_contents: impl FnOnce(&mut Gui<'_>) -> R,
+    ) -> InnerResponse<R> {
+        let style = Rc::clone(&self.style);
+        self.ui.with_layout(
+            Layout::left_to_right(Align::Min).with_cross_justify(true),
+            |ui| {
+                let mut gui = Gui::new_with_scale(ui, &style, self.scale);
+                add_contents(&mut gui)
+            },
+        )
     }
 
     pub fn vertical<R>(

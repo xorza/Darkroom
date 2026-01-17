@@ -76,8 +76,9 @@ impl NewNodeUi {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     gui.ui().set_min_width(150.0);
                     gui.ui().set_min_height(150.0);
+                    gui.ui().set_max_height(300.0);
 
-                    gui.horizontal(|gui| {
+                    gui.horizontal_justified(|gui| {
                         // Show const bind option if opened from connection
                         if from_connection {
                             gui.vertical(|gui| {
