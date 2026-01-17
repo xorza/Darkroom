@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::async_lambda;
 use crate::data::{DataType, DynamicValue};
 use crate::event::EventLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
@@ -17,18 +16,15 @@ pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21
 pub struct TimersFuncLib {
     func_lib: FuncLib,
 
-    run_event: Arc<Notify>,
-}
-
-#[derive(Debug)]
-struct FrameEventCache {
-    frame_no: i64,
+    pub run_event: Arc<Notify>,
+    fps_state_slot: Slot<FpsEventState>,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct FpsEventState {
     frequency: f64,
     last_execution: Instant,
+    frame_no: i64,
 }
 
 impl TimersFuncLib {
@@ -40,6 +36,11 @@ impl TimersFuncLib {
 
     pub fn into_func_lib(self) -> FuncLib {
         self.func_lib
+    }
+
+    /// Resets the fps event state (frame_no and last_execution time).
+    pub fn reset_fps_state(&self) {
+        self.fps_state_slot.take();
     }
 }
 
@@ -105,45 +106,45 @@ impl Default for TimersFuncLib {
                 },
             ],
             required_contexts: vec![],
-            lambda: async_lambda!(
-                move |_context_manager, cache, inputs, _output_usage, outputs| {
-                    fps_state_slot = fps_state_slot.clone(),
-                } => {
-                    let now = Instant::now();
+            lambda: FuncLambda::new({
+                let fps_state_slot = fps_state_slot.clone();
+                move |_context_manager, _cache, inputs, _output_usage, outputs| {
+                    let fps_state_slot = fps_state_slot.clone();
 
-                    let frequency = inputs[0]
-                        .value
-                        .is_none()
-                        .then_else_with(|| 30.0, || inputs[0].value.as_f64());
+                    Box::pin(async move {
+                        let now = Instant::now();
 
-                    // Get delta from previous state if available
-                    let delta = fps_state_slot
-                        .peek()
-                        .map(|state| state.last_execution.elapsed().as_secs_f64())
-                        .unwrap_or(1.0 / frequency);
+                        let frequency = inputs[0]
+                            .value
+                            .is_none()
+                            .then_else_with(|| 30.0, || inputs[0].value.as_f64());
 
-                    // Send new state for the fps event
-                    fps_state_slot.send(FpsEventState {
-                        frequency,
-                        last_execution: now,
-                    });
+                        // Get previous state if available
+                        let prev_state = fps_state_slot.peek();
 
-                    let frame_no = {
-                        if let Some(frame_event_cache) = cache.get_mut::<FrameEventCache>() {
-                            let frame_no = frame_event_cache.frame_no;
-                            frame_event_cache.frame_no += 1;
-                            frame_no
-                        } else {
-                            cache.set(FrameEventCache { frame_no: 2 });
-                            1
-                        }
-                    };
+                        let delta = prev_state
+                            .as_ref()
+                            .map(|state| state.last_execution.elapsed().as_secs_f64())
+                            .unwrap_or(1.0 / frequency);
 
-                    outputs[0] = DynamicValue::Float(delta);
-                    outputs[1] = DynamicValue::Int(frame_no);
-                    Ok(())
+                        let frame_no = prev_state
+                            .as_ref()
+                            .map(|state| state.frame_no + 1)
+                            .unwrap_or(1);
+
+                        // Send new state for the fps event
+                        fps_state_slot.send(FpsEventState {
+                            frequency,
+                            last_execution: now,
+                            frame_no,
+                        });
+
+                        outputs[0] = DynamicValue::Float(delta);
+                        outputs[1] = DynamicValue::Int(frame_no);
+                        Ok(())
+                    })
                 }
-            ),
+            }),
         });
 
         let run_event = Arc::new(Notify::new());
@@ -176,6 +177,7 @@ impl Default for TimersFuncLib {
         TimersFuncLib {
             func_lib,
             run_event,
+            fps_state_slot,
         }
     }
 }
