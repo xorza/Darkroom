@@ -176,6 +176,13 @@ impl GraphUi {
             gui.set_scale(1.0);
             self.buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun);
 
+            self.node_details_ui.show(
+                gui,
+                &mut ctx,
+                &mut app_data.interaction,
+                &app_data.argument_values_cache,
+            );
+
             self.handle_new_node_popup(
                 gui,
                 &mut ctx,
@@ -183,13 +190,6 @@ impl GraphUi {
                 &mut app_data.interaction,
                 background_response,
                 arena,
-            );
-
-            self.node_details_ui.show(
-                gui,
-                &mut ctx,
-                &mut app_data.interaction,
-                &app_data.argument_values_cache,
             );
         });
     }

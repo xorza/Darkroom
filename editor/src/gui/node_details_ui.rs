@@ -4,8 +4,8 @@ use graph::data::DynamicValue;
 use graph::graph::NodeId;
 
 use crate::common::TextEdit;
-use crate::common::area::Area;
 use crate::common::frame::Frame;
+use crate::common::positioned_ui::PositionedUi;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
@@ -44,10 +44,9 @@ impl NodeDetailsUi {
 
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
 
-        Area::new(popup_id)
-            .fixed_pos(panel_rect.min)
-            .movable(false)
-            .interactable(true)
+        PositionedUi::new(popup_id, panel_rect.min)
+            .max_size(panel_rect.size())
+            .interactable(false)
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup).show(gui, |gui| {
                     let padding = gui.style.padding;
