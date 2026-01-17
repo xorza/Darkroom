@@ -235,41 +235,39 @@ impl AppData {
         }
 
         self.graph_dirty |= self.handle_actions();
+        let mut update_if_dirty = false;
 
         let mut msgs: Vec<WorkerMessage> = Vec::default();
-        let mut run_once: bool = false;
 
         match self.interaction.run_cmd {
+            RunCommand::None => {}
             RunCommand::StartAutorun => {
-                if !self.autorun {
-                    self.reset_frame_event.call();
-                    msgs.push(WorkerMessage::StartEventLoop);
-                }
+                assert!(!self.autorun);
+
+                self.reset_frame_event.call();
+                msgs.push(WorkerMessage::StartEventLoop);
+                update_if_dirty = true;
                 self.autorun = true;
             }
             RunCommand::StopAutorun => {
+                assert!(self.autorun);
+
                 msgs.push(WorkerMessage::StopEventLoop);
                 self.autorun = false;
             }
-            RunCommand::None => {}
             RunCommand::RunOnce => {
                 self.reset_frame_event.call();
-                run_once = true;
+                msgs.push(WorkerMessage::ExecuteTerminals);
+                update_if_dirty = true;
             }
         }
 
-        let update_graph = self.graph_dirty && (self.autorun || run_once);
-
-        if update_graph {
+        if self.graph_dirty && update_if_dirty {
             msgs.push(WorkerMessage::Update {
                 graph: self.view_graph.graph.clone(),
                 func_lib: self.func_lib.clone(),
             });
             self.graph_dirty = false;
-        }
-
-        if run_once || (self.autorun && update_graph) {
-            msgs.push(WorkerMessage::ExecuteTerminals);
         }
 
         // Handle argument values request
