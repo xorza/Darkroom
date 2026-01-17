@@ -77,7 +77,7 @@ impl GraphUi {
         let secondary_pressed = gui.ui().input(|input| input.pointer.secondary_pressed());
 
         if secondary_pressed || esc_pressed {
-            self.reset_to_idle();
+            self.reset_to(InteractionState::Idle);
         }
 
         let rect = gui
@@ -248,7 +248,7 @@ impl GraphUi {
                 }
             }
         } else if was_open && !self.new_node_ui.is_open() {
-            self.reset_to_idle();
+            self.reset_to(InteractionState::Idle);
         }
     }
 
@@ -287,10 +287,10 @@ impl GraphUi {
             InteractionState::Idle => {
                 if primary_down {
                     if let PortInteractCommand::DragStart(_) = port_interact_cmd {
+                        self.reset_to(InteractionState::DraggingNewConnection);
                         self.connections.update_drag(pointer_pos, port_interact_cmd);
-                        self.state = InteractionState::DraggingNewConnection;
                     } else if pointer_on_background {
-                        self.state = InteractionState::BreakingConnections;
+                        self.reset_to(InteractionState::BreakingConnections);
                         self.connection_breaker.start(pointer_pos);
                     }
                 }
@@ -299,7 +299,7 @@ impl GraphUi {
                 if primary_down {
                     self.connection_breaker.add_point(pointer_pos);
                 } else {
-                    self.reset_to_idle();
+                    self.reset_to(InteractionState::Idle);
 
                     let iter = self
                         .connections
@@ -367,7 +367,7 @@ impl GraphUi {
                 match update {
                     ConnectionDragUpdate::InProgress => {}
                     ConnectionDragUpdate::Finished => {
-                        self.reset_to_idle();
+                        self.reset_to(InteractionState::Idle);
                     }
                     ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                         assert_eq!(input_port.kind, PortKind::Input);
@@ -408,17 +408,11 @@ impl GraphUi {
                             _ => unreachable!(),
                         }
 
-                        self.reset_to_idle();
+                        self.reset_to(InteractionState::Idle);
                     }
                 }
             }
         }
-    }
-
-    fn reset_to_idle(&mut self) {
-        self.state = InteractionState::Idle;
-        self.connections.stop_drag();
-        self.connection_breaker.reset();
     }
 
     fn render_connections(
@@ -581,12 +575,12 @@ impl GraphUi {
         match self.state {
             InteractionState::Idle => {
                 if background_response.drag_started_by(PointerButton::Middle) {
-                    self.state = InteractionState::PanningGraph;
+                    self.reset_to(InteractionState::PanningGraph);
                 }
             }
             InteractionState::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.reset_to_idle();
+                    self.reset_to(InteractionState::Idle);
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();
@@ -603,6 +597,15 @@ impl GraphUi {
                 after_scale: ctx.view_graph.scale,
             });
         }
+    }
+
+    fn reset_to(&mut self, new_state: InteractionState) {
+        if self.state == new_state {
+            return;
+        }
+        self.connections.stop_drag();
+        self.connection_breaker.reset();
+        self.state = new_state;
     }
 }
 
