@@ -406,7 +406,9 @@ impl ConnectionUi {
                 ConnectionDragUpdate::InProgress
             }
             PortInteractCommand::DragStop => {
-                let update = if let Some(port_info) = drag.end_port {
+                
+
+                if let Some(port_info) = drag.end_port {
                     let (input_port, output_port) =
                         match (drag.start_port.port.kind, port_info.port.kind) {
                             (PortKind::Output, PortKind::Input) => {
@@ -438,9 +440,7 @@ impl ConnectionUi {
                     }
                 } else {
                     ConnectionDragUpdate::Finished
-                };
-
-                update
+                }
             }
             PortInteractCommand::Click(port_info) => {
                 tracing::info!("PortInteractCommand::Click");

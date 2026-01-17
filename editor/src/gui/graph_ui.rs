@@ -218,8 +218,8 @@ impl GraphUi {
                 }
                 NewNodeSelection::ConstBind => {
                     // Create a const binding for the pending input
-                    if let Some(connection_drag) = self.connections.temp_connection.take() {
-                        if connection_drag.start_port.port.kind == PortKind::Input {
+                    if let Some(connection_drag) = self.connections.temp_connection.take()
+                        && connection_drag.start_port.port.kind == PortKind::Input {
                             let input_port = connection_drag.start_port.port;
 
                             let input_node =
@@ -236,7 +236,6 @@ impl GraphUi {
                                 after,
                             });
                         }
-                    }
                 }
             }
         }
