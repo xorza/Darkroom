@@ -136,4 +136,88 @@ mod tests {
         assert!(count >= 1, "should have received at least one value");
         assert!(count <= 1000, "should not receive more than sent");
     }
+
+    #[test]
+    fn peek_returns_value_without_removing() {
+        let slot = Slot::default();
+        slot.send(42);
+
+        let peeked = slot.peek();
+        assert!(peeked.is_some());
+        assert_eq!(*peeked.unwrap(), 42);
+
+        // Value should still be there
+        assert!(slot.has_value());
+        let peeked_again = slot.peek();
+        assert_eq!(*peeked_again.unwrap(), 42);
+    }
+
+    #[test]
+    fn peek_empty_returns_none() {
+        let slot: Slot<i32> = Slot::default();
+        assert!(slot.peek().is_none());
+    }
+
+    #[tokio::test]
+    async fn peek_or_wait_returns_immediately_if_value_exists() {
+        let slot = Slot::default();
+        slot.send(42);
+
+        let val = slot.peek_or_wait().await;
+        assert_eq!(*val, 42);
+
+        // Value should still be there
+        assert!(slot.has_value());
+    }
+
+    #[tokio::test]
+    async fn peek_or_wait_waits_for_value() {
+        let slot = Slot::default();
+        let slot_clone = slot.clone();
+
+        let handle = tokio::spawn(async move {
+            let val = slot_clone.peek_or_wait().await;
+            *val
+        });
+
+        // Give the task a moment to start waiting
+        tokio::task::yield_now().await;
+
+        // Value shouldn't be there yet, task should be waiting
+        assert!(!slot.has_value());
+
+        // Send the value
+        slot.send(123);
+
+        // Task should complete with the value
+        let result = handle.await.unwrap();
+        assert_eq!(result, 123);
+    }
+
+    #[tokio::test]
+    async fn peek_or_wait_multiple_waiters() {
+        let slot: Slot<i32> = Slot::default();
+
+        let handles: Vec<_> = (0..5)
+            .map(|_| {
+                let slot_clone = slot.clone();
+                tokio::spawn(async move {
+                    let val = slot_clone.peek_or_wait().await;
+                    *val
+                })
+            })
+            .collect();
+
+        // Give tasks time to start waiting
+        tokio::task::yield_now().await;
+
+        // Send the value - all waiters should be notified
+        slot.send(999);
+
+        // All tasks should complete with the same value
+        for handle in handles {
+            let result = handle.await.unwrap();
+            assert_eq!(result, 999);
+        }
+    }
 }
