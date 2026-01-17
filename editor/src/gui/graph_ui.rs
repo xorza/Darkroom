@@ -8,8 +8,8 @@ use egui::{
 };
 
 use crate::app_data::AppData;
-use crate::common::area::Area;
 use crate::common::frame::Frame;
+use crate::common::positioned_ui::PositionedUi;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
 use graph::graph::NodeId;
@@ -463,11 +463,9 @@ impl GraphUi {
 
         let rect = gui.rect;
 
-        Area::new(Id::new("graph_ui_top_buttons"))
-            .sizing_pass(false)
-            .movable(false)
-            .interactable(false)
+        PositionedUi::new(Id::new("graph_ui_top_buttons"), rect.left_top())
             .pivot(Align2::LEFT_TOP)
+            .interactable(false)
             .show(gui, |gui| {
                 gui.ui().take_available_width();
 
@@ -499,34 +497,35 @@ impl GraphUi {
                 });
             });
 
-        Area::new(Id::new("graph_ui_bottom_buttons"))
-            .fixed_pos(pos2(rect.left(), rect.bottom()))
-            .pivot(Align2::LEFT_BOTTOM)
-            .movable(false)
-            .interactable(false)
-            .show(gui, |gui| {
-                let padding = gui.style.padding;
-                Frame::none().inner_margin(padding).show(gui, |gui| {
-                    gui.horizontal(|gui| {
-                        if Button::default().text("run").show(gui).clicked() {
-                            interaction.run_cmd = RunCommand::RunOnce;
-                        }
+        PositionedUi::new(
+            Id::new("graph_ui_bottom_buttons"),
+            pos2(rect.left(), rect.bottom()),
+        )
+        .pivot(Align2::LEFT_BOTTOM)
+        .interactable(false)
+        .show(gui, |gui| {
+            let padding = gui.style.padding;
+            Frame::none().inner_margin(padding).show(gui, |gui| {
+                gui.horizontal(|gui| {
+                    if Button::default().text("run").show(gui).clicked() {
+                        interaction.run_cmd = RunCommand::RunOnce;
+                    }
 
-                        let response = Button::default()
-                            .toggle(&mut autorun)
-                            .text("autorun")
-                            .show(gui);
+                    let response = Button::default()
+                        .toggle(&mut autorun)
+                        .text("autorun")
+                        .show(gui);
 
-                        if response.clicked() {
-                            if autorun {
-                                interaction.run_cmd = RunCommand::StartAutorun;
-                            } else {
-                                interaction.run_cmd = RunCommand::StopAutorun;
-                            }
+                    if response.clicked() {
+                        if autorun {
+                            interaction.run_cmd = RunCommand::StartAutorun;
+                        } else {
+                            interaction.run_cmd = RunCommand::StopAutorun;
                         }
-                    });
+                    }
                 });
             });
+        });
 
         if reset_view {
             ctx.view_graph.scale = 1.0;

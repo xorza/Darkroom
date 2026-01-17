@@ -7,6 +7,7 @@ pub mod drag_value;
 pub mod expander;
 pub mod font;
 pub mod frame;
+pub mod positioned_ui;
 pub mod scroll_area;
 pub mod text_edit;
 pub mod ui_equals;
