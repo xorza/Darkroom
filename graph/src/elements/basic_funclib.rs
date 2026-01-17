@@ -95,6 +95,12 @@ impl BasicFuncLib {
     }
 }
 
+impl From<BasicFuncLib> for FuncLib {
+    fn from(basic: BasicFuncLib) -> Self {
+        basic.func_lib
+    }
+}
+
 impl Default for BasicFuncLib {
     fn default() -> Self {
         let mut func_lib = FuncLib::default();

@@ -7,6 +7,7 @@ use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::slot::Slot;
 use common::{SerdeFormat, Shared};
+use graph::elements::basic_funclib::BasicFuncLib;
 use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
 use graph::execution_graph::{self, Result as ExecutionGraphResult};
 use graph::graph::{Binding, Node, NodeId};
@@ -68,7 +69,8 @@ impl AppData {
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
         func_lib.merge(TimersFuncLib::default());
-        func_lib.merge(EditorFuncLib::new());
+        func_lib.merge(EditorFuncLib::default());
+        func_lib.merge(BasicFuncLib::default());
 
         let mut result = Self {
             func_lib,

@@ -7,18 +7,12 @@ use graph::{
 };
 use tokio::sync::Notify;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct EditorFuncLib {
     func_lib: FuncLib,
 }
 
 impl EditorFuncLib {
-    pub fn new() -> EditorFuncLib {
-        EditorFuncLib {
-            func_lib: FuncLib::default(),
-        }
-    }
-
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
