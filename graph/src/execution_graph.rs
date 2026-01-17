@@ -447,32 +447,32 @@ impl ExecutionGraph {
     }
     pub async fn execute_events<T: IntoIterator<Item = EventRef>>(
         &mut self,
-        event_ids: T,
+        events: T,
     ) -> Result<ExecutionStats> {
-        self.execute(false, false, event_ids).await
+        self.execute(false, false, events).await
     }
 
     pub async fn execute<T: IntoIterator<Item = EventRef>>(
         &mut self,
         terminals: bool,
         event_triggers: bool,
-        event_ids: T,
+        events: T,
     ) -> Result<ExecutionStats> {
-        let mut event_ids: Vec<EventRef> = event_ids.into_iter().collect();
+        let mut events: Vec<EventRef> = events.into_iter().collect();
 
         // add run event subscribers
-        event_ids.extend(self.e_nodes.iter().filter_map(|e_node| {
+        events.extend(self.e_nodes.iter().filter_map(|e_node| {
             (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventRef {
                 node_id: e_node.id,
                 event_idx: 0,
             })
         }));
 
-        self.prepare_execution(terminals, event_triggers, &event_ids)?;
+        self.prepare_execution(terminals, event_triggers, &events)?;
 
         let mut result = self.execute_internal().await;
         if let Ok(exe_stats) = &mut result {
-            exe_stats.triggered_events = event_ids;
+            exe_stats.triggered_events = events;
         }
 
         self.e_node_terminal_idx.clear();
@@ -484,13 +484,13 @@ impl ExecutionGraph {
         &mut self,
         terminals: bool,
         event_triggers: bool,
-        event_ids: &[EventRef],
+        events: &[EventRef],
     ) -> Result<()> {
         self.e_node_terminal_idx.clear();
 
         self.e_node_terminal_idx
-            .extend(event_ids.iter().flat_map(|event_id| {
-                self.e_nodes.by_key(&event_id.node_id).unwrap().events[event_id.event_idx]
+            .extend(events.iter().flat_map(|event| {
+                self.e_nodes.by_key(&event.node_id).unwrap().events[event.event_idx]
                     .subscribers
                     .iter()
                     .map(|node_id| self.e_nodes.index_of_key(node_id).unwrap())

@@ -16,10 +16,10 @@ const MAX_EVENTS_PER_LOOP: usize = 10;
 pub enum WorkerMessage {
     Exit,
     Event {
-        event_id: EventRef,
+        event: EventRef,
     },
     Events {
-        event_ids: Vec<EventRef>,
+        events: Vec<EventRef>,
     },
     Update {
         graph: Graph,
@@ -130,7 +130,7 @@ async fn worker_loop<Callback>(
     let mut msgs: VecDeque<WorkerMessage> = VecDeque::with_capacity(MAX_EVENTS_PER_LOOP);
     let mut msgs_vec: Vec<WorkerMessage> = Vec::with_capacity(MAX_EVENTS_PER_LOOP);
 
-    let mut event_ids: HashSet<EventRef> = HashSet::default();
+    let mut events: HashSet<EventRef> = HashSet::default();
     let mut event_loop_handle: Option<EventLoopHandle> = None;
     let mut processing_callback: Option<ProcessingCallback> = None;
     let event_loop_pause_gate = PauseGate::default();
@@ -138,7 +138,7 @@ async fn worker_loop<Callback>(
     loop {
         assert!(msgs.is_empty());
         assert!(msgs_vec.is_empty());
-        assert!(event_ids.is_empty());
+        assert!(events.is_empty());
         assert!(processing_callback.is_none());
 
         if worker_message_rx
@@ -160,18 +160,16 @@ async fn worker_loop<Callback>(
         while let Some(msg) = msgs.pop_front() {
             match msg {
                 WorkerMessage::Exit => return,
-                WorkerMessage::Event { event_id } => {
-                    event_ids.insert(event_id);
+                WorkerMessage::Event { event } => {
+                    events.insert(event);
                 }
-                WorkerMessage::Events {
-                    event_ids: new_event_ids,
-                } => event_ids.extend(new_event_ids),
+                WorkerMessage::Events { events: new_events } => events.extend(new_events),
                 WorkerMessage::Update { graph, func_lib } => {
-                    event_ids.clear();
+                    events.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
-                    event_ids.clear();
+                    events.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
@@ -198,9 +196,9 @@ async fn worker_loop<Callback>(
             execution_graph.update(&graph, &func_lib);
         }
 
-        if execute_terminals || !event_ids.is_empty() {
+        if execute_terminals || !events.is_empty() {
             let result = execution_graph
-                .execute(execute_terminals, false, event_ids.drain())
+                .execute(execute_terminals, false, events.drain())
                 .await;
             (execution_callback.lock().await)(result);
         }
@@ -257,23 +255,17 @@ async fn start_event_loop(
     let join_handle = tokio::spawn({
         let worker_message_tx = worker_message_tx.clone();
         async move {
-            let mut event_ids = Vec::default();
+            let mut events = Vec::default();
             loop {
-                event_ids.clear();
-                if event_rx
-                    .recv_many(&mut event_ids, MAX_EVENTS_PER_LOOP)
-                    .await
-                    == 0
-                {
+                events.clear();
+                if event_rx.recv_many(&mut events, MAX_EVENTS_PER_LOOP).await == 0 {
                     return;
                 }
-                let result = if event_ids.len() == 1 {
-                    worker_message_tx.send(WorkerMessage::Event {
-                        event_id: event_ids[0],
-                    })
+                let result = if events.len() == 1 {
+                    worker_message_tx.send(WorkerMessage::Event { event: events[0] })
                 } else {
                     worker_message_tx.send(WorkerMessage::Events {
-                        event_ids: std::mem::take(&mut event_ids),
+                        events: std::mem::take(&mut events),
                     })
                 };
 
@@ -471,7 +463,7 @@ mod tests {
 
         worker.update(graph.clone(), func_lib.clone());
         worker.send(WorkerMessage::Event {
-            event_id: EventRef {
+            event: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -487,7 +479,7 @@ mod tests {
         assert_eq!(output_stream.take().await, ["1"]);
 
         worker.send(WorkerMessage::Event {
-            event_id: EventRef {
+            event: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -503,7 +495,7 @@ mod tests {
         assert_eq!(output_stream.take().await, ["2"]);
 
         worker.send(WorkerMessage::Event {
-            event_id: EventRef {
+            event: EventRef {
                 node_id: frame_event_node_id,
                 event_idx: 0,
             },
@@ -543,11 +535,11 @@ mod tests {
         .await;
 
         let msg = rx.recv().await.expect("Expected event loop message");
-        let WorkerMessage::Event { event_id } = msg else {
+        let WorkerMessage::Event { event } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
-            event_id,
+            event,
             EventRef {
                 node_id,
                 event_idx: 0
@@ -594,11 +586,11 @@ mod tests {
             .await
             .expect("Expected event message")
             .expect("Event channel closed");
-        let WorkerMessage::Event { event_id } = msg else {
+        let WorkerMessage::Event { event } = msg else {
             panic!("Expected WorkerMessage::Event");
         };
         assert_eq!(
-            event_id,
+            event,
             EventRef {
                 node_id,
                 event_idx: 0

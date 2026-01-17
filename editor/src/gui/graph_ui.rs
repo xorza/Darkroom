@@ -470,7 +470,6 @@ impl GraphUi {
 
         Area::new(Id::new("graph_ui_top_buttons"))
             .sizing_pass(false)
-            .default_width(rect.width())
             .movable(false)
             .interactable(false)
             .pivot(Align2::LEFT_TOP)
