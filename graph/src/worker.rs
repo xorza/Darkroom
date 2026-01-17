@@ -196,14 +196,14 @@ async fn worker_loop<ExecutionCallback>(
                     }
                 }
                 WorkerMessage::Update { graph, func_lib } => {
-                    should_start_event_loop = event_loop_handle.is_some();
+                    should_start_event_loop |= event_loop_handle.is_some();
                     current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
-                    should_start_event_loop = event_loop_handle.is_some();
+                    should_start_event_loop |= event_loop_handle.is_some();
                     current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
