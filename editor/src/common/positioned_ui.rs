@@ -11,6 +11,7 @@ pub struct PositionedUi {
     pivot: Align2,
     max_size: Vec2,
     interactable: bool,
+    rect: Option<Rect>,
 }
 
 impl PositionedUi {
@@ -21,7 +22,13 @@ impl PositionedUi {
             pivot: Align2::LEFT_TOP,
             max_size: Vec2::new(f32::INFINITY, f32::INFINITY),
             interactable: false,
+            rect: None,
         }
+    }
+
+    pub fn rect(mut self, rect: Rect) -> Self {
+        self.rect = Some(rect);
+        self
     }
 
     pub fn pivot(mut self, pivot: Align2) -> Self {
@@ -47,19 +54,23 @@ impl PositionedUi {
         let style = gui.style.clone();
         let scale = gui.scale();
 
-        // First pass: measure content size using invisible UI
-        let content_size = gui
-            .ui()
-            .ctx()
-            .memory(|mem| mem.data.get_temp::<Vec2>(self.id));
-
-        let top_left = if let Some(size) = content_size {
-            self.compute_top_left(size)
+        let initial_rect = if let Some(rect) = self.rect {
+            rect
         } else {
-            self.position
-        };
+            // First pass: measure content size using invisible UI
+            let content_size = gui
+                .ui()
+                .ctx()
+                .memory(|mem| mem.data.get_temp::<Vec2>(self.id));
 
-        let initial_rect = Rect::from_min_size(top_left, self.max_size);
+            let top_left = if let Some(size) = content_size {
+                self.compute_top_left(size)
+            } else {
+                self.position
+            };
+
+            Rect::from_min_size(top_left, self.max_size)
+        };
 
         let builder = UiBuilder::new()
             .id_salt(self.id)
