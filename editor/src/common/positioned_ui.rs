@@ -20,7 +20,7 @@ impl PositionedUi {
             position,
             pivot: Align2::LEFT_TOP,
             max_size: Vec2::new(f32::INFINITY, f32::INFINITY),
-            interactable: true,
+            interactable: false,
         }
     }
 
