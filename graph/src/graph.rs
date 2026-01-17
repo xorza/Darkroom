@@ -328,6 +328,11 @@ impl From<StaticValue> for Binding {
         Binding::Const(value)
     }
 }
+impl From<i64> for Binding {
+    fn from(value: i64) -> Self {
+        Binding::Const(value.into())
+    }
+}
 
 impl NodeBehavior {
     pub fn toggle(&mut self) {

@@ -446,6 +446,7 @@ mod tests {
 
         let mut frame_event_node: Node = frame_event_func.into();
         frame_event_node.id = frame_event_node_id;
+        frame_event_node.inputs[0].binding = 1.into();
         frame_event_node.events[0].subscribers.push(print_node_id);
         graph.add(frame_event_node);
 
