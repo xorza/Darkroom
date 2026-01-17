@@ -1,5 +1,6 @@
 use std::ptr::NonNull;
 
+use bumpalo::Bump;
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, FontId, Id, Key, Layout, Margin, PointerButton, Pos2, Rect, Response,
@@ -73,7 +74,7 @@ pub struct GraphUi {
 }
 
 impl GraphUi {
-    pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData) {
+    pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData, arena: &Bump) {
         let rect = gui
             .ui()
             .available_rect_before_wrap()
@@ -171,12 +172,12 @@ impl GraphUi {
                 pointer_pos,
                 &mut app_data.interaction,
                 background_response,
+                arena,
             );
 
             self.node_details_ui.show(
                 gui,
                 &mut ctx,
-                rect,
                 &mut app_data.interaction,
                 &app_data.argument_values_cache,
             );
@@ -190,6 +191,7 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
         interaction: &mut GraphUiInteraction,
         background_response: Response,
+        arena: &Bump,
     ) {
         // Open menu on double-click
         if background_response.double_clicked_by(PointerButton::Primary)
@@ -200,7 +202,7 @@ impl GraphUi {
 
         // Show menu and handle selection
         let was_open = self.new_node_ui.is_open();
-        if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib) {
+        if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
             match selection {
                 NewNodeSelection::Func(func) => {
                     let screen_pos = self.new_node_ui.position();

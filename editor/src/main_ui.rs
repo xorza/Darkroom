@@ -157,7 +157,8 @@ impl MainUi {
             });
 
         CentralPanel::default().frame(Frame::NONE).show(ctx, |ui| {
-            self.graph_ui.render(&mut Gui::new(ui, &style), app_data)
+            self.graph_ui
+                .render(&mut Gui::new(ui, &style), app_data, &self.arena)
         });
 
         app_data.handle_interaction();

@@ -1,3 +1,7 @@
+use std::cmp::Ordering;
+
+use bumpalo::Bump;
+use bumpalo::collections::Vec as BumpVec;
 use egui::{Align, Key, Order, Pos2, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
@@ -52,6 +56,7 @@ impl NewNodeUi {
         &mut self,
         gui: &mut Gui<'_>,
         func_lib: &'a FuncLib,
+        arena: &Bump,
     ) -> Option<NewNodeSelection<'a>> {
         if !self.open {
             return None;
@@ -96,8 +101,8 @@ impl NewNodeUi {
                             });
                         }
 
-                        let mut categories: Vec<&str> =
-                            func_lib.funcs.iter().map(|f| f.category.as_str()).collect();
+                        let mut categories: BumpVec<&str> = BumpVec::new_in(arena);
+                        categories.extend(func_lib.funcs.iter().map(|f| f.category.as_str()));
                         categories.sort();
                         categories.dedup();
 
@@ -107,30 +112,29 @@ impl NewNodeUi {
                                 gui.ui().set_min_width(80.0 + padding * 2.0);
 
                                 Expander::new(category).default_open(true).show(gui, |gui| {
-                                    for func in func_lib.funcs.iter() {
-                                        if func.category != category {
-                                            continue;
-                                        }
+                                    let mut funcs: BumpVec<&Func> = BumpVec::new_in(arena);
+                                    funcs.extend(
+                                        func_lib.funcs.iter().filter(|f| f.category == category),
+                                    );
 
-                                        let btn_font = gui.style.sub_font.clone();
-                                        let max_width = func_lib
-                                            .funcs
-                                            .iter()
-                                            .filter(|f| f.category == category)
-                                            .map(|f| {
-                                                gui.painter()
-                                                    .layout_no_wrap(
-                                                        f.name.clone(),
-                                                        btn_font.clone(),
-                                                        gui.style.text_color,
-                                                    )
-                                                    .size()
-                                                    .x
-                                            })
-                                            .max_by(|a, b| a.partial_cmp(b).unwrap())
-                                            .unwrap_or(80.0)
-                                            .max(80.0);
+                                    let btn_font = gui.style.sub_font.clone();
+                                    let max_width = funcs
+                                        .iter()
+                                        .map(|&func| {
+                                            gui.painter()
+                                                .layout_no_wrap(
+                                                    func.name.clone(),
+                                                    btn_font.clone(),
+                                                    gui.style.text_color,
+                                                )
+                                                .size()
+                                                .x
+                                        })
+                                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
+                                        .unwrap_or(80.0)
+                                        .max(80.0);
 
+                                    for func in funcs {
                                         let button_width = max_width + gui.style.padding * 2.0;
                                         let button_height = gui.font_height(&btn_font)
                                             + gui.style.small_padding * 2.0;

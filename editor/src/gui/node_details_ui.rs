@@ -1,3 +1,4 @@
+use bumpalo::Bump;
 use egui::{Align2, Pos2, Rect, Vec2};
 use graph::data::DynamicValue;
 use graph::graph::NodeId;
@@ -21,7 +22,6 @@ impl NodeDetailsUi {
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
-        graph_rect: Rect,
         interaction: &mut GraphUiInteraction,
         argument_values_cache: &ArgumentValuesCache,
     ) {
@@ -29,6 +29,7 @@ impl NodeDetailsUi {
             return;
         };
 
+        let graph_rect = gui.rect;
         let big_padding = gui.style.big_padding;
         let panel_rect = Rect::from_min_size(
             Pos2::new(
