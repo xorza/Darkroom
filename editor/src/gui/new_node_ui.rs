@@ -1,8 +1,9 @@
 use std::cmp::Ordering;
+use std::sync::Arc;
 
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Align, Key, Order, Pos2, vec2};
+use egui::{Align, Galley, Key, Order, Pos2, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
@@ -118,19 +119,21 @@ impl NewNodeUi {
                                     );
 
                                     let btn_font = gui.style.sub_font.clone();
-                                    let max_width = funcs
+                                    let mut galleys: BumpVec<Arc<Galley>> = BumpVec::new_in(arena);
+                                    galleys.extend(funcs.iter().map(|&func| {
+                                        gui.painter().layout_no_wrap(
+                                            func.name.clone(),
+                                            btn_font.clone(),
+                                            gui.style.text_color,
+                                        )
+                                    }));
+
+                                    let max_width = galleys
                                         .iter()
-                                        .map(|&func| {
-                                            gui.painter()
-                                                .layout_no_wrap(
-                                                    func.name.clone(),
-                                                    btn_font.clone(),
-                                                    gui.style.text_color,
-                                                )
-                                                .size()
-                                                .x
+                                        .map(|galley| galley.size().x)
+                                        .max_by(|&a, &b| {
+                                            a.partial_cmp(&b).unwrap_or(Ordering::Equal)
                                         })
-                                        .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                                         .unwrap_or(80.0)
                                         .max(80.0);
 
