@@ -196,23 +196,27 @@ async fn worker_loop<Callback>(
                 }
                 WorkerMessage::Update { graph, func_lib } => {
                     should_start_event_loop = event_loop_handle.is_some();
+                    current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                     update_graph = Some((graph, func_lib));
                 }
                 WorkerMessage::Clear => {
                     should_start_event_loop = event_loop_handle.is_some();
+                    current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                     execution_graph.clear();
                 }
                 WorkerMessage::ExecuteTerminals => execute_terminals = true,
                 WorkerMessage::StartEventLoop => {
+                    current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                     should_start_event_loop = true;
                 }
                 WorkerMessage::StopEventLoop => {
+                    current_loop_id += 1;
                     stop_event_loop(&mut event_loop_handle).await;
                     events_from_loop.clear();
                 }
@@ -260,7 +264,6 @@ async fn worker_loop<Callback>(
                 let events_triggers = collect_active_event_triggers(&mut execution_graph);
 
                 if !events_triggers.is_empty() {
-                    current_loop_id += 1;
                     event_loop_handle = Some(
                         start_event_loop(
                             worker_message_tx.clone(),
