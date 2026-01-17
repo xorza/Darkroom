@@ -1,1 +1,1 @@
-replace bincode with something
+new node ui - descirption in tooltips
