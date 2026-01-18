@@ -451,7 +451,7 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::None];
         let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
-        let event_states: Vec<std::sync::Arc<std::sync::Mutex<NodeState>>> = vec![];
+        let event_states: Vec<common::Shared<NodeState>> = vec![];
         func_lib
             .by_id(&sum_id)
             .unwrap()

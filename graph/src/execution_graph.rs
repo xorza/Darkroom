@@ -1,7 +1,7 @@
 use std::panic;
-use std::sync::Arc;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
+use common::{BoolExt, SerdeFormat, Shared, is_debug};
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -15,7 +15,6 @@ use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventRef;
-use common::{BoolExt, SerdeFormat, is_debug};
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
@@ -80,7 +79,7 @@ pub struct ExecutionEvent {
     pub lambda: EventLambda,
 
     #[serde(skip, default)]
-    pub state: std::sync::Arc<std::sync::Mutex<NodeState>>,
+    pub state: Shared<NodeState>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -247,7 +246,7 @@ impl ExecutionNode {
                 self.events.push(ExecutionEvent {
                     subscribers: Vec::new(),
                     lambda: func_event.event_lambda.clone(),
-                    state: Arc::new(std::sync::Mutex::new(NodeState::default())),
+                    state: Shared::new(NodeState::default()),
                 });
             }
         }
@@ -780,7 +779,7 @@ impl ExecutionGraph {
             let event_states: Vec<_> = e_node
                 .events
                 .iter()
-                .map(|event| Arc::clone(&event.state))
+                .map(|event| event.state.clone())
                 .collect();
 
             let e_node = &mut self.e_nodes[e_node_idx];

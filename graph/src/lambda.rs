@@ -1,5 +1,7 @@
-use std::{pin::Pin, sync::Arc};
+use std::pin::Pin;
+use std::sync::Arc;
 
+use common::Shared;
 use thiserror::Error;
 
 use crate::{
@@ -20,7 +22,7 @@ pub struct InvokeInput {
     pub value: DynamicValue,
 }
 
-pub type EventStates = [Arc<std::sync::Mutex<NodeState>>];
+pub type EventStates = [Shared<NodeState>];
 
 type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
 
