@@ -107,6 +107,13 @@ impl Default for TimersFuncLib {
                                 tokio::time::sleep(desired_duration - elapsed).await;
                             }
 
+                            // update state with new frame number and current time
+                            slot.send(FpsEventState {
+                                frequency: fps_state.frequency,
+                                last_execution: Instant::now(),
+                                frame_no: fps_state.frame_no + 1,
+                            });
+
                             // If elapsed >= desired_duration, fire immediately (no sleep)
                         })
                     }),
@@ -127,7 +134,7 @@ impl Default for TimersFuncLib {
                                 slot.send(FpsEventState {
                                     frequency,
                                     last_execution: Instant::now(),
-                                    frame_no: 0,
+                                    frame_no: 1,
                                 });
                                 slot
                             })
@@ -135,17 +142,19 @@ impl Default for TimersFuncLib {
 
                         let prev_state = slot.peek().unwrap();
                         let delta = prev_state.last_execution.elapsed().as_secs_f64();
-                        let frame_no = prev_state.frame_no + 1;
 
-                        // Store new state in the fps event's state
-                        slot.send(FpsEventState {
-                            frequency,
-                            last_execution: prev_state.last_execution,
-                            frame_no,
-                        });
+
+                        if !frequency.approximately_eq(prev_state.frequency) {
+                            // update frequency
+                            slot.send(FpsEventState {
+                                frequency,
+                                last_execution: prev_state.last_execution,
+                                frame_no: prev_state.frame_no,
+                            });
+                        }
 
                         outputs[0] = DynamicValue::Float(delta);
-                        outputs[1] = DynamicValue::Int(frame_no);
+                        outputs[1] = DynamicValue::Int(prev_state.frame_no);
                         Ok(())
                     })
                 },
