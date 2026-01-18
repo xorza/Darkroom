@@ -158,6 +158,7 @@ pub struct ExecutionNode {
     pub lambda: FuncLambda,
 
     #[cfg(debug_assertions)]
+    #[serde(default)]
     pub name: String,
 }
 impl KeyIndexKey<NodeId> for ExecutionNode {
