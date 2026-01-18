@@ -85,12 +85,16 @@ impl Default for TimersFuncLib {
                             let guard = state.lock().await;
                             let Some(fps_state) = guard.get::<FpsEventState>() else {
                                 // No state yet, wait for first execution
+
+                                tracing::info!("No state yet, wait for first execution");
                                 drop(guard);
                                 std::future::pending::<()>().await;
                                 return;
                             };
 
                             if fps_state.frequency.approximately_eq(0.0) {
+                                tracing::info!("Frequency is zero, no FPS event");
+
                                 drop(guard);
                                 std::future::pending::<()>().await;
                                 return;
@@ -135,6 +139,9 @@ impl Default for TimersFuncLib {
                             last_execution: now,
                             frame_no,
                         });
+
+                        tracing::info!("FPS event executed");
+
                         drop(guard);
 
                         outputs[0] = DynamicValue::Float(delta);

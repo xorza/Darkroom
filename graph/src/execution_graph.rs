@@ -256,8 +256,6 @@ impl ExecutionNode {
             self.outputs
                 .resize(func.outputs.len(), ExecutionOutput::default());
         } else {
-            self.state = NodeState::default();
-
             self.outputs.fill(ExecutionOutput::default());
         }
 
@@ -277,8 +275,9 @@ impl ExecutionNode {
             self.events[event_idx]
                 .subscribers
                 .extend(&event.subscribers);
-            self.events[event_idx].state = EventState::default();
         }
+
+        self.reset_state();
 
         assert_eq!(self.inputs.len(), node.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
@@ -288,6 +287,12 @@ impl ExecutionNode {
         {
             self.name.clear();
             self.name.push_str(&node.name);
+        }
+    }
+    fn reset_state(&mut self) {
+        self.state = NodeState::default();
+        for event in &mut self.events {
+            event.state = EventState::default();
         }
     }
 }
