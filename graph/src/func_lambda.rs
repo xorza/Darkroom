@@ -4,8 +4,10 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    context::ContextManager, data::DynamicValue, event_state::EventState,
-    execution_graph::OutputUsage, prelude::NodeState,
+    context::ContextManager,
+    data::DynamicValue,
+    execution_graph::OutputUsage,
+    prelude::{AnyState, SharedAnyState},
 };
 
 #[derive(Debug, Error)]
@@ -27,8 +29,8 @@ type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Sen
 pub trait AsyncLambdaFn:
     for<'a> Fn(
         &'a mut ContextManager,
-        &'a mut NodeState,
-        &'a EventState,
+        &'a mut AnyState,
+        &'a SharedAnyState,
         &'a [InvokeInput],
         &'a [OutputUsage],
         &'a mut [DynamicValue],
@@ -42,8 +44,8 @@ pub trait AsyncLambdaFn:
 impl<T> AsyncLambdaFn for T where
     T: for<'a> Fn(
             &'a mut ContextManager,
-            &'a mut NodeState,
-            &'a EventState,
+            &'a mut AnyState,
+            &'a SharedAnyState,
             &'a [InvokeInput],
             &'a [OutputUsage],
             &'a mut [DynamicValue],
@@ -78,8 +80,8 @@ impl FuncLambda {
     pub async fn invoke(
         &self,
         ctx_manager: &mut ContextManager,
-        state: &mut NodeState,
-        event_state: &EventState,
+        state: &mut AnyState,
+        event_state: &SharedAnyState,
         inputs: &[InvokeInput],
         output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],

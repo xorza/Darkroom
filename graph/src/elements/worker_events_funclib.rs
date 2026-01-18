@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::data::{DataType, DynamicValue};
-use crate::event::EventLambda;
+use crate::event_lambda::EventLambda;
+use crate::func_lambda::FuncLambda;
 use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOutput};
-use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::FloatExt;
 use common::slot::Slot;
@@ -13,7 +13,7 @@ use tokio::sync::Notify;
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 
 #[derive(Debug)]
-pub struct TimersFuncLib {
+pub struct WorkerEventsFuncLib {
     func_lib: FuncLib,
 
     pub run_event: Arc<Notify>,
@@ -26,7 +26,7 @@ struct FpsEventState {
     frame_no: i64,
 }
 
-impl TimersFuncLib {
+impl WorkerEventsFuncLib {
     pub const RUN_FUNC_ID: FuncId = FuncId::from_u128(0xe871ddf47a534ae59728927a88649673);
 
     pub fn func_lib(&self) -> &FuncLib {
@@ -38,8 +38,8 @@ impl TimersFuncLib {
     }
 }
 
-impl Default for TimersFuncLib {
-    fn default() -> TimersFuncLib {
+impl Default for WorkerEventsFuncLib {
+    fn default() -> WorkerEventsFuncLib {
         let mut func_lib = FuncLib::default();
 
         func_lib.add(Func {
@@ -134,7 +134,7 @@ impl Default for TimersFuncLib {
                         let prev_state = slot.peek().unwrap();
                         let mut delta = prev_state.last_execution.elapsed().as_secs_f64();
                         if delta.approximately_eq(0.0) {
-                            // to avoid division by zero by delta users
+                            // to avoid
                             delta = 1.0 / frequency;
                         }
 
@@ -180,7 +180,7 @@ impl Default for TimersFuncLib {
             lambda: FuncLambda::None,
         });
 
-        TimersFuncLib {
+        WorkerEventsFuncLib {
             func_lib,
             run_event,
         }
@@ -197,8 +197,8 @@ impl Default for FpsEventState {
     }
 }
 
-impl From<TimersFuncLib> for FuncLib {
-    fn from(value: TimersFuncLib) -> Self {
+impl From<WorkerEventsFuncLib> for FuncLib {
+    fn from(value: WorkerEventsFuncLib) -> Self {
         value.func_lib
     }
 }

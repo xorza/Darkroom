@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use common::BoolExt;
 use graph::{
-    event::EventLambda,
+    event_lambda::EventLambda,
     prelude::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib},
 };
 use tokio::sync::Notify;

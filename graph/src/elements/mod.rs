@@ -1,3 +1,3 @@
 pub mod basic_funclib;
 pub mod lua;
-pub mod timers_funclib;
+pub mod worker_events_funclib;

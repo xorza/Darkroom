@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::context::ContextType;
 
-use crate::event::EventLambda;
-use crate::lambda::FuncLambda;
+use crate::event_lambda::EventLambda;
+use crate::func_lambda::FuncLambda;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
@@ -329,9 +329,9 @@ mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::OutputUsage;
+    use crate::func_lambda::InvokeInput;
     use crate::function::{TestFuncHooks, test_func_lib};
-    use crate::lambda::InvokeInput;
-    use crate::node_state::NodeState;
+    use crate::prelude::AnyState;
     use common::SerdeFormat;
 
     #[test]
@@ -354,7 +354,7 @@ mod tests {
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
         let mut ctx_manager = ContextManager::default();
-        let mut node_state = NodeState::default();
+        let mut node_state = AnyState::default();
         let mut inputs = vec![
             InvokeInput {
                 changed: true,
@@ -367,7 +367,7 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::None];
         let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
-        let event_state = crate::event_state::EventState::default();
+        let event_state = crate::common::shared_any_state::SharedAnyState::default();
         func_lib
             .by_id(&sum_id)
             .unwrap()

@@ -8,8 +8,8 @@ use common::output_stream::OutputStream;
 
 use crate::async_lambda;
 use crate::data::{DataType, DynamicValue, StaticValue};
+use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput, ValueOption};
-use crate::lambda::InvokeInput;
 
 #[derive(Debug)]
 pub struct BasicFuncLib {

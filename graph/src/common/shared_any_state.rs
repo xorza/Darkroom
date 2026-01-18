@@ -3,19 +3,19 @@ use std::ops::{Deref, DerefMut};
 use common::Shared;
 use tokio::sync::MutexGuard;
 
-use crate::node_state::NodeState;
+use crate::prelude::AnyState;
 
 #[derive(Debug, Clone, Default)]
-pub struct EventState {
-    inner: Shared<NodeState>,
+pub struct SharedAnyState {
+    inner: Shared<AnyState>,
 }
 
 pub struct EventStateGuard<'a> {
-    guard: MutexGuard<'a, NodeState>,
+    guard: MutexGuard<'a, AnyState>,
 }
 
 impl Deref for EventStateGuard<'_> {
-    type Target = NodeState;
+    type Target = AnyState;
 
     fn deref(&self) -> &Self::Target {
         &self.guard
@@ -28,7 +28,7 @@ impl DerefMut for EventStateGuard<'_> {
     }
 }
 
-impl EventState {
+impl SharedAnyState {
     pub async fn lock(&self) -> EventStateGuard<'_> {
         EventStateGuard {
             guard: self.inner.lock().await,

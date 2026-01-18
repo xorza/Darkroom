@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use crate::data::DataType;
 use crate::data::DynamicValue;
+use crate::func_lambda::FuncLambda;
 use crate::graph::{Graph, Node, NodeId};
-use crate::lambda::FuncLambda;
 use crate::prelude::Func;
 use crate::prelude::FuncBehavior;
 use crate::prelude::FuncId;
@@ -433,7 +433,7 @@ mod tests {
     use crate::{
         context::ContextManager,
         execution_graph::OutputUsage,
-        prelude::{InvokeInput, NodeState},
+        prelude::{AnyState, InvokeInput, SharedAnyState},
     };
 
     #[test]
@@ -519,8 +519,8 @@ mod tests {
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
 
         let mut ctx_manager = ContextManager::default();
-        let mut node_state = NodeState::default();
-        let event_state = crate::event_state::EventState::default();
+        let mut node_state = AnyState::default();
+        let event_state = SharedAnyState::default();
         // call 'mult' function
         invoker
             .func_lib()
@@ -591,8 +591,8 @@ mod tests {
         let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut ctx_manager = ContextManager::default();
-        let mut node_state = NodeState::default();
-        let event_state = crate::event_state::EventState::default();
+        let mut node_state = AnyState::default();
+        let event_state = SharedAnyState::default();
 
         invoker
             .func_lib()

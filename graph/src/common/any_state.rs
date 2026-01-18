@@ -1,11 +1,11 @@
 use std::any::Any;
 
 #[derive(Debug, Default)]
-pub struct NodeState {
+pub struct AnyState {
     boxed: Option<Box<dyn Any + Send>>,
 }
 
-impl NodeState {
+impl AnyState {
     pub fn is_none(&self) -> bool {
         self.boxed.is_none()
     }

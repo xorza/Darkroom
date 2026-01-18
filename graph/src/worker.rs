@@ -1,5 +1,5 @@
-use crate::event::EventLambda;
-use crate::event_state::EventState;
+use crate::common::shared_any_state::SharedAnyState;
+use crate::event_lambda::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
@@ -331,7 +331,7 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
-type EventTrigger = (EventRef, EventLambda, EventState);
+type EventTrigger = (EventRef, EventLambda, SharedAnyState);
 
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
@@ -527,10 +527,10 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
     use tokio::time::{Duration, timeout};
 
+    use crate::common::shared_any_state::SharedAnyState;
     use crate::elements::basic_funclib::BasicFuncLib;
-    use crate::elements::timers_funclib::TimersFuncLib;
-    use crate::event::EventLambda;
-    use crate::event_state::EventState;
+    use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
+    use crate::event_lambda::EventLambda;
     use crate::function::FuncLib;
     use crate::graph::{Graph, Node, NodeId};
 
@@ -570,7 +570,7 @@ mod tests {
     async fn test_worker() -> anyhow::Result<()> {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -650,7 +650,7 @@ mod tests {
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let event_state = EventState::default();
+        let event_state = SharedAnyState::default();
 
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
@@ -694,7 +694,7 @@ mod tests {
                 notify.notified().await;
             })
         });
-        let event_state = EventState::default();
+        let event_state = SharedAnyState::default();
 
         let notify_for_callback = Arc::clone(&notify);
         let callback = ProcessingCallback::new(move || {
@@ -751,7 +751,7 @@ mod tests {
                 invoke_count.fetch_add(1, Ordering::SeqCst);
             })
         });
-        let event_state = EventState::default();
+        let event_state = SharedAnyState::default();
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -816,7 +816,7 @@ mod tests {
     async fn clear_resets_execution_graph() {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -869,7 +869,7 @@ mod tests {
     async fn multi_message_processes_nested_messages() {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -917,7 +917,7 @@ mod tests {
     async fn events_are_deduplicated() {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -1001,7 +1001,7 @@ mod tests {
     async fn start_stop_event_loop() {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -1041,7 +1041,7 @@ mod tests {
     async fn request_argument_values_invokes_callback() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::default();
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -1098,7 +1098,7 @@ mod tests {
     async fn processing_callback_is_invoked_after_execution() {
         use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::default();
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -1146,7 +1146,7 @@ mod tests {
     async fn update_restarts_event_loop_if_running() {
         let output_stream = OutputStream::new();
 
-        let timers_invoker = TimersFuncLib::default();
+        let timers_invoker = WorkerEventsFuncLib::default();
         let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
 
         let mut func_lib = basic_invoker.into_func_lib();
@@ -1199,7 +1199,7 @@ mod tests {
 
         // Create a simple event lambda that completes immediately
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let event_state = EventState::default();
+        let event_state = SharedAnyState::default();
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -1253,7 +1253,7 @@ mod tests {
 
         // Start a new event loop with loop_id = 1
         let new_event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let new_event_state = EventState::default();
+        let new_event_state = SharedAnyState::default();
 
         let mut new_handle = super::start_event_loop(
             tx,

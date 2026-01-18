@@ -6,16 +6,15 @@ use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::elements::timers_funclib::TimersFuncLib;
-use crate::event::EventLambda;
-use crate::event_state::EventState;
+use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
+use crate::event_lambda::EventLambda;
+use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
-use crate::lambda::InvokeInput;
-use crate::node_state::NodeState;
-use crate::prelude::{FuncId, FuncLambda};
+use crate::prelude::{AnyState, FuncId, FuncLambda};
 use crate::worker::EventRef;
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
@@ -146,9 +145,9 @@ pub struct ExecutionNode {
     pub error: Option<Error>,
 
     #[serde(skip)]
-    pub(crate) state: NodeState,
+    pub(crate) state: AnyState,
     #[serde(skip)]
-    pub(crate) event_state: EventState,
+    pub(crate) event_state: SharedAnyState,
     #[serde(skip)]
     // todo remove option to reuse memory
     pub(crate) output_values: Option<Vec<DynamicValue>>,
@@ -289,8 +288,8 @@ impl ExecutionNode {
         }
     }
     fn reset_state(&mut self) {
-        self.state = NodeState::default();
-        self.event_state = EventState::default();
+        self.state = AnyState::default();
+        self.event_state = SharedAnyState::default();
         self.output_values = None;
     }
 }
@@ -484,7 +483,7 @@ impl ExecutionGraph {
         // treat run event subscribers as terminals
         if terminals {
             events.extend(self.e_nodes.iter().filter_map(|e_node| {
-                (e_node.func_id == TimersFuncLib::RUN_FUNC_ID).then_some(EventRef {
+                (e_node.func_id == WorkerEventsFuncLib::RUN_FUNC_ID).then_some(EventRef {
                     node_id: e_node.id,
                     event_idx: 0,
                 })

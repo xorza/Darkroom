@@ -8,7 +8,7 @@ use anyhow::Result;
 use common::slot::Slot;
 use common::{SerdeFormat, Shared};
 use graph::elements::basic_funclib::BasicFuncLib;
-use graph::elements::timers_funclib::{FRAME_EVENT_FUNC_ID, TimersFuncLib};
+use graph::elements::worker_events_funclib::{FRAME_EVENT_FUNC_ID, WorkerEventsFuncLib};
 use graph::execution_graph::{self, Result as ExecutionGraphResult};
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::{ExecutionStats, FuncId, FuncLib};
@@ -64,7 +64,7 @@ impl AppData {
         let argument_values_rx = Slot::default();
         let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
 
-        let timers_func_lib = TimersFuncLib::default();
+        let timers_func_lib = WorkerEventsFuncLib::default();
         let run_event = timers_func_lib.run_event.clone();
 
         let mut func_lib = FuncLib::default();
@@ -152,7 +152,11 @@ impl AppData {
         let graph = test_graph();
         let mut view_graph: ViewGraph = graph.into();
 
-        add_node_from_func_id(&mut view_graph, &self.func_lib, TimersFuncLib::RUN_FUNC_ID);
+        add_node_from_func_id(
+            &mut view_graph,
+            &self.func_lib,
+            WorkerEventsFuncLib::RUN_FUNC_ID,
+        );
         add_node_from_func_id(&mut view_graph, &self.func_lib, FRAME_EVENT_FUNC_ID);
 
         view_graph.auto_place_nodes();
