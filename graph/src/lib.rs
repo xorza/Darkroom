@@ -11,6 +11,7 @@ pub mod function;
 pub mod graph;
 pub mod lambda;
 pub mod macros;
+pub mod node_state;
 pub mod worker;
 
 pub mod prelude {
@@ -19,11 +20,10 @@ pub mod prelude {
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,
     };
-    pub use crate::function::{
-        Func, FuncBehavior, FuncId, FuncLib, NodeState, TestFuncHooks, test_func_lib,
-    };
+    pub use crate::function::{Func, FuncBehavior, FuncId, FuncLib, TestFuncHooks, test_func_lib};
     pub use crate::graph::{
         Binding, Event, Graph, Input, Node, NodeBehavior, NodeId, PortAddress, test_graph,
     };
     pub use crate::lambda::{FuncLambda, InvokeError, InvokeInput, InvokeResult};
+    pub use crate::node_state::NodeState;
 }

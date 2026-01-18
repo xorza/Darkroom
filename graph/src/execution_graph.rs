@@ -11,9 +11,10 @@ use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::elements::timers_funclib::TimersFuncLib;
 use crate::event::EventLambda;
 use crate::event_state::EventState;
-use crate::function::{Func, FuncBehavior, FuncLib, NodeState};
+use crate::function::{Func, FuncBehavior, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
+use crate::node_state::NodeState;
 use crate::prelude::{FuncId, FuncLambda};
 use crate::worker::EventRef;
 

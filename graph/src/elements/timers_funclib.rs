@@ -82,15 +82,16 @@ impl Default for TimersFuncLib {
                     event_lambda: EventLambda::new(|state| {
                         Box::pin(async move {
                             // Get current state from per-node event state
-                            let fps_state = state.get::<FpsEventState>().await;
-
-                            let Some(fps_state) = fps_state else {
+                            let guard = state.lock().await;
+                            let Some(fps_state) = guard.get::<FpsEventState>() else {
                                 // No state yet, wait for first execution
+                                drop(guard);
                                 std::future::pending::<()>().await;
                                 return;
                             };
 
                             if fps_state.frequency.approximately_eq(0.0) {
+                                drop(guard);
                                 std::future::pending::<()>().await;
                                 return;
                             }
@@ -98,6 +99,7 @@ impl Default for TimersFuncLib {
                             let desired_duration =
                                 Duration::from_secs_f64(1.0 / fps_state.frequency);
                             let elapsed = fps_state.last_execution.elapsed();
+                            drop(guard);
 
                             if elapsed < desired_duration {
                                 tokio::time::sleep(desired_duration - elapsed).await;
@@ -117,25 +119,23 @@ impl Default for TimersFuncLib {
                         let frequency = inputs[0].value.unwrap_or_f64(1.0);
 
                         // Get previous state from the fps event's state
-                        let prev_state = event_states[FPS_EVENT_IDX]
-                            .get_or_else(|| FpsEventState {
-                                frequency,
-                                last_execution: now,
-                                frame_no: 0,
-                            })
-                            .await;
+                        let mut guard = event_states[FPS_EVENT_IDX].lock().await;
+                        let prev_state = guard.get_or_default_with(|| FpsEventState {
+                            frequency,
+                            last_execution: now,
+                            frame_no: 0,
+                        });
 
                         let delta = prev_state.last_execution.elapsed().as_secs_f64();
                         let frame_no = prev_state.frame_no + 1;
 
                         // Store new state in the fps event's state
-                        event_states[FPS_EVENT_IDX]
-                            .set(FpsEventState {
-                                frequency,
-                                last_execution: now,
-                                frame_no,
-                            })
-                            .await;
+                        guard.set(FpsEventState {
+                            frequency,
+                            last_execution: now,
+                            frame_no,
+                        });
+                        drop(guard);
 
                         outputs[0] = DynamicValue::Float(delta);
                         outputs[1] = DynamicValue::Int(frame_no);

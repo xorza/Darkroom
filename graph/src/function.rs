@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::context::ContextType;
@@ -145,90 +144,6 @@ where
         func_lib
     }
 }
-
-#[derive(Debug, Default)]
-pub struct NodeState {
-    boxed: Option<Box<dyn Any + Send>>,
-}
-
-impl NodeState {
-    pub(crate) fn default() -> NodeState {
-        NodeState { boxed: None }
-    }
-
-    pub fn is_none(&self) -> bool {
-        self.boxed.is_none()
-    }
-
-    pub fn is_some<T>(&self) -> bool
-    where
-        T: Any + Send,
-    {
-        match &self.boxed {
-            None => false,
-            Some(v) => v.is::<T>(),
-        }
-    }
-
-    pub fn get<T>(&self) -> Option<&T>
-    where
-        T: Any + Send,
-    {
-        self.boxed
-            .as_ref()
-            .and_then(|boxed| boxed.downcast_ref::<T>())
-    }
-
-    pub fn get_mut<T>(&mut self) -> Option<&mut T>
-    where
-        T: Any + Send,
-    {
-        self.boxed
-            .as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
-    }
-
-    pub fn set<T>(&mut self, value: T)
-    where
-        T: Any + Send,
-    {
-        self.boxed = Some(Box::new(value));
-    }
-
-    pub fn get_or_default<T>(&mut self) -> &mut T
-    where
-        T: Any + Send + Default,
-    {
-        if self
-            .boxed
-            .as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
-            .is_none()
-        {
-            self.boxed = Some(Box::<T>::default());
-        }
-
-        self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
-    }
-
-    pub fn get_or_default_with<T, F>(&mut self, f: F) -> &mut T
-    where
-        T: Any + Send,
-        F: FnOnce() -> T,
-    {
-        if self
-            .boxed
-            .as_mut()
-            .and_then(|boxed| boxed.downcast_mut::<T>())
-            .is_none()
-        {
-            self.boxed = Some(Box::<T>::new(f()));
-        }
-
-        self.boxed.as_mut().unwrap().downcast_mut::<T>().unwrap()
-    }
-}
-
 pub struct TestFuncHooks {
     pub get_a: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
     pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
@@ -414,8 +329,9 @@ mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::OutputUsage;
-    use crate::function::{NodeState, TestFuncHooks, test_func_lib};
+    use crate::function::{TestFuncHooks, test_func_lib};
     use crate::lambda::InvokeInput;
+    use crate::node_state::NodeState;
     use common::SerdeFormat;
 
     #[test]
