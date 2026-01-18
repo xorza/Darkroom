@@ -5,7 +5,6 @@ use crate::model::ArgumentValuesCache;
 use crate::model::config::Config;
 use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
-use common::lambda::Lambda;
 use common::slot::Slot;
 use common::{SerdeFormat, Shared};
 use graph::elements::basic_funclib::BasicFuncLib;
@@ -51,7 +50,6 @@ pub struct AppData {
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 
     pub run_event: Arc<Notify>,
-    pub reset_frame_event: Lambda,
 
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
@@ -67,7 +65,6 @@ impl AppData {
         let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
 
         let timers_func_lib = TimersFuncLib::default();
-        let reset_frame_no = timers_func_lib.reset_frame_event.clone();
         let run_event = timers_func_lib.run_event.clone();
 
         let mut func_lib = FuncLib::default();
@@ -98,7 +95,6 @@ impl AppData {
             print_out_rx,
 
             run_event,
-            reset_frame_event: reset_frame_no,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -246,7 +242,6 @@ impl AppData {
             RunCommand::StartAutorun => {
                 assert!(!self.autorun);
 
-                self.reset_frame_event.call();
                 msgs.push(WorkerMessage::StartEventLoop);
                 update_if_dirty = true;
                 self.autorun = true;
@@ -258,7 +253,6 @@ impl AppData {
                 self.autorun = false;
             }
             RunCommand::RunOnce => {
-                self.reset_frame_event.call();
                 msgs.push(WorkerMessage::ExecuteTerminals);
                 update_if_dirty = true;
             }
@@ -347,7 +341,6 @@ impl AppData {
         self.graph_dirty = true;
         self.execution_stats = None;
         self.argument_values_cache.clear();
-        self.reset_frame_event.call();
     }
 
     fn handle_actions(&mut self) -> bool {

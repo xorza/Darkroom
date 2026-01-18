@@ -1,4 +1,5 @@
 use std::panic;
+use std::sync::Arc;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use hashbrown::HashSet;
@@ -9,7 +10,7 @@ use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::elements::timers_funclib::TimersFuncLib;
 use crate::event::EventLambda;
-use crate::function::{Func, FuncBehavior, FuncLib, InvokeCache};
+use crate::function::{Func, FuncBehavior, FuncLib, NodeState};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
 use crate::prelude::{FuncId, FuncLambda};
@@ -71,12 +72,15 @@ pub struct ExecutionInput {
 pub struct ExecutionOutput {
     usage_count: usize,
 }
-#[derive(Clone, Default, Debug, Serialize, Deserialize)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionEvent {
     pub subscribers: Vec<NodeId>,
 
     #[serde(skip, default)]
     pub lambda: EventLambda,
+
+    #[serde(skip, default)]
+    pub state: std::sync::Arc<std::sync::Mutex<NodeState>>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -143,7 +147,7 @@ pub struct ExecutionNode {
     pub error: Option<Error>,
 
     #[serde(skip)]
-    pub(crate) cache: InvokeCache,
+    pub(crate) state: NodeState,
     #[serde(skip)]
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
@@ -243,6 +247,7 @@ impl ExecutionNode {
                 self.events.push(ExecutionEvent {
                     subscribers: Vec::new(),
                     lambda: func_event.event_lambda.clone(),
+                    state: Arc::new(std::sync::Mutex::new(NodeState::default())),
                 });
             }
         }
@@ -771,6 +776,13 @@ impl ExecutionGraph {
                 (output.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)
             }));
 
+            // Collect event states before mutable borrow
+            let event_states: Vec<_> = e_node
+                .events
+                .iter()
+                .map(|event| Arc::clone(&event.state))
+                .collect();
+
             let e_node = &mut self.e_nodes[e_node_idx];
             assert!(e_node.error.is_none());
 
@@ -783,10 +795,11 @@ impl ExecutionGraph {
                 .lambda
                 .invoke(
                     &mut self.ctx_manager,
-                    &mut e_node.cache,
+                    &mut e_node.state,
                     inputs.as_slice(),
                     output_usage.as_slice(),
                     outputs.as_mut_slice(),
+                    &event_states,
                 )
                 .await
                 .map_err(|source| Error::Invoke {

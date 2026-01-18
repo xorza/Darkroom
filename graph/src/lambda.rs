@@ -3,7 +3,7 @@ use std::{pin::Pin, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    context::ContextManager, data::DynamicValue, execution_graph::OutputUsage, prelude::InvokeCache,
+    context::ContextManager, data::DynamicValue, execution_graph::OutputUsage, prelude::NodeState,
 };
 
 #[derive(Debug, Error)]
@@ -20,15 +20,18 @@ pub struct InvokeInput {
     pub value: DynamicValue,
 }
 
+pub type EventStates = [Arc<std::sync::Mutex<NodeState>>];
+
 type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
 
 pub trait AsyncLambdaFn:
     for<'a> Fn(
         &'a mut ContextManager,
-        &'a mut InvokeCache,
+        &'a mut NodeState,
         &'a [InvokeInput],
         &'a [OutputUsage],
         &'a mut [DynamicValue],
+        &'a EventStates,
     ) -> AsyncLambdaFuture<'a>
     + Send
     + Sync
@@ -39,10 +42,11 @@ pub trait AsyncLambdaFn:
 impl<T> AsyncLambdaFn for T where
     T: for<'a> Fn(
             &'a mut ContextManager,
-            &'a mut InvokeCache,
+            &'a mut NodeState,
             &'a [InvokeInput],
             &'a [OutputUsage],
             &'a mut [DynamicValue],
+            &'a EventStates,
         ) -> AsyncLambdaFuture<'a>
         + Send
         + Sync
@@ -74,17 +78,26 @@ impl FuncLambda {
     pub async fn invoke(
         &self,
         ctx_manager: &mut ContextManager,
-        cache: &mut InvokeCache,
+        cache: &mut NodeState,
         inputs: &[InvokeInput],
         output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],
+        event_states: &EventStates,
     ) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
                 panic!("Func missing lambda");
             }
             FuncLambda::Lambda(inner) => {
-                (inner)(ctx_manager, cache, inputs, output_usage, outputs).await
+                (inner)(
+                    ctx_manager,
+                    cache,
+                    inputs,
+                    output_usage,
+                    outputs,
+                    event_states,
+                )
+                .await
             }
         }
     }

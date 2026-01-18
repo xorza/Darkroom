@@ -7,8 +7,6 @@ use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOut
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::FloatExt;
-use common::lambda::Lambda;
-use common::slot::Slot;
 use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
@@ -18,7 +16,6 @@ pub struct TimersFuncLib {
     func_lib: FuncLib,
 
     pub run_event: Arc<Notify>,
-    pub reset_frame_event: Lambda,
 }
 
 #[derive(Debug, Clone)]
@@ -44,7 +41,8 @@ impl Default for TimersFuncLib {
     fn default() -> TimersFuncLib {
         let mut func_lib = FuncLib::default();
 
-        let fps_state_slot: Slot<FpsEventState> = Slot::default();
+        // Event index for fps event within the frame event func
+        const FPS_EVENT_IDX: usize = 1;
 
         func_lib.add(Func {
             id: FRAME_EVENT_FUNC_ID,
@@ -73,7 +71,7 @@ impl Default for TimersFuncLib {
             events: vec![
                 FuncEvent {
                     name: "always".into(),
-                    event_lambda: EventLambda::new(|| {
+                    event_lambda: EventLambda::new(|_state| {
                         Box::pin(async move {
                             //
                         })
@@ -81,67 +79,76 @@ impl Default for TimersFuncLib {
                 },
                 FuncEvent {
                     name: "fps".into(),
-                    event_lambda: EventLambda::new({
-                        let fps_state_slot = fps_state_slot.clone();
-                        move || {
-                            let fps_state_slot = fps_state_slot.clone();
-                            Box::pin(async move {
-                                let state = fps_state_slot.peek_or_wait().await;
+                    event_lambda: EventLambda::new(|state| {
+                        Box::pin(async move {
+                            // Get current state from per-node event state
+                            let state = {
+                                let state_guard = state.lock().unwrap();
+                                state_guard.get::<FpsEventState>().cloned()
+                            };
 
-                                if state.frequency.approximately_eq(0.0) {
-                                    std::future::pending::<()>().await;
-                                }
+                            let Some(state) = state else {
+                                // No state yet, wait for first execution
+                                std::future::pending::<()>().await;
+                                return;
+                            };
 
-                                let desired_duration =
-                                    Duration::from_secs_f64(1.0 / state.frequency);
-                                let elapsed = state.last_execution.elapsed();
+                            if state.frequency.approximately_eq(0.0) {
+                                std::future::pending::<()>().await;
+                                return;
+                            }
 
-                                if elapsed < desired_duration {
-                                    tokio::time::sleep(desired_duration - elapsed).await;
-                                }
+                            let desired_duration = Duration::from_secs_f64(1.0 / state.frequency);
+                            let elapsed = state.last_execution.elapsed();
 
-                                // If elapsed >= desired_duration, fire immediately (no sleep)
-                            })
-                        }
+                            if elapsed < desired_duration {
+                                tokio::time::sleep(desired_duration - elapsed).await;
+                            }
+
+                            // If elapsed >= desired_duration, fire immediately (no sleep)
+                        })
                     }),
                 },
             ],
             required_contexts: vec![],
-            lambda: FuncLambda::new({
-                let fps_state_slot = fps_state_slot.clone();
-                move |_context_manager, _cache, inputs, _output_usage, outputs| {
-                    let fps_state_slot = fps_state_slot.clone();
-
+            lambda: FuncLambda::new(
+                move |_context_manager, _state, inputs, _output_usage, outputs, event_states| {
                     Box::pin(async move {
                         let now = Instant::now();
 
                         let frequency = inputs[0].value.unwrap_or_f64(1.0);
 
-                        // Get previous state if available
-                        let prev_state = fps_state_slot.peek().unwrap_or_else(|| {
-                            Arc::new(FpsEventState {
-                                frequency,
-                                last_execution: now,
-                                frame_no: 0,
-                            })
+                        // Get previous state from the fps event's state
+                        let prev_state = {
+                            let state_guard = event_states[FPS_EVENT_IDX].lock().unwrap();
+                            state_guard.get::<FpsEventState>().cloned()
+                        };
+
+                        let prev_state = prev_state.unwrap_or(FpsEventState {
+                            frequency,
+                            last_execution: now,
+                            frame_no: 0,
                         });
 
                         let delta = prev_state.last_execution.elapsed().as_secs_f64();
                         let frame_no = prev_state.frame_no + 1;
 
-                        // Send new state for the fps event
-                        fps_state_slot.send(FpsEventState {
-                            frequency,
-                            last_execution: now,
-                            frame_no,
-                        });
+                        // Store new state in the fps event's state
+                        {
+                            let mut state_guard = event_states[FPS_EVENT_IDX].lock().unwrap();
+                            state_guard.set(FpsEventState {
+                                frequency,
+                                last_execution: now,
+                                frame_no,
+                            });
+                        }
 
                         outputs[0] = DynamicValue::Float(delta);
                         outputs[1] = DynamicValue::Int(frame_no);
                         Ok(())
                     })
-                }
-            }),
+                },
+            ),
         });
 
         let run_event = Arc::new(Notify::new());
@@ -159,7 +166,7 @@ impl Default for TimersFuncLib {
                 name: "run".into(),
                 event_lambda: EventLambda::new({
                     let run_event = Arc::clone(&run_event);
-                    move || {
+                    move |_state| {
                         let run_event = Arc::clone(&run_event);
                         Box::pin(async move {
                             run_event.notified().await;
@@ -171,17 +178,9 @@ impl Default for TimersFuncLib {
             lambda: FuncLambda::None,
         });
 
-        let reset_frame_event = Lambda::new({
-            let fps_state_slot = fps_state_slot.clone();
-            move || {
-                fps_state_slot.take();
-            }
-        });
-
         TimersFuncLib {
             func_lib,
             run_event,
-            reset_frame_event,
         }
     }
 }

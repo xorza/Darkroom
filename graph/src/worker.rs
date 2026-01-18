@@ -1,6 +1,6 @@
 use crate::event::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
-use crate::function::FuncLib;
+use crate::function::{FuncLib, NodeState};
 use crate::graph::{Graph, NodeId};
 use common::ReadyState;
 use common::pause_gate::PauseGate;
@@ -329,9 +329,11 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
+type EventTrigger = (EventRef, EventLambda, Arc<std::sync::Mutex<NodeState>>);
+
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
-    events: Vec<(EventRef, EventLambda)>,
+    events: Vec<EventTrigger>,
     pause_gate: PauseGate,
     loop_id: u64,
 ) -> EventLoopHandle {
@@ -386,7 +388,7 @@ async fn start_event_loop(
 
     // Spawn one task per event lambda. Each task repeatedly invokes its lambda
     // and sends the event to the bounded channel.
-    for (event_ref, event_lambda) in events {
+    for (event_ref, event_lambda, event_state) in events {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();
@@ -396,7 +398,7 @@ async fn start_event_loop(
                 ready.signal();
 
                 loop {
-                    event_lambda.invoke().await;
+                    event_lambda.invoke(Arc::clone(&event_state)).await;
                     let result = event_tx.send(event_ref).await;
                     if result.is_err() {
                         return;
@@ -431,9 +433,7 @@ async fn reset_event_loop(
     events_from_loop.clear();
 }
 
-fn collect_active_event_triggers(
-    execution_graph: &mut ExecutionGraph,
-) -> Vec<(EventRef, EventLambda)> {
+fn collect_active_event_triggers(execution_graph: &mut ExecutionGraph) -> Vec<EventTrigger> {
     let result = execution_graph.collect_nodes_ready_for_execution();
 
     result
@@ -449,6 +449,7 @@ fn collect_active_event_triggers(
                             event_idx,
                         },
                         event.lambda.clone(),
+                        Arc::clone(&event.state),
                     ))
                 })
         })
@@ -519,7 +520,7 @@ mod tests {
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::timers_funclib::TimersFuncLib;
     use crate::event::EventLambda;
-    use crate::function::FuncLib;
+    use crate::function::{FuncLib, NodeState};
     use crate::graph::{Graph, Node, NodeId};
 
     use crate::worker::{EventRef, ProcessingCallback, Worker, WorkerMessage};
@@ -636,7 +637,8 @@ mod tests {
     #[tokio::test]
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
-        let event_lambda = EventLambda::new(|| Box::pin(async move {}));
+        let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
+        let event_state = Arc::new(std::sync::Mutex::new(NodeState::default()));
 
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
@@ -647,6 +649,7 @@ mod tests {
                     event_idx: 0,
                 },
                 event_lambda,
+                event_state,
             )],
             PauseGate::default(),
             0,
@@ -673,12 +676,13 @@ mod tests {
         let node_id = NodeId::unique();
         let notify = Arc::new(Notify::new());
         let notify_for_event = Arc::clone(&notify);
-        let event_lambda = EventLambda::new(move || {
+        let event_lambda = EventLambda::new(move |_state| {
             let notify = Arc::clone(&notify_for_event);
             Box::pin(async move {
                 notify.notified().await;
             })
         });
+        let event_state = Arc::new(std::sync::Mutex::new(NodeState::default()));
 
         let notify_for_callback = Arc::clone(&notify);
         let callback = ProcessingCallback::new(move || {
@@ -694,6 +698,7 @@ mod tests {
                     event_idx: 0,
                 },
                 event_lambda,
+                event_state,
             )],
             PauseGate::default(),
             0,
@@ -728,12 +733,13 @@ mod tests {
         let invoke_count = Arc::new(AtomicUsize::new(0));
         let invoke_count_clone = Arc::clone(&invoke_count);
 
-        let event_lambda = EventLambda::new(move || {
+        let event_lambda = EventLambda::new(move |_state| {
             let invoke_count = Arc::clone(&invoke_count_clone);
             Box::pin(async move {
                 invoke_count.fetch_add(1, Ordering::SeqCst);
             })
         });
+        let event_state = Arc::new(std::sync::Mutex::new(NodeState::default()));
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -746,6 +752,7 @@ mod tests {
                     event_idx: 0,
                 },
                 event_lambda,
+                event_state,
             )],
             pause_gate.clone(),
             0,
@@ -1179,7 +1186,8 @@ mod tests {
         let node_id = NodeId::unique();
 
         // Create a simple event lambda that completes immediately
-        let event_lambda = EventLambda::new(|| Box::pin(async move {}));
+        let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
+        let event_state = Arc::new(std::sync::Mutex::new(NodeState::default()));
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -1193,6 +1201,7 @@ mod tests {
                     event_idx: 0,
                 },
                 event_lambda.clone(),
+                Arc::clone(&event_state),
             )],
             pause_gate.clone(),
             0, // loop_id = 0
@@ -1231,7 +1240,8 @@ mod tests {
         }
 
         // Start a new event loop with loop_id = 1
-        let new_event_lambda = EventLambda::new(|| Box::pin(async move {}));
+        let new_event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
+        let new_event_state = Arc::new(std::sync::Mutex::new(NodeState::default()));
 
         let mut new_handle = super::start_event_loop(
             tx,
@@ -1241,6 +1251,7 @@ mod tests {
                     event_idx: 0,
                 },
                 new_event_lambda,
+                new_event_state,
             )],
             pause_gate,
             1, // loop_id = 1 (incremented)

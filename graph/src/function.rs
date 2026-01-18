@@ -147,13 +147,13 @@ where
 }
 
 #[derive(Debug, Default)]
-pub struct InvokeCache {
+pub struct NodeState {
     boxed: Option<Box<dyn Any + Send>>,
 }
 
-impl InvokeCache {
-    pub(crate) fn default() -> InvokeCache {
-        InvokeCache { boxed: None }
+impl NodeState {
+    pub(crate) fn default() -> NodeState {
+        NodeState { boxed: None }
     }
 
     pub fn is_none(&self) -> bool {
@@ -282,7 +282,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, cache, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, state, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -290,7 +290,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 // let b: i64 = inputs[1].value.as_int();
                 let b: i64 = inputs[1].value.none_or_int().unwrap_or(1);
                 outputs[0] = (a * b).into();
-                cache.set(a * b);
+                state.set(a * b);
 
                 Ok(())
             }),
@@ -368,13 +368,13 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, cache, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, state, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_i64();
                 let b: i64 = inputs[1].value.none_or_int().unwrap_or_default();
                 // let b: i64 = inputs[1].value.as_int();
-                cache.set(a + b);
+                state.set(a + b);
                 outputs[0] = (a + b).into();
                 Ok(())
             }),
@@ -414,7 +414,7 @@ mod tests {
     use crate::context::ContextManager;
     use crate::data::DynamicValue;
     use crate::execution_graph::OutputUsage;
-    use crate::function::{InvokeCache, TestFuncHooks, test_func_lib};
+    use crate::function::{NodeState, TestFuncHooks, test_func_lib};
     use crate::lambda::InvokeInput;
     use common::SerdeFormat;
 
@@ -438,7 +438,7 @@ mod tests {
         let sum_id = func_lib.by_name("sum").unwrap().id;
 
         let mut ctx_manager = ContextManager::default();
-        let mut cache = InvokeCache::default();
+        let mut node_state = NodeState::default();
         let mut inputs = vec![
             InvokeInput {
                 changed: true,
@@ -451,20 +451,22 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::None];
         let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
+        let event_states: Vec<std::sync::Arc<std::sync::Mutex<NodeState>>> = vec![];
         func_lib
             .by_id(&sum_id)
             .unwrap()
             .lambda
             .invoke(
                 &mut ctx_manager,
-                &mut cache,
+                &mut node_state,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,
+                &event_states,
             )
             .await?;
         assert_eq!(outputs[0].as_i64(), 6);
-        let cached = *cache
+        let cached = *node_state
             .get::<i64>()
             .expect("InvokeCache should contain the sum value");
         assert_eq!(cached, 6);
@@ -478,10 +480,11 @@ mod tests {
             .lambda
             .invoke(
                 &mut ctx_manager,
-                &mut cache,
+                &mut node_state,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,
+                &event_states,
             )
             .await?;
         assert_eq!(outputs[0].as_i64(), 8);

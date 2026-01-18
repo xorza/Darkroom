@@ -433,7 +433,7 @@ mod tests {
     use crate::{
         context::ContextManager,
         execution_graph::OutputUsage,
-        prelude::{InvokeCache, InvokeInput},
+        prelude::{InvokeInput, NodeState},
     };
 
     #[test]
@@ -519,7 +519,8 @@ mod tests {
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
 
         let mut ctx_manager = ContextManager::default();
-        let mut cache = InvokeCache::default();
+        let mut node_state = NodeState::default();
+        let event_states: Vec<std::sync::Arc<std::sync::Mutex<NodeState>>> = vec![];
         // call 'mult' function
         invoker
             .func_lib()
@@ -528,10 +529,11 @@ mod tests {
             .lambda
             .invoke(
                 &mut ctx_manager,
-                &mut cache,
+                &mut node_state,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),
+                &event_states,
             )
             .await
             .map_err(anyhow::Error::from)?;
@@ -589,7 +591,8 @@ mod tests {
         let mut outputs: Vec<DynamicValue> = vec![0.into()];
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut ctx_manager = ContextManager::default();
-        let mut cache = InvokeCache::default();
+        let mut node_state = NodeState::default();
+        let event_states: Vec<std::sync::Arc<std::sync::Mutex<NodeState>>> = vec![];
 
         invoker
             .func_lib()
@@ -598,10 +601,11 @@ mod tests {
             .lambda
             .invoke(
                 &mut ctx_manager,
-                &mut cache,
+                &mut node_state,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),
+                &event_states,
             )
             .await
             .map_err(anyhow::Error::from)?;
