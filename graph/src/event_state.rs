@@ -18,6 +18,23 @@ impl EventState {
         guard.get::<T>().cloned()
     }
 
+    pub async fn get_or_default<T>(&self) -> T
+    where
+        T: Any + Send + Clone + Default,
+    {
+        let guard = self.inner.lock().await;
+        guard.get::<T>().cloned().unwrap_or_default()
+    }
+
+    pub async fn get_or_else<T, F>(&self, f: F) -> T
+    where
+        T: Any + Send + Clone,
+        F: FnOnce() -> T,
+    {
+        let guard = self.inner.lock().await;
+        guard.get::<T>().cloned().unwrap_or_else(f)
+    }
+
     pub async fn set<T>(&self, value: T)
     where
         T: Any + Send,

@@ -118,13 +118,12 @@ impl Default for TimersFuncLib {
 
                         // Get previous state from the fps event's state
                         let prev_state = event_states[FPS_EVENT_IDX]
-                            .get::<FpsEventState>()
-                            .await
-                            .unwrap_or(FpsEventState {
+                            .get_or_else(|| FpsEventState {
                                 frequency,
                                 last_execution: now,
                                 frame_no: 0,
-                            });
+                            })
+                            .await;
 
                         let delta = prev_state.last_execution.elapsed().as_secs_f64();
                         let frame_no = prev_state.frame_no + 1;
