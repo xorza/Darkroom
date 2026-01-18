@@ -7,6 +7,7 @@ use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOut
 use crate::lambda::FuncLambda;
 use crate::prelude::FuncId;
 use common::FloatExt;
+use common::slot::Slot;
 use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
@@ -83,14 +84,8 @@ impl Default for TimersFuncLib {
                         Box::pin(async move {
                             // Get current state from per-node event state
                             let guard = state.lock().await;
-                            let Some(fps_state) = guard.get::<FpsEventState>() else {
-                                // No state yet, wait for first execution
-
-                                tracing::info!("No state yet, wait for first execution");
-                                drop(guard);
-                                std::future::pending::<()>().await;
-                                return;
-                            };
+                            let slot = guard.get::<Slot<FpsEventState>>().unwrap();
+                            let fps_state = slot.peek_or_wait().await;
 
                             if fps_state.frequency.approximately_eq(0.0) {
                                 tracing::info!("Frequency is zero, no FPS event");
@@ -124,17 +119,22 @@ impl Default for TimersFuncLib {
 
                         // Get previous state from the fps event's state
                         let mut guard = event_states[FPS_EVENT_IDX].lock().await;
-                        let prev_state = guard.get_or_default_with(|| FpsEventState {
-                            frequency,
-                            last_execution: now,
-                            frame_no: 0,
+                        let slot = guard.get_or_default_with(|| {
+                            let slot = Slot::default();
+                            slot.send(FpsEventState {
+                                frequency,
+                                last_execution: now,
+                                frame_no: 0,
+                            });
+                            slot
                         });
 
+                        let prev_state = slot.peek().unwrap();
                         let delta = prev_state.last_execution.elapsed().as_secs_f64();
                         let frame_no = prev_state.frame_no + 1;
 
                         // Store new state in the fps event's state
-                        guard.set(FpsEventState {
+                        slot.send(FpsEventState {
                             frequency,
                             last_execution: now,
                             frame_no,
