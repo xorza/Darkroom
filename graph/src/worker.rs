@@ -648,6 +648,11 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn event_loop_increments_frame_no() -> anyhow::Result<()> {
+        todo!();
+    }
+
+    #[tokio::test]
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
