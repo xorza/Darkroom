@@ -69,22 +69,9 @@ impl Default for TimersFuncLib {
             events: vec![
                 FuncEvent {
                     name: "always".into(),
-                    event_lambda: EventLambda::new(|state| {
+                    event_lambda: EventLambda::new(|_state| {
                         Box::pin(async move {
-                            // Get current state and increment frame_no
-                            let slot = state
-                                .lock()
-                                .await
-                                .get::<Slot<FpsEventState>>()
-                                .expect("Node was never executed, nodes should be executed prior to registering events")
-                                .clone();
-                            let fps_state = slot.peek_or_wait().await;
-
-                            slot.send(FpsEventState {
-                                frequency: fps_state.frequency,
-                                last_execution: Instant::now(),
-                                frame_no: fps_state.frame_no + 1,
-                            });
+                            //
                         })
                     }),
                 },
@@ -117,13 +104,6 @@ impl Default for TimersFuncLib {
                                 tokio::time::sleep(desired_duration - elapsed).await;
                             }
 
-                            // update state with new frame number and current time
-                            slot.send(FpsEventState {
-                                frequency: fps_state.frequency,
-                                last_execution: Instant::now(),
-                                frame_no: fps_state.frame_no + 1,
-                            });
-
                             // If elapsed >= desired_duration, fire immediately (no sleep)
                         })
                     }),
@@ -134,6 +114,7 @@ impl Default for TimersFuncLib {
                 move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
                     Box::pin(async move {
                         let frequency = inputs[0].value.unwrap_or_f64(1.0);
+                        let now = Instant::now();
 
                         // Get previous state from the event state
                         let slot = event_state
@@ -143,28 +124,29 @@ impl Default for TimersFuncLib {
                                 let slot = Slot::default();
                                 slot.send(FpsEventState {
                                     frequency,
-                                    last_execution: Instant::now(),
-                                    frame_no: 0,
+                                    last_execution: now,
+                                    frame_no: 1,
                                 });
                                 slot
                             })
                             .clone();
 
                         let prev_state = slot.peek().unwrap();
-                        let delta = prev_state.last_execution.elapsed().as_secs_f64();
-
-
-                        if !frequency.approximately_eq(prev_state.frequency) {
-                            // update frequency
-                            slot.send(FpsEventState {
-                                frequency,
-                                last_execution: prev_state.last_execution,
-                                frame_no: prev_state.frame_no,
-                            });
+                        let mut delta = prev_state.last_execution.elapsed().as_secs_f64();
+                        if delta.approximately_eq(0.0) {
+                            // to avoid division by zero by delta users
+                            delta = 1.0 / frequency;
                         }
+
+                        slot.send(FpsEventState {
+                            frequency,
+                            last_execution: now,
+                            frame_no: prev_state.frame_no + 1,
+                        });
 
                         outputs[0] = DynamicValue::Float(delta);
                         outputs[1] = DynamicValue::Int(prev_state.frame_no);
+
                         Ok(())
                     })
                 },

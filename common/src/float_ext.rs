@@ -4,13 +4,13 @@ pub trait FloatExt {
 
 impl FloatExt for f32 {
     fn approximately_eq(self, other: Self) -> bool {
-        (self - other).abs() < f32::EPSILON
+        (self - other).abs() < crate::EPSILON
     }
 }
 
 impl FloatExt for f64 {
     fn approximately_eq(self, other: Self) -> bool {
-        (self - other).abs() < f64::EPSILON
+        (self - other).abs() < crate::EPSILON as f64
     }
 }
 
