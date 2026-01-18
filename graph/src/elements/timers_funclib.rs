@@ -72,9 +72,22 @@ impl Default for TimersFuncLib {
             events: vec![
                 FuncEvent {
                     name: "always".into(),
-                    event_lambda: EventLambda::new(|_state| {
+                    event_lambda: EventLambda::new(|state| {
                         Box::pin(async move {
-                            //
+                            // Get current state and increment frame_no
+                            let slot = state
+                                .lock()
+                                .await
+                                .get::<Slot<FpsEventState>>()
+                                .expect("Node was never executed, nodes should be executed prior to registering events")
+                                .clone();
+                            let fps_state = slot.peek_or_wait().await;
+
+                            slot.send(FpsEventState {
+                                frequency: fps_state.frequency,
+                                last_execution: Instant::now(),
+                                frame_no: fps_state.frame_no + 1,
+                            });
                         })
                     }),
                 },

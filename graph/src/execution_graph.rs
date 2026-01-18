@@ -2045,7 +2045,7 @@ mod tests {
         let mut execution_graph = ExecutionGraph::default();
         execution_graph.update(&graph, &func_lib);
 
-        // First execution - frame_no should be 1
+        // First execution - frame_no should be 1 (initialized)
         let event = EventRef {
             node_id: frame_event_node_id,
             event_idx: 0,
@@ -2058,11 +2058,11 @@ mod tests {
         );
         assert_eq!(output_stream.take().await, ["1"]);
 
-        // Second execution - frame_no should be 2 (state persists)
+        // Second execution - frame_no stays 1 (only incremented when event fires, not on execution)
         execution_graph.execute_events([event]).await?;
-        assert_eq!(output_stream.take().await, ["2"]);
+        assert_eq!(output_stream.take().await, ["1"]);
 
-        // Update graph (simulates what worker does) - state should still persist
+        // Update graph - state should be reset
         execution_graph.update(&graph, &func_lib);
 
         // Third execution - frame_no should be 1 (state was reset by update)
