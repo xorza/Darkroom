@@ -334,11 +334,11 @@ type EventTrigger = (EventRef, EventLambda, EventState);
 
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
-    events: Vec<EventTrigger>,
+    event_triggers: Vec<EventTrigger>,
     pause_gate: PauseGate,
     loop_id: u64,
 ) -> EventLoopHandle {
-    assert!(!events.is_empty());
+    assert!(!event_triggers.is_empty());
 
     let mut join_handles: Vec<JoinHandle<()>> = Vec::default();
 
@@ -385,11 +385,11 @@ async fn start_event_loop(
     });
     join_handles.push(join_handle);
 
-    let ready = ReadyState::new(events.len());
+    let ready = ReadyState::new(event_triggers.len());
 
     // Spawn one task per event lambda. Each task repeatedly invokes its lambda
     // and sends the event to the bounded channel.
-    for (event_ref, event_lambda, event_state) in events {
+    for (event_ref, event_lambda, event_state) in event_triggers {
         let join_handle = tokio::spawn({
             let event_tx = event_tx.clone();
             let ready = ready.clone();

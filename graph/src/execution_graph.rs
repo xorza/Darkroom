@@ -2058,9 +2058,92 @@ mod tests {
         // Update graph (simulates what worker does) - state should still persist
         execution_graph.update(&graph, &func_lib);
 
-        // Third execution - frame_no should be 3 (state persists across update)
+        // Third execution - frame_no should be 1 (state was reset by update)
         execution_graph.execute_events([event]).await?;
         assert_eq!(output_stream.take().await, ["1"]);
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn node_state_reset_on_update() -> anyhow::Result<()> {
+        use crate::function::{Func, FuncBehavior, FuncInput, FuncOutput};
+        use crate::lambda::FuncLambda;
+
+        // Create a function that accumulates a counter in node state
+        let accumulator_func = Func {
+            id: "a0000000-0000-0000-0000-000000000001".into(),
+            name: "accumulator".to_string(),
+            description: None,
+            category: "Test".to_string(),
+            behavior: FuncBehavior::Impure,
+            terminal: true,
+            inputs: vec![FuncInput {
+                name: "increment".to_string(),
+                required: true,
+                data_type: DataType::Int,
+                default_value: Some(1.into()),
+                value_options: vec![],
+            }],
+            outputs: vec![FuncOutput {
+                name: "counter".to_string(),
+                data_type: DataType::Int,
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: FuncLambda::new(|_, state, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    let increment = inputs[0].value.unwrap_or_i64(1);
+                    let current = state.get::<i64>().cloned().unwrap_or(0);
+                    let new_value = current + increment;
+                    state.set(new_value);
+                    outputs[0] = DynamicValue::Int(new_value);
+                    Ok(())
+                })
+            }),
+        };
+
+        let mut func_lib = FuncLib::default();
+        func_lib.add(accumulator_func);
+
+        let mut graph = Graph::default();
+        let acc_node_id: NodeId = "b0000000-0000-0000-0000-000000000001".into();
+
+        let acc_func = func_lib.by_name("accumulator").unwrap();
+        let mut acc_node: Node = acc_func.into();
+        acc_node.id = acc_node_id;
+        acc_node.inputs[0].binding = StaticValue::Int(1).into();
+        graph.add(acc_node);
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
+
+        // First execution - counter should be 1
+        execution_graph.execute_terminals().await?;
+        let e_node = execution_graph.by_id(&acc_node_id).unwrap();
+        assert_eq!(e_node.output_values.as_ref().unwrap()[0].as_i64(), 1);
+
+        // Second execution - counter should be 2 (state persists)
+        execution_graph.execute_terminals().await?;
+        let e_node = execution_graph.by_id(&acc_node_id).unwrap();
+        assert_eq!(e_node.output_values.as_ref().unwrap()[0].as_i64(), 2);
+
+        // Third execution - counter should be 3 (state persists)
+        execution_graph.execute_terminals().await?;
+        let e_node = execution_graph.by_id(&acc_node_id).unwrap();
+        assert_eq!(e_node.output_values.as_ref().unwrap()[0].as_i64(), 3);
+
+        // Update graph - state should be reset
+        execution_graph.update(&graph, &func_lib);
+
+        // Fourth execution - counter should be 1 (state was reset by update)
+        execution_graph.execute_terminals().await?;
+        let e_node = execution_graph.by_id(&acc_node_id).unwrap();
+        assert_eq!(
+            e_node.output_values.as_ref().unwrap()[0].as_i64(),
+            1,
+            "Node state should be reset after update"
+        );
 
         Ok(())
     }
