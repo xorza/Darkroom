@@ -1,9 +1,10 @@
 use crate::event::EventLambda;
+use crate::event_state::EventState;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
-use crate::function::{FuncLib, NodeState};
+use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
+use common::ReadyState;
 use common::pause_gate::PauseGate;
-use common::{ReadyState, Shared};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::mem::take;
@@ -329,7 +330,7 @@ async fn worker_loop<ExecutionCallback>(
     }
 }
 
-type EventTrigger = (EventRef, EventLambda, Shared<NodeState>);
+type EventTrigger = (EventRef, EventLambda, EventState);
 
 async fn start_event_loop(
     worker_message_tx: UnboundedSender<WorkerMessage>,
@@ -449,7 +450,7 @@ fn collect_active_event_triggers(execution_graph: &mut ExecutionGraph) -> Vec<Ev
                             event_idx,
                         },
                         event.lambda.clone(),
-                        event.state.shared().clone(),
+                        event.state.clone(),
                     ))
                 })
         })
@@ -511,7 +512,6 @@ impl std::fmt::Debug for ArgumentValuesCallback {
 mod tests {
     use std::sync::Arc;
 
-    use common::Shared;
     use common::output_stream::OutputStream;
     use common::pause_gate::PauseGate;
     use tokio::sync::Notify;
@@ -521,7 +521,8 @@ mod tests {
     use crate::elements::basic_funclib::BasicFuncLib;
     use crate::elements::timers_funclib::TimersFuncLib;
     use crate::event::EventLambda;
-    use crate::function::{FuncLib, NodeState};
+    use crate::event_state::EventState;
+    use crate::function::FuncLib;
     use crate::graph::{Graph, Node, NodeId};
 
     use crate::worker::{EventRef, ProcessingCallback, Worker, WorkerMessage};
@@ -639,7 +640,7 @@ mod tests {
     async fn start_event_loop_forwards_events() {
         let node_id = NodeId::unique();
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let event_state = Shared::new(NodeState::default());
+        let event_state = EventState::default();
 
         let (tx, mut rx) = unbounded_channel();
         let mut handle = super::start_event_loop(
@@ -683,7 +684,7 @@ mod tests {
                 notify.notified().await;
             })
         });
-        let event_state = Shared::new(NodeState::default());
+        let event_state = EventState::default();
 
         let notify_for_callback = Arc::clone(&notify);
         let callback = ProcessingCallback::new(move || {
@@ -740,7 +741,7 @@ mod tests {
                 invoke_count.fetch_add(1, Ordering::SeqCst);
             })
         });
-        let event_state = Shared::new(NodeState::default());
+        let event_state = EventState::default();
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -1188,7 +1189,7 @@ mod tests {
 
         // Create a simple event lambda that completes immediately
         let event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let event_state = Shared::new(NodeState::default());
+        let event_state = EventState::default();
 
         let pause_gate = PauseGate::default();
         let (tx, mut rx) = unbounded_channel();
@@ -1242,7 +1243,7 @@ mod tests {
 
         // Start a new event loop with loop_id = 1
         let new_event_lambda = EventLambda::new(|_state| Box::pin(async move {}));
-        let new_event_state = Shared::new(NodeState::default());
+        let new_event_state = EventState::default();
 
         let mut new_handle = super::start_event_loop(
             tx,

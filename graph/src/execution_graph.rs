@@ -1,7 +1,7 @@
 use std::panic;
 
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
-use common::{BoolExt, SerdeFormat, Shared, is_debug};
+use common::{BoolExt, SerdeFormat, is_debug};
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,6 +10,7 @@ use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::elements::timers_funclib::TimersFuncLib;
 use crate::event::EventLambda;
+use crate::event_state::EventState;
 use crate::function::{Func, FuncBehavior, FuncLib, NodeState};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
 use crate::lambda::InvokeInput;
@@ -70,17 +71,6 @@ pub struct ExecutionInput {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct ExecutionOutput {
     usage_count: usize,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct EventState {
-    inner: Shared<NodeState>,
-}
-
-impl EventState {
-    pub fn shared(&self) -> &Shared<NodeState> {
-        &self.inner
-    }
 }
 
 #[derive(Default, Debug, Serialize, Deserialize)]
@@ -791,7 +781,7 @@ impl ExecutionGraph {
             let event_states: Vec<_> = e_node
                 .events
                 .iter()
-                .map(|event| event.state.shared().clone())
+                .map(|event| event.state.clone())
                 .collect();
 
             let e_node = &mut self.e_nodes[e_node_idx];

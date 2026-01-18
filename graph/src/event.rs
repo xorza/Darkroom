@@ -1,15 +1,12 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use common::Shared;
-
-use crate::function::NodeState;
+use crate::event_state::EventState;
 
 type AsyncEventFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-pub trait AsyncEventFn: Fn(Shared<NodeState>) -> AsyncEventFuture + Send + Sync + 'static {}
+pub trait AsyncEventFn: Fn(EventState) -> AsyncEventFuture + Send + Sync + 'static {}
 
-impl<T> AsyncEventFn for T where T: Fn(Shared<NodeState>) -> AsyncEventFuture + Send + Sync + 'static
-{}
+impl<T> AsyncEventFn for T where T: Fn(EventState) -> AsyncEventFuture + Send + Sync + 'static {}
 
 pub type AsyncEvent = dyn AsyncEventFn;
 
@@ -28,7 +25,7 @@ impl EventLambda {
         Self::Lambda(Arc::new(lambda))
     }
 
-    pub async fn invoke(&self, state: Shared<NodeState>) {
+    pub async fn invoke(&self, state: EventState) {
         match self {
             EventLambda::None => {
                 panic!("Func missing lambda");

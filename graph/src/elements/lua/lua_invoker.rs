@@ -520,7 +520,7 @@ mod tests {
 
         let mut ctx_manager = ContextManager::default();
         let mut node_state = NodeState::default();
-        let event_states: Vec<common::Shared<NodeState>> = vec![];
+        let event_states: Vec<crate::event_state::EventState> = vec![];
         // call 'mult' function
         invoker
             .func_lib()
@@ -592,7 +592,7 @@ mod tests {
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut ctx_manager = ContextManager::default();
         let mut node_state = NodeState::default();
-        let event_states: Vec<common::Shared<NodeState>> = vec![];
+        let event_states: Vec<crate::event_state::EventState> = vec![];
 
         invoker
             .func_lib()

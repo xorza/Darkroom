@@ -1,11 +1,11 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use common::Shared;
 use thiserror::Error;
 
 use crate::{
-    context::ContextManager, data::DynamicValue, execution_graph::OutputUsage, prelude::NodeState,
+    context::ContextManager, data::DynamicValue, event_state::EventState,
+    execution_graph::OutputUsage, prelude::NodeState,
 };
 
 #[derive(Debug, Error)]
@@ -22,7 +22,7 @@ pub struct InvokeInput {
     pub value: DynamicValue,
 }
 
-pub type EventStates = [Shared<NodeState>];
+pub type EventStates = [EventState];
 
 type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
 
