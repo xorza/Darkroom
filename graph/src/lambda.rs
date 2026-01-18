@@ -22,15 +22,13 @@ pub struct InvokeInput {
     pub value: DynamicValue,
 }
 
-pub type EventStates = [EventState];
-
 type AsyncLambdaFuture<'a> = Pin<Box<dyn Future<Output = InvokeResult<()>> + Send + 'a>>;
 
 pub trait AsyncLambdaFn:
     for<'a> Fn(
         &'a mut ContextManager,
         &'a mut NodeState,
-        &'a EventStates,
+        &'a EventState,
         &'a [InvokeInput],
         &'a [OutputUsage],
         &'a mut [DynamicValue],
@@ -45,7 +43,7 @@ impl<T> AsyncLambdaFn for T where
     T: for<'a> Fn(
             &'a mut ContextManager,
             &'a mut NodeState,
-            &'a EventStates,
+            &'a EventState,
             &'a [InvokeInput],
             &'a [OutputUsage],
             &'a mut [DynamicValue],
@@ -81,7 +79,7 @@ impl FuncLambda {
         &self,
         ctx_manager: &mut ContextManager,
         state: &mut NodeState,
-        event_states: &EventStates,
+        event_state: &EventState,
         inputs: &[InvokeInput],
         output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],
@@ -94,7 +92,7 @@ impl FuncLambda {
                 (inner)(
                     ctx_manager,
                     state,
-                    event_states,
+                    event_state,
                     inputs,
                     output_usage,
                     outputs,

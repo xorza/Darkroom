@@ -367,7 +367,7 @@ mod tests {
         ];
         let mut outputs = vec![DynamicValue::None];
         let outputs_meta = vec![OutputUsage::Needed; outputs.len()];
-        let event_states: Vec<crate::event_state::EventState> = vec![];
+        let event_state = crate::event_state::EventState::default();
         func_lib
             .by_id(&sum_id)
             .unwrap()
@@ -375,7 +375,7 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
-                &event_states,
+                &event_state,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,
@@ -397,7 +397,7 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
-                &event_states,
+                &event_state,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,

@@ -80,9 +80,6 @@ pub struct ExecutionEvent {
 
     #[serde(skip, default)]
     pub lambda: EventLambda,
-
-    #[serde(skip, default)]
-    pub state: EventState,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -150,6 +147,8 @@ pub struct ExecutionNode {
 
     #[serde(skip)]
     pub(crate) state: NodeState,
+    #[serde(skip)]
+    pub(crate) event_state: EventState,
     #[serde(skip)]
     // todo remove option to reuse memory
     pub(crate) output_values: Option<Vec<DynamicValue>>,
@@ -293,9 +292,7 @@ impl ExecutionNode {
     }
     fn reset_state(&mut self) {
         self.state = NodeState::default();
-        for event in &mut self.events {
-            event.state = EventState::default();
-        }
+        self.event_state = EventState::default();
     }
 }
 
@@ -789,12 +786,8 @@ impl ExecutionGraph {
                 (output.usage_count == 0).then_else(OutputUsage::Skip, OutputUsage::Needed)
             }));
 
-            // Collect event states before mutable borrow
-            let event_states: Vec<_> = e_node
-                .events
-                .iter()
-                .map(|event| event.state.clone())
-                .collect();
+            // Clone event state before mutable borrow
+            let event_state = e_node.event_state.clone();
 
             let e_node = &mut self.e_nodes[e_node_idx];
             assert!(e_node.error.is_none());
@@ -809,7 +802,7 @@ impl ExecutionGraph {
                 .invoke(
                     &mut self.ctx_manager,
                     &mut e_node.state,
-                    &event_states,
+                    &event_state,
                     inputs.as_slice(),
                     output_usage.as_slice(),
                     outputs.as_mut_slice(),

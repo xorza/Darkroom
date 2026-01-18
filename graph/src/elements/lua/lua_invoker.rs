@@ -520,7 +520,7 @@ mod tests {
 
         let mut ctx_manager = ContextManager::default();
         let mut node_state = NodeState::default();
-        let event_states: Vec<crate::event_state::EventState> = vec![];
+        let event_state = crate::event_state::EventState::default();
         // call 'mult' function
         invoker
             .func_lib()
@@ -530,7 +530,7 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
-                &event_states,
+                &event_state,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),
@@ -592,7 +592,7 @@ mod tests {
         let outputs_meta = vec![OutputUsage::Needed; outputs.as_slice().len()];
         let mut ctx_manager = ContextManager::default();
         let mut node_state = NodeState::default();
-        let event_states: Vec<crate::event_state::EventState> = vec![];
+        let event_state = crate::event_state::EventState::default();
 
         invoker
             .func_lib()
@@ -602,7 +602,7 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
-                &event_states,
+                &event_state,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),

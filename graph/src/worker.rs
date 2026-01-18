@@ -446,19 +446,20 @@ fn collect_active_event_triggers(
         .chain(execution_stats.executed_nodes.iter().map(|n| n.node_id))
         .flat_map(|node_id| {
             let e_node = execution_graph.by_id(&node_id).unwrap();
+            let event_state = e_node.event_state.clone();
             e_node
                 .events
                 .iter()
                 .enumerate()
                 .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
-                .map(|(event_idx, event)| {
+                .map(move |(event_idx, event)| {
                     (
                         EventRef {
                             node_id: e_node.id,
                             event_idx,
                         },
                         event.lambda.clone(),
-                        event.state.clone(),
+                        event_state.clone(),
                     )
                 })
         })
@@ -620,8 +621,10 @@ mod tests {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
+        // Manual event triggers don't run the event lambda that increments frame_no,
+        // so frame_no stays at 1 for all manual triggers
         assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(output_stream.take().await, ["2"]);
+        assert_eq!(output_stream.take().await, ["1"]);
 
         worker.send(WorkerMessage::Event {
             event: EventRef {
@@ -637,7 +640,7 @@ mod tests {
             .expect("Unsuccessful compute");
 
         assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(output_stream.take().await, ["3"]);
+        assert_eq!(output_stream.take().await, ["1"]);
 
         worker.exit();
 

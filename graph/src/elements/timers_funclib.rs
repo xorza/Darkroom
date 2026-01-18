@@ -42,9 +42,6 @@ impl Default for TimersFuncLib {
     fn default() -> TimersFuncLib {
         let mut func_lib = FuncLib::default();
 
-        // Event index for fps event within the frame event func
-        const FPS_EVENT_IDX: usize = 1;
-
         func_lib.add(Func {
             id: FRAME_EVENT_FUNC_ID,
             name: "frame event".to_string(),
@@ -134,12 +131,12 @@ impl Default for TimersFuncLib {
             ],
             required_contexts: vec![],
             lambda: FuncLambda::new(
-                move |_context_manager, _state, event_states, inputs, _output_usage, outputs| {
+                move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
                     Box::pin(async move {
                         let frequency = inputs[0].value.unwrap_or_f64(1.0);
 
-                        // Get previous state from the fps event's state
-                        let slot = event_states[FPS_EVENT_IDX]
+                        // Get previous state from the event state
+                        let slot = event_state
                             .lock()
                             .await
                             .get_or_default_with(|| {
