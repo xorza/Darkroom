@@ -345,10 +345,9 @@ impl ExecutionGraph {
         }
     }
 
-    pub fn reset_states_clear_outputs(&mut self) {
+    pub fn reset_states(&mut self) {
         for e_node in &mut self.e_nodes {
             e_node.reset_state();
-            e_node.output_values = None;
         }
     }
 
@@ -557,13 +556,6 @@ impl ExecutionGraph {
         self.validate_for_execution();
 
         Ok(())
-    }
-
-    pub fn collect_nodes_ready_for_execution(&mut self) -> impl Iterator<Item = &ExecutionNode> {
-        self.e_node_execute_order
-            .iter()
-            .copied()
-            .map(|e_node_idx| &self.e_nodes[e_node_idx])
     }
 
     // Walk backward from terminal nodes to collect process order and detect cycles.

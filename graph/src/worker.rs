@@ -297,13 +297,11 @@ async fn worker_loop<ExecutionCallback>(
             if execution_graph_clear {
                 tracing::error!("Execution graph is clear, cannot start event loop");
             } else {
-                execution_graph.reset_states_clear_outputs();
                 let result = execution_graph.execute(false, true, []).await;
-                let ok = result.is_ok();
-                (execution_callback)(result);
 
-                if ok {
-                    let events_triggers = collect_active_event_triggers(&mut execution_graph);
+                if let Ok(execution_stats) = &result {
+                    let events_triggers =
+                        collect_active_event_triggers(&execution_graph, execution_stats);
 
                     if !events_triggers.is_empty() {
                         event_loop_handle = Some(
@@ -318,7 +316,9 @@ async fn worker_loop<ExecutionCallback>(
 
                         tracing::info!("Event loop started");
                     }
-                }
+                };
+
+                (execution_callback)(result);
             }
         }
 
@@ -435,11 +435,18 @@ async fn reset_event_loop(
     events_from_loop.clear();
 }
 
-fn collect_active_event_triggers(execution_graph: &mut ExecutionGraph) -> Vec<EventTrigger> {
-    let result = execution_graph.collect_nodes_ready_for_execution();
+fn collect_active_event_triggers(
+    execution_graph: &ExecutionGraph,
+    execution_stats: &ExecutionStats,
+) -> Vec<EventTrigger> {
+    let mut ready_node_ids = execution_stats.cached_nodes.clone();
+    ready_node_ids.extend(execution_stats.executed_nodes.iter().map(|asd| asd.node_id));
 
-    result
-        .flat_map(|e_node| {
+    let mut event_triggers = Vec::new();
+
+    for node_id in ready_node_ids.drain(..) {
+        let e_node = execution_graph.by_id(&node_id).unwrap();
+        event_triggers.extend(
             e_node
                 .events
                 .iter()
@@ -453,9 +460,32 @@ fn collect_active_event_triggers(execution_graph: &mut ExecutionGraph) -> Vec<Ev
                         event.lambda.clone(),
                         event.state.clone(),
                     ))
-                })
-        })
-        .collect()
+                }),
+        );
+    }
+
+    // let result = execution_graph.collect_nodes_ready_for_execution();
+
+    // result
+    //     .flat_map(|e_node| {
+    //         e_node
+    //             .events
+    //             .iter()
+    //             .enumerate()
+    //             .filter_map(|(event_idx, event)| {
+    //                 (!event.subscribers.is_empty() && !event.lambda.is_none()).then_some((
+    //                     EventRef {
+    //                         node_id: e_node.id,
+    //                         event_idx,
+    //                     },
+    //                     event.lambda.clone(),
+    //                     event.state.clone(),
+    //                 ))
+    //             })
+    //     })
+    //     .collect()
+
+    event_triggers
 }
 
 impl ProcessingCallback {
