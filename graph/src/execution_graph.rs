@@ -343,6 +343,12 @@ impl ExecutionGraph {
         }
     }
 
+    pub fn reset_states(&mut self) {
+        for e_node in &mut self.e_nodes {
+            e_node.reset_state();
+        }
+    }
+
     pub fn clear(&mut self) {
         self.e_nodes.clear();
         self.e_node_process_order.clear();
