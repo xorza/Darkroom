@@ -621,10 +621,9 @@ mod tests {
             .expect("Missing compute completion")
             .expect("Unsuccessful compute");
 
-        // Manual event triggers don't run the event lambda that increments frame_no,
-        // so frame_no stays at 1 for all manual triggers
+        // frame_no is incremented in the update lambda, so each execution increments it
         assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(output_stream.take().await, ["1"]);
+        assert_eq!(output_stream.take().await, ["2"]);
 
         worker.send(WorkerMessage::Event {
             event: EventRef {
@@ -640,16 +639,11 @@ mod tests {
             .expect("Unsuccessful compute");
 
         assert_eq!(executed.executed_nodes.len(), 3);
-        assert_eq!(output_stream.take().await, ["1"]);
+        assert_eq!(output_stream.take().await, ["3"]);
 
         worker.exit();
 
         Ok(())
-    }
-
-    #[tokio::test]
-    async fn event_loop_increments_frame_no() -> anyhow::Result<()> {
-        todo!();
     }
 
     #[tokio::test]
