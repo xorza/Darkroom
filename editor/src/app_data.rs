@@ -49,8 +49,6 @@ pub struct AppData {
 
     undo_stack: Box<dyn UndoStack<ViewGraph, Action = GraphUiAction>>,
 
-    pub run_event: Arc<Notify>,
-
     execution_stats_rx: Slot<Result<ExecutionStats, execution_graph::Error>>,
     argument_values_rx: Slot<(NodeId, Option<ArgumentValues>)>,
     print_out_rx: UnboundedReceiver<String>,
@@ -64,14 +62,11 @@ impl AppData {
         let argument_values_rx = Slot::default();
         let (print_out_tx, print_out_rx) = unbounded_channel::<String>();
 
-        let timers_func_lib = WorkerEventsFuncLib::default();
-        let run_event = timers_func_lib.run_event.clone();
-
         let mut func_lib = FuncLib::default();
         func_lib.merge(test_func_lib(sample_test_hooks(print_out_tx)));
         func_lib.merge(EditorFuncLib::default());
         func_lib.merge(BasicFuncLib::default());
-        func_lib.merge(timers_func_lib);
+        func_lib.merge(WorkerEventsFuncLib::default());
 
         let mut result = Self {
             func_lib,
@@ -93,8 +88,6 @@ impl AppData {
             execution_stats_rx,
             argument_values_rx,
             print_out_rx,
-
-            run_event,
         };
 
         if let Some(path) = result.config.current_path.clone() {
@@ -146,23 +139,6 @@ impl AppData {
                 self.add_status(format!("Load failed: {} {err}", path.display()));
             }
         }
-    }
-
-    pub fn load_test_graph(&mut self) {
-        let graph = test_graph();
-        let mut view_graph: ViewGraph = graph.into();
-
-        add_node_from_func_id(
-            &mut view_graph,
-            &self.func_lib,
-            WorkerEventsFuncLib::RUN_FUNC_ID,
-        );
-        add_node_from_func_id(&mut view_graph, &self.func_lib, FRAME_EVENT_FUNC_ID);
-
-        view_graph.auto_place_nodes();
-        self.apply_mew_graph(view_graph, true);
-
-        self.add_status("Loaded sample test graph");
     }
 
     pub fn update_shared_status(&mut self) {

@@ -95,11 +95,6 @@ impl MainUi {
         }
     }
 
-    pub fn test_graph(&mut self, app_data: &mut AppData) {
-        self.graph_ui = GraphUi::default();
-        app_data.load_test_graph();
-    }
-
     pub fn render(&mut self, app_data: &mut AppData, ctx: &egui::Context) {
         let style = Rc::new(Style::new(self.style_settings.clone(), 1.0));
         ctx.style_mut(|egui_style| {
@@ -134,10 +129,6 @@ impl MainUi {
                         }
                         if ui.button("Open").clicked() {
                             self.load(app_data);
-                            ui.close();
-                        }
-                        if ui.button("Test").clicked() {
-                            self.test_graph(app_data);
                             ui.close();
                         }
                         if ui.button("Exit").clicked() {

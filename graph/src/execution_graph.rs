@@ -9,7 +9,6 @@ use thiserror::Error;
 use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
-use crate::elements::worker_events_funclib::WorkerEventsFuncLib;
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
@@ -478,17 +477,7 @@ impl ExecutionGraph {
         event_triggers: bool,
         events: T,
     ) -> Result<ExecutionStats> {
-        let mut events: Vec<EventRef> = events.into_iter().collect();
-
-        // treat run event subscribers as terminals
-        if terminals {
-            events.extend(self.e_nodes.iter().filter_map(|e_node| {
-                (e_node.func_id == WorkerEventsFuncLib::RUN_FUNC_ID).then_some(EventRef {
-                    node_id: e_node.id,
-                    event_idx: 0,
-                })
-            }));
-        }
+        let events: Vec<EventRef> = events.into_iter().collect();
 
         self.prepare_execution(terminals, event_triggers, &events)?;
 

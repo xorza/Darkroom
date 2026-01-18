@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::data::{DataType, DynamicValue};
@@ -8,15 +7,12 @@ use crate::function::{Func, FuncBehavior, FuncEvent, FuncInput, FuncLib, FuncOut
 use crate::prelude::FuncId;
 use common::FloatExt;
 use common::slot::Slot;
-use tokio::sync::Notify;
 
 pub const FRAME_EVENT_FUNC_ID: FuncId = FuncId::from_u128(0x01897c92d6055f5a7a21627ed74824ff);
 
 #[derive(Debug)]
 pub struct WorkerEventsFuncLib {
     func_lib: FuncLib,
-
-    pub run_event: Arc<Notify>,
 }
 
 #[derive(Debug, Clone)]
@@ -27,8 +23,6 @@ struct FpsEventState {
 }
 
 impl WorkerEventsFuncLib {
-    pub const RUN_FUNC_ID: FuncId = FuncId::from_u128(0xe871ddf47a534ae59728927a88649673);
-
     pub fn func_lib(&self) -> &FuncLib {
         &self.func_lib
     }
@@ -153,37 +147,7 @@ impl Default for WorkerEventsFuncLib {
             ),
         });
 
-        let run_event = Arc::new(Notify::new());
-
-        func_lib.add(Func {
-            id: Self::RUN_FUNC_ID,
-            name: "run".to_string(),
-            description: None,
-            behavior: FuncBehavior::Impure,
-            category: "Timers".to_string(),
-            terminal: false,
-            inputs: vec![],
-            outputs: vec![],
-            events: vec![FuncEvent {
-                name: "run".into(),
-                event_lambda: EventLambda::new({
-                    let run_event = Arc::clone(&run_event);
-                    move |_state| {
-                        let run_event = Arc::clone(&run_event);
-                        Box::pin(async move {
-                            run_event.notified().await;
-                        })
-                    }
-                }),
-            }],
-            required_contexts: vec![],
-            lambda: FuncLambda::None,
-        });
-
-        WorkerEventsFuncLib {
-            func_lib,
-            run_event,
-        }
+        WorkerEventsFuncLib { func_lib }
     }
 }
 
