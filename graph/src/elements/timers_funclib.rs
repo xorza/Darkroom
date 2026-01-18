@@ -144,7 +144,7 @@ impl Default for TimersFuncLib {
                                 slot.send(FpsEventState {
                                     frequency,
                                     last_execution: Instant::now(),
-                                    frame_no: 1,
+                                    frame_no: 0,
                                 });
                                 slot
                             })
