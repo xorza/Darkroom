@@ -119,7 +119,6 @@ impl Default for TimersFuncLib {
 
                         // Get previous state if available
                         let prev_state = fps_state_slot.peek().unwrap_or_else(|| {
-                            tracing::info!("Creating new FPS state");
                             Arc::new(FpsEventState {
                                 frequency,
                                 last_execution: now,
