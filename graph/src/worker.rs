@@ -439,53 +439,30 @@ fn collect_active_event_triggers(
     execution_graph: &ExecutionGraph,
     execution_stats: &ExecutionStats,
 ) -> Vec<EventTrigger> {
-    let mut ready_node_ids = execution_stats.cached_nodes.clone();
-    ready_node_ids.extend(execution_stats.executed_nodes.iter().map(|asd| asd.node_id));
-
-    let mut event_triggers = Vec::new();
-
-    for node_id in ready_node_ids.drain(..) {
-        let e_node = execution_graph.by_id(&node_id).unwrap();
-        event_triggers.extend(
+    execution_stats
+        .cached_nodes
+        .iter()
+        .copied()
+        .chain(execution_stats.executed_nodes.iter().map(|n| n.node_id))
+        .flat_map(|node_id| {
+            let e_node = execution_graph.by_id(&node_id).unwrap();
             e_node
                 .events
                 .iter()
                 .enumerate()
-                .filter_map(|(event_idx, event)| {
-                    (!event.subscribers.is_empty() && !event.lambda.is_none()).then_some((
+                .filter(|(_, event)| !event.subscribers.is_empty() && !event.lambda.is_none())
+                .map(|(event_idx, event)| {
+                    (
                         EventRef {
                             node_id: e_node.id,
                             event_idx,
                         },
                         event.lambda.clone(),
                         event.state.clone(),
-                    ))
-                }),
-        );
-    }
-
-    // let result = execution_graph.collect_nodes_ready_for_execution();
-
-    // result
-    //     .flat_map(|e_node| {
-    //         e_node
-    //             .events
-    //             .iter()
-    //             .enumerate()
-    //             .filter_map(|(event_idx, event)| {
-    //                 (!event.subscribers.is_empty() && !event.lambda.is_none()).then_some((
-    //                     EventRef {
-    //                         node_id: e_node.id,
-    //                         event_idx,
-    //                     },
-    //                     event.lambda.clone(),
-    //                     event.state.clone(),
-    //                 ))
-    //             })
-    //     })
-    //     .collect()
-
-    event_triggers
+                    )
+                })
+        })
+        .collect()
 }
 
 impl ProcessingCallback {
