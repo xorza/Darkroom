@@ -449,7 +449,7 @@ fn collect_active_event_triggers(execution_graph: &mut ExecutionGraph) -> Vec<Ev
                             event_idx,
                         },
                         event.lambda.clone(),
-                        event.state.clone(),
+                        event.state.shared().clone(),
                     ))
                 })
         })

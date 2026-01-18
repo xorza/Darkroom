@@ -71,6 +71,18 @@ pub struct ExecutionInput {
 pub struct ExecutionOutput {
     usage_count: usize,
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct EventState {
+    inner: Shared<NodeState>,
+}
+
+impl EventState {
+    pub fn shared(&self) -> &Shared<NodeState> {
+        &self.inner
+    }
+}
+
 #[derive(Default, Debug, Serialize, Deserialize)]
 pub struct ExecutionEvent {
     pub subscribers: Vec<NodeId>,
@@ -79,7 +91,7 @@ pub struct ExecutionEvent {
     pub lambda: EventLambda,
 
     #[serde(skip, default)]
-    pub state: Shared<NodeState>,
+    pub state: EventState,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ExecutionBehavior {
@@ -246,7 +258,7 @@ impl ExecutionNode {
                 self.events.push(ExecutionEvent {
                     subscribers: Vec::new(),
                     lambda: func_event.event_lambda.clone(),
-                    state: Shared::new(NodeState::default()),
+                    state: EventState::default(),
                 });
             }
         }
@@ -779,7 +791,7 @@ impl ExecutionGraph {
             let event_states: Vec<_> = e_node
                 .events
                 .iter()
-                .map(|event| event.state.clone())
+                .map(|event| event.state.shared().clone())
                 .collect();
 
             let e_node = &mut self.e_nodes[e_node_idx];
