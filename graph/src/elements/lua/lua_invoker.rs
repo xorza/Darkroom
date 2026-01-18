@@ -111,7 +111,7 @@ impl LuaInvoker {
             let lua_func_template = lua_func.clone();
             let lua = Arc::clone(&self.lua);
             func.lambda = crate::async_lambda!(
-                move |_, _, inputs, _, outputs| {
+                move |_, _, _, inputs, _, outputs| {
                     func = func_template.clone(),
                     lua_func = lua_func_template.clone(),
                     lua = Arc::clone(&lua)
@@ -530,10 +530,10 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
+                &event_states,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),
-                &event_states,
             )
             .await
             .map_err(anyhow::Error::from)?;
@@ -602,10 +602,10 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
+                &event_states,
                 inputs.as_slice(),
                 &outputs_meta,
                 outputs.as_mut_slice(),
-                &event_states,
             )
             .await
             .map_err(anyhow::Error::from)?;

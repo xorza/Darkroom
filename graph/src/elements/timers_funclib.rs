@@ -110,7 +110,7 @@ impl Default for TimersFuncLib {
             ],
             required_contexts: vec![],
             lambda: FuncLambda::new(
-                move |_context_manager, _state, inputs, _output_usage, outputs, event_states| {
+                move |_context_manager, _state, event_states, inputs, _output_usage, outputs| {
                     Box::pin(async move {
                         let now = Instant::now();
 

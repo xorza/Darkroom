@@ -797,10 +797,10 @@ impl ExecutionGraph {
                 .invoke(
                     &mut self.ctx_manager,
                     &mut e_node.state,
+                    &event_states,
                     inputs.as_slice(),
                     output_usage.as_slice(),
                     outputs.as_mut_slice(),
-                    &event_states,
                 )
                 .await
                 .map_err(|source| Error::Invoke {

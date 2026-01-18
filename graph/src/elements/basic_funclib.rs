@@ -126,7 +126,7 @@ impl Default for BasicFuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, inputs, _, _| { output_stream = output_stream_clone.clone() } => {
+                move |_, _, _, inputs, _, _| { output_stream = output_stream_clone.clone() } => {
                     assert_eq!(inputs.len(), 1);
                     let value: &str = inputs[0].value.as_string();
                     let mut guard = output_stream
@@ -177,7 +177,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
@@ -210,7 +210,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(|_, _, inputs, _, outputs| {
+            lambda: async_lambda!(|_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -252,7 +252,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, cache, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, cache, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -297,7 +297,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -339,7 +339,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -381,7 +381,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -432,7 +432,7 @@ impl Default for BasicFuncLib {
             ],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -478,7 +478,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -511,7 +511,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -543,7 +543,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -575,7 +575,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -607,7 +607,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -641,7 +641,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -675,7 +675,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -710,7 +710,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
@@ -753,7 +753,7 @@ impl Default for BasicFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, _, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 

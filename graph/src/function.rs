@@ -282,7 +282,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, state, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, state, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
@@ -310,7 +310,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
+                move |_, _, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_a() as f64).into();
                     Ok(())
@@ -332,7 +332,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
+                move |_, _, _, _, _, outputs| { get_b = Arc::clone(&get_b) } => {
                     assert_eq!(outputs.len(), 1);
                     outputs[0] = (get_b() as f64).into();
                     Ok(())
@@ -368,7 +368,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, state, inputs, _, outputs| {
+            lambda: async_lambda!(move |_, state, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
                 let a: i64 = inputs[0].value.as_i64();
@@ -397,7 +397,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             events: vec![],
             required_contexts: vec![],
             lambda: async_lambda!(
-                move |_, _, inputs, _, _| { print = Arc::clone(&print) } => {
+                move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
                     print(inputs[0].value.as_i64());
@@ -459,10 +459,10 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
+                &event_states,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,
-                &event_states,
             )
             .await?;
         assert_eq!(outputs[0].as_i64(), 6);
@@ -481,10 +481,10 @@ mod tests {
             .invoke(
                 &mut ctx_manager,
                 &mut node_state,
+                &event_states,
                 &inputs,
                 &outputs_meta,
                 &mut outputs,
-                &event_states,
             )
             .await?;
         assert_eq!(outputs[0].as_i64(), 8);

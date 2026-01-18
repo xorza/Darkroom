@@ -30,10 +30,10 @@ pub trait AsyncLambdaFn:
     for<'a> Fn(
         &'a mut ContextManager,
         &'a mut NodeState,
+        &'a EventStates,
         &'a [InvokeInput],
         &'a [OutputUsage],
         &'a mut [DynamicValue],
-        &'a EventStates,
     ) -> AsyncLambdaFuture<'a>
     + Send
     + Sync
@@ -45,10 +45,10 @@ impl<T> AsyncLambdaFn for T where
     T: for<'a> Fn(
             &'a mut ContextManager,
             &'a mut NodeState,
+            &'a EventStates,
             &'a [InvokeInput],
             &'a [OutputUsage],
             &'a mut [DynamicValue],
-            &'a EventStates,
         ) -> AsyncLambdaFuture<'a>
         + Send
         + Sync
@@ -80,11 +80,11 @@ impl FuncLambda {
     pub async fn invoke(
         &self,
         ctx_manager: &mut ContextManager,
-        cache: &mut NodeState,
+        state: &mut NodeState,
+        event_states: &EventStates,
         inputs: &[InvokeInput],
         output_usage: &[OutputUsage],
         outputs: &mut [DynamicValue],
-        event_states: &EventStates,
     ) -> InvokeResult<()> {
         match self {
             FuncLambda::None => {
@@ -93,11 +93,11 @@ impl FuncLambda {
             FuncLambda::Lambda(inner) => {
                 (inner)(
                     ctx_manager,
-                    cache,
+                    state,
+                    event_states,
                     inputs,
                     output_usage,
                     outputs,
-                    event_states,
                 )
                 .await
             }
