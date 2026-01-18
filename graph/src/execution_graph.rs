@@ -246,11 +246,18 @@ impl ExecutionNode {
             self.events.reserve(func.events.len());
             for func_event in func.events.iter() {
                 self.events.push(ExecutionEvent {
-                    subscribers: Vec::new(),
                     lambda: func_event.event_lambda.clone(),
-                    state: EventState::default(),
+                    ..Default::default()
                 });
             }
+
+            self.outputs.clear();
+            self.outputs
+                .resize(func.outputs.len(), ExecutionOutput::default());
+        } else {
+            self.state = NodeState::default();
+
+            self.outputs.fill(ExecutionOutput::default());
         }
 
         self.terminal = func.terminal;
@@ -264,19 +271,17 @@ impl ExecutionNode {
             NodeBehavior::Once => ExecutionBehavior::Once,
         };
 
-        self.outputs.clear();
-        self.outputs
-            .resize(func.outputs.len(), ExecutionOutput::default());
-
         for (event_idx, event) in node.events.iter().enumerate() {
             self.events[event_idx].subscribers.clear();
             self.events[event_idx]
                 .subscribers
                 .extend(&event.subscribers);
+            self.events[event_idx].state = EventState::default();
         }
 
         assert_eq!(self.inputs.len(), node.inputs.len());
         assert_eq!(self.outputs.len(), func.outputs.len());
+        assert_eq!(self.events.len(), func.events.len());
 
         #[cfg(debug_assertions)]
         {
@@ -1983,6 +1988,79 @@ mod tests {
         assert!(values.inputs[0].is_none()); // get_a hasn't executed
         assert!(values.inputs[1].is_none()); // get_b hasn't executed
         assert!(values.outputs.is_empty()); // sum hasn't executed
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn event_state_reset_on_updates() -> anyhow::Result<()> {
+        use crate::elements::basic_funclib::BasicFuncLib;
+        use crate::elements::timers_funclib::TimersFuncLib;
+        use crate::worker::EventRef;
+        use common::output_stream::OutputStream;
+
+        let output_stream = OutputStream::new();
+
+        let timers_invoker = TimersFuncLib::default();
+        let basic_invoker = BasicFuncLib::with_output_stream(&output_stream).await;
+
+        let mut func_lib = basic_invoker.into_func_lib();
+        func_lib.merge(timers_invoker.into_func_lib());
+
+        // Build a graph: frame_event -> float_to_string -> print
+        // The frame_event node outputs a frame counter that increments on each execution
+        let mut graph = Graph::default();
+
+        let frame_event_node_id: NodeId = "e69c3f32-ac66-4447-a3f6-9e8528c5d830".into();
+        let float_to_string_node_id: NodeId = "eb6590aa-229d-4874-abba-37c56f5b97fa".into();
+        let print_node_id: NodeId = "8be72298-dece-4a5f-8a1d-d2dee1e791d3".into();
+
+        let frame_event_func = func_lib.by_name("frame event").unwrap();
+        let float_to_string_func = func_lib.by_name("float to string").unwrap();
+        let print_func = func_lib.by_name("print").unwrap();
+
+        let mut frame_event_node: Node = frame_event_func.into();
+        frame_event_node.id = frame_event_node_id;
+        frame_event_node.inputs[0].binding = 1.into();
+        frame_event_node.events[0].subscribers.push(print_node_id);
+        graph.add(frame_event_node);
+
+        let mut float_to_string_node: Node = float_to_string_func.into();
+        float_to_string_node.id = float_to_string_node_id;
+        float_to_string_node.inputs[0].binding = (frame_event_node_id, 1).into();
+        graph.add(float_to_string_node);
+
+        let mut print_node: Node = print_func.into();
+        print_node.id = print_node_id;
+        print_node.inputs[0].binding = (float_to_string_node_id, 0).into();
+        graph.add(print_node);
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
+
+        // First execution - frame_no should be 1
+        let event = EventRef {
+            node_id: frame_event_node_id,
+            event_idx: 0,
+        };
+        let stats = execution_graph.execute_events([event]).await?;
+        assert_eq!(
+            stats.executed_nodes.len(),
+            3,
+            "Should execute frame_event, float_to_string, print"
+        );
+        assert_eq!(output_stream.take().await, ["1"]);
+
+        // Second execution - frame_no should be 2 (state persists)
+        execution_graph.execute_events([event]).await?;
+        assert_eq!(output_stream.take().await, ["2"]);
+
+        // Update graph (simulates what worker does) - state should still persist
+        execution_graph.update(&graph, &func_lib);
+
+        // Third execution - frame_no should be 3 (state persists across update)
+        execution_graph.execute_events([event]).await?;
+        assert_eq!(output_stream.take().await, ["1"]);
 
         Ok(())
     }
