@@ -297,7 +297,7 @@ async fn worker_loop<ExecutionCallback>(
             if execution_graph_clear {
                 tracing::error!("Execution graph is clear, cannot start event loop");
             } else {
-                execution_graph.reset_states();
+                execution_graph.reset_states_clear_outputs();
                 let result = execution_graph.execute(false, true, []).await;
                 let ok = result.is_ok();
                 (execution_callback)(result);

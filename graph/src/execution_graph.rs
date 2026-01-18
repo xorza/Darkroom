@@ -151,6 +151,7 @@ pub struct ExecutionNode {
     #[serde(skip)]
     pub(crate) state: NodeState,
     #[serde(skip)]
+    // todo remove option to reuse memory
     pub(crate) output_values: Option<Vec<DynamicValue>>,
 
     #[serde(skip)]
@@ -343,9 +344,10 @@ impl ExecutionGraph {
         }
     }
 
-    pub fn reset_states(&mut self) {
+    pub fn reset_states_clear_outputs(&mut self) {
         for e_node in &mut self.e_nodes {
             e_node.reset_state();
+            e_node.output_values = None;
         }
     }
 
