@@ -128,8 +128,8 @@ impl<'a> ConstBindFrame<'a> {
             const_bind_style.stroke.color = stroke_color;
 
             let before_value = value.clone();
-            let response = if let StaticValue::Int(int_value) = value {
-                DragValue::new(int_value)
+            let response = match value {
+                StaticValue::Int(int_value) => DragValue::new(int_value)
                     .font(mono_font.clone())
                     .color(gui.style.text_color)
                     .speed(1.0)
@@ -137,9 +137,17 @@ impl<'a> ConstBindFrame<'a> {
                     .pos(connection_start)
                     .align(Align2::RIGHT_CENTER)
                     .style(const_bind_style)
-                    .show(gui, ("const_int_drag", node.id, input_idx))
-            } else {
-                todo!();
+                    .show(gui, ("const_int_drag", node.id, input_idx)),
+                StaticValue::Float(float_value) => DragValue::new(float_value)
+                    .font(mono_font.clone())
+                    .color(gui.style.text_color)
+                    .speed(0.01)
+                    .padding(vec2(small_padding, 0.0))
+                    .pos(connection_start)
+                    .align(Align2::RIGHT_CENTER)
+                    .style(const_bind_style)
+                    .show(gui, ("const_float_drag", node.id, input_idx)),
+                _ => todo!(),
             };
 
             if let Some(breaker) = breaker {
