@@ -112,6 +112,11 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
+    assert!(
+        image.desc().is_packed(),
+        "Image must be packed before saving"
+    );
+
     if image.desc.color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "JPEG channel type: {:?}",
@@ -153,6 +158,11 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 }
 
 pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
+    assert!(
+        image.desc().is_packed(),
+        "Image must be packed before saving"
+    );
+
     if image.desc.color_format.channel_type != ChannelType::UInt {
         return Err(Error::UnsupportedFormat(format!(
             "PNG channel type: {:?}",

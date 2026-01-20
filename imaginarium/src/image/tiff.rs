@@ -175,6 +175,11 @@ where
     CT::Inner: Pod,
     [CT::Inner]: TiffValue,
 {
+    assert!(
+        image.desc().is_packed(),
+        "Image must be packed before saving"
+    );
+
     let buf: &[CT::Inner] = bytemuck::try_cast_slice(image.bytes())?;
 
     let mut file = File::create(filename)?;
