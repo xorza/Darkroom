@@ -159,7 +159,7 @@ impl StaticValue {
 }
 
 impl DynamicValue {
-    pub fn custom<T: CustomValue>(value: T) -> Self {
+    pub fn from_custom<T: CustomValue>(value: T) -> Self {
         let DataType::Custom(type_def) = &value.data_type() else {
             panic!("value expected to be of custom type");
         };
@@ -179,51 +179,42 @@ impl DynamicValue {
         }
     }
 
-    pub fn as_i64(&self) -> i64 {
-        self.try_into().unwrap()
-    }
-
-    pub fn none_or_int(&self) -> Option<i64> {
+    pub fn as_i64(&self) -> Option<i64> {
         match self {
             DynamicValue::Int(value) => Some(*value),
-            DynamicValue::None => None,
-            _ => panic!("Value is not a bool"),
+            DynamicValue::Float(value) => Some(*value as i64),
+            DynamicValue::Bool(value) => Some(*value as i64),
+            _ => None,
         }
     }
 
-    pub fn as_bool(&self) -> bool {
+    pub fn as_bool(&self) -> Option<bool> {
         match self {
-            DynamicValue::Bool(value) => *value,
-            _ => {
-                panic!("Value is not a bool")
-            }
+            DynamicValue::Bool(value) => Some(*value),
+            DynamicValue::Int(value) => Some(*value != 0),
+            DynamicValue::Float(value) => Some(value.abs() > f64::EPSILON),
+            _ => None,
         }
     }
 
-    pub fn as_string(&self) -> &str {
+    pub fn as_string(&self) -> Option<&str> {
         match self {
-            DynamicValue::String(value) => value,
-            _ => {
-                panic!("Value is not a string")
-            }
+            DynamicValue::String(value) => Some(value),
+            _ => None,
         }
     }
 
-    pub fn as_custom<T: Any>(&self) -> &T {
+    pub fn as_custom<T: Any>(&self) -> Option<&T> {
         match self {
-            DynamicValue::Custom { data, .. } => data
-                .downcast_ref::<T>()
-                .expect("Custom value type mismatch"),
-            _ => {
-                panic!("Value is not a custom type")
-            }
+            DynamicValue::Custom { data, .. } => data.downcast_ref::<T>(),
+            _ => None,
         }
     }
 
-    pub fn as_enum(&self) -> &str {
+    pub fn as_enum(&self) -> Option<&str> {
         match self {
-            DynamicValue::Enum { variant_name, .. } => variant_name,
-            _ => panic!("Value is not an enum"),
+            DynamicValue::Enum { variant_name, .. } => Some(variant_name),
+            _ => None,
         }
     }
 

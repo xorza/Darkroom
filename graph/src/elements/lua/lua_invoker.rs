@@ -532,7 +532,7 @@ mod tests {
             )
             .await
             .map_err(anyhow::Error::from)?;
-        let result: i64 = outputs[0].as_i64();
+        let result: i64 = outputs[0].as_i64().unwrap();
         assert_eq!(result, 15);
 
         let graph = invoker.map_graph()?;
@@ -605,7 +605,7 @@ mod tests {
             .await
             .map_err(anyhow::Error::from)?;
 
-        let result: i64 = outputs[0].as_i64();
+        let result: i64 = outputs[0].as_i64().unwrap();
         assert_eq!(result, 42);
 
         Ok(())

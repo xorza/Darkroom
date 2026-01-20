@@ -138,7 +138,7 @@ impl Default for ImageFuncLib {
                     assert_eq!(inputs.len(), 3);
                     assert_eq!(outputs.len(), 1);
 
-                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>().unwrap();
 
                     let brightness = inputs[1].value.as_f64().unwrap() as f32;
                     let contrast = inputs[2].value.as_f64().unwrap() as f32;
@@ -152,7 +152,7 @@ impl Default for ImageFuncLib {
                         .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
                         .expect("Failed to apply brightness/contrast");
 
-                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
+                    outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
                     Ok(())
                 })
@@ -182,7 +182,7 @@ impl Default for ImageFuncLib {
                     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
                     let image = imaginarium::Image::read_file(path).expect("Failed to load image");
 
-                    outputs[0] = DynamicValue::custom(Image::from(image));
+                    outputs[0] = DynamicValue::from_custom(Image::from(image));
 
                     Ok(())
                 })
@@ -211,7 +211,7 @@ impl Default for ImageFuncLib {
                 Box::pin(async move {
                     assert_eq!(inputs.len(), 1);
 
-                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>().unwrap();
 
                     // For now, save to test_output directory
 
@@ -253,7 +253,7 @@ impl Default for ImageFuncLib {
                     assert_eq!(inputs.len(), 1);
                     assert_eq!(outputs.len(), 1);
 
-                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>().unwrap();
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                     let cpu_image = input_image
@@ -272,7 +272,7 @@ impl Default for ImageFuncLib {
                         .convert(target_format)
                         .expect("Failed to convert image");
 
-                    outputs[0] = DynamicValue::custom(Image::from(converted));
+                    outputs[0] = DynamicValue::from_custom(Image::from(converted));
 
                     Ok(())
                 })
@@ -331,9 +331,9 @@ impl Default for ImageFuncLib {
                     assert_eq!(inputs.len(), 4);
                     assert_eq!(outputs.len(), 1);
 
-                    let src_image = inputs[0].value.as_custom::<Image>();
-                    let dst_image = inputs[1].value.as_custom::<Image>();
-                    let mode_name = inputs[2].value.as_enum();
+                    let src_image = inputs[0].value.as_custom::<Image>().unwrap();
+                    let dst_image = inputs[1].value.as_custom::<Image>().unwrap();
+                    let mode_name = inputs[2].value.as_enum().unwrap();
                     let alpha = inputs[3].value.as_f64().unwrap() as f32;
 
                     let blend_mode = match mode_name {
@@ -359,7 +359,7 @@ impl Default for ImageFuncLib {
                         )
                         .expect("Failed to blend images");
 
-                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
+                    outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
                     Ok(())
                 })
@@ -429,7 +429,7 @@ impl Default for ImageFuncLib {
                     assert_eq!(inputs.len(), 6);
                     assert_eq!(outputs.len(), 1);
 
-                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>().unwrap();
                     let scale_x = inputs[1].value.as_f64().unwrap() as f32;
                     let scale_y = inputs[2].value.as_f64().unwrap() as f32;
                     let rotation = inputs[3].value.as_f64().unwrap() as f32;
@@ -457,7 +457,7 @@ impl Default for ImageFuncLib {
                         )
                         .expect("Failed to transform image");
 
-                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
+                    outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
                     Ok(())
                 })

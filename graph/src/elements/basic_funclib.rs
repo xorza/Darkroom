@@ -128,7 +128,7 @@ impl Default for BasicFuncLib {
             lambda: async_lambda!(
                 move |_, _, _, inputs, _, _| { output_stream = output_stream_clone.clone() } => {
                     assert_eq!(inputs.len(), 1);
-                    let value: &str = inputs[0].value.as_string();
+                    let value: &str = inputs[0].value.as_string().unwrap();
                     let mut guard = output_stream
                         .try_lock()
                         .expect("Output stream mutex is already locked");
@@ -181,7 +181,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let op: Math2ArgOp = inputs[2].value.as_i64().into();
+                let op: Math2ArgOp = inputs[2].value.as_i64().unwrap().into();
 
                 op.invoke(&inputs[0..2])
                     .map(|result| outputs[0] = result)

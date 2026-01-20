@@ -201,9 +201,9 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: i64 = inputs[0].value.as_i64();
+                let a: i64 = inputs[0].value.as_i64().unwrap();
                 // let b: i64 = inputs[1].value.as_int();
-                let b: i64 = inputs[1].value.none_or_int().unwrap_or(1);
+                let b: i64 = inputs[1].value.as_i64().unwrap_or(1);
                 outputs[0] = (a * b).into();
                 state.set(a * b);
 
@@ -286,8 +286,8 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             lambda: async_lambda!(move |_, state, _, inputs, _, outputs| {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
-                let a: i64 = inputs[0].value.as_i64();
-                let b: i64 = inputs[1].value.none_or_int().unwrap_or_default();
+                let a: i64 = inputs[0].value.as_i64().unwrap();
+                let b: i64 = inputs[1].value.as_i64().unwrap_or_default();
                 // let b: i64 = inputs[1].value.as_int();
                 state.set(a + b);
                 outputs[0] = (a + b).into();
@@ -315,7 +315,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 move |_, _, _, inputs, _, _| { print = Arc::clone(&print) } => {
                     // tokio::time::sleep(std::time::Duration::from_secs(3)).await;
                     assert_eq!(inputs.len(), 1);
-                    print(inputs[0].value.as_i64());
+                    print(inputs[0].value.as_i64().unwrap());
                     Ok(())
                 }
             ),
@@ -381,7 +381,7 @@ mod tests {
                 &mut outputs,
             )
             .await?;
-        assert_eq!(outputs[0].as_i64(), 6);
+        assert_eq!(outputs[0].as_i64().unwrap(), 6);
         let cached = *node_state
             .get::<i64>()
             .expect("InvokeCache should contain the sum value");
@@ -403,7 +403,7 @@ mod tests {
                 &mut outputs,
             )
             .await?;
-        assert_eq!(outputs[0].as_i64(), 8);
+        assert_eq!(outputs[0].as_i64().unwrap(), 8);
 
         Ok(())
     }
