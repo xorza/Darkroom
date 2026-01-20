@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
 
 use crate::common::popup_menu::{ListItem, PopupMenu};
@@ -106,31 +108,35 @@ impl<'a> ComboBox<'a> {
         let options = self.options;
 
         PopupMenu::new(&response, id_salt).show(gui, |gui| {
-            // Calculate max width for all items
+            // Pre-compute galleys for all items (reuse like new_node_ui)
             let item_font = gui.style.sub_font.clone();
             let padding = gui.style.padding;
             let small_padding = gui.style.small_padding;
 
-            let max_text_width = options
+            let galleys: Vec<_> = options
                 .iter()
                 .map(|option| {
-                    let galley = gui.painter().layout_no_wrap(
+                    gui.painter().layout_no_wrap(
                         option.clone(),
                         item_font.clone(),
                         gui.style.text_color,
-                    );
-                    galley.size().x
+                    )
                 })
-                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .collect();
+
+            let max_text_width = galleys
+                .iter()
+                .map(|galley| galley.size().x)
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal))
                 .unwrap_or(0.0);
 
             let item_width = max_text_width + padding * 2.0;
             let item_height = gui.font_height(&item_font) + small_padding * 2.0;
             let item_size = vec2(item_width, item_height);
 
-            for option in options {
+            for (option, galley) in options.iter().zip(galleys.into_iter()) {
                 let is_selected = option == &selected;
-                if ListItem::from_str(option)
+                if ListItem::from_galley(galley)
                     .selected(is_selected)
                     .size(item_size)
                     .show(gui)
