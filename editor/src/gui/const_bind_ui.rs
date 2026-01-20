@@ -88,9 +88,12 @@ impl<'a> ConstBindFrame<'a> {
                 .compact
                 .insert_with(&connection_key, || ConnectionCurve::new(connection_key));
 
-            curve
-                .bezier
-                .update_points(connection_start, connection_end, gui.scale());
+            curve.bezier.update_points_with_count(
+                connection_start,
+                connection_end,
+                gui.scale(),
+                10,
+            );
 
             let prev_broke = breaker.is_some() && curve.broke;
             let style =

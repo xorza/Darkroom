@@ -44,10 +44,23 @@ impl ConnectionBezier {
     }
 
     pub fn update_points(&mut self, start: Pos2, end: Pos2, scale: f32) {
+        self.update_points_with_count(start, end, scale, Self::DEFAULT_POINTS);
+    }
+
+    pub fn update_points_with_count(
+        &mut self,
+        start: Pos2,
+        end: Pos2,
+        scale: f32,
+        point_count: usize,
+    ) {
+        assert!(point_count >= 2, "point count must be at least 2");
+
         let needs_rebuild = !self.inited
             || !self.start.ui_equals(start)
             || !self.end.ui_equals(end)
-            || !self.scale.ui_equals(scale);
+            || !self.scale.ui_equals(scale)
+            || self.polyline.points().len() != point_count;
         if !needs_rebuild {
             return;
         }
@@ -60,8 +73,8 @@ impl ConnectionBezier {
         self.scale = scale;
 
         let points = self.polyline.points_mut();
-        if points.len() != Self::DEFAULT_POINTS {
-            points.resize(Self::DEFAULT_POINTS, Pos2::ZERO);
+        if points.len() != point_count {
+            points.resize(point_count, Pos2::ZERO);
         }
         bezier_helper::sample(points.as_mut_slice(), start, end, scale);
 
