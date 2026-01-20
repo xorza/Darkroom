@@ -1,21 +1,16 @@
 use std::sync::LazyLock;
 
 use graph::async_lambda;
-use graph::data::{DataType, TypeId};
+use graph::data::DataType;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::ContrastBrightness;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
-pub static IMAGE_BUFFER_TYPE_ID: LazyLock<TypeId> =
-    LazyLock::new(|| "a1b2c3d4-image-type-0001-000000000001".into());
-
-fn image_buffer_data_type() -> DataType {
-    DataType::Custom {
-        type_id: *IMAGE_BUFFER_TYPE_ID,
-        type_name: "ImageBuffer".to_string(),
-    }
-}
+pub static IMAGE_BUFFER_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom {
+    type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
+    type_name: "ImageBuffer".to_string(),
+});
 
 #[derive(Debug)]
 pub struct ImageFuncLib {
@@ -56,7 +51,7 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "image".to_string(),
                     required: true,
-                    data_type: image_buffer_data_type(),
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
                     default_value: None,
                     value_options: vec![],
                 },
@@ -77,7 +72,7 @@ impl Default for ImageFuncLib {
             ],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: image_buffer_data_type(),
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
@@ -100,7 +95,7 @@ impl Default for ImageFuncLib {
                     .expect("Failed to apply brightness/contrast");
 
                 outputs[0] = graph::data::DynamicValue::Custom {
-                    data_type: image_buffer_data_type(),
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
                     data: Box::new(output_buffer),
                 };
 
