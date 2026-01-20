@@ -161,7 +161,7 @@ impl StaticValue {
 impl DynamicValue {
     pub fn custom<T: CustomValue>(value: T) -> Self {
         let DataType::Custom(type_def) = &value.data_type() else {
-            panic!("")
+            panic!("value expected to be of custom type");
         };
 
         DynamicValue::Custom {
