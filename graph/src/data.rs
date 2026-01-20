@@ -167,9 +167,11 @@ impl DynamicValue {
             }
         }
     }
-    pub fn as_custom(&self) -> &Box<dyn Any + Send + Sync> {
+    pub fn as_custom<T: Any>(&self) -> &T {
         match self {
-            DynamicValue::Custom { data, .. } => data,
+            DynamicValue::Custom { data, .. } => data
+                .downcast_ref::<T>()
+                .expect("Custom value type mismatch"),
             _ => {
                 panic!("Value is not a custom type")
             }

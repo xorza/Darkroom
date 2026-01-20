@@ -85,11 +85,7 @@ impl Default for ImageFuncLib {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let input_buffer = inputs[0]
-                    .value
-                    .as_custom()
-                    .downcast_ref::<imaginarium::ImageBuffer>()
-                    .expect("Input should be an ImageBuffer");
+                let input_buffer = inputs[0].value.as_custom::<imaginarium::ImageBuffer>();
 
                 let brightness = inputs[1].value.as_f64() as f32;
                 let contrast = inputs[2].value.as_f64() as f32;
