@@ -10,16 +10,10 @@ type ContextCtor = dyn Fn() -> Box<dyn Any + Send> + Send + Sync;
 id_type!(CtxId);
 
 #[derive(Clone)]
-pub struct ContextMeta {
+pub struct ContextType {
     pub ctx_id: CtxId,
     pub description: String,
     ctor: Arc<ContextCtor>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ContextType {
-    Lua,
-    Custom(ContextMeta),
 }
 
 #[derive(Debug, Default)]
@@ -27,7 +21,7 @@ pub struct ContextManager {
     pub store: HashMap<ContextType, Box<dyn Any + Send>>,
 }
 
-impl Debug for ContextMeta {
+impl Debug for ContextType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -36,36 +30,26 @@ impl Debug for ContextMeta {
         )
     }
 }
-impl PartialEq for ContextMeta {
+impl PartialEq for ContextType {
     fn eq(&self, other: &Self) -> bool {
         self.ctx_id == other.ctx_id
     }
 }
-impl Eq for ContextMeta {}
-impl Hash for ContextMeta {
+impl Eq for ContextType {}
+impl Hash for ContextType {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.ctx_id.hash(state);
     }
 }
 
-impl ContextMeta {
+impl ContextType {
     pub fn new<T: 'static + Send + Sync, F>(ctx_id: CtxId, ctor: F) -> Self
     where
         F: Fn() -> T + Send + Sync + 'static,
     {
         let ctor: Arc<ContextCtor> = Arc::new(move || Box::new(ctor()) as Box<dyn Any + Send>);
 
-        ContextMeta {
-            ctx_id,
-            description: "".into(),
-            ctor,
-        }
-    }
-
-    pub fn new_default<T: 'static + Send + Sync + Default>(ctx_id: CtxId) -> Self {
-        let ctor: Arc<ContextCtor> = Arc::new(|| Box::new(T::default()) as Box<dyn Any + Send>);
-
-        ContextMeta {
+        ContextType {
             ctx_id,
             description: "".into(),
             ctor,
@@ -83,10 +67,7 @@ impl ContextManager {
         let boxed = match self.store.entry(ctx_type.clone()) {
             Entry::Occupied(entry) => entry.into_mut(),
             Entry::Vacant(entry) => {
-                let value = match ctx_type {
-                    ContextType::Custom(meta) => (meta.ctor)(),
-                    ContextType::Lua => todo!("ContextManager missing ctor for Lua"),
-                };
+                let value = (ctx_type.ctor)();
                 entry.insert(value)
             }
         };
@@ -99,7 +80,11 @@ impl ContextManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContextManager, ContextMeta, ContextType};
+    use std::{any::Any, sync::Arc};
+
+    use crate::context::ContextCtor;
+
+    use super::{ContextManager, ContextType};
 
     #[derive(Debug, Default)]
     struct TestCtx {
@@ -108,9 +93,13 @@ mod tests {
 
     #[test]
     fn custom_default_context_is_created_and_reused() {
-        let meta =
-            ContextMeta::new_default::<TestCtx>("5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into());
-        let ctx_type = ContextType::Custom(meta);
+        let ctor: Arc<ContextCtor> =
+            Arc::new(|| Box::new(TestCtx::default()) as Box<dyn Any + Send>);
+        let ctx_type = ContextType {
+            ctx_id: "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
+            description: "".into(),
+            ctor,
+        };
 
         let mut manager = ContextManager::default();
         let ctx = manager.get::<TestCtx>(&ctx_type);
@@ -123,11 +112,10 @@ mod tests {
 
     #[test]
     fn custom_context_is_created_and_reused() {
-        let meta = ContextMeta::new::<TestCtx, _>(
+        let ctx_type = ContextType::new::<TestCtx, _>(
             "5f7dca60-37c4-4f3a-81c5-0d3d9a30c1f8".into(),
             TestCtx::default,
         );
-        let ctx_type = ContextType::Custom(meta);
 
         let mut manager = ContextManager::default();
         let ctx = manager.get::<TestCtx>(&ctx_type);
