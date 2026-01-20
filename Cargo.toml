@@ -2,7 +2,8 @@
 members = [
     "common",
     "graph",
-    "editor"
+    "editor",
+    "vision"
 ]
 
 resolver = "2"
@@ -15,6 +16,7 @@ edition = "2024"
 common = { path = "common" }
 graph = { path = "graph" }
 editor = { path = "editor" }
+vision = { path = "vision" }
 
 # wgpu version should be in sync with egui
 wgpu = { version = "28.0", features = ["metal", "vulkan", "dx12"] }

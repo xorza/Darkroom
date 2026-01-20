@@ -1,0 +1,9 @@
+[package]
+name = "vision"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+common = { workspace = true }
+graph = { workspace = true }
+imaginarium = { workspace = true }
