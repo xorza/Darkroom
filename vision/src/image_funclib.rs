@@ -336,15 +336,7 @@ impl Default for ImageFuncLib {
                     let mode_name = inputs[2].value.as_enum().unwrap();
                     let alpha = inputs[3].value.as_f64().unwrap() as f32;
 
-                    let blend_mode = match mode_name {
-                        "Normal" => BlendMode::Normal,
-                        "Add" => BlendMode::Add,
-                        "Subtract" => BlendMode::Subtract,
-                        "Multiply" => BlendMode::Multiply,
-                        "Screen" => BlendMode::Screen,
-                        "Overlay" => BlendMode::Overlay,
-                        _ => panic!("Invalid blend mode: {}", mode_name),
-                    };
+                    let blend_mode: BlendMode = mode_name.parse().expect("Invalid blend mode");
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 

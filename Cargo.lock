@@ -1694,6 +1694,8 @@ dependencies = [
  "paste",
  "pollster",
  "rayon",
+ "strum",
+ "strum_macros",
  "tiff 0.11.1",
  "tracing",
  "wgpu",

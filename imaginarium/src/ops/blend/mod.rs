@@ -2,6 +2,8 @@ mod cpu;
 mod gpu;
 mod pipeline;
 
+use strum_macros::EnumString;
+
 use crate::common::color_format::ColorFormat;
 use crate::common::error::Result;
 use crate::gpu::Gpu;
@@ -40,7 +42,7 @@ const SUPPORTED_GPU_FORMATS: &[ColorFormat] = &[
 ];
 
 /// Blend modes for combining two images.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, EnumString)]
 #[repr(u8)]
 pub enum BlendMode {
     /// Normal alpha blending: result = src * alpha + dst * (1 - alpha)
