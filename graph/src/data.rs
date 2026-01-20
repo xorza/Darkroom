@@ -294,25 +294,6 @@ impl DynamicValue {
     }
 }
 
-impl From<StaticValue> for DynamicValue {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Null => DynamicValue::Null,
-            StaticValue::Float(value) => DynamicValue::Float(value),
-            StaticValue::Int(value) => DynamicValue::Int(value),
-            StaticValue::Bool(value) => DynamicValue::Bool(value),
-            StaticValue::String(value) => DynamicValue::String(value),
-            StaticValue::Enum {
-                type_id,
-                variant_name,
-            } => DynamicValue::Enum {
-                type_id,
-                variant_name,
-            },
-        }
-    }
-}
-
 impl From<&StaticValue> for DynamicValue {
     fn from(value: &StaticValue) -> Self {
         match value {

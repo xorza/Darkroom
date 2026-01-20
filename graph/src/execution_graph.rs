@@ -995,9 +995,7 @@ impl ExecutionGraph {
             .iter()
             .map(|input| match &input.binding {
                 ExecutionBinding::Undefined | ExecutionBinding::None => None,
-                ExecutionBinding::Const(static_value) => {
-                    Some(DynamicValue::from(static_value.clone()))
-                }
+                ExecutionBinding::Const(static_value) => Some(DynamicValue::from(static_value)),
                 ExecutionBinding::Bind(port_address) => {
                     let source_node = &self.e_nodes[port_address.target_idx];
                     source_node
