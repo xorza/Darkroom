@@ -194,10 +194,8 @@ impl Default for ImageFuncLib {
                     let input_image = inputs[0].value.as_custom::<Image>();
 
                     // For now, save to test_output directory
-                    let output_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_output");
-                    std::fs::create_dir_all(output_dir).expect("Failed to create output directory");
 
-                    let path = format!("{}/vision_output.tiff", output_dir);
+                    let path = "vision_output.tiff";
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
