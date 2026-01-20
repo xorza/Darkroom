@@ -104,30 +104,19 @@ impl<'a> ComboBox<'a> {
 
         let mut response = gui.ui().allocate_rect(rect, Sense::click());
 
-        if response.clicked() {
-            Popup::toggle_id(gui.ui().ctx(), popup_id);
-        }
-
         let mut selected_option: Option<String> = None;
-        let is_open = Popup::is_id_open(gui.ui().ctx(), popup_id);
 
-        if is_open {
-            let popup_pos = rect.left_bottom();
-            egui::Area::new(popup_id)
-                .order(egui::Order::Foreground)
-                .fixed_pos(popup_pos)
-                .show(gui.ui().ctx(), |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        for option in self.options {
-                            let is_selected = option == self.selected;
-                            if ui.selectable_label(is_selected, option).clicked() {
-                                selected_option = Some(option.clone());
-                                Popup::close_id(ui.ctx(), popup_id);
-                            }
-                        }
-                    });
-                });
-        }
+        Popup::menu(&response)
+            .id(popup_id)
+            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+            .show(|ui| {
+                for option in self.options {
+                    let is_selected = option == self.selected;
+                    if ui.selectable_label(is_selected, option).clicked() {
+                        selected_option = Some(option.clone());
+                    }
+                }
+            });
 
         if let Some(new_selection) = selected_option {
             *self.selected = new_selection;
