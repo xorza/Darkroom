@@ -15,6 +15,9 @@ use crate::{
 /// Trait for numeric types that can be used with DragValue.
 pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync + 'static {
     fn from_drag(start: Self, delta: f32, speed: f32) -> Self;
+    fn display(&self) -> String {
+        self.to_string()
+    }
 }
 
 impl DragValueNumeric for i64 {
@@ -26,6 +29,10 @@ impl DragValueNumeric for i64 {
 impl DragValueNumeric for f64 {
     fn from_drag(start: Self, delta: f32, speed: f32) -> Self {
         start + (delta * speed) as f64
+    }
+
+    fn display(&self) -> String {
+        format!("{:.4}", self)
     }
 }
 
@@ -119,7 +126,7 @@ impl<'a, T: DragValueNumeric> DragValue<'a, T> {
             .data_mut(|data| data.get_temp::<T>(drag_temp_id))
             .unwrap_or(*self.value);
 
-        let value_text = display_value.to_string();
+        let value_text = display_value.display();
         let galley = gui
             .ui()
             .painter()
