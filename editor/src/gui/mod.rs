@@ -42,7 +42,7 @@ impl<'a> Gui<'a> {
             _marker: PhantomData,
         }
     }
-    fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
+    pub fn new_with_scale(ui: &'a mut Ui, style: &Rc<Style>, scale: f32) -> Self {
         let rect = ui.available_rect_before_wrap();
 
         Self {

@@ -8,6 +8,7 @@ pub mod drag_value;
 pub mod expander;
 pub mod font;
 pub mod frame;
+pub mod popup_menu;
 pub mod positioned_ui;
 pub mod scroll_area;
 pub mod text_edit;
@@ -15,5 +16,6 @@ pub mod ui_equals;
 pub mod undo_stack;
 
 pub use combo_box::ComboBox;
+pub use popup_menu::{MenuItem, PopupMenu};
 pub use text_edit::TextEdit;
 pub use ui_equals::UiEquals;
