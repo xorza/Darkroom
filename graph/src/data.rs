@@ -412,61 +412,6 @@ impl From<bool> for StaticValue {
     }
 }
 
-impl From<StaticValue> for i64 {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Int(value) => value,
-            _ => {
-                panic!("Value is not an int")
-            }
-        }
-    }
-}
-
-impl From<StaticValue> for f64 {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Float(value) => value,
-            _ => {
-                panic!("Value is not a float")
-            }
-        }
-    }
-}
-
-impl From<StaticValue> for i32 {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Int(value) => value as i32,
-            _ => {
-                panic!("Value is not an int")
-            }
-        }
-    }
-}
-
-impl From<StaticValue> for f32 {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Float(value) => value as f32,
-            _ => {
-                panic!("Value is not a float")
-            }
-        }
-    }
-}
-
-impl From<StaticValue> for bool {
-    fn from(value: StaticValue) -> Self {
-        match value {
-            StaticValue::Bool(value) => value,
-            _ => {
-                panic!("Value is not a bool")
-            }
-        }
-    }
-}
-
 impl From<i64> for DynamicValue {
     fn from(value: i64) -> Self {
         DynamicValue::Int(value)
@@ -506,61 +451,6 @@ impl From<String> for DynamicValue {
 impl From<bool> for DynamicValue {
     fn from(value: bool) -> Self {
         DynamicValue::Bool(value)
-    }
-}
-
-impl From<DynamicValue> for f64 {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::Float(value) => value,
-            _ => {
-                panic!("Value is not a float")
-            }
-        }
-    }
-}
-
-impl From<DynamicValue> for i32 {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::Int(value) => value as i32,
-            _ => {
-                panic!("Value is not an int")
-            }
-        }
-    }
-}
-
-impl From<DynamicValue> for f32 {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::Float(value) => value as f32,
-            _ => {
-                panic!("Value is not a float")
-            }
-        }
-    }
-}
-
-impl From<DynamicValue> for bool {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::Bool(value) => value,
-            _ => {
-                panic!("Value is not a bool")
-            }
-        }
-    }
-}
-
-impl From<DynamicValue> for String {
-    fn from(value: DynamicValue) -> Self {
-        match value {
-            DynamicValue::String(value) => value,
-            _ => {
-                panic!("Value is not a string")
-            }
-        }
     }
 }
 
