@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use graph::data::{CustomValue, DataType, DynamicValue, StaticValue};
+use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{
@@ -289,10 +289,7 @@ impl Default for ImageFuncLib {
                     name: "mode".to_string(),
                     required: true,
                     data_type: BLENDMODE_DATATYPE.clone(),
-                    default_value: Some(StaticValue::Enum {
-                        type_id: "54d531cf-d353-4e30-8ea7-8823a9b5305f".into(),
-                        variant_name: "Normal".to_string(),
-                    }),
+                    default_value: Some(BLENDMODE_DATATYPE.default_value()),
                     value_options: vec![],
                 },
                 FuncInput {

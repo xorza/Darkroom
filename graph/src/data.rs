@@ -427,6 +427,10 @@ impl DataType {
         DataType::Enum(Arc::new(EnumDef::from_enum::<E>(type_id, display_name)))
     }
 
+    pub fn default_value(&self) -> StaticValue {
+        StaticValue::from(self)
+    }
+
     pub fn is_custom(&self) -> bool {
         matches!(self, DataType::Custom(_))
     }
