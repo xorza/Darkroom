@@ -6,6 +6,7 @@ use graph::data::EnumDef;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
+use crate::common::combo_box::ComboBox;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::common::drag_value::DragValue;
 use crate::gui::Gui;
@@ -254,44 +255,14 @@ fn render_enum_dropdown(
     enum_def: &Arc<EnumDef>,
     variant_name: &mut String,
     pos: Pos2,
-    _style: &crate::gui::style::DragValueStyle,
+    style: &crate::gui::style::DragValueStyle,
 ) -> Response {
-    let id = gui.ui().make_persistent_id(id_salt);
-
-    let font = gui.style.mono_font.clone();
-    let text_color = gui.style.text_color;
-    let padding = vec2(gui.style.small_padding, 0.0);
-
-    let galley = gui
-        .ui()
-        .painter()
-        .layout_no_wrap(variant_name.clone(), font.clone(), text_color);
-    let size = galley.size() + padding * 2.0;
-
-    let rect = Align2::RIGHT_CENTER.anchor_size(pos, size);
-
-    let mut changed = false;
-    let inner_response = gui
-        .ui()
-        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-            egui::ComboBox::from_id_salt(id)
-                .selected_text(variant_name.as_str())
-                .show_ui(ui, |ui| {
-                    for variant in &enum_def.variants {
-                        if ui
-                            .selectable_value(variant_name, variant.clone(), variant)
-                            .changed()
-                        {
-                            changed = true;
-                        }
-                    }
-                })
-        });
-
-    let mut response = inner_response.response;
-    if changed {
-        response.mark_changed();
-    }
-
-    response
+    ComboBox::new(variant_name, &enum_def.variants)
+        .font(gui.style.mono_font.clone())
+        .color(gui.style.text_color)
+        .padding(vec2(gui.style.small_padding, 0.0))
+        .pos(pos)
+        .align(Align2::RIGHT_CENTER)
+        .style(style.clone())
+        .show(gui, id_salt)
 }
