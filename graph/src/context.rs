@@ -11,7 +11,7 @@ id_type!(CtxId);
 
 #[derive(Clone)]
 pub struct ContextType {
-    pub ctx_id: CtxId,
+    ctx_id: CtxId,
     pub description: String,
     ctor: Arc<ContextCtor>,
 }
@@ -54,6 +54,10 @@ impl ContextType {
             description: "".into(),
             ctor,
         }
+    }
+
+    pub fn id(&self) -> &CtxId {
+        &self.ctx_id
     }
 }
 
