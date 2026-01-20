@@ -9,7 +9,7 @@ execution. The repository is a Cargo workspace containing a core graph library, 
 egui-based editor.
 
 **License:** AGPL  
-**Build System:** Cargo workspace with 3 member crates
+**Build System:** Cargo workspace with 4 member crates
 
 ## Repository Layout
 
@@ -18,6 +18,7 @@ scenarium/
 ├── common/          # Shared utilities and helper macros
 ├── graph/           # Core graph library with execution engine
 ├── editor/          # Visual egui-based graph editor
+├── vision/          # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
 ├── test_output/     # Output folder created by unit tests
 └── deprecated_code/ # Older .NET/QML editors (historical)
@@ -104,6 +105,24 @@ Visual egui-based editor for graph creation and execution.
 - `common/undo_stack.rs` - Undo/redo implementations
 
 **Dependencies:** common, graph, egui, eframe, wgpu, tokio, serde, rayon, rfd, arc-swap, bumpalo, lz4_flex
+
+### vision
+
+Image processing function library adapting imaginarium operations to the node-based workflow.
+
+**Key modules:**
+- `image_funclib.rs` - Image processing functions (brightness_contrast, etc.)
+- `vision_ctx.rs` - `VisionCtx` with `ProcessingContext` for GPU/CPU image operations
+
+**Key types:**
+- `ImageFuncLib` - Function library with image processing nodes
+- `VisionCtx` - Context holding `imaginarium::ProcessingContext` for GPU/CPU dispatch
+- `VISION_CTX_TYPE` - Lazy-initialized `ContextType` for context manager
+
+**Current functions:**
+- `brightness_contrast` - Adjusts image brightness and contrast using imaginarium
+
+**Dependencies:** common, graph, imaginarium
 
 ## Key Data Structures
 

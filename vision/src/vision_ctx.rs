@@ -4,7 +4,7 @@ use graph::context::ContextType;
 
 #[derive(Debug, Default)]
 pub struct VisionCtx {
-    processing_ctx: imaginarium::ProcessingContext,
+    pub processing_ctx: imaginarium::ProcessingContext,
 }
 
 pub static VISION_CTX_TYPE: LazyLock<ContextType> = LazyLock::new(|| {
