@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use imaginarium::ContrastBrightness;
+use imaginarium::{ChannelCount, ColorFormat, ContrastBrightness};
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
@@ -201,6 +201,58 @@ impl Default for ImageFuncLib {
                         .make_cpu(&vision_ctx.processing_ctx)
                         .expect("Failed to get CPU image");
                     cpu_image.save_file(path).expect("Failed to save image");
+
+                    Ok(())
+                })
+            }),
+        });
+
+        // convert_to_f32
+        func_lib.add(Func {
+            id: "80aa1ee7-3b75-4200-b480-b9db913bd6eb".into(),
+            name: "convert_to_f32".to_string(),
+            description: Some("Converts image color format to f32".to_string()),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "image".to_string(),
+            inputs: vec![FuncInput {
+                name: "image".to_string(),
+                required: true,
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                default_value: None,
+                value_options: vec![],
+            }],
+            outputs: vec![FuncOutput {
+                name: "image".to_string(),
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+            }],
+            events: vec![],
+            required_contexts: vec![VISION_CTX_TYPE.clone()],
+            lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 1);
+                    assert_eq!(outputs.len(), 1);
+
+                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+
+                    let cpu_image = input_image
+                        .make_cpu(&vision_ctx.processing_ctx)
+                        .expect("Failed to get CPU image");
+
+                    let target_format = match cpu_image.desc().color_format.channel_count {
+                        ChannelCount::Gray => ColorFormat::GRAY_F32,
+                        ChannelCount::GrayAlpha => ColorFormat::GRAY_ALPHA_F32,
+                        ChannelCount::Rgb => ColorFormat::RGB_F32,
+                        ChannelCount::Rgba => ColorFormat::RGBA_F32,
+                    };
+
+                    let converted = cpu_image
+                        .clone()
+                        .convert(target_format)
+                        .expect("Failed to convert image");
+
+                    outputs[0] = DynamicValue::custom(Image::from(converted));
 
                     Ok(())
                 })
