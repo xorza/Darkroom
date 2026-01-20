@@ -34,12 +34,11 @@ pub struct EnumDef {
 }
 
 impl EnumDef {
-    pub fn from_enum<E: VariantNames>(
-        type_id: impl Into<TypeId>,
-        display_name: impl Into<String>,
-    ) -> Self {
+    /// Creates an EnumDef from an enum type that derives `VariantNames`.
+    /// The type_id is generated deterministically from the full type name.
+    pub fn from_enum<E: VariantNames>(display_name: impl Into<String>) -> Self {
         Self {
-            type_id: type_id.into(),
+            type_id: TypeId::from_type::<E>(),
             display_name: display_name.into(),
             variants: E::VARIANTS.iter().map(|s| (*s).to_string()).collect(),
         }

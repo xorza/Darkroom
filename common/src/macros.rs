@@ -17,11 +17,24 @@ macro_rules! id_type {
         pub struct $name(uuid::Uuid);
 
         impl $name {
+            /// Namespace UUID for generating deterministic IDs from names.
+            /// This is a custom namespace specific to this application.
+            const NAMESPACE: uuid::Uuid =
+                uuid::Uuid::from_u128(0x3063f616_7396_43bc_afcb_b57bb6913305);
+
             pub fn unique() -> $name {
                 $name(uuid::Uuid::new_v4())
             }
             pub fn nil() -> $name {
                 $name(uuid::Uuid::nil())
+            }
+            /// Creates a deterministic UUID v5 from a type.
+            /// The same type will always produce the same UUID.
+            pub fn from_type<T: ?Sized>() -> $name {
+                $name(uuid::Uuid::new_v5(
+                    &Self::NAMESPACE,
+                    std::any::type_name::<T>().as_bytes(),
+                ))
             }
             pub const fn from_u128(value: u128) -> $name {
                 $name(uuid::Uuid::from_u128(value))
