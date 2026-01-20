@@ -308,7 +308,7 @@ impl Default for ImageFuncLib {
                     data_type: DataType::Enum(Arc::clone(&BLENDMODE_ENUM)),
                     default_value: Some(StaticValue::Enum {
                         enum_def: Arc::clone(&BLENDMODE_ENUM),
-                        variant_index: 0,
+                        variant_name: "Normal".to_string(),
                     }),
                     value_options: vec![],
                 },
@@ -333,17 +333,17 @@ impl Default for ImageFuncLib {
 
                     let src_image = inputs[0].value.as_custom::<Image>();
                     let dst_image = inputs[1].value.as_custom::<Image>();
-                    let (mode_index, _) = inputs[2].value.as_enum();
+                    let mode_name = inputs[2].value.as_enum();
                     let alpha = inputs[3].value.as_f64() as f32;
 
-                    let blend_mode = match mode_index {
-                        0 => BlendMode::Normal,
-                        1 => BlendMode::Add,
-                        2 => BlendMode::Subtract,
-                        3 => BlendMode::Multiply,
-                        4 => BlendMode::Screen,
-                        5 => BlendMode::Overlay,
-                        _ => panic!("Invalid blend mode index: {}", mode_index),
+                    let blend_mode = match mode_name {
+                        "Normal" => BlendMode::Normal,
+                        "Add" => BlendMode::Add,
+                        "Subtract" => BlendMode::Subtract,
+                        "Multiply" => BlendMode::Multiply,
+                        "Screen" => BlendMode::Screen,
+                        "Overlay" => BlendMode::Overlay,
+                        _ => panic!("Invalid blend mode: {}", mode_name),
                     };
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);

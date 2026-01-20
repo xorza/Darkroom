@@ -67,7 +67,7 @@ pub enum StaticValue {
     String(String),
     Enum {
         enum_def: Arc<EnumDef>,
-        variant_index: usize,
+        variant_name: String,
     },
 }
 
@@ -84,13 +84,13 @@ impl PartialEq for StaticValue {
             (
                 StaticValue::Enum {
                     enum_def: def_left,
-                    variant_index: idx_left,
+                    variant_name: name_left,
                 },
                 StaticValue::Enum {
                     enum_def: def_right,
-                    variant_index: idx_right,
+                    variant_name: name_right,
                 },
-            ) => def_left.type_id == def_right.type_id && idx_left == idx_right,
+            ) => def_left.type_id == def_right.type_id && name_left == name_right,
             _ => false,
         }
     }
@@ -114,7 +114,7 @@ pub enum DynamicValue {
     },
     Enum {
         enum_def: Arc<EnumDef>,
-        variant_index: usize,
+        variant_name: String,
     },
 }
 
@@ -163,12 +163,9 @@ impl StaticValue {
         }
     }
 
-    pub fn as_enum(&self) -> (usize, &str) {
+    pub fn as_enum(&self) -> &str {
         match self {
-            StaticValue::Enum {
-                enum_def,
-                variant_index,
-            } => (*variant_index, &enum_def.variants[*variant_index]),
+            StaticValue::Enum { variant_name, .. } => variant_name,
             _ => panic!("Value is not an enum"),
         }
     }
@@ -242,12 +239,9 @@ impl DynamicValue {
         }
     }
 
-    pub fn as_enum(&self) -> (usize, &str) {
+    pub fn as_enum(&self) -> &str {
         match self {
-            DynamicValue::Enum {
-                enum_def,
-                variant_index,
-            } => (*variant_index, &enum_def.variants[*variant_index]),
+            DynamicValue::Enum { variant_name, .. } => variant_name,
             _ => panic!("Value is not an enum"),
         }
     }
@@ -323,10 +317,10 @@ impl From<StaticValue> for DynamicValue {
             StaticValue::String(value) => DynamicValue::String(value),
             StaticValue::Enum {
                 enum_def,
-                variant_index,
+                variant_name,
             } => DynamicValue::Enum {
                 enum_def: Arc::clone(&enum_def),
-                variant_index,
+                variant_name,
             },
         }
     }
@@ -342,10 +336,10 @@ impl From<&StaticValue> for DynamicValue {
             StaticValue::String(value) => DynamicValue::String(value.clone()),
             StaticValue::Enum {
                 enum_def,
-                variant_index,
+                variant_name,
             } => DynamicValue::Enum {
                 enum_def: Arc::clone(enum_def),
-                variant_index: *variant_index,
+                variant_name: variant_name.clone(),
             },
         }
     }
@@ -366,7 +360,7 @@ impl From<&DataType> for StaticValue {
             DataType::String => StaticValue::String("".to_string()),
             DataType::Enum(enum_def) => StaticValue::Enum {
                 enum_def: Arc::clone(enum_def),
-                variant_index: 0,
+                variant_name: enum_def.variants[0].clone(),
             },
             _ => panic!("No value for {:?}", data_type),
         }
@@ -382,7 +376,7 @@ impl From<&DataType> for DynamicValue {
             DataType::String => DynamicValue::String("".to_string()),
             DataType::Enum(enum_def) => DynamicValue::Enum {
                 enum_def: Arc::clone(enum_def),
-                variant_index: 0,
+                variant_name: enum_def.variants[0].clone(),
             },
             _ => panic!("No value for {:?}", data_type),
         }

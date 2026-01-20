@@ -196,10 +196,7 @@ fn static_value_label(value: &StaticValue) -> String {
                 format!("{}...", truncated)
             }
         }
-        StaticValue::Enum {
-            enum_def,
-            variant_index,
-        } => enum_def.variants[*variant_index].clone(),
+        StaticValue::Enum { variant_name, .. } => variant_name.clone(),
     }
 }
 
@@ -230,12 +227,11 @@ fn parse_static_value(text: &str, current: &StaticValue) -> Option<StaticValue> 
             _ => None,
         },
         StaticValue::String(_) => Some(StaticValue::String(text.to_string())),
-        StaticValue::Enum {
-            enum_def,
-            variant_index: _,
-        } => enum_def.index_of(text.trim()).map(|idx| StaticValue::Enum {
-            enum_def: enum_def.clone(),
-            variant_index: idx,
-        }),
+        StaticValue::Enum { enum_def, .. } => {
+            enum_def.index_of(text.trim()).map(|_| StaticValue::Enum {
+                enum_def: enum_def.clone(),
+                variant_name: text.trim().to_string(),
+            })
+        }
     }
 }
