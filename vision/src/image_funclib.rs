@@ -1,7 +1,8 @@
+use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use graph::async_lambda;
-use graph::data::DataType;
+use graph::data::{CustomValue, DataType};
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::ContrastBrightness;
 
@@ -11,6 +12,42 @@ pub static IMAGE_BUFFER_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataTyp
     type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
     type_name: "ImageBuffer".to_string(),
 });
+
+/// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
+#[derive(Debug)]
+pub struct Image(pub imaginarium::ImageBuffer);
+
+impl CustomValue for Image {
+    fn data_type(&self) -> DataType {
+        IMAGE_BUFFER_DATA_TYPE.clone()
+    }
+}
+
+impl From<imaginarium::ImageBuffer> for Image {
+    fn from(buffer: imaginarium::ImageBuffer) -> Self {
+        Image(buffer)
+    }
+}
+
+impl From<imaginarium::Image> for Image {
+    fn from(image: imaginarium::Image) -> Self {
+        Image(imaginarium::ImageBuffer::from(image))
+    }
+}
+
+impl Deref for Image {
+    type Target = imaginarium::ImageBuffer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Image {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct ImageFuncLib {
@@ -80,7 +117,7 @@ impl Default for ImageFuncLib {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let input_buffer = inputs[0].value.as_custom::<imaginarium::ImageBuffer>();
+                let input_image = inputs[0].value.as_custom::<Image>();
 
                 let brightness = inputs[1].value.as_f64() as f32;
                 let contrast = inputs[2].value.as_f64() as f32;
@@ -88,14 +125,13 @@ impl Default for ImageFuncLib {
                 let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                 let mut output_buffer =
-                    imaginarium::ImageBuffer::new_empty(*input_buffer.desc());
+                    imaginarium::ImageBuffer::new_empty(*input_image.desc());
 
                 ContrastBrightness::new(contrast, brightness)
-                    .execute(&mut vision_ctx.processing_ctx, input_buffer, &mut output_buffer)
+                    .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
                     .expect("Failed to apply brightness/contrast");
 
-                outputs[0] =
-                    graph::data::DynamicValue::custom(IMAGE_BUFFER_DATA_TYPE.clone(), output_buffer);
+                outputs[0] = graph::data::DynamicValue::custom(Image::from(output_buffer));
 
                 Ok(())
             }),
@@ -122,10 +158,8 @@ impl Default for ImageFuncLib {
                 // For now, always load lena.tiff from test_resources
                 let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
                 let image = imaginarium::Image::read_file(path).expect("Failed to load image");
-                let buffer = imaginarium::ImageBuffer::from(image);
 
-                outputs[0] =
-                    graph::data::DynamicValue::custom(IMAGE_BUFFER_DATA_TYPE.clone(), buffer);
+                outputs[0] = graph::data::DynamicValue::custom(Image::from(image));
 
                 Ok(())
             }),
@@ -152,7 +186,7 @@ impl Default for ImageFuncLib {
             lambda: async_lambda!(move |ctx_manager, _, _, inputs, _, _| {
                 assert_eq!(inputs.len(), 1);
 
-                let input_buffer = inputs[0].value.as_custom::<imaginarium::ImageBuffer>();
+                let input_image = inputs[0].value.as_custom::<Image>();
 
                 // For now, save to test_output directory
                 let output_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_output");
@@ -160,10 +194,10 @@ impl Default for ImageFuncLib {
 
                 let path = format!("{}/vision_output.tiff", output_dir);
                 let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
-                let image = input_buffer
+                let cpu_image = input_image
                     .make_cpu(&vision_ctx.processing_ctx)
                     .expect("Failed to get CPU image");
-                image.save_file(&path).expect("Failed to save image");
+                cpu_image.save_file(&path).expect("Failed to save image");
 
                 Ok(())
             }),

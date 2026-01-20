@@ -12,6 +12,12 @@ use common::id_type;
 
 id_type!(TypeId);
 
+/// Trait for custom types that can be stored in `DynamicValue::Custom`.
+/// Implementors provide their `DataType` so it doesn't need to be passed separately.
+pub trait CustomValue: Any + Send + Sync {
+    fn data_type(&self) -> DataType;
+}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
@@ -121,7 +127,8 @@ impl StaticValue {
 }
 
 impl DynamicValue {
-    pub fn custom<T: Any + Send + Sync>(data_type: DataType, value: T) -> Self {
+    pub fn custom<T: CustomValue>(value: T) -> Self {
+        let data_type = value.data_type();
         DynamicValue::Custom {
             data_type,
             data: Arc::new(value),

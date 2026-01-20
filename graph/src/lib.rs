@@ -16,7 +16,7 @@ pub mod prelude {
     pub use crate::common::any_state::AnyState;
     pub use crate::common::shared_any_state::SharedAnyState;
     pub use crate::context::ContextType;
-    pub use crate::data::{DataType, DynamicValue, StaticValue, TypeId};
+    pub use crate::data::{CustomValue, DataType, DynamicValue, StaticValue, TypeId};
     pub use crate::execution_graph::{
         ExecutionGraph, ExecutionInput, ExecutionNode, ExecutionOutput, ExecutionStats, InputState,
     };
