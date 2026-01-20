@@ -1,7 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use graph::data::{CustomValue, DataType, DynamicValue, TypeDef};
+use graph::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue, TypeDef};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{
@@ -16,6 +16,21 @@ pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
         type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
         display_name: "Image".to_string(),
     }))
+});
+
+pub static BLENDMODE_ENUM: LazyLock<Arc<EnumDef>> = LazyLock::new(|| {
+    Arc::new(EnumDef {
+        type_id: "54d531cf-d353-4e30-8ea7-8823a9b5305f".into(),
+        display_name: "Blendmode".to_string(),
+        variants: vec![
+            "Normal".to_string(),
+            "Add".to_string(),
+            "Subtract".to_string(),
+            "Multiply".to_string(),
+            "Screen".to_string(),
+            "Overlay".to_string(),
+        ],
+    })
 });
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
@@ -266,9 +281,9 @@ impl Default for ImageFuncLib {
 
         // blend
         func_lib.add(Func {
-            id: "c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f".into(),
+            id: "975cc74b-8412-4293-b2cb-ef8d41fdd9b3".into(),
             name: "blend".to_string(),
-            description: Some("Blends two images using overlay mode".to_string()),
+            description: Some("Blends two images".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "image".to_string(),
@@ -288,6 +303,16 @@ impl Default for ImageFuncLib {
                     value_options: vec![],
                 },
                 FuncInput {
+                    name: "mode".to_string(),
+                    required: true,
+                    data_type: DataType::Enum(Arc::clone(&BLENDMODE_ENUM)),
+                    default_value: Some(StaticValue::Enum {
+                        enum_def: Arc::clone(&BLENDMODE_ENUM),
+                        variant_index: 0,
+                    }),
+                    value_options: vec![],
+                },
+                FuncInput {
                     name: "alpha".to_string(),
                     required: true,
                     data_type: DataType::Float,
@@ -303,18 +328,29 @@ impl Default for ImageFuncLib {
             required_contexts: vec![VISION_CTX_TYPE.clone()],
             lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
                 Box::pin(async move {
-                    assert_eq!(inputs.len(), 3);
+                    assert_eq!(inputs.len(), 4);
                     assert_eq!(outputs.len(), 1);
 
                     let src_image = inputs[0].value.as_custom::<Image>();
                     let dst_image = inputs[1].value.as_custom::<Image>();
-                    let alpha = inputs[2].value.as_f64() as f32;
+                    let (mode_index, _) = inputs[2].value.as_enum();
+                    let alpha = inputs[3].value.as_f64() as f32;
+
+                    let blend_mode = match mode_index {
+                        0 => BlendMode::Normal,
+                        1 => BlendMode::Add,
+                        2 => BlendMode::Subtract,
+                        3 => BlendMode::Multiply,
+                        4 => BlendMode::Screen,
+                        5 => BlendMode::Overlay,
+                        _ => panic!("Invalid blend mode index: {}", mode_index),
+                    };
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                     let mut output_buffer = imaginarium::ImageBuffer::new_empty(*src_image.desc());
 
-                    Blend::new(BlendMode::Overlay, alpha)
+                    Blend::new(blend_mode, alpha)
                         .execute(
                             &mut vision_ctx.processing_ctx,
                             src_image,

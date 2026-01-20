@@ -30,7 +30,7 @@ pub struct TypeDef {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EnumDef {
     pub type_id: TypeId,
-    pub type_name: String,
+    pub display_name: String,
     pub variants: Vec<String>,
 }
 
