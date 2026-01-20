@@ -10,6 +10,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 
 
@@ -51,6 +52,10 @@ bytes = { version = "*" }
 lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 criterion = { version = "*" }
+tiff = { version = "*" }
+image = { version = "*" }
+paste = { version = "*" }
+atomic_refcell = { version = "*" }
 arc-swap = { version = "*" }
 bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "*", features = ["std"] }
