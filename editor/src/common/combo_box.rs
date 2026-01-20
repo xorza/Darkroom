@@ -1,6 +1,6 @@
-use eframe::egui;
-use egui::{Align2, Color32, FontId, Popup, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
+use egui::{Align2, Color32, FontId, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
 
+use crate::common::popup_menu::{ListItem, PopupMenu};
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
 
@@ -87,9 +87,6 @@ impl<'a> ComboBox<'a> {
             return gui.ui().allocate_rect(rect, Sense::hover());
         }
 
-        let id = gui.ui().make_persistent_id(id_salt);
-        let popup_id = id.with("popup");
-
         gui.painter().rect(
             rect,
             style.radius,
@@ -105,18 +102,21 @@ impl<'a> ComboBox<'a> {
         let mut response = gui.ui().allocate_rect(rect, Sense::click());
 
         let mut selected_option: Option<String> = None;
+        let selected = self.selected.clone();
+        let options = self.options;
 
-        Popup::menu(&response)
-            .id(popup_id)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
-            .show(|ui| {
-                for option in self.options {
-                    let is_selected = option == self.selected;
-                    if ui.selectable_label(is_selected, option).clicked() {
-                        selected_option = Some(option.clone());
-                    }
+        PopupMenu::new(&response, id_salt).show(gui, |gui| {
+            for option in options {
+                let is_selected = option == &selected;
+                if ListItem::new(option)
+                    .selected(is_selected)
+                    .show(gui)
+                    .clicked()
+                {
+                    selected_option = Some(option.clone());
                 }
-            });
+            }
+        });
 
         if let Some(new_selection) = selected_option {
             *self.selected = new_selection;

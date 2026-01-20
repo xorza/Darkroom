@@ -1,6 +1,6 @@
-use eframe::egui;
-use egui::{Align, FontId, Id, Order, Popup, Pos2, Response, Vec2};
+use egui::{Align, FontId, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
 
+use crate::common::area::Area;
 use crate::common::button::Button;
 use crate::common::frame::Frame;
 use crate::gui::Gui;
@@ -8,12 +8,14 @@ use crate::gui::style::{ButtonStyle, PopupStyle};
 
 /// A custom popup menu that works with the Gui struct.
 /// Opens on click of the anchor response and closes on click outside or item selection.
+/// Styled like new_node_ui popup.
 #[derive(Debug)]
 pub struct PopupMenu {
     id: Id,
     anchor_response: Response,
     style: Option<PopupStyle>,
     close_on_click: bool,
+    min_width: Option<f32>,
 }
 
 impl PopupMenu {
@@ -22,9 +24,11 @@ impl PopupMenu {
     pub fn new(anchor_response: &Response, id_salt: impl std::hash::Hash) -> Self {
         let id = anchor_response.id.with(id_salt);
 
-        // Toggle popup on click
+        // Toggle popup on click using egui memory (like new_node_ui does)
         if anchor_response.clicked() {
-            Popup::toggle_id(&anchor_response.ctx, id);
+            let ctx = &anchor_response.ctx;
+            let is_open = ctx.memory(|mem| mem.data.get_temp::<bool>(id).unwrap_or(false));
+            ctx.memory_mut(|mem| mem.data.insert_temp(id, !is_open));
         }
 
         Self {
@@ -32,6 +36,7 @@ impl PopupMenu {
             anchor_response: anchor_response.clone(),
             style: None,
             close_on_click: true,
+            min_width: None,
         }
     }
 
@@ -45,50 +50,72 @@ impl PopupMenu {
         self
     }
 
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.min_width = Some(width);
+        self
+    }
+
     /// Show the popup menu if it's open.
     /// Returns Some(inner) if the popup was shown, None otherwise.
     pub fn show<R>(self, gui: &mut Gui<'_>, content: impl FnOnce(&mut Gui<'_>) -> R) -> Option<R> {
-        if !Popup::is_id_open(gui.ui().ctx(), self.id) {
+        let ctx = gui.ui().ctx().clone();
+        let is_open = ctx.memory(|mem| mem.data.get_temp::<bool>(self.id).unwrap_or(false));
+
+        if !is_open {
             return None;
         }
 
         let popup_style = self.style.unwrap_or_else(|| gui.style.popup.clone());
-
-        let ctx = gui.ui().ctx().clone();
-        let popup_id = self.id;
         let close_on_click = self.close_on_click;
         let anchor_rect = self.anchor_response.rect;
-        let gui_style = gui.style.clone();
-        let scale = gui.scale();
+        let min_width = self.min_width;
+        let popup_id = self.id;
+        // Check if the popup was just opened on this frame (anchor was clicked)
+        let just_opened = self.anchor_response.clicked();
 
-        let area_response = egui::Area::new(self.id)
+        let popup_response = Area::new(self.id)
+            .fixed_pos(anchor_rect.left_bottom())
             .order(Order::Foreground)
-            .default_pos(anchor_rect.left_bottom())
-            .show(&ctx, |ui| {
-                let mut gui = Gui::new_with_scale(ui, &gui_style, scale);
-                Frame::popup(&popup_style)
-                    .show(&mut gui, |gui| content(gui))
-                    .inner
+            .show(gui, |gui| {
+                Frame::popup(&popup_style).show(gui, |gui| {
+                    if let Some(width) = min_width {
+                        gui.ui().set_min_width(width);
+                    }
+                    content(gui)
+                })
             });
 
-        let inner = area_response.inner;
-        let area_response = area_response.response;
+        let inner = popup_response.inner.inner;
+        let popup_rect = popup_response.response.rect;
+
+        // Don't process close events on the frame the popup was just opened
+        if just_opened {
+            return Some(inner);
+        }
 
         // Close on click outside
-        let clicked_outside = ctx.input(|i| i.pointer.any_click())
-            && !area_response.contains_pointer()
-            && !anchor_rect.contains(
-                ctx.input(|i| i.pointer.interact_pos())
-                    .unwrap_or(Pos2::ZERO),
-            );
+        if gui.ui().input(|i| i.pointer.any_pressed())
+            && let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
+            && !popup_rect.contains(pointer_pos)
+            && !anchor_rect.contains(pointer_pos)
+        {
+            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
+        }
 
-        // Close on any click inside if close_on_click is true
-        let clicked_inside = close_on_click
-            && ctx.input(|i| i.pointer.any_click())
-            && area_response.contains_pointer();
+        // Close on click inside if close_on_click is true
+        // But not if clicking on the anchor (which toggles the popup)
+        if close_on_click
+            && gui.ui().input(|i| i.pointer.any_click())
+            && let Some(pointer_pos) = gui.ui().input(|i| i.pointer.interact_pos())
+            && popup_rect.contains(pointer_pos)
+            && !anchor_rect.contains(pointer_pos)
+        {
+            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
+        }
 
-        if clicked_outside || clicked_inside {
-            Popup::close_id(&ctx, popup_id);
+        // Close on Escape
+        if gui.ui().input(|i| i.key_pressed(Key::Escape)) {
+            ctx.memory_mut(|mem| mem.data.insert_temp(popup_id, false));
         }
 
         Some(inner)
@@ -97,7 +124,6 @@ impl PopupMenu {
 
 /// A list item widget for use inside PopupMenu or other list contexts.
 /// Uses Button internally to ensure consistent styling with new_node_ui.
-#[derive(Debug)]
 pub struct ListItem<'a> {
     text: &'a str,
     selected: bool,
@@ -152,21 +178,42 @@ impl<'a> ListItem<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
+        let style = self.style.unwrap_or(gui.style.list_button);
+
+        // Calculate size like new_node_ui does
+        let size = if let Some(size) = self.size {
+            size
+        } else {
+            let font = self
+                .font
+                .clone()
+                .unwrap_or_else(|| gui.style.sub_font.clone());
+            let padding = gui.style.padding;
+            let small_padding = gui.style.small_padding;
+
+            let galley = gui.painter().layout_no_wrap(
+                self.text.to_string(),
+                font.clone(),
+                gui.style.text_color,
+            );
+
+            let width = galley.size().x + padding * 2.0;
+            let height = gui.font_height(&font) + small_padding * 2.0;
+            vec2(width, height)
+        };
+
         let mut selected = self.selected;
 
         let mut btn = Button::default()
             .text(self.text)
-            .background(self.style.unwrap_or(gui.style.list_button))
+            .background(style)
             .enabled(self.enabled)
             .align(self.align)
+            .size(size)
             .toggle(&mut selected);
 
         if let Some(font) = self.font {
             btn = btn.font(font);
-        }
-
-        if let Some(size) = self.size {
-            btn = btn.size(size);
         }
 
         btn.show(gui)
