@@ -152,7 +152,7 @@ fn format_dynamic_value(value: &DynamicValue) -> String {
         DynamicValue::Int(i) => i.to_string(),
         DynamicValue::Bool(b) => b.to_string(),
         DynamicValue::String(s) => format!("\"{s}\""),
-        DynamicValue::Custom { data_type, .. } => format!("<{data_type:?}>"),
+        DynamicValue::Custom { type_id, .. } => format!("<{type_id:?}>"),
         DynamicValue::Enum { variant_name, .. } => variant_name.clone(),
     }
 }

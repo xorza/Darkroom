@@ -107,7 +107,7 @@ pub enum DynamicValue {
     String(String),
     // Array(Vec<DynamicValue>),
     Custom {
-        data_type: DataType,
+        type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
     },
     Enum {
@@ -160,9 +160,12 @@ impl StaticValue {
 
 impl DynamicValue {
     pub fn custom<T: CustomValue>(value: T) -> Self {
-        let data_type = value.data_type();
+        let DataType::Custom(type_def) = &value.data_type() else {
+            panic!("")
+        };
+
         DynamicValue::Custom {
-            data_type,
+            type_id: type_def.type_id,
             data: Arc::new(value),
         }
     }
@@ -270,6 +273,12 @@ impl DynamicValue {
             }
             (DynamicValue::String(s), DataType::Bool) => {
                 DynamicValue::Bool(s == "true" || s == "1")
+            }
+
+            (DynamicValue::Custom { type_id, .. }, DataType::Custom(type_def))
+                if *type_id == type_def.type_id =>
+            {
+                self.clone()
             }
 
             (src, dst) => {
