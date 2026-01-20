@@ -4,7 +4,7 @@ use std::path::Path;
 use image as image_lib;
 use tiff::decoder::DecodingResult;
 
-use super::stride::{add_stride_padding, strip_stride_padding};
+use super::stride::add_stride_padding;
 use crate::prelude::*;
 
 pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -140,17 +140,9 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
         }
     };
 
-    let pixels = strip_stride_padding(
-        &image.bytes,
-        image.desc.width,
-        image.desc.height,
-        image.desc.stride,
-        image.desc.color_format.byte_count(),
-    );
-
     image_lib::save_buffer_with_format(
         filename,
-        &pixels,
+        &image.bytes,
         image.desc.width,
         image.desc.height,
         color_format,
@@ -190,17 +182,9 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
         }
     };
 
-    let pixels = strip_stride_padding(
-        &image.bytes,
-        image.desc.width,
-        image.desc.height,
-        image.desc.stride,
-        image.desc.color_format.byte_count(),
-    );
-
     image_lib::save_buffer_with_format(
         filename,
-        &pixels,
+        &image.bytes,
         image.desc.width,
         image.desc.height,
         color_format,
