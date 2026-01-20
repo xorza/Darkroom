@@ -18,6 +18,14 @@ pub trait CustomValue: Any + Send + Sync {
     fn data_type(&self) -> DataType;
 }
 
+/// Definition of a custom type for `DataType::Custom`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TypeDef {
+    pub type_id: TypeId,
+    // display_name is not included in the hash or equality check
+    pub display_name: String,
+}
+
 /// Definition of an enum type for `DataType::Enum`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EnumDef {
@@ -45,11 +53,7 @@ pub enum DataType {
         // length is not included in the hash or equality check
         length: usize,
     },
-    Custom {
-        type_id: TypeId,
-        // type_name is not included in the hash or equality check
-        display_name: String,
-    },
+    Custom(Arc<TypeDef>),
     Enum(Arc<EnumDef>),
 }
 
@@ -598,7 +602,7 @@ impl TryFrom<&DynamicValue> for i64 {
 
 impl DataType {
     pub fn is_custom(&self) -> bool {
-        matches!(self, DataType::Custom { .. })
+        matches!(self, DataType::Custom(_))
     }
 }
 
@@ -609,10 +613,7 @@ impl Display for DataType {
             DataType::Int => "int".to_string(),
             DataType::Bool => "bool".to_string(),
             DataType::String => "string".to_string(),
-            DataType::Custom {
-                display_name: type_name,
-                ..
-            } => type_name.clone(),
+            DataType::Custom(def) => def.display_name.clone(),
             _ => panic!("No string representation for {:?}", self),
         };
         write!(f, "{}", str)
@@ -643,9 +644,7 @@ impl PartialEq for DataType {
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
 
-            (DataType::Custom { type_id: id1, .. }, DataType::Custom { type_id: id2, .. }) => {
-                id1 == id2
-            }
+            (DataType::Custom(def1), DataType::Custom(def2)) => def1.type_id == def2.type_id,
 
             (
                 DataType::Array {
@@ -682,10 +681,9 @@ impl Hash for DataType {
                 // length is not included in the hash
             }
 
-            DataType::Custom { type_id, .. } => {
+            DataType::Custom(def) => {
                 6.hash(state);
-                type_id.hash(state);
-                // type_name is not included in the hash
+                def.type_id.hash(state);
             }
 
             DataType::Enum(def) => {

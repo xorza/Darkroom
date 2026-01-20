@@ -1,18 +1,21 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use graph::data::{CustomValue, DataType, DynamicValue};
+use graph::data::{CustomValue, DataType, DynamicValue, TypeDef};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{
     Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness, Transform, Vec2,
 };
+use std::sync::Arc;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
-pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom {
-    type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
-    display_name: "Image".to_string(),
+pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
+    DataType::Custom(Arc::new(TypeDef {
+        type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
+        display_name: "Image".to_string(),
+    }))
 });
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
