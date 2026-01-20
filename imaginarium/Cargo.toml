@@ -5,6 +5,8 @@ edition.workspace = true
 
 
 [dependencies]
+common.workspace = true
+
 tiff.workspace = true
 image.workspace = true
 bytemuck.workspace = true
