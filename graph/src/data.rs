@@ -6,8 +6,6 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
-use common::EPSILON;
-
 use common::id_type;
 
 id_type!(TypeId);
@@ -66,7 +64,7 @@ pub enum StaticValue {
     Bool(bool),
     String(String),
     Enum {
-        enum_def: Arc<EnumDef>,
+        type_id: TypeId,
         variant_name: String,
     },
 }
@@ -83,14 +81,14 @@ impl PartialEq for StaticValue {
             (StaticValue::String(left), StaticValue::String(right)) => left == right,
             (
                 StaticValue::Enum {
-                    enum_def: def_left,
+                    type_id: type_id_left,
                     variant_name: name_left,
                 },
                 StaticValue::Enum {
-                    enum_def: def_right,
+                    type_id: type_id_right,
                     variant_name: name_right,
                 },
-            ) => def_left.type_id == def_right.type_id && name_left == name_right,
+            ) => type_id_left == type_id_right && name_left == name_right,
             _ => false,
         }
     }
@@ -113,23 +111,12 @@ pub enum DynamicValue {
         data: Arc<dyn Any + Send + Sync>,
     },
     Enum {
-        enum_def: Arc<EnumDef>,
+        type_id: TypeId,
         variant_name: String,
     },
 }
 
 impl StaticValue {
-    pub fn data_type(&self) -> DataType {
-        match self {
-            StaticValue::Null => DataType::Null,
-            StaticValue::Float(_) => DataType::Float,
-            StaticValue::Int(_) => DataType::Int,
-            StaticValue::Bool(_) => DataType::Bool,
-            StaticValue::String(_) => DataType::String,
-            StaticValue::Enum { enum_def, .. } => DataType::Enum(Arc::clone(enum_def)),
-        }
-    }
-
     pub fn as_float(&self) -> f64 {
         match self {
             StaticValue::Float(value) => *value,
@@ -177,20 +164,6 @@ impl DynamicValue {
         DynamicValue::Custom {
             data_type,
             data: Arc::new(value),
-        }
-    }
-
-    pub fn data_type(&self) -> DataType {
-        match self {
-            DynamicValue::Null => DataType::Null,
-            DynamicValue::Float(_) => DataType::Float,
-            DynamicValue::Int(_) => DataType::Int,
-            DynamicValue::Bool(_) => DataType::Bool,
-            DynamicValue::String(_) => DataType::String,
-            // DynamicValue::Array(_) => DataType::Array,
-            DynamicValue::Custom { data_type, .. } => data_type.clone(),
-            DynamicValue::Enum { enum_def, .. } => DataType::Enum(Arc::clone(enum_def)),
-            DynamicValue::None => panic!("Value is None"),
         }
     }
 
@@ -276,34 +249,38 @@ impl DynamicValue {
             return DynamicValue::None;
         }
 
-        let src_data_type = self.data_type();
-        if src_data_type == *dst_data_type {
-            return self;
-        }
+        return self;
 
-        if src_data_type.is_custom() || dst_data_type.is_custom() {
-            panic!("Custom types are not supported yet");
-        }
+        // todo!("Implement convert_type");
 
-        match (src_data_type, dst_data_type) {
-            (DataType::Bool, DataType::Int) => DynamicValue::Int(self.as_bool() as i64),
-            (DataType::Bool, DataType::Float) => DynamicValue::Float(self.as_bool() as i64 as f64),
-            (DataType::Bool, DataType::String) => DynamicValue::String(self.as_bool().to_string()),
+        // let src_data_type = self.data_type();
+        // if src_data_type == *dst_data_type {
+        //     return self;
+        // }
 
-            (DataType::Int, DataType::Bool) => DynamicValue::Bool(self.as_i64() != 0),
-            (DataType::Int, DataType::Float) => DynamicValue::Float(self.as_i64() as f64),
-            (DataType::Int, DataType::String) => DynamicValue::String(self.as_i64().to_string()),
+        // if src_data_type.is_custom() || dst_data_type.is_custom() {
+        //     panic!("Custom types are not supported yet");
+        // }
 
-            (DataType::Float, DataType::Bool) => {
-                DynamicValue::Bool(self.as_f64().abs() > EPSILON as f64)
-            }
-            (DataType::Float, DataType::Int) => DynamicValue::Int(self.as_f64() as i64),
-            (DataType::Float, DataType::String) => DynamicValue::String(self.as_f64().to_string()),
+        // match (src_data_type, dst_data_type) {
+        //     (DataType::Bool, DataType::Int) => DynamicValue::Int(self.as_bool() as i64),
+        //     (DataType::Bool, DataType::Float) => DynamicValue::Float(self.as_bool() as i64 as f64),
+        //     (DataType::Bool, DataType::String) => DynamicValue::String(self.as_bool().to_string()),
 
-            (src, dst) => {
-                panic!("Unsupported conversion from {:?} to {:?}", src, dst);
-            }
-        }
+        //     (DataType::Int, DataType::Bool) => DynamicValue::Bool(self.as_i64() != 0),
+        //     (DataType::Int, DataType::Float) => DynamicValue::Float(self.as_i64() as f64),
+        //     (DataType::Int, DataType::String) => DynamicValue::String(self.as_i64().to_string()),
+
+        //     (DataType::Float, DataType::Bool) => {
+        //         DynamicValue::Bool(self.as_f64().abs() > EPSILON as f64)
+        //     }
+        //     (DataType::Float, DataType::Int) => DynamicValue::Int(self.as_f64() as i64),
+        //     (DataType::Float, DataType::String) => DynamicValue::String(self.as_f64().to_string()),
+
+        //     (src, dst) => {
+        //         panic!("Unsupported conversion from {:?} to {:?}", src, dst);
+        //     }
+        // }
     }
 }
 
@@ -316,10 +293,10 @@ impl From<StaticValue> for DynamicValue {
             StaticValue::Bool(value) => DynamicValue::Bool(value),
             StaticValue::String(value) => DynamicValue::String(value),
             StaticValue::Enum {
-                enum_def,
+                type_id,
                 variant_name,
             } => DynamicValue::Enum {
-                enum_def: Arc::clone(&enum_def),
+                type_id,
                 variant_name,
             },
         }
@@ -335,10 +312,10 @@ impl From<&StaticValue> for DynamicValue {
             StaticValue::Bool(value) => DynamicValue::Bool(*value),
             StaticValue::String(value) => DynamicValue::String(value.clone()),
             StaticValue::Enum {
-                enum_def,
+                type_id,
                 variant_name,
             } => DynamicValue::Enum {
-                enum_def: Arc::clone(enum_def),
+                type_id: *type_id,
                 variant_name: variant_name.clone(),
             },
         }
@@ -359,7 +336,7 @@ impl From<&DataType> for StaticValue {
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String("".to_string()),
             DataType::Enum(enum_def) => StaticValue::Enum {
-                enum_def: Arc::clone(enum_def),
+                type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
             },
             _ => panic!("No value for {:?}", data_type),
@@ -375,7 +352,7 @@ impl From<&DataType> for DynamicValue {
             DataType::Bool => DynamicValue::Bool(false),
             DataType::String => DynamicValue::String("".to_string()),
             DataType::Enum(enum_def) => DynamicValue::Enum {
-                enum_def: Arc::clone(enum_def),
+                type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
             },
             _ => panic!("No value for {:?}", data_type),

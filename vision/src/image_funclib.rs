@@ -307,7 +307,7 @@ impl Default for ImageFuncLib {
                     required: true,
                     data_type: DataType::Enum(Arc::clone(&BLENDMODE_ENUM)),
                     default_value: Some(StaticValue::Enum {
-                        enum_def: Arc::clone(&BLENDMODE_ENUM),
+                        type_id: BLENDMODE_ENUM.type_id,
                         variant_name: "Normal".to_string(),
                     }),
                     value_options: vec![],

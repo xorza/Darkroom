@@ -133,8 +133,7 @@ impl LuaInvoker {
                     );
 
                     let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
-                    for (input_info, input) in func.inputs.iter().zip(inputs.iter()) {
-                        assert_eq!(input_info.data_type, input.value.data_type());
+                    for (_input_info, input) in func.inputs.iter().zip(inputs.iter()) {
 
                         let invoke_value = to_lua_value(&lua, &input.value)?;
                         input_args.push(invoke_value);
@@ -149,11 +148,10 @@ impl LuaInvoker {
                         func.name
                     );
 
-                    for ((index, output_info), output_arg) in
+                    for ((index, _output_info), output_arg) in
                         func.outputs.iter().enumerate().zip(output_args.into_iter())
                     {
                         let output = data::DynamicValue::from(&output_arg);
-                        assert_eq!(output_info.data_type, output.data_type());
                         outputs[index] = output;
                     }
 
@@ -402,10 +400,7 @@ fn to_lua_value(lua: &mlua::Lua, value: &DynamicValue) -> anyhow::Result<mlua::V
         DynamicValue::Int(v) => Ok(mlua::Value::Integer(*v)),
         DynamicValue::Bool(v) => Ok(mlua::Value::Boolean(*v)),
         DynamicValue::String(v) => Ok(mlua::Value::String(lua.create_string(v)?)),
-        _ => panic!(
-            "Lua value conversion does not support {:?}",
-            value.data_type()
-        ),
+        _ => panic!("Lua value conversion does not support {:?}", value),
     }
 }
 

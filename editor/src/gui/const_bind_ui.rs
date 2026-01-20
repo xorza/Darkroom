@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use eframe::egui;
 use egui::{Align2, PointerButton, Pos2, Response, Sense, Vec2, pos2, vec2};
+use graph::data::DataType;
 use graph::data::EnumDef;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
@@ -63,7 +64,7 @@ impl<'a> ConstBindFrame<'a> {
         ui_interaction: &mut GraphUiInteraction,
         node_layout: &NodeLayout,
         node: &mut Node,
-        _func: &Func,
+        func: &Func,
         breaker: Option<&ConnectionBreaker>,
     ) {
         let port_radius = gui.style.node.port_radius;
@@ -152,16 +153,23 @@ impl<'a> ConstBindFrame<'a> {
                     .style(const_bind_style)
                     .show(gui, ("const_float_drag", node.id, input_idx)),
                 StaticValue::Enum {
-                    enum_def,
+                    type_id,
                     variant_name,
-                } => render_enum_dropdown(
-                    gui,
-                    ("const_enum_dropdown", node.id, input_idx),
-                    enum_def,
-                    variant_name,
-                    connection_start,
-                    &const_bind_style,
-                ),
+                } => {
+                    let DataType::Enum(enum_def) = &func.inputs[input_idx].data_type else {
+                        panic!("Expected Enum data type")
+                    };
+                    assert_eq!(*type_id, enum_def.type_id, "Type ID mismatch");
+
+                    render_enum_dropdown(
+                        gui,
+                        ("const_enum_dropdown", node.id, input_idx),
+                        enum_def,
+                        variant_name,
+                        connection_start,
+                        &const_bind_style,
+                    )
+                }
                 _ => todo!(),
             };
 
@@ -227,28 +235,6 @@ fn const_input_text(
     gui.ui()
         .data_mut(|data| data.get_temp::<String>(id))
         .unwrap_or_else(|| static_value_label(value))
-}
-
-fn parse_static_value(text: &str, current: &StaticValue) -> Option<StaticValue> {
-    match current {
-        StaticValue::Null => text
-            .eq_ignore_ascii_case("null")
-            .then_some(StaticValue::Null),
-        StaticValue::Float(_) => text.parse::<f64>().ok().map(StaticValue::Float),
-        StaticValue::Int(_) => text.parse::<i64>().ok().map(StaticValue::Int),
-        StaticValue::Bool(_) => match text.trim().to_ascii_lowercase().as_str() {
-            "true" => Some(StaticValue::Bool(true)),
-            "false" => Some(StaticValue::Bool(false)),
-            _ => None,
-        },
-        StaticValue::String(_) => Some(StaticValue::String(text.to_string())),
-        StaticValue::Enum { enum_def, .. } => {
-            enum_def.index_of(text.trim()).map(|_| StaticValue::Enum {
-                enum_def: enum_def.clone(),
-                variant_name: text.trim().to_string(),
-            })
-        }
-    }
 }
 
 fn render_enum_dropdown(
