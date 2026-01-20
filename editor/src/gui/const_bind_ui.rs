@@ -1,7 +1,8 @@
+use std::sync::Arc;
+
 use eframe::egui;
-use egui::{
-    Align, Align2, PointerButton, Pos2, Sense, Stroke, TextEdit, UiBuilder, Vec2, pos2, vec2,
-};
+use egui::{Align2, PointerButton, Pos2, Response, Sense, Vec2, pos2, vec2};
+use graph::data::EnumDef;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 
@@ -147,6 +148,17 @@ impl<'a> ConstBindFrame<'a> {
                     .align(Align2::RIGHT_CENTER)
                     .style(const_bind_style)
                     .show(gui, ("const_float_drag", node.id, input_idx)),
+                StaticValue::Enum {
+                    enum_def,
+                    variant_name,
+                } => render_enum_dropdown(
+                    gui,
+                    ("const_enum_dropdown", node.id, input_idx),
+                    enum_def,
+                    variant_name,
+                    connection_start,
+                    &const_bind_style,
+                ),
                 _ => todo!(),
             };
 
@@ -234,4 +246,52 @@ fn parse_static_value(text: &str, current: &StaticValue) -> Option<StaticValue> 
             })
         }
     }
+}
+
+fn render_enum_dropdown(
+    gui: &mut Gui<'_>,
+    id_salt: impl std::hash::Hash,
+    enum_def: &Arc<EnumDef>,
+    variant_name: &mut String,
+    pos: Pos2,
+    _style: &crate::gui::style::DragValueStyle,
+) -> Response {
+    let id = gui.ui().make_persistent_id(id_salt);
+
+    let font = gui.style.mono_font.clone();
+    let text_color = gui.style.text_color;
+    let padding = vec2(gui.style.small_padding, 0.0);
+
+    let galley = gui
+        .ui()
+        .painter()
+        .layout_no_wrap(variant_name.clone(), font.clone(), text_color);
+    let size = galley.size() + padding * 2.0;
+
+    let rect = Align2::RIGHT_CENTER.anchor_size(pos, size);
+
+    let mut changed = false;
+    let inner_response = gui
+        .ui()
+        .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            egui::ComboBox::from_id_salt(id)
+                .selected_text(variant_name.as_str())
+                .show_ui(ui, |ui| {
+                    for variant in &enum_def.variants {
+                        if ui
+                            .selectable_value(variant_name, variant.clone(), variant)
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+                })
+        });
+
+    let mut response = inner_response.response;
+    if changed {
+        response.mark_changed();
+    }
+
+    response
 }
