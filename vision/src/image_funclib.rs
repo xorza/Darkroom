@@ -4,7 +4,9 @@ use std::sync::LazyLock;
 use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use imaginarium::{Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness};
+use imaginarium::{
+    Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness, Transform, Vec2,
+};
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
@@ -317,6 +319,104 @@ impl Default for ImageFuncLib {
                             &mut output_buffer,
                         )
                         .expect("Failed to blend images");
+
+                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
+
+                    Ok(())
+                })
+            }),
+        });
+
+        // transform
+        func_lib.add(Func {
+            id: "d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a".into(),
+            name: "transform".to_string(),
+            description: Some("Applies scale, rotation, and translation to an image".to_string()),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "image".to_string(),
+            inputs: vec![
+                FuncInput {
+                    name: "image".to_string(),
+                    required: true,
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "scale_x".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((1.0).into()),
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "scale_y".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((1.0).into()),
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "rotation".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((0.0).into()),
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "translate_x".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((0.0).into()),
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "translate_y".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((0.0).into()),
+                    value_options: vec![],
+                },
+            ],
+            outputs: vec![FuncOutput {
+                name: "image".to_string(),
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+            }],
+            events: vec![],
+            required_contexts: vec![VISION_CTX_TYPE.clone()],
+            lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 6);
+                    assert_eq!(outputs.len(), 1);
+
+                    let input_image = inputs[0].value.as_custom::<Image>();
+                    let scale_x = inputs[1].value.as_f64() as f32;
+                    let scale_y = inputs[2].value.as_f64() as f32;
+                    let rotation = inputs[3].value.as_f64() as f32;
+                    let translate_x = inputs[4].value.as_f64() as f32;
+                    let translate_y = inputs[5].value.as_f64() as f32;
+
+                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+
+                    let mut output_buffer =
+                        imaginarium::ImageBuffer::new_empty(*input_image.desc());
+
+                    let center = Vec2::new(
+                        input_image.desc().width as f32 / 2.0,
+                        input_image.desc().height as f32 / 2.0,
+                    );
+
+                    Transform::new()
+                        .scale(Vec2::new(scale_x, scale_y))
+                        .rotate_around(rotation, center)
+                        .translate(Vec2::new(translate_x, translate_y))
+                        .execute(
+                            &mut vision_ctx.processing_ctx,
+                            input_image,
+                            &mut output_buffer,
+                        )
+                        .expect("Failed to transform image");
 
                     outputs[0] = DynamicValue::custom(Image::from(output_buffer));
 
