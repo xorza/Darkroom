@@ -103,6 +103,76 @@ impl Default for ImageFuncLib {
             }),
         });
 
+        // load_image
+        func_lib.add(Func {
+            id: "a4d9bf87-9d98-44f1-a162-7483c298be3d".into(),
+            name: "load_image".to_string(),
+            description: Some("Loads an image from file".to_string()),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "image".to_string(),
+            inputs: vec![],
+            outputs: vec![FuncOutput {
+                name: "image".to_string(),
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+            }],
+            events: vec![],
+            required_contexts: vec![],
+            lambda: async_lambda!(move |_, _, _, _, _, outputs| {
+                assert_eq!(outputs.len(), 1);
+
+                // For now, always load lena.tiff from test_resources
+                let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
+                let image = imaginarium::Image::read_file(path).expect("Failed to load image");
+                let buffer = imaginarium::ImageBuffer::from(image);
+
+                outputs[0] = graph::data::DynamicValue::Custom {
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    data: Box::new(buffer),
+                };
+
+                Ok(())
+            }),
+        });
+
+        // save_image
+        func_lib.add(Func {
+            id: "0c17bcbe-d757-43be-b184-27b429e8b434".into(),
+            name: "save_image".to_string(),
+            description: Some("Saves an image to file".to_string()),
+            behavior: FuncBehavior::Impure,
+            terminal: true,
+            category: "image".to_string(),
+            inputs: vec![FuncInput {
+                name: "image".to_string(),
+                required: true,
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                default_value: None,
+                value_options: vec![],
+            }],
+            outputs: vec![],
+            events: vec![],
+            required_contexts: vec![VISION_CTX_TYPE.clone()],
+            lambda: async_lambda!(move |ctx_manager, _, _, inputs, _, _| {
+                assert_eq!(inputs.len(), 1);
+
+                let input_buffer = inputs[0].value.as_custom::<imaginarium::ImageBuffer>();
+
+                // For now, save to test_output directory
+                let output_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_output");
+                std::fs::create_dir_all(output_dir).expect("Failed to create output directory");
+
+                let path = format!("{}/vision_output.tiff", output_dir);
+                let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+                let image = input_buffer
+                    .make_cpu(&vision_ctx.processing_ctx)
+                    .expect("Failed to get CPU image");
+                image.save_file(&path).expect("Failed to save image");
+
+                Ok(())
+            }),
+        });
+
         Self { func_lib }
     }
 }
