@@ -1,8 +1,10 @@
 use eframe::egui;
-use egui::{Color32, FontId, Id, Order, Popup, Pos2, Response, Sense, StrokeKind, Vec2, vec2};
+use egui::{Align, FontId, Id, Order, Popup, Pos2, Response, Vec2};
 
+use crate::common::button::Button;
+use crate::common::frame::Frame;
 use crate::gui::Gui;
-use crate::gui::style::PopupStyle;
+use crate::gui::style::{ButtonStyle, PopupStyle};
 
 /// A custom popup menu that works with the Gui struct.
 /// Opens on click of the anchor response and closes on click outside or item selection.
@@ -50,7 +52,7 @@ impl PopupMenu {
             return None;
         }
 
-        let style = self.style.unwrap_or_else(|| gui.style.popup.clone());
+        let popup_style = self.style.unwrap_or_else(|| gui.style.popup.clone());
 
         let ctx = gui.ui().ctx().clone();
         let popup_id = self.id;
@@ -63,15 +65,9 @@ impl PopupMenu {
             .order(Order::Foreground)
             .default_pos(anchor_rect.left_bottom())
             .show(&ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(style.fill)
-                    .stroke(style.stroke)
-                    .corner_radius(style.corner_radius)
-                    .inner_margin(style.padding)
-                    .show(ui, |ui| {
-                        let mut gui = Gui::new_with_scale(ui, &gui_style, scale);
-                        content(&mut gui)
-                    })
+                let mut gui = Gui::new_with_scale(ui, &gui_style, scale);
+                Frame::popup(&popup_style)
+                    .show(&mut gui, |gui| content(gui))
                     .inner
             });
 
@@ -99,22 +95,29 @@ impl PopupMenu {
     }
 }
 
-/// A menu item for use inside PopupMenu.
+/// A list item widget for use inside PopupMenu or other list contexts.
+/// Uses Button internally to ensure consistent styling with new_node_ui.
 #[derive(Debug)]
-pub struct MenuItem<'a> {
+pub struct ListItem<'a> {
     text: &'a str,
     selected: bool,
     enabled: bool,
     font: Option<FontId>,
+    style: Option<ButtonStyle>,
+    size: Option<Vec2>,
+    align: Align,
 }
 
-impl<'a> MenuItem<'a> {
+impl<'a> ListItem<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
             text,
             selected: false,
             enabled: true,
             font: None,
+            style: None,
+            size: None,
+            align: Align::Min,
         }
     }
 
@@ -133,54 +136,39 @@ impl<'a> MenuItem<'a> {
         self
     }
 
+    pub fn style(mut self, style: ButtonStyle) -> Self {
+        self.style = Some(style);
+        self
+    }
+
+    pub fn size(mut self, size: Vec2) -> Self {
+        self.size = Some(size);
+        self
+    }
+
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
-        let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
-        let text_color = if !self.enabled {
-            gui.style.noninteractive_text_color
-        } else if self.selected {
-            gui.style.dark_text_color
-        } else {
-            gui.style.text_color
-        };
+        let mut selected = self.selected;
 
-        let galley = gui
-            .painter()
-            .layout_no_wrap(self.text.to_string(), font, text_color);
+        let mut btn = Button::default()
+            .text(self.text)
+            .background(self.style.unwrap_or(gui.style.list_button))
+            .enabled(self.enabled)
+            .align(self.align)
+            .toggle(&mut selected);
 
-        let padding = vec2(gui.style.padding, gui.style.small_padding);
-        let size = galley.size() + padding * 2.0;
-
-        let sense = if self.enabled {
-            Sense::click() | Sense::hover()
-        } else {
-            Sense::hover()
-        };
-
-        let (rect, response) = gui.ui().allocate_exact_size(size, sense);
-
-        if gui.ui().is_rect_visible(rect) {
-            let fill = if self.selected {
-                gui.style.checked_bg_fill
-            } else if response.hovered() && self.enabled {
-                gui.style.hover_bg_fill
-            } else {
-                Color32::TRANSPARENT
-            };
-
-            if fill != Color32::TRANSPARENT {
-                gui.painter().rect(
-                    rect,
-                    gui.style.small_corner_radius,
-                    fill,
-                    egui::Stroke::NONE,
-                    StrokeKind::Inside,
-                );
-            }
-
-            let text_pos = rect.min + padding;
-            gui.painter().galley(text_pos, galley, text_color);
+        if let Some(font) = self.font {
+            btn = btn.font(font);
         }
 
-        response
+        if let Some(size) = self.size {
+            btn = btn.size(size);
+        }
+
+        btn.show(gui)
     }
 }

@@ -16,6 +16,6 @@ pub mod ui_equals;
 pub mod undo_stack;
 
 pub use combo_box::ComboBox;
-pub use popup_menu::{MenuItem, PopupMenu};
+pub use popup_menu::{ListItem, PopupMenu};
 pub use text_edit::TextEdit;
 pub use ui_equals::UiEquals;
