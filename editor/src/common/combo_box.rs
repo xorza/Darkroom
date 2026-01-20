@@ -130,7 +130,7 @@ impl<'a> ComboBox<'a> {
 
             for option in options {
                 let is_selected = option == &selected;
-                if ListItem::new(option)
+                if ListItem::from_str(option)
                     .selected(is_selected)
                     .size(item_size)
                     .show(gui)

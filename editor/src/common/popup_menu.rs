@@ -139,7 +139,7 @@ pub struct ListItem<'a> {
 }
 
 impl<'a> ListItem<'a> {
-    pub fn new(text: &'a str) -> Self {
+    pub fn from_str(text: &'a str) -> Self {
         Self {
             text: Some(text),
             galley: None,

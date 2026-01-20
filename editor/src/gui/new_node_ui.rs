@@ -103,7 +103,7 @@ impl NewNodeUi {
                                 let button_height =
                                     gui.font_height(&btn_font) + small_padding * 2.0;
 
-                                if ListItem::new("Const")
+                                if ListItem::from_str("Const")
                                     .size(vec2(button_width, button_height))
                                     .show(gui)
                                     .clicked()
