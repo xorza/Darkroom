@@ -18,8 +18,12 @@ pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
     }))
 });
 
-pub static BLENDMODE_ENUM: LazyLock<Arc<EnumDef>> =
-    LazyLock::new(|| Arc::new(EnumDef::from_enum::<BlendMode>("BlendMode")));
+pub static BLENDMODE_ENUM: LazyLock<Arc<EnumDef>> = LazyLock::new(|| {
+    Arc::new(EnumDef::from_enum::<BlendMode>(
+        "54d531cf-d353-4e30-8ea7-8823a9b5305f",
+        "Blendmode",
+    ))
+});
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
 #[derive(Debug)]
