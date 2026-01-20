@@ -167,7 +167,7 @@ impl Style {
                 family: FontFamily::Proportional,
             },
             mono_font: FontId {
-                size: scaled(13.0),
+                size: scaled(12.0),
                 family: FontFamily::Monospace,
             },
             text_color: style_settings.color_text,

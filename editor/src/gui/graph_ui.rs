@@ -553,10 +553,6 @@ impl GraphUi {
         pointer_pos: Option<Pos2>,
         interaction: &mut GraphUiInteraction,
     ) {
-        if !background_response.hovered() {
-            return;
-        }
-
         let prev_scale = ctx.view_graph.scale;
         let prev_pan = ctx.view_graph.pan;
         if let Some(pointer_pos) = pointer_pos {

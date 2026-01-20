@@ -258,7 +258,7 @@ fn render_enum_dropdown(
     style: &crate::gui::style::DragValueStyle,
 ) -> Response {
     ComboBox::new(variant_name, &enum_def.variants)
-        .font(gui.style.mono_font.clone())
+        .font(gui.style.sub_font.clone())
         .color(gui.style.text_color)
         .padding(vec2(gui.style.small_padding, 0.0))
         .pos(pos)
