@@ -4,7 +4,6 @@ use std::sync::LazyLock;
 use graph::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue, TypeDef};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use graph::prelude::FuncId;
 use imaginarium::{
     Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness, Transform, Vec2,
 };
@@ -75,15 +74,13 @@ impl From<ImageFuncLib> for FuncLib {
     }
 }
 
-struct BrightnessContrastFunc;
-
 impl Default for ImageFuncLib {
     fn default() -> Self {
         let mut func_lib = FuncLib::default();
 
         // brightness_contrast
         func_lib.add(Func {
-            id: FuncId::from_type::<BrightnessContrastFunc>(),
+            id: "b8c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e".into(),
             name: "brightness_contrast".to_string(),
             description: Some(
                 "Adjusts brightness and contrast of an image. Contrast multiplier (1.0 = no change), brightness offset [-1.0, 1.0]".to_string(),
@@ -147,9 +144,8 @@ impl Default for ImageFuncLib {
         });
 
         // load_image
-        struct LoadImageFunc;
         func_lib.add(Func {
-            id: FuncId::from_type::<LoadImageFunc>(),
+            id: "a4d9bf87-9d98-44f1-a162-7483c298be3d".into(),
             name: "load_image".to_string(),
             description: Some("Loads an image from file".to_string()),
             behavior: FuncBehavior::Pure,
@@ -178,9 +174,8 @@ impl Default for ImageFuncLib {
         });
 
         // save_image
-        struct SaveImageFunc;
         func_lib.add(Func {
-            id: FuncId::from_type::<SaveImageFunc>(),
+            id: "0c17bcbe-d757-43be-b184-27b429e8b434".into(),
             name: "save_image".to_string(),
             description: Some("Saves an image to file".to_string()),
             behavior: FuncBehavior::Impure,
@@ -217,9 +212,8 @@ impl Default for ImageFuncLib {
         });
 
         // convert_to_f32
-        struct ConvertToF32Func;
         func_lib.add(Func {
-            id: FuncId::from_type::<ConvertToF32Func>(),
+            id: "80aa1ee7-3b75-4200-b480-b9db913bd6eb".into(),
             name: "convert_to_f32".to_string(),
             description: Some("Converts image color format to f32".to_string()),
             behavior: FuncBehavior::Pure,
@@ -270,9 +264,8 @@ impl Default for ImageFuncLib {
         });
 
         // blend
-        struct BlendFunc;
         func_lib.add(Func {
-            id: FuncId::from_type::<BlendFunc>(),
+            id: "975cc74b-8412-4293-b2cb-ef8d41fdd9b3".into(),
             name: "blend".to_string(),
             description: Some("Blends two images".to_string()),
             behavior: FuncBehavior::Pure,
@@ -350,9 +343,8 @@ impl Default for ImageFuncLib {
         });
 
         // transform
-        struct TransformFunc;
         func_lib.add(Func {
-            id: FuncId::from_type::<TransformFunc>(),
+            id: "d3e4f5a6-b7c8-4d9e-0f1a-2b3c4d5e6f7a".into(),
             name: "transform".to_string(),
             description: Some("Applies scale, rotation, and translation to an image".to_string()),
             behavior: FuncBehavior::Pure,
