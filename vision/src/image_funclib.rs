@@ -11,12 +11,8 @@ use std::sync::Arc;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
-pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| {
-    DataType::Custom(Arc::new(TypeDef {
-        type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
-        display_name: "Image".to_string(),
-    }))
-});
+pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
+    LazyLock::new(|| DataType::Custom(Arc::new(TypeDef::from_type::<Image>("Image"))));
 
 pub static BLENDMODE_ENUM: LazyLock<Arc<EnumDef>> =
     LazyLock::new(|| Arc::new(EnumDef::from_enum::<BlendMode>("BlendMode")));

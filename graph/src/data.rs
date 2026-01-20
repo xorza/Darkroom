@@ -25,6 +25,17 @@ pub struct TypeDef {
     pub display_name: String,
 }
 
+impl TypeDef {
+    /// Creates a TypeDef from a type.
+    /// The type_id is generated deterministically from the full type name.
+    pub fn from_type<T>(display_name: impl Into<String>) -> Self {
+        Self {
+            type_id: TypeId::from_type::<T>(),
+            display_name: display_name.into(),
+        }
+    }
+}
+
 /// Definition of an enum type for `DataType::Enum`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EnumDef {
