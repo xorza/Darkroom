@@ -1,8 +1,8 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use graph::async_lambda;
-use graph::data::{CustomValue, DataType};
+use graph::data::{CustomValue, DataType, DynamicValue};
+use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::ContrastBrightness;
 
@@ -113,27 +113,29 @@ impl Default for ImageFuncLib {
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
-            lambda: async_lambda!(move |ctx_manager, _, _, inputs, _, outputs| {
-                assert_eq!(inputs.len(), 3);
-                assert_eq!(outputs.len(), 1);
+            lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 3);
+                    assert_eq!(outputs.len(), 1);
 
-                let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>();
 
-                let brightness = inputs[1].value.as_f64() as f32;
-                let contrast = inputs[2].value.as_f64() as f32;
+                    let brightness = inputs[1].value.as_f64() as f32;
+                    let contrast = inputs[2].value.as_f64() as f32;
 
-                let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-                let mut output_buffer =
-                    imaginarium::ImageBuffer::new_empty(*input_image.desc());
+                    let mut output_buffer =
+                        imaginarium::ImageBuffer::new_empty(*input_image.desc());
 
-                ContrastBrightness::new(contrast, brightness)
-                    .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
-                    .expect("Failed to apply brightness/contrast");
+                    ContrastBrightness::new(contrast, brightness)
+                        .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
+                        .expect("Failed to apply brightness/contrast");
 
-                outputs[0] = graph::data::DynamicValue::custom(Image::from(output_buffer));
+                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
 
-                Ok(())
+                    Ok(())
+                })
             }),
         });
 
@@ -152,16 +154,18 @@ impl Default for ImageFuncLib {
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: async_lambda!(move |_, _, _, _, _, outputs| {
-                assert_eq!(outputs.len(), 1);
+            lambda: FuncLambda::new(move |_, _, _, _, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(outputs.len(), 1);
 
-                // For now, always load lena.tiff from test_resources
-                let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
-                let image = imaginarium::Image::read_file(path).expect("Failed to load image");
+                    // For now, always load lena.tiff from test_resources
+                    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
+                    let image = imaginarium::Image::read_file(path).expect("Failed to load image");
 
-                outputs[0] = graph::data::DynamicValue::custom(Image::from(image));
+                    outputs[0] = DynamicValue::custom(Image::from(image));
 
-                Ok(())
+                    Ok(())
+                })
             }),
         });
 
@@ -183,23 +187,25 @@ impl Default for ImageFuncLib {
             outputs: vec![],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
-            lambda: async_lambda!(move |ctx_manager, _, _, inputs, _, _| {
-                assert_eq!(inputs.len(), 1);
+            lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, _| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 1);
 
-                let input_image = inputs[0].value.as_custom::<Image>();
+                    let input_image = inputs[0].value.as_custom::<Image>();
 
-                // For now, save to test_output directory
-                let output_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_output");
-                std::fs::create_dir_all(output_dir).expect("Failed to create output directory");
+                    // For now, save to test_output directory
+                    let output_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_output");
+                    std::fs::create_dir_all(output_dir).expect("Failed to create output directory");
 
-                let path = format!("{}/vision_output.tiff", output_dir);
-                let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
-                let cpu_image = input_image
-                    .make_cpu(&vision_ctx.processing_ctx)
-                    .expect("Failed to get CPU image");
-                cpu_image.save_file(&path).expect("Failed to save image");
+                    let path = format!("{}/vision_output.tiff", output_dir);
+                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+                    let cpu_image = input_image
+                        .make_cpu(&vision_ctx.processing_ctx)
+                        .expect("Failed to get CPU image");
+                    cpu_image.save_file(&path).expect("Failed to save image");
 
-                Ok(())
+                    Ok(())
+                })
             }),
         });
 

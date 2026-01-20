@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fs::File;
 use std::path::Path;
 
@@ -6,6 +7,7 @@ use tiff::encoder::colortype::*;
 use tiff::encoder::{TiffEncoder, TiffValue, colortype};
 use tiff::tags::{PhotometricInterpretation, SampleFormat};
 
+use super::stride::strip_stride_padding;
 use crate::prelude::*;
 
 macro_rules! define_int_color_type {
@@ -175,11 +177,27 @@ where
     CT::Inner: Pod,
     [CT::Inner]: TiffValue,
 {
-    let buf: &[CT::Inner] = bytemuck::try_cast_slice(&image.bytes)?;
+    let desc = image.desc();
+    let row_bytes = desc.width * desc.color_format.byte_count() as u32;
+
+    // Strip stride padding if present
+    let packed_bytes: Cow<[u8]> = if desc.stride == row_bytes {
+        Cow::Borrowed(image.bytes())
+    } else {
+        Cow::Owned(strip_stride_padding(
+            image.bytes(),
+            desc.width,
+            desc.height,
+            desc.stride,
+            desc.color_format.byte_count(),
+        ))
+    };
+
+    let buf: &[CT::Inner] = bytemuck::try_cast_slice(&packed_bytes)?;
 
     let mut file = File::create(filename)?;
     let mut tiff = TiffEncoder::new(&mut file)?;
-    let img = tiff.new_image::<CT>(image.desc.width, image.desc.height)?;
+    let img = tiff.new_image::<CT>(desc.width, desc.height)?;
 
     img.write_data(buf)?;
 
