@@ -1,4 +1,4 @@
-AI coding rules for this project:
+AI coding rules for Rust projects:
 
 - Avoid using Option<> and Result<> for cases that should not fail.
 - For required values, use `.unwrap()`. For non-obvious cases add `.expect("...")` with clear, specific message.
