@@ -67,7 +67,7 @@ impl<'a> ComboBox<'a> {
     }
 
     pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
-        let font = self.font.unwrap_or_else(|| gui.style.body_font.clone());
+        let font = self.font.unwrap_or_else(|| gui.style.sub_font.clone());
         let color = self.color.unwrap_or(gui.style.text_color);
         let padding = self
             .padding
