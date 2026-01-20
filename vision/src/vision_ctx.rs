@@ -1,1 +1,13 @@
+use std::sync::LazyLock;
 
+use graph::context::ContextType;
+
+#[derive(Debug, Default)]
+pub struct VisionCtx {}
+
+pub static VISION_CTX_TYPE: LazyLock<ContextType> = LazyLock::new(|| {
+    ContextType::new(
+        "46a85022-e3c7-4c80-aa90-cf1a77251286".into(),
+        VisionCtx::default,
+    )
+});
