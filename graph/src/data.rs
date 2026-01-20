@@ -2,6 +2,7 @@ use std::any::Any;
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +59,7 @@ impl PartialEq for StaticValue {
 
 impl Eq for StaticValue {}
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub enum DynamicValue {
     #[default]
     None,
@@ -70,7 +71,7 @@ pub enum DynamicValue {
     // Array(Vec<DynamicValue>),
     Custom {
         data_type: DataType,
-        data: Box<dyn Any + Send + Sync>,
+        data: Arc<dyn Any + Send + Sync>,
     },
 }
 
@@ -120,6 +121,13 @@ impl StaticValue {
 }
 
 impl DynamicValue {
+    pub fn custom<T: Any + Send + Sync>(data_type: DataType, value: T) -> Self {
+        DynamicValue::Custom {
+            data_type,
+            data: Arc::new(value),
+        }
+    }
+
     pub fn data_type(&self) -> &DataType {
         match self {
             DynamicValue::Null => &DataType::Null,
@@ -234,46 +242,6 @@ impl DynamicValue {
 
             (src, dst) => {
                 panic!("Unsupported conversion from {:?} to {:?}", src, dst);
-            }
-        }
-    }
-}
-
-impl Clone for DynamicValue {
-    fn clone(&self) -> Self {
-        let mut result = DynamicValue::Null;
-        result.clone_from(self);
-        result
-    }
-
-    fn clone_from(&mut self, source: &Self) {
-        match source {
-            DynamicValue::Null => {
-                *self = DynamicValue::Null;
-            }
-            DynamicValue::Float(value) => {
-                *self = DynamicValue::Float(*value);
-            }
-            DynamicValue::Int(value) => {
-                *self = DynamicValue::Int(*value);
-            }
-            DynamicValue::Bool(value) => {
-                *self = DynamicValue::Bool(*value);
-            }
-            DynamicValue::String(value) => {
-                *self = DynamicValue::String(value.clone());
-            }
-            // DynamicValue::Array(value) => { *self = DynamicValue::Array(value.clone()); }
-            DynamicValue::Custom { data_type, data: _ } => {
-                *self = DynamicValue::Custom {
-                    data_type: data_type.clone(),
-                    // data: *data.clone(),
-                    data: Box::new(()),
-                };
-                unimplemented!("Clone custom type")
-            }
-            DynamicValue::None => {
-                *self = DynamicValue::None;
             }
         }
     }

@@ -159,7 +159,7 @@ NodeBehavior: AsFunction | Once
 ```rust
 DataType: Null | Float | Int | Bool | String | Array | Custom(TypeId)
 StaticValue: Serializable constants (f64 equality via to_bits())
-DynamicValue: Runtime values including Box<dyn Any + Send + Sync>
+DynamicValue: Runtime values including Arc<dyn Any + Send + Sync> for Custom variant (shallow clone)
 ```
 
 ## Architecture Patterns

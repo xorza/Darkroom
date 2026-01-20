@@ -94,10 +94,8 @@ impl Default for ImageFuncLib {
                     .execute(&mut vision_ctx.processing_ctx, input_buffer, &mut output_buffer)
                     .expect("Failed to apply brightness/contrast");
 
-                outputs[0] = graph::data::DynamicValue::Custom {
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
-                    data: Box::new(output_buffer),
-                };
+                outputs[0] =
+                    graph::data::DynamicValue::custom(IMAGE_BUFFER_DATA_TYPE.clone(), output_buffer);
 
                 Ok(())
             }),
@@ -126,10 +124,8 @@ impl Default for ImageFuncLib {
                 let image = imaginarium::Image::read_file(path).expect("Failed to load image");
                 let buffer = imaginarium::ImageBuffer::from(image);
 
-                outputs[0] = graph::data::DynamicValue::Custom {
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
-                    data: Box::new(buffer),
-                };
+                outputs[0] =
+                    graph::data::DynamicValue::custom(IMAGE_BUFFER_DATA_TYPE.clone(), buffer);
 
                 Ok(())
             }),
