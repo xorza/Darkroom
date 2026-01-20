@@ -1,24 +1,19 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
-use graph::data::{CustomValue, DataType, DynamicValue, EnumDef, StaticValue};
+use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
+use graph::data::{CustomValue, DataType, DynamicValue, StaticValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{
     Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness, Transform, Vec2,
 };
-use std::sync::Arc;
-
-use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
-    LazyLock::new(|| DataType::custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
+    LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
 
-pub static BLENDMODE_ENUM: LazyLock<Arc<EnumDef>> = LazyLock::new(|| {
-    Arc::new(EnumDef::from_enum::<BlendMode>(
-        "54d531cf-d353-4e30-8ea7-8823a9b5305f",
-        "Blendmode",
-    ))
+pub static BLENDMODE_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
+    DataType::from_enum::<BlendMode>("54d531cf-d353-4e30-8ea7-8823a9b5305f", "BlendMode")
 });
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
@@ -293,9 +288,9 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "mode".to_string(),
                     required: true,
-                    data_type: DataType::Enum(Arc::clone(&BLENDMODE_ENUM)),
+                    data_type: BLENDMODE_DATATYPE.clone(),
                     default_value: Some(StaticValue::Enum {
-                        type_id: BLENDMODE_ENUM.type_id,
+                        type_id: "54d531cf-d353-4e30-8ea7-8823a9b5305f".into(),
                         variant_name: "Normal".to_string(),
                     }),
                     value_options: vec![],

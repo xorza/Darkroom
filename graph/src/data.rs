@@ -413,11 +413,18 @@ impl From<bool> for DynamicValue {
 }
 
 impl DataType {
-    pub fn custom<T: Into<TypeId>>(type_id: T, display_name: impl Into<String>) -> Self {
+    pub fn from_custom(type_id: impl Into<TypeId>, display_name: impl Into<String>) -> Self {
         DataType::Custom(Arc::new(TypeDef {
             type_id: type_id.into(),
             display_name: display_name.into(),
         }))
+    }
+
+    pub fn from_enum<E: VariantNames>(
+        type_id: impl Into<TypeId>,
+        display_name: impl Into<String>,
+    ) -> Self {
+        DataType::Enum(Arc::new(EnumDef::from_enum::<E>(type_id, display_name)))
     }
 
     pub fn is_custom(&self) -> bool {
