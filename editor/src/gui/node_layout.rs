@@ -3,6 +3,7 @@ use common::key_index_vec::KeyIndexKey;
 use eframe::egui;
 use egui::{Galley, Pos2, Rect, Vec2, pos2, vec2};
 use graph::graph::NodeId;
+use graph::prelude::FuncBehavior;
 use std::sync::Arc;
 
 use crate::common::UiEquals;
@@ -205,7 +206,9 @@ impl NodeLayout {
             max_row_width = max_row_width.max(row_width);
         }
 
-        let has_cache_btn = !func.terminal && !func.outputs.is_empty();
+        let has_cache_btn = !func.terminal
+            && !func.outputs.is_empty()
+            && !(func.behavior == FuncBehavior::Pure && func.inputs.len() == 0);
         let (cache_button_height, cache_row_height) = if has_cache_btn {
             let cache_button_height = gui.style.sub_font.size;
             (cache_button_height, cache_button_height + padding * 2.0)
