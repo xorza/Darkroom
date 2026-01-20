@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use strum::VariantNames;
 
 use common::id_type;
 
@@ -33,6 +34,17 @@ pub struct EnumDef {
 }
 
 impl EnumDef {
+    pub fn from_enum<E: VariantNames>(
+        type_id: impl Into<TypeId>,
+        display_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            type_id: type_id.into(),
+            display_name: display_name.into(),
+            variants: E::VARIANTS.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
     pub fn index_of(&self, variant: &str) -> Option<usize> {
         self.variants.iter().position(|v| v == variant)
     }
