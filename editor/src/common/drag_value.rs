@@ -1,3 +1,6 @@
+use std::fmt::Display;
+use std::str::FromStr;
+
 use eframe::egui;
 use egui::{
     Align, Align2, Color32, CursorIcon, FontId, Key, Pos2, Response, Sense, Stroke, StrokeKind,
@@ -9,9 +12,26 @@ use crate::{
     gui::{Gui, style::DragValueStyle},
 };
 
+/// Trait for numeric types that can be used with DragValue.
+pub trait DragValueNumeric: Copy + PartialEq + Display + FromStr + Send + Sync + 'static {
+    fn from_drag(start: Self, delta: f32, speed: f32) -> Self;
+}
+
+impl DragValueNumeric for i64 {
+    fn from_drag(start: Self, delta: f32, speed: f32) -> Self {
+        start + (delta * speed).round() as i64
+    }
+}
+
+impl DragValueNumeric for f64 {
+    fn from_drag(start: Self, delta: f32, speed: f32) -> Self {
+        start + (delta * speed) as f64
+    }
+}
+
 #[derive(Debug)]
-pub struct DragValue<'a> {
-    value: &'a mut i64,
+pub struct DragValue<'a, T: DragValueNumeric> {
+    value: &'a mut T,
     speed: f32,
     font: Option<FontId>,
     color: Option<Color32>,
@@ -22,8 +42,8 @@ pub struct DragValue<'a> {
     hover: bool,
 }
 
-impl<'a> DragValue<'a> {
-    pub fn new(value: &'a mut i64) -> Self {
+impl<'a, T: DragValueNumeric> DragValue<'a, T> {
+    pub fn new(value: &'a mut T) -> Self {
         Self {
             value,
             speed: 1.0,
@@ -96,7 +116,7 @@ impl<'a> DragValue<'a> {
         let drag_temp_id = id.with("drag_temp");
         let display_value = gui
             .ui()
-            .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+            .data_mut(|data| data.get_temp::<T>(drag_temp_id))
             .unwrap_or(*self.value);
 
         let value_text = display_value.to_string();
@@ -140,7 +160,7 @@ impl<'a> DragValue<'a> {
                 .unwrap_or_else(|| self.value.to_string());
             let original_value = gui
                 .ui()
-                .data_mut(|data| data.get_temp::<i64>(edit_original_id))
+                .data_mut(|data| data.get_temp::<T>(edit_original_id))
                 .unwrap_or(*self.value);
 
             let text_edit = TextEdit::singleline(&mut edit_text)
@@ -167,7 +187,7 @@ impl<'a> DragValue<'a> {
 
             let mut value_actually_changed = false;
             if should_confirm {
-                if let Ok(parsed) = edit_text.trim().parse::<i64>()
+                if let Ok(parsed) = edit_text.trim().parse::<T>()
                     && parsed != original_value
                 {
                     *self.value = parsed;
@@ -186,7 +206,7 @@ impl<'a> DragValue<'a> {
                 } else {
                     data.remove::<bool>(edit_id);
                     data.remove::<String>(edit_text_id);
-                    data.remove::<i64>(edit_original_id);
+                    data.remove::<T>(edit_original_id);
                 }
             });
 
@@ -225,16 +245,16 @@ impl<'a> DragValue<'a> {
         if response.dragged() {
             let start_value = gui
                 .ui()
-                .data_mut(|data| data.get_temp::<i64>(id))
+                .data_mut(|data| data.get_temp::<T>(id))
                 .unwrap_or(*self.value);
             let delta = response
                 .total_drag_delta()
                 .expect("dragged response should have total delta")
                 .x;
-            let new_value = start_value + (delta * self.speed).round() as i64;
+            let new_value = T::from_drag(start_value, delta, self.speed);
             let current_temp = gui
                 .ui()
-                .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+                .data_mut(|data| data.get_temp::<T>(drag_temp_id))
                 .unwrap_or(*self.value);
             if new_value != current_temp {
                 gui.ui()
@@ -245,15 +265,15 @@ impl<'a> DragValue<'a> {
         if response.drag_stopped() {
             let final_value = gui
                 .ui()
-                .data_mut(|data| data.get_temp::<i64>(drag_temp_id))
+                .data_mut(|data| data.get_temp::<T>(drag_temp_id))
                 .unwrap_or(*self.value);
             if final_value != *self.value {
                 *self.value = final_value;
                 response.mark_changed();
             }
             gui.ui().data_mut(|data| {
-                data.remove::<i64>(id);
-                data.remove::<i64>(drag_temp_id);
+                data.remove::<T>(id);
+                data.remove::<T>(drag_temp_id);
             });
         }
 
