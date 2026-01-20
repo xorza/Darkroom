@@ -85,12 +85,12 @@ impl Default for ImageFuncLib {
                 assert_eq!(inputs.len(), 3);
                 assert_eq!(outputs.len(), 1);
 
-                let mut input_buffer = inputs[0]
+                let input_buffer = inputs[0]
                     .value
                     .as_custom()
                     .downcast_ref::<imaginarium::ImageBuffer>()
-                    .expect("Input should be an ImageBuffer")
-                    .clone();
+                    .expect("Input should be an ImageBuffer");
+
                 let brightness = inputs[1].value.as_f64() as f32;
                 let contrast = inputs[2].value.as_f64() as f32;
 
@@ -100,7 +100,7 @@ impl Default for ImageFuncLib {
                     imaginarium::ImageBuffer::new_empty(*input_buffer.desc());
 
                 ContrastBrightness::new(contrast, brightness)
-                    .execute(&mut vision_ctx.processing_ctx, &mut input_buffer, &mut output_buffer)
+                    .execute(&mut vision_ctx.processing_ctx, input_buffer, &mut output_buffer)
                     .expect("Failed to apply brightness/contrast");
 
                 outputs[0] = graph::data::DynamicValue::Custom {

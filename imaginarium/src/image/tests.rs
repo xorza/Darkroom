@@ -4,10 +4,25 @@ use std::sync::Once;
 
 static INIT: Once = Once::new();
 
+/// Returns the workspace root directory (parent of the crate directory).
+fn workspace_root() -> &'static str {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/..")
+}
+
+/// Returns the path to a test resource file relative to workspace root.
+fn test_resource(name: &str) -> String {
+    format!("{}/test_resources/{}", workspace_root(), name)
+}
+
 fn ensure_test_output_dir() {
     INIT.call_once(|| {
-        std::fs::create_dir_all("./test_output").expect("Failed to create test_output directory");
+        std::fs::create_dir_all(format!("{}/test_output", workspace_root()))
+            .expect("Failed to create test_output directory");
     });
+}
+
+fn test_output(name: &str) -> String {
+    format!("{}/test_output/{}", workspace_root(), name)
 }
 
 // =============================================================================
@@ -16,7 +31,7 @@ fn ensure_test_output_dir() {
 
 #[test]
 fn read_png_rgba_8bit() {
-    let png = Image::read_file("./test_resources/rgba-sample-u8.png").unwrap();
+    let png = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
     assert_eq!(png.desc().width, 864);
     assert_eq!(png.desc().height, 409);
     assert_eq!(png.desc().stride, 3456);
@@ -27,7 +42,7 @@ fn read_png_rgba_8bit() {
 
 #[test]
 fn read_png_rgb_8bit() {
-    let png = Image::read_file("./test_resources/rgb-sample-u8.png").unwrap();
+    let png = Image::read_file(test_resource("rgb-sample-u8.png")).unwrap();
     assert_eq!(png.desc().width, 331);
     assert_eq!(png.desc().height, 126);
     assert_eq!(png.desc().stride, 996); // 331 * 3 = 993, aligned to 4 = 996
@@ -37,13 +52,13 @@ fn read_png_rgb_8bit() {
 
 #[test]
 fn read_missing_file_returns_error() {
-    let result = Image::read_file("./test_resources/does_not_exist.png");
+    let result = Image::read_file(test_resource("does_not_exist.png"));
     assert!(result.is_err());
 }
 
 #[test]
 fn read_invalid_extension_returns_error() {
-    let result = Image::read_file("./test_resources/file.xyz");
+    let result = Image::read_file(test_resource("file.xyz"));
     assert!(matches!(result, Err(Error::InvalidExtension(_))));
 }
 
@@ -51,7 +66,7 @@ fn read_invalid_extension_returns_error() {
 fn read_case_insensitive_extension() {
     // This test verifies that uppercase extensions work
     // We can't easily test this without actual files, but we verify the code path
-    let result = Image::read_file("./test_resources/does_not_exist.PNG");
+    let result = Image::read_file(test_resource("does_not_exist.PNG"));
     // Should fail with IO error (file not found), not InvalidExtension
     assert!(matches!(
         result,
@@ -66,10 +81,10 @@ fn read_case_insensitive_extension() {
 #[test]
 fn save_and_reload_png() {
     ensure_test_output_dir();
-    let original = Image::read_file("./test_resources/rgb-sample-u8.png").unwrap();
-    original.save_file("./test_output/save_reload.png").unwrap();
+    let original = Image::read_file(test_resource("rgb-sample-u8.png")).unwrap();
+    original.save_file(test_output("save_reload.png")).unwrap();
 
-    let reloaded = Image::read_file("./test_output/save_reload.png").unwrap();
+    let reloaded = Image::read_file(test_output("save_reload.png")).unwrap();
     assert_eq!(original.desc, reloaded.desc);
     assert_eq!(original.bytes, reloaded.bytes);
 }
@@ -77,15 +92,13 @@ fn save_and_reload_png() {
 #[test]
 fn save_and_reload_tiff() {
     ensure_test_output_dir();
-    let original = Image::read_file("./test_resources/rgb-sample-u8.png")
+    let original = Image::read_file(test_resource("rgb-sample-u8.png"))
         .unwrap()
         .convert(ColorFormat::RGB_F32)
         .unwrap();
-    original
-        .save_file("./test_output/save_reload.tiff")
-        .unwrap();
+    original.save_file(test_output("save_reload.tiff")).unwrap();
 
-    let reloaded = Image::read_file("./test_output/save_reload.tiff").unwrap();
+    let reloaded = Image::read_file(test_output("save_reload.tiff")).unwrap();
     assert_eq!(original.desc().width, reloaded.desc().width);
     assert_eq!(original.desc().height, reloaded.desc().height);
     assert_eq!(original.desc().color_format, reloaded.desc().color_format);
@@ -325,31 +338,31 @@ fn convert_from_float_denormalizes() {
 #[test]
 fn convert_and_save_various_formats() {
     ensure_test_output_dir();
-    let png = Image::read_file("./test_resources/rgba-sample-u8.png").unwrap();
+    let png = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
 
     // Test various format conversions
     let conversions = [
-        (ColorFormat::GRAY_U8, "./test_output/conv-gray-u8.tiff"),
-        (ColorFormat::GRAY_U16, "./test_output/conv-gray-u16.tiff"),
-        (ColorFormat::RGB_U8, "./test_output/conv-rgb-u8.tiff"),
-        (ColorFormat::RGB_U16, "./test_output/conv-rgb-u16.tiff"),
-        (ColorFormat::RGBA_U16, "./test_output/conv-rgba-u16.tiff"),
-        (ColorFormat::RGBA_F32, "./test_output/conv-rgba-f32.tiff"),
-        (ColorFormat::GRAY_ALPHA_U8, "./test_output/conv-ga-u8.tiff"),
+        (ColorFormat::GRAY_U8, test_output("conv-gray-u8.tiff")),
+        (ColorFormat::GRAY_U16, test_output("conv-gray-u16.tiff")),
+        (ColorFormat::RGB_U8, test_output("conv-rgb-u8.tiff")),
+        (ColorFormat::RGB_U16, test_output("conv-rgb-u16.tiff")),
+        (ColorFormat::RGBA_U16, test_output("conv-rgba-u16.tiff")),
+        (ColorFormat::RGBA_F32, test_output("conv-rgba-f32.tiff")),
+        (ColorFormat::GRAY_ALPHA_U8, test_output("conv-ga-u8.tiff")),
     ];
 
     for (format, path) in conversions {
         png.clone()
             .convert(format)
             .unwrap_or_else(|_| panic!("Failed to convert to {:?}", format))
-            .save_file(path)
+            .save_file(&path)
             .unwrap_or_else(|_| panic!("Failed to save {:?}", path));
     }
 }
 
 #[test]
 fn double_conversion_preserves_dimensions() {
-    let original = Image::read_file("./test_resources/rgba-sample-u8.png").unwrap();
+    let original = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
     let width = original.desc().width;
     let height = original.desc().height;
 

@@ -2,7 +2,6 @@
 **/.idea/
 
 /test_output/
-**/logs/
 
 **/target/
 /patch.diff
