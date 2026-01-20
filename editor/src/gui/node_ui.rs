@@ -68,14 +68,13 @@ impl NodeUi {
             let node_layout = body_drag(gui, ctx, graph_layout, ui_interaction, &node_id);
 
             let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
+            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, ui_interaction, node_layout, node, breaker);
+            const_bind_frame.render(gui, ui_interaction, node_layout, node, func, breaker);
 
             if !gui.ui().is_rect_visible(node_layout.body_rect) {
                 continue;
             }
-
-            let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
             let is_selected = ctx
                 .view_graph

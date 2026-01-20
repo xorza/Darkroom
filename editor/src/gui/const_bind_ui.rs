@@ -5,6 +5,7 @@ use egui::{Align2, PointerButton, Pos2, Response, Sense, Vec2, pos2, vec2};
 use graph::data::EnumDef;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
+use graph::prelude::Func;
 
 use crate::common::combo_box::ComboBox;
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
@@ -62,6 +63,7 @@ impl<'a> ConstBindFrame<'a> {
         ui_interaction: &mut GraphUiInteraction,
         node_layout: &NodeLayout,
         node: &mut Node,
+        _func: &Func,
         breaker: Option<&ConnectionBreaker>,
     ) {
         let port_radius = gui.style.node.port_radius;
