@@ -275,6 +275,12 @@ impl DynamicValue {
                 DynamicValue::Bool(s == "true" || s == "1")
             }
 
+            (DynamicValue::Enum { type_id, .. }, DataType::Enum(enum_def))
+                if *type_id == enum_def.type_id =>
+            {
+                self.clone()
+            }
+
             (DynamicValue::Custom { type_id, .. }, DataType::Custom(type_def))
                 if *type_id == type_def.type_id =>
             {
