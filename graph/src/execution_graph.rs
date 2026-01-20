@@ -760,8 +760,6 @@ impl ExecutionGraph {
                     }
                 };
 
-                let value = value.convert_type(&input.data_type);
-
                 inputs.push(InvokeInput {
                     changed: input.binding_changed || input.dependency_wants_execute,
                     value,
