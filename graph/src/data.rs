@@ -400,17 +400,6 @@ impl From<bool> for DynamicValue {
     }
 }
 
-impl TryFrom<&DynamicValue> for i64 {
-    type Error = ();
-
-    fn try_from(value: &DynamicValue) -> Result<Self, Self::Error> {
-        match value {
-            DynamicValue::Int(value) => Ok(*value),
-            _ => Err(()),
-        }
-    }
-}
-
 impl DataType {
     pub fn is_custom(&self) -> bool {
         matches!(self, DataType::Custom(_))
