@@ -200,7 +200,7 @@ impl Default for ImageFuncLib {
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
                         .expect("Failed to get CPU image");
-                    cpu_image.save_file(&path).expect("Failed to save image");
+                    cpu_image.save_file(path).expect("Failed to save image");
 
                     Ok(())
                 })
