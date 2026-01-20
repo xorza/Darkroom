@@ -10,9 +10,9 @@ use imaginarium::{
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
-pub static IMAGE_BUFFER_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom {
+pub static IMAGE_DATA_TYPE: LazyLock<DataType> = LazyLock::new(|| DataType::Custom {
     type_id: "a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2".into(),
-    type_name: "ImageBuffer".to_string(),
+    display_name: "Image".to_string(),
 });
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
@@ -21,7 +21,7 @@ pub struct Image(pub imaginarium::ImageBuffer);
 
 impl CustomValue for Image {
     fn data_type(&self) -> DataType {
-        IMAGE_BUFFER_DATA_TYPE.clone()
+        IMAGE_DATA_TYPE.clone()
     }
 }
 
@@ -90,7 +90,7 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "image".to_string(),
                     required: true,
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    data_type: IMAGE_DATA_TYPE.clone(),
                     default_value: None,
                     value_options: vec![],
                 },
@@ -111,7 +111,7 @@ impl Default for ImageFuncLib {
             ],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
@@ -152,7 +152,7 @@ impl Default for ImageFuncLib {
             inputs: vec![],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![],
@@ -182,7 +182,7 @@ impl Default for ImageFuncLib {
             inputs: vec![FuncInput {
                 name: "image".to_string(),
                 required: true,
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
                 default_value: None,
                 value_options: vec![],
             }],
@@ -220,13 +220,13 @@ impl Default for ImageFuncLib {
             inputs: vec![FuncInput {
                 name: "image".to_string(),
                 required: true,
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
                 default_value: None,
                 value_options: vec![],
             }],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
@@ -273,14 +273,14 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "source".to_string(),
                     required: true,
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    data_type: IMAGE_DATA_TYPE.clone(),
                     default_value: None,
                     value_options: vec![],
                 },
                 FuncInput {
                     name: "destination".to_string(),
                     required: true,
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    data_type: IMAGE_DATA_TYPE.clone(),
                     default_value: None,
                     value_options: vec![],
                 },
@@ -294,7 +294,7 @@ impl Default for ImageFuncLib {
             ],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
@@ -339,7 +339,7 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "image".to_string(),
                     required: true,
-                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    data_type: IMAGE_DATA_TYPE.clone(),
                     default_value: None,
                     value_options: vec![],
                 },
@@ -381,7 +381,7 @@ impl Default for ImageFuncLib {
             ],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
-                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],

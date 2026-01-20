@@ -18,6 +18,20 @@ pub trait CustomValue: Any + Send + Sync {
     fn data_type(&self) -> DataType;
 }
 
+/// Definition of an enum type for `DataType::Enum`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct EnumDef {
+    pub type_id: TypeId,
+    pub type_name: String,
+    pub variants: Vec<String>,
+}
+
+impl EnumDef {
+    pub fn index_of(&self, variant: &str) -> Option<usize> {
+        self.variants.iter().position(|v| v == variant)
+    }
+}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
@@ -34,8 +48,9 @@ pub enum DataType {
     Custom {
         type_id: TypeId,
         // type_name is not included in the hash or equality check
-        type_name: String,
+        display_name: String,
     },
+    Enum(Arc<EnumDef>),
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -46,6 +61,10 @@ pub enum StaticValue {
     Int(i64),
     Bool(bool),
     String(String),
+    Enum {
+        enum_def: Arc<EnumDef>,
+        variant_index: usize,
+    },
 }
 
 impl PartialEq for StaticValue {
@@ -58,6 +77,16 @@ impl PartialEq for StaticValue {
             (StaticValue::Int(left), StaticValue::Int(right)) => left == right,
             (StaticValue::Bool(left), StaticValue::Bool(right)) => left == right,
             (StaticValue::String(left), StaticValue::String(right)) => left == right,
+            (
+                StaticValue::Enum {
+                    enum_def: def_left,
+                    variant_index: idx_left,
+                },
+                StaticValue::Enum {
+                    enum_def: def_right,
+                    variant_index: idx_right,
+                },
+            ) => def_left.type_id == def_right.type_id && idx_left == idx_right,
             _ => false,
         }
     }
@@ -79,16 +108,21 @@ pub enum DynamicValue {
         data_type: DataType,
         data: Arc<dyn Any + Send + Sync>,
     },
+    Enum {
+        enum_def: Arc<EnumDef>,
+        variant_index: usize,
+    },
 }
 
 impl StaticValue {
-    pub fn data_type(&self) -> &DataType {
+    pub fn data_type(&self) -> DataType {
         match self {
-            StaticValue::Null => &DataType::Null,
-            StaticValue::Float(_) => &DataType::Float,
-            StaticValue::Int(_) => &DataType::Int,
-            StaticValue::Bool(_) => &DataType::Bool,
-            StaticValue::String(_) => &DataType::String,
+            StaticValue::Null => DataType::Null,
+            StaticValue::Float(_) => DataType::Float,
+            StaticValue::Int(_) => DataType::Int,
+            StaticValue::Bool(_) => DataType::Bool,
+            StaticValue::String(_) => DataType::String,
+            StaticValue::Enum { enum_def, .. } => DataType::Enum(Arc::clone(enum_def)),
         }
     }
 
@@ -124,6 +158,16 @@ impl StaticValue {
             }
         }
     }
+
+    pub fn as_enum(&self) -> (usize, &str) {
+        match self {
+            StaticValue::Enum {
+                enum_def,
+                variant_index,
+            } => (*variant_index, &enum_def.variants[*variant_index]),
+            _ => panic!("Value is not an enum"),
+        }
+    }
 }
 
 impl DynamicValue {
@@ -135,15 +179,16 @@ impl DynamicValue {
         }
     }
 
-    pub fn data_type(&self) -> &DataType {
+    pub fn data_type(&self) -> DataType {
         match self {
-            DynamicValue::Null => &DataType::Null,
-            DynamicValue::Float(_) => &DataType::Float,
-            DynamicValue::Int(_) => &DataType::Int,
-            DynamicValue::Bool(_) => &DataType::Bool,
-            DynamicValue::String(_) => &DataType::String,
+            DynamicValue::Null => DataType::Null,
+            DynamicValue::Float(_) => DataType::Float,
+            DynamicValue::Int(_) => DataType::Int,
+            DynamicValue::Bool(_) => DataType::Bool,
+            DynamicValue::String(_) => DataType::String,
             // DynamicValue::Array(_) => DataType::Array,
-            DynamicValue::Custom { data_type, .. } => data_type,
+            DynamicValue::Custom { data_type, .. } => data_type.clone(),
+            DynamicValue::Enum { enum_def, .. } => DataType::Enum(Arc::clone(enum_def)),
             DynamicValue::None => panic!("Value is None"),
         }
     }
@@ -193,6 +238,16 @@ impl DynamicValue {
         }
     }
 
+    pub fn as_enum(&self) -> (usize, &str) {
+        match self {
+            DynamicValue::Enum {
+                enum_def,
+                variant_index,
+            } => (*variant_index, &enum_def.variants[*variant_index]),
+            _ => panic!("Value is not an enum"),
+        }
+    }
+
     pub fn is_none(&self) -> bool {
         matches!(self, DynamicValue::None)
     }
@@ -224,7 +279,7 @@ impl DynamicValue {
         }
 
         let src_data_type = self.data_type();
-        if *src_data_type == *dst_data_type {
+        if src_data_type == *dst_data_type {
             return self;
         }
 
@@ -262,6 +317,13 @@ impl From<StaticValue> for DynamicValue {
             StaticValue::Int(value) => DynamicValue::Int(value),
             StaticValue::Bool(value) => DynamicValue::Bool(value),
             StaticValue::String(value) => DynamicValue::String(value),
+            StaticValue::Enum {
+                enum_def,
+                variant_index,
+            } => DynamicValue::Enum {
+                enum_def: Arc::clone(&enum_def),
+                variant_index,
+            },
         }
     }
 }
@@ -274,6 +336,13 @@ impl From<&StaticValue> for DynamicValue {
             StaticValue::Int(value) => DynamicValue::Int(*value),
             StaticValue::Bool(value) => DynamicValue::Bool(*value),
             StaticValue::String(value) => DynamicValue::String(value.clone()),
+            StaticValue::Enum {
+                enum_def,
+                variant_index,
+            } => DynamicValue::Enum {
+                enum_def: Arc::clone(enum_def),
+                variant_index: *variant_index,
+            },
         }
     }
 }
@@ -297,6 +366,10 @@ impl From<&DataType> for StaticValue {
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String("".to_string()),
+            DataType::Enum(enum_def) => StaticValue::Enum {
+                enum_def: Arc::clone(enum_def),
+                variant_index: 0,
+            },
             _ => panic!("No value for {:?}", data_type),
         }
     }
@@ -309,6 +382,10 @@ impl From<&DataType> for DynamicValue {
             DataType::Int => DynamicValue::Int(0),
             DataType::Bool => DynamicValue::Bool(false),
             DataType::String => DynamicValue::String("".to_string()),
+            DataType::Enum(enum_def) => DynamicValue::Enum {
+                enum_def: Arc::clone(enum_def),
+                variant_index: 0,
+            },
             _ => panic!("No value for {:?}", data_type),
         }
     }
@@ -532,7 +609,10 @@ impl Display for DataType {
             DataType::Int => "int".to_string(),
             DataType::Bool => "bool".to_string(),
             DataType::String => "string".to_string(),
-            DataType::Custom { type_name, .. } => type_name.clone(),
+            DataType::Custom {
+                display_name: type_name,
+                ..
+            } => type_name.clone(),
             _ => panic!("No string representation for {:?}", self),
         };
         write!(f, "{}", str)
@@ -578,6 +658,8 @@ impl PartialEq for DataType {
                 },
             ) => element_type_a == element_type_b,
 
+            (DataType::Enum(def_a), DataType::Enum(def_b)) => def_a.type_id == def_b.type_id,
+
             _ => false,
         }
     }
@@ -604,6 +686,12 @@ impl Hash for DataType {
                 6.hash(state);
                 type_id.hash(state);
                 // type_name is not included in the hash
+            }
+
+            DataType::Enum(def) => {
+                7.hash(state);
+                def.type_id.hash(state);
+                // type_name and variants are not included in the hash
             }
         }
     }

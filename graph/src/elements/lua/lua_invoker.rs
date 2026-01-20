@@ -134,7 +134,7 @@ impl LuaInvoker {
 
                     let mut input_args: mlua::Variadic<mlua::Value> = mlua::Variadic::new();
                     for (input_info, input) in func.inputs.iter().zip(inputs.iter()) {
-                        assert_eq!(input_info.data_type, *input.value.data_type());
+                        assert_eq!(input_info.data_type, input.value.data_type());
 
                         let invoke_value = to_lua_value(&lua, &input.value)?;
                         input_args.push(invoke_value);
@@ -153,7 +153,7 @@ impl LuaInvoker {
                         func.outputs.iter().enumerate().zip(output_args.into_iter())
                     {
                         let output = data::DynamicValue::from(&output_arg);
-                        assert_eq!(output_info.data_type, *output.data_type());
+                        assert_eq!(output_info.data_type, output.data_type());
                         outputs[index] = output;
                     }
 
