@@ -140,8 +140,8 @@ impl Default for ImageFuncLib {
 
                     let input_image = inputs[0].value.as_custom::<Image>();
 
-                    let brightness = inputs[1].value.as_f64() as f32;
-                    let contrast = inputs[2].value.as_f64() as f32;
+                    let brightness = inputs[1].value.as_f64().unwrap() as f32;
+                    let contrast = inputs[2].value.as_f64().unwrap() as f32;
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
@@ -334,7 +334,7 @@ impl Default for ImageFuncLib {
                     let src_image = inputs[0].value.as_custom::<Image>();
                     let dst_image = inputs[1].value.as_custom::<Image>();
                     let mode_name = inputs[2].value.as_enum();
-                    let alpha = inputs[3].value.as_f64() as f32;
+                    let alpha = inputs[3].value.as_f64().unwrap() as f32;
 
                     let blend_mode = match mode_name {
                         "Normal" => BlendMode::Normal,
@@ -430,11 +430,11 @@ impl Default for ImageFuncLib {
                     assert_eq!(outputs.len(), 1);
 
                     let input_image = inputs[0].value.as_custom::<Image>();
-                    let scale_x = inputs[1].value.as_f64() as f32;
-                    let scale_y = inputs[2].value.as_f64() as f32;
-                    let rotation = inputs[3].value.as_f64() as f32;
-                    let translate_x = inputs[4].value.as_f64() as f32;
-                    let translate_y = inputs[5].value.as_f64() as f32;
+                    let scale_x = inputs[1].value.as_f64().unwrap() as f32;
+                    let scale_y = inputs[2].value.as_f64().unwrap() as f32;
+                    let rotation = inputs[3].value.as_f64().unwrap() as f32;
+                    let translate_x = inputs[4].value.as_f64().unwrap() as f32;
+                    let translate_y = inputs[5].value.as_f64().unwrap() as f32;
 
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 

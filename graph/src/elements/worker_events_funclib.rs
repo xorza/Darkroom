@@ -107,7 +107,7 @@ impl Default for WorkerEventsFuncLib {
             lambda: FuncLambda::new(
                 move |_context_manager, _state, event_state, inputs, _output_usage, outputs| {
                     Box::pin(async move {
-                        let frequency = inputs[0].value.unwrap_or_f64(1.0);
+                        let frequency = inputs[0].value.as_f64().unwrap_or(1.0);
                         let now = Instant::now();
 
                         // Get previous state from the event state

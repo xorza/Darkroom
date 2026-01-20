@@ -41,8 +41,8 @@ impl Math2ArgOp {
     fn invoke(&self, inputs: &[InvokeInput]) -> anyhow::Result<DynamicValue> {
         assert_eq!(inputs.len(), 2);
 
-        let a = inputs[0].value.as_f64();
-        let b = inputs[1].value.as_f64();
+        let a = inputs[0].value.as_f64().unwrap();
+        let b = inputs[1].value.as_f64().unwrap();
 
         Ok(DynamicValue::Float(self.apply(a, b)))
     }
@@ -214,7 +214,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_f64();
+                let value: f64 = inputs[0].value.as_f64().unwrap();
                 let result = format!("{}", value);
 
                 outputs[0] = DynamicValue::String(result);
@@ -258,8 +258,8 @@ impl Default for BasicFuncLib {
 
                 let rng = cache.get_or_default_with(rand::rngs::StdRng::from_os_rng);
 
-                let min: f64 = inputs[0].value.as_f64();
-                let max: f64 = inputs[1].value.as_f64();
+                let min: f64 = inputs[0].value.as_f64().unwrap();
+                let max: f64 = inputs[1].value.as_f64().unwrap();
                 let random = rng.random::<f64>();
                 let result = min + (max - min) * random;
 
@@ -301,8 +301,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
-                let b: f64 = inputs[1].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a + b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -343,8 +343,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
-                let b: f64 = inputs[1].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a - b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -385,8 +385,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
-                let b: f64 = inputs[1].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let b: f64 = inputs[1].value.as_f64().unwrap();
                 let result = a * b;
 
                 outputs[0] = DynamicValue::Float(result);
@@ -436,8 +436,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
-                let b: f64 = inputs[1].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let b: f64 = inputs[1].value.as_f64().unwrap();
                 let divide = a / b;
                 let modulo = a % b;
 
@@ -482,8 +482,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
-                let b: f64 = inputs[1].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
+                let b: f64 = inputs[1].value.as_f64().unwrap();
                 let power = a.powf(b);
 
                 outputs[0] = DynamicValue::Float(power);
@@ -515,7 +515,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
                 let sqrt = a.sqrt();
 
                 outputs[0] = DynamicValue::Float(sqrt);
@@ -547,7 +547,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
                 let sin = a.sin();
 
                 outputs[0] = DynamicValue::Float(sin);
@@ -579,7 +579,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
                 let cos = a.cos();
 
                 outputs[0] = DynamicValue::Float(cos);
@@ -611,7 +611,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let a: f64 = inputs[0].value.as_f64();
+                let a: f64 = inputs[0].value.as_f64().unwrap();
                 let tan = a.tan();
 
                 outputs[0] = DynamicValue::Float(tan);
@@ -645,7 +645,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let sin: f64 = inputs[0].value.as_f64();
+                let sin: f64 = inputs[0].value.as_f64().unwrap();
                 let asin = sin.asin();
 
                 outputs[0] = DynamicValue::Float(asin);
@@ -679,7 +679,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let cos: f64 = inputs[0].value.as_f64();
+                let cos: f64 = inputs[0].value.as_f64().unwrap();
                 let acos = cos.acos();
 
                 outputs[0] = DynamicValue::Float(acos);
@@ -714,7 +714,7 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 1);
                 assert_eq!(outputs.len(), 1);
 
-                let tan: f64 = inputs[0].value.as_f64();
+                let tan: f64 = inputs[0].value.as_f64().unwrap();
                 let atan = tan.atan();
 
                 outputs[0] = DynamicValue::Float(atan);
@@ -757,8 +757,8 @@ impl Default for BasicFuncLib {
                 assert_eq!(inputs.len(), 2);
                 assert_eq!(outputs.len(), 1);
 
-                let value: f64 = inputs[0].value.as_f64();
-                let base: f64 = inputs[1].value.as_f64();
+                let value: f64 = inputs[0].value.as_f64().unwrap();
+                let base: f64 = inputs[1].value.as_f64().unwrap();
                 let log = value.log(base);
 
                 outputs[0] = DynamicValue::Float(log);

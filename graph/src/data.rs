@@ -170,17 +170,19 @@ impl DynamicValue {
         }
     }
 
-    pub fn as_f64(&self) -> f64 {
+    pub fn as_f64(&self) -> Option<f64> {
         match self {
-            DynamicValue::Float(value) => *value,
-            _ => {
-                panic!("Value is not a float")
-            }
+            DynamicValue::Float(value) => Some(*value),
+            DynamicValue::Int(value) => Some(*value as f64),
+            DynamicValue::Bool(value) => Some(*value as i64 as f64),
+            _ => None,
         }
     }
+
     pub fn as_i64(&self) -> i64 {
         self.try_into().unwrap()
     }
+
     pub fn none_or_int(&self) -> Option<i64> {
         match self {
             DynamicValue::Int(value) => Some(*value),
@@ -188,6 +190,7 @@ impl DynamicValue {
             _ => panic!("Value is not a bool"),
         }
     }
+
     pub fn as_bool(&self) -> bool {
         match self {
             DynamicValue::Bool(value) => *value,
@@ -196,6 +199,7 @@ impl DynamicValue {
             }
         }
     }
+
     pub fn as_string(&self) -> &str {
         match self {
             DynamicValue::String(value) => value,
@@ -204,6 +208,7 @@ impl DynamicValue {
             }
         }
     }
+
     pub fn as_custom<T: Any>(&self) -> &T {
         match self {
             DynamicValue::Custom { data, .. } => data
@@ -285,12 +290,6 @@ impl From<&StaticValue> for DynamicValue {
                 variant_name: variant_name.clone(),
             },
         }
-    }
-}
-
-impl From<DataType> for DynamicValue {
-    fn from(data_type: DataType) -> Self {
-        Self::from(&data_type)
     }
 }
 
