@@ -180,7 +180,8 @@ impl NodeLayout {
         let row_count = input_count.max(output_count + event_count).max(1);
         let port_label_side_padding = gui.style.node.port_label_side_padding;
 
-        let mut max_row_width: f32 = 0.0;
+        let mut max_left: f32 = 0.0;
+        let mut max_right: f32 = 0.0;
         let row_height: f32 = gui.font_height(&label_font) + small_padding;
         for row in 0..row_count {
             let left = self
@@ -199,16 +200,18 @@ impl NodeLayout {
                     .map_or(0.0, |galley| galley.size().x)
             };
 
-            let row_width = port_label_side_padding
-                + left
-                + right
-                + (left > 0.0 && right > 0.0).then_else(padding, 0.0);
-            max_row_width = max_row_width.max(row_width);
+            max_left = max_left.max(left);
+            max_right = max_right.max(right);
         }
 
-        let has_cache_btn = !func.terminal
-            && !func.outputs.is_empty()
-            && !(func.behavior == FuncBehavior::Pure && func.inputs.len() == 0);
+        let max_row_width = port_label_side_padding * 2.0
+            + max_left
+            + max_right
+            + (max_left > 0.0 && max_right > 0.0).then_else(padding, 0.0);
+
+        let has_cache_btn = !(func.terminal
+            || func.outputs.is_empty()
+            || (func.behavior == FuncBehavior::Pure && func.inputs.is_empty()));
         let (cache_button_height, cache_row_height) = if has_cache_btn {
             let cache_button_height = gui.style.sub_font.size;
             (cache_button_height, cache_button_height + padding * 2.0)
