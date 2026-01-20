@@ -6,6 +6,7 @@ use egui::{
     Align, Align2, Color32, FontId, Id, Key, Layout, Margin, PointerButton, Pos2, Rect, Response,
     RichText, Sense, Shape, StrokeKind, UiBuilder, Vec2, pos2, vec2,
 };
+use graph::data::StaticValue;
 
 use crate::app_data::AppData;
 use crate::common::frame::Frame;
@@ -240,9 +241,15 @@ impl GraphUi {
 
                         let input_node =
                             ctx.view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
+                        let func_input = &ctx.func_lib.by_id(&input_node.func_id).unwrap().inputs
+                            [input_port.port_idx];
                         let input = &mut input_node.inputs[input_port.port_idx];
                         let before = input.binding.clone();
-                        input.binding = Binding::Const(0.into());
+                        input.binding = func_input
+                            .default_value
+                            .clone()
+                            .unwrap_or_else(|| StaticValue::from(&func_input.data_type))
+                            .into();
                         let after = input.binding.clone();
 
                         interaction.add_action(GraphUiAction::InputChanged {

@@ -351,12 +351,6 @@ impl From<&StaticValue> for DynamicValue {
     }
 }
 
-impl From<DataType> for StaticValue {
-    fn from(data_type: DataType) -> Self {
-        Self::from(&data_type)
-    }
-}
-
 impl From<DataType> for DynamicValue {
     fn from(data_type: DataType) -> Self {
         Self::from(&data_type)

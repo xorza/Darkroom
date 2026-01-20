@@ -2,7 +2,7 @@ use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
 use hashbrown::HashSet;
 use serde::{Deserialize, Serialize};
 
-use crate::data::StaticValue;
+use crate::data::{DataType, StaticValue};
 use crate::function::{Func, FuncId, FuncLib};
 use crate::prelude::{TestFuncHooks, test_func_lib};
 use common::{Result, SerdeFormat, deserialize, serialize};
@@ -321,6 +321,11 @@ impl From<(NodeId, usize)> for Binding {
             target_id: output_node_id,
             port_idx: output_idx,
         })
+    }
+}
+impl From<&DataType> for Binding {
+    fn from(value: &DataType) -> Self {
+        Binding::Const(value.into())
     }
 }
 impl From<StaticValue> for Binding {
