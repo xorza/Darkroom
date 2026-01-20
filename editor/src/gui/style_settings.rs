@@ -54,7 +54,7 @@ impl Default for StyleSettings {
             port_radius: 5.0,
             port_activation_radius: 7.0,
             port_label_side_padding: 8.0,
-            const_badge_offset: Vec2::new(-15.0, -4.0),
+            const_badge_offset: Vec2::new(-10.0, 0.0),
         }
     }
 }

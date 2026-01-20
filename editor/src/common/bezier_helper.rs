@@ -3,7 +3,7 @@ use egui::Pos2;
 // - `ENDPOINT_BIAS = 1.0` → no change (linear spacing in t).
 // - `ENDPOINT_BIAS > 1.0` → concentrates samples toward the ends (more points near t≈0 and t≈1).
 // - `ENDPOINT_BIAS < 1.0` → flattens toward the middle (more points near t≈0.5).
-const ENDPOINT_BIAS: f32 = 1.2;
+const ENDPOINT_BIAS: f32 = 1.1;
 
 pub fn sample(points: &mut [Pos2], start: Pos2, end: Pos2, scale: f32) {
     assert!(points.len() >= 3, "bezier steps must be greater than 2");
@@ -57,7 +57,7 @@ pub fn segments_intersect(a1: Pos2, a2: Pos2, b1: Pos2, b2: Pos2) -> bool {
 
 fn control_offset(start: Pos2, end: Pos2, scale: f32) -> f32 {
     let dx = (end.x - start.x).abs();
-    (dx * 0.5).max(30.0 * scale).min(100.0 * scale)
+    (dx * 0.5).max(35.0 * scale).min(90.0 * scale)
 }
 
 fn bias_t(t: f32, bias: f32) -> f32 {
