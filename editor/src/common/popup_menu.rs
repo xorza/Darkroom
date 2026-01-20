@@ -1,4 +1,6 @@
-use egui::{Align, FontId, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
+use std::sync::Arc;
+
+use egui::{Align, FontId, Galley, Id, Key, Order, Pos2, Response, Sense, Vec2, vec2};
 
 use crate::common::area::Area;
 use crate::common::button::Button;
@@ -125,25 +127,44 @@ impl PopupMenu {
 /// A list item widget for use inside PopupMenu or other list contexts.
 /// Uses Button internally to ensure consistent styling with new_node_ui.
 pub struct ListItem<'a> {
-    text: &'a str,
+    text: Option<&'a str>,
+    galley: Option<Arc<Galley>>,
     selected: bool,
     enabled: bool,
     font: Option<FontId>,
     style: Option<ButtonStyle>,
     size: Option<Vec2>,
     align: Align,
+    tooltip: Option<&'a str>,
 }
 
 impl<'a> ListItem<'a> {
     pub fn new(text: &'a str) -> Self {
         Self {
-            text,
+            text: Some(text),
+            galley: None,
             selected: false,
             enabled: true,
             font: None,
             style: None,
             size: None,
             align: Align::Min,
+            tooltip: None,
+        }
+    }
+
+    /// Create a ListItem with a pre-computed galley (for performance with ColumnFlow).
+    pub fn from_galley(galley: Arc<Galley>) -> Self {
+        Self {
+            text: None,
+            galley: Some(galley),
+            selected: false,
+            enabled: true,
+            font: None,
+            style: None,
+            size: None,
+            align: Align::Min,
+            tooltip: None,
         }
     }
 
@@ -177,6 +198,11 @@ impl<'a> ListItem<'a> {
         self
     }
 
+    pub fn tooltip(mut self, tooltip: &'a str) -> Self {
+        self.tooltip = Some(tooltip);
+        self
+    }
+
     pub fn show(self, gui: &mut Gui<'_>) -> Response {
         let style = self.style.unwrap_or(gui.style.list_button);
 
@@ -191,13 +217,18 @@ impl<'a> ListItem<'a> {
             let padding = gui.style.padding;
             let small_padding = gui.style.small_padding;
 
-            let galley = gui.painter().layout_no_wrap(
-                self.text.to_string(),
-                font.clone(),
-                gui.style.text_color,
-            );
+            let text_width = if let Some(galley) = &self.galley {
+                galley.size().x
+            } else {
+                let galley = gui.painter().layout_no_wrap(
+                    self.text.unwrap_or("").to_string(),
+                    font.clone(),
+                    gui.style.text_color,
+                );
+                galley.size().x
+            };
 
-            let width = galley.size().x + padding * 2.0;
+            let width = text_width + padding * 2.0;
             let height = gui.font_height(&font) + small_padding * 2.0;
             vec2(width, height)
         };
@@ -205,15 +236,25 @@ impl<'a> ListItem<'a> {
         let mut selected = self.selected;
 
         let mut btn = Button::default()
-            .text(self.text)
             .background(style)
             .enabled(self.enabled)
             .align(self.align)
             .size(size)
             .toggle(&mut selected);
 
+        // Set text or galley
+        if let Some(galley) = self.galley {
+            btn = btn.galley(galley);
+        } else if let Some(text) = self.text {
+            btn = btn.text(text);
+        }
+
         if let Some(font) = self.font {
             btn = btn.font(font);
+        }
+
+        if let Some(tooltip) = self.tooltip {
+            btn = btn.tooltip(tooltip);
         }
 
         btn.show(gui)

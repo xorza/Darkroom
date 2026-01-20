@@ -3,15 +3,15 @@ use std::sync::Arc;
 
 use bumpalo::Bump;
 use bumpalo::collections::Vec as BumpVec;
-use egui::{Align, Galley, Id, Key, Layout, Order, Pos2, Sense, vec2};
+use egui::{Galley, Id, Key, Order, Pos2, Sense, vec2};
 use graph::function::Func;
 use graph::prelude::FuncLib;
 
 use crate::common::area::Area;
-use crate::common::button::Button;
 use crate::common::column_flow::ColumnFlow;
 use crate::common::expander::Expander;
 use crate::common::frame::Frame;
+use crate::common::popup_menu::ListItem;
 use crate::gui::Gui;
 
 const POPUP_MIN_WIDTH: f32 = 150.0;
@@ -103,11 +103,8 @@ impl NewNodeUi {
                                 let button_height =
                                     gui.font_height(&btn_font) + small_padding * 2.0;
 
-                                if Button::default()
-                                    .background(gui.style.list_button)
-                                    .text("Const")
+                                if ListItem::new("Const")
                                     .size(vec2(button_width, button_height))
-                                    .align(Align::Min)
                                     .show(gui)
                                     .clicked()
                                 {
@@ -162,16 +159,14 @@ impl NewNodeUi {
                                             gui,
                                             galleys.iter().zip(funcs.iter()),
                                             |gui, (galley, func)| {
-                                                let mut btn = Button::default()
-                                                    .background(gui.style.list_button)
-                                                    .galley((*galley).clone())
-                                                    .size(vec2(button_width, button_height))
-                                                    .align(Align::Min);
+                                                let mut item =
+                                                    ListItem::from_galley((*galley).clone())
+                                                        .size(vec2(button_width, button_height));
                                                 if let Some(tooltip) = func.description.as_ref() {
-                                                    btn = btn.tooltip(tooltip);
+                                                    item = item.tooltip(tooltip);
                                                 }
 
-                                                if btn.show(gui).clicked() {
+                                                if item.show(gui).clicked() {
                                                     selection = Some(NewNodeSelection::Func(func));
                                                 }
                                             },

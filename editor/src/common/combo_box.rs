@@ -106,10 +106,33 @@ impl<'a> ComboBox<'a> {
         let options = self.options;
 
         PopupMenu::new(&response, id_salt).show(gui, |gui| {
+            // Calculate max width for all items
+            let item_font = gui.style.sub_font.clone();
+            let padding = gui.style.padding;
+            let small_padding = gui.style.small_padding;
+
+            let max_text_width = options
+                .iter()
+                .map(|option| {
+                    let galley = gui.painter().layout_no_wrap(
+                        option.clone(),
+                        item_font.clone(),
+                        gui.style.text_color,
+                    );
+                    galley.size().x
+                })
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap_or(0.0);
+
+            let item_width = max_text_width + padding * 2.0;
+            let item_height = gui.font_height(&item_font) + small_padding * 2.0;
+            let item_size = vec2(item_width, item_height);
+
             for option in options {
                 let is_selected = option == &selected;
                 if ListItem::new(option)
                     .selected(is_selected)
+                    .size(item_size)
                     .show(gui)
                     .clicked()
                 {
