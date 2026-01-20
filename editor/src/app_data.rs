@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Notify, watch};
+use vision::ImageFuncLib;
 
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
@@ -67,6 +68,7 @@ impl AppData {
         func_lib.merge(EditorFuncLib::default());
         func_lib.merge(BasicFuncLib::default());
         func_lib.merge(WorkerEventsFuncLib::default());
+        func_lib.merge(ImageFuncLib::default());
 
         let mut result = Self {
             func_lib,

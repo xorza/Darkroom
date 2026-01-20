@@ -22,7 +22,7 @@ imaginarium = { path = "imaginarium" }
 vision = { path = "vision" }
 
 # wgpu version should be in sync with egui
-wgpu = { version = "28.0", features = ["metal", "vulkan", "dx12"] }
+wgpu = { version = "27.0", features = ["metal", "vulkan", "dx12"] }
 eframe = { version = "0.33", default-features = false, features = ["default_fonts", "persistence", "wgpu", "wayland"] }
 egui = { version = "0.33", default-features = false, features = ["default_fonts", "rayon", "serde"] }
 
