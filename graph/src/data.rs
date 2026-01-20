@@ -222,31 +222,6 @@ impl DynamicValue {
         }
     }
 
-    pub fn is_none(&self) -> bool {
-        matches!(self, DynamicValue::None)
-    }
-
-    pub fn unwrap_or_f64(&self, default: f64) -> f64 {
-        match self {
-            DynamicValue::None => default,
-            _ => self.as_f64(),
-        }
-    }
-
-    pub fn unwrap_or_i64(&self, default: i64) -> i64 {
-        match self {
-            DynamicValue::None => default,
-            _ => self.as_i64(),
-        }
-    }
-
-    pub fn unwrap_or_bool(&self, default: bool) -> bool {
-        match self {
-            DynamicValue::None => default,
-            _ => self.as_bool(),
-        }
-    }
-
     pub fn convert_type(self, dst_data_type: &DataType) -> DynamicValue {
         match (&self, dst_data_type) {
             (DynamicValue::None, _) => DynamicValue::None,
