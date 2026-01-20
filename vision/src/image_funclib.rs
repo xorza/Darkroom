@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use imaginarium::{ChannelCount, ColorFormat, ContrastBrightness};
+use imaginarium::{Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness};
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 
@@ -253,6 +253,72 @@ impl Default for ImageFuncLib {
                         .expect("Failed to convert image");
 
                     outputs[0] = DynamicValue::custom(Image::from(converted));
+
+                    Ok(())
+                })
+            }),
+        });
+
+        // blend
+        func_lib.add(Func {
+            id: "c2d3e4f5-a6b7-4c8d-9e0f-1a2b3c4d5e6f".into(),
+            name: "blend".to_string(),
+            description: Some("Blends two images using overlay mode".to_string()),
+            behavior: FuncBehavior::Pure,
+            terminal: false,
+            category: "image".to_string(),
+            inputs: vec![
+                FuncInput {
+                    name: "source".to_string(),
+                    required: true,
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "destination".to_string(),
+                    required: true,
+                    data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "alpha".to_string(),
+                    required: true,
+                    data_type: DataType::Float,
+                    default_value: Some((1.0).into()),
+                    value_options: vec![],
+                },
+            ],
+            outputs: vec![FuncOutput {
+                name: "image".to_string(),
+                data_type: IMAGE_BUFFER_DATA_TYPE.clone(),
+            }],
+            events: vec![],
+            required_contexts: vec![VISION_CTX_TYPE.clone()],
+            lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
+                Box::pin(async move {
+                    assert_eq!(inputs.len(), 3);
+                    assert_eq!(outputs.len(), 1);
+
+                    let src_image = inputs[0].value.as_custom::<Image>();
+                    let dst_image = inputs[1].value.as_custom::<Image>();
+                    let alpha = inputs[2].value.as_f64() as f32;
+
+                    let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+
+                    let mut output_buffer = imaginarium::ImageBuffer::new_empty(*src_image.desc());
+
+                    Blend::new(BlendMode::Overlay, alpha)
+                        .execute(
+                            &mut vision_ctx.processing_ctx,
+                            src_image,
+                            dst_image,
+                            &mut output_buffer,
+                        )
+                        .expect("Failed to blend images");
+
+                    outputs[0] = DynamicValue::custom(Image::from(output_buffer));
 
                     Ok(())
                 })
