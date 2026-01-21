@@ -353,7 +353,7 @@ async fn collect_arguments(
         }
     }
     for pending in pending_previews {
-        pending.wait().await;
+        pending.wait(&mut execution_graph.ctx_manager).await;
     }
 
     values

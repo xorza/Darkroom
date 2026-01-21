@@ -28,12 +28,19 @@ id_type!(TypeId);
 pub type PreviewFn =
     SharedFn<dyn Fn(&dyn Any, &mut ContextManager) -> Option<PendingPreview> + Send + Sync>;
 
+/// Boxed async function that receives ContextManager for resource access during polling.
+type PollFn = Box<
+    dyn FnOnce(
+            &mut ContextManager,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send,
+>;
+
 /// A pending preview generation that requires polling to complete.
 /// Call `wait()` to await completion, which polls the GPU and awaits the task.
 pub struct PendingPreview {
     /// Async function to poll the GPU
-    poll_fn:
-        Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>,
+    poll_fn: PollFn,
     /// The spawned task handle
     task: tokio::task::JoinHandle<()>,
     /// Notifier that signals when the task is ready for GPU polling
@@ -47,11 +54,11 @@ impl PendingPreview {
         ready_notify: Arc<tokio::sync::Notify>,
     ) -> Self
     where
-        F: FnOnce() -> Fut + Send + 'static,
+        F: FnOnce(&mut ContextManager) -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
         Self {
-            poll_fn: Box::new(move || Box::pin(poll_fn())),
+            poll_fn: Box::new(move |ctx| Box::pin(poll_fn(ctx))),
             task,
             ready_notify,
         }
@@ -59,11 +66,11 @@ impl PendingPreview {
 
     /// Awaits until the preview generation completes.
     /// Waits for the task to be ready, polls the GPU, then awaits the task.
-    pub async fn wait(self) {
+    pub async fn wait(self, ctx_manager: &mut ContextManager) {
         // Wait for the task to signal it's ready for GPU polling
         self.ready_notify.notified().await;
         // Poll the GPU
-        (self.poll_fn)().await;
+        (self.poll_fn)(ctx_manager).await;
         // Wait for the task to complete
         let _ = self.task.await;
     }

@@ -117,7 +117,15 @@ impl CustomValue for Image {
         });
 
         Some(PendingPreview::new(
-            move || async move { gpu.wait_async().await },
+            |ctx_manager| {
+                let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+                let gpu = vision_ctx.processing_ctx.gpu().cloned();
+                async move {
+                    if let Some(gpu) = gpu {
+                        gpu.wait_async().await;
+                    }
+                }
+            },
             task,
             ready_notify,
         ))
