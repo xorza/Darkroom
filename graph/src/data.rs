@@ -25,11 +25,15 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
+pub type PreviewFn = SharedFn<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
+
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
-    fn gen_preview(&self, ctx_manager: &mut ContextManager);
+    fn preview_fn() -> PreviewFn {
+        PreviewFn::None
+    }
 }
 
 /// Definition of a custom type for `DataType::Custom`.
@@ -169,7 +173,6 @@ impl PartialEq for StaticValue {
 impl Eq for StaticValue {}
 
 type DisplayFn = SharedFn<dyn Fn(&dyn Any) -> String + Send + Sync>;
-type PreviewFn = SharedFn<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
 
 #[derive(Default, Clone)]
 pub enum DynamicValue {
@@ -284,21 +287,12 @@ impl DynamicValue {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "<invalid>".to_string())
         }));
-        let preview_fn: PreviewFn = SharedFn::new(Arc::new(
-            |data: &dyn Any, ctx_manager: &mut ContextManager| {
-                if let Some(custom_value) = data.downcast_ref::<T>() {
-                    custom_value.gen_preview(ctx_manager);
-                } else {
-                    unreachable!();
-                }
-            },
-        ));
 
         DynamicValue::Custom {
             type_id,
             data: Arc::new(value),
             display_fn,
-            preview_fn,
+            preview_fn: T::preview_fn(),
         }
     }
 
