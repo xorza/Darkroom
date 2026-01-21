@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use common::slot::Slot;
 use graph::context::ContextManager;
-use graph::data::{CustomValue, DataType};
+use graph::data::{CustomValue, DataType, PendingPreview};
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
@@ -45,8 +45,7 @@ impl CustomValue for Image {
         IMAGE_DATA_TYPE.clone()
     }
 
-    fn gen_preview(&self, ctx_manager: &mut ContextManager) {
-        //todo make async
+    fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
         let desc = self.buffer.desc();
         let max_dim = desc.width.max(desc.height);
 
@@ -61,8 +60,6 @@ impl CustomValue for Image {
 
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
-        // First transform to same format but smaller size
-
         let preview_desc = ImageDesc::new(new_width, new_height, desc.color_format);
 
         let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
@@ -75,27 +72,53 @@ impl CustomValue for Image {
 
         if let Err(e) = result {
             tracing::error!("Failed to scale preview: {}", e);
-            return;
+            return None;
         }
 
-        // Read from GPU and convert to RGBA_U8
-        let scaled_cpu = match scaled_buffer.to_cpu(&vision_ctx.processing_ctx) {
-            Ok(img) => img,
-            Err(e) => {
-                tracing::error!("Failed to read preview from GPU: {}", e);
-                return;
-            }
-        };
+        let gpu = vision_ctx
+            .processing_ctx
+            .gpu()
+            .expect("GPU context required for preview generation")
+            .clone();
 
-        let preview_image = match scaled_cpu.convert(ColorFormat::RGBA_U8) {
-            Ok(img) => img,
-            Err(e) => {
-                tracing::error!("Failed to convert preview to RGBA_U8: {}", e);
-                return;
-            }
-        };
+        let ready_notify = std::sync::Arc::new(tokio::sync::Notify::new());
 
-        self.preview.send(preview_image);
+        // Spawn async task to download from GPU and convert
+        let task = tokio::spawn({
+            let gpu = gpu.clone();
+            let preview_slot = self.preview.clone();
+            let ready_notify = ready_notify.clone();
+            async move {
+                let scaled_gpu = scaled_buffer
+                    .as_gpu()
+                    .expect("Expected that Transform always returns Gpu image");
+
+                // Signal that we're ready for GPU polling before starting the async download
+                ready_notify.notify_one();
+
+                let scaled_cpu = match scaled_gpu.to_image_async(&gpu).await {
+                    Ok(img) => img,
+                    Err(e) => {
+                        tracing::error!("Failed to read preview from GPU: {}", e);
+                        return;
+                    }
+                };
+
+                let preview_image = match scaled_cpu.convert(ColorFormat::RGBA_U8) {
+                    Ok(img) => img,
+                    Err(e) => {
+                        tracing::error!("Failed to convert preview to RGBA_U8: {}", e);
+                        return;
+                    }
+                };
+
+                preview_slot.send(preview_image);
+
+                tracing::info!("Preview generated successfully");
+            }
+        });
+
+        Some(PendingPreview::new(move || gpu.wait(), task, ready_notify))
     }
 }
 

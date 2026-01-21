@@ -260,16 +260,7 @@ async fn worker_loop<ExecutionCallback>(
                     processing_callback = Some(callback)
                 }
                 WorkerMessage::RequestArgumentValues { node_id, callback } => {
-                    let mut values = execution_graph.get_argument_values(&node_id);
-
-                    for value in values.iter_mut() {
-                        for input in value.inputs.iter_mut().flatten() {
-                            input.gen_preview(&mut execution_graph.ctx_manager);
-                        }
-                        for output in value.outputs.iter_mut() {
-                            output.gen_preview(&mut execution_graph.ctx_manager);
-                        }
-                    }
+                    let values = collect_arguments(&mut execution_graph, node_id).await;
                     callback.call(values);
                 }
             }
@@ -340,6 +331,32 @@ async fn worker_loop<ExecutionCallback>(
         drop(event_loop_pause_guard);
         tokio::task::yield_now().await;
     }
+}
+
+async fn collect_arguments(
+    execution_graph: &mut ExecutionGraph,
+    node_id: NodeId,
+) -> Option<ArgumentValues> {
+    let mut values = execution_graph.get_argument_values(&node_id);
+
+    let mut pending_previews = Vec::new();
+    for value in values.iter_mut() {
+        for input in value.inputs.iter_mut().flatten() {
+            if let Some(pending) = input.gen_preview(&mut execution_graph.ctx_manager) {
+                pending_previews.push(pending);
+            }
+        }
+        for output in value.outputs.iter_mut() {
+            if let Some(pending) = output.gen_preview(&mut execution_graph.ctx_manager) {
+                pending_previews.push(pending);
+            }
+        }
+    }
+    for pending in pending_previews {
+        pending.wait().await;
+    }
+
+    values
 }
 
 type EventTrigger = (EventRef, EventLambda, SharedAnyState);

@@ -60,6 +60,7 @@ impl Gpu {
 
     /// Polls the device, blocking until all pending operations complete.
     pub fn wait(&self) {
+        tracing::info!("Waiting for device...");
         self.device
             .poll(wgpu::PollType::wait_indefinitely())
             .unwrap();

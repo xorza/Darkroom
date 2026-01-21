@@ -25,13 +25,52 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-pub type PreviewFn = SharedFn<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
+pub type PreviewFn =
+    SharedFn<dyn Fn(&dyn Any, &mut ContextManager) -> Option<PendingPreview> + Send + Sync>;
+
+/// A pending preview generation that requires polling to complete.
+/// Call `wait()` to await completion, which polls the GPU and awaits the task.
+pub struct PendingPreview {
+    /// Function to poll the GPU (should be called from the waiting thread)
+    poll_fn: Box<dyn FnOnce() + Send>,
+    /// The spawned task handle
+    task: tokio::task::JoinHandle<()>,
+    /// Notifier that signals when the task is ready for GPU polling
+    ready_notify: Arc<tokio::sync::Notify>,
+}
+
+impl PendingPreview {
+    pub fn new(
+        poll_fn: impl FnOnce() + Send + 'static,
+        task: tokio::task::JoinHandle<()>,
+        ready_notify: Arc<tokio::sync::Notify>,
+    ) -> Self {
+        Self {
+            poll_fn: Box::new(poll_fn),
+            task,
+            ready_notify,
+        }
+    }
+
+    /// Awaits until the preview generation completes.
+    /// Waits for the task to be ready, polls the GPU, then awaits the task.
+    pub async fn wait(self) {
+        // Wait for the task to signal it's ready for GPU polling
+        self.ready_notify.notified().await;
+        // Poll the GPU
+        (self.poll_fn)();
+        // Wait for the task to complete
+        let _ = self.task.await;
+    }
+}
 
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
-    fn gen_preview(&self, _ctx_manager: &mut ContextManager) {}
+    fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
+        None
+    }
 }
 
 /// Definition of a custom type for `DataType::Custom`.
@@ -287,9 +326,8 @@ impl DynamicValue {
         }));
         let preview_fn: PreviewFn = SharedFn::new(Arc::new(
             |data: &dyn Any, ctx_manager: &mut ContextManager| {
-                if let Some(custom_value) = data.downcast_ref::<T>() {
-                    custom_value.gen_preview(ctx_manager);
-                }
+                data.downcast_ref::<T>()
+                    .and_then(|custom_value| custom_value.gen_preview(ctx_manager))
             },
         ));
 
@@ -356,13 +394,15 @@ impl DynamicValue {
         }
     }
 
-    pub fn gen_preview(&mut self, ctx_manager: &mut ContextManager) {
+    pub fn gen_preview(&mut self, ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
         if let DynamicValue::Custom {
             data, preview_fn, ..
         } = self
             && let Some(preview_fn) = preview_fn.as_ref()
         {
-            (preview_fn)(data.as_ref(), ctx_manager);
+            (preview_fn)(data.as_ref(), ctx_manager)
+        } else {
+            None
         }
     }
 
