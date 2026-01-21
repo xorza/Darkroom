@@ -14,7 +14,7 @@ pub(crate) fn add_stride_padding(
     let row_bytes = width as usize * bpp as usize;
 
     if row_bytes == stride {
-        src.to_vec()
+        src
     } else {
         let mut padded = vec![0u8; stride * height as usize];
         for y in 0..height as usize {
