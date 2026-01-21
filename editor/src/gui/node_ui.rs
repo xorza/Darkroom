@@ -99,7 +99,19 @@ impl NodeUi {
             );
             render_cache_btn(gui, ui_interaction, node_layout, node);
 
-            let node_drag_port_result = render_ports(gui, node_layout, node, func);
+            let missing_input_ports: Vec<usize> = ctx
+                .execution_stats
+                .map(|stats| {
+                    stats
+                        .missing_inputs
+                        .iter()
+                        .filter(|p| p.target_id == node_id)
+                        .map(|p| p.port_idx)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let node_drag_port_result =
+                render_ports(gui, node_layout, node, func, &missing_input_ports);
             drag_port_info = drag_port_info.prefer(node_drag_port_result);
 
             render_port_labels(gui, node_layout);
@@ -369,6 +381,7 @@ fn render_ports(
     node_layout: &NodeLayout,
     node: &Node,
     func: &Func,
+    missing_input_ports: &[usize],
 ) -> PortInteractCommand {
     let port_radius = gui.style.node.port_radius;
     let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
@@ -383,11 +396,15 @@ fn render_ports(
     let event_base = gui.style.node.event_port_color;
     let event_hover = gui.style.node.event_hover_color;
 
+    let missing_shadow_color = gui.style.node.missing_inputs_shadow.color;
+    let missing_shadow_spread = gui.style.node.missing_inputs_shadow.spread as f32;
+
     let mut draw_port = |center: Pos2,
                          kind: PortKind,
                          idx: usize,
                          base_color: Color32,
-                         hover_color: Color32|
+                         hover_color: Color32,
+                         has_missing_shadow: bool|
      -> PortInteractCommand {
         let port_rect = egui::Rect::from_center_size(center, port_rect_size);
         let ui = gui.ui();
@@ -398,6 +415,14 @@ fn render_ports(
             Sense::drag() | Sense::hover() | Sense::click(),
         );
         let is_hovered = ui.rect_contains_pointer(port_rect);
+
+        if has_missing_shadow {
+            gui.painter().circle_filled(
+                center,
+                port_radius + missing_shadow_spread,
+                missing_shadow_color,
+            );
+        }
 
         let color = is_hovered.then_else(hover_color, base_color);
         gui.painter().circle_filled(center, port_radius, color);
@@ -427,15 +452,28 @@ fn render_ports(
 
     if func.terminal {
         let center = node_layout.trigger_center();
-        final_port_interact_cmd =
-            draw_port(center, PortKind::Trigger, 0, trigger_base, trigger_hover)
-                .prefer(final_port_interact_cmd);
+        final_port_interact_cmd = draw_port(
+            center,
+            PortKind::Trigger,
+            0,
+            trigger_base,
+            trigger_hover,
+            false,
+        )
+        .prefer(final_port_interact_cmd);
     }
 
     for input_idx in 0..node_layout.input_galleys.len() {
         let center = node_layout.input_center(input_idx);
-        let port_interact_cmd =
-            draw_port(center, PortKind::Input, input_idx, input_base, input_hover);
+        let is_missing = missing_input_ports.contains(&input_idx);
+        let port_interact_cmd = draw_port(
+            center,
+            PortKind::Input,
+            input_idx,
+            input_base,
+            input_hover,
+            is_missing,
+        );
         final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
@@ -447,14 +485,21 @@ fn render_ports(
             output_idx,
             output_base,
             output_hover,
+            false,
         );
         final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
     for event_idx in 0..node_layout.event_galleys.len() {
         let center = node_layout.event_center(event_idx);
-        let port_interact_cmd =
-            draw_port(center, PortKind::Event, event_idx, event_base, event_hover);
+        let port_interact_cmd = draw_port(
+            center,
+            PortKind::Event,
+            event_idx,
+            event_base,
+            event_hover,
+            false,
+        );
         final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
     }
 
