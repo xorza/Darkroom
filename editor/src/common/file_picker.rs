@@ -1,8 +1,9 @@
 use std::path::Path;
 
-use egui::{Align2, Pos2, Response, Sense, StrokeKind, Vec2, pos2, vec2};
+use egui::{Align2, Pos2, Response, Sense, StrokeKind, pos2, vec2};
 use graph::data::{FsPathConfig, FsPathMode};
 
+use crate::common::button::Button;
 use crate::gui::Gui;
 use crate::gui::style::DragValueStyle;
 
@@ -41,13 +42,11 @@ impl<'a> FilePicker<'a> {
         self
     }
 
-    pub fn show(self, gui: &mut Gui<'_>, id_salt: impl std::hash::Hash) -> Response {
+    pub fn show(self, gui: &mut Gui<'_>, _id_salt: impl std::hash::Hash) -> Response {
         let display_name = Path::new(self.path.as_str())
             .file_name()
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "(none)".to_string());
-
-        let id = gui.ui().make_persistent_id(&id_salt);
 
         let padding = vec2(gui.style.small_padding, 0.0);
         let font = gui.style.sub_font.clone();
@@ -56,7 +55,7 @@ impl<'a> FilePicker<'a> {
             .style
             .unwrap_or_else(|| gui.style.node.const_bind_style.clone());
 
-        let browse_text = "...";
+        let browse_text = "browse";
         let browse_galley =
             gui.ui()
                 .painter()
@@ -66,7 +65,7 @@ impl<'a> FilePicker<'a> {
         let filename_galley =
             gui.ui()
                 .painter()
-                .layout_no_wrap(display_name.clone(), font, text_color);
+                .layout_no_wrap(display_name.clone(), font.clone(), text_color);
         let filename_size = filename_galley.size() + padding * 2.0;
 
         let separator_width = 1.0;
@@ -84,20 +83,13 @@ impl<'a> FilePicker<'a> {
             vec2(browse_size.x, total_size.y),
         );
 
-        // Draw the combined background
+        // Draw filename background
         gui.painter().rect(
-            rect,
+            filename_rect,
             style.radius,
             style.fill,
             style.stroke,
             StrokeKind::Outside,
-        );
-
-        // Draw separator line
-        gui.painter().vline(
-            filename_rect.max.x + separator_width * 0.5,
-            rect.y_range(),
-            style.stroke,
         );
 
         // Draw filename text centered vertically
@@ -108,18 +100,14 @@ impl<'a> FilePicker<'a> {
         gui.painter()
             .galley(filename_text_pos, filename_galley, text_color);
 
-        // Draw browse text centered vertically
-        let browse_text_pos = pos2(
-            browse_rect.min.x + padding.x,
-            browse_rect.center().y - browse_galley.size().y * 0.5,
-        );
-        gui.painter()
-            .galley(browse_text_pos, browse_galley, text_color);
+        let response = gui.ui().allocate_rect(filename_rect, Sense::hover());
 
-        let response = gui.ui().allocate_rect(rect, Sense::hover());
-        let browse_response = gui
-            .ui()
-            .interact(browse_rect, id.with("browse_btn"), Sense::click());
+        // Browse button
+        let browse_response = Button::default()
+            .text(browse_text)
+            .font(font)
+            .rect(browse_rect)
+            .show(gui);
 
         if browse_response.clicked() {
             let mut dialog = rfd::FileDialog::new();
