@@ -93,7 +93,7 @@ pub(super) fn apply(
         alpha: params.alpha,
         width,
         height,
-        stride,
+        stride: stride as u32,
         format_type,
         _padding: [0; 2],
     };

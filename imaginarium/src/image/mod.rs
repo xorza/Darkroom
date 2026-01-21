@@ -19,7 +19,7 @@ use stride::{add_stride_padding, align_stride, strip_stride_padding};
 pub struct ImageDesc {
     pub width: u32,
     pub height: u32,
-    pub stride: u32,
+    pub stride: usize,
     pub color_format: ColorFormat,
 }
 
@@ -186,7 +186,9 @@ impl Image {
 impl ImageDesc {
     pub fn new(width: u32, height: u32, color_format: ColorFormat) -> Self {
         let stride = align_stride(
-            width * color_format.channel_count as u32 * color_format.channel_size as u32,
+            width as usize
+                * color_format.channel_count as usize
+                * color_format.channel_size as usize,
         );
 
         Self {
@@ -198,12 +200,12 @@ impl ImageDesc {
     }
 
     pub fn size_in_bytes(&self) -> usize {
-        (self.height * self.stride) as usize
+        self.height as usize * self.stride
     }
 
     /// Returns the number of bytes per row without padding.
-    pub fn row_bytes(&self) -> u32 {
-        self.width * self.color_format.byte_count() as u32
+    pub fn row_bytes(&self) -> usize {
+        self.width as usize * self.color_format.byte_count() as usize
     }
 
     /// Returns true if stride equals row bytes (no padding).

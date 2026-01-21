@@ -1,5 +1,5 @@
 /// Aligns a value to 4-byte boundary.
-pub(crate) fn align_stride(n: u32) -> u32 {
+pub(crate) fn align_stride(n: usize) -> usize {
     (n + 3) & !3
 }
 
@@ -8,11 +8,10 @@ pub(crate) fn add_stride_padding(
     src: &[u8],
     width: u32,
     height: u32,
-    stride: u32,
+    stride: usize,
     bpp: u8,
 ) -> Vec<u8> {
     let row_bytes = width as usize * bpp as usize;
-    let stride = stride as usize;
 
     if row_bytes == stride {
         src.to_vec()
@@ -31,11 +30,10 @@ pub(crate) fn strip_stride_padding(
     src: &[u8],
     width: u32,
     height: u32,
-    stride: u32,
+    stride: usize,
     bpp: u8,
 ) -> Vec<u8> {
     let row_bytes = width as usize * bpp as usize;
-    let stride = stride as usize;
 
     if row_bytes == stride {
         src.to_vec()

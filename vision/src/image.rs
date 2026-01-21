@@ -64,7 +64,7 @@ impl CustomValue for Image {
             width: new_width,
             height: new_height,
             color_format: desc.color_format,
-            stride: new_width * desc.color_format.byte_count() as u32,
+            stride: new_width as usize * desc.color_format.byte_count() as usize,
         };
         let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
 

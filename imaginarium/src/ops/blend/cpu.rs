@@ -133,9 +133,9 @@ where
 {
     let width = src.desc().width as usize;
     let channels = src.desc().color_format.channel_count.channel_count() as usize;
-    let src_stride = src.desc().stride as usize;
-    let dst_stride = dst.desc().stride as usize;
-    let out_stride = output.desc().stride as usize;
+    let src_stride = src.desc().stride;
+    let dst_stride = dst.desc().stride;
+    let out_stride = output.desc().stride;
     let row_bytes = width * channels * size_of::<T>();
 
     let has_alpha = channels == 2 || channels == 4;
@@ -185,9 +185,9 @@ where
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_u8_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
     let width = src.desc().width as usize;
-    let src_stride = src.desc().stride as usize;
-    let dst_stride = dst.desc().stride as usize;
-    let out_stride = output.desc().stride as usize;
+    let src_stride = src.desc().stride;
+    let dst_stride = dst.desc().stride;
+    let out_stride = output.desc().stride;
 
     output
         .bytes_mut()
@@ -334,9 +334,9 @@ unsafe fn process_row_rgba_u8_sse41(
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_f32_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
     let width = src.desc().width as usize;
-    let src_stride = src.desc().stride as usize;
-    let dst_stride = dst.desc().stride as usize;
-    let out_stride = output.desc().stride as usize;
+    let src_stride = src.desc().stride;
+    let dst_stride = dst.desc().stride;
+    let out_stride = output.desc().stride;
 
     output
         .bytes_mut()
@@ -434,9 +434,9 @@ unsafe fn process_row_rgba_f32_sse41(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_u8_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
     let width = src.desc().width as usize;
-    let src_stride = src.desc().stride as usize;
-    let dst_stride = dst.desc().stride as usize;
-    let out_stride = output.desc().stride as usize;
+    let src_stride = src.desc().stride;
+    let dst_stride = dst.desc().stride;
+    let out_stride = output.desc().stride;
 
     output
         .bytes_mut()
@@ -590,9 +590,9 @@ unsafe fn process_row_rgba_u8_neon(
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_f32_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
     let width = src.desc().width as usize;
-    let src_stride = src.desc().stride as usize;
-    let dst_stride = dst.desc().stride as usize;
-    let out_stride = output.desc().stride as usize;
+    let src_stride = src.desc().stride;
+    let dst_stride = dst.desc().stride;
+    let out_stride = output.desc().stride;
 
     output
         .bytes_mut()

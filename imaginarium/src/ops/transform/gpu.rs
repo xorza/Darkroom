@@ -109,8 +109,8 @@ pub(super) fn apply(
         input_height: input_desc.height,
         output_width: output_desc.width,
         output_height: output_desc.height,
-        input_stride: input_desc.stride,
-        output_stride: output_desc.stride,
+        input_stride: input_desc.stride as u32,
+        output_stride: output_desc.stride as u32,
         filter_mode: match params.filter {
             FilterMode::Nearest => 0,
             FilterMode::Bilinear => 1,
@@ -181,9 +181,9 @@ mod tests {
         let mut image = Image::new_empty(desc).unwrap();
 
         // Fill with a gradient pattern
-        for y in 0..height {
-            for x in 0..width {
-                let idx = (y * image.desc().stride + x * 4) as usize;
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let idx = y * image.desc().stride + x * 4;
                 image.bytes_mut()[idx] = (x % 256) as u8; // R
                 image.bytes_mut()[idx + 1] = (y % 256) as u8; // G
                 image.bytes_mut()[idx + 2] = 128; // B

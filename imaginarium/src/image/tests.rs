@@ -124,7 +124,7 @@ fn new_empty_creates_zeroed_image() {
     assert!(img.bytes.iter().all(|&b| b == 0));
     assert_eq!(
         img.bytes.len(),
-        (img.desc().stride * img.desc().height) as usize
+        img.desc().stride * img.desc().height as usize
     );
 }
 
@@ -179,7 +179,7 @@ fn image_desc_stride_alignment() {
 #[test]
 fn image_desc_size_calculation() {
     let desc = ImageDesc::new(100, 50, ColorFormat::RGBA_U8);
-    assert_eq!(desc.size_in_bytes(), (desc.stride * desc.height) as usize);
+    assert_eq!(desc.size_in_bytes(), desc.stride * desc.height as usize);
 }
 
 #[test]
@@ -391,7 +391,7 @@ fn single_pixel_image() {
 fn large_image_dimensions() {
     let desc = ImageDesc::new(4096, 4096, ColorFormat::RGBA_U8);
     // Just verify it calculates correctly without overflow
-    assert_eq!(desc.size_in_bytes(), (desc.stride * 4096) as usize);
+    assert_eq!(desc.size_in_bytes(), desc.stride * 4096);
 }
 
 #[test]

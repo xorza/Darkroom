@@ -229,8 +229,8 @@ where
     let width = from.desc().width as usize;
     let to_channels = to.desc().color_format.channel_count.channel_count() as usize;
     let from_channels = from.desc().color_format.channel_count.channel_count() as usize;
-    let from_stride = from.desc().stride as usize;
-    let to_stride = to.desc().stride as usize;
+    let from_stride = from.desc().stride;
+    let to_stride = to.desc().stride;
     let from_row_bytes = width * from_channels * size_of::<From>();
     let to_row_bytes = width * to_channels * size_of::<To>();
 
