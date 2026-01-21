@@ -94,6 +94,8 @@ impl CustomValue for Image {
         };
 
         *self.preview.write().unwrap() = Some(preview_image);
+
+        tracing::info!("Preview image created");
     }
 }
 
