@@ -31,8 +31,9 @@ pub type PreviewFn =
 /// A pending preview generation that requires polling to complete.
 /// Call `wait()` to await completion, which polls the GPU and awaits the task.
 pub struct PendingPreview {
-    /// Function to poll the GPU (should be called from the waiting thread)
-    poll_fn: Box<dyn FnOnce() + Send>,
+    /// Async function to poll the GPU
+    poll_fn:
+        Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>,
     /// The spawned task handle
     task: tokio::task::JoinHandle<()>,
     /// Notifier that signals when the task is ready for GPU polling
@@ -40,13 +41,17 @@ pub struct PendingPreview {
 }
 
 impl PendingPreview {
-    pub fn new(
-        poll_fn: impl FnOnce() + Send + 'static,
+    pub fn new<F, Fut>(
+        poll_fn: F,
         task: tokio::task::JoinHandle<()>,
         ready_notify: Arc<tokio::sync::Notify>,
-    ) -> Self {
+    ) -> Self
+    where
+        F: FnOnce() -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
         Self {
-            poll_fn: Box::new(poll_fn),
+            poll_fn: Box::new(move || Box::pin(poll_fn())),
             task,
             ready_notify,
         }
@@ -58,7 +63,7 @@ impl PendingPreview {
         // Wait for the task to signal it's ready for GPU polling
         self.ready_notify.notified().await;
         // Poll the GPU
-        (self.poll_fn)();
+        (self.poll_fn)().await;
         // Wait for the task to complete
         let _ = self.task.await;
     }

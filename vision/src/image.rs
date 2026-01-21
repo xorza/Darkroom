@@ -118,7 +118,11 @@ impl CustomValue for Image {
             }
         });
 
-        Some(PendingPreview::new(move || gpu.wait(), task, ready_notify))
+        Some(PendingPreview::new(
+            move || async move { gpu.wait_async().await },
+            task,
+            ready_notify,
+        ))
     }
 }
 
