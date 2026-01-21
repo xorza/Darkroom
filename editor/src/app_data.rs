@@ -248,8 +248,10 @@ impl AppData {
             self.graph_dirty = false;
         }
 
-        // Handle argument values request
-        if let Some(node_id) = self.interaction.request_argument_values {
+        // Handle argument values request (only if not already pending)
+        if let Some(node_id) = self.interaction.request_argument_values
+            && self.argument_values_cache.mark_pending(node_id)
+        {
             msgs.push(WorkerMessage::RequestArgumentValues {
                 node_id,
                 callback: ArgumentValuesCallback::new({

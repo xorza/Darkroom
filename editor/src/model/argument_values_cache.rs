@@ -2,7 +2,7 @@ use egui::TextureHandle;
 use graph::execution_graph::ArgumentValues;
 use graph::execution_stats::ExecutionStats;
 use graph::graph::NodeId;
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use imaginarium::ImageDesc;
 
 #[derive(Clone)]
@@ -21,6 +21,7 @@ pub struct NodeCache {
 #[derive(Default)]
 pub struct ArgumentValuesCache {
     pub values: HashMap<NodeId, NodeCache>,
+    pending_requests: HashSet<NodeId>,
 }
 
 impl std::fmt::Debug for ArgumentValuesCache {
@@ -37,11 +38,19 @@ impl ArgumentValuesCache {
     }
 
     pub fn insert(&mut self, node_id: NodeId, node_cache: NodeCache) {
+        self.pending_requests.remove(&node_id);
         self.values.insert(node_id, node_cache);
+    }
+
+    /// Returns true if this is a new request (not already pending).
+    /// Call this before sending a request to avoid duplicates.
+    pub fn mark_pending(&mut self, node_id: NodeId) -> bool {
+        self.pending_requests.insert(node_id)
     }
 
     pub fn clear(&mut self) {
         self.values.clear();
+        self.pending_requests.clear();
     }
 
     pub fn invalidate_changed(&mut self, execution_stats: &ExecutionStats) {
