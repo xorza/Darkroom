@@ -15,7 +15,7 @@ use egui::{
     Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke,
     StrokeKind, Vec2, pos2, vec2,
 };
-use graph::execution_graph::ExecutedNodeStats;
+use graph::execution_stats::ExecutedNodeStats;
 use graph::graph::{Node, NodeId};
 use graph::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 

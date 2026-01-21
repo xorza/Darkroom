@@ -10,6 +10,7 @@ use crate::common::shared_any_state::SharedAnyState;
 use crate::context::ContextManager;
 use crate::data::{DataType, DynamicValue, StaticValue};
 use crate::event_lambda::EventLambda;
+use crate::execution_stats::{ExecutedNodeStats, ExecutionStats, NodeError};
 use crate::func_lambda::InvokeInput;
 use crate::function::{Func, FuncBehavior, FuncLib};
 use crate::graph::{Binding, Graph, Node, NodeBehavior, NodeId, PortAddress};
@@ -25,29 +26,6 @@ pub enum Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
-
-#[derive(Debug, Clone)]
-pub struct ExecutedNodeStats {
-    pub node_id: NodeId,
-    pub elapsed_secs: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeError {
-    pub node_id: NodeId,
-    pub error: Error,
-}
-
-#[derive(Debug)]
-pub struct ExecutionStats {
-    pub elapsed_secs: f64,
-
-    pub executed_nodes: Vec<ExecutedNodeStats>,
-    pub missing_inputs: Vec<PortAddress>,
-    pub cached_nodes: Vec<NodeId>,
-    pub triggered_events: Vec<EventRef>,
-    pub node_errors: Vec<NodeError>,
-}
 
 #[derive(Debug, Default)]
 pub struct ArgumentValues {

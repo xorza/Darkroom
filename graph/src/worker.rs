@@ -1,6 +1,7 @@
 use crate::common::shared_any_state::SharedAnyState;
 use crate::event_lambda::EventLambda;
-use crate::execution_graph::{ArgumentValues, ExecutionGraph, ExecutionStats, Result};
+use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
+use crate::execution_stats::ExecutionStats;
 use crate::function::FuncLib;
 use crate::graph::{Graph, NodeId};
 use common::ReadyState;

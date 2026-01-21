@@ -1,4 +1,5 @@
-use graph::execution_graph::{ArgumentValues, ExecutionStats};
+use graph::execution_graph::ArgumentValues;
+use graph::execution_stats::ExecutionStats;
 use graph::graph::NodeId;
 use hashbrown::HashMap;
 
