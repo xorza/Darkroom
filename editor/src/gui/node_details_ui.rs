@@ -1,16 +1,12 @@
-use std::sync::Arc;
-
-use egui::epaint::ColorImage;
 use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
 use graph::data::DynamicValue;
-use graph::execution_graph::ArgumentValues;
 use graph::graph::NodeId;
 use graph::prelude::ExecutionStats;
-use imaginarium::ColorFormat;
 use vision::Image;
 
 use crate::common::TextEdit;
 use crate::common::frame::Frame;
+use crate::common::image_utils::to_color_image;
 use crate::common::positioned_ui::PositionedUi;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
@@ -163,28 +159,15 @@ impl NodeDetailsUi {
             if let Some(value) = input.as_ref() {
                 if let Some(image) = value.as_custom::<Image>() {
                     if let Some(preview) = image.take_preview() {
-                        assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
-
                         let desc = *preview.desc();
-                        let pixels: Vec<Color32> = {
-                            let mut bytes = preview.take_bytes();
-                            let ptr = bytes.as_mut_ptr() as *mut Color32;
-                            let len = bytes.len() / 4;
-                            let cap = bytes.capacity() / 4;
-                            std::mem::forget(bytes);
-                            unsafe { Vec::from_raw_parts(ptr, len, cap) }
-                        };
-
-                        let color_image =
-                            ColorImage::new([desc.width as usize, desc.height as usize], pixels);
-
+                        let color_image = to_color_image(preview);
                         let texture_handle = gui.ui().ctx().load_texture(
                             format!("node_preview_{node_id}_input_{idx}"),
                             color_image,
                             TextureOptions::LINEAR,
                         );
                         let cached_texture = CachedTexture {
-                            desc: desc,
+                            desc,
                             handle: texture_handle,
                         };
 
@@ -200,21 +183,8 @@ impl NodeDetailsUi {
         for (idx, value) in node_cache.arg_values.outputs.iter().enumerate() {
             if let Some(image) = value.as_custom::<Image>() {
                 if let Some(preview) = image.take_preview() {
-                    assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
-
                     let desc = *preview.desc();
-                    let pixels: Vec<Color32> = {
-                        let mut bytes = preview.take_bytes();
-                        let ptr = bytes.as_mut_ptr() as *mut Color32;
-                        let len = bytes.len() / 4;
-                        let cap = bytes.capacity() / 4;
-                        std::mem::forget(bytes);
-                        unsafe { Vec::from_raw_parts(ptr, len, cap) }
-                    };
-
-                    let color_image =
-                        ColorImage::new([desc.width as usize, desc.height as usize], pixels);
-
+                    let color_image = to_color_image(preview);
                     let texture_handle = gui.ui().ctx().load_texture(
                         format!("node_preview_{node_id}_output_{idx}"),
                         color_image,

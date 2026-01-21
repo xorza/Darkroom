@@ -9,6 +9,7 @@ pub mod expander;
 pub mod file_picker;
 pub mod font;
 pub mod frame;
+pub mod image_utils;
 pub mod popup_menu;
 pub mod positioned_ui;
 pub mod primitives;
