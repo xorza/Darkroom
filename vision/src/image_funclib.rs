@@ -175,7 +175,7 @@ impl Default for ImageFuncLib {
 
                     ContrastBrightness::new(contrast, brightness)
                         .execute(&mut vision_ctx.processing_ctx, input_image, &mut output_buffer)
-                        .expect("Failed to apply brightness/contrast");
+                        .map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
@@ -205,7 +205,7 @@ impl Default for ImageFuncLib {
 
                     // For now, always load lena.tiff from test_resources
                     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
-                    let image = imaginarium::Image::read_file(path).expect("Failed to load image");
+                    let image = imaginarium::Image::read_file(path).map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(image));
 
@@ -244,8 +244,8 @@ impl Default for ImageFuncLib {
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
-                        .expect("Failed to get CPU image");
-                    cpu_image.save_file(path).expect("Failed to save image");
+                        .map_err(anyhow::Error::from)?;
+                    cpu_image.save_file(path).map_err(anyhow::Error::from)?;
 
                     Ok(())
                 })
@@ -378,7 +378,7 @@ impl Default for ImageFuncLib {
                             dst_image,
                             &mut output_buffer,
                         )
-                        .expect("Failed to blend images");
+                        .map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
@@ -476,7 +476,7 @@ impl Default for ImageFuncLib {
                             input_image,
                             &mut output_buffer,
                         )
-                        .expect("Failed to transform image");
+                        .map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(output_buffer));
 
