@@ -137,6 +137,7 @@ impl StaticValue {
             }
         }
     }
+    
     pub fn as_int(&self) -> i64 {
         match self {
             StaticValue::Int(value) => *value,
@@ -145,6 +146,7 @@ impl StaticValue {
             }
         }
     }
+    
     pub fn as_bool(&self) -> bool {
         match self {
             StaticValue::Bool(value) => *value,
@@ -153,6 +155,7 @@ impl StaticValue {
             }
         }
     }
+    
     pub fn as_string(&self) -> &str {
         match self {
             StaticValue::String(value) => value,
