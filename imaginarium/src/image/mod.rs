@@ -224,3 +224,9 @@ impl ImageDesc {
         }
     }
 }
+
+impl std::fmt::Display for ImageDesc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{} {}", self.width, self.height, self.color_format)
+    }
+}

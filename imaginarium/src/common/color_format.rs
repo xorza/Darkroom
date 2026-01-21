@@ -145,7 +145,7 @@ impl std::fmt::Display for ColorFormat {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "{}{}{}",
+            "{}{} {}",
             self.channel_count, self.channel_type, self.channel_size
         )
     }

@@ -70,6 +70,12 @@ impl CustomValue for Image {
     }
 }
 
+impl std::fmt::Display for Image {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.desc())
+    }
+}
+
 impl From<imaginarium::ImageBuffer> for Image {
     fn from(buffer: imaginarium::ImageBuffer) -> Self {
         Image(buffer)

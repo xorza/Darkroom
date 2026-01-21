@@ -13,7 +13,7 @@ id_type!(TypeId);
 
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
-pub trait CustomValue: Any + Send + Sync {
+pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
 }
 
@@ -153,7 +153,9 @@ impl PartialEq for StaticValue {
 
 impl Eq for StaticValue {}
 
-#[derive(Default, Debug, Clone)]
+type DisplayFn = Arc<dyn Fn(&dyn Any) -> String + Send + Sync>;
+
+#[derive(Default, Clone)]
 pub enum DynamicValue {
     #[default]
     None,
@@ -167,11 +169,38 @@ pub enum DynamicValue {
     Custom {
         type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
+        display_fn: DisplayFn,
     },
     Enum {
         type_id: TypeId,
         variant_name: String,
     },
+}
+
+impl std::fmt::Debug for DynamicValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DynamicValue::None => write!(f, "None"),
+            DynamicValue::Null => write!(f, "Null"),
+            DynamicValue::Float(v) => f.debug_tuple("Float").field(v).finish(),
+            DynamicValue::Int(v) => f.debug_tuple("Int").field(v).finish(),
+            DynamicValue::Bool(v) => f.debug_tuple("Bool").field(v).finish(),
+            DynamicValue::String(v) => f.debug_tuple("String").field(v).finish(),
+            DynamicValue::FsPath(v) => f.debug_tuple("FsPath").field(v).finish(),
+            DynamicValue::Custom { type_id, .. } => f
+                .debug_struct("Custom")
+                .field("type_id", type_id)
+                .finish_non_exhaustive(),
+            DynamicValue::Enum {
+                type_id,
+                variant_name,
+            } => f
+                .debug_struct("Enum")
+                .field("type_id", type_id)
+                .field("variant_name", variant_name)
+                .finish(),
+        }
+    }
 }
 
 impl StaticValue {
@@ -227,14 +256,22 @@ impl StaticValue {
 }
 
 impl DynamicValue {
-    pub fn from_custom<T: CustomValue>(value: T) -> Self {
+    pub fn from_custom<T: CustomValue + 'static>(value: T) -> Self {
         let DataType::Custom(type_def) = &value.data_type() else {
             panic!("value expected to be of custom type");
         };
 
+        let type_id = type_def.type_id;
+        let display_fn: DisplayFn = Arc::new(|data: &dyn Any| {
+            data.downcast_ref::<T>()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "<invalid>".to_string())
+        });
+
         DynamicValue::Custom {
-            type_id: type_def.type_id,
+            type_id,
             data: Arc::new(value),
+            display_fn,
         }
     }
 
@@ -503,6 +540,24 @@ impl DataType {
 
     pub fn is_custom(&self) -> bool {
         matches!(self, DataType::Custom(_))
+    }
+}
+
+impl Display for DynamicValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DynamicValue::None => write!(f, "-"),
+            DynamicValue::Null => write!(f, "null"),
+            DynamicValue::Float(v) => write!(f, "{v:.4}"),
+            DynamicValue::Int(v) => write!(f, "{v}"),
+            DynamicValue::Bool(v) => write!(f, "{v}"),
+            DynamicValue::String(s) => write!(f, "\"{s}\""),
+            DynamicValue::FsPath(s) => write!(f, "\"{s}\""),
+            DynamicValue::Custom {
+                data, display_fn, ..
+            } => write!(f, "{}", display_fn(data.as_ref())),
+            DynamicValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
+        }
     }
 }
 
