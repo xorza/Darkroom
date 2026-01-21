@@ -9,7 +9,7 @@ execution. The repository is a Cargo workspace containing a core graph library, 
 egui-based editor.
 
 **License:** AGPL  
-**Build System:** Cargo workspace with 4 member crates
+**Build System:** Cargo workspace with 5 member crates
 
 ## Repository Layout
 
@@ -17,6 +17,7 @@ egui-based editor.
 scenarium/
 ├── common/          # Shared utilities and helper macros
 ├── graph/           # Core graph library with execution engine
+├── imaginarium/     # GPU/CPU image processing library
 ├── editor/          # Visual egui-based graph editor
 ├── vision/          # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
@@ -106,23 +107,93 @@ Visual egui-based editor for graph creation and execution.
 
 **Dependencies:** common, graph, egui, eframe, wgpu, tokio, serde, rayon, rfd, arc-swap, bumpalo, lz4_flex
 
+### imaginarium
+
+GPU/CPU image processing library with automatic backend selection.
+
+**Key modules:**
+
+- `image/mod.rs` - Core `Image` and `ImageDesc` types with file I/O (PNG, JPEG, TIFF)
+- `common/color_format.rs` - `ColorFormat`, `ChannelCount`, `ChannelSize`, `ChannelType` enums
+- `common/error.rs` - Error types (`Error`, `Result`)
+- `common/conversion/` - Color format conversion (scalar and SIMD implementations)
+- `gpu/mod.rs` - `Gpu` context wrapping wgpu device/queue
+- `gpu/gpu_image.rs` - `GpuImage` for GPU-resident image data
+- `processing_context/mod.rs` - `ProcessingContext` managing GPU resources and pipelines
+- `processing_context/image_buffer.rs` - `ImageBuffer` smart buffer with CPU/GPU transfer
+- `processing_context/gpu_context.rs` - `GpuContext` with cached pipeline management
+- `ops/blend/` - Image blending (Normal, Add, Subtract, Multiply, Screen, Overlay)
+- `ops/contrast_brightness/` - Brightness/contrast adjustment
+- `ops/transform/` - Affine transforms with filter modes
+- `ops/backend_selection.rs` - Automatic CPU/GPU backend selection
+
+**Key types:**
+
+```rust
+Image              // CPU image with bytes, desc, file I/O, format conversion
+ImageDesc          // { width, height, stride, color_format }
+ImageBuffer        // Smart buffer with automatic CPU/GPU transfer (AtomicRefCell)
+Storage            // Cpu(Image) | Gpu(GpuImage)
+ColorFormat        // { channel_count, channel_size, channel_type }
+ChannelCount       // Gray | GrayAlpha | Rgb | Rgba
+ChannelSize        // _8bit | _16bit | _32bit
+ChannelType        // UInt | Float
+Gpu                // wgpu device/queue wrapper
+GpuImage           // GPU-resident image with upload/download
+ProcessingContext  // GPU context manager with pipeline caching
+GpuContext         // Holds Gpu + cached pipelines (GpuPipeline trait)
+```
+
+**Operations:**
+
+```rust
+Blend              // { mode: BlendMode, alpha: f32 }
+BlendMode          // Normal | Add | Subtract | Multiply | Screen | Overlay
+ContrastBrightness // { contrast: f32, brightness: f32 }
+Transform          // { transform: Affine2, filter: FilterMode }
+FilterMode         // Nearest | Linear
+```
+
+**Color formats (12 supported):**
+- Gray/GrayAlpha/RGB/RGBA × U8/U16/F32
+- Constants: `ColorFormat::RGBA_U8`, `ColorFormat::RGB_F32`, etc.
+- `ALL_FORMATS` and `ALPHA_FORMATS` arrays
+
+**Architecture patterns:**
+- Operations have `apply_cpu()`, `apply_gpu()`, and `execute()` methods
+- `execute()` auto-selects backend based on data location and format support
+- `ImageBuffer` uses interior mutability (`AtomicRefCell`) for CPU/GPU conversion
+- GPU pipelines cached in `GpuContext` via `GpuPipeline` trait
+- wgpu compute shaders for GPU operations
+
+**Dependencies:** common, anyhow, wgpu, pollster, image, tiff, bytemuck, strum, rayon, atomic_refcell
+
 ### vision
 
 Image processing function library adapting imaginarium operations to the node-based workflow.
 
 **Key modules:**
-- `image_funclib.rs` - Image processing functions (brightness_contrast, etc.)
+- `image_funclib.rs` - Image processing functions and type definitions
 - `vision_ctx.rs` - `VisionCtx` with `ProcessingContext` for GPU/CPU image operations
 
 **Key types:**
 - `ImageFuncLib` - Function library with image processing nodes
+- `Image` - Wrapper around `imaginarium::ImageBuffer` implementing `CustomValue`
 - `VisionCtx` - Context holding `imaginarium::ProcessingContext` for GPU/CPU dispatch
+- `ConversionFormat` - Enum for all 12 color format conversion targets
+- `IMAGE_DATA_TYPE` - Lazy-initialized custom `DataType` for images
+- `BLENDMODE_DATATYPE` - Lazy-initialized enum `DataType` for blend modes
+- `CONVERSION_FORMAT_DATATYPE` - Lazy-initialized enum `DataType` for conversion formats
 - `VISION_CTX_TYPE` - Lazy-initialized `ContextType` for context manager
 
 **Current functions:**
-- `brightness_contrast` - Adjusts image brightness and contrast using imaginarium
+- `brightness_contrast` - Adjusts image brightness and contrast
+- `transform` - Applies affine transformations (translate, scale, rotate)
+- `save_image` - Saves image to file
+- `convert` - Converts image to different color format (enum input)
+- `blend` - Blends two images with configurable mode and alpha
 
-**Dependencies:** common, graph, imaginarium
+**Dependencies:** common, graph, imaginarium, anyhow, strum, strum_macros
 
 ## Key Data Structures
 
