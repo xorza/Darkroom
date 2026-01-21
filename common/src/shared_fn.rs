@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 /// A shared function that can be either None or an Arc-wrapped function.
 /// Generic over the function signature F which must be Send + Sync + 'static.
+#[derive(Default)]
 pub enum SharedFn<F: ?Sized + Send + Sync + 'static> {
+    #[default]
     None,
     Some(Arc<F>),
 }
@@ -13,12 +15,6 @@ impl<F: ?Sized + Send + Sync + 'static> Clone for SharedFn<F> {
             SharedFn::None => SharedFn::None,
             SharedFn::Some(f) => SharedFn::Some(Arc::clone(f)),
         }
-    }
-}
-
-impl<F: ?Sized + Send + Sync + 'static> Default for SharedFn<F> {
-    fn default() -> Self {
-        SharedFn::None
     }
 }
 
