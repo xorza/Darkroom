@@ -28,8 +28,16 @@ impl ReadyState {
     }
 
     pub async fn wait(&self) {
-        while self.count.load(Ordering::SeqCst) < self.total {
-            self.notify.notified().await;
+        loop {
+            // Register for notification BEFORE checking the condition
+            // to avoid missing a signal between check and wait
+            let notified = self.notify.notified();
+
+            if self.count.load(Ordering::SeqCst) >= self.total {
+                return;
+            }
+
+            notified.await;
         }
     }
 }
