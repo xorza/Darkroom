@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-
 use egui::epaint::ColorImage;
-use egui::{Color32, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
+use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
 use graph::data::DynamicValue;
-use graph::execution_graph::ArgumentValues;
 use graph::graph::NodeId;
 use graph::prelude::ExecutionStats;
 use vision::Image;
@@ -20,18 +17,8 @@ use crate::model::graph_ui_action::GraphUiAction;
 const PANEL_WIDTH: f32 = 250.0;
 const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 32.0;
 
-#[derive(Default)]
-pub struct NodeDetailsUi {
-    preview_textures: HashMap<usize, TextureHandle>,
-}
-
-impl std::fmt::Debug for NodeDetailsUi {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NodeDetailsUi")
-            .field("preview_textures_count", &self.preview_textures.len())
-            .finish()
-    }
-}
+#[derive(Debug, Default)]
+pub struct NodeDetailsUi {}
 
 impl NodeDetailsUi {
     pub fn show(
@@ -39,7 +26,7 @@ impl NodeDetailsUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         interaction: &mut GraphUiInteraction,
-        argument_values_cache: &ArgumentValuesCache,
+        argument_values_cache: &mut ArgumentValuesCache,
     ) {
         let Some(selected_node_id) = ctx.view_graph.selected_node_id else {
             return;
@@ -79,7 +66,7 @@ impl NodeDetailsUi {
         ctx: &mut GraphContext<'_>,
         node_id: NodeId,
         interaction: &mut GraphUiInteraction,
-        argument_values_cache: &ArgumentValuesCache,
+        argument_values_cache: &mut ArgumentValuesCache,
     ) {
         // Get current name from node
         let original_name = ctx.view_graph.graph.by_id(&node_id).unwrap().name.clone();
@@ -123,100 +110,109 @@ impl NodeDetailsUi {
         }
 
         // Display cached argument values
-        if let Some(values) = argument_values_cache.get(&node_id) {
-            gui.ui().add_space(8.0);
-            gui.ui().separator();
-            gui.ui().add_space(4.0);
+        let Some(values) = argument_values_cache.get(&node_id) else {
+            return;
+        };
 
-            // Get function info for input/output names
-            let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-            let func = ctx.func_lib.by_id(&node.func_id);
+        gui.ui().add_space(8.0);
+        gui.ui().separator();
+        gui.ui().add_space(4.0);
 
-            // Display inputs
-            if !values.inputs.is_empty() {
-                gui.ui().label("Inputs:");
-                for (idx, input_value) in values.inputs.iter().enumerate() {
-                    let input_name = func
-                        .and_then(|f| f.inputs.get(idx))
-                        .map(|i| i.name.as_str())
-                        .unwrap_or("?");
-                    let value_str = match input_value {
-                        Some(v) => format_dynamic_value(v),
-                        None => "-".to_string(),
-                    };
-                    gui.ui().label(format!("  {input_name}: {value_str}"));
-                }
+        // Get function info for input/output names
+        let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
+        let func = ctx.func_lib.by_id(&node.func_id);
+
+        // Display inputs
+        if !values.inputs.is_empty() {
+            gui.ui().label("Inputs:");
+            for (idx, input_value) in values.inputs.iter().enumerate() {
+                let input_name = func
+                    .and_then(|f| f.inputs.get(idx))
+                    .map(|i| i.name.as_str())
+                    .unwrap_or("?");
+                let value_str = match input_value {
+                    Some(v) => format_dynamic_value(v),
+                    None => "-".to_string(),
+                };
+                gui.ui().label(format!("  {input_name}: {value_str}"));
             }
-
-            // Display outputs
-            if !values.outputs.is_empty() {
-                gui.ui().add_space(4.0);
-                gui.ui().label("Outputs:");
-                for (idx, output_value) in values.outputs.iter().enumerate() {
-                    let output_name = func
-                        .and_then(|f| f.outputs.get(idx))
-                        .map(|o| o.name.as_str())
-                        .unwrap_or("?");
-                    let value_str = format_dynamic_value(output_value);
-                    gui.ui().label(format!("  {output_name}: {value_str}"));
-                }
-            }
-
-            // Try to render image preview from outputs
-            self.show_image_preview(gui, values);
         }
-    }
 
-    fn show_image_preview(&mut self, gui: &mut Gui<'_>, values: &ArgumentValues) {
-        // Collect all images from inputs and outputs
-        let images: Vec<_> = values
+        // Display outputs
+        if !values.outputs.is_empty() {
+            gui.ui().add_space(4.0);
+            gui.ui().label("Outputs:");
+            for (idx, output_value) in values.outputs.iter().enumerate() {
+                let output_name = func
+                    .and_then(|f| f.outputs.get(idx))
+                    .map(|o| o.name.as_str())
+                    .unwrap_or("?");
+                let value_str = format_dynamic_value(output_value);
+                gui.ui().label(format!("  {output_name}: {value_str}"));
+            }
+        }
+
+        // Collect image previews while values is borrowed
+        let previews: Vec<_> = values
             .inputs
             .iter()
             .filter_map(|v| v.as_ref())
             .chain(values.outputs.iter())
             .filter_map(|v| v.as_custom::<Image>())
+            .filter_map(|img| {
+                let guard = img.preview();
+                guard.as_ref().map(|preview| {
+                    let desc = preview.desc();
+                    (
+                        desc.width as usize,
+                        desc.height as usize,
+                        preview.bytes().to_vec(),
+                    )
+                })
+            })
             .collect();
 
-        if images.is_empty() {
-            self.preview_textures.clear();
+        Self::show_image_previews(gui, node_id, &previews, argument_values_cache);
+    }
+
+    fn show_image_previews(
+        gui: &mut Gui<'_>,
+        node_id: NodeId,
+        previews: &[(usize, usize, Vec<u8>)],
+        cache: &mut ArgumentValuesCache,
+    ) {
+        if previews.is_empty() {
+            cache.preview_textures.remove(&node_id);
             return;
         }
 
+        let textures = cache.get_textures(&node_id);
+
         // Remove stale textures
-        self.preview_textures.retain(|idx, _| *idx < images.len());
+        textures.retain(|idx, _| *idx < previews.len());
 
         gui.ui().add_space(8.0);
         gui.ui().separator();
         gui.ui().add_space(4.0);
         gui.ui().label("Previews:");
 
-        for (idx, image) in images.iter().enumerate() {
-            let preview_guard = image.preview();
-            let Some(preview) = preview_guard.as_ref() else {
-                continue;
-            };
-
-            // Convert preview image to egui texture
-            let desc = preview.desc();
-            let width = desc.width as usize;
-            let height = desc.height as usize;
-
+        for (idx, (width, height, bytes)) in previews.iter().enumerate() {
             // Create ColorImage from RGBA_U8 data
-            let color_image = ColorImage::from_rgba_unmultiplied([width, height], preview.bytes());
+            let color_image = ColorImage::from_rgba_unmultiplied([*width, *height], bytes);
 
             // Load or update texture
-            let texture = self.preview_textures.entry(idx).or_insert_with(|| {
+            let texture = textures.entry(idx).or_insert_with(|| {
                 gui.ui().ctx().load_texture(
-                    format!("node_preview_{idx}"),
+                    format!("node_preview_{node_id}_{idx}"),
                     color_image.clone(),
                     TextureOptions::LINEAR,
                 )
             });
 
             // Update texture if dimensions changed
-            if texture.size() != [width, height] {
+            if texture.size() != [*width, *height] {
                 *texture = gui.ui().ctx().load_texture(
-                    format!("node_preview_{idx}"),
+                    format!("node_preview_{node_id}_{idx}"),
                     color_image.clone(),
                     TextureOptions::LINEAR,
                 );
@@ -225,8 +221,8 @@ impl NodeDetailsUi {
             }
 
             // Calculate display size maintaining aspect ratio
-            let aspect = width as f32 / height as f32;
-            let display_width = PREVIEW_MAX_WIDTH.min(width as f32);
+            let aspect = *width as f32 / *height as f32;
+            let display_width = PREVIEW_MAX_WIDTH.min(*width as f32);
             let display_height = display_width / aspect;
 
             gui.ui().add_space(4.0);

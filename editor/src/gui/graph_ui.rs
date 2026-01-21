@@ -184,7 +184,7 @@ impl GraphUi {
                 gui,
                 &mut ctx,
                 &mut app_data.interaction,
-                &app_data.argument_values_cache,
+                &mut app_data.argument_values_cache,
             );
 
             self.handle_new_node_popup(
