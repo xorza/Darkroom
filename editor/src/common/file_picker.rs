@@ -1,11 +1,11 @@
 use std::path::Path;
 
-use egui::{Align2, Pos2, Response, Sense, StrokeKind, pos2, vec2};
+use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec2};
 use graph::data::{FsPathConfig, FsPathMode};
 
 use crate::common::button::Button;
 use crate::gui::Gui;
-use crate::gui::style::DragValueStyle;
+use crate::gui::style::{ButtonStyle, DragValueStyle};
 
 #[derive(Debug)]
 pub struct FilePicker<'a> {
@@ -48,7 +48,7 @@ impl<'a> FilePicker<'a> {
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_else(|| "(none)".to_string());
 
-        let padding = vec2(gui.style.small_padding, 0.0);
+        let padding = gui.style.small_padding;
         let font = gui.style.sub_font.clone();
         let text_color = gui.style.text_color;
         let style = self
@@ -60,49 +60,52 @@ impl<'a> FilePicker<'a> {
             gui.ui()
                 .painter()
                 .layout_no_wrap(browse_text.to_string(), font.clone(), text_color);
-        let browse_size = browse_galley.size() + padding * 2.0;
+        let browse_text_size = browse_galley.size();
 
         let filename_galley =
             gui.ui()
                 .painter()
                 .layout_no_wrap(display_name.clone(), font.clone(), text_color);
-        let filename_size = filename_galley.size() + padding * 2.0;
+        let filename_text_size = filename_galley.size();
 
-        let separator_width = 1.0;
+        let inner_height = filename_text_size.y.max(browse_text_size.y);
+        let button_inner_padding = gui.style.padding;
         let total_size = vec2(
-            filename_size.x + separator_width + browse_size.x,
-            filename_size.y.max(browse_size.y),
+            padding
+                + filename_text_size.x
+                + padding
+                + button_inner_padding
+                + browse_text_size.x
+                + button_inner_padding,
+            inner_height + padding * 2.0,
         );
 
         let rect = self.align.anchor_size(self.pos, total_size);
 
-        let filename_rect =
-            egui::Rect::from_min_size(rect.min, vec2(filename_size.x, total_size.y));
-        let browse_rect = egui::Rect::from_min_size(
-            pos2(filename_rect.max.x + separator_width, rect.min.y),
-            vec2(browse_size.x, total_size.y),
-        );
+        // Calculate separator position
+        let separator_x = rect.min.x + padding + filename_text_size.x + padding;
 
-        // Draw filename background
+        // Browse button rect (right side, inside the main rect)
+        let browse_rect =
+            egui::Rect::from_min_max(pos2(separator_x, rect.min.y), rect.max).shrink(padding);
+
+        // Draw outer background for entire widget
         gui.painter().rect(
-            filename_rect,
+            rect,
             style.radius,
             style.fill,
             style.stroke,
             StrokeKind::Outside,
         );
 
-        // Draw filename text centered vertically
-        let filename_text_pos = pos2(
-            filename_rect.min.x + padding.x,
-            filename_rect.center().y - filename_galley.size().y * 0.5,
+        // Draw filename text
+        let filename_pos = pos2(
+            rect.min.x + padding,
+            rect.center().y - filename_text_size.y * 0.5,
         );
         gui.painter()
-            .galley(filename_text_pos, filename_galley, text_color);
+            .galley(filename_pos, filename_galley, text_color);
 
-        let response = gui.ui().allocate_rect(filename_rect, Sense::hover());
-
-        // Browse button
         let browse_response = Button::default()
             .text(browse_text)
             .font(font)
@@ -126,6 +129,6 @@ impl<'a> FilePicker<'a> {
             }
         }
 
-        response | browse_response
+        browse_response
     }
 }
