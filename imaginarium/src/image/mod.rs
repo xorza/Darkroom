@@ -167,20 +167,21 @@ impl Image {
             return self;
         }
 
+        let desc = *self.desc();
         let bytes = add_stride_padding(
-            &self.bytes,
-            self.desc.width,
-            self.desc.height,
+            self.take_bytes(),
+            desc.width,
+            desc.height,
             aligned_stride,
-            self.desc.color_format.byte_count(),
+            desc.color_format.byte_count(),
         );
 
         Image {
             desc: ImageDesc {
-                width: self.desc.width,
-                height: self.desc.height,
+                width: desc.width,
+                height: desc.height,
                 stride: aligned_stride,
-                color_format: self.desc.color_format,
+                color_format: desc.color_format,
             },
             bytes,
         }

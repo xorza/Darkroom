@@ -5,7 +5,7 @@ pub(crate) fn align_stride(n: usize) -> usize {
 
 /// Adds stride padding to tightly packed pixel data.
 pub(crate) fn add_stride_padding(
-    src: &[u8],
+    src: Vec<u8>,
     width: u32,
     height: u32,
     stride: usize,

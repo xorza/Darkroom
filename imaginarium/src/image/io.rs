@@ -41,7 +41,7 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
     let desc = ImageDesc::new(img.width(), img.height(), color_format);
     let bytes = add_stride_padding(
-        img.as_bytes(),
+        img.into_bytes(),
         desc.width,
         desc.height,
         desc.stride,
@@ -101,7 +101,7 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
     let desc = ImageDesc::new(w, h, color_format);
     let bytes = add_stride_padding(
-        &bytes,
+        bytes,
         desc.width,
         desc.height,
         desc.stride,
