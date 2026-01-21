@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
-use wgpu::util::DeviceExt;
+use common::slot::Slot;
+use wgpu::{BufferAsyncError, util::DeviceExt};
 
 use crate::prelude::*;
 
@@ -102,6 +103,48 @@ impl GpuImage {
         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
 
         ctx.wait();
+
+        let data = buffer_slice.get_mapped_range();
+        let bytes = data.to_vec();
+        drop(data);
+        staging_buffer.unmap();
+
+        Image::new_with_data(self.desc, bytes)
+    }
+
+    /// Downloads GPU image data to CPU.
+    pub async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
+        let size = self.desc().size_in_bytes() as u64;
+
+        let staging_buffer = ctx.device().create_buffer(&wgpu::BufferDescriptor {
+            label: Some("gpu_image_staging"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder = ctx
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("gpu_image_download_encoder"),
+            });
+
+        encoder.copy_buffer_to_buffer(&self.buffer, 0, &staging_buffer, 0, size);
+        ctx.queue().submit(std::iter::once(encoder.finish()));
+
+        let slot = Slot::<std::result::Result<(), BufferAsyncError>>::default();
+        let buffer_slice = staging_buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, {
+            let slot = slot.clone();
+            move |result| {
+                slot.send(result);
+            }
+        });
+
+        slot.take_or_wait()
+            .await
+            .unwrap()
+            .map_err(|err| Error::Gpu(err.to_string()))?;
 
         let data = buffer_slice.get_mapped_range();
         let bytes = data.to_vec();
