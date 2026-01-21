@@ -5,7 +5,7 @@ use eframe::egui;
 use egui::{Align2, PointerButton, Pos2, Response, Sense, StrokeKind, Vec2, pos2, vec2};
 use graph::data::DataType;
 use graph::data::EnumDef;
-use graph::data::FsPathMode;
+use graph::data::FsPathConfig;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::Func;
@@ -173,14 +173,14 @@ impl<'a> ConstBindFrame<'a> {
                     )
                 }
                 StaticValue::FsPath(path) => {
-                    let DataType::FsPath(mode) = &func.inputs[input_idx].data_type else {
+                    let DataType::FsPath(config) = &func.inputs[input_idx].data_type else {
                         panic!("Expected FsPath data type")
                     };
                     render_fs_path_input(
                         gui,
                         ("const_fspath_input", node.id, input_idx),
                         path,
-                        *mode,
+                        config,
                         connection_start,
                         &const_bind_style,
                     )
@@ -274,20 +274,14 @@ fn render_fs_path_input(
     gui: &mut Gui<'_>,
     id_salt: impl std::hash::Hash,
     path: &mut String,
-    mode: FsPathMode,
+    config: &FsPathConfig,
     pos: Pos2,
     style: &crate::gui::style::DragValueStyle,
 ) -> Response {
-    let display_name = match mode {
-        FsPathMode::Directory => Path::new(path.as_str())
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "(none)".to_string()),
-        _ => Path::new(path.as_str())
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "(none)".to_string()),
-    };
+    let display_name = Path::new(path.as_str())
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "(none)".to_string());
 
     let _id = gui.ui().make_persistent_id(&id_salt);
 
@@ -337,8 +331,14 @@ fn render_fs_path_input(
     let browse_response = gui.ui().put(browse_rect, egui::Button::new(browse_text));
 
     if browse_response.clicked() {
-        let dialog = rfd::FileDialog::new();
-        let selected_path = match mode {
+        use graph::data::FsPathMode;
+
+        let mut dialog = rfd::FileDialog::new();
+        if !config.extensions.is_empty() {
+            let extensions: Vec<&str> = config.extensions.iter().map(|s| s.as_str()).collect();
+            dialog = dialog.add_filter("Allowed files", &extensions);
+        }
+        let selected_path = match config.mode {
             FsPathMode::ExistingFile => dialog.pick_file(),
             FsPathMode::NewFile => dialog.save_file(),
             FsPathMode::Directory => dialog.pick_folder(),

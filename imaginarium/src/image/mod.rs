@@ -7,6 +7,9 @@ mod tests;
 
 use std::path::Path;
 
+/// Supported image file extensions for reading and writing.
+pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
+
 use crate::common::conversion::convert_image;
 use crate::common::{ColorFormat, Error, Result};
 

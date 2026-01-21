@@ -2,10 +2,12 @@ use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use graph::data::{CustomValue, DataType, DynamicValue, FsPathMode};
+use graph::data::{CustomValue, DataType, DynamicValue, FsPathConfig, FsPathMode};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
+use imaginarium::{
+    Blend, BlendMode, ColorFormat, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2,
+};
 use std::str::FromStr;
 use strum_macros::{EnumString, VariantNames};
 
@@ -195,7 +197,10 @@ impl Default for ImageFuncLib {
             inputs: vec![FuncInput {
                 name: "path".to_string(),
                 required: true,
-                data_type: DataType::FsPath(FsPathMode::ExistingFile),
+                data_type: DataType::FsPath(FsPathConfig::with_extensions(
+                    FsPathMode::ExistingFile,
+                    SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+                )),
                 default_value: None,
                 value_options: vec![],
             }],
@@ -239,7 +244,10 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "path".to_string(),
                     required: true,
-                    data_type: DataType::FsPath(FsPathMode::NewFile),
+                    data_type: DataType::FsPath(FsPathConfig::with_extensions(
+                        FsPathMode::NewFile,
+                        SUPPORTED_EXTENSIONS.iter().map(|s| s.to_string()).collect(),
+                    )),
                     default_value: None,
                     value_options: vec![],
                 },

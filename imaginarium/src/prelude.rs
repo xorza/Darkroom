@@ -7,7 +7,7 @@ pub use crate::common::{
 pub use crate::common::{Error, Result};
 
 // Image types
-pub use crate::image::{Image, ImageDesc};
+pub use crate::image::{Image, ImageDesc, SUPPORTED_EXTENSIONS};
 
 // Context and smart buffers
 pub use crate::processing_context::{

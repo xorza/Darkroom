@@ -59,6 +59,40 @@ pub enum FsPathMode {
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
+pub struct FsPathConfig {
+    pub mode: FsPathMode,
+    pub extensions: Vec<String>,
+}
+
+impl FsPathConfig {
+    pub fn new(mode: FsPathMode) -> Self {
+        Self {
+            mode,
+            extensions: Vec::new(),
+        }
+    }
+
+    pub fn with_extensions(mode: FsPathMode, extensions: Vec<String>) -> Self {
+        Self { mode, extensions }
+    }
+}
+
+impl PartialEq for FsPathConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.mode == other.mode
+    }
+}
+
+impl Eq for FsPathConfig {}
+
+impl Hash for FsPathConfig {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.mode.hash(state);
+        self.extensions.hash(state);
+    }
+}
+
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
     Null,
@@ -66,7 +100,7 @@ pub enum DataType {
     Int,
     Bool,
     String,
-    FsPath(FsPathMode),
+    FsPath(FsPathConfig),
     Array {
         element_type: Box<DataType>,
         // length is not included in the hash or equality check
@@ -497,7 +531,7 @@ impl FromStr for DataType {
             "int" => Ok(DataType::Int),
             "bool" => Ok(DataType::Bool),
             "string" => Ok(DataType::String),
-            "path" => Ok(DataType::FsPath(FsPathMode::default())),
+            "path" => Ok(DataType::FsPath(FsPathConfig::default())),
             _ => Err(()),
         }
     }
@@ -511,7 +545,7 @@ impl PartialEq for DataType {
             (DataType::Int, DataType::Int) => true,
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
-            (DataType::FsPath(mode_a), DataType::FsPath(mode_b)) => mode_a == mode_b,
+            (DataType::FsPath(config_a), DataType::FsPath(config_b)) => config_a == config_b,
 
             (DataType::Custom(def1), DataType::Custom(def2)) => def1.type_id == def2.type_id,
 
@@ -543,9 +577,9 @@ impl Hash for DataType {
             DataType::Int => 2.hash(state),
             DataType::Bool => 3.hash(state),
             DataType::String => 4.hash(state),
-            DataType::FsPath(mode) => {
+            DataType::FsPath(config) => {
                 5.hash(state);
-                mode.hash(state);
+                config.hash(state);
             }
 
             DataType::Array { element_type, .. } => {
