@@ -6,7 +6,8 @@ use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
-use strum_macros::VariantNames;
+use std::str::FromStr;
+use strum_macros::{EnumString, VariantNames};
 
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
@@ -15,7 +16,7 @@ pub static BLENDMODE_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::from_enum::<BlendMode>("54d531cf-d353-4e30-8ea7-8823a9b5305f", "BlendMode")
 });
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantNames)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantNames, EnumString)]
 pub enum ConversionFormat {
     GrayU8,
     GrayU16,
@@ -294,22 +295,9 @@ impl Default for ImageFuncLib {
                         .make_cpu(&vision_ctx.processing_ctx)
                         .map_err(anyhow::Error::from)?;
 
-                    let target_format = match format_str {
-                        "GrayU8" => ConversionFormat::GrayU8,
-                        "GrayU16" => ConversionFormat::GrayU16,
-                        "GrayF32" => ConversionFormat::GrayF32,
-                        "GrayAlphaU8" => ConversionFormat::GrayAlphaU8,
-                        "GrayAlphaU16" => ConversionFormat::GrayAlphaU16,
-                        "GrayAlphaF32" => ConversionFormat::GrayAlphaF32,
-                        "RgbU8" => ConversionFormat::RgbU8,
-                        "RgbU16" => ConversionFormat::RgbU16,
-                        "RgbF32" => ConversionFormat::RgbF32,
-                        "RgbaU8" => ConversionFormat::RgbaU8,
-                        "RgbaU16" => ConversionFormat::RgbaU16,
-                        "RgbaF32" => ConversionFormat::RgbaF32,
-                        _ => panic!("Unknown conversion format: {}", format_str),
-                    }
-                    .to_color_format();
+                    let target_format = ConversionFormat::from_str(format_str)
+                        .expect("Invalid conversion format")
+                        .to_color_format();
 
                     let converted = cpu_image
                         .clone()
