@@ -112,7 +112,11 @@ impl GpuImage {
         Image::new_with_data(self.desc, bytes)
     }
 
-    /// Downloads GPU image data to CPU.
+    /// Downloads GPU image data to CPU asynchronously.
+    ///
+    /// Note: This method requires the GPU device to be polled (via `ctx.wait()` or
+    /// `ctx.wait_async()`) for the download to complete. The polling can happen
+    /// from another thread - the callback will fire when polled, waking up this future.
     pub async fn to_image_async(&self, ctx: &Gpu) -> Result<Image> {
         let size = self.desc().size_in_bytes() as u64;
 
