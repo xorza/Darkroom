@@ -7,6 +7,10 @@
 // 5 = GRAY_ALPHA_F32 (8 bytes per pixel, 2 floats)
 // 6 = RGB_F32 (12 bytes per pixel, 3 floats)
 // 7 = RGBA_F32 (16 bytes per pixel, 4 floats)
+// 8 = GRAY_U16 (2 bytes per pixel)
+// 9 = GRAY_ALPHA_U16 (4 bytes per pixel)
+// 10 = RGB_U16 (6 bytes per pixel)
+// 11 = RGBA_U16 (8 bytes per pixel)
 
 struct Params {
     // Inverse transform matrix (2x2) + translation (row-major)
@@ -160,6 +164,73 @@ fn read_pixel(x: i32, y: i32) -> vec4<f32> {
                 bitcast<f32>(input_data[idx + 3u])
             );
         }
+        case 8u: {
+            // GRAY_U16: 2 bytes per pixel
+            let byte_offset = uy * params.input_stride + ux * 2u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let word = input_data[u32_idx];
+
+            var gray: u32;
+            if byte_in_u32 == 0u {
+                gray = word & 0xFFFFu;
+            } else {
+                gray = (word >> 16u) & 0xFFFFu;
+            }
+
+            let g = f32(gray) / 65535.0;
+            return vec4<f32>(g, g, g, 1.0);
+        }
+        case 9u: {
+            // GRAY_ALPHA_U16: 4 bytes per pixel (word-aligned)
+            let stride_u32 = params.input_stride / 4u;
+            let idx = uy * stride_u32 + ux;
+            let word = input_data[idx];
+            let gray = f32(word & 0xFFFFu) / 65535.0;
+            let alpha = f32((word >> 16u) & 0xFFFFu) / 65535.0;
+            return vec4<f32>(gray, gray, gray, alpha);
+        }
+        case 10u: {
+            // RGB_U16: 6 bytes per pixel
+            let byte_offset = uy * params.input_stride + ux * 6u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+
+            let word0 = input_data[u32_idx];
+            let word1 = input_data[u32_idx + 1u];
+            let word2 = input_data[u32_idx + 2u];
+
+            var r: u32;
+            var g: u32;
+            var b: u32;
+
+            if byte_in_u32 == 0u {
+                // R at bytes 0-1, G at bytes 2-3, B at bytes 4-5
+                r = word0 & 0xFFFFu;
+                g = (word0 >> 16u) & 0xFFFFu;
+                b = word1 & 0xFFFFu;
+            } else {
+                // byte_in_u32 == 2: R at bytes 2-3, G at bytes 4-5, B at bytes 6-7
+                r = (word0 >> 16u) & 0xFFFFu;
+                g = word1 & 0xFFFFu;
+                b = (word1 >> 16u) & 0xFFFFu;
+            }
+
+            return vec4<f32>(f32(r) / 65535.0, f32(g) / 65535.0, f32(b) / 65535.0, 1.0);
+        }
+        case 11u: {
+            // RGBA_U16: 8 bytes per pixel (2 u32s per pixel)
+            let stride_u32 = params.input_stride / 4u;
+            let idx = uy * stride_u32 + ux * 2u;
+            let word0 = input_data[idx];
+            let word1 = input_data[idx + 1u];
+            return vec4<f32>(
+                f32(word0 & 0xFFFFu) / 65535.0,
+                f32((word0 >> 16u) & 0xFFFFu) / 65535.0,
+                f32(word1 & 0xFFFFu) / 65535.0,
+                f32((word1 >> 16u) & 0xFFFFu) / 65535.0
+            );
+        }
         default: {
             return vec4<f32>(0.0, 0.0, 0.0, 0.0);
         }
@@ -259,6 +330,58 @@ fn write_pixel(x: u32, y: u32, color: vec4<f32>) {
             atomicStore(&output_data[idx + 1u], bitcast<u32>(color.g));
             atomicStore(&output_data[idx + 2u], bitcast<u32>(color.b));
             atomicStore(&output_data[idx + 3u], bitcast<u32>(color.a));
+        }
+        case 8u: {
+            // GRAY_U16: 2 bytes per pixel - use atomic OR
+            let byte_offset = y * params.output_stride + x * 2u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let gray = u32(clamp(color.r * 65535.0, 0.0, 65535.0));
+
+            if byte_in_u32 == 0u {
+                atomicOr(&output_data[u32_idx], gray);
+            } else {
+                atomicOr(&output_data[u32_idx], gray << 16u);
+            }
+        }
+        case 9u: {
+            // GRAY_ALPHA_U16: 4 bytes per pixel (word-aligned)
+            let stride_u32 = params.output_stride / 4u;
+            let idx = y * stride_u32 + x;
+            let gray = u32(clamp(color.r * 65535.0, 0.0, 65535.0));
+            let alpha = u32(clamp(color.a * 65535.0, 0.0, 65535.0));
+            atomicStore(&output_data[idx], gray | (alpha << 16u));
+        }
+        case 10u: {
+            // RGB_U16: 6 bytes per pixel - use atomic OR
+            let byte_offset = y * params.output_stride + x * 6u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+
+            let r = u32(clamp(color.r * 65535.0, 0.0, 65535.0));
+            let g = u32(clamp(color.g * 65535.0, 0.0, 65535.0));
+            let b = u32(clamp(color.b * 65535.0, 0.0, 65535.0));
+
+            if byte_in_u32 == 0u {
+                // R at bytes 0-1, G at bytes 2-3, B at bytes 4-5
+                atomicOr(&output_data[u32_idx], r | (g << 16u));
+                atomicOr(&output_data[u32_idx + 1u], b);
+            } else {
+                // byte_in_u32 == 2: R at bytes 2-3, G at bytes 4-5, B at bytes 6-7
+                atomicOr(&output_data[u32_idx], r << 16u);
+                atomicOr(&output_data[u32_idx + 1u], g | (b << 16u));
+            }
+        }
+        case 11u: {
+            // RGBA_U16: 8 bytes per pixel (2 u32s per pixel, word-aligned)
+            let stride_u32 = params.output_stride / 4u;
+            let idx = y * stride_u32 + x * 2u;
+            let r = u32(clamp(color.r * 65535.0, 0.0, 65535.0));
+            let g = u32(clamp(color.g * 65535.0, 0.0, 65535.0));
+            let b = u32(clamp(color.b * 65535.0, 0.0, 65535.0));
+            let a = u32(clamp(color.a * 65535.0, 0.0, 65535.0));
+            atomicStore(&output_data[idx], r | (g << 16u));
+            atomicStore(&output_data[idx + 1u], b | (a << 16u));
         }
         default: {}
     }

@@ -15,6 +15,10 @@ const FORMAT_GRAY_F32: u32 = 4;
 const FORMAT_GRAY_ALPHA_F32: u32 = 5;
 const FORMAT_RGB_F32: u32 = 6;
 const FORMAT_RGBA_F32: u32 = 7;
+const FORMAT_GRAY_U16: u32 = 8;
+const FORMAT_GRAY_ALPHA_U16: u32 = 9;
+const FORMAT_RGB_U16: u32 = 10;
+const FORMAT_RGBA_U16: u32 = 11;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
@@ -52,6 +56,10 @@ fn get_format_type(format: ColorFormat) -> u32 {
         (ChannelCount::GrayAlpha, ChannelSize::_32bit, ChannelType::Float) => FORMAT_GRAY_ALPHA_F32,
         (ChannelCount::Rgb, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGB_F32,
         (ChannelCount::Rgba, ChannelSize::_32bit, ChannelType::Float) => FORMAT_RGBA_F32,
+        (ChannelCount::Gray, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_GRAY_U16,
+        (ChannelCount::GrayAlpha, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_GRAY_ALPHA_U16,
+        (ChannelCount::Rgb, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGB_U16,
+        (ChannelCount::Rgba, ChannelSize::_16bit, ChannelType::UInt) => FORMAT_RGBA_U16,
         _ => panic!("Unsupported format for Transform: {}", format),
     }
 }
@@ -79,11 +87,16 @@ pub(super) fn apply(
 
     let format_type = get_format_type(input_desc.color_format);
 
-    // For formats that use OR-based writing (non-word-aligned: GRAY_U8, GRAY_ALPHA_U8, RGB_U8),
+    // For formats that use OR-based writing (non-word-aligned),
     // we need to clear the output buffer first to avoid garbage data
     let needs_clear = matches!(
         format_type,
-        FORMAT_GRAY_U8 | FORMAT_GRAY_ALPHA_U8 | FORMAT_RGB_U8
+        FORMAT_GRAY_U8
+            | FORMAT_GRAY_ALPHA_U8
+            | FORMAT_RGB_U8
+            | FORMAT_GRAY_U16
+            | FORMAT_GRAY_ALPHA_U16
+            | FORMAT_RGB_U16
     );
 
     if needs_clear {
