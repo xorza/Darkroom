@@ -225,7 +225,6 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
-            ..Default::default()
         });
 
         // save_image

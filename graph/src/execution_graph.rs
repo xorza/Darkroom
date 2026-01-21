@@ -32,6 +32,12 @@ pub struct ExecutedNodeStats {
     pub elapsed_secs: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct NodeError {
+    pub node_id: NodeId,
+    pub error: Error,
+}
+
 #[derive(Debug)]
 pub struct ExecutionStats {
     pub elapsed_secs: f64,
@@ -40,6 +46,7 @@ pub struct ExecutionStats {
     pub missing_inputs: Vec<PortAddress>,
     pub cached_nodes: Vec<NodeId>,
     pub triggered_events: Vec<EventRef>,
+    pub node_errors: Vec<NodeError>,
 }
 
 #[derive(Debug, Default)]
@@ -823,6 +830,7 @@ impl ExecutionGraph {
         let mut executed_nodes: Vec<ExecutedNodeStats> = Vec::default();
         let mut missing_inputs: Vec<PortAddress> = Vec::default();
         let mut cached_nodes: Vec<NodeId> = Vec::default();
+        let mut node_errors: Vec<NodeError> = Vec::default();
 
         for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
@@ -835,7 +843,6 @@ impl ExecutionGraph {
         for e_node_idx in self.e_node_process_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             if e_node.missing_required_inputs {
-                // nodes_with_missing_inputs.push(e_node.id);
                 for (input_idx, e_input) in e_node.inputs.iter().enumerate() {
                     if e_input.missing {
                         missing_inputs.push(PortAddress {
@@ -848,6 +855,12 @@ impl ExecutionGraph {
             if e_node.cached {
                 cached_nodes.push(e_node.id);
             }
+            if let Some(error) = &e_node.error {
+                node_errors.push(NodeError {
+                    node_id: e_node.id,
+                    error: error.clone(),
+                });
+            }
         }
 
         ExecutionStats {
@@ -856,6 +869,7 @@ impl ExecutionGraph {
             missing_inputs,
             cached_nodes,
             triggered_events: Vec::default(),
+            node_errors,
         }
     }
 
