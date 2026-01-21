@@ -1,5 +1,5 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, RwLock, RwLockReadGuard};
 
 use graph::context::ContextManager;
 use graph::data::{CustomValue, DataType};
@@ -34,8 +34,8 @@ impl Image {
         }
     }
 
-    pub fn take_preview(&self) -> Option<imaginarium::Image> {
-        self.preview.write().unwrap().take()
+    pub fn preview(&self) -> RwLockReadGuard<'_, Option<imaginarium::Image>> {
+        self.preview.read().unwrap()
     }
 }
 
@@ -94,8 +94,6 @@ impl CustomValue for Image {
         };
 
         *self.preview.write().unwrap() = Some(preview_image);
-
-        tracing::info!("Preview image created");
     }
 }
 

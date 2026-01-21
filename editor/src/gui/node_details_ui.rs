@@ -1,7 +1,10 @@
-use egui::{Color32, Pos2, Rect, Vec2};
+use egui::epaint::ColorImage;
+use egui::{Color32, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 use graph::data::DynamicValue;
+use graph::execution_graph::ArgumentValues;
 use graph::graph::NodeId;
 use graph::prelude::ExecutionStats;
+use vision::Image;
 
 use crate::common::TextEdit;
 use crate::common::frame::Frame;
@@ -13,9 +16,20 @@ use crate::model::ArgumentValuesCache;
 use crate::model::graph_ui_action::GraphUiAction;
 
 const PANEL_WIDTH: f32 = 250.0;
+const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 32.0;
 
-#[derive(Debug, Default)]
-pub struct NodeDetailsUi {}
+#[derive(Default)]
+pub struct NodeDetailsUi {
+    preview_texture: Option<TextureHandle>,
+}
+
+impl std::fmt::Debug for NodeDetailsUi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeDetailsUi")
+            .field("has_preview_texture", &self.preview_texture.is_some())
+            .finish()
+    }
+}
 
 impl NodeDetailsUi {
     pub fn show(
@@ -145,7 +159,68 @@ impl NodeDetailsUi {
                     gui.ui().label(format!("  {output_name}: {value_str}"));
                 }
             }
+
+            // Try to render image preview from outputs
+            self.show_image_preview(gui, values);
         }
+    }
+
+    fn show_image_preview(&mut self, gui: &mut Gui<'_>, values: &ArgumentValues) {
+        // Find first image in outputs
+        let image_value = values
+            .outputs
+            .iter()
+            .chain(values.inputs.iter().filter_map(|v| v.as_ref()))
+            .find_map(|v| v.as_custom::<Image>());
+
+        let Some(image) = image_value else {
+            self.preview_texture = None;
+            return;
+        };
+
+        let preview_guard = image.preview();
+        let Some(preview) = preview_guard.as_ref() else {
+            self.preview_texture = None;
+            return;
+        };
+
+        // Convert preview image to egui texture
+        let desc = preview.desc();
+        let width = desc.width as usize;
+        let height = desc.height as usize;
+
+        // Create ColorImage from RGBA_U8 data
+        let color_image = ColorImage::from_rgba_unmultiplied([width, height], preview.bytes());
+
+        // Load or update texture
+        let texture = self.preview_texture.get_or_insert_with(|| {
+            gui.ui()
+                .ctx()
+                .load_texture("node_preview", color_image.clone(), TextureOptions::LINEAR)
+        });
+
+        // Update texture if dimensions changed
+        if texture.size() != [width, height] {
+            *texture = gui.ui().ctx().load_texture(
+                "node_preview",
+                color_image.clone(),
+                TextureOptions::LINEAR,
+            );
+        } else {
+            texture.set(color_image, TextureOptions::LINEAR);
+        }
+
+        // Calculate display size maintaining aspect ratio
+        let aspect = width as f32 / height as f32;
+        let display_width = PREVIEW_MAX_WIDTH.min(width as f32);
+        let display_height = display_width / aspect;
+
+        gui.ui().add_space(8.0);
+        gui.ui().separator();
+        gui.ui().add_space(4.0);
+        gui.ui().label("Preview:");
+        gui.ui()
+            .image((texture.id(), Vec2::new(display_width, display_height)));
     }
 
     fn show_execution_info(
