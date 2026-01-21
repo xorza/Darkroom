@@ -60,12 +60,9 @@ impl CustomValue for Image {
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
         // First transform to same format but smaller size
-        let preview_desc = ImageDesc {
-            width: new_width,
-            height: new_height,
-            color_format: desc.color_format,
-            stride: new_width as usize * desc.color_format.byte_count() as usize,
-        };
+
+        let preview_desc = ImageDesc::new(new_width, new_height, desc.color_format);
+
         let mut scaled_buffer = ImageBuffer::new_empty(preview_desc);
 
         let result = Transform::new().scale(Vec2::new(scale, scale)).execute(
@@ -80,7 +77,7 @@ impl CustomValue for Image {
         }
 
         // Read from GPU and convert to RGBA_U8
-        let scaled_cpu = match scaled_buffer.make_cpu(&vision_ctx.processing_ctx) {
+        let scaled_cpu = match scaled_buffer.to_cpu(&vision_ctx.processing_ctx) {
             Ok(img) => img,
             Err(e) => {
                 tracing::error!("Failed to read preview from GPU: {}", e);
@@ -88,7 +85,7 @@ impl CustomValue for Image {
             }
         };
 
-        let preview_image = match scaled_cpu.clone().convert(ColorFormat::RGBA_U8) {
+        let preview_image = match scaled_cpu.convert(ColorFormat::RGBA_U8) {
             Ok(img) => img,
             Err(e) => {
                 tracing::error!("Failed to convert preview to RGBA_U8: {}", e);

@@ -28,6 +28,7 @@ pub struct ImageBuffer {
 impl ImageBuffer {
     /// Creates a new ImageBuffer from a CPU image.
     pub fn from_cpu(image: Image) -> Self {
+        let image = image.with_stride();
         Self {
             desc: *image.desc(),
             storage: AtomicRefCell::new(Some(Storage::Cpu(image))),
@@ -45,7 +46,7 @@ impl ImageBuffer {
     /// Creates an empty ImageBuffer with no storage, just a descriptor.
     pub fn new_empty(desc: ImageDesc) -> Self {
         Self {
-            desc,
+            desc: desc.with_aligned_stride(),
             storage: AtomicRefCell::new(None),
         }
     }
@@ -160,6 +161,26 @@ impl ImageBuffer {
             }
         }
         Ok(())
+    }
+
+    /// Consumes self and returns the CPU image, downloading from GPU if needed.
+    /// Allocates CPU storage if empty.
+    pub fn to_cpu(self, ctx: &ProcessingContext) -> Result<Image> {
+        self.ensure_cpu(ctx)?;
+        match self.storage.into_inner() {
+            Some(Storage::Cpu(img)) => Ok(img),
+            _ => unreachable!(),
+        }
+    }
+
+    /// Consumes self and returns the GPU image, uploading from CPU if needed.
+    /// Allocates GPU storage if empty.
+    pub fn to_gpu(self, ctx: &ProcessingContext) -> Result<GpuImage> {
+        self.ensure_gpu(ctx)?;
+        match self.storage.into_inner() {
+            Some(Storage::Gpu(img)) => Ok(img),
+            _ => unreachable!(),
+        }
     }
 }
 
