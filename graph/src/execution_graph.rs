@@ -466,14 +466,12 @@ impl ExecutionGraph {
 
         self.prepare_execution(terminals, event_triggers, &events)?;
 
-        let mut result = self.execute_internal().await;
-        if let Ok(exe_stats) = &mut result {
-            exe_stats.triggered_events = events;
-        }
+        let mut exe_stats = self.execute_internal().await;
+        exe_stats.triggered_events = events;
 
         self.e_node_terminal_idx.clear();
 
-        result
+        Ok(exe_stats)
     }
 
     fn prepare_execution(
@@ -714,16 +712,35 @@ impl ExecutionGraph {
         }
     }
 
-    async fn execute_internal(&mut self) -> std::result::Result<ExecutionStats, Error> {
+    async fn execute_internal(&mut self) -> ExecutionStats {
         let start = std::time::Instant::now();
 
         let mut inputs: Vec<InvokeInput> = Vec::default();
         let mut output_usage: Vec<OutputUsage> = Vec::default();
-        let mut error: Option<Error> = None;
 
         for e_node_idx in self.e_node_execute_order.iter().copied() {
             let e_node = &self.e_nodes[e_node_idx];
             if e_node.lambda.is_none() {
+                continue;
+            }
+
+            // Check if any upstream dependency has an error - skip this node if so
+            let has_errored_dependency = e_node.inputs.iter().any(|input| {
+                if let ExecutionBinding::Bind(port_address) = &input.binding {
+                    self.e_nodes[port_address.target_idx].error.is_some()
+                } else {
+                    false
+                }
+            });
+
+            if has_errored_dependency {
+                // Mark this node as errored due to upstream failure and drop output values
+                let e_node = &mut self.e_nodes[e_node_idx];
+                e_node.output_values = None;
+                e_node.error = Some(Error::Invoke {
+                    func_id: e_node.func_id,
+                    message: "Skipped due to upstream error".to_string(),
+                });
                 continue;
             }
 
@@ -792,16 +809,13 @@ impl ExecutionGraph {
             });
 
             if let Err(err) = invoke_result {
-                e_node.error = Some(err.clone());
-                error = Some(err);
-                break;
+                e_node.error = Some(err);
+                e_node.output_values = None;
+                // Continue execution instead of breaking
             }
         }
 
-        match error {
-            Some(err) => Err(err),
-            None => Ok(self.collect_execution_stats(start)),
-        }
+        self.collect_execution_stats(start)
     }
 
     fn collect_execution_stats(&self, start: std::time::Instant) -> ExecutionStats {
