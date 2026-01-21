@@ -193,6 +193,7 @@ impl Default for ImageFuncLib {
             name: "load_image".to_string(),
             description: Some("Loads an image from file".to_string()),
             behavior: FuncBehavior::Impure,
+            node_default_behavior: graph::graph::NodeBehavior::Once,
             terminal: false,
             category: "image".to_string(),
             inputs: vec![FuncInput {

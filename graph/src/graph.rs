@@ -232,7 +232,7 @@ impl From<&Func> for Node {
             id: NodeId::unique(),
             func_id: func.id,
             name: func.name.clone(),
-            behavior: NodeBehavior::AsFunction,
+            behavior: func.node_default_behavior,
             inputs,
             events,
         }
