@@ -31,9 +31,7 @@ pub type PreviewFn = SharedFn<dyn Fn(&dyn Any, &mut ContextManager) + Send + Syn
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
-    fn preview_fn() -> PreviewFn {
-        PreviewFn::None
-    }
+    fn gen_preview(&self, _ctx_manager: &mut ContextManager) {}
 }
 
 /// Definition of a custom type for `DataType::Custom`.
@@ -287,12 +285,19 @@ impl DynamicValue {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "<invalid>".to_string())
         }));
+        let preview_fn: PreviewFn = SharedFn::new(Arc::new(
+            |data: &dyn Any, ctx_manager: &mut ContextManager| {
+                if let Some(custom_value) = data.downcast_ref::<T>() {
+                    custom_value.gen_preview(ctx_manager);
+                }
+            },
+        ));
 
         DynamicValue::Custom {
             type_id,
             data: Arc::new(value),
             display_fn,
-            preview_fn: T::preview_fn(),
+            preview_fn,
         }
     }
 
