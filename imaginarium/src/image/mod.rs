@@ -40,6 +40,10 @@ impl Image {
         &self.bytes
     }
 
+    pub fn take_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
     /// Returns the image bytes as a mutable slice.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         &mut self.bytes

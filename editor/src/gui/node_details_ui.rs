@@ -121,16 +121,13 @@ impl NodeDetailsUi {
 
         // Get function info for input/output names
         let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
-        let func = ctx.func_lib.by_id(&node.func_id);
+        let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
         // Display inputs
         if !node_cache.arg_values.inputs.is_empty() {
             gui.ui().label("Inputs:");
             for (idx, input_value) in node_cache.arg_values.inputs.iter().enumerate() {
-                let input_name = func
-                    .and_then(|f| f.inputs.get(idx))
-                    .map(|i| i.name.as_str())
-                    .unwrap_or("?");
+                let input_name = func.inputs[idx].name.as_str();
                 let value_str = match input_value {
                     Some(v) => format_dynamic_value(v),
                     None => "-".to_string(),
@@ -144,10 +141,7 @@ impl NodeDetailsUi {
             gui.ui().add_space(4.0);
             gui.ui().label("Outputs:");
             for (idx, output_value) in node_cache.arg_values.outputs.iter().enumerate() {
-                let output_name = func
-                    .and_then(|f| f.outputs.get(idx))
-                    .map(|o| o.name.as_str())
-                    .unwrap_or("?");
+                let output_name = func.outputs[idx].name.as_str();
                 let value_str = format_dynamic_value(output_value);
                 gui.ui().label(format!("  {output_name}: {value_str}"));
             }
@@ -171,22 +165,27 @@ impl NodeDetailsUi {
                     if let Some(preview) = image.take_preview() {
                         assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
 
-                        // todo move bytes
-                        let color_image = ColorImage::from_rgba_unmultiplied(
-                            [
-                                preview.desc().width as usize,
-                                preview.desc().height as usize,
-                            ],
-                            preview.bytes(),
-                        );
+                        let desc = *preview.desc();
+                        let pixels: Vec<Color32> = {
+                            let mut bytes = preview.take_bytes();
+                            let ptr = bytes.as_mut_ptr() as *mut Color32;
+                            let len = bytes.len() / 4;
+                            let cap = bytes.capacity() / 4;
+                            std::mem::forget(bytes);
+                            unsafe { Vec::from_raw_parts(ptr, len, cap) }
+                        };
+
+                        let color_image =
+                            ColorImage::new([desc.width as usize, desc.height as usize], pixels);
+
                         let texture_handle = gui.ui().ctx().load_texture(
-                            format!("node_preview_{node_id}_{idx}"),
-                            color_image.clone(),
+                            format!("node_preview_{node_id}_input_{idx}"),
+                            color_image,
                             TextureOptions::LINEAR,
                         );
                         let cached_texture = CachedTexture {
-                            desc: preview.desc().clone(),
-                            handle: texture_handle.clone(),
+                            desc: desc,
+                            handle: texture_handle,
                         };
 
                         node_cache.input_previews[idx] = Some(cached_texture);
@@ -203,23 +202,28 @@ impl NodeDetailsUi {
                 if let Some(preview) = image.take_preview() {
                     assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
 
-                    // todo move bytes
-                    let color_image = ColorImage::from_rgba_unmultiplied(
-                        [
-                            preview.desc().width as usize,
-                            preview.desc().height as usize,
-                        ],
-                        preview.bytes(),
-                    );
+                    let desc = *preview.desc();
+                    let pixels: Vec<Color32> = {
+                        let mut bytes = preview.take_bytes();
+                        let ptr = bytes.as_mut_ptr() as *mut Color32;
+                        let len = bytes.len() / 4;
+                        let cap = bytes.capacity() / 4;
+                        std::mem::forget(bytes);
+                        unsafe { Vec::from_raw_parts(ptr, len, cap) }
+                    };
+
+                    let color_image =
+                        ColorImage::new([desc.width as usize, desc.height as usize], pixels);
+
                     let texture_handle = gui.ui().ctx().load_texture(
-                        format!("node_preview_{node_id}_{idx}"),
-                        color_image.clone(),
+                        format!("node_preview_{node_id}_output_{idx}"),
+                        color_image,
                         TextureOptions::LINEAR,
                     );
 
                     let cached_texture = CachedTexture {
-                        desc: preview.desc().clone(),
-                        handle: texture_handle.clone(),
+                        desc,
+                        handle: texture_handle,
                     };
 
                     node_cache.output_previews[idx] = Some(cached_texture);
