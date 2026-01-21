@@ -40,7 +40,7 @@ impl Image {
         &self.bytes
     }
 
-    pub fn take_bytes(self) -> Vec<u8> {
+    pub fn into_bytes(self) -> Vec<u8> {
         self.bytes
     }
 
@@ -140,21 +140,21 @@ impl Image {
         if self.desc.is_packed() {
             return self;
         }
-
+        let desc = *self.desc();
         let bytes = strip_stride_padding(
-            &self.bytes,
-            self.desc.width,
-            self.desc.height,
-            self.desc.stride,
-            self.desc.color_format.byte_count(),
+            self.into_bytes(),
+            desc.width,
+            desc.height,
+            desc.stride,
+            desc.color_format.byte_count(),
         );
 
         Image {
             desc: ImageDesc {
-                width: self.desc.width,
-                height: self.desc.height,
-                stride: self.desc.row_bytes(),
-                color_format: self.desc.color_format,
+                width: desc.width,
+                height: desc.height,
+                stride: desc.row_bytes(),
+                color_format: desc.color_format,
             },
             bytes,
         }
@@ -169,7 +169,7 @@ impl Image {
 
         let desc = *self.desc();
         let bytes = add_stride_padding(
-            self.take_bytes(),
+            self.into_bytes(),
             desc.width,
             desc.height,
             aligned_stride,

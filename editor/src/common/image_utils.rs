@@ -15,7 +15,7 @@ pub fn to_color_image(image: Image) -> ColorImage {
     let size = [desc.width as usize, desc.height as usize];
 
     let pixels: Vec<Color32> = {
-        let mut bytes = image.take_bytes();
+        let mut bytes = image.into_bytes();
         let ptr = bytes.as_mut_ptr() as *mut Color32;
         let len = bytes.len() / 4;
         let cap = bytes.capacity() / 4;

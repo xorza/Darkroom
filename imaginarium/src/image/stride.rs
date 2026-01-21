@@ -27,7 +27,7 @@ pub(crate) fn add_stride_padding(
 
 /// Strips stride padding from image bytes, returning tightly packed pixel data.
 pub(crate) fn strip_stride_padding(
-    src: &[u8],
+    src: Vec<u8>,
     width: u32,
     height: u32,
     stride: usize,
@@ -36,7 +36,7 @@ pub(crate) fn strip_stride_padding(
     let row_bytes = width as usize * bpp as usize;
 
     if row_bytes == stride {
-        src.to_vec()
+        src
     } else {
         let mut packed = Vec::with_capacity(row_bytes * height as usize);
         for y in 0..height as usize {
