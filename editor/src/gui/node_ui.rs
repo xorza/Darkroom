@@ -2,6 +2,7 @@ use std::any;
 
 use crate::common::button::Button;
 
+use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
@@ -417,8 +418,10 @@ fn render_ports(
         let is_hovered = ui.rect_contains_pointer(port_rect);
 
         if has_missing_shadow {
-            gui.painter().circle_filled(
+            draw_circle_with_gradient_shadow(
+                gui.painter(),
                 center,
+                port_radius,
                 port_radius + missing_shadow_spread,
                 missing_shadow_color,
             );

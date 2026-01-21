@@ -11,6 +11,7 @@ pub mod font;
 pub mod frame;
 pub mod popup_menu;
 pub mod positioned_ui;
+pub mod primitives;
 pub mod scroll_area;
 pub mod text_edit;
 pub mod ui_equals;
