@@ -501,18 +501,7 @@ impl From<&DataType> for StaticValue {
 
 impl From<&DataType> for DynamicValue {
     fn from(data_type: &DataType) -> Self {
-        match data_type {
-            DataType::Float => DynamicValue::Float(0.0),
-            DataType::Int => DynamicValue::Int(0),
-            DataType::Bool => DynamicValue::Bool(false),
-            DataType::String => DynamicValue::String("".to_string()),
-            DataType::FsPath(_) => DynamicValue::FsPath("".to_string()),
-            DataType::Enum(enum_def) => DynamicValue::Enum {
-                type_id: enum_def.type_id,
-                variant_name: enum_def.variants[0].clone(),
-            },
-            _ => panic!("No value for {:?}", data_type),
-        }
+        DynamicValue::from(&StaticValue::from(data_type))
     }
 }
 
