@@ -1,7 +1,8 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use eframe::egui;
-use egui::{Align2, PointerButton, Pos2, Response, Sense, Vec2, pos2, vec2};
+use egui::{Align2, PointerButton, Pos2, Response, Sense, StrokeKind, Vec2, pos2, vec2};
 use graph::data::DataType;
 use graph::data::EnumDef;
 use graph::data::StaticValue;
@@ -170,6 +171,13 @@ impl<'a> ConstBindFrame<'a> {
                         &const_bind_style,
                     )
                 }
+                StaticValue::FsPath(path) => render_fs_path_input(
+                    gui,
+                    ("const_fspath_input", node.id, input_idx),
+                    path,
+                    connection_start,
+                    &const_bind_style,
+                ),
                 _ => todo!(),
             };
 
@@ -253,4 +261,72 @@ fn render_enum_dropdown(
         .align(Align2::RIGHT_CENTER)
         .style(style.clone())
         .show(gui, id_salt)
+}
+
+fn render_fs_path_input(
+    gui: &mut Gui<'_>,
+    id_salt: impl std::hash::Hash,
+    path: &mut String,
+    pos: Pos2,
+    style: &crate::gui::style::DragValueStyle,
+) -> Response {
+    let filename = Path::new(path.as_str())
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "(none)".to_string());
+
+    let _id = gui.ui().make_persistent_id(&id_salt);
+
+    let padding = vec2(gui.style.small_padding, 0.0);
+    let font = gui.style.sub_font.clone();
+    let text_color = gui.style.text_color;
+
+    let browse_text = "...";
+    let browse_galley =
+        gui.ui()
+            .painter()
+            .layout_no_wrap(browse_text.to_string(), font.clone(), text_color);
+    let browse_size = browse_galley.size() + padding * 2.0;
+
+    let filename_galley = gui
+        .ui()
+        .painter()
+        .layout_no_wrap(filename.clone(), font, text_color);
+    let filename_size = filename_galley.size() + padding * 2.0;
+
+    let total_width = filename_size.x + browse_size.x + gui.style.small_padding;
+    let total_height = filename_size.y.max(browse_size.y);
+
+    let rect = egui::Rect::from_min_size(
+        pos2(pos.x - total_width, pos.y - total_height / 2.0),
+        vec2(total_width, total_height),
+    );
+
+    let filename_rect = egui::Rect::from_min_size(rect.min, filename_size);
+    let browse_rect = egui::Rect::from_min_size(
+        pos2(filename_rect.max.x + gui.style.small_padding, rect.min.y),
+        browse_size,
+    );
+
+    let response = gui.ui().allocate_rect(rect, Sense::hover());
+
+    gui.painter().rect(
+        filename_rect,
+        style.radius,
+        style.fill,
+        style.stroke,
+        StrokeKind::Outside,
+    );
+    gui.painter()
+        .galley(filename_rect.min + padding, filename_galley, text_color);
+
+    let browse_response = gui.ui().put(browse_rect, egui::Button::new(browse_text));
+
+    if browse_response.clicked()
+        && let Some(selected_path) = rfd::FileDialog::new().pick_file()
+    {
+        *path = selected_path.to_string_lossy().to_string();
+    }
+
+    response | browse_response
 }
