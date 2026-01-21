@@ -57,6 +57,28 @@ impl Gpu {
     pub fn queue_arc(&self) -> Arc<wgpu::Queue> {
         Arc::clone(&self.queue)
     }
+
+    /// Polls the device, blocking until all pending operations complete.
+    pub fn wait(&self) {
+        self.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .unwrap();
+    }
+
+    /// Polls the device asynchronously until all pending operations complete.
+    pub async fn wait_async(&self) {
+        loop {
+            if self
+                .device
+                .poll(wgpu::PollType::Poll)
+                .unwrap()
+                .is_queue_empty()
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    }
 }
 
 #[cfg(test)]

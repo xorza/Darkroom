@@ -22,6 +22,7 @@ tracing.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
 atomic_refcell.workspace = true
+tokio.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
