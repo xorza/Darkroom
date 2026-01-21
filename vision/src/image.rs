@@ -113,8 +113,6 @@ impl CustomValue for Image {
                 };
 
                 preview_slot.send(preview_image);
-
-                tracing::info!("Preview generated successfully");
             }
         });
 
