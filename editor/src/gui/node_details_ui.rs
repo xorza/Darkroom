@@ -156,24 +156,23 @@ impl NodeDetailsUi {
             .input_previews
             .resize(node_cache.arg_values.inputs.len(), None);
         for (idx, input) in node_cache.arg_values.inputs.iter().enumerate() {
-            if let Some(value) = input.as_ref() {
-                if let Some(image) = value.as_custom::<Image>() {
-                    if let Some(preview) = image.take_preview() {
-                        let desc = *preview.desc();
-                        let color_image = to_color_image(preview);
-                        let texture_handle = gui.ui().ctx().load_texture(
-                            format!("node_preview_{node_id}_input_{idx}"),
-                            color_image,
-                            TextureOptions::LINEAR,
-                        );
-                        let cached_texture = CachedTexture {
-                            desc,
-                            handle: texture_handle,
-                        };
+            if let Some(value) = input.as_ref()
+                && let Some(image) = value.as_custom::<Image>()
+                && let Some(preview) = image.take_preview()
+            {
+                let desc = *preview.desc();
+                let color_image = to_color_image(preview);
+                let texture_handle = gui.ui().ctx().load_texture(
+                    format!("node_preview_{node_id}_input_{idx}"),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                let cached_texture = CachedTexture {
+                    desc,
+                    handle: texture_handle,
+                };
 
-                        node_cache.input_previews[idx] = Some(cached_texture);
-                    }
-                }
+                node_cache.input_previews[idx] = Some(cached_texture);
             }
         }
 
@@ -181,23 +180,23 @@ impl NodeDetailsUi {
             .output_previews
             .resize(node_cache.arg_values.outputs.len(), None);
         for (idx, value) in node_cache.arg_values.outputs.iter().enumerate() {
-            if let Some(image) = value.as_custom::<Image>() {
-                if let Some(preview) = image.take_preview() {
-                    let desc = *preview.desc();
-                    let color_image = to_color_image(preview);
-                    let texture_handle = gui.ui().ctx().load_texture(
-                        format!("node_preview_{node_id}_output_{idx}"),
-                        color_image,
-                        TextureOptions::LINEAR,
-                    );
+            if let Some(image) = value.as_custom::<Image>()
+                && let Some(preview) = image.take_preview()
+            {
+                let desc = *preview.desc();
+                let color_image = to_color_image(preview);
+                let texture_handle = gui.ui().ctx().load_texture(
+                    format!("node_preview_{node_id}_output_{idx}"),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
 
-                    let cached_texture = CachedTexture {
-                        desc,
-                        handle: texture_handle,
-                    };
+                let cached_texture = CachedTexture {
+                    desc,
+                    handle: texture_handle,
+                };
 
-                    node_cache.output_previews[idx] = Some(cached_texture);
-                }
+                node_cache.output_previews[idx] = Some(cached_texture);
             }
         }
 
