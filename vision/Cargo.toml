@@ -7,3 +7,4 @@ edition.workspace = true
 common = { workspace = true }
 graph = { workspace = true }
 imaginarium = { workspace = true }
+anyhow = { workspace = true }

@@ -241,7 +241,7 @@ impl Default for ImageFuncLib {
 
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
-                        .expect("Failed to get CPU image");
+                        .map_err(anyhow::Error::from)?;
 
                     let target_format = match cpu_image.desc().color_format.channel_count {
                         ChannelCount::Gray => ColorFormat::GRAY_F32,
@@ -253,7 +253,7 @@ impl Default for ImageFuncLib {
                     let converted = cpu_image
                         .clone()
                         .convert(target_format)
-                        .expect("Failed to convert image");
+                        .map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(converted));
 
