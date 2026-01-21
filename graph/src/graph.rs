@@ -211,7 +211,10 @@ impl From<&Func> for Node {
             .inputs
             .iter()
             .map(|func_input| Input {
-                binding: Binding::None,
+                binding: match &func_input.default_value {
+                    Some(default) => Binding::Const(default.clone()),
+                    None => Binding::None,
+                },
                 name: func_input.name.clone(),
             })
             .collect();
