@@ -98,8 +98,10 @@ where
         let removed = self.items.remove(idx);
         assert!(*removed.key() == *key);
 
-        for (pos, item) in self.items.iter().enumerate().skip(idx) {
-            self.idx_by_key.insert(*item.key(), pos);
+        // Only update indices for items that shifted (those after the removed index)
+        for item in self.items.iter().skip(idx) {
+            let entry = self.idx_by_key.get_mut(item.key()).unwrap();
+            *entry -= 1;
         }
 
         Some(removed)
@@ -115,8 +117,10 @@ where
         let had_key = self.idx_by_key.remove(&key).is_some();
         assert!(had_key, "remove_by_index expects the key to exist");
 
-        for (pos, item) in self.items.iter().enumerate().skip(idx) {
-            self.idx_by_key.insert(*item.key(), pos);
+        // Only update indices for items that shifted (those after the removed index)
+        for item in self.items.iter().skip(idx) {
+            let entry = self.idx_by_key.get_mut(item.key()).unwrap();
+            *entry -= 1;
         }
 
         removed
