@@ -2,7 +2,7 @@ mod gpu_image;
 
 use std::sync::Arc;
 
-pub use self::gpu_image::{GpuImage, PendingDownload, ReadBuffer, WriteBuffer};
+pub use self::gpu_image::{GpuImage, ReadBuffer, WriteBuffer};
 
 use crate::common::{Error, Result};
 

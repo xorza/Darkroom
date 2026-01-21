@@ -1,57 +1,8 @@
 use atomic_refcell::{AtomicRef, AtomicRefCell, AtomicRefMut};
 
 use super::ProcessingContext;
-use crate::gpu::{Gpu, GpuImage, PendingDownload};
+use crate::gpu::GpuImage;
 use crate::prelude::*;
-
-/// A pending download that will store the result back into an ImageBuffer.
-pub struct PendingBufferDownload<'a> {
-    buffer: &'a ImageBuffer,
-    download: PendingDownload,
-}
-
-impl<'a> PendingBufferDownload<'a> {
-    /// Waits for this download to complete and stores the result back into the buffer.
-    /// Assumes the GPU has already been polled to completion.
-    fn wait(self, ctx: &Gpu) -> Result<()> {
-        let image = PendingDownload::wait_all(std::iter::once(self.download), ctx)?
-            .pop()
-            .unwrap();
-        self.buffer.set_cpu(image);
-        Ok(())
-    }
-
-    /// Waits for all pending downloads and stores results back into their buffers.
-    pub fn wait_all(downloads: Vec<PendingBufferDownload<'a>>, ctx: &Gpu) -> Result<()> {
-        if downloads.is_empty() {
-            return Ok(());
-        }
-
-        ctx.wait();
-        for download in downloads {
-            download.wait(ctx)?;
-        }
-
-        Ok(())
-    }
-
-    /// Waits for all pending downloads asynchronously and stores results back into their buffers.
-    pub async fn wait_all_async(
-        downloads: Vec<PendingBufferDownload<'a>>,
-        ctx: &Gpu,
-    ) -> Result<()> {
-        if downloads.is_empty() {
-            return Ok(());
-        }
-
-        ctx.wait_async().await;
-        for download in downloads {
-            download.wait(ctx)?;
-        }
-
-        Ok(())
-    }
-}
 
 /// Storage location for image data.
 #[derive(Debug)]
@@ -222,23 +173,6 @@ impl ImageBuffer {
         }
     }
 
-    /// Starts a GPU download without waiting, returning a pending download handle.
-    /// If already on CPU or empty, returns None.
-    /// Use `PendingBufferDownload::wait_all` to complete multiple downloads at once.
-    pub fn start_download(&self, ctx: &ProcessingContext) -> Option<PendingBufferDownload<'_>> {
-        let storage = self.storage.borrow();
-        match &*storage {
-            Some(Storage::Gpu(gpu_img)) => {
-                let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
-                Some(PendingBufferDownload {
-                    buffer: self,
-                    download: gpu_img.start_download(gpu_ctx),
-                })
-            }
-            _ => None,
-        }
-    }
-
     /// Consumes self and returns the GPU image, uploading from CPU if needed.
     /// Allocates GPU storage if empty.
     pub fn to_gpu(self, ctx: &ProcessingContext) -> Result<GpuImage> {
@@ -247,11 +181,6 @@ impl ImageBuffer {
             Some(Storage::Gpu(img)) => Ok(img),
             _ => unreachable!(),
         }
-    }
-
-    /// Stores a CPU image, replacing any existing storage.
-    fn set_cpu(&self, image: Image) {
-        *self.storage.borrow_mut() = Some(Storage::Cpu(image));
     }
 }
 
