@@ -129,6 +129,8 @@ impl<'a> FilePicker<'a> {
             }
         }
 
-        browse_response
+        // Return response for the entire widget rect, not just the browse button
+        let widget_response = gui.ui().interact(rect, browse_response.id, Sense::hover());
+        widget_response | browse_response
     }
 }
