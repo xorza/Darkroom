@@ -93,7 +93,7 @@ fn test_blend_chain() {
     let img2 = img1.clone();
     let width = img1.desc().width;
     let height = img1.desc().height;
-    let output_img = Image::new_empty(*img1.desc()).unwrap();
+    let output_img = Image::new_black(*img1.desc()).unwrap();
 
     let src = ImageBuffer::from_cpu(img1);
     let dst = ImageBuffer::from_cpu(img2);

@@ -182,7 +182,7 @@ mod tests {
 
     fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
         let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_empty(desc).unwrap();
+        let mut img = Image::new_black(desc).unwrap();
         for (i, byte) in img.bytes_mut().iter_mut().enumerate() {
             *byte = ((i + seed) * 37 % 256) as u8;
         }
@@ -191,7 +191,7 @@ mod tests {
 
     fn create_test_image_f32(format: ColorFormat, width: u32, height: u32, value: f32) -> Image {
         let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_empty(desc).unwrap();
+        let mut img = Image::new_black(desc).unwrap();
         let bytes = img.bytes_mut();
         // Fill with f32 values
         for chunk in bytes.chunks_exact_mut(4) {

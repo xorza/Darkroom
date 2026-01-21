@@ -10,7 +10,7 @@ fn main() {
     let dst = load_lena_rgba_u8();
     print_image_info("Source", &src);
 
-    let mut output = Image::new_empty(*src.desc()).unwrap();
+    let mut output = Image::new_black(*src.desc()).unwrap();
 
     // CPU example
     Blend::new(BlendMode::Screen, 0.5).apply_cpu(&src, &dst, &mut output);

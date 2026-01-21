@@ -716,7 +716,7 @@ mod tests {
 
     fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
         let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_empty(desc).unwrap();
+        let mut img = Image::new_black(desc).unwrap();
 
         match (format.channel_size, format.channel_type) {
             (ChannelSize::_32bit, ChannelType::Float) => {
@@ -740,7 +740,7 @@ mod tests {
         for format in ALL_FORMATS {
             let src = create_test_image(*format, 8, 4, 0);
             let dst = create_test_image(*format, 8, 4, 100);
-            let mut output = Image::new_empty(*dst.desc()).unwrap();
+            let mut output = Image::new_black(*dst.desc()).unwrap();
 
             Blend::new(BlendMode::Normal, 0.0).apply_cpu(&src, &dst, &mut output);
 
@@ -760,7 +760,7 @@ mod tests {
         for format in ALL_FORMATS {
             let src = create_test_image(*format, 8, 4, 0);
             let dst = create_test_image(*format, 8, 4, 100);
-            let mut output = Image::new_empty(*dst.desc()).unwrap();
+            let mut output = Image::new_black(*dst.desc()).unwrap();
 
             Blend::new(BlendMode::Normal, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -789,7 +789,7 @@ mod tests {
                 src.bytes_mut()[i] = 255; // White RGB
             }
         }
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Multiply, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -820,7 +820,7 @@ mod tests {
             }
         }
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Multiply, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -837,7 +837,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Add, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -851,7 +851,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Screen, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -863,7 +863,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Overlay, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -875,7 +875,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 8, 4, 0);
         let dst = create_test_image(format, 8, 4, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Subtract, 1.0).apply_cpu(&src, &dst, &mut output);
 
@@ -897,7 +897,7 @@ mod tests {
             for mode in &modes {
                 let src = create_test_image(*format, 17, 5, 0);
                 let dst = create_test_image(*format, 17, 5, 100);
-                let mut output = Image::new_empty(*dst.desc()).unwrap();
+                let mut output = Image::new_black(*dst.desc()).unwrap();
 
                 Blend::new(*mode, 0.5).apply_cpu(&src, &dst, &mut output);
 
@@ -916,7 +916,7 @@ mod tests {
         let format = ColorFormat::RGBA_U8;
         let src = create_test_image(format, 256, 128, 0);
         let dst = create_test_image(format, 256, 128, 100);
-        let mut output = Image::new_empty(*dst.desc()).unwrap();
+        let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Normal, 0.5).apply_cpu(&src, &dst, &mut output);
 

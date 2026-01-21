@@ -9,7 +9,7 @@ fn main() {
     let input = load_lena_rgba_u8();
     print_image_info("Input", &input);
 
-    let mut output = Image::new_empty(*input.desc()).unwrap();
+    let mut output = Image::new_black(*input.desc()).unwrap();
 
     // CPU example
     ContrastBrightness::new(1.5, 0.1).apply_cpu(&input, &mut output);

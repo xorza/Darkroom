@@ -221,10 +221,33 @@ mod tests {
         };
 
         let desc = ImageDesc::new(64, 64, ColorFormat::RGBA_U8);
-        let image = Image::new_empty(desc).unwrap();
+        let image = Image::new_black(desc).unwrap();
         let gpu_image = GpuImage::from_image(&ctx, &image);
 
         let result = gpu_image.to_image(&ctx).unwrap();
+
+        assert_eq!(result.desc().width, 64);
+        assert_eq!(result.desc().height, 64);
+    }
+
+    #[tokio::test]
+    async fn test_to_image_async() {
+        let Some(ctx) = create_test_gpu() else {
+            return;
+        };
+
+        let desc = ImageDesc::new(64, 64, ColorFormat::RGBA_U8);
+        let image = Image::new_black(desc).unwrap();
+        let gpu_image = GpuImage::from_image(&ctx, &image);
+
+        // Spawn a task to poll the GPU while we wait for the download
+        let ctx_clone = ctx.clone();
+        let poll_handle = tokio::spawn(async move {
+            ctx_clone.wait_async().await;
+        });
+
+        let result = gpu_image.to_image_async(&ctx).await.unwrap();
+        poll_handle.await.unwrap();
 
         assert_eq!(result.desc().width, 64);
         assert_eq!(result.desc().height, 64);

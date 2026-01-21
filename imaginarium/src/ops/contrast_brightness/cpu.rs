@@ -1524,7 +1524,7 @@ mod tests {
     /// Create a test image with varied data pattern
     fn create_test_image(format: ColorFormat, width: u32, height: u32) -> Image {
         let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_empty(desc).unwrap();
+        let mut img = Image::new_black(desc).unwrap();
 
         // For float formats, we need valid float values in [0, 1] range
         // For integer formats, we use a simple byte pattern
@@ -1557,7 +1557,7 @@ mod tests {
     fn test_no_change_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 17, 5);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.0, 0.0).apply_cpu(&input, &mut output);
 
@@ -1588,7 +1588,7 @@ mod tests {
     fn test_alpha_preserved_all_formats() {
         for format in ALPHA_FORMATS {
             let input = create_test_image(*format, 16, 4);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(2.0, 0.3).apply_cpu(&input, &mut output);
 
@@ -1623,7 +1623,7 @@ mod tests {
     fn test_brightness_increase_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.0, 0.2).apply_cpu(&input, &mut output);
 
@@ -1639,7 +1639,7 @@ mod tests {
     fn test_brightness_decrease_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.0, -0.2).apply_cpu(&input, &mut output);
 
@@ -1659,7 +1659,7 @@ mod tests {
     fn test_contrast_increase_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(2.0, 0.0).apply_cpu(&input, &mut output);
 
@@ -1675,7 +1675,7 @@ mod tests {
     fn test_contrast_decrease_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 8, 2);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(0.5, 0.0).apply_cpu(&input, &mut output);
 
@@ -1695,7 +1695,7 @@ mod tests {
     fn test_combined_adjustment_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 17, 5);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.5, 0.1).apply_cpu(&input, &mut output);
 
@@ -1716,7 +1716,7 @@ mod tests {
         for format in ALL_FORMATS {
             // Use odd dimensions to trigger scalar fallback
             let input = create_test_image(*format, 17, 7);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.3, -0.05).apply_cpu(&input, &mut output);
 
@@ -1736,7 +1736,7 @@ mod tests {
     fn test_clamp_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 4, 2);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             // Extreme brightness to trigger clamping
             ContrastBrightness::new(1.0, 1.0).apply_cpu(&input, &mut output);
@@ -1766,7 +1766,7 @@ mod tests {
     fn test_large_image_all_formats() {
         for format in ALL_FORMATS {
             let input = create_test_image(*format, 256, 128);
-            let mut output = Image::new_empty(*input.desc()).unwrap();
+            let mut output = Image::new_black(*input.desc()).unwrap();
 
             ContrastBrightness::new(1.2, 0.05).apply_cpu(&input, &mut output);
 

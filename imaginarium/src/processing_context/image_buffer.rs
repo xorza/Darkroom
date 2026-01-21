@@ -155,7 +155,7 @@ impl ImageBuffer {
                 }
                 Some(Storage::Cpu(_)) => unreachable!(),
                 None => {
-                    let image = Image::new_empty(self.desc)?;
+                    let image = Image::new_black(self.desc)?;
                     *self.storage.borrow_mut() = Some(Storage::Cpu(image));
                 }
             }
@@ -185,7 +185,7 @@ impl ImageBuffer {
                 let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
                 gpu_img.to_image_async(gpu_ctx).await
             }
-            None => Image::new_empty(self.desc),
+            None => Image::new_black(self.desc),
         }
     }
 

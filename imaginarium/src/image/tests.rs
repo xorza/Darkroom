@@ -119,7 +119,7 @@ fn save_tiff_with_misaligned_bytes_returns_error() {
 #[test]
 fn new_empty_creates_zeroed_image() {
     let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
-    let img = Image::new_empty(desc).unwrap();
+    let img = Image::new_black(desc).unwrap();
 
     assert!(img.bytes.iter().all(|&b| b == 0));
     assert_eq!(
@@ -146,7 +146,7 @@ fn invalid_float_format_returns_error() {
         channel_type: ChannelType::Float,
     };
     let desc = ImageDesc::new(1, 1, format);
-    let result = Image::new_empty(desc);
+    let result = Image::new_black(desc);
 
     assert!(matches!(result, Err(Error::InvalidColorFormat(_))));
 }
@@ -154,7 +154,7 @@ fn invalid_float_format_returns_error() {
 #[test]
 fn valid_f32_format_succeeds() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
-    let result = Image::new_empty(desc);
+    let result = Image::new_black(desc);
     assert!(result.is_ok());
 }
 
@@ -185,15 +185,15 @@ fn image_desc_size_calculation() {
 #[test]
 fn bytes_per_pixel_calculation() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let img = Image::new_empty(desc).unwrap();
+    let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 
     let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U16);
-    let img = Image::new_empty(desc).unwrap();
+    let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 6);
 
     let desc = ImageDesc::new(1, 1, ColorFormat::GRAY_F32);
-    let img = Image::new_empty(desc).unwrap();
+    let img = Image::new_black(desc).unwrap();
     assert_eq!(img.bytes_per_pixel(), 4);
 }
 
@@ -383,7 +383,7 @@ fn double_conversion_preserves_dimensions() {
 #[test]
 fn single_pixel_image() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_U8);
-    let img = Image::new_empty(desc).unwrap();
+    let img = Image::new_black(desc).unwrap();
     assert!(img.desc().stride >= 4);
 }
 

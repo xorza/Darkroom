@@ -191,7 +191,7 @@ mod tests {
     fn create_test_image(width: u32, height: u32) -> Image {
         let format = ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
         let desc = ImageDesc::new(width, height, format);
-        let mut image = Image::new_empty(desc).unwrap();
+        let mut image = Image::new_black(desc).unwrap();
 
         // Fill with a gradient pattern
         for y in 0..height as usize {

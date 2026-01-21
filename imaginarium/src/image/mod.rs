@@ -49,7 +49,7 @@ impl Image {
         &mut self.bytes
     }
 
-    pub fn new_empty(desc: ImageDesc) -> Result<Image> {
+    pub fn new_black(desc: ImageDesc) -> Result<Image> {
         desc.color_format.validate()?;
 
         let bytes = vec![0; desc.size_in_bytes()];
@@ -124,7 +124,7 @@ impl Image {
 
         let desc = ImageDesc::new(self.desc.width, self.desc.height, color_format);
 
-        let mut result = Image::new_empty(desc)?;
+        let mut result = Image::new_black(desc)?;
 
         convert_image(&self, &mut result)?;
 
