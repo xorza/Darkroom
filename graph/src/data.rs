@@ -9,6 +9,18 @@ use strum::VariantNames;
 
 use common::id_type;
 
+/// Trait for enums that can be used with `DataType::Enum`.
+pub trait EnumVariants {
+    fn variant_names() -> Vec<String>;
+}
+
+/// Blanket impl for types that implement strum's `VariantNames`.
+impl<T: VariantNames> EnumVariants for T {
+    fn variant_names() -> Vec<String> {
+        T::VARIANTS.iter().map(|s| (*s).to_string()).collect()
+    }
+}
+
 id_type!(TypeId);
 
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
@@ -34,14 +46,14 @@ pub struct EnumDef {
 }
 
 impl EnumDef {
-    pub fn from_enum<E: VariantNames>(
+    pub fn from_enum<E: EnumVariants>(
         type_id: impl Into<TypeId>,
         display_name: impl Into<String>,
     ) -> Self {
         Self {
             type_id: type_id.into(),
             display_name: display_name.into(),
-            variants: E::VARIANTS.iter().map(|s| (*s).to_string()).collect(),
+            variants: E::variant_names(),
         }
     }
 
@@ -527,7 +539,7 @@ impl DataType {
         }))
     }
 
-    pub fn from_enum<E: VariantNames>(
+    pub fn from_enum<E: EnumVariants>(
         type_id: impl Into<TypeId>,
         display_name: impl Into<String>,
     ) -> Self {

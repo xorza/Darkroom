@@ -9,7 +9,6 @@ use imaginarium::{
     Blend, BlendMode, ColorFormat, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2,
 };
 use std::str::FromStr;
-use strum_macros::{EnumString, VariantNames};
 
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
@@ -18,7 +17,11 @@ pub static BLENDMODE_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::from_enum::<BlendMode>("54d531cf-d353-4e30-8ea7-8823a9b5305f", "BlendMode")
 });
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantNames, EnumString)]
+use graph::data::EnumVariants;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, EnumIter)]
 pub enum ConversionFormat {
     GrayU8,
     GrayU16,
@@ -50,6 +53,28 @@ impl ConversionFormat {
             ConversionFormat::RgbaU16 => ColorFormat::RGBA_U16,
             ConversionFormat::RgbaF32 => ColorFormat::RGBA_F32,
         }
+    }
+}
+
+static CONVERSION_FORMAT_VARIANTS: LazyLock<Vec<String>> = LazyLock::new(|| {
+    ConversionFormat::iter()
+        .map(|f| f.to_color_format().to_string())
+        .collect()
+});
+
+impl EnumVariants for ConversionFormat {
+    fn variant_names() -> Vec<String> {
+        CONVERSION_FORMAT_VARIANTS.clone()
+    }
+}
+
+impl FromStr for ConversionFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        ConversionFormat::iter()
+            .find(|f| f.to_color_format().to_string() == s)
+            .ok_or_else(|| format!("Unknown conversion format: {}", s))
     }
 }
 
