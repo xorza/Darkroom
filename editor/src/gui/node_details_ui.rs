@@ -1,7 +1,7 @@
 use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
 use graph::data::DynamicValue;
-use graph::graph::NodeId;
-use graph::prelude::ExecutionStats;
+use graph::graph::{Node, NodeId};
+use graph::prelude::{ExecutionStats, Func};
 use vision::Image;
 
 use crate::common::TextEdit;
@@ -119,16 +119,88 @@ impl NodeDetailsUi {
         let node = ctx.view_graph.graph.by_id(&node_id).unwrap();
         let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
+        Self::show_image_previews(gui, node, func, node_cache);
+    }
+
+    fn show_image_previews(
+        gui: &mut Gui<'_>,
+        node: &Node,
+        func: &Func,
+        node_cache: &mut NodeCache,
+    ) {
+        for (idx, input) in node_cache.arg_values.inputs.iter().enumerate() {
+            if let Some(value) = input.as_ref()
+                && let Some(image) = value.as_custom::<Image>()
+                && let Some(preview) = image.take_preview()
+            {
+                let desc = *preview.desc();
+                let color_image = to_color_image(preview);
+                let texture_handle = gui.ui().ctx().load_texture(
+                    format!("node_preview_{}_input_{idx}", node.id),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                let cached_texture = CachedTexture {
+                    desc,
+                    handle: texture_handle,
+                };
+
+                if idx >= node_cache.input_previews.len() {
+                    node_cache.input_previews.resize(idx + 1, None);
+                }
+
+                node_cache.input_previews[idx] = Some(cached_texture);
+            }
+        }
+
+        for (idx, value) in node_cache.arg_values.outputs.iter().enumerate() {
+            if let Some(image) = value.as_custom::<Image>()
+                && let Some(preview) = image.take_preview()
+            {
+                let desc = *preview.desc();
+                let color_image = to_color_image(preview);
+                let texture_handle = gui.ui().ctx().load_texture(
+                    format!("node_preview_{}_output_{idx}", node.id),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+
+                let cached_texture = CachedTexture {
+                    desc,
+                    handle: texture_handle,
+                };
+
+                if idx >= node_cache.output_previews.len() {
+                    node_cache.output_previews.resize(idx + 1, None);
+                }
+
+                node_cache.output_previews[idx] = Some(cached_texture);
+            }
+        }
+
         // Display inputs
         if !node_cache.arg_values.inputs.is_empty() {
             gui.ui().label("Inputs:");
             for (idx, input_value) in node_cache.arg_values.inputs.iter().enumerate() {
                 let input_name = func.inputs[idx].name.as_str();
                 let value_str = match input_value {
-                    Some(v) => format_dynamic_value(v),
+                    Some(v) => v.to_string(),
                     None => "-".to_string(),
                 };
                 gui.ui().label(format!("  {input_name}: {value_str}"));
+
+                if let Some(Some(texture)) = node_cache.input_previews.get(idx) {
+                    // Calculate display size maintaining aspect ratio
+                    let aspect = texture.desc.width as f32 / texture.desc.height as f32;
+                    let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
+                    let display_height = display_width / aspect;
+
+                    gui.ui().add_space(4.0);
+                    gui.ui().image((
+                        texture.handle.id(),
+                        Vec2::new(display_width, display_height),
+                    ));
+                }
             }
         }
 
@@ -138,95 +210,22 @@ impl NodeDetailsUi {
             gui.ui().label("Outputs:");
             for (idx, output_value) in node_cache.arg_values.outputs.iter().enumerate() {
                 let output_name = func.outputs[idx].name.as_str();
-                let value_str = format_dynamic_value(output_value);
+                let value_str = output_value.to_string();
                 gui.ui().label(format!("  {output_name}: {value_str}"));
+
+                if let Some(Some(texture)) = node_cache.output_previews.get(idx) {
+                    // Calculate display size maintaining aspect ratio
+                    let aspect = texture.desc.width as f32 / texture.desc.height as f32;
+                    let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
+                    let display_height = display_width / aspect;
+
+                    gui.ui().add_space(4.0);
+                    gui.ui().image((
+                        texture.handle.id(),
+                        Vec2::new(display_width, display_height),
+                    ));
+                }
             }
-        }
-
-        Self::show_image_previews(gui, node_id, node_cache);
-    }
-
-    fn show_image_previews(gui: &mut Gui<'_>, node_id: NodeId, node_cache: &mut NodeCache) {
-        gui.ui().add_space(8.0);
-        gui.ui().separator();
-        gui.ui().add_space(4.0);
-        gui.ui().label("Previews:");
-
-        node_cache
-            .input_previews
-            .resize(node_cache.arg_values.inputs.len(), None);
-        for (idx, input) in node_cache.arg_values.inputs.iter().enumerate() {
-            if let Some(value) = input.as_ref()
-                && let Some(image) = value.as_custom::<Image>()
-                && let Some(preview) = image.take_preview()
-            {
-                let desc = *preview.desc();
-                let color_image = to_color_image(preview);
-                let texture_handle = gui.ui().ctx().load_texture(
-                    format!("node_preview_{node_id}_input_{idx}"),
-                    color_image,
-                    TextureOptions::LINEAR,
-                );
-                let cached_texture = CachedTexture {
-                    desc,
-                    handle: texture_handle,
-                };
-
-                node_cache.input_previews[idx] = Some(cached_texture);
-            }
-        }
-
-        node_cache
-            .output_previews
-            .resize(node_cache.arg_values.outputs.len(), None);
-        for (idx, value) in node_cache.arg_values.outputs.iter().enumerate() {
-            if let Some(image) = value.as_custom::<Image>()
-                && let Some(preview) = image.take_preview()
-            {
-                let desc = *preview.desc();
-                let color_image = to_color_image(preview);
-                let texture_handle = gui.ui().ctx().load_texture(
-                    format!("node_preview_{node_id}_output_{idx}"),
-                    color_image,
-                    TextureOptions::LINEAR,
-                );
-
-                let cached_texture = CachedTexture {
-                    desc,
-                    handle: texture_handle,
-                };
-
-                node_cache.output_previews[idx] = Some(cached_texture);
-            }
-        }
-
-        for texture in node_cache.input_previews.iter().filter_map(|h| h.as_ref()) {
-            // Calculate display size maintaining aspect ratio
-            let aspect = texture.desc.width as f32 / texture.desc.height as f32;
-            let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
-            let display_height = display_width / aspect;
-
-            gui.ui().add_space(4.0);
-            gui.ui().image((
-                texture.handle.id(),
-                Vec2::new(display_width, display_height),
-            ));
-        }
-
-        gui.ui().separator();
-        gui.ui().add_space(4.0);
-
-        for texture in node_cache.output_previews.iter().filter_map(|h| h.as_ref()) {
-            // Calculate display size maintaining aspect ratio
-            let aspect = texture.desc.width as f32 / texture.desc.height as f32;
-            let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
-            let display_height = display_width / aspect;
-
-            gui.ui().add_space(4.0);
-            gui.ui().image((
-                texture.handle.id(),
-                Vec2::new(display_width, display_height),
-            ));
         }
     }
 
@@ -282,8 +281,4 @@ impl NodeDetailsUi {
             gui.ui().label("  Status: not executed");
         }
     }
-}
-
-fn format_dynamic_value(value: &DynamicValue) -> String {
-    value.to_string()
 }

@@ -50,6 +50,10 @@ impl ArgumentValuesCache {
             self.values.remove(&executed.node_id);
         }
 
+        for error in &execution_stats.node_errors {
+            self.values.remove(&error.node_id);
+        }
+
         // Remove cached values for nodes with missing inputs
         for port_address in &execution_stats.missing_inputs {
             self.values.remove(&port_address.target_id);
