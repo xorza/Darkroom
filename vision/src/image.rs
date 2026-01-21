@@ -1,5 +1,5 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, LazyLock};
+use std::sync::LazyLock;
 
 use common::slot::Slot;
 use graph::context::ContextManager;
@@ -35,8 +35,8 @@ impl Image {
         }
     }
 
-    pub fn preview(&self) -> Option<Arc<imaginarium::Image>> {
-        self.preview.peek()
+    pub fn take_preview(&self) -> Option<imaginarium::Image> {
+        self.preview.take()
     }
 }
 
@@ -46,6 +46,7 @@ impl CustomValue for Image {
     }
 
     fn gen_preview(&self, ctx_manager: &mut ContextManager) {
+        //todo make async
         let desc = self.buffer.desc();
         let max_dim = desc.width.max(desc.height);
 

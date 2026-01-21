@@ -1,8 +1,12 @@
+use std::sync::Arc;
+
 use egui::epaint::ColorImage;
 use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
 use graph::data::DynamicValue;
+use graph::execution_graph::ArgumentValues;
 use graph::graph::NodeId;
 use graph::prelude::ExecutionStats;
+use imaginarium::ColorFormat;
 use vision::Image;
 
 use crate::common::TextEdit;
@@ -12,6 +16,7 @@ use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::model::ArgumentValuesCache;
+use crate::model::argument_values_cache::{CachedTexture, NodeCache};
 use crate::model::graph_ui_action::GraphUiAction;
 
 const PANEL_WIDTH: f32 = 250.0;
@@ -104,13 +109,9 @@ impl NodeDetailsUi {
             self.show_execution_info(gui, ctx, node_id, stats);
         }
 
-        // Request argument values if not cached
-        if argument_values_cache.get(&node_id).is_none() {
-            interaction.request_argument_values = Some(node_id);
-        }
-
         // Display cached argument values
-        let Some(values) = argument_values_cache.get(&node_id) else {
+        let Some(node_cache) = argument_values_cache.get_mut(&node_id) else {
+            interaction.request_argument_values = Some(node_id);
             return;
         };
 
@@ -123,9 +124,9 @@ impl NodeDetailsUi {
         let func = ctx.func_lib.by_id(&node.func_id);
 
         // Display inputs
-        if !values.inputs.is_empty() {
+        if !node_cache.arg_values.inputs.is_empty() {
             gui.ui().label("Inputs:");
-            for (idx, input_value) in values.inputs.iter().enumerate() {
+            for (idx, input_value) in node_cache.arg_values.inputs.iter().enumerate() {
                 let input_name = func
                     .and_then(|f| f.inputs.get(idx))
                     .map(|i| i.name.as_str())
@@ -139,10 +140,10 @@ impl NodeDetailsUi {
         }
 
         // Display outputs
-        if !values.outputs.is_empty() {
+        if !node_cache.arg_values.outputs.is_empty() {
             gui.ui().add_space(4.0);
             gui.ui().label("Outputs:");
-            for (idx, output_value) in values.outputs.iter().enumerate() {
+            for (idx, output_value) in node_cache.arg_values.outputs.iter().enumerate() {
                 let output_name = func
                     .and_then(|f| f.outputs.get(idx))
                     .map(|o| o.name.as_str())
@@ -152,81 +153,107 @@ impl NodeDetailsUi {
             }
         }
 
-        // Collect image previews while values is borrowed
-        let previews: Vec<_> = values
-            .inputs
-            .iter()
-            .filter_map(|v| v.as_ref())
-            .chain(values.outputs.iter())
-            .filter_map(|v| v.as_custom::<Image>())
-            .filter_map(|img| {
-                img.preview().map(|preview| {
-                    let desc = preview.desc();
-                    (
-                        desc.width as usize,
-                        desc.height as usize,
-                        preview.bytes().to_vec(),
-                    )
-                })
-            })
-            .collect();
-
-        Self::show_image_previews(gui, node_id, &previews, argument_values_cache);
+        Self::show_image_previews(gui, node_id, node_cache);
     }
 
-    fn show_image_previews(
-        gui: &mut Gui<'_>,
-        node_id: NodeId,
-        previews: &[(usize, usize, Vec<u8>)],
-        cache: &mut ArgumentValuesCache,
-    ) {
-        if previews.is_empty() {
-            cache.preview_textures.remove(&node_id);
-            return;
-        }
-
-        let textures = cache.get_textures(&node_id);
-
-        // Remove stale textures
-        textures.retain(|idx, _| *idx < previews.len());
-
+    fn show_image_previews(gui: &mut Gui<'_>, node_id: NodeId, node_cache: &mut NodeCache) {
         gui.ui().add_space(8.0);
         gui.ui().separator();
         gui.ui().add_space(4.0);
         gui.ui().label("Previews:");
 
-        for (idx, (width, height, bytes)) in previews.iter().enumerate() {
-            // Create ColorImage from RGBA_U8 data
-            let color_image = ColorImage::from_rgba_unmultiplied([*width, *height], bytes);
+        node_cache
+            .input_previews
+            .resize(node_cache.arg_values.inputs.len(), None);
+        for (idx, input) in node_cache.arg_values.inputs.iter().enumerate() {
+            if let Some(value) = input.as_ref() {
+                if let Some(image) = value.as_custom::<Image>() {
+                    if let Some(preview) = image.take_preview() {
+                        assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
 
-            // Load or update texture
-            let texture = textures.entry(idx).or_insert_with(|| {
-                gui.ui().ctx().load_texture(
-                    format!("node_preview_{node_id}_{idx}"),
-                    color_image.clone(),
-                    TextureOptions::LINEAR,
-                )
-            });
+                        // todo move bytes
+                        let color_image = ColorImage::from_rgba_unmultiplied(
+                            [
+                                preview.desc().width as usize,
+                                preview.desc().height as usize,
+                            ],
+                            preview.bytes(),
+                        );
+                        let texture_handle = gui.ui().ctx().load_texture(
+                            format!("node_preview_{node_id}_{idx}"),
+                            color_image.clone(),
+                            TextureOptions::LINEAR,
+                        );
+                        let cached_texture = CachedTexture {
+                            desc: preview.desc().clone(),
+                            handle: texture_handle.clone(),
+                        };
 
-            // Update texture if dimensions changed
-            if texture.size() != [*width, *height] {
-                *texture = gui.ui().ctx().load_texture(
-                    format!("node_preview_{node_id}_{idx}"),
-                    color_image.clone(),
-                    TextureOptions::LINEAR,
-                );
-            } else {
-                texture.set(color_image, TextureOptions::LINEAR);
+                        node_cache.input_previews[idx] = Some(cached_texture);
+                    }
+                }
             }
+        }
 
+        node_cache
+            .output_previews
+            .resize(node_cache.arg_values.outputs.len(), None);
+        for (idx, value) in node_cache.arg_values.outputs.iter().enumerate() {
+            if let Some(image) = value.as_custom::<Image>() {
+                if let Some(preview) = image.take_preview() {
+                    assert_eq!(preview.desc().color_format, ColorFormat::RGBA_U8);
+
+                    // todo move bytes
+                    let color_image = ColorImage::from_rgba_unmultiplied(
+                        [
+                            preview.desc().width as usize,
+                            preview.desc().height as usize,
+                        ],
+                        preview.bytes(),
+                    );
+                    let texture_handle = gui.ui().ctx().load_texture(
+                        format!("node_preview_{node_id}_{idx}"),
+                        color_image.clone(),
+                        TextureOptions::LINEAR,
+                    );
+
+                    let cached_texture = CachedTexture {
+                        desc: preview.desc().clone(),
+                        handle: texture_handle.clone(),
+                    };
+
+                    node_cache.output_previews[idx] = Some(cached_texture);
+                }
+            }
+        }
+
+        for texture in node_cache.input_previews.iter().filter_map(|h| h.as_ref()) {
             // Calculate display size maintaining aspect ratio
-            let aspect = *width as f32 / *height as f32;
-            let display_width = PREVIEW_MAX_WIDTH.min(*width as f32);
+            let aspect = texture.desc.width as f32 / texture.desc.height as f32;
+            let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
             let display_height = display_width / aspect;
 
             gui.ui().add_space(4.0);
-            gui.ui()
-                .image((texture.id(), Vec2::new(display_width, display_height)));
+            gui.ui().image((
+                texture.handle.id(),
+                Vec2::new(display_width, display_height),
+            ));
+        }
+
+        gui.ui().separator();
+        gui.ui().add_space(4.0);
+
+        for texture in node_cache.output_previews.iter().filter_map(|h| h.as_ref()) {
+            // Calculate display size maintaining aspect ratio
+            let aspect = texture.desc.width as f32 / texture.desc.height as f32;
+            let display_width = PREVIEW_MAX_WIDTH.min(texture.desc.width as f32);
+            let display_height = display_width / aspect;
+
+            gui.ui().add_space(4.0);
+            gui.ui().image((
+                texture.handle.id(),
+                Vec2::new(display_width, display_height),
+            ));
         }
     }
 

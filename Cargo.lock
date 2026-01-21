@@ -3157,6 +3157,7 @@ dependencies = [
  "egui",
  "graph",
  "hashbrown 0.16.1",
+ "imaginarium",
  "lz4_flex",
  "pollster",
  "rayon",

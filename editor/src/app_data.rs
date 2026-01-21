@@ -180,7 +180,7 @@ impl AppData {
 
         // Process argument values response
         if let Some((node_id, Some(values))) = self.argument_values_rx.take() {
-            self.argument_values_cache.insert(node_id, values);
+            self.argument_values_cache.insert(node_id, values.into());
         }
     }
 
