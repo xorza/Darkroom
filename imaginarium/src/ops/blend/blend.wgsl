@@ -7,6 +7,10 @@
 // 5 = GRAY_ALPHA_F32 (8 bytes per pixel, 2 floats)
 // 6 = RGB_F32 (12 bytes per pixel, 3 floats)
 // 7 = RGBA_F32 (16 bytes per pixel, 4 floats)
+// 8 = GRAY_U16 (2 bytes per pixel)
+// 9 = GRAY_ALPHA_U16 (4 bytes per pixel)
+// 10 = RGB_U16 (6 bytes per pixel)
+// 11 = RGBA_U16 (8 bytes per pixel)
 
 struct Params {
     mode: u32,           // 0=Normal, 1=Add, 2=Subtract, 3=Multiply, 4=Screen, 5=Overlay
@@ -131,6 +135,64 @@ fn read_src_pixel(x: u32, y: u32) -> vec4<f32> {
                 bitcast<f32>(src[idx + 3u])
             );
         }
+        case 8u: {
+            // GRAY_U16: 2 bytes per pixel
+            let byte_offset = y * params.stride + x * 2u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let word = src[u32_idx];
+            var gray: u32;
+            if byte_in_u32 == 0u {
+                gray = word & 0xFFFFu;
+            } else {
+                gray = (word >> 16u) & 0xFFFFu;
+            }
+            let g = f32(gray) / 65535.0;
+            return vec4<f32>(g, g, g, 1.0);
+        }
+        case 9u: {
+            // GRAY_ALPHA_U16: 4 bytes per pixel (word-aligned)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x;
+            let word = src[idx];
+            let gray = f32(word & 0xFFFFu) / 65535.0;
+            let alpha = f32((word >> 16u) & 0xFFFFu) / 65535.0;
+            return vec4<f32>(gray, gray, gray, alpha);
+        }
+        case 10u: {
+            // RGB_U16: 6 bytes per pixel
+            let byte_offset = y * params.stride + x * 6u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let word0 = src[u32_idx];
+            let word1 = src[u32_idx + 1u];
+            var r: u32;
+            var g: u32;
+            var b: u32;
+            if byte_in_u32 == 0u {
+                r = word0 & 0xFFFFu;
+                g = (word0 >> 16u) & 0xFFFFu;
+                b = word1 & 0xFFFFu;
+            } else {
+                r = (word0 >> 16u) & 0xFFFFu;
+                g = word1 & 0xFFFFu;
+                b = (word1 >> 16u) & 0xFFFFu;
+            }
+            return vec4<f32>(f32(r) / 65535.0, f32(g) / 65535.0, f32(b) / 65535.0, 1.0);
+        }
+        case 11u: {
+            // RGBA_U16: 8 bytes per pixel (2 u32s per pixel)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x * 2u;
+            let word0 = src[idx];
+            let word1 = src[idx + 1u];
+            return vec4<f32>(
+                f32(word0 & 0xFFFFu) / 65535.0,
+                f32((word0 >> 16u) & 0xFFFFu) / 65535.0,
+                f32(word1 & 0xFFFFu) / 65535.0,
+                f32((word1 >> 16u) & 0xFFFFu) / 65535.0
+            );
+        }
         default: {
             return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }
@@ -243,6 +305,64 @@ fn read_dst_pixel(x: u32, y: u32) -> vec4<f32> {
                 bitcast<f32>(dst[idx + 1u]),
                 bitcast<f32>(dst[idx + 2u]),
                 bitcast<f32>(dst[idx + 3u])
+            );
+        }
+        case 8u: {
+            // GRAY_U16: 2 bytes per pixel
+            let byte_offset = y * params.stride + x * 2u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let word = dst[u32_idx];
+            var gray: u32;
+            if byte_in_u32 == 0u {
+                gray = word & 0xFFFFu;
+            } else {
+                gray = (word >> 16u) & 0xFFFFu;
+            }
+            let g = f32(gray) / 65535.0;
+            return vec4<f32>(g, g, g, 1.0);
+        }
+        case 9u: {
+            // GRAY_ALPHA_U16: 4 bytes per pixel (word-aligned)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x;
+            let word = dst[idx];
+            let gray = f32(word & 0xFFFFu) / 65535.0;
+            let alpha = f32((word >> 16u) & 0xFFFFu) / 65535.0;
+            return vec4<f32>(gray, gray, gray, alpha);
+        }
+        case 10u: {
+            // RGB_U16: 6 bytes per pixel
+            let byte_offset = y * params.stride + x * 6u;
+            let u32_idx = byte_offset / 4u;
+            let byte_in_u32 = byte_offset % 4u;
+            let word0 = dst[u32_idx];
+            let word1 = dst[u32_idx + 1u];
+            var r: u32;
+            var g: u32;
+            var b: u32;
+            if byte_in_u32 == 0u {
+                r = word0 & 0xFFFFu;
+                g = (word0 >> 16u) & 0xFFFFu;
+                b = word1 & 0xFFFFu;
+            } else {
+                r = (word0 >> 16u) & 0xFFFFu;
+                g = word1 & 0xFFFFu;
+                b = (word1 >> 16u) & 0xFFFFu;
+            }
+            return vec4<f32>(f32(r) / 65535.0, f32(g) / 65535.0, f32(b) / 65535.0, 1.0);
+        }
+        case 11u: {
+            // RGBA_U16: 8 bytes per pixel (2 u32s per pixel)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x * 2u;
+            let word0 = dst[idx];
+            let word1 = dst[idx + 1u];
+            return vec4<f32>(
+                f32(word0 & 0xFFFFu) / 65535.0,
+                f32((word0 >> 16u) & 0xFFFFu) / 65535.0,
+                f32(word1 & 0xFFFFu) / 65535.0,
+                f32((word1 >> 16u) & 0xFFFFu) / 65535.0
             );
         }
         default: {
@@ -377,7 +497,47 @@ fn process_rgb_u8_pixel(x: u32, y: u32) {
     }
 }
 
-// For aligned formats (RGBA_U8, all F32): Simple per-pixel write
+// For GRAY_U16: Process 2 pixels at once to write a full u32
+fn process_gray_u16_pair(base_x: u32, y: u32) {
+    var packed: u32 = 0u;
+    for (var i: u32 = 0u; i < 2u; i++) {
+        let x = base_x + i;
+        if x < params.width {
+            let result = blend_pixel(x, y);
+            let gray = u32(clamp(result.r * 65535.0, 0.0, 65535.0));
+            packed = packed | (gray << (i * 16u));
+        }
+    }
+    let byte_offset = y * params.stride + base_x * 2u;
+    let u32_idx = byte_offset / 4u;
+    output[u32_idx] = packed;
+}
+
+// For RGB_U16: Process pixels and write the bytes
+fn process_rgb_u16_pixel(x: u32, y: u32) {
+    let result = blend_pixel(x, y);
+    let r = u32(clamp(result.r * 65535.0, 0.0, 65535.0));
+    let g = u32(clamp(result.g * 65535.0, 0.0, 65535.0));
+    let b = u32(clamp(result.b * 65535.0, 0.0, 65535.0));
+
+    let byte_offset = y * params.stride + x * 6u;
+    let u32_idx = byte_offset / 4u;
+    let byte_in_u32 = byte_offset % 4u;
+
+    if byte_in_u32 == 0u {
+        // R at bytes 0-1, G at bytes 2-3, B at bytes 4-5
+        output[u32_idx] = r | (g << 16u);
+        let mask1 = 0xFFFF0000u;
+        output[u32_idx + 1u] = (output[u32_idx + 1u] & mask1) | b;
+    } else {
+        // byte_in_u32 == 2: R at bytes 2-3, G at bytes 4-5, B at bytes 6-7
+        let mask0 = 0x0000FFFFu;
+        output[u32_idx] = (output[u32_idx] & mask0) | (r << 16u);
+        output[u32_idx + 1u] = g | (b << 16u);
+    }
+}
+
+// For aligned formats (RGBA_U8, all F32, GRAY_ALPHA_U16, RGBA_U16): Simple per-pixel write
 fn process_aligned_pixel(x: u32, y: u32) {
     let result = blend_pixel(x, y);
 
@@ -422,6 +582,25 @@ fn process_aligned_pixel(x: u32, y: u32) {
             output[idx + 2u] = bitcast<u32>(result.b);
             output[idx + 3u] = bitcast<u32>(result.a);
         }
+        case 9u: {
+            // GRAY_ALPHA_U16: 4 bytes per pixel (word-aligned)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x;
+            let gray = u32(clamp(result.r * 65535.0, 0.0, 65535.0));
+            let alpha = u32(clamp(result.a * 65535.0, 0.0, 65535.0));
+            output[idx] = gray | (alpha << 16u);
+        }
+        case 11u: {
+            // RGBA_U16: 8 bytes per pixel (2 u32s per pixel)
+            let stride_u32 = params.stride / 4u;
+            let idx = y * stride_u32 + x * 2u;
+            let r = u32(clamp(result.r * 65535.0, 0.0, 65535.0));
+            let g = u32(clamp(result.g * 65535.0, 0.0, 65535.0));
+            let b = u32(clamp(result.b * 65535.0, 0.0, 65535.0));
+            let a = u32(clamp(result.a * 65535.0, 0.0, 65535.0));
+            output[idx] = r | (g << 16u);
+            output[idx + 1u] = b | (a << 16u);
+        }
         default: {}
     }
 }
@@ -465,6 +644,30 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let x = pixel_idx % params.width;
             let y = pixel_idx / params.width;
             process_rgb_u8_pixel(x, y);
+        }
+        case 8u: {
+            // GRAY_U16: Each thread processes 2 pixels (one u32)
+            let pair_idx = global_id.x;
+            let pairs_per_row = (params.width + 1u) / 2u;
+            let total_pairs = pairs_per_row * params.height;
+            if pair_idx >= total_pairs {
+                return;
+            }
+            let y = pair_idx / pairs_per_row;
+            let pair_x = pair_idx % pairs_per_row;
+            let base_x = pair_x * 2u;
+            process_gray_u16_pair(base_x, y);
+        }
+        case 10u: {
+            // RGB_U16: Each thread processes 1 pixel
+            let pixel_idx = global_id.x;
+            let total_pixels = params.width * params.height;
+            if pixel_idx >= total_pixels {
+                return;
+            }
+            let x = pixel_idx % params.width;
+            let y = pixel_idx / params.width;
+            process_rgb_u16_pixel(x, y);
         }
         default: {
             // Aligned formats: Each thread processes 1 pixel

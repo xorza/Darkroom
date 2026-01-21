@@ -12,6 +12,10 @@
 // 5 = GRAY_ALPHA_F32 (8 bytes per pixel, 2 floats)
 // 6 = RGB_F32 (12 bytes per pixel, 3 floats)
 // 7 = RGBA_F32 (16 bytes per pixel, 4 floats)
+// 8 = GRAY_U16 (2 bytes per pixel)
+// 9 = GRAY_ALPHA_U16 (4 bytes per pixel)
+// 10 = RGB_U16 (6 bytes per pixel)
+// 11 = RGBA_U16 (8 bytes per pixel)
 
 struct Params {
     contrast: f32,
@@ -38,6 +42,13 @@ fn adjust_channel_u8(value: f32) -> f32 {
     // offset = 127.5 * (1 - contrast) + brightness * 255
     let offset = 127.5 * (1.0 - params.contrast) + params.brightness * 255.0;
     return clamp(value * params.contrast + offset, 0.0, 255.0);
+}
+
+// Apply contrast/brightness to a u16 channel (0-65535 range)
+fn adjust_channel_u16(value: f32) -> f32 {
+    // offset = 32767.5 * (1 - contrast) + brightness * 65535
+    let offset = 32767.5 * (1.0 - params.contrast) + params.brightness * 65535.0;
+    return clamp(value * params.contrast + offset, 0.0, 65535.0);
 }
 
 // Process GRAY_U8: Each thread handles 4 pixels (one u32)
@@ -194,6 +205,93 @@ fn process_rgba_f32_pixel(x: u32, y: u32) {
     output[idx + 3u] = a;
 }
 
+// Process GRAY_U16: Each thread handles 2 pixels (one u32)
+fn process_gray_u16_pair(base_x: u32, y: u32) {
+    let byte_offset = y * params.stride + base_x * 2u;
+    let u32_idx = byte_offset / 4u;
+    let word = input[u32_idx];
+
+    var result: u32 = 0u;
+    for (var i: u32 = 0u; i < 2u; i++) {
+        let x = base_x + i;
+        if x < params.width {
+            let gray = f32((word >> (i * 16u)) & 0xFFFFu);
+            let adjusted = u32(adjust_channel_u16(gray));
+            result = result | (adjusted << (i * 16u));
+        }
+    }
+    output[u32_idx] = result;
+}
+
+// Process GRAY_ALPHA_U16: Each thread handles 1 pixel (one u32)
+fn process_gray_alpha_u16_pixel(x: u32, y: u32) {
+    let stride_u32 = params.stride / 4u;
+    let idx = y * stride_u32 + x;
+    let word = input[idx];
+
+    let gray = f32(word & 0xFFFFu);
+    let alpha = (word >> 16u) & 0xFFFFu; // Preserve alpha
+
+    let adjusted = u32(adjust_channel_u16(gray));
+    output[idx] = adjusted | (alpha << 16u);
+}
+
+// Process RGB_U16: Each thread handles 1 pixel
+fn process_rgb_u16_pixel(x: u32, y: u32) {
+    let byte_offset = y * params.stride + x * 6u;
+    let u32_idx = byte_offset / 4u;
+    let byte_in_u32 = byte_offset % 4u;
+    let word0 = input[u32_idx];
+    let word1 = input[u32_idx + 1u];
+
+    var r: u32;
+    var g: u32;
+    var b: u32;
+    if byte_in_u32 == 0u {
+        r = word0 & 0xFFFFu;
+        g = (word0 >> 16u) & 0xFFFFu;
+        b = word1 & 0xFFFFu;
+    } else {
+        r = (word0 >> 16u) & 0xFFFFu;
+        g = word1 & 0xFFFFu;
+        b = (word1 >> 16u) & 0xFFFFu;
+    }
+
+    let r_out = u32(adjust_channel_u16(f32(r)));
+    let g_out = u32(adjust_channel_u16(f32(g)));
+    let b_out = u32(adjust_channel_u16(f32(b)));
+
+    if byte_in_u32 == 0u {
+        output[u32_idx] = r_out | (g_out << 16u);
+        let mask1 = 0xFFFF0000u;
+        output[u32_idx + 1u] = (output[u32_idx + 1u] & mask1) | b_out;
+    } else {
+        let mask0 = 0x0000FFFFu;
+        output[u32_idx] = (output[u32_idx] & mask0) | (r_out << 16u);
+        output[u32_idx + 1u] = g_out | (b_out << 16u);
+    }
+}
+
+// Process RGBA_U16: Each thread handles 1 pixel (2 u32s)
+fn process_rgba_u16_pixel(x: u32, y: u32) {
+    let stride_u32 = params.stride / 4u;
+    let idx = y * stride_u32 + x * 2u;
+    let word0 = input[idx];
+    let word1 = input[idx + 1u];
+
+    let r = f32(word0 & 0xFFFFu);
+    let g = f32((word0 >> 16u) & 0xFFFFu);
+    let b = f32(word1 & 0xFFFFu);
+    let a = (word1 >> 16u) & 0xFFFFu; // Preserve alpha
+
+    let r_out = u32(adjust_channel_u16(r));
+    let g_out = u32(adjust_channel_u16(g));
+    let b_out = u32(adjust_channel_u16(b));
+
+    output[idx] = r_out | (g_out << 16u);
+    output[idx + 1u] = b_out | (a << 16u);
+}
+
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     switch params.format_type {
@@ -288,6 +386,52 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let x = pixel_idx % params.width;
             let y = pixel_idx / params.width;
             process_rgba_f32_pixel(x, y);
+        }
+        case 8u: {
+            // GRAY_U16: Each thread processes 2 pixels (one u32)
+            let pair_idx = global_id.x;
+            let pairs_per_row = (params.width + 1u) / 2u;
+            let total_pairs = pairs_per_row * params.height;
+            if pair_idx >= total_pairs {
+                return;
+            }
+            let y = pair_idx / pairs_per_row;
+            let pair_x = pair_idx % pairs_per_row;
+            let base_x = pair_x * 2u;
+            process_gray_u16_pair(base_x, y);
+        }
+        case 9u: {
+            // GRAY_ALPHA_U16: Each thread processes 1 pixel
+            let pixel_idx = global_id.x;
+            let total_pixels = params.width * params.height;
+            if pixel_idx >= total_pixels {
+                return;
+            }
+            let x = pixel_idx % params.width;
+            let y = pixel_idx / params.width;
+            process_gray_alpha_u16_pixel(x, y);
+        }
+        case 10u: {
+            // RGB_U16: Each thread processes 1 pixel
+            let pixel_idx = global_id.x;
+            let total_pixels = params.width * params.height;
+            if pixel_idx >= total_pixels {
+                return;
+            }
+            let x = pixel_idx % params.width;
+            let y = pixel_idx / params.width;
+            process_rgb_u16_pixel(x, y);
+        }
+        case 11u: {
+            // RGBA_U16: Each thread processes 1 pixel
+            let pixel_idx = global_id.x;
+            let total_pixels = params.width * params.height;
+            if pixel_idx >= total_pixels {
+                return;
+            }
+            let x = pixel_idx % params.width;
+            let y = pixel_idx / params.width;
+            process_rgba_u16_pixel(x, y);
         }
         default: {}
     }
