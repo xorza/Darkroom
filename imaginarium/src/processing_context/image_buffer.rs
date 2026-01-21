@@ -173,6 +173,22 @@ impl ImageBuffer {
         }
     }
 
+    /// Consumes self and returns the CPU image asynchronously, downloading from GPU if needed.
+    /// Allocates CPU storage if empty.
+    ///
+    /// Note: Requires the GPU device to be polled (via `ctx.gpu().wait()` or similar)
+    /// for the download to complete. The polling can happen from another thread.
+    pub async fn to_cpu_async(self, ctx: &ProcessingContext) -> Result<Image> {
+        match self.storage.into_inner() {
+            Some(Storage::Cpu(img)) => Ok(img),
+            Some(Storage::Gpu(gpu_img)) => {
+                let gpu_ctx = ctx.gpu().expect("GPU image exists but no GPU context");
+                gpu_img.to_image_async(gpu_ctx).await
+            }
+            None => Image::new_empty(self.desc),
+        }
+    }
+
     /// Consumes self and returns the GPU image, uploading from CPU if needed.
     /// Allocates GPU storage if empty.
     pub fn to_gpu(self, ctx: &ProcessingContext) -> Result<GpuImage> {
