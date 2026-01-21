@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::LazyLock;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use graph::data::{CustomValue, DataType, DynamicValue};
+use graph::data::{CustomValue, DataType, DynamicValue, FsPathMode};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
@@ -195,7 +195,7 @@ impl Default for ImageFuncLib {
             inputs: vec![FuncInput {
                 name: "path".to_string(),
                 required: true,
-                data_type: DataType::FsPath,
+                data_type: DataType::FsPath(FsPathMode::ExistingFile),
                 default_value: None,
                 value_options: vec![],
             }],
@@ -239,7 +239,7 @@ impl Default for ImageFuncLib {
                 FuncInput {
                     name: "path".to_string(),
                     required: true,
-                    data_type: DataType::FsPath,
+                    data_type: DataType::FsPath(FsPathMode::NewFile),
                     default_value: None,
                     value_options: vec![],
                 },

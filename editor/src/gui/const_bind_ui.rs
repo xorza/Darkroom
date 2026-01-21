@@ -5,6 +5,7 @@ use eframe::egui;
 use egui::{Align2, PointerButton, Pos2, Response, Sense, StrokeKind, Vec2, pos2, vec2};
 use graph::data::DataType;
 use graph::data::EnumDef;
+use graph::data::FsPathMode;
 use graph::data::StaticValue;
 use graph::graph::{Binding, Node, NodeId};
 use graph::prelude::Func;
@@ -171,13 +172,19 @@ impl<'a> ConstBindFrame<'a> {
                         &const_bind_style,
                     )
                 }
-                StaticValue::FsPath(path) => render_fs_path_input(
-                    gui,
-                    ("const_fspath_input", node.id, input_idx),
-                    path,
-                    connection_start,
-                    &const_bind_style,
-                ),
+                StaticValue::FsPath(path) => {
+                    let DataType::FsPath(mode) = &func.inputs[input_idx].data_type else {
+                        panic!("Expected FsPath data type")
+                    };
+                    render_fs_path_input(
+                        gui,
+                        ("const_fspath_input", node.id, input_idx),
+                        path,
+                        *mode,
+                        connection_start,
+                        &const_bind_style,
+                    )
+                }
                 _ => todo!(),
             };
 
@@ -267,13 +274,20 @@ fn render_fs_path_input(
     gui: &mut Gui<'_>,
     id_salt: impl std::hash::Hash,
     path: &mut String,
+    mode: FsPathMode,
     pos: Pos2,
     style: &crate::gui::style::DragValueStyle,
 ) -> Response {
-    let filename = Path::new(path.as_str())
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .unwrap_or_else(|| "(none)".to_string());
+    let display_name = match mode {
+        FsPathMode::Directory => Path::new(path.as_str())
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "(none)".to_string()),
+        _ => Path::new(path.as_str())
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_else(|| "(none)".to_string()),
+    };
 
     let _id = gui.ui().make_persistent_id(&id_salt);
 
@@ -291,7 +305,7 @@ fn render_fs_path_input(
     let filename_galley = gui
         .ui()
         .painter()
-        .layout_no_wrap(filename.clone(), font, text_color);
+        .layout_no_wrap(display_name.clone(), font, text_color);
     let filename_size = filename_galley.size() + padding * 2.0;
 
     let total_width = filename_size.x + browse_size.x + gui.style.small_padding;
@@ -322,10 +336,16 @@ fn render_fs_path_input(
 
     let browse_response = gui.ui().put(browse_rect, egui::Button::new(browse_text));
 
-    if browse_response.clicked()
-        && let Some(selected_path) = rfd::FileDialog::new().pick_file()
-    {
-        *path = selected_path.to_string_lossy().to_string();
+    if browse_response.clicked() {
+        let dialog = rfd::FileDialog::new();
+        let selected_path = match mode {
+            FsPathMode::ExistingFile => dialog.pick_file(),
+            FsPathMode::NewFile => dialog.save_file(),
+            FsPathMode::Directory => dialog.pick_folder(),
+        };
+        if let Some(selected_path) = selected_path {
+            *path = selected_path.to_string_lossy().to_string();
+        }
     }
 
     response | browse_response

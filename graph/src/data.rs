@@ -50,6 +50,14 @@ impl EnumDef {
     }
 }
 
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FsPathMode {
+    #[default]
+    ExistingFile,
+    NewFile,
+    Directory,
+}
+
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub enum DataType {
     #[default]
@@ -58,7 +66,7 @@ pub enum DataType {
     Int,
     Bool,
     String,
-    FsPath,
+    FsPath(FsPathMode),
     Array {
         element_type: Box<DataType>,
         // length is not included in the hash or equality check
@@ -278,9 +286,9 @@ impl DynamicValue {
             (DynamicValue::String(s), DataType::Bool) => {
                 DynamicValue::Bool(s == "true" || s == "1")
             }
-            (DynamicValue::String(s), DataType::FsPath) => DynamicValue::FsPath(s.clone()),
+            (DynamicValue::String(s), DataType::FsPath(_)) => DynamicValue::FsPath(s.clone()),
 
-            (DynamicValue::FsPath(_), DataType::FsPath) => self,
+            (DynamicValue::FsPath(_), DataType::FsPath(_)) => self,
             (DynamicValue::FsPath(s), DataType::String) => DynamicValue::String(s.clone()),
 
             (DynamicValue::Enum { type_id, .. }, DataType::Enum(enum_def))
@@ -329,7 +337,7 @@ impl From<&DataType> for StaticValue {
             DataType::Int => StaticValue::Int(0),
             DataType::Bool => StaticValue::Bool(false),
             DataType::String => StaticValue::String("".to_string()),
-            DataType::FsPath => StaticValue::FsPath("".to_string()),
+            DataType::FsPath(_) => StaticValue::FsPath("".to_string()),
             DataType::Enum(enum_def) => StaticValue::Enum {
                 type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
@@ -346,7 +354,7 @@ impl From<&DataType> for DynamicValue {
             DataType::Int => DynamicValue::Int(0),
             DataType::Bool => DynamicValue::Bool(false),
             DataType::String => DynamicValue::String("".to_string()),
-            DataType::FsPath => DynamicValue::FsPath("".to_string()),
+            DataType::FsPath(_) => DynamicValue::FsPath("".to_string()),
             DataType::Enum(enum_def) => DynamicValue::Enum {
                 type_id: enum_def.type_id,
                 variant_name: enum_def.variants[0].clone(),
@@ -471,7 +479,7 @@ impl Display for DataType {
             DataType::Int => "int".to_string(),
             DataType::Bool => "bool".to_string(),
             DataType::String => "string".to_string(),
-            DataType::FsPath => "path".to_string(),
+            DataType::FsPath(_) => "path".to_string(),
             DataType::Custom(def) => def.display_name.clone(),
             _ => panic!("No string representation for {:?}", self),
         };
@@ -489,7 +497,7 @@ impl FromStr for DataType {
             "int" => Ok(DataType::Int),
             "bool" => Ok(DataType::Bool),
             "string" => Ok(DataType::String),
-            "path" => Ok(DataType::FsPath),
+            "path" => Ok(DataType::FsPath(FsPathMode::default())),
             _ => Err(()),
         }
     }
@@ -503,7 +511,7 @@ impl PartialEq for DataType {
             (DataType::Int, DataType::Int) => true,
             (DataType::Bool, DataType::Bool) => true,
             (DataType::String, DataType::String) => true,
-            (DataType::FsPath, DataType::FsPath) => true,
+            (DataType::FsPath(mode_a), DataType::FsPath(mode_b)) => mode_a == mode_b,
 
             (DataType::Custom(def1), DataType::Custom(def2)) => def1.type_id == def2.type_id,
 
@@ -535,7 +543,10 @@ impl Hash for DataType {
             DataType::Int => 2.hash(state),
             DataType::Bool => 3.hash(state),
             DataType::String => 4.hash(state),
-            DataType::FsPath => 5.hash(state),
+            DataType::FsPath(mode) => {
+                5.hash(state);
+                mode.hash(state);
+            }
 
             DataType::Array { element_type, .. } => {
                 6.hash(state);
