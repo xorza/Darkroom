@@ -191,7 +191,7 @@ impl Default for ImageFuncLib {
             id: "a4d9bf87-9d98-44f1-a162-7483c298be3d".into(),
             name: "load_image".to_string(),
             description: Some("Loads an image from file".to_string()),
-            behavior: FuncBehavior::Pure,
+            behavior: FuncBehavior::Impure,
             terminal: false,
             category: "image".to_string(),
             inputs: vec![FuncInput {
