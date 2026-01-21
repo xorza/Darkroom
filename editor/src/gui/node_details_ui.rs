@@ -1,7 +1,7 @@
-use bumpalo::Bump;
-use egui::{Align2, Pos2, Rect, Vec2};
+use egui::{Color32, Pos2, Rect, Vec2};
 use graph::data::DynamicValue;
 use graph::graph::NodeId;
+use graph::prelude::ExecutionStats;
 
 use crate::common::TextEdit;
 use crate::common::frame::Frame;
@@ -96,6 +96,11 @@ impl NodeDetailsUi {
             });
         }
 
+        // Display execution info
+        if let Some(stats) = ctx.execution_stats {
+            self.show_execution_info(gui, node_id, stats);
+        }
+
         // Request argument values if not cached
         if argument_values_cache.get(&node_id).is_none() {
             interaction.request_argument_values = Some(node_id);
@@ -140,6 +145,43 @@ impl NodeDetailsUi {
                     gui.ui().label(format!("  {output_name}: {value_str}"));
                 }
             }
+        }
+    }
+
+    fn show_execution_info(&self, gui: &mut Gui<'_>, node_id: NodeId, stats: &ExecutionStats) {
+        gui.ui().add_space(8.0);
+        gui.ui().separator();
+        gui.ui().add_space(4.0);
+        gui.ui().label("Execution:");
+
+        // Check for error
+        if let Some(node_error) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
+            let error_color = Color32::from_rgb(255, 100, 100);
+            gui.ui()
+                .colored_label(error_color, format!("  Error: {}", node_error.error));
+            return;
+        }
+
+        // Check if cached
+        if stats.cached_nodes.contains(&node_id) {
+            gui.ui().label("  Status: cached");
+            return;
+        }
+
+        // Check for missing inputs
+        if stats.missing_inputs.iter().any(|p| p.target_id == node_id) {
+            let warning_color = Color32::from_rgb(255, 180, 70);
+            gui.ui()
+                .colored_label(warning_color, "  Status: missing inputs");
+            return;
+        }
+
+        // Check if executed and show time
+        if let Some(executed) = stats.executed_nodes.iter().find(|e| e.node_id == node_id) {
+            gui.ui()
+                .label(format!("  Time: {:.2} ms", executed.elapsed_secs * 1000.0));
+        } else {
+            gui.ui().label("  Status: not executed");
         }
     }
 }
