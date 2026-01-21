@@ -12,7 +12,7 @@ use crate::{
 
 #[derive(Debug, Error)]
 pub enum InvokeError {
-    #[error("Invocation failed: {0}")]
+    #[error("{0}")]
     External(#[from] anyhow::Error),
 }
 
