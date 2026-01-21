@@ -25,62 +25,22 @@ impl<T: VariantNames> EnumVariants for T {
 
 id_type!(TypeId);
 
-pub type PreviewFn =
-    SharedFn<dyn Fn(&dyn Any, &mut ContextManager) -> Option<PendingPreview> + Send + Sync>;
-
-/// Boxed async function that receives ContextManager for resource access during polling.
-type PollFn = Box<
-    dyn FnOnce(
-            &mut ContextManager,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
-        + Send,
+pub type PreviewFn = SharedFn<
+    dyn Fn(&dyn Any, &mut ContextManager) -> Option<Box<dyn PendingPreview>> + Send + Sync,
 >;
 
-/// A pending preview generation that requires polling to complete.
-/// Call `wait()` to await completion, which polls the GPU and awaits the task.
-pub struct PendingPreview {
-    /// Async function to poll the GPU
-    poll_fn: PollFn,
-    /// The spawned task handle
-    task: tokio::task::JoinHandle<()>,
-    /// Notifier that signals when the task is ready for GPU polling
-    ready_notify: Arc<tokio::sync::Notify>,
-}
-
-impl PendingPreview {
-    pub fn new<F, Fut>(
-        poll_fn: F,
-        task: tokio::task::JoinHandle<()>,
-        ready_notify: Arc<tokio::sync::Notify>,
-    ) -> Self
-    where
-        F: FnOnce(&mut ContextManager) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
-    {
-        Self {
-            poll_fn: Box::new(move |ctx| Box::pin(poll_fn(ctx))),
-            task,
-            ready_notify,
-        }
-    }
-
+/// Trait for pending preview generation that requires polling to complete.
+#[async_trait::async_trait]
+pub trait PendingPreview: Send {
     /// Awaits until the preview generation completes.
-    /// Waits for the task to be ready, polls the GPU, then awaits the task.
-    pub async fn wait(self, ctx_manager: &mut ContextManager) {
-        // Wait for the task to signal it's ready for GPU polling
-        self.ready_notify.notified().await;
-        // Poll the GPU
-        (self.poll_fn)(ctx_manager).await;
-        // Wait for the task to complete
-        let _ = self.task.await;
-    }
+    async fn wait(self: Box<Self>, ctx_manager: &mut ContextManager);
 }
 
 /// Trait for custom types that can be stored in `DynamicValue::Custom`.
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
-    fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
+    fn gen_preview(&self, _ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
         None
     }
 }
@@ -406,7 +366,10 @@ impl DynamicValue {
         }
     }
 
-    pub fn gen_preview(&mut self, ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
+    pub fn gen_preview(
+        &mut self,
+        ctx_manager: &mut ContextManager,
+    ) -> Option<Box<dyn PendingPreview>> {
         if let DynamicValue::Custom {
             data, preview_fn, ..
         } = self

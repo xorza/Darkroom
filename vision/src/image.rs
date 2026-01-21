@@ -1,12 +1,41 @@
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use std::sync::LazyLock;
 
 use common::slot::Slot;
 use graph::context::ContextManager;
 use graph::data::{CustomValue, DataType, PendingPreview};
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
+use tokio::sync::Notify;
+use tokio::task::JoinHandle;
 
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
+
+/// Pending preview for image data that requires GPU polling.
+struct ImagePendingPreview {
+    task: JoinHandle<()>,
+    ready_notify: Arc<Notify>,
+}
+
+#[async_trait::async_trait]
+impl PendingPreview for ImagePendingPreview {
+    async fn wait(self: Box<Self>, ctx_manager: &mut ContextManager) {
+        // Wait for the task to signal it's ready for GPU polling
+        self.ready_notify.notified().await;
+
+        // Poll the GPU
+        let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
+        vision_ctx
+            .processing_ctx
+            .gpu()
+            .expect("Gpu is expected to be available")
+            .wait_async()
+            .await;
+
+        // Wait for the task to complete
+        let _ = self.task.await;
+    }
+}
 
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
@@ -45,7 +74,7 @@ impl CustomValue for Image {
         IMAGE_DATA_TYPE.clone()
     }
 
-    fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<PendingPreview> {
+    fn gen_preview(&self, ctx_manager: &mut ContextManager) -> Option<Box<dyn PendingPreview>> {
         let desc = self.buffer.desc();
         let max_dim = desc.width.max(desc.height);
 
@@ -81,11 +110,10 @@ impl CustomValue for Image {
             .expect("GPU context required for preview generation")
             .clone();
 
-        let ready_notify = std::sync::Arc::new(tokio::sync::Notify::new());
+        let ready_notify = Arc::new(Notify::new());
 
         // Spawn async task to download from GPU and convert
         let task = tokio::spawn({
-            let gpu = gpu.clone();
             let preview_slot = self.preview.clone();
             let ready_notify = ready_notify.clone();
             async move {
@@ -116,19 +144,7 @@ impl CustomValue for Image {
             }
         });
 
-        Some(PendingPreview::new(
-            |ctx_manager| {
-                let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
-                let gpu = vision_ctx.processing_ctx.gpu().cloned();
-                async move {
-                    if let Some(gpu) = gpu {
-                        gpu.wait_async().await;
-                    }
-                }
-            },
-            task,
-            ready_notify,
-        ))
+        Some(Box::new(ImagePendingPreview { task, ready_notify }))
     }
 }
 

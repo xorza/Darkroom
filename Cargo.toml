@@ -61,6 +61,7 @@ bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "*", features = ["std"] }
 bitcode = { version = "*", features = ["serde"] }
 rfd = { version = "*" }
+async-trait = { version = "*" }
 
 
 [profile.bench]
