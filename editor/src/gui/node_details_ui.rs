@@ -98,7 +98,7 @@ impl NodeDetailsUi {
 
         // Display execution info
         if let Some(stats) = ctx.execution_stats {
-            self.show_execution_info(gui, node_id, stats);
+            self.show_execution_info(gui, ctx, node_id, stats);
         }
 
         // Request argument values if not cached
@@ -148,7 +148,13 @@ impl NodeDetailsUi {
         }
     }
 
-    fn show_execution_info(&self, gui: &mut Gui<'_>, node_id: NodeId, stats: &ExecutionStats) {
+    fn show_execution_info(
+        &self,
+        gui: &mut Gui<'_>,
+        ctx: &GraphContext<'_>,
+        node_id: NodeId,
+        stats: &ExecutionStats,
+    ) {
         gui.ui().add_space(8.0);
         gui.ui().separator();
         gui.ui().add_space(4.0);
@@ -157,8 +163,18 @@ impl NodeDetailsUi {
         // Check for error
         if let Some(node_error) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
             let error_color = Color32::from_rgb(255, 100, 100);
-            gui.ui()
-                .colored_label(error_color, format!("  Error: {}", node_error.error));
+            let func_name = match &node_error.error {
+                graph::execution_graph::Error::Invoke { func_id, .. } => ctx
+                    .func_lib
+                    .by_id(func_id)
+                    .map(|f| f.name.as_str())
+                    .unwrap(),
+                graph::execution_graph::Error::CycleDetected { .. } => "cycle",
+            };
+            gui.ui().colored_label(
+                error_color,
+                format!("  {}: {}", func_name, node_error.error),
+            );
             return;
         }
 

@@ -19,7 +19,7 @@ use crate::worker::EventRef;
 
 #[derive(Debug, Error, Clone, Serialize, Deserialize)]
 pub enum Error {
-    #[error("Function invocation failed for function {func_id:?}: {message}")]
+    #[error("{message}")]
     Invoke { func_id: FuncId, message: String },
     #[error("Cycle detected while building execution graph at node {node_id:?}")]
     CycleDetected { node_id: NodeId },
