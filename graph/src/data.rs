@@ -7,7 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 
-use common::id_type;
+use common::{SharedFn, id_type};
 
 use crate::context::ContextManager;
 
@@ -168,8 +168,8 @@ impl PartialEq for StaticValue {
 
 impl Eq for StaticValue {}
 
-type DisplayFn = Arc<dyn Fn(&dyn Any) -> String + Send + Sync>;
-type PreviewFn = Arc<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
+type DisplayFn = SharedFn<dyn Fn(&dyn Any) -> String + Send + Sync>;
+type PreviewFn = SharedFn<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
 
 #[derive(Default, Clone)]
 pub enum DynamicValue {
@@ -186,7 +186,7 @@ pub enum DynamicValue {
         type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
         display_fn: DisplayFn,
-        preview_fn: Option<PreviewFn>,
+        preview_fn: PreviewFn,
     },
     Enum {
         type_id: TypeId,
@@ -279,25 +279,26 @@ impl DynamicValue {
         };
 
         let type_id = type_def.type_id;
-        let display_fn: DisplayFn = Arc::new(|data: &dyn Any| {
+        let display_fn: DisplayFn = SharedFn::new(Arc::new(|data: &dyn Any| {
             data.downcast_ref::<T>()
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "<invalid>".to_string())
-        });
-        let preview_fn: PreviewFn = Arc::new(|data: &dyn Any, ctx_manager: &mut ContextManager| {
-            tracing::info!("{:?}", data);
-            if let Some(custom_value) = data.downcast_ref::<T>() {
-                custom_value.gen_preview(ctx_manager);
-            } else {
-                unreachable!();
-            }
-        });
+        }));
+        let preview_fn: PreviewFn = SharedFn::new(Arc::new(
+            |data: &dyn Any, ctx_manager: &mut ContextManager| {
+                if let Some(custom_value) = data.downcast_ref::<T>() {
+                    custom_value.gen_preview(ctx_manager);
+                } else {
+                    unreachable!();
+                }
+            },
+        ));
 
         DynamicValue::Custom {
             type_id,
             data: Arc::new(value),
             display_fn,
-            preview_fn: Some(preview_fn),
+            preview_fn,
         }
     }
 
@@ -591,7 +592,13 @@ impl Display for DynamicValue {
             DynamicValue::FsPath(s) => write!(f, "\"{s}\""),
             DynamicValue::Custom {
                 data, display_fn, ..
-            } => write!(f, "{}", display_fn(data.as_ref())),
+            } => {
+                if let Some(display_fn) = display_fn.as_ref() {
+                    write!(f, "{}", display_fn(data.as_ref()))
+                } else {
+                    write!(f, "<custom>")
+                }
+            }
             DynamicValue::Enum { variant_name, .. } => write!(f, "{variant_name}"),
         }
     }
