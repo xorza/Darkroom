@@ -93,6 +93,8 @@ impl CustomValue for Image {
     fn data_type(&self) -> DataType {
         IMAGE_DATA_TYPE.clone()
     }
+
+    fn gen_preview(&self, _ctx_manager: &mut graph::context::ContextManager) {}
 }
 
 impl std::fmt::Display for Image {

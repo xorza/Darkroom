@@ -3877,6 +3877,7 @@ dependencies = [
  "imaginarium",
  "strum",
  "strum_macros",
+ "tracing",
 ]
 
 [[package]]

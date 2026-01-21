@@ -1,4 +1,5 @@
 use crate::common::shared_any_state::SharedAnyState;
+
 use crate::event_lambda::EventLambda;
 use crate::execution_graph::{ArgumentValues, ExecutionGraph, Result};
 use crate::execution_stats::ExecutionStats;
@@ -259,7 +260,13 @@ async fn worker_loop<ExecutionCallback>(
                     processing_callback = Some(callback)
                 }
                 WorkerMessage::RequestArgumentValues { node_id, callback } => {
-                    let values = execution_graph.get_argument_values(&node_id);
+                    let mut values = execution_graph.get_argument_values(&node_id);
+
+                    for value in values.iter_mut() {
+                        for output in value.outputs.iter_mut() {
+                            output.gen_preview(&mut execution_graph.ctx_manager);
+                        }
+                    }
                     callback.call(values);
                 }
             }

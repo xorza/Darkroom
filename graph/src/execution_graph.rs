@@ -158,7 +158,7 @@ pub struct ExecutionGraph {
     pub e_node_terminal_idx: HashSet<usize>,
 
     #[serde(skip)]
-    ctx_manager: ContextManager,
+    pub ctx_manager: ContextManager,
 
     //caches
     #[serde(skip)]

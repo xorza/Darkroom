@@ -9,6 +9,8 @@ use strum::VariantNames;
 
 use common::id_type;
 
+use crate::context::ContextManager;
+
 /// Trait for enums that can be used with `DataType::Enum`.
 pub trait EnumVariants {
     fn variant_names() -> Vec<String>;
@@ -27,6 +29,7 @@ id_type!(TypeId);
 /// Implementors provide their `DataType` so it doesn't need to be passed separately.
 pub trait CustomValue: Any + Send + Sync + Display {
     fn data_type(&self) -> DataType;
+    fn gen_preview(&self, ctx_manager: &mut ContextManager);
 }
 
 /// Definition of a custom type for `DataType::Custom`.
@@ -166,6 +169,7 @@ impl PartialEq for StaticValue {
 impl Eq for StaticValue {}
 
 type DisplayFn = Arc<dyn Fn(&dyn Any) -> String + Send + Sync>;
+type PreviewFn = Arc<dyn Fn(&dyn Any, &mut ContextManager) + Send + Sync>;
 
 #[derive(Default, Clone)]
 pub enum DynamicValue {
@@ -182,6 +186,7 @@ pub enum DynamicValue {
         type_id: TypeId,
         data: Arc<dyn Any + Send + Sync>,
         display_fn: DisplayFn,
+        preview_fn: Option<PreviewFn>,
     },
     Enum {
         type_id: TypeId,
@@ -279,11 +284,20 @@ impl DynamicValue {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "<invalid>".to_string())
         });
+        let preview_fn: PreviewFn = Arc::new(|data: &dyn Any, ctx_manager: &mut ContextManager| {
+            tracing::info!("{:?}", data);
+            if let Some(custom_value) = data.downcast_ref::<T>() {
+                custom_value.gen_preview(ctx_manager);
+            } else {
+                unreachable!();
+            }
+        });
 
         DynamicValue::Custom {
             type_id,
             data: Arc::new(value),
             display_fn,
+            preview_fn: Some(preview_fn),
         }
     }
 
@@ -321,7 +335,7 @@ impl DynamicValue {
         }
     }
 
-    pub fn as_custom<T: Any>(&self) -> Option<&T> {
+    pub fn as_custom<T: CustomValue>(&self) -> Option<&T> {
         match self {
             DynamicValue::Custom { data, .. } => data.downcast_ref::<T>(),
             _ => None,
@@ -339,6 +353,16 @@ impl DynamicValue {
         match self {
             DynamicValue::FsPath(value) => Some(value),
             _ => None,
+        }
+    }
+
+    pub fn gen_preview(&mut self, ctx_manager: &mut ContextManager) {
+        if let DynamicValue::Custom {
+            data, preview_fn, ..
+        } = self
+            && let Some(preview_fn) = preview_fn.as_ref()
+        {
+            (preview_fn)(data.as_ref(), ctx_manager);
         }
     }
 
