@@ -160,8 +160,7 @@ impl NodeDetailsUi {
             .chain(values.outputs.iter())
             .filter_map(|v| v.as_custom::<Image>())
             .filter_map(|img| {
-                let guard = img.preview();
-                guard.as_ref().map(|preview| {
+                img.preview().map(|preview| {
                     let desc = preview.desc();
                     (
                         desc.width as usize,

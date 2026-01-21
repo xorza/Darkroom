@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
-use std::sync::{LazyLock, RwLock, RwLockReadGuard};
+use std::sync::{Arc, LazyLock};
 
+use common::slot::Slot;
 use graph::context::ContextManager;
 use graph::data::{CustomValue, DataType};
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
@@ -15,7 +16,7 @@ const PREVIEW_SIZE: u32 = 256;
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
 pub struct Image {
     pub buffer: imaginarium::ImageBuffer,
-    preview: RwLock<Option<imaginarium::Image>>,
+    preview: Slot<imaginarium::Image>,
 }
 
 impl std::fmt::Debug for Image {
@@ -30,12 +31,12 @@ impl Image {
     pub fn new(buffer: imaginarium::ImageBuffer) -> Self {
         Self {
             buffer,
-            preview: RwLock::new(None),
+            preview: Slot::default(),
         }
     }
 
-    pub fn preview(&self) -> RwLockReadGuard<'_, Option<imaginarium::Image>> {
-        self.preview.read().unwrap()
+    pub fn preview(&self) -> Option<Arc<imaginarium::Image>> {
+        self.preview.peek()
     }
 }
 
@@ -93,7 +94,7 @@ impl CustomValue for Image {
             }
         };
 
-        *self.preview.write().unwrap() = Some(preview_image);
+        self.preview.send(preview_image);
     }
 }
 
@@ -125,7 +126,7 @@ impl Deref for Image {
 
 impl DerefMut for Image {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        *self.preview.write().unwrap() = None;
+        self.preview.take();
         &mut self.buffer
     }
 }
