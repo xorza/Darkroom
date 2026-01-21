@@ -78,6 +78,7 @@ pub struct NodeStyle {
     pub executed_shadow: Shadow,
     pub cached_shadow: Shadow,
     pub missing_inputs_shadow: Shadow,
+    pub errored_shadow: Shadow,
 
     pub cache_btn_width: f32,
     pub remove_btn_size: f32,
@@ -228,6 +229,12 @@ impl Style {
                 },
                 missing_inputs_shadow: Shadow {
                     color: style_settings.color_shadow_missing,
+                    offset: [0, 0],
+                    blur: scaled(style_settings.shadow_blur).ceil() as u8,
+                    spread: scaled(style_settings.shadow_spread).ceil() as u8,
+                },
+                errored_shadow: Shadow {
+                    color: style_settings.color_shadow_errored,
                     offset: [0, 0],
                     blur: scaled(style_settings.shadow_blur).ceil() as u8,
                     spread: scaled(style_settings.shadow_spread).ceil() as u8,

@@ -28,8 +28,9 @@ impl Default for StyleSettings {
             color_text_checked: Color32::from_rgb(60, 50, 20),
             color_dot_impure: Color32::from_rgb(255, 150, 70),
             color_shadow_executed: Color32::from_rgb(66, 216, 130),
-            color_shadow_cached: Color32::from_rgb(248, 216, 75),
-            color_shadow_missing: Color32::from_rgb(238, 66, 66),
+            color_shadow_cached: Color32::from_rgb(100, 160, 255),
+            color_shadow_missing: Color32::from_rgb(255, 180, 70),
+            color_shadow_errored: Color32::from_rgb(238, 66, 66),
             color_dotted: Color32::from_rgb(48, 48, 48),
             corner_radius: 4.0,
             small_corner_radius: 2.0,
@@ -112,6 +113,8 @@ pub struct StyleSettings {
     pub color_shadow_cached: Color32,
     #[serde(with = "color_hex")]
     pub color_shadow_missing: Color32,
+    #[serde(with = "color_hex")]
+    pub color_shadow_errored: Color32,
     #[serde(with = "color_hex")]
     pub color_dotted: Color32,
     pub corner_radius: f32,

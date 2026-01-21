@@ -15,7 +15,7 @@ use egui::{
     Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke,
     StrokeKind, Vec2, pos2, vec2,
 };
-use graph::execution_stats::ExecutedNodeStats;
+use graph::execution_stats::{ExecutedNodeStats, NodeError};
 use graph::graph::{Node, NodeId};
 use graph::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 
@@ -40,6 +40,7 @@ pub(crate) struct NodeUi {
 
 #[derive(Debug)]
 enum NodeExecutionInfo<'a> {
+    Errored(&'a NodeError),
     MissingInputs,
     Executed(&'a ExecutedNodeStats),
     Cached,
@@ -200,6 +201,7 @@ fn render_body(
     ));
 
     let shadow = match *node_execution_info {
+        NodeExecutionInfo::Errored(_) => Some(&gui.style.node.errored_shadow),
         NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
         NodeExecutionInfo::Executed(_) => Some(&gui.style.node.executed_shadow),
         NodeExecutionInfo::Cached => Some(&gui.style.node.cached_shadow),
@@ -490,6 +492,14 @@ fn node_execution_info<'a>(
     let Some(execution_stats) = execution_stats else {
         return NodeExecutionInfo::None;
     };
+
+    if let Some(node_error) = execution_stats
+        .node_errors
+        .iter()
+        .find(|err| err.node_id == node_id)
+    {
+        return NodeExecutionInfo::Errored(node_error);
+    }
 
     if execution_stats
         .missing_inputs
