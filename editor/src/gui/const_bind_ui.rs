@@ -210,7 +210,7 @@ fn static_value_label(value: &StaticValue) -> String {
             .then_else_with(|| format!("{:.0}", value), || format!("{:.3}", value)),
         StaticValue::Int(value) => value.to_string(),
         StaticValue::Bool(value) => value.to_string(),
-        StaticValue::String(value) => {
+        StaticValue::String(value) | StaticValue::FsPath(value) => {
             const MAX_LEN: usize = 12;
             if value.chars().count() <= MAX_LEN {
                 value.clone()
