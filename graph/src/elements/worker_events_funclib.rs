@@ -145,6 +145,7 @@ impl Default for WorkerEventsFuncLib {
                     })
                 },
             ),
+            ..Default::default()
         });
 
         WorkerEventsFuncLib { func_lib }

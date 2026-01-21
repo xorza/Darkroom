@@ -4,6 +4,7 @@ use crate::context::ContextType;
 
 use crate::event_lambda::EventLambda;
 use crate::func_lambda::FuncLambda;
+use crate::graph::NodeBehavior;
 use crate::{async_lambda, data::*};
 use common::id_type;
 use common::key_index_vec::{KeyIndexKey, KeyIndexVec};
@@ -60,6 +61,7 @@ pub struct Func {
     pub terminal: bool,
 
     pub behavior: FuncBehavior,
+    pub node_default_behavior: NodeBehavior,
 
     #[serde(default)]
     pub description: Option<String>,
@@ -209,6 +211,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
 
                 Ok(())
             }),
+            ..Default::default()
         },
         Func {
             id: "d4d27137-5a14-437a-8bb5-b2f7be0941a2".into(),
@@ -231,6 +234,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
         Func {
             id: "a937baff-822d-48fd-9154-58751539b59b".into(),
@@ -253,6 +257,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
         Func {
             id: "2d3b389d-7b58-44d9-b3d1-a595765b21a5".into(),
@@ -293,6 +298,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                 outputs[0] = (a + b).into();
                 Ok(())
             }),
+            ..Default::default()
         },
         Func {
             id: "f22cd316-1cdf-4a80-b86c-1277acd1408a".into(),
@@ -319,6 +325,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
                     Ok(())
                 }
             ),
+            ..Default::default()
         },
     ]
     .into()

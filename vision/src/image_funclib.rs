@@ -184,6 +184,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         // load_image
@@ -223,6 +224,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         // save_image
@@ -271,6 +273,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         // convert
@@ -330,6 +333,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         // blend
@@ -406,6 +410,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         // transform
@@ -504,6 +509,7 @@ impl Default for ImageFuncLib {
                     Ok(())
                 })
             }),
+            ..Default::default()
         });
 
         Self { func_lib }
