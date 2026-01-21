@@ -422,7 +422,7 @@ fn render_ports(
                 gui.painter(),
                 center,
                 port_radius,
-                port_radius + missing_shadow_spread,
+                port_radius + missing_shadow_spread * 2.0,
                 missing_shadow_color,
             );
         }

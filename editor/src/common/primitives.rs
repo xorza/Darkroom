@@ -12,7 +12,7 @@ pub fn draw_circle_with_gradient_shadow(
     outer_radius: f32,
     shadow_color: Color32,
 ) {
-    const SEGMENTS: usize = 12;
+    const SEGMENTS: usize = 32;
 
     let mut mesh = Mesh::default();
 
