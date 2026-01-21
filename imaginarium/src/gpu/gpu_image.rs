@@ -106,10 +106,7 @@ impl GpuImage {
         });
 
         ctx.device()
-            .poll(wgpu::PollType::Wait {
-                submission_index: None,
-                timeout: None,
-            })
+            .poll(wgpu::PollType::wait_indefinitely())
             .unwrap();
 
         rx.recv()
