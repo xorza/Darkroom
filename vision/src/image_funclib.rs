@@ -192,19 +192,25 @@ impl Default for ImageFuncLib {
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "image".to_string(),
-            inputs: vec![],
+            inputs: vec![FuncInput {
+                name: "path".to_string(),
+                required: true,
+                data_type: DataType::FsPath,
+                default_value: None,
+                value_options: vec![],
+            }],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
                 data_type: IMAGE_DATA_TYPE.clone(),
             }],
             events: vec![],
             required_contexts: vec![],
-            lambda: FuncLambda::new(move |_, _, _, _, _, outputs| {
+            lambda: FuncLambda::new(move |_, _, _, inputs, _, outputs| {
                 Box::pin(async move {
+                    assert_eq!(inputs.len(), 1);
                     assert_eq!(outputs.len(), 1);
 
-                    // For now, always load lena.tiff from test_resources
-                    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_resources/lena.tiff");
+                    let path = inputs[0].value.as_fs_path().unwrap();
                     let image = imaginarium::Image::read_file(path).map_err(anyhow::Error::from)?;
 
                     outputs[0] = DynamicValue::from_custom(Image::from(image));
@@ -222,25 +228,32 @@ impl Default for ImageFuncLib {
             behavior: FuncBehavior::Impure,
             terminal: true,
             category: "image".to_string(),
-            inputs: vec![FuncInput {
-                name: "image".to_string(),
-                required: true,
-                data_type: IMAGE_DATA_TYPE.clone(),
-                default_value: None,
-                value_options: vec![],
-            }],
+            inputs: vec![
+                FuncInput {
+                    name: "image".to_string(),
+                    required: true,
+                    data_type: IMAGE_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "path".to_string(),
+                    required: true,
+                    data_type: DataType::FsPath,
+                    default_value: None,
+                    value_options: vec![],
+                },
+            ],
             outputs: vec![],
             events: vec![],
             required_contexts: vec![VISION_CTX_TYPE.clone()],
             lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, _| {
                 Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
+                    assert_eq!(inputs.len(), 2);
 
                     let input_image = inputs[0].value.as_custom::<Image>().unwrap();
+                    let path = inputs[1].value.as_fs_path().unwrap();
 
-                    // For now, save to test_output directory
-
-                    let path = "vision_output.tiff";
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
