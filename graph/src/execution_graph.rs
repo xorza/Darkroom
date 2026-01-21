@@ -1153,7 +1153,7 @@ mod tests {
     async fn const_binding() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1296,7 +1296,7 @@ mod tests {
     async fn node_skips_consequent_invokations() -> anyhow::Result<()> {
         let graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1375,7 +1375,7 @@ mod tests {
     async fn once_node_recomputes_on_binding_change() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 3),
+            get_a: Arc::new(move || Ok(3)),
             get_b: Arc::new(move || 55),
             print: Arc::new(move |_| {}),
         });
@@ -1415,7 +1415,7 @@ mod tests {
     async fn once_node_recomputes_on_binding_change_with_cached_inputs() -> anyhow::Result<()> {
         let mut graph = test_graph();
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 3),
+            get_a: Arc::new(move || Ok(3)),
             get_b: Arc::new(move || 55),
             print: Arc::new(move |_| {}),
         });
@@ -1524,7 +1524,7 @@ mod tests {
         let test_values_b = test_values.clone();
         let test_values_result = test_values.clone();
         let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || test_values_a.try_lock().unwrap().a),
+            get_a: Arc::new(move || Ok(test_values_a.try_lock().unwrap().a)),
             get_b: Arc::new(move || test_values_b.try_lock().unwrap().b),
             print: Arc::new(move |result| {
                 test_values_result.try_lock().unwrap().result = result;
@@ -1608,7 +1608,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn optional_input_binding_change_recomputes() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1644,7 +1644,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn const_input_excludes_upstream_node() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1680,7 +1680,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn change_from_const_to_bind_recomputes() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1717,7 +1717,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn required_none_binding_execute_is_stable() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1738,7 +1738,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn cached_upstream_output_reused_after_rebinding() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1782,7 +1782,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn once_node_toggle_refreshes_upstream_execution() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1881,7 +1881,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn get_input_output_values_with_bound_outputs() -> anyhow::Result<()> {
         let func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 2),
+            get_a: Arc::new(move || Ok(2)),
             get_b: Arc::new(move || 5),
             print: Arc::new(move |_| {}),
         });
@@ -1935,7 +1935,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn get_input_output_values_with_none_binding() -> anyhow::Result<()> {
         let mut func_lib = test_func_lib(TestFuncHooks {
-            get_a: Arc::new(move || 1),
+            get_a: Arc::new(move || Ok(1)),
             get_b: Arc::new(move || 11),
             print: Arc::new(move |_| {}),
         });
@@ -1977,6 +1977,97 @@ mod tests {
         assert!(values.inputs[0].is_none()); // get_a hasn't executed
         assert!(values.inputs[1].is_none()); // get_b hasn't executed
         assert!(values.outputs.is_empty()); // sum hasn't executed
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn node_error_propagates_to_dependents() -> anyhow::Result<()> {
+        // Test graph: get_a -> sum -> mult -> print
+        //             get_b -/     \-/
+        // If get_a fails, sum, mult, and print should have errors
+        // but get_b should execute successfully
+
+        let graph = test_graph();
+        let func_lib = test_func_lib(TestFuncHooks {
+            get_a: Arc::new(|| Err(anyhow::anyhow!("Intentional failure in get_a"))),
+            get_b: Arc::new(|| 42),
+            print: Arc::new(|_| {}),
+        });
+
+        let mut execution_graph = ExecutionGraph::default();
+        execution_graph.update(&graph, &func_lib);
+
+        let stats = execution_graph.execute_terminals().await?;
+
+        // get_a should have an error (panic converted to invoke error)
+        let get_a = execution_graph.by_name("get_a").unwrap();
+        assert!(get_a.error.is_some());
+        assert!(get_a.output_values.is_none());
+
+        // get_b should execute successfully (no dependency on get_a)
+        let get_b = execution_graph.by_name("get_b").unwrap();
+        assert!(get_b.error.is_none());
+        assert!(get_b.output_values.is_some());
+        assert!(
+            get_b.output_values.as_ref().unwrap()[0]
+                .as_f64()
+                .unwrap()
+                .approximately_eq(42.0)
+        );
+
+        // sum depends on get_a, should be skipped with error
+        let sum = execution_graph.by_name("sum").unwrap();
+        assert!(sum.error.is_some());
+        assert!(sum.output_values.is_none());
+        assert!(
+            sum.error
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("upstream error")
+        );
+
+        // mult depends on sum (which errored), should be skipped with error
+        let mult = execution_graph.by_name("mult").unwrap();
+        assert!(mult.error.is_some());
+        assert!(mult.output_values.is_none());
+        assert!(
+            mult.error
+                .as_ref()
+                .unwrap()
+                .to_string()
+                .contains("upstream error")
+        );
+
+        // print depends on mult (which errored), should be skipped with error
+        let print = execution_graph.by_name("print").unwrap();
+        assert!(print.error.is_some());
+        assert!(print.output_values.is_none());
+
+        // Verify stats contain all errors
+        assert_eq!(stats.node_errors.len(), 4); // get_a, sum, mult, print
+
+        // get_a error should be the actual panic message
+        let get_a_error = stats
+            .node_errors
+            .iter()
+            .find(|e| e.node_id == get_a.id)
+            .unwrap();
+        assert!(
+            get_a_error
+                .error
+                .to_string()
+                .contains("Intentional failure")
+        );
+
+        // Other errors should mention upstream error
+        let sum_error = stats
+            .node_errors
+            .iter()
+            .find(|e| e.node_id == sum.id)
+            .unwrap();
+        assert!(sum_error.error.to_string().contains("upstream error"));
 
         Ok(())
     }

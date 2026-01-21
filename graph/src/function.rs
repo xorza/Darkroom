@@ -147,7 +147,7 @@ where
     }
 }
 pub struct TestFuncHooks {
-    pub get_a: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
+    pub get_a: Arc<dyn Fn() -> anyhow::Result<i64> + Send + Sync + 'static>,
     pub get_b: Arc<dyn Fn() -> i64 + Send + Sync + 'static>,
     pub print: Arc<dyn Fn(i64) + Send + Sync + 'static>,
 }
@@ -230,7 +230,7 @@ pub fn test_func_lib(hooks: TestFuncHooks) -> FuncLib {
             lambda: async_lambda!(
                 move |_, _, _, _, _, outputs| { get_a = Arc::clone(&get_a) } => {
                     assert_eq!(outputs.len(), 1);
-                    outputs[0] = (get_a() as f64).into();
+                    outputs[0] = (get_a()? as f64).into();
                     Ok(())
                 }
             ),

@@ -345,7 +345,7 @@ impl AppData {
 
 fn sample_test_hooks(print_out_tx: UnboundedSender<String>) -> TestFuncHooks {
     TestFuncHooks {
-        get_a: Arc::new(|| 21),
+        get_a: Arc::new(|| Ok(21)),
         get_b: Arc::new(|| 2),
         print: Arc::new(move |value| {
             print_out_tx.send(value.to_string()).unwrap();
