@@ -263,6 +263,9 @@ async fn worker_loop<ExecutionCallback>(
                     let mut values = execution_graph.get_argument_values(&node_id);
 
                     for value in values.iter_mut() {
+                        for input in value.inputs.iter_mut().flatten() {
+                            input.gen_preview(&mut execution_graph.ctx_manager);
+                        }
                         for output in value.outputs.iter_mut() {
                             output.gen_preview(&mut execution_graph.ctx_manager);
                         }

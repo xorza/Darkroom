@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use egui::epaint::ColorImage;
 use egui::{Color32, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 use graph::data::DynamicValue;
@@ -20,13 +22,13 @@ const PREVIEW_MAX_WIDTH: f32 = PANEL_WIDTH - 32.0;
 
 #[derive(Default)]
 pub struct NodeDetailsUi {
-    preview_texture: Option<TextureHandle>,
+    preview_textures: HashMap<usize, TextureHandle>,
 }
 
 impl std::fmt::Debug for NodeDetailsUi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeDetailsUi")
-            .field("has_preview_texture", &self.preview_texture.is_some())
+            .field("preview_textures_count", &self.preview_textures.len())
             .finish()
     }
 }
@@ -166,61 +168,71 @@ impl NodeDetailsUi {
     }
 
     fn show_image_preview(&mut self, gui: &mut Gui<'_>, values: &ArgumentValues) {
-        // Find first image in outputs
-        let image_value = values
-            .outputs
+        // Collect all images from inputs and outputs
+        let images: Vec<_> = values
+            .inputs
             .iter()
-            .chain(values.inputs.iter().filter_map(|v| v.as_ref()))
-            .find_map(|v| v.as_custom::<Image>());
+            .filter_map(|v| v.as_ref())
+            .chain(values.outputs.iter())
+            .filter_map(|v| v.as_custom::<Image>())
+            .collect();
 
-        let Some(image) = image_value else {
-            self.preview_texture = None;
+        if images.is_empty() {
+            self.preview_textures.clear();
             return;
-        };
-
-        let preview_guard = image.preview();
-        let Some(preview) = preview_guard.as_ref() else {
-            self.preview_texture = None;
-            return;
-        };
-
-        // Convert preview image to egui texture
-        let desc = preview.desc();
-        let width = desc.width as usize;
-        let height = desc.height as usize;
-
-        // Create ColorImage from RGBA_U8 data
-        let color_image = ColorImage::from_rgba_unmultiplied([width, height], preview.bytes());
-
-        // Load or update texture
-        let texture = self.preview_texture.get_or_insert_with(|| {
-            gui.ui()
-                .ctx()
-                .load_texture("node_preview", color_image.clone(), TextureOptions::LINEAR)
-        });
-
-        // Update texture if dimensions changed
-        if texture.size() != [width, height] {
-            *texture = gui.ui().ctx().load_texture(
-                "node_preview",
-                color_image.clone(),
-                TextureOptions::LINEAR,
-            );
-        } else {
-            texture.set(color_image, TextureOptions::LINEAR);
         }
 
-        // Calculate display size maintaining aspect ratio
-        let aspect = width as f32 / height as f32;
-        let display_width = PREVIEW_MAX_WIDTH.min(width as f32);
-        let display_height = display_width / aspect;
+        // Remove stale textures
+        self.preview_textures.retain(|idx, _| *idx < images.len());
 
         gui.ui().add_space(8.0);
         gui.ui().separator();
         gui.ui().add_space(4.0);
-        gui.ui().label("Preview:");
-        gui.ui()
-            .image((texture.id(), Vec2::new(display_width, display_height)));
+        gui.ui().label("Previews:");
+
+        for (idx, image) in images.iter().enumerate() {
+            let preview_guard = image.preview();
+            let Some(preview) = preview_guard.as_ref() else {
+                continue;
+            };
+
+            // Convert preview image to egui texture
+            let desc = preview.desc();
+            let width = desc.width as usize;
+            let height = desc.height as usize;
+
+            // Create ColorImage from RGBA_U8 data
+            let color_image = ColorImage::from_rgba_unmultiplied([width, height], preview.bytes());
+
+            // Load or update texture
+            let texture = self.preview_textures.entry(idx).or_insert_with(|| {
+                gui.ui().ctx().load_texture(
+                    format!("node_preview_{idx}"),
+                    color_image.clone(),
+                    TextureOptions::LINEAR,
+                )
+            });
+
+            // Update texture if dimensions changed
+            if texture.size() != [width, height] {
+                *texture = gui.ui().ctx().load_texture(
+                    format!("node_preview_{idx}"),
+                    color_image.clone(),
+                    TextureOptions::LINEAR,
+                );
+            } else {
+                texture.set(color_image, TextureOptions::LINEAR);
+            }
+
+            // Calculate display size maintaining aspect ratio
+            let aspect = width as f32 / height as f32;
+            let display_width = PREVIEW_MAX_WIDTH.min(width as f32);
+            let display_height = display_width / aspect;
+
+            gui.ui().add_space(4.0);
+            gui.ui()
+                .image((texture.id(), Vec2::new(display_width, display_height)));
+        }
     }
 
     fn show_execution_info(

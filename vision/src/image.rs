@@ -125,6 +125,7 @@ impl Deref for Image {
 
 impl DerefMut for Image {
     fn deref_mut(&mut self) -> &mut Self::Target {
+        *self.preview.write().unwrap() = None;
         &mut self.buffer
     }
 }
