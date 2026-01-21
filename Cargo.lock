@@ -3875,6 +3875,8 @@ dependencies = [
  "common",
  "graph",
  "imaginarium",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]

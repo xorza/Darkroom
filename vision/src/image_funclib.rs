@@ -5,15 +5,56 @@ use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
 use graph::data::{CustomValue, DataType, DynamicValue};
 use graph::func_lambda::FuncLambda;
 use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
-use imaginarium::{
-    Blend, BlendMode, ChannelCount, ColorFormat, ContrastBrightness, Transform, Vec2,
-};
+use imaginarium::{Blend, BlendMode, ColorFormat, ContrastBrightness, Transform, Vec2};
+use strum_macros::VariantNames;
 
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
 
 pub static BLENDMODE_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
     DataType::from_enum::<BlendMode>("54d531cf-d353-4e30-8ea7-8823a9b5305f", "BlendMode")
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, VariantNames)]
+pub enum ConversionFormat {
+    GrayU8,
+    GrayU16,
+    GrayF32,
+    GrayAlphaU8,
+    GrayAlphaU16,
+    GrayAlphaF32,
+    RgbU8,
+    RgbU16,
+    RgbF32,
+    RgbaU8,
+    RgbaU16,
+    RgbaF32,
+}
+
+impl ConversionFormat {
+    pub fn to_color_format(self) -> ColorFormat {
+        match self {
+            ConversionFormat::GrayU8 => ColorFormat::GRAY_U8,
+            ConversionFormat::GrayU16 => ColorFormat::GRAY_U16,
+            ConversionFormat::GrayF32 => ColorFormat::GRAY_F32,
+            ConversionFormat::GrayAlphaU8 => ColorFormat::GRAY_ALPHA_U8,
+            ConversionFormat::GrayAlphaU16 => ColorFormat::GRAY_ALPHA_U16,
+            ConversionFormat::GrayAlphaF32 => ColorFormat::GRAY_ALPHA_F32,
+            ConversionFormat::RgbU8 => ColorFormat::RGB_U8,
+            ConversionFormat::RgbU16 => ColorFormat::RGB_U16,
+            ConversionFormat::RgbF32 => ColorFormat::RGB_F32,
+            ConversionFormat::RgbaU8 => ColorFormat::RGBA_U8,
+            ConversionFormat::RgbaU16 => ColorFormat::RGBA_U16,
+            ConversionFormat::RgbaF32 => ColorFormat::RGBA_F32,
+        }
+    }
+}
+
+pub static CONVERSION_FORMAT_DATATYPE: LazyLock<DataType> = LazyLock::new(|| {
+    DataType::from_enum::<ConversionFormat>(
+        "6d9db73e-5c92-4332-af0d-b2eb7c95acd0",
+        "ConversionFormat",
+    )
 });
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
@@ -210,21 +251,30 @@ impl Default for ImageFuncLib {
             }),
         });
 
-        // convert_to_f32
+        // convert
         func_lib.add(Func {
             id: "80aa1ee7-3b75-4200-b480-b9db913bd6eb".into(),
-            name: "convert_to_f32".to_string(),
-            description: Some("Converts image color format to f32".to_string()),
+            name: "convert".to_string(),
+            description: Some("Converts image to a different color format".to_string()),
             behavior: FuncBehavior::Pure,
             terminal: false,
             category: "image".to_string(),
-            inputs: vec![FuncInput {
-                name: "image".to_string(),
-                required: true,
-                data_type: IMAGE_DATA_TYPE.clone(),
-                default_value: None,
-                value_options: vec![],
-            }],
+            inputs: vec![
+                FuncInput {
+                    name: "image".to_string(),
+                    required: true,
+                    data_type: IMAGE_DATA_TYPE.clone(),
+                    default_value: None,
+                    value_options: vec![],
+                },
+                FuncInput {
+                    name: "format".to_string(),
+                    required: true,
+                    data_type: CONVERSION_FORMAT_DATATYPE.clone(),
+                    default_value: Some(CONVERSION_FORMAT_DATATYPE.default_value()),
+                    value_options: vec![],
+                },
+            ],
             outputs: vec![FuncOutput {
                 name: "image".to_string(),
                 data_type: IMAGE_DATA_TYPE.clone(),
@@ -233,22 +283,33 @@ impl Default for ImageFuncLib {
             required_contexts: vec![VISION_CTX_TYPE.clone()],
             lambda: FuncLambda::new(move |ctx_manager, _, _, inputs, _, outputs| {
                 Box::pin(async move {
-                    assert_eq!(inputs.len(), 1);
+                    assert_eq!(inputs.len(), 2);
                     assert_eq!(outputs.len(), 1);
 
                     let input_image = inputs[0].value.as_custom::<Image>().unwrap();
+                    let format_str = inputs[1].value.as_enum().unwrap();
                     let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 
                     let cpu_image = input_image
                         .make_cpu(&vision_ctx.processing_ctx)
                         .map_err(anyhow::Error::from)?;
 
-                    let target_format = match cpu_image.desc().color_format.channel_count {
-                        ChannelCount::Gray => ColorFormat::GRAY_F32,
-                        ChannelCount::GrayAlpha => ColorFormat::GRAY_ALPHA_F32,
-                        ChannelCount::Rgb => ColorFormat::RGB_F32,
-                        ChannelCount::Rgba => ColorFormat::RGBA_F32,
-                    };
+                    let target_format = match format_str {
+                        "GrayU8" => ConversionFormat::GrayU8,
+                        "GrayU16" => ConversionFormat::GrayU16,
+                        "GrayF32" => ConversionFormat::GrayF32,
+                        "GrayAlphaU8" => ConversionFormat::GrayAlphaU8,
+                        "GrayAlphaU16" => ConversionFormat::GrayAlphaU16,
+                        "GrayAlphaF32" => ConversionFormat::GrayAlphaF32,
+                        "RgbU8" => ConversionFormat::RgbU8,
+                        "RgbU16" => ConversionFormat::RgbU16,
+                        "RgbF32" => ConversionFormat::RgbF32,
+                        "RgbaU8" => ConversionFormat::RgbaU8,
+                        "RgbaU16" => ConversionFormat::RgbaU16,
+                        "RgbaF32" => ConversionFormat::RgbaF32,
+                        _ => panic!("Unknown conversion format: {}", format_str),
+                    }
+                    .to_color_format();
 
                     let converted = cpu_image
                         .clone()

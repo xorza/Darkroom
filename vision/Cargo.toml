@@ -8,3 +8,5 @@ common = { workspace = true }
 graph = { workspace = true }
 imaginarium = { workspace = true }
 anyhow = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
