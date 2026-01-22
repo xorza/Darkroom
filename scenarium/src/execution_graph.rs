@@ -120,13 +120,29 @@ pub enum ExecutionBehavior {
     Once,
 }
 
+/// State machine for graph traversal during execution preparation.
+///
+/// The execution graph uses a two-phase traversal:
+/// 1. Backward pass: Collect nodes in dependency order, detect cycles
+/// 2. Forward pass: Propagate input state changes through the graph
+///
+/// State transitions:
+/// ```text
+/// Unvisited ──► Visiting ──► DependenciesResolved ──► Ready
+///                  │
+///                  └──► (cycle detected if revisited while Visiting)
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 enum ProcessState {
+    /// Node has not been visited yet in current traversal
     #[default]
-    None,
-    Processing,
-    Backward,
-    Forward,
+    Unvisited,
+    /// Node is currently being visited (used for cycle detection)
+    Visiting,
+    /// Backward pass complete - all dependencies have been collected
+    DependenciesResolved,
+    /// Forward pass complete - input states have been propagated
+    Ready,
 }
 
 // === Execution Node ===
@@ -176,7 +192,7 @@ impl KeyIndexKey<NodeId> for ExecutionNode {
 impl ExecutionNode {
     fn invalidate(&mut self) {
         self.output_values = None;
-        self.process_state = ProcessState::None;
+        self.process_state = ProcessState::Unvisited;
         self.inputs.clear();
         self.outputs.clear();
         self.reset_for_execution();
@@ -190,7 +206,7 @@ impl ExecutionNode {
         self.cached = false;
         self.run_time = 0.0;
         self.error = None;
-        self.process_state = ProcessState::Forward;
+        self.process_state = ProcessState::Ready;
 
         for e_input in &mut self.inputs {
             e_input.dependency_wants_execute = false;
@@ -215,7 +231,7 @@ impl ExecutionNode {
         }
 
         self.terminal = func.terminal;
-        self.process_state = ProcessState::None;
+        self.process_state = ProcessState::Unvisited;
         self.behavior = Self::compute_behavior(node.behavior, func.behavior);
 
         for (event_idx, event) in node.events.iter().enumerate() {
@@ -402,7 +418,7 @@ impl ExecutionGraph {
     fn build_execution_nodes(&mut self, graph: &Graph, func_lib: &FuncLib) {
         self.e_nodes
             .iter_mut()
-            .for_each(|e| e.process_state = ProcessState::None);
+            .for_each(|e| e.process_state = ProcessState::Unvisited);
 
         let mut compact = self.e_nodes.compact_insert_start();
 
@@ -412,11 +428,11 @@ impl ExecutionGraph {
                 ..Default::default()
             });
 
-            assert_eq!(e_node.process_state, ProcessState::None);
+            assert_eq!(e_node.process_state, ProcessState::Unvisited);
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&node.func_id).unwrap();
             e_node.refresh(node, func);
-            e_node.process_state = ProcessState::Forward;
+            e_node.process_state = ProcessState::Ready;
 
             for (input_idx, input) in node.inputs.iter().enumerate() {
                 Self::update_input_binding(&mut compact, e_node_idx, input_idx, &input.binding);
@@ -597,8 +613,8 @@ impl ExecutionGraph {
                 }
                 VisitCause::Done => {
                     let e_node = &mut self.e_nodes[visit.e_node_idx];
-                    assert_eq!(e_node.process_state, ProcessState::Processing);
-                    e_node.process_state = ProcessState::Backward;
+                    assert_eq!(e_node.process_state, ProcessState::Visiting);
+                    e_node.process_state = ProcessState::DependenciesResolved;
                     self.e_node_process_order.push(visit.e_node_idx);
                     continue;
                 }
@@ -606,15 +622,15 @@ impl ExecutionGraph {
 
             let e_node = &mut self.e_nodes[visit.e_node_idx];
             match e_node.process_state {
-                ProcessState::None => unreachable!("should be Forward"),
-                ProcessState::Processing => {
+                ProcessState::Unvisited => unreachable!("should be Forward"),
+                ProcessState::Visiting => {
                     return Err(Error::CycleDetected { node_id: e_node.id });
                 }
-                ProcessState::Backward => continue,
-                ProcessState::Forward => {}
+                ProcessState::DependenciesResolved => continue,
+                ProcessState::Ready => {}
             }
 
-            e_node.process_state = ProcessState::Processing;
+            e_node.process_state = ProcessState::Visiting;
             self.stack.push(Visit {
                 e_node_idx: visit.e_node_idx,
                 cause: VisitCause::Done,
@@ -640,7 +656,7 @@ impl ExecutionGraph {
             let e_node = &self.e_nodes[e_node_idx];
             assert!(!matches!(
                 e_node.process_state,
-                ProcessState::None | ProcessState::Processing
+                ProcessState::Unvisited | ProcessState::Visiting
             ));
 
             let mut inputs_updated = false;
@@ -655,7 +671,7 @@ impl ExecutionGraph {
                     ExecutionBinding::Const(_) => (false, false),
                     ExecutionBinding::Bind(addr) => {
                         let output_node = &self.e_nodes[addr.target_idx];
-                        assert_eq!(output_node.process_state, ProcessState::Forward);
+                        assert_eq!(output_node.process_state, ProcessState::Ready);
                         assert!(addr.port_idx < output_node.outputs.len());
                         (
                             output_node.wants_execute,
@@ -673,7 +689,7 @@ impl ExecutionGraph {
             }
 
             let e_node = &mut self.e_nodes[e_node_idx];
-            e_node.process_state = ProcessState::Forward;
+            e_node.process_state = ProcessState::Ready;
             e_node.inputs_updated = inputs_updated;
             e_node.bindings_changed = bindings_changed;
             e_node.missing_required_inputs = missing_required;
@@ -712,28 +728,28 @@ impl ExecutionGraph {
             match visit.cause {
                 VisitCause::Terminal | VisitCause::OutputRequest { .. } => {}
                 VisitCause::Done => {
-                    assert_eq!(e_node.process_state, ProcessState::Processing);
+                    assert_eq!(e_node.process_state, ProcessState::Visiting);
                     self.e_node_execute_order.push(visit.e_node_idx);
-                    e_node.process_state = ProcessState::Backward;
+                    e_node.process_state = ProcessState::DependenciesResolved;
                     continue;
                 }
             }
 
             match e_node.process_state {
-                ProcessState::Processing => {
+                ProcessState::Visiting => {
                     unreachable!("cycle should be detected in walk_backward_collect_order")
                 }
-                ProcessState::None => unreachable!("should have been processed"),
-                ProcessState::Backward => continue,
-                ProcessState::Forward => {}
+                ProcessState::Unvisited => unreachable!("should have been processed"),
+                ProcessState::DependenciesResolved => continue,
+                ProcessState::Ready => {}
             }
 
             if !e_node.wants_execute {
-                e_node.process_state = ProcessState::Backward;
+                e_node.process_state = ProcessState::DependenciesResolved;
                 continue;
             }
 
-            e_node.process_state = ProcessState::Processing;
+            e_node.process_state = ProcessState::Visiting;
             self.stack.push(Visit {
                 e_node_idx: visit.e_node_idx,
                 cause: VisitCause::Done,
@@ -954,8 +970,8 @@ impl ExecutionGraph {
                 assert_eq!(output_values.len(), e_node.outputs.len());
             }
 
-            assert_ne!(e_node.process_state, ProcessState::Processing);
-            assert_ne!(e_node.process_state, ProcessState::None);
+            assert_ne!(e_node.process_state, ProcessState::Visiting);
+            assert_ne!(e_node.process_state, ProcessState::Unvisited);
 
             let node = graph.by_id(&e_node.id).unwrap();
             let func = func_lib.by_id(&e_node.func_id).unwrap();
@@ -1014,7 +1030,7 @@ impl ExecutionGraph {
         for e_node in self.e_nodes.iter() {
             assert!(!matches!(
                 e_node.process_state,
-                ProcessState::Processing | ProcessState::None
+                ProcessState::Visiting | ProcessState::Unvisited
             ));
 
             if e_node.missing_required_inputs {
@@ -1040,7 +1056,7 @@ impl ExecutionGraph {
             pending.remove(&idx);
 
             let e_node = &self.e_nodes[idx];
-            assert_eq!(e_node.process_state, ProcessState::Backward);
+            assert_eq!(e_node.process_state, ProcessState::DependenciesResolved);
             assert!(e_node.wants_execute);
             assert!(!e_node.missing_required_inputs);
 
