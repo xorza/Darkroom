@@ -339,6 +339,14 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 - `ConstBindIds` - const binding connections and value editors
 - Returns tuples that hash consistently for `ui.make_persistent_id()`
 
+### Drag State
+
+`DragState<T>` in `common/drag_state.rs` manages drag operations:
+- Stores start value on drag_started, returns it on drag_stopped
+- `DragResult` enum: `Idle`, `Started`, `Dragging`, `Stopped { start_value }`
+- Used by `node_ui.rs` for node position dragging with undo support
+- Type-safe with Clone + Default + Send + Sync bounds
+
 ## Undo System
 
 Two implementations available:

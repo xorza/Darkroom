@@ -1,4 +1,5 @@
 use crate::common::button::Button;
+use crate::common::drag_state::{DragResult, DragState};
 use crate::common::id_salt::{NodeIds, PortIds};
 use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
@@ -192,14 +193,6 @@ fn handle_node_drag<'a>(
     let dragged =
         response.dragged_by(PointerButton::Middle) || response.dragged_by(PointerButton::Primary);
 
-    // Store drag start position
-    let drag_start_id = gui.ui().make_persistent_id(NodeIds::drag_start(*node_id));
-    if response.drag_started() {
-        let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-        gui.ui()
-            .data_mut(|data| data.insert_temp(drag_start_id, start_pos));
-    }
-
     // Handle selection
     if (dragged || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
         let before = ctx.view_graph.selected_node_id;
@@ -210,26 +203,28 @@ fn handle_node_drag<'a>(
         });
     }
 
-    // Handle drag movement
-    if dragged {
-        ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-            response.drag_delta() / gui.scale();
-        layout.update(ctx, gui, graph_layout.origin);
-    }
+    // Handle drag with DragState
+    let drag_id = gui.ui().make_persistent_id(NodeIds::drag_start(*node_id));
+    let drag_state = DragState::<Pos2>::new(drag_id);
+    let current_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
 
-    // Record drag end for undo
-    if response.drag_stopped() {
-        let start_pos = gui
-            .ui()
-            .data_mut(|data| data.remove_temp::<Pos2>(drag_start_id))
-            .expect("drag start position must exist");
-        let end_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
-
-        interaction.add_action(GraphUiAction::NodeMoved {
-            node_id: *node_id,
-            before: start_pos,
-            after: end_pos,
-        });
+    match drag_state.update(gui.ui(), &response, current_pos) {
+        DragResult::Started | DragResult::Dragging => {
+            if dragged {
+                ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
+                    response.drag_delta() / gui.scale();
+                layout.update(ctx, gui, graph_layout.origin);
+            }
+        }
+        DragResult::Stopped { start_value } => {
+            let end_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
+            interaction.add_action(GraphUiAction::NodeMoved {
+                node_id: *node_id,
+                before: start_value,
+                after: end_pos,
+            });
+        }
+        DragResult::Idle => {}
     }
 
     layout
