@@ -56,8 +56,9 @@ impl NodeDetailsUi {
                                 argument_values_cache,
                             );
                         });
-                    });
+                    })
             })
+            .inner
             .response
     }
 
