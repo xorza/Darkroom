@@ -227,7 +227,7 @@ fn show_category_functions<'a>(
             gui,
             galleys.iter().zip(funcs.iter()),
             |gui, (galley, func)| {
-                let mut item = ListItem::from_galley((*galley).clone())
+                let mut item = ListItem::from_galley(Arc::clone(galley))
                     .size(vec2(button_width, button_height));
 
                 if let Some(tooltip) = func.description.as_ref() {

@@ -803,12 +803,11 @@ fn apply_data_connection(
 
     let input_node = view_graph.graph.by_id_mut(&input_port.node_id).unwrap();
     let input = &mut input_node.inputs[input_port.port_idx];
-    let before = input.binding.clone();
     let after = Binding::Bind(PortAddress {
         target_id: output_port.node_id,
         port_idx: output_port.port_idx,
     });
-    input.binding = after.clone();
+    let before = std::mem::replace(&mut input.binding, after.clone());
 
     Ok(GraphUiAction::InputChanged {
         node_id: input_port.node_id,

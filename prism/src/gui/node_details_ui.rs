@@ -107,7 +107,12 @@ impl NodeDetailsUi {
         });
 
         if name != original_name {
-            ctx.view_graph.graph.by_id_mut(&node_id).unwrap().name = name.clone();
+            ctx.view_graph
+                .graph
+                .by_id_mut(&node_id)
+                .unwrap()
+                .name
+                .clone_from(&name);
             interaction.add_action(GraphUiAction::NodeNameChanged {
                 node_id,
                 before: original_name,
