@@ -544,4 +544,307 @@ mod tests {
         right.add(TestItem { id: 2, value: 99 });
         assert_ne!(left, right);
     }
+
+    // === remove_by_key tests ===
+
+    #[test]
+    fn remove_by_key_existing() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+
+        let removed = vec.remove_by_key(&2);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().value, 20);
+
+        assert_eq!(vec.len(), 2);
+        assert!(vec.by_key(&2).is_none());
+        assert_eq!(vec.by_key(&1).unwrap().value, 10);
+        assert_eq!(vec.by_key(&3).unwrap().value, 30);
+        // Check indices were updated
+        assert_eq!(vec.index_of_key(&1), Some(0));
+        assert_eq!(vec.index_of_key(&3), Some(1));
+    }
+
+    #[test]
+    fn remove_by_key_nonexistent() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+
+        let removed = vec.remove_by_key(&999);
+        assert!(removed.is_none());
+        assert_eq!(vec.len(), 1);
+    }
+
+    #[test]
+    fn remove_by_key_first_element() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+
+        vec.remove_by_key(&1);
+
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.index_of_key(&2), Some(0));
+        assert_eq!(vec.index_of_key(&3), Some(1));
+    }
+
+    #[test]
+    fn remove_by_key_last_element() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+
+        vec.remove_by_key(&3);
+
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.index_of_key(&1), Some(0));
+        assert_eq!(vec.index_of_key(&2), Some(1));
+    }
+
+    // === remove_by_index tests ===
+
+    #[test]
+    fn remove_by_index_middle() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+
+        let removed = vec.remove_by_index(1);
+        assert_eq!(removed.id, 2);
+        assert_eq!(removed.value, 20);
+
+        assert_eq!(vec.len(), 2);
+        assert_eq!(vec.index_of_key(&1), Some(0));
+        assert_eq!(vec.index_of_key(&3), Some(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "remove_by_index expects a valid index")]
+    fn remove_by_index_out_of_bounds() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.remove_by_index(5);
+    }
+
+    // === clear tests ===
+
+    #[test]
+    fn clear_empties_vec() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        vec.clear();
+
+        assert!(vec.is_empty());
+        assert_eq!(vec.len(), 0);
+        assert!(vec.by_key(&1).is_none());
+        assert!(vec.by_key(&2).is_none());
+    }
+
+    #[test]
+    fn clear_empty_vec() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.clear();
+        assert!(vec.is_empty());
+    }
+
+    // === retain tests ===
+
+    #[test]
+    fn retain_keeps_matching() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+        vec.add(TestItem { id: 4, value: 40 });
+
+        vec.retain(|item| item.value > 15);
+
+        assert_eq!(vec.len(), 3);
+        assert!(vec.by_key(&1).is_none());
+        assert!(vec.by_key(&2).is_some());
+        assert!(vec.by_key(&3).is_some());
+        assert!(vec.by_key(&4).is_some());
+        // Check indices are rebuilt correctly
+        assert_eq!(vec.index_of_key(&2), Some(0));
+        assert_eq!(vec.index_of_key(&3), Some(1));
+        assert_eq!(vec.index_of_key(&4), Some(2));
+    }
+
+    #[test]
+    fn retain_removes_all() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        vec.retain(|_| false);
+
+        assert!(vec.is_empty());
+    }
+
+    #[test]
+    fn retain_keeps_all() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        vec.retain(|_| true);
+
+        assert_eq!(vec.len(), 2);
+    }
+
+    // === with_capacity tests ===
+
+    #[test]
+    fn with_capacity_creates_empty() {
+        let vec = KeyIndexVec::<u32, TestItem>::with_capacity(10);
+        assert!(vec.is_empty());
+        assert!(vec.items.capacity() >= 10);
+    }
+
+    // === len / is_empty tests ===
+
+    #[test]
+    fn len_and_is_empty() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        assert!(vec.is_empty());
+        assert_eq!(vec.len(), 0);
+
+        vec.add(TestItem { id: 1, value: 10 });
+        assert!(!vec.is_empty());
+        assert_eq!(vec.len(), 1);
+
+        vec.add(TestItem { id: 2, value: 20 });
+        assert_eq!(vec.len(), 2);
+    }
+
+    // === by_key / by_key_mut tests ===
+
+    #[test]
+    fn by_key_returns_none_for_missing() {
+        let vec = KeyIndexVec::<u32, TestItem>::default();
+        assert!(vec.by_key(&999).is_none());
+    }
+
+    #[test]
+    fn by_key_mut_modifies_item() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+
+        if let Some(item) = vec.by_key_mut(&1) {
+            item.value = 99;
+        }
+
+        assert_eq!(vec.by_key(&1).unwrap().value, 99);
+    }
+
+    #[test]
+    fn by_key_mut_returns_none_for_missing() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        assert!(vec.by_key_mut(&999).is_none());
+    }
+
+    // === Index / IndexMut tests ===
+
+    #[test]
+    fn index_access() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        assert_eq!(vec[0].id, 1);
+        assert_eq!(vec[1].id, 2);
+    }
+
+    #[test]
+    fn index_mut_access() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+
+        vec[0].value = 99;
+
+        assert_eq!(vec[0].value, 99);
+    }
+
+    #[test]
+    #[should_panic]
+    fn index_out_of_bounds_panics() {
+        let vec = KeyIndexVec::<u32, TestItem>::default();
+        let _ = &vec[0];
+    }
+
+    // === iter / iter_mut tests ===
+
+    #[test]
+    fn iter_visits_all() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+        vec.add(TestItem { id: 3, value: 30 });
+
+        let values: Vec<i32> = vec.iter().map(|item| item.value).collect();
+        assert_eq!(values, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn iter_mut_modifies_all() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        for item in vec.iter_mut() {
+            item.value *= 2;
+        }
+
+        assert_eq!(vec.by_key(&1).unwrap().value, 20);
+        assert_eq!(vec.by_key(&2).unwrap().value, 40);
+    }
+
+    // === IntoIterator tests ===
+
+    #[test]
+    fn into_iter_ref() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        let mut count = 0;
+        for item in &vec {
+            assert!(item.id == 1 || item.id == 2);
+            count += 1;
+        }
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn into_iter_mut_ref() {
+        let mut vec = KeyIndexVec::<u32, TestItem>::default();
+        vec.add(TestItem { id: 1, value: 10 });
+        vec.add(TestItem { id: 2, value: 20 });
+
+        for item in &mut vec {
+            item.value += 100;
+        }
+
+        assert_eq!(vec.by_key(&1).unwrap().value, 110);
+        assert_eq!(vec.by_key(&2).unwrap().value, 120);
+    }
+
+    // === Deserialization error tests ===
+
+    #[test]
+    fn deserialize_duplicate_key_errors() {
+        // JSON with duplicate keys (same id)
+        let json = r#"[{"id": 1, "value": 10}, {"id": 1, "value": 20}]"#;
+        let result: Result<KeyIndexVec<u32, TestItem>, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Duplicate key"));
+    }
 }
