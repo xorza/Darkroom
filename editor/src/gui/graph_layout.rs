@@ -1,10 +1,15 @@
 use egui::Pos2;
 use graph::graph::NodeId;
 
+use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;
-use crate::gui::node_layout::{self, NodeLayout};
-use crate::gui::{Gui, graph_ctx::GraphContext};
+use crate::gui::graph_ctx::GraphContext;
+use crate::gui::node_layout::NodeLayout;
 use common::key_index_vec::KeyIndexVec;
+
+// ============================================================================
+// Types
+// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PortRef {
@@ -19,32 +24,25 @@ pub struct PortInfo {
     pub center: Pos2,
 }
 
-#[derive(Debug)]
+// ============================================================================
+// GraphLayout
+// ============================================================================
+
+#[derive(Debug, Default)]
 pub struct GraphLayout {
     pub origin: Pos2,
-    pub node_layouts: KeyIndexVec<NodeId, node_layout::NodeLayout>,
-}
-
-impl Default for GraphLayout {
-    fn default() -> Self {
-        Self {
-            origin: Pos2::ZERO,
-            node_layouts: KeyIndexVec::default(),
-        }
-    }
+    pub node_layouts: KeyIndexVec<NodeId, NodeLayout>,
 }
 
 impl GraphLayout {
     pub fn update(&mut self, gui: &mut Gui<'_>, ctx: &GraphContext) {
-        let view_graph = &ctx.view_graph;
-        self.origin = gui.rect.min + view_graph.pan;
+        self.origin = gui.rect.min + ctx.view_graph.pan;
+
         let mut compact = self.node_layouts.compact_insert_start();
-
-        for view_node in view_graph.view_nodes.iter() {
-            let (_idx, node_layout) =
+        for view_node in ctx.view_graph.view_nodes.iter() {
+            let (_idx, layout) =
                 compact.insert_with(&view_node.id, || NodeLayout::new(gui, &view_node.id));
-
-            node_layout.update(ctx, gui, self.origin);
+            layout.update(ctx, gui, self.origin);
         }
     }
 
