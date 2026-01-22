@@ -184,7 +184,7 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_utils::{load_lena_rgba_u8, load_lena_small_rgba_u8_61x38, test_gpu};
+    use crate::common::test_utils::{load_lena_rgba_u8_61x38, load_lena_rgba_u8_895x551, test_gpu};
     use std::f32::consts::PI;
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = load_lena_small_rgba_u8_61x38();
+        let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input_cpu.desc());
 
@@ -219,7 +219,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = load_lena_small_rgba_u8_61x38();
+        let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
 
         // Create larger output for 2x scale
@@ -247,7 +247,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = load_lena_small_rgba_u8_61x38();
+        let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input_cpu.desc());
 
@@ -272,7 +272,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = load_lena_small_rgba_u8_61x38();
+        let input_cpu = load_lena_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
 
         // Scale up with nearest neighbor
@@ -315,7 +315,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGB_U8
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_rgb = lena_rgba.convert(ColorFormat::RGB_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_rgb);
@@ -340,7 +340,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGB_U8
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_rgb = lena_rgba.convert(ColorFormat::RGB_U8).unwrap();
 
         let width = lena_rgb.desc().width;
@@ -372,7 +372,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGBA_F32
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGBA_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
@@ -409,7 +409,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGBA_F32
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGBA_F32).unwrap();
 
         let width = lena_f32.desc().width;
@@ -439,7 +439,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGB_F32
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGB_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_f32);
@@ -475,7 +475,7 @@ mod tests {
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
         // Load lena and convert to RGB_F32
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_f32 = lena_rgba.convert(ColorFormat::RGB_F32).unwrap();
 
         let width = lena_f32.desc().width;
@@ -504,7 +504,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
 
         let formats = [
             ColorFormat::GRAY_U8,
@@ -556,7 +556,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray = lena_rgba.convert(ColorFormat::GRAY_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray);
@@ -579,7 +579,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray_alpha = lena_rgba.convert(ColorFormat::GRAY_ALPHA_U8).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_alpha);
@@ -602,7 +602,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray_f32 = lena_rgba.convert(ColorFormat::GRAY_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_f32);
@@ -636,7 +636,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray_alpha_f32 = lena_rgba.convert(ColorFormat::GRAY_ALPHA_F32).unwrap();
 
         let input = GpuImage::from_image(&ctx, &lena_gray_alpha_f32);
@@ -670,7 +670,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let lena_rgba = load_lena_rgba_u8();
+        let lena_rgba = load_lena_rgba_u8_895x551();
         let lena_gray = lena_rgba.convert(ColorFormat::GRAY_U8).unwrap();
 
         let width = lena_gray.desc().width;

@@ -16,10 +16,10 @@ fn test_resource(name: &str) -> String {
 
 /// Loads the lena test image as RGBA_U8 format (895x551).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_rgba_u8() -> Image {
+pub fn load_lena_rgba_u8_895x551() -> Image {
     static LENA: OnceLock<Image> = OnceLock::new();
     LENA.get_or_init(|| {
-        Image::read_file(test_resource("lena.tiff"))
+        Image::read_file(test_resource("lena_895x551.tiff"))
             .unwrap()
             .convert(ColorFormat::from((
                 ChannelCount::Rgba,
@@ -33,11 +33,11 @@ pub fn load_lena_rgba_u8() -> Image {
 
 /// Loads a small lena test image as RGBA_U8 format (61x38).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_small_rgba_u8_61x38() -> Image {
+pub fn load_lena_rgba_u8_61x38() -> Image {
     static LENA_SMALL: OnceLock<Image> = OnceLock::new();
     LENA_SMALL
         .get_or_init(|| {
-            Image::read_file(test_resource("lena_small.tiff"))
+            Image::read_file(test_resource("lena_61x38.tiff"))
                 .unwrap()
                 .convert(ColorFormat::from((
                     ChannelCount::Rgba,
@@ -87,6 +87,34 @@ pub fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usi
         }
     }
     img
+}
+
+/// Loads the lena test image as RGBA_F32 format (895x551).
+/// The image is cached and cloned on each call to avoid repeated file I/O.
+pub fn load_lena_rgba_f32_895x551() -> Image {
+    static LENA_F32: OnceLock<Image> = OnceLock::new();
+    LENA_F32
+        .get_or_init(|| {
+            Image::read_file(test_resource("lena_895x551.tiff"))
+                .unwrap()
+                .convert(ColorFormat::RGBA_F32)
+                .unwrap()
+        })
+        .clone()
+}
+
+/// Loads a small lena test image as RGBA_F32 format (61x38).
+/// The image is cached and cloned on each call to avoid repeated file I/O.
+pub fn load_lena_rgba_f32_61x38() -> Image {
+    static LENA_SMALL_F32: OnceLock<Image> = OnceLock::new();
+    LENA_SMALL_F32
+        .get_or_init(|| {
+            Image::read_file(test_resource("lena_61x38.tiff"))
+                .unwrap()
+                .convert(ColorFormat::RGBA_F32)
+                .unwrap()
+        })
+        .clone()
 }
 
 /// Creates a test image filled with a constant f32 value.

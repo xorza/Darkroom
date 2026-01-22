@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 
 use glam::Vec2;
 
-use crate::common::test_utils::{load_lena_rgba_u8, test_processing_context};
+use crate::common::test_utils::{load_lena_rgba_u8_895x551, test_processing_context};
 use crate::prelude::*;
 use crate::processing_context::ImageBuffer;
 
@@ -14,7 +14,7 @@ fn test_chained_operations() {
     }
 
     // Create test images
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
     let mut input = ImageBuffer::from_cpu(input_cpu.clone());
@@ -53,7 +53,7 @@ fn test_mixed_gpu_cpu_operations() {
     }
 
     // Create test images
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
@@ -88,7 +88,7 @@ fn test_blend_chain() {
     }
 
     // Create test images
-    let img1 = load_lena_rgba_u8();
+    let img1 = load_lena_rgba_u8_895x551();
     let img2 = img1.clone();
     let width = img1.desc().width;
     let height = img1.desc().height;
@@ -117,7 +117,7 @@ fn test_multiple_transforms_ping_pong() {
         return;
     }
 
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
@@ -150,7 +150,7 @@ fn test_full_pipeline() {
     }
 
     // Create test images
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let overlay_cpu = input_cpu.clone();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
@@ -194,7 +194,7 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
         return;
     }
 
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
 
@@ -221,7 +221,7 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
 fn test_apply_uses_cpu_when_data_on_cpu() {
     let mut ctx = test_processing_context();
 
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
 
@@ -250,7 +250,7 @@ fn test_apply_chained_operations() {
         return;
     }
 
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
     let center = Vec2::new(width as f32 / 2.0, height as f32 / 2.0);
@@ -293,7 +293,7 @@ fn test_apply_blend_chain() {
         return;
     }
 
-    let img1 = load_lena_rgba_u8();
+    let img1 = load_lena_rgba_u8_895x551();
     let img2 = img1.clone();
     let width = img1.desc().width;
     let height = img1.desc().height;
@@ -321,7 +321,7 @@ fn test_apply_full_pipeline_with_blend() {
         return;
     }
 
-    let input_cpu = load_lena_rgba_u8();
+    let input_cpu = load_lena_rgba_u8_895x551();
     let overlay_cpu = input_cpu.clone();
     let width = input_cpu.desc().width;
     let height = input_cpu.desc().height;
@@ -376,7 +376,7 @@ fn test_apply_error_on_mismatched_formats() {
     let mut ctx = test_processing_context();
 
     // Create images with different formats
-    let img_rgba = load_lena_rgba_u8();
+    let img_rgba = load_lena_rgba_u8_895x551();
     let img_rgb = img_rgba.clone().convert(ColorFormat::RGB_U8).unwrap();
 
     let input = ImageBuffer::from_cpu(img_rgba);

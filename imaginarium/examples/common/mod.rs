@@ -15,7 +15,7 @@ fn output_dir() -> String {
 }
 
 fn lena_path() -> String {
-    format!("{}/test_resources/lena.tiff", workspace_root())
+    format!("{}/test_resources/lena_895x551.tiff", workspace_root())
 }
 
 pub fn load_lena_rgba_u8() -> Image {

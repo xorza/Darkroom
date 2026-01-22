@@ -1,4 +1,5 @@
 use crate::common::conversion::Convert;
+use crate::common::test_utils::{load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551};
 use crate::prelude::*;
 use std::sync::Once;
 
@@ -7,11 +8,6 @@ static INIT: Once = Once::new();
 /// Returns the workspace root directory (parent of the crate directory).
 fn workspace_root() -> &'static str {
     concat!(env!("CARGO_MANIFEST_DIR"), "/..")
-}
-
-/// Returns the path to a test resource file relative to workspace root.
-fn test_resource(name: &str) -> String {
-    format!("{}/test_resources/{}", workspace_root(), name)
 }
 
 fn ensure_test_output_dir() {
@@ -30,35 +26,37 @@ fn test_output(name: &str) -> String {
 // =============================================================================
 
 #[test]
-fn read_png_rgba_8bit() {
-    let png = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
-    assert_eq!(png.desc().width, 864);
-    assert_eq!(png.desc().height, 409);
-    assert_eq!(png.desc().stride, 3456);
-    assert_eq!(png.desc().color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(png.desc().color_format.channel_count, ChannelCount::Rgba);
-    assert_eq!(png.desc().color_format.channel_type, ChannelType::UInt);
+fn read_lena_rgba_8bit() {
+    let img = load_lena_rgba_u8_895x551();
+    assert_eq!(img.desc().width, 895);
+    assert_eq!(img.desc().height, 551);
+    assert_eq!(img.desc().stride, 3580); // 895 * 4 = 3580
+    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
+    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgba);
+    assert_eq!(img.desc().color_format.channel_type, ChannelType::UInt);
 }
 
 #[test]
-fn read_png_rgb_8bit() {
-    let png = Image::read_file(test_resource("rgb-sample-u8.png")).unwrap();
-    assert_eq!(png.desc().width, 331);
-    assert_eq!(png.desc().height, 126);
-    assert_eq!(png.desc().stride, 996); // 331 * 3 = 993, aligned to 4 = 996
-    assert_eq!(png.desc().color_format.channel_size, ChannelSize::_8bit);
-    assert_eq!(png.desc().color_format.channel_count, ChannelCount::Rgb);
+fn read_lena_rgb_converted() {
+    let img = load_lena_rgba_u8_895x551()
+        .convert(ColorFormat::RGB_U8)
+        .unwrap();
+    assert_eq!(img.desc().width, 895);
+    assert_eq!(img.desc().height, 551);
+    assert_eq!(img.desc().stride, 2688); // 895 * 3 = 2685, aligned to 4 = 2688
+    assert_eq!(img.desc().color_format.channel_size, ChannelSize::_8bit);
+    assert_eq!(img.desc().color_format.channel_count, ChannelCount::Rgb);
 }
 
 #[test]
 fn read_missing_file_returns_error() {
-    let result = Image::read_file(test_resource("does_not_exist.png"));
+    let result = Image::read_file("/nonexistent/does_not_exist.png");
     assert!(result.is_err());
 }
 
 #[test]
 fn read_invalid_extension_returns_error() {
-    let result = Image::read_file(test_resource("file.xyz"));
+    let result = Image::read_file("/nonexistent/file.xyz");
     assert!(matches!(result, Err(Error::InvalidExtension(_))));
 }
 
@@ -66,7 +64,7 @@ fn read_invalid_extension_returns_error() {
 fn read_case_insensitive_extension() {
     // This test verifies that uppercase extensions work
     // We can't easily test this without actual files, but we verify the code path
-    let result = Image::read_file(test_resource("does_not_exist.PNG"));
+    let result = Image::read_file("/nonexistent/does_not_exist.PNG");
     // Should fail with IO error (file not found), not InvalidExtension
     assert!(matches!(
         result,
@@ -81,7 +79,9 @@ fn read_case_insensitive_extension() {
 #[test]
 fn save_and_reload_png() {
     ensure_test_output_dir();
-    let original = Image::read_file(test_resource("rgb-sample-u8.png")).unwrap();
+    let original = load_lena_rgba_u8_895x551()
+        .convert(ColorFormat::RGB_U8)
+        .unwrap();
     original.save_file(test_output("save_reload.png")).unwrap();
 
     let reloaded = Image::read_file(test_output("save_reload.png")).unwrap();
@@ -92,8 +92,7 @@ fn save_and_reload_png() {
 #[test]
 fn save_and_reload_tiff() {
     ensure_test_output_dir();
-    let original = Image::read_file(test_resource("rgb-sample-u8.png"))
-        .unwrap()
+    let original = load_lena_rgba_f32_895x551()
         .convert(ColorFormat::RGB_F32)
         .unwrap();
     original.save_file(test_output("save_reload.tiff")).unwrap();
@@ -338,7 +337,7 @@ fn convert_from_float_denormalizes() {
 #[test]
 fn convert_and_save_various_formats() {
     ensure_test_output_dir();
-    let png = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
+    let img = load_lena_rgba_u8_895x551();
 
     // Test various format conversions
     let conversions = [
@@ -352,7 +351,7 @@ fn convert_and_save_various_formats() {
     ];
 
     for (format, path) in conversions {
-        png.clone()
+        img.clone()
             .convert(format)
             .unwrap_or_else(|_| panic!("Failed to convert to {:?}", format))
             .save_file(&path)
@@ -362,7 +361,7 @@ fn convert_and_save_various_formats() {
 
 #[test]
 fn double_conversion_preserves_dimensions() {
-    let original = Image::read_file(test_resource("rgba-sample-u8.png")).unwrap();
+    let original = load_lena_rgba_u8_895x551();
     let width = original.desc().width;
     let height = original.desc().height;
 
