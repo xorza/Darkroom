@@ -74,15 +74,12 @@ impl GraphInteractionState {
 
     /// Transitions to idle mode, resetting all interaction state.
     pub fn reset_to_idle(&mut self) {
-        tracing::info!("Resetting graph UI to Idle state");
-        self.mode = InteractionMode::Idle;
-        self.connection_breaker.reset();
+        self.transition_to(InteractionMode::Idle);
     }
 
     /// Transitions to breaking connections mode.
     pub fn start_breaking(&mut self, start_pos: Pos2) {
-        tracing::info!("Starting connection breaking at {:?}", start_pos);
-        self.mode = InteractionMode::BreakingConnections;
+        self.transition_to(InteractionMode::BreakingConnections);
         self.connection_breaker.start(start_pos);
     }
 
@@ -98,16 +95,12 @@ impl GraphInteractionState {
 
     /// Transitions to dragging new connection mode.
     pub fn start_dragging_connection(&mut self) {
-        tracing::info!("Starting new connection drag");
-        self.mode = InteractionMode::DraggingNewConnection;
-        self.connection_breaker.reset();
+        self.transition_to(InteractionMode::DraggingNewConnection);
     }
 
     /// Transitions to panning mode.
     pub fn start_panning(&mut self) {
-        tracing::info!("Starting graph panning");
-        self.mode = InteractionMode::PanningGraph;
-        self.connection_breaker.reset();
+        self.transition_to(InteractionMode::PanningGraph);
     }
 
     /// Transitions to a specific mode, resetting breaker state.

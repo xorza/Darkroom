@@ -116,13 +116,6 @@ impl GraphUi {
                 self.handle_background_click(&mut ctx, &mut app_data.interaction);
             }
 
-            self.update_zoom_and_pan(
-                gui,
-                &mut ctx,
-                &background_response,
-                pointer_pos,
-                &mut app_data.interaction,
-            );
             gui.set_scale(ctx.view_graph.scale);
 
             self.graph_layout.update(gui, &ctx);
@@ -149,6 +142,16 @@ impl GraphUi {
                     &background_response,
                     pointer_pos,
                     port_interact_cmd,
+                    &mut app_data.interaction,
+                );
+            }
+
+            if self.interaction.is_idle() || self.interaction.is_panning() {
+                self.update_zoom_and_pan(
+                    gui,
+                    &mut ctx,
+                    &background_response,
+                    pointer_pos,
                     &mut app_data.interaction,
                 );
             }
