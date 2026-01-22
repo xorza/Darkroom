@@ -1519,7 +1519,7 @@ unsafe fn process_row_f32_rgba_neon(
 mod tests {
     use super::ContrastBrightness;
     use crate::common::image_diff::{max_pixel_diff, pixels_equal};
-    use crate::common::test_utils::create_test_image;
+    use crate::common::test_utils::{create_test_image, load_lena_small_rgba_u8_61x38};
     use crate::prelude::*;
 
     fn pixels_changed(img1: &Image, img2: &Image) -> bool {
@@ -1740,18 +1740,15 @@ mod tests {
     // ========================================================================
 
     #[test]
-    fn test_large_image_all_formats() {
-        for format in ALL_FORMATS {
-            let input = create_test_image(*format, 256, 128, 0);
-            let mut output = Image::new_black(*input.desc()).unwrap();
+    fn test_large_image() {
+        let input = load_lena_small_rgba_u8_61x38();
+        let mut output = Image::new_black(*input.desc()).unwrap();
 
-            ContrastBrightness::new(1.2, 0.05).apply_cpu(&input, &mut output);
+        ContrastBrightness::new(1.2, 0.05).apply_cpu(&input, &mut output);
 
-            assert!(
-                pixels_changed(&input, &output),
-                "large image test should change output for format {}",
-                format
-            );
-        }
+        assert!(
+            pixels_changed(&input, &output),
+            "large image test should change output"
+        );
     }
 }

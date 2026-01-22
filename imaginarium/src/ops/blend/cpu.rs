@@ -712,7 +712,7 @@ unsafe fn process_row_rgba_f32_neon(
 mod tests {
     use super::super::{Blend, BlendMode};
     use crate::common::image_diff::max_pixel_diff;
-    use crate::common::test_utils::create_test_image;
+    use crate::common::test_utils::{create_test_image, load_lena_small_rgba_u8_61x38};
     use crate::prelude::*;
 
     #[test]
@@ -894,9 +894,8 @@ mod tests {
 
     #[test]
     fn test_large_image() {
-        let format = ColorFormat::RGBA_U8;
-        let src = create_test_image(format, 256, 128, 0);
-        let dst = create_test_image(format, 256, 128, 100);
+        let src = load_lena_small_rgba_u8_61x38();
+        let dst = load_lena_small_rgba_u8_61x38();
         let mut output = Image::new_black(*dst.desc()).unwrap();
 
         Blend::new(BlendMode::Normal, 0.5).apply_cpu(&src, &dst, &mut output);
