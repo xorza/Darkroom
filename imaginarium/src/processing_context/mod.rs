@@ -36,6 +36,13 @@ impl ProcessingContext {
         Self { gpu_context: None }
     }
 
+    /// Creates a ProcessingContext with the given GPU context.
+    pub fn with_gpu(gpu_context: GpuContext) -> Self {
+        Self {
+            gpu_context: Some(gpu_context),
+        }
+    }
+
     /// Returns true if GPU is available.
     pub fn has_gpu(&self) -> bool {
         self.gpu_context.is_some()

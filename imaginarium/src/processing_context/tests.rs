@@ -2,15 +2,14 @@ use std::f32::consts::PI;
 
 use glam::Vec2;
 
-use crate::common::test_utils::load_lena_rgba_u8;
+use crate::common::test_utils::{load_lena_rgba_u8, test_processing_context};
 use crate::prelude::*;
-use crate::processing_context::{ImageBuffer, ProcessingContext};
+use crate::processing_context::ImageBuffer;
 
 #[test]
 fn test_chained_operations() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
-        // Skip test if no GPU available
         return;
     }
 
@@ -48,7 +47,7 @@ fn test_chained_operations() {
 
 #[test]
 fn test_mixed_gpu_cpu_operations() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -83,7 +82,7 @@ fn test_mixed_gpu_cpu_operations() {
 
 #[test]
 fn test_blend_chain() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -113,7 +112,7 @@ fn test_blend_chain() {
 
 #[test]
 fn test_multiple_transforms_ping_pong() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -145,7 +144,7 @@ fn test_multiple_transforms_ping_pong() {
 
 #[test]
 fn test_full_pipeline() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -190,7 +189,7 @@ fn test_full_pipeline() {
 
 #[test]
 fn test_apply_auto_selects_gpu_when_data_on_gpu() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -220,7 +219,7 @@ fn test_apply_auto_selects_gpu_when_data_on_gpu() {
 
 #[test]
 fn test_apply_uses_cpu_when_data_on_cpu() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
 
     let input_cpu = load_lena_rgba_u8();
     let width = input_cpu.desc().width;
@@ -246,7 +245,7 @@ fn test_apply_uses_cpu_when_data_on_cpu() {
 
 #[test]
 fn test_apply_chained_operations() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -289,7 +288,7 @@ fn test_apply_chained_operations() {
 
 #[test]
 fn test_apply_blend_chain() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -317,7 +316,7 @@ fn test_apply_blend_chain() {
 
 #[test]
 fn test_apply_full_pipeline_with_blend() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
     if !ctx.has_gpu() {
         return;
     }
@@ -374,7 +373,7 @@ fn test_apply_full_pipeline_with_blend() {
 
 #[test]
 fn test_apply_error_on_mismatched_formats() {
-    let mut ctx = ProcessingContext::new();
+    let mut ctx = test_processing_context();
 
     // Create images with different formats
     let img_rgba = load_lena_rgba_u8();

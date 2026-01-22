@@ -159,6 +159,7 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::test_utils::test_gpu;
     use crate::image::{Image, ImageDesc};
 
     fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
@@ -184,12 +185,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_no_change() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -226,12 +223,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_increase() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -260,12 +253,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_alpha_preserved() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -312,12 +301,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_pipeline_reuse() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -336,12 +321,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_gray_u8() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -378,12 +359,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_rgb_u8() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -420,12 +397,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_rgba_f32() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -471,12 +444,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_gray_f32() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -521,12 +490,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_all_formats() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -618,12 +583,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_gray_alpha_u8_alpha_preserved() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
@@ -668,12 +629,8 @@ mod tests {
 
     #[test]
     fn test_gpu_contrast_brightness_rgba_f32_alpha_preserved() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping test - no GPU available: {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();

@@ -209,14 +209,11 @@ impl GpuImage {
 mod tests {
     use super::*;
     use crate::ColorFormat;
-
-    fn create_test_gpu() -> Option<Gpu> {
-        Gpu::new().ok()
-    }
+    use crate::common::test_utils::test_gpu;
 
     #[test]
     fn test_to_image() {
-        let Some(ctx) = create_test_gpu() else {
+        let Some(ctx) = test_gpu() else {
             return;
         };
 
@@ -232,7 +229,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_to_image_async() {
-        let Some(ctx) = create_test_gpu() else {
+        let Some(ctx) = test_gpu() else {
             return;
         };
 

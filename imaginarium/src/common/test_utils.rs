@@ -1,5 +1,8 @@
+use std::sync::OnceLock;
+
 use crate::image::Image;
 use crate::prelude::*;
+use crate::processing_context::{GpuContext, ProcessingContext};
 
 /// Returns the workspace root directory (parent of the crate directory).
 fn workspace_root() -> &'static str {
@@ -21,4 +24,20 @@ pub fn load_lena_rgba_u8() -> Image {
             ChannelType::UInt,
         )))
         .unwrap()
+}
+
+/// Returns a shared GPU context for tests.
+/// This avoids the ~2 second initialization overhead per test.
+pub fn test_gpu() -> Option<Gpu> {
+    static TEST_GPU: OnceLock<Option<Gpu>> = OnceLock::new();
+    TEST_GPU.get_or_init(|| Gpu::new().ok()).clone()
+}
+
+/// Returns a shared ProcessingContext for tests.
+/// This avoids the ~2 second GPU initialization overhead per test.
+pub fn test_processing_context() -> ProcessingContext {
+    match test_gpu() {
+        Some(gpu) => ProcessingContext::with_gpu(GpuContext::new(gpu)),
+        None => ProcessingContext::cpu_only(),
+    }
 }

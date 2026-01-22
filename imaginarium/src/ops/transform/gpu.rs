@@ -184,8 +184,7 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_utils::load_lena_rgba_u8;
-    use crate::gpu::Gpu;
+    use crate::common::test_utils::{load_lena_rgba_u8, test_gpu};
     use std::f32::consts::PI;
 
     fn create_test_image(width: u32, height: u32) -> Image {
@@ -209,12 +208,8 @@ mod tests {
 
     #[test]
     fn test_identity_transform() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -237,12 +232,8 @@ mod tests {
 
     #[test]
     fn test_scale_transform() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -269,12 +260,8 @@ mod tests {
 
     #[test]
     fn test_rotation_transform() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -298,12 +285,8 @@ mod tests {
 
     #[test]
     fn test_filter_modes() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -344,12 +327,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgb_u8() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -373,12 +352,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgb_u8_rotation() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -409,12 +384,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgba_f32() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -450,12 +421,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgba_f32_rotation() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -484,12 +451,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgb_f32() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -524,12 +487,8 @@ mod tests {
 
     #[test]
     fn test_transform_rgb_f32_rotation() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -558,12 +517,8 @@ mod tests {
 
     #[test]
     fn test_transform_all_formats_scale() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -614,12 +569,8 @@ mod tests {
 
     #[test]
     fn test_transform_gray_u8_identity() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -641,12 +592,8 @@ mod tests {
 
     #[test]
     fn test_transform_gray_alpha_u8_identity() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -668,12 +615,8 @@ mod tests {
 
     #[test]
     fn test_transform_gray_f32_identity() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -706,12 +649,8 @@ mod tests {
 
     #[test]
     fn test_transform_gray_alpha_f32_identity() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
@@ -744,12 +683,8 @@ mod tests {
 
     #[test]
     fn test_transform_gray_u8_rotation() {
-        let ctx = match Gpu::new() {
-            Ok(ctx) => ctx,
-            Err(e) => {
-                eprintln!("Skipping GPU test (no GPU available): {}", e);
-                return;
-            }
+        let Some(ctx) = test_gpu() else {
+            return;
         };
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
