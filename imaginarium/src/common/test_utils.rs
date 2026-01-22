@@ -14,6 +14,20 @@ fn test_resource(name: &str) -> String {
     format!("{}/test_resources/{}", workspace_root(), name)
 }
 
+/// Ensures the test output directory exists. Safe to call multiple times.
+pub fn ensure_test_output_dir() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        std::fs::create_dir_all(format!("{}/test_output", workspace_root()))
+            .expect("Failed to create test_output directory");
+    });
+}
+
+/// Returns the path to a test output file.
+pub fn test_output(name: &str) -> String {
+    format!("{}/test_output/{}", workspace_root(), name)
+}
+
 /// Loads the lena test image as RGBA_U8 format (895x551).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
 pub fn load_lena_rgba_u8_895x551() -> Image {

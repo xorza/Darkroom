@@ -1,25 +1,8 @@
 use crate::common::conversion::Convert;
-use crate::common::test_utils::{load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551};
+use crate::common::test_utils::{
+    ensure_test_output_dir, load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output,
+};
 use crate::prelude::*;
-use std::sync::Once;
-
-static INIT: Once = Once::new();
-
-/// Returns the workspace root directory (parent of the crate directory).
-fn workspace_root() -> &'static str {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/..")
-}
-
-fn ensure_test_output_dir() {
-    INIT.call_once(|| {
-        std::fs::create_dir_all(format!("{}/test_output", workspace_root()))
-            .expect("Failed to create test_output directory");
-    });
-}
-
-fn test_output(name: &str) -> String {
-    format!("{}/test_output/{}", workspace_root(), name)
-}
 
 // =============================================================================
 // File reading tests
