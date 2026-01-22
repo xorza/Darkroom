@@ -331,6 +331,14 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 - Used by `const_bind_ui.rs` for inline const binding editing
 - Extensible for new value types via match arm addition
 
+### ID Salt Helpers
+
+`common/id_salt.rs` provides standardized ID generation for egui persistent IDs:
+- `NodeIds` - node body, drag start, status indicators
+- `PortIds` - port interaction areas
+- `ConstBindIds` - const binding connections and value editors
+- Returns tuples that hash consistently for `ui.make_persistent_id()`
+
 ## Undo System
 
 Two implementations available:

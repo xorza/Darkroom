@@ -1,4 +1,5 @@
 use crate::common::button::Button;
+use crate::common::id_salt::{NodeIds, PortIds};
 use crate::common::primitives::draw_circle_with_gradient_shadow;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
@@ -181,7 +182,7 @@ fn handle_node_drag<'a>(
 ) -> &'a NodeLayout {
     let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
 
-    let body_id = gui.ui().make_persistent_id(("node_body", node_id));
+    let body_id = gui.ui().make_persistent_id(NodeIds::body(*node_id));
     let response = gui.ui().interact(
         layout.body_rect,
         body_id,
@@ -192,7 +193,7 @@ fn handle_node_drag<'a>(
         response.dragged_by(PointerButton::Middle) || response.dragged_by(PointerButton::Primary);
 
     // Store drag start position
-    let drag_start_id = gui.ui().make_persistent_id(("node_drag_start", node_id));
+    let drag_start_id = gui.ui().make_persistent_id(NodeIds::drag_start(*node_id));
     if response.drag_started() {
         let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
         gui.ui()
@@ -409,7 +410,7 @@ fn render_status_hints(
 
     // Tooltip on hover
     let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-    let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
+    let dot_id = gui.ui().make_persistent_id(NodeIds::status_impure(node_id));
     let response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
 
     if response.hovered() {
@@ -457,7 +458,7 @@ fn render_ports(
         let port_rect = Rect::from_center_size(center, port_rect_size);
         let port_id = gui
             .ui()
-            .make_persistent_id(("node_port", kind, node.id, idx));
+            .make_persistent_id(PortIds::port(node.id, kind, idx));
         let response = gui.ui().interact(
             port_rect,
             port_id,
