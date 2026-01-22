@@ -273,25 +273,13 @@ impl GraphUi {
         port_interact_cmd: PortInteractCommand,
         interaction: &mut GraphUiInteraction,
     ) {
-        let primary_state = Self::get_primary_button_state(gui);
-
         let primary_down = matches!(
-            primary_state,
+            Self::get_primary_button_state(gui),
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
 
         match self.interaction.mode() {
-            InteractionMode::Idle => {}
-            InteractionMode::BreakingConnections | InteractionMode::DraggingNewConnection => {
-                let id = gui.ui.make_persistent_id("temp overlay background");
-                let rect = gui.rect;
-                gui.ui().interact(rect, id, Sense::all());
-            }
             InteractionMode::PanningGraph => return,
-        };
-
-        match self.interaction.mode() {
-            InteractionMode::PanningGraph => {}
             InteractionMode::Idle => {
                 let pointer_on_background =
                     background_response.hovered() && !self.connections.any_hovered();
@@ -301,7 +289,17 @@ impl GraphUi {
                     pointer_on_background,
                     port_interact_cmd,
                 );
+                return;
             }
+            InteractionMode::BreakingConnections | InteractionMode::DraggingNewConnection => {
+                let id = gui.ui.make_persistent_id("temp overlay background");
+                let rect = gui.rect;
+                gui.ui().interact(rect, id, Sense::all());
+            }
+        };
+
+        match self.interaction.mode() {
+            InteractionMode::PanningGraph | InteractionMode::Idle => unreachable!(),
             InteractionMode::BreakingConnections => {
                 self.handle_breaking_connections(ctx, interaction, pointer_pos, primary_down);
             }
