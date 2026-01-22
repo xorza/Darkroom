@@ -5,6 +5,7 @@ use egui::{
     vec2,
 };
 use scenarium::data::StaticValue;
+use tokio::net::unix::ReuniteError;
 
 use crate::app_data::AppData;
 use crate::common::frame::Frame;
@@ -146,33 +147,35 @@ impl GraphUi {
                 );
             }
 
-            if self.interaction.is_idle() || self.interaction.is_panning() {
-                self.update_zoom_and_pan(
-                    gui,
-                    &mut ctx,
-                    &background_response,
-                    pointer_pos,
-                    &mut app_data.interaction,
-                );
-            }
-
             gui.set_scale(1.0);
-            self.render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun);
-            self.node_details_ui.show(
+            let mut overlay_hovered =
+                self.render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun);
+            overlay_hovered |= self.node_details_ui.show(
                 gui,
                 &mut ctx,
                 &mut app_data.interaction,
                 &mut app_data.argument_values_cache,
             );
 
-            self.handle_new_node_popup(
+            overlay_hovered |= self.handle_new_node_popup(
                 gui,
                 &mut ctx,
                 pointer_pos,
                 &mut app_data.interaction,
-                background_response,
+                &background_response,
                 arena,
             );
+
+            if !overlay_hovered
+                && (self.interaction.is_idle() || self.interaction.is_panning()) {
+                    self.update_zoom_and_pan(
+                        gui,
+                        &mut ctx,
+                        &background_response,
+                        pointer_pos,
+                        &mut app_data.interaction,
+                    );
+                }
         });
     }
 
@@ -509,7 +512,9 @@ impl GraphUi {
         ctx: &mut GraphContext,
         interaction: &mut GraphUiInteraction,
         mut autorun: bool,
-    ) {
+    ) -> bool {
+        let mut hovered = false;
+
         let rect = gui.rect;
         let mut fit_all = false;
         let mut view_selected = false;
@@ -528,24 +533,29 @@ impl GraphUi {
                         let btn_size = vec2(20.0, 20.0);
                         let mono_font = gui.style.mono_font.clone();
 
-                        fit_all = Button::default()
+                        let response = Button::default()
                             .text("a")
                             .font(mono_font.clone())
                             .size(btn_size)
-                            .show(gui)
-                            .clicked();
-                        view_selected = Button::default()
+                            .show(gui);
+                        fit_all = response.clicked();
+                        hovered |= response.hovered();
+
+                        let response = Button::default()
                             .text("s")
                             .font(mono_font.clone())
                             .size(btn_size)
-                            .show(gui)
-                            .clicked();
-                        reset_view = Button::default()
+                            .show(gui);
+                        view_selected = response.clicked();
+                        hovered |= response.hovered();
+
+                        let response = Button::default()
                             .text("r")
                             .font(mono_font)
                             .size(btn_size)
-                            .show(gui)
-                            .clicked();
+                            .show(gui);
+                        reset_view = response.clicked();
+                        hovered |= response.hovered();
                     });
                 });
             });
@@ -562,9 +572,11 @@ impl GraphUi {
 
             Frame::none().inner_margin(padding).show(gui, |gui| {
                 gui.horizontal(|gui| {
-                    if Button::default().text("run").show(gui).clicked() {
+                    let response = Button::default().text("run").show(gui);
+                    if response.clicked() {
                         interaction.run_cmd = RunCommand::RunOnce;
                     }
+                    hovered |= response.hovered();
 
                     let response = Button::default()
                         .toggle(&mut autorun)
@@ -578,6 +590,7 @@ impl GraphUi {
                             RunCommand::StopAutorun
                         };
                     }
+                    hovered |= response.hovered();
                 });
             });
         });
@@ -594,6 +607,8 @@ impl GraphUi {
         if fit_all {
             fit_all_nodes(gui, ctx, &self.graph_layout);
         }
+
+        hovered
     }
 
     // ------------------------------------------------------------------------
@@ -606,9 +621,9 @@ impl GraphUi {
         ctx: &mut GraphContext<'_>,
         pointer_pos: Option<Pos2>,
         interaction: &mut GraphUiInteraction,
-        background_response: Response,
+        background_response: &Response,
         arena: &Bump,
-    ) {
+    ) -> bool {
         if background_response.double_clicked_by(PointerButton::Primary)
             && let Some(pos) = pointer_pos
         {
@@ -623,6 +638,8 @@ impl GraphUi {
             self.interaction.reset_to_idle();
             self.connections.stop_drag();
         }
+
+        self.new_node_ui.is_open()
     }
 
     fn handle_new_node_selection(

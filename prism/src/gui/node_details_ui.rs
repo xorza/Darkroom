@@ -29,9 +29,9 @@ impl NodeDetailsUi {
         ctx: &mut GraphContext<'_>,
         interaction: &mut GraphUiInteraction,
         argument_values_cache: &mut ArgumentValuesCache,
-    ) {
+    ) -> bool {
         let Some(node_id) = ctx.view_graph.selected_node_id else {
-            return;
+            return false;
         };
 
         let panel_rect = self.compute_panel_rect(gui);
@@ -55,7 +55,9 @@ impl NodeDetailsUi {
                             );
                         });
                     });
-            });
+            })
+            .response
+            .hovered()
     }
 
     fn compute_panel_rect(&self, gui: &Gui<'_>) -> Rect {
