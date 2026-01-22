@@ -27,13 +27,13 @@ async fn main() -> Result<()> {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon)
-            .with_app_id("scenarium-egui"),
+            .with_app_id("prism-editor"),
         persist_window: true,
         ..Default::default()
     };
 
     eframe::run_native(
-        "Scenarium",
+        "Prism",
         options,
         Box::new(|cc| {
             configure_fonts(&cc.egui_ctx);
