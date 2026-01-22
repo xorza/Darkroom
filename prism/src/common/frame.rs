@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use egui::{Color32, CornerRadius, InnerResponse, Margin, Stroke};
+use egui::{Color32, CornerRadius, InnerResponse, Margin, Sense, Stroke};
 
 use crate::gui::{
     Gui,
@@ -10,12 +10,14 @@ use crate::gui::{
 #[derive(Debug, Clone)]
 pub struct Frame {
     inner: egui::Frame,
+    sense: Option<Sense>,
 }
 
 impl Frame {
     pub fn none() -> Self {
         Self {
             inner: egui::Frame::NONE,
+            sense: None,
         }
     }
 
@@ -26,7 +28,13 @@ impl Frame {
                 .stroke(style.stroke)
                 .corner_radius(style.corner_radius)
                 .inner_margin(style.padding),
+            sense: None,
         }
+    }
+
+    pub fn sense(mut self, sense: Sense) -> Self {
+        self.sense = Some(sense);
+        self
     }
 
     pub fn fill(mut self, fill: Color32) -> Self {
@@ -60,9 +68,19 @@ impl Frame {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = gui.style.clone();
-        self.inner.show(gui.ui(), |ui| {
+        let sense = self.sense;
+
+        let mut result = self.inner.show(gui.ui(), |ui| {
             let mut gui = Gui::new(ui, &style);
             add_contents(&mut gui)
-        })
+        });
+
+        if let Some(sense) = sense {
+            result.response |= gui
+                .ui()
+                .interact(result.response.rect, result.response.id, sense);
+        }
+
+        result
     }
 }

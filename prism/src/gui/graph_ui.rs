@@ -148,8 +148,9 @@ impl GraphUi {
             }
 
             gui.set_scale(1.0);
-            let mut overlay_hovered =
-                self.render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun);
+            let mut overlay_hovered = self
+                .render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun)
+                .hovered();
             overlay_hovered |= self.node_details_ui.show(
                 gui,
                 &mut ctx,
@@ -166,16 +167,15 @@ impl GraphUi {
                 arena,
             );
 
-            if !overlay_hovered
-                && (self.interaction.is_idle() || self.interaction.is_panning()) {
-                    self.update_zoom_and_pan(
-                        gui,
-                        &mut ctx,
-                        &background_response,
-                        pointer_pos,
-                        &mut app_data.interaction,
-                    );
-                }
+            if !overlay_hovered && (self.interaction.is_idle() || self.interaction.is_panning()) {
+                self.update_zoom_and_pan(
+                    gui,
+                    &mut ctx,
+                    &background_response,
+                    pointer_pos,
+                    &mut app_data.interaction,
+                );
+            }
         });
     }
 
@@ -512,56 +512,56 @@ impl GraphUi {
         ctx: &mut GraphContext,
         interaction: &mut GraphUiInteraction,
         mut autorun: bool,
-    ) -> bool {
-        let mut hovered = false;
-
+    ) -> Response {
         let rect = gui.rect;
         let mut fit_all = false;
         let mut view_selected = false;
         let mut reset_view = false;
 
         // Top buttons (view controls)
-        PositionedUi::new(Id::new("graph_ui_top_buttons"), rect.left_top())
+        let mut response = PositionedUi::new(Id::new("graph_ui_top_buttons"), rect.left_top())
             .pivot(Align2::LEFT_TOP)
             .interactable(false)
             .show(gui, |gui| {
                 gui.ui().take_available_width();
                 let padding = gui.style.padding;
 
-                Frame::none().inner_margin(padding).show(gui, |gui| {
-                    gui.horizontal(|gui| {
-                        let btn_size = vec2(20.0, 20.0);
-                        let mono_font = gui.style.mono_font.clone();
+                Frame::none()
+                    .sense(Sense::hover())
+                    .inner_margin(padding)
+                    .show(gui, |gui| {
+                        gui.horizontal(|gui| {
+                            let btn_size = vec2(20.0, 20.0);
+                            let mono_font = gui.style.mono_font.clone();
 
-                        let response = Button::default()
-                            .text("a")
-                            .font(mono_font.clone())
-                            .size(btn_size)
-                            .show(gui);
-                        fit_all = response.clicked();
-                        hovered |= response.hovered();
+                            let response = Button::default()
+                                .text("a")
+                                .font(mono_font.clone())
+                                .size(btn_size)
+                                .show(gui);
+                            fit_all = response.clicked();
 
-                        let response = Button::default()
-                            .text("s")
-                            .font(mono_font.clone())
-                            .size(btn_size)
-                            .show(gui);
-                        view_selected = response.clicked();
-                        hovered |= response.hovered();
+                            let response = Button::default()
+                                .text("s")
+                                .font(mono_font.clone())
+                                .size(btn_size)
+                                .show(gui);
+                            view_selected = response.clicked();
 
-                        let response = Button::default()
-                            .text("r")
-                            .font(mono_font)
-                            .size(btn_size)
-                            .show(gui);
-                        reset_view = response.clicked();
-                        hovered |= response.hovered();
-                    });
-                });
-            });
+                            let response = Button::default()
+                                .text("r")
+                                .font(mono_font)
+                                .size(btn_size)
+                                .show(gui);
+                            reset_view = response.clicked();
+                        });
+                    })
+                    .response
+            })
+            .inner;
 
         // Bottom buttons (execution controls)
-        PositionedUi::new(
+        response |= PositionedUi::new(
             Id::new("graph_ui_bottom_buttons"),
             pos2(rect.left(), rect.bottom()),
         )
@@ -570,30 +570,33 @@ impl GraphUi {
         .show(gui, |gui| {
             let padding = gui.style.padding;
 
-            Frame::none().inner_margin(padding).show(gui, |gui| {
-                gui.horizontal(|gui| {
-                    let response = Button::default().text("run").show(gui);
-                    if response.clicked() {
-                        interaction.run_cmd = RunCommand::RunOnce;
-                    }
-                    hovered |= response.hovered();
+            Frame::none()
+                .sense(Sense::hover())
+                .inner_margin(padding)
+                .show(gui, |gui| {
+                    gui.horizontal(|gui| {
+                        let response = Button::default().text("run").show(gui);
+                        if response.clicked() {
+                            interaction.run_cmd = RunCommand::RunOnce;
+                        }
 
-                    let response = Button::default()
-                        .toggle(&mut autorun)
-                        .text("autorun")
-                        .show(gui);
+                        let response = Button::default()
+                            .toggle(&mut autorun)
+                            .text("autorun")
+                            .show(gui);
 
-                    if response.clicked() {
-                        interaction.run_cmd = if autorun {
-                            RunCommand::StartAutorun
-                        } else {
-                            RunCommand::StopAutorun
-                        };
-                    }
-                    hovered |= response.hovered();
-                });
-            });
-        });
+                        if response.clicked() {
+                            interaction.run_cmd = if autorun {
+                                RunCommand::StartAutorun
+                            } else {
+                                RunCommand::StopAutorun
+                            };
+                        }
+                    });
+                })
+                .response
+        })
+        .inner;
 
         // Apply view actions
         if reset_view {
@@ -608,7 +611,7 @@ impl GraphUi {
             fit_all_nodes(gui, ctx, &self.graph_layout);
         }
 
-        hovered
+        response
     }
 
     // ------------------------------------------------------------------------
