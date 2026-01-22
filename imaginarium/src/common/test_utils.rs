@@ -14,7 +14,7 @@ fn test_resource(name: &str) -> String {
     format!("{}/test_resources/{}", workspace_root(), name)
 }
 
-/// Loads the lena test image as RGBA_U8 format.
+/// Loads the lena test image as RGBA_U8 format (895x551).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
 pub fn load_lena_rgba_u8() -> Image {
     static LENA: OnceLock<Image> = OnceLock::new();
@@ -29,6 +29,24 @@ pub fn load_lena_rgba_u8() -> Image {
             .unwrap()
     })
     .clone()
+}
+
+/// Loads a small lena test image as RGBA_U8 format (61x38).
+/// The image is cached and cloned on each call to avoid repeated file I/O.
+pub fn load_lena_small_rgba_u8() -> Image {
+    static LENA_SMALL: OnceLock<Image> = OnceLock::new();
+    LENA_SMALL
+        .get_or_init(|| {
+            Image::read_file(test_resource("lena_small.tiff"))
+                .unwrap()
+                .convert(ColorFormat::from((
+                    ChannelCount::Rgba,
+                    ChannelSize::_8bit,
+                    ChannelType::UInt,
+                )))
+                .unwrap()
+        })
+        .clone()
 }
 
 /// Returns a shared GPU context for tests.
