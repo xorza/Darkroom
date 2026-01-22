@@ -274,16 +274,27 @@ impl GraphUi {
         interaction: &mut GraphUiInteraction,
     ) {
         let primary_state = Self::get_primary_button_state(gui);
-        let pointer_on_background =
-            background_response.hovered() && !self.connections.any_hovered();
+
         let primary_down = matches!(
             primary_state,
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
 
         match self.interaction.mode() {
+            InteractionMode::Idle => {}
+            InteractionMode::BreakingConnections | InteractionMode::DraggingNewConnection => {
+                let id = gui.ui.make_persistent_id("temp overlay background");
+                let rect = gui.rect;
+                gui.ui().interact(rect, id, Sense::all());
+            }
+            InteractionMode::PanningGraph => return,
+        };
+
+        match self.interaction.mode() {
             InteractionMode::PanningGraph => {}
             InteractionMode::Idle => {
+                let pointer_on_background =
+                    background_response.hovered() && !self.connections.any_hovered();
                 self.handle_idle_state(
                     pointer_pos,
                     primary_down,
