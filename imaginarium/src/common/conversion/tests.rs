@@ -73,6 +73,23 @@ macro_rules! test_float_conversion {
 test_float_conversion!(float_conversion_u8_f32, u8, f32);
 test_float_conversion!(float_conversion_u16_f32, u16, f32);
 
+// Test that opaque_alpha is correct for each channel type
+#[test]
+fn opaque_alpha_values() {
+    use super::conversion_scalar::OpaqueAlpha;
+    assert_eq!(
+        f32::opaque_alpha(),
+        1.0,
+        "f32::opaque_alpha() should be 1.0"
+    );
+    assert_eq!(u8::opaque_alpha(), 255, "u8::opaque_alpha() should be 255");
+    assert_eq!(
+        u16::opaque_alpha(),
+        65535,
+        "u16::opaque_alpha() should be 65535"
+    );
+}
+
 // Test all conversion paths between supported formats (u8, u16, f32)
 #[test]
 fn all_conversion_paths() {

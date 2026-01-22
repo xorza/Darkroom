@@ -1,7 +1,6 @@
 use std::mem::size_of;
 
 use bytemuck::Pod;
-use num_traits::Bounded;
 use rayon::prelude::*;
 
 use crate::common::color_format::*;
@@ -18,6 +17,12 @@ pub(crate) trait ChannelConvert<To>: Copy {
 
 pub(crate) trait ChannelAverage: Copy {
     fn average3(a: Self, b: Self, c: Self) -> Self;
+}
+
+/// Trait for getting the opaque alpha value for a channel type.
+/// For integers this is max value (255, 65535), for floats it's 1.0.
+pub trait OpaqueAlpha: Copy {
+    fn opaque_alpha() -> Self;
 }
 
 // =============================================================================
@@ -137,6 +142,31 @@ impl_average_int!(u16, u32);
 impl_average_float!(f32);
 
 // =============================================================================
+// Implement OpaqueAlpha
+// =============================================================================
+
+impl OpaqueAlpha for u8 {
+    #[inline]
+    fn opaque_alpha() -> Self {
+        255
+    }
+}
+
+impl OpaqueAlpha for u16 {
+    #[inline]
+    fn opaque_alpha() -> Self {
+        65535
+    }
+}
+
+impl OpaqueAlpha for f32 {
+    #[inline]
+    fn opaque_alpha() -> Self {
+        1.0
+    }
+}
+
+// =============================================================================
 // Image conversion using traits (scalar implementation)
 // =============================================================================
 
@@ -209,7 +239,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
 fn convert_pixels<From, To>(from: &Image, to: &mut Image)
 where
     From: Pod + ChannelConvert<To> + ChannelAverage + Sync,
-    To: Pod + Bounded + Send,
+    To: Pod + OpaqueAlpha + Send,
 {
     debug_assert_eq!(from.desc().width, to.desc().width);
     debug_assert_eq!(from.desc().height, to.desc().height);
@@ -254,7 +284,7 @@ where
 
                     (2, 1) => {
                         dst[0] = src[0].convert();
-                        dst[1] = To::max_value();
+                        dst[1] = To::opaque_alpha();
                     }
                     (2, 2) => {
                         dst[0] = src[0].convert();
@@ -262,7 +292,7 @@ where
                     }
                     (2, 3) => {
                         dst[0] = From::average3(src[0], src[1], src[2]).convert();
-                        dst[1] = To::max_value();
+                        dst[1] = To::opaque_alpha();
                     }
                     (2, 4) => {
                         dst[0] = From::average3(src[0], src[1], src[2]).convert();
@@ -297,7 +327,7 @@ where
                         dst[0] = v;
                         dst[1] = v;
                         dst[2] = v;
-                        dst[3] = To::max_value();
+                        dst[3] = To::opaque_alpha();
                     }
                     (4, 2) => {
                         let v = src[0].convert();
@@ -310,7 +340,7 @@ where
                         dst[0] = src[0].convert();
                         dst[1] = src[1].convert();
                         dst[2] = src[2].convert();
-                        dst[3] = To::max_value();
+                        dst[3] = To::opaque_alpha();
                     }
                     (4, 4) => {
                         dst[0] = src[0].convert();
