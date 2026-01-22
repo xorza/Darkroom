@@ -17,9 +17,11 @@ pub mod scroll_area;
 pub mod text_edit;
 pub mod ui_equals;
 pub mod undo_stack;
+pub mod value_editor;
 
 pub use combo_box::ComboBox;
 pub use file_picker::FilePicker;
 pub use popup_menu::{ListItem, PopupMenu};
 pub use text_edit::TextEdit;
 pub use ui_equals::UiEquals;
+pub use value_editor::StaticValueEditor;

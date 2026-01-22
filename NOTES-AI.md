@@ -323,6 +323,14 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 - `PortColors::select(hovered: bool) -> Color32` picks the appropriate color
 - Used by: `render_ports()`, `build_const_bind_style()`, `ConnectionBezierStyle::build()`
 
+### Value Editor
+
+`StaticValueEditor` in `common/value_editor.rs` provides unified editing for `StaticValue` types:
+- Handles Int, Float, Enum, FsPath value types
+- Builder pattern with `.pos()`, `.align()`, `.style()` configuration
+- Used by `const_bind_ui.rs` for inline const binding editing
+- Extensible for new value types via match arm addition
+
 ## Undo System
 
 Two implementations available:

@@ -1,14 +1,10 @@
-use std::sync::Arc;
-
-use egui::{Align2, PointerButton, Pos2, Response, Sense, pos2, vec2};
-use scenarium::data::{DataType, EnumDef, StaticValue};
+use egui::{PointerButton, Pos2, Sense, pos2};
+use scenarium::data::StaticValue;
 use scenarium::graph::{Binding, Node, NodeId};
 use scenarium::prelude::Func;
 
-use crate::common::combo_box::ComboBox;
+use crate::common::StaticValueEditor;
 use crate::common::connection_bezier::ConnectionBezierStyle;
-use crate::common::drag_value::DragValue;
-use crate::common::file_picker::FilePicker;
 use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionCurve, ConnectionKey, PortKind};
@@ -144,8 +140,11 @@ impl<'a> ConstBindFrame<'a> {
         );
 
         let before_value = value.clone();
-        let editor_response =
-            render_value_editor(gui, ctx, value, connection_start, &const_bind_style);
+        let data_type = &ctx.func.inputs[ctx.input_idx].data_type;
+        let editor_response = StaticValueEditor::new(value, data_type)
+            .pos(connection_start)
+            .style(const_bind_style)
+            .show(gui, ("const_value", ctx.node_id, ctx.input_idx));
 
         if let Some(breaker) = ctx.breaker {
             currently_broke |= breaker.intersects_rect(editor_response.rect);
@@ -216,88 +215,4 @@ fn build_const_bind_style(gui: &Gui<'_>, is_broke: bool, is_hovered: bool) -> Dr
     let mut style = gui.style.node.const_bind_style.clone();
     style.stroke.color = stroke_color;
     style
-}
-
-fn render_value_editor(
-    gui: &mut Gui<'_>,
-    ctx: &InputContext<'_>,
-    value: &mut StaticValue,
-    pos: Pos2,
-    style: &DragValueStyle,
-) -> Response {
-    let small_padding = gui.style.small_padding;
-    let mono_font = gui.style.mono_font.clone();
-    let text_color = gui.style.text_color;
-
-    match value {
-        StaticValue::Int(int_value) => DragValue::new(int_value)
-            .font(mono_font)
-            .color(text_color)
-            .speed(1.0)
-            .padding(vec2(small_padding, 0.0))
-            .pos(pos)
-            .align(Align2::RIGHT_CENTER)
-            .style(style.clone())
-            .show(gui, ("const_int_drag", ctx.node_id, ctx.input_idx)),
-
-        StaticValue::Float(float_value) => DragValue::new(float_value)
-            .font(mono_font)
-            .color(text_color)
-            .speed(0.01)
-            .padding(vec2(small_padding, 0.0))
-            .pos(pos)
-            .align(Align2::RIGHT_CENTER)
-            .style(style.clone())
-            .show(gui, ("const_float_drag", ctx.node_id, ctx.input_idx)),
-
-        StaticValue::Enum {
-            type_id,
-            variant_name,
-        } => {
-            let DataType::Enum(enum_def) = &ctx.func.inputs[ctx.input_idx].data_type else {
-                panic!("Expected Enum data type");
-            };
-            assert_eq!(*type_id, enum_def.type_id, "Type ID mismatch");
-
-            render_enum_dropdown(
-                gui,
-                ("const_enum_dropdown", ctx.node_id, ctx.input_idx),
-                enum_def,
-                variant_name,
-                pos,
-                style,
-            )
-        }
-
-        StaticValue::FsPath(path) => {
-            let DataType::FsPath(config) = &ctx.func.inputs[ctx.input_idx].data_type else {
-                panic!("Expected FsPath data type");
-            };
-            FilePicker::new(path, config)
-                .pos(pos)
-                .align(Align2::RIGHT_CENTER)
-                .style(style.clone())
-                .show(gui, ("const_fspath_input", ctx.node_id, ctx.input_idx))
-        }
-
-        _ => todo!(),
-    }
-}
-
-fn render_enum_dropdown(
-    gui: &mut Gui<'_>,
-    id_salt: impl std::hash::Hash,
-    enum_def: &Arc<EnumDef>,
-    variant_name: &mut String,
-    pos: Pos2,
-    style: &DragValueStyle,
-) -> Response {
-    ComboBox::new(variant_name, &enum_def.variants)
-        .font(gui.style.sub_font.clone())
-        .color(gui.style.text_color)
-        .padding(vec2(gui.style.small_padding, 0.0))
-        .pos(pos)
-        .align(Align2::RIGHT_CENTER)
-        .style(style.clone())
-        .show(gui, id_salt)
 }
