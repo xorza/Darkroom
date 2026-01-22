@@ -2,11 +2,11 @@ use egui::epaint::Mesh;
 use egui::{Color32, Pos2, Rect, Response, Sense};
 
 use crate::common::{UiEquals, bezier_helper};
+use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
 use crate::gui::polyline_mesh::PolylineMesh;
 use crate::gui::style::Style;
-use crate::gui::{Gui, style};
 
 const DEFAULT_FEATHER: f32 = 0.8;
 
@@ -245,35 +245,18 @@ impl ConnectionBezierStyle {
                 stroke_width: style.connections.stroke_width,
                 feather: style.connections.feather,
             }
-        } else if hovered {
-            match port_kind {
-                PortKind::Input | PortKind::Output => ConnectionBezierStyle {
-                    start_color: style.node.output_hover_color,
-                    end_color: style.node.input_hover_color,
-                    stroke_width: style.connections.stroke_width,
-                    feather: style.connections.feather,
-                },
-                PortKind::Trigger | PortKind::Event => ConnectionBezierStyle {
-                    start_color: style.node.event_hover_color,
-                    end_color: style.node.trigger_hover_color,
-                    stroke_width: style.connections.stroke_width,
-                    feather: style.connections.feather,
-                },
-            }
         } else {
-            match port_kind {
-                PortKind::Input | PortKind::Output => ConnectionBezierStyle {
-                    start_color: style.node.output_port_color,
-                    end_color: style.node.input_port_color,
-                    stroke_width: style.connections.stroke_width,
-                    feather: style.connections.feather,
-                },
-                PortKind::Trigger | PortKind::Event => ConnectionBezierStyle {
-                    start_color: style.node.event_port_color,
-                    end_color: style.node.trigger_port_color,
-                    stroke_width: style.connections.stroke_width,
-                    feather: style.connections.feather,
-                },
+            // Connections go from source (Output/Event) to target (Input/Trigger)
+            let (source_kind, target_kind) = match port_kind {
+                PortKind::Input | PortKind::Output => (PortKind::Output, PortKind::Input),
+                PortKind::Trigger | PortKind::Event => (PortKind::Event, PortKind::Trigger),
+            };
+
+            ConnectionBezierStyle {
+                start_color: style.node.port_colors(source_kind).select(hovered),
+                end_color: style.node.port_colors(target_kind).select(hovered),
+                stroke_width: style.connections.stroke_width,
+                feather: style.connections.feather,
             }
         }
     }

@@ -3,7 +3,8 @@ use std::rc::Rc;
 use eframe::egui;
 use egui::{Color32, FontFamily, FontId, Shadow, Stroke, Vec2};
 
-use crate::{common::connection_bezier::ConnectionBezierStyle, gui::style_settings::StyleSettings};
+use crate::gui::connection_ui::PortKind;
+use crate::gui::style_settings::StyleSettings;
 
 pub fn brighten(color: Color32, amount: f32) -> Color32 {
     let t = amount.clamp(0.0, 1.0);
@@ -131,6 +132,44 @@ pub(crate) struct DragValueStyle {
     pub(crate) fill: Color32,
     pub(crate) stroke: Stroke,
     pub(crate) radius: f32,
+}
+
+/// Port colors for a specific port kind (base and hover variants).
+#[derive(Debug, Clone, Copy)]
+pub struct PortColors {
+    pub base: Color32,
+    pub hover: Color32,
+}
+
+impl PortColors {
+    /// Select the appropriate color based on hover state.
+    pub fn select(self, hovered: bool) -> Color32 {
+        if hovered { self.hover } else { self.base }
+    }
+}
+
+impl NodeStyle {
+    /// Get the colors for a port based on its kind.
+    pub fn port_colors(&self, kind: PortKind) -> PortColors {
+        match kind {
+            PortKind::Input => PortColors {
+                base: self.input_port_color,
+                hover: self.input_hover_color,
+            },
+            PortKind::Output => PortColors {
+                base: self.output_port_color,
+                hover: self.output_hover_color,
+            },
+            PortKind::Trigger => PortColors {
+                base: self.trigger_port_color,
+                hover: self.trigger_hover_color,
+            },
+            PortKind::Event => PortColors {
+                base: self.event_port_color,
+                hover: self.event_hover_color,
+            },
+        }
+    }
 }
 
 impl Style {

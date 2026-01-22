@@ -316,6 +316,13 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 - Contains `NodeStyle`, `ConnectionStyle`, `GraphBackgroundStyle`
 - Applied to egui visuals via `Style::apply_to_egui`
 
+### Port Colors
+
+`PortColors` struct provides unified port color selection:
+- `NodeStyle::port_colors(PortKind) -> PortColors` returns base/hover color pair
+- `PortColors::select(hovered: bool) -> Color32` picks the appropriate color
+- Used by: `render_ports()`, `build_const_bind_style()`, `ConnectionBezierStyle::build()`
+
 ## Undo System
 
 Two implementations available:

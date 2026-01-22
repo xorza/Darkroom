@@ -445,15 +445,6 @@ fn render_ports(
     let missing_shadow_color = gui.style.node.missing_inputs_shadow.color;
     let missing_shadow_spread = gui.style.node.missing_inputs_shadow.spread as f32;
 
-    let input_base = gui.style.node.input_port_color;
-    let input_hover = gui.style.node.input_hover_color;
-    let output_base = gui.style.node.output_port_color;
-    let output_hover = gui.style.node.output_hover_color;
-    let trigger_base = gui.style.node.trigger_port_color;
-    let trigger_hover = gui.style.node.trigger_hover_color;
-    let event_base = gui.style.node.event_port_color;
-    let event_hover = gui.style.node.event_hover_color;
-
     let mut result = PortInteractCommand::None;
 
     // Helper closure for drawing a single port
@@ -461,8 +452,6 @@ fn render_ports(
                      center: Pos2,
                      kind: PortKind,
                      idx: usize,
-                     base_color: Color32,
-                     hover_color: Color32,
                      show_missing_shadow: bool|
      -> PortInteractCommand {
         let port_rect = Rect::from_center_size(center, port_rect_size);
@@ -486,7 +475,7 @@ fn render_ports(
             );
         }
 
-        let color = hovered.then_else(hover_color, base_color);
+        let color = gui.style.node.port_colors(kind).select(hovered);
         gui.painter().circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
@@ -513,15 +502,7 @@ fn render_ports(
 
     // Trigger port (for terminal nodes)
     if func.terminal {
-        let cmd = draw_port(
-            gui,
-            layout.trigger_center(),
-            PortKind::Trigger,
-            0,
-            trigger_base,
-            trigger_hover,
-            false,
-        );
+        let cmd = draw_port(gui, layout.trigger_center(), PortKind::Trigger, 0, false);
         result = result.prefer(cmd);
     }
 
@@ -532,8 +513,6 @@ fn render_ports(
             layout.input_center(idx),
             PortKind::Input,
             idx,
-            input_base,
-            input_hover,
             missing_inputs.contains(&idx),
         );
         result = result.prefer(cmd);
@@ -541,29 +520,13 @@ fn render_ports(
 
     // Output ports
     for idx in 0..layout.output_galleys.len() {
-        let cmd = draw_port(
-            gui,
-            layout.output_center(idx),
-            PortKind::Output,
-            idx,
-            output_base,
-            output_hover,
-            false,
-        );
+        let cmd = draw_port(gui, layout.output_center(idx), PortKind::Output, idx, false);
         result = result.prefer(cmd);
     }
 
     // Event ports
     for idx in 0..layout.event_galleys.len() {
-        let cmd = draw_port(
-            gui,
-            layout.event_center(idx),
-            PortKind::Event,
-            idx,
-            event_base,
-            event_hover,
-            false,
-        );
+        let cmd = draw_port(gui, layout.event_center(idx), PortKind::Event, idx, false);
         result = result.prefer(cmd);
     }
 

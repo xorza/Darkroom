@@ -206,10 +206,11 @@ fn compute_connection_points(
 fn build_const_bind_style(gui: &Gui<'_>, is_broke: bool, is_hovered: bool) -> DragValueStyle {
     let stroke_color = if is_broke {
         gui.style.connections.broke_clr
-    } else if is_hovered {
-        gui.style.node.output_hover_color
     } else {
-        gui.style.node.output_port_color
+        gui.style
+            .node
+            .port_colors(PortKind::Output)
+            .select(is_hovered)
     };
 
     let mut style = gui.style.node.const_bind_style.clone();
