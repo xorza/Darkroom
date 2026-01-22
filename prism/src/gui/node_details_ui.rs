@@ -8,6 +8,7 @@ use crate::common::TextEdit;
 use crate::common::frame::Frame;
 use crate::common::image_utils::to_color_image;
 use crate::common::positioned_ui::PositionedUi;
+use crate::common::scroll_area::ScrollArea;
 use crate::gui::Gui;
 use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_ui_interaction::GraphUiInteraction;
@@ -35,16 +36,24 @@ impl NodeDetailsUi {
 
         let panel_rect = self.compute_panel_rect(gui);
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
+        let scroll_id = gui.ui().make_persistent_id("node_details_scroll");
 
         PositionedUi::new(popup_id, panel_rect.min)
             .rect(panel_rect)
             .max_size(panel_rect.size())
-            .interactable(false)
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup)
                     .inner_margin(gui.style.padding)
                     .show(gui, |gui| {
-                        self.show_content(gui, ctx, node_id, interaction, argument_values_cache);
+                        ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
+                            self.show_content(
+                                gui,
+                                ctx,
+                                node_id,
+                                interaction,
+                                argument_values_cache,
+                            );
+                        });
                     });
             });
     }
