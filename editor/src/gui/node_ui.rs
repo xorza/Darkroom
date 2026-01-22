@@ -14,9 +14,9 @@ use egui::epaint::CornerRadiusF32;
 use egui::{
     Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
-use graph::execution_stats::{ExecutedNodeStats, NodeError};
-use graph::graph::{Node, NodeId};
-use graph::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
+use scenarium::execution_stats::{ExecutedNodeStats, NodeError};
+use scenarium::graph::{Node, NodeId};
+use scenarium::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 
 // ============================================================================
 // Types

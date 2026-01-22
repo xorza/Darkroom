@@ -1,5 +1,5 @@
 use egui::{Pos2, Vec2};
-use graph::graph::{Binding, Node, NodeBehavior, NodeId};
+use scenarium::graph::{Binding, Node, NodeBehavior, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::model::view_graph::IncomingEvent;

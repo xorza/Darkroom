@@ -4,10 +4,10 @@ use crate::blend_mode::BLENDMODE_DATATYPE;
 use crate::conversion_format::{CONVERSION_FORMAT_DATATYPE, ConversionFormat};
 use crate::image::{IMAGE_DATA_TYPE, Image};
 use crate::vision_ctx::{VISION_CTX_TYPE, VisionCtx};
-use graph::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
-use graph::func_lambda::FuncLambda;
-use graph::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 use imaginarium::{Blend, BlendMode, ContrastBrightness, SUPPORTED_EXTENSIONS, Transform, Vec2};
+use scenarium::data::{DataType, DynamicValue, FsPathConfig, FsPathMode};
+use scenarium::func_lambda::FuncLambda;
+use scenarium::function::{Func, FuncBehavior, FuncInput, FuncLib, FuncOutput};
 
 #[derive(Debug)]
 pub struct ImageFuncLib {
@@ -106,7 +106,7 @@ impl Default for ImageFuncLib {
             name: "load_image".to_string(),
             description: Some("Loads an image from file".to_string()),
             behavior: FuncBehavior::Impure,
-            node_default_behavior: graph::graph::NodeBehavior::Once,
+            node_default_behavior: scenarium::graph::NodeBehavior::Once,
             terminal: false,
             category: "image".to_string(),
             inputs: vec![FuncInput {

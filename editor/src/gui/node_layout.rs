@@ -2,8 +2,8 @@ use common::BoolExt;
 use common::key_index_vec::KeyIndexKey;
 use eframe::egui;
 use egui::{FontId, Galley, Pos2, Rect, Vec2, pos2, vec2};
-use graph::graph::NodeId;
-use graph::prelude::FuncBehavior;
+use scenarium::graph::NodeId;
+use scenarium::prelude::FuncBehavior;
 use std::sync::Arc;
 
 use crate::common::UiEquals;
@@ -129,7 +129,7 @@ impl NodeLayout {
         self.compute_layout(gui, func, origin, view_node.pos);
     }
 
-    fn rebuild_port_galleys(&mut self, gui: &Gui, func: &graph::prelude::Func) {
+    fn rebuild_port_galleys(&mut self, gui: &Gui, func: &scenarium::prelude::Func) {
         let font = &gui.style.sub_font;
 
         self.input_galleys = func
@@ -159,7 +159,7 @@ impl NodeLayout {
     fn compute_layout(
         &mut self,
         gui: &mut Gui,
-        func: &graph::prelude::Func,
+        func: &scenarium::prelude::Func,
         origin: Pos2,
         node_pos: egui::Pos2,
     ) {

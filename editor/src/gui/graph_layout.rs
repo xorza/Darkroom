@@ -1,5 +1,5 @@
 use egui::Pos2;
-use graph::graph::NodeId;
+use scenarium::graph::NodeId;
 
 use crate::gui::Gui;
 use crate::gui::connection_ui::PortKind;

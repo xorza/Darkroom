@@ -1,8 +1,8 @@
 use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
-use graph::data::DynamicValue;
-use graph::graph::{Node, NodeId};
-use graph::prelude::{ExecutionStats, Func};
-use vision::Image;
+use palantir::Image;
+use scenarium::data::DynamicValue;
+use scenarium::graph::{Node, NodeId};
+use scenarium::prelude::{ExecutionStats, Func};
 
 use crate::common::TextEdit;
 use crate::common::frame::Frame;
@@ -167,10 +167,10 @@ fn get_execution_status(
 ) -> ExecutionStatus {
     if let Some(node_error) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
         let func_name = match &node_error.error {
-            graph::execution_graph::Error::Invoke { func_id, .. } => {
+            scenarium::execution_graph::Error::Invoke { func_id, .. } => {
                 ctx.func_lib.by_id(func_id).unwrap().name.clone()
             }
-            graph::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
+            scenarium::execution_graph::Error::CycleDetected { .. } => "cycle".to_string(),
         };
         return ExecutionStatus::Error {
             func_name,

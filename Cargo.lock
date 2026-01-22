@@ -1447,30 +1447,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "graph"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "common",
- "criterion",
- "glam",
- "hashbrown 0.16.1",
- "mlua",
- "pollster",
- "rand",
- "serde",
- "serde_json",
- "serde_yml",
- "strum",
- "strum_macros",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1488,7 +1464,10 @@ version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
+ "allocator-api2",
+ "equivalent",
  "foldhash 0.1.5",
+ "serde",
 ]
 
 [[package]]
@@ -2610,6 +2589,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "palantir"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "common",
+ "imaginarium",
+ "scenarium",
+ "strum",
+ "strum_macros",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "parking_lot"
 version = "0.12.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3158,6 +3152,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "scenarium"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "common",
+ "criterion",
+ "glam",
+ "hashbrown 0.15.5",
+ "mlua",
+ "pollster",
+ "rand",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "strum",
+ "strum_macros",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "scenarium-editor"
 version = "0.1.0"
 dependencies = [
@@ -3168,13 +3186,14 @@ dependencies = [
  "dotenv",
  "eframe",
  "egui",
- "graph",
  "hashbrown 0.16.1",
  "imaginarium",
  "lz4_flex",
+ "palantir",
  "pollster",
  "rayon",
  "rfd",
+ "scenarium",
  "serde",
  "serde_json",
  "serde_yml",
@@ -3185,7 +3204,6 @@ dependencies = [
  "tracing-rolling-file",
  "tracing-subscriber",
  "uuid",
- "vision",
  "wgpu",
 ]
 
@@ -3880,21 +3898,6 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
-
-[[package]]
-name = "vision"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "common",
- "graph",
- "imaginarium",
- "strum",
- "strum_macros",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "walkdir"

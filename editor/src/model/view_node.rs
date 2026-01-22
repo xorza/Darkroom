@@ -1,6 +1,6 @@
 use common::key_index_vec::KeyIndexKey;
 use egui::Pos2;
-use graph::graph::{Node, NodeId};
+use scenarium::graph::{Node, NodeId};
 use serde::{Deserialize, Serialize};
 
 use crate::common::UiEquals;

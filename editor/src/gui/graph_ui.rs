@@ -4,15 +4,15 @@ use egui::{
     Align2, Id, Key, PointerButton, Pos2, Rect, Response, Sense, StrokeKind, UiBuilder, Vec2, pos2,
     vec2,
 };
-use graph::data::StaticValue;
+use scenarium::data::StaticValue;
 
 use crate::app_data::AppData;
 use crate::common::frame::Frame;
 use crate::common::positioned_ui::PositionedUi;
 use crate::model::EventSubscriberChange;
 use crate::model::graph_ui_action::GraphUiAction;
-use graph::graph::NodeId;
-use graph::prelude::{Binding, ExecutionStats, PortAddress};
+use scenarium::graph::NodeId;
+use scenarium::prelude::{Binding, ExecutionStats, PortAddress};
 
 use crate::common::UiEquals;
 

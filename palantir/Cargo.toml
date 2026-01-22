@@ -1,11 +1,11 @@
 [package]
-name = "vision"
+name = "palantir"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 common = { workspace = true }
-graph = { workspace = true }
+scenarium = { workspace = true }
 imaginarium = { workspace = true }
 anyhow = { workspace = true }
 strum = { workspace = true }

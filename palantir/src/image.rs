@@ -3,9 +3,9 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 
 use common::slot::Slot;
-use graph::context::ContextManager;
-use graph::data::{CustomValue, DataType, PendingPreview};
 use imaginarium::{ColorFormat, ImageBuffer, ImageDesc, Transform, Vec2};
+use scenarium::context::ContextManager;
+use scenarium::data::{CustomValue, DataType, PendingPreview};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 

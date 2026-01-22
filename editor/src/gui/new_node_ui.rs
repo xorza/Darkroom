@@ -5,8 +5,8 @@ use bumpalo::Bump;
 use bumpalo::collections::CollectIn;
 use bumpalo::collections::Vec as BumpVec;
 use egui::{Galley, Id, Key, Order, Pos2, Sense, vec2};
-use graph::function::Func;
-use graph::prelude::FuncLib;
+use scenarium::function::Func;
+use scenarium::prelude::FuncLib;
 
 use crate::common::area::Area;
 use crate::common::column_flow::ColumnFlow;

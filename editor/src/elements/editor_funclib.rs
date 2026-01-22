@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use common::BoolExt;
-use graph::{
+use scenarium::{
     event_lambda::EventLambda,
     prelude::{Func, FuncBehavior, FuncId, FuncLambda, FuncLib},
 };

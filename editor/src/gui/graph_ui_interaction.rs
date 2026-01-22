@@ -1,4 +1,4 @@
-use graph::graph::NodeId;
+use scenarium::graph::NodeId;
 
 use crate::{gui::graph_ui::Error, model::graph_ui_action::GraphUiAction};
 

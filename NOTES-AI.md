@@ -16,10 +16,10 @@ egui-based editor.
 ```
 scenarium/
 ├── common/          # Shared utilities and helper macros
-├── graph/           # Core graph library with execution engine
+├── scenarium/       # Core graph library with execution engine
 ├── imaginarium/     # GPU/CPU image processing library
 ├── editor/          # Visual egui-based graph editor
-├── vision/          # Image processing funclib (imaginarium adapter)
+├── palantir/        # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
 ├── test_output/     # Output folder created by unit tests
 └── deprecated_code/ # Older .NET/QML editors (historical)
@@ -291,7 +291,7 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 
 - Unit tests in-module via `#[cfg(test)]` blocks
 - `test_graph()` and `test_func_lib()` fixtures for reproducible testing
-- Criterion benchmarks in `graph/benches/b1.rs`
+- Criterion benchmarks in `scenarium/benches/b1.rs`
 - `TestFuncHooks` with Arc callbacks for async test support
 
 ## Editor Features

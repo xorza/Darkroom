@@ -1,8 +1,8 @@
 use common::key_index_vec::{CompactInsert, KeyIndexKey, KeyIndexVec};
 use egui::{PointerButton, Pos2, Sense};
-use graph::graph::{NodeId, PortAddress};
-use graph::prelude::{Binding, ExecutionStats};
-use graph::worker::EventRef;
+use scenarium::graph::{NodeId, PortAddress};
+use scenarium::prelude::{Binding, ExecutionStats};
+use scenarium::worker::EventRef;
 
 use crate::common::connection_bezier::{ConnectionBezier, ConnectionBezierStyle};
 use crate::gui::Gui;

@@ -10,7 +10,7 @@ executing graphs.
 Repo layout:
 
 - `common/` — shared utilities used across the workspace.
-- `graph/` — the core graph library and execution logic.
+- `scenarium/` — the core graph library and execution logic.
 - `editor/` — the visual editor application.
 - `NOTES-AI.md` — current implementation notes and recent changes (kept up to date).
 
@@ -53,13 +53,13 @@ These are important for consistency and avoiding subtle bugs:
 
 Suggested quick tour:
 
-- `graph/` for graph data structures and execution logic.
+- `scenarium/` for graph data structures and execution logic.
 - `editor/` for UI and editor behavior.
 - `common/` for shared helpers and utility types.
 
 ## First Tasks
 
-1. Create a sample graph in code, similar to `graph::graph::test_graph()`.
+1. Create a sample graph in code, similar to `scenarium::graph::test_graph()`.
 2. Execute computation for that graph using `execution_graph` (see the `execution_graph` tests).
 3. Add a GUI panel that shows details for the currently selected node, including an editable node name.
    See `editor::main_ui` and `editor::app_data`.

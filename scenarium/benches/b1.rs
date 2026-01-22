@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
-use graph::{
+use scenarium::{
     graph::test_graph,
     prelude::{ExecutionGraph, TestFuncHooks, test_func_lib},
 };

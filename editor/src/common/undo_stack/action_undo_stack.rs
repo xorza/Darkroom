@@ -199,9 +199,9 @@ mod tests {
     use crate::model::view_graph::{IncomingConnection, IncomingEvent};
     use common::SerdeFormat;
     use egui::{Pos2, Vec2, vec2};
-    use graph::data::StaticValue;
-    use graph::graph::{Binding, Event, Input, NodeBehavior};
-    use graph::prelude::test_graph;
+    use scenarium::data::StaticValue;
+    use scenarium::graph::{Binding, Event, Input, NodeBehavior};
+    use scenarium::prelude::test_graph;
 
     fn assert_ranges_match_actions(stack: &ActionUndoStack) {
         for range in &stack.undo_stack {
@@ -234,7 +234,7 @@ mod tests {
 
     fn collect_incoming_connections(
         view_graph: &ViewGraph,
-        removed_node_id: graph::graph::NodeId,
+        removed_node_id: scenarium::graph::NodeId,
     ) -> Vec<IncomingConnection> {
         let mut incoming = Vec::new();
         for node in view_graph.graph.nodes.iter() {
@@ -255,7 +255,7 @@ mod tests {
 
     fn collect_incoming_events(
         view_graph: &ViewGraph,
-        removed_node_id: graph::graph::NodeId,
+        removed_node_id: scenarium::graph::NodeId,
     ) -> Vec<IncomingEvent> {
         let mut incoming = Vec::new();
         for node in view_graph.graph.nodes.iter() {

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use egui::{Align2, PointerButton, Pos2, Response, Sense, pos2, vec2};
-use graph::data::{DataType, EnumDef, StaticValue};
-use graph::graph::{Binding, Node, NodeId};
-use graph::prelude::Func;
+use scenarium::data::{DataType, EnumDef, StaticValue};
+use scenarium::graph::{Binding, Node, NodeId};
+use scenarium::prelude::Func;
 
 use crate::common::combo_box::ComboBox;
 use crate::common::connection_bezier::ConnectionBezierStyle;

@@ -7,25 +7,25 @@ use crate::model::graph_ui_action::GraphUiAction;
 use anyhow::Result;
 use common::slot::Slot;
 use common::{SerdeFormat, Shared};
-use graph::elements::basic_funclib::BasicFuncLib;
-use graph::elements::worker_events_funclib::{FRAME_EVENT_FUNC_ID, WorkerEventsFuncLib};
-use graph::execution_graph::{self, Result as ExecutionGraphResult};
-use graph::graph::{Binding, Node, NodeId};
-use graph::prelude::{ExecutionStats, FuncId, FuncLib};
-use graph::prelude::{TestFuncHooks, test_func_lib, test_graph};
-use graph::worker::{ArgumentValuesCallback, WorkerMessage};
-use graph::worker::{EventRef, ProcessingCallback, Worker};
+use palantir::ImageFuncLib;
+use scenarium::elements::basic_funclib::BasicFuncLib;
+use scenarium::elements::worker_events_funclib::{FRAME_EVENT_FUNC_ID, WorkerEventsFuncLib};
+use scenarium::execution_graph::{self, Result as ExecutionGraphResult};
+use scenarium::graph::{Binding, Node, NodeId};
+use scenarium::prelude::{ExecutionStats, FuncId, FuncLib};
+use scenarium::prelude::{TestFuncHooks, test_func_lib, test_graph};
+use scenarium::worker::{ArgumentValuesCallback, WorkerMessage};
+use scenarium::worker::{EventRef, ProcessingCallback, Worker};
 use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Notify, watch};
-use vision::ImageFuncLib;
 
 use crate::main_ui::UiContext;
 use crate::model::{ViewGraph, ViewNode};
 
-use graph::execution_graph::ArgumentValues;
+use scenarium::execution_graph::ArgumentValues;
 
 const UNDO_MAX_STEPS: usize = 256;
 

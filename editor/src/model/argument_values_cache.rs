@@ -1,9 +1,9 @@
 use egui::TextureHandle;
-use graph::execution_graph::ArgumentValues;
-use graph::execution_stats::ExecutionStats;
-use graph::graph::NodeId;
 use hashbrown::{HashMap, HashSet};
 use imaginarium::ImageDesc;
+use scenarium::execution_graph::ArgumentValues;
+use scenarium::execution_stats::ExecutionStats;
+use scenarium::graph::NodeId;
 
 #[derive(Clone)]
 pub struct CachedTexture {

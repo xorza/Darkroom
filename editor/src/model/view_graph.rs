@@ -1,8 +1,8 @@
 use anyhow::{Result, bail};
 use common::{SerdeFormat, is_debug, key_index_vec::KeyIndexVec};
-use graph::function::Func;
-use graph::graph::{Binding, Node};
-use graph::prelude::{FuncLib, Graph as CoreGraph, NodeId};
+use scenarium::function::Func;
+use scenarium::graph::{Binding, Node};
+use scenarium::prelude::{FuncLib, Graph as CoreGraph, NodeId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -245,7 +245,7 @@ impl From<CoreGraph> for ViewGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use graph::prelude::test_graph as core_test_graph;
+    use scenarium::prelude::test_graph as core_test_graph;
 
     #[test]
     fn graph_view_test() {

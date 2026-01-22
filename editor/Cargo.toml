@@ -5,9 +5,9 @@ edition.workspace = true
 
 [dependencies]
 common = { workspace = true }
-graph = { workspace = true }
+scenarium = { workspace = true }
 imaginarium = { workspace = true }
-vision = { workspace = true }
+palantir = { workspace = true }
 
 wgpu = { workspace = true }
 egui = { workspace = true }

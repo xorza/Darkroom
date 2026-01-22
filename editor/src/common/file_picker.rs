@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use egui::{Align2, Color32, Pos2, Response, Sense, Stroke, StrokeKind, pos2, vec2};
-use graph::data::{FsPathConfig, FsPathMode};
+use scenarium::data::{FsPathConfig, FsPathMode};
 
 use crate::common::button::Button;
 use crate::gui::Gui;

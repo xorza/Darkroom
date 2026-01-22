@@ -1,5 +1,5 @@
 use crate::model::ViewGraph;
-use graph::prelude::{ExecutionStats, FuncLib};
+use scenarium::prelude::{ExecutionStats, FuncLib};
 
 #[derive(Debug)]
 pub struct GraphContext<'a> {

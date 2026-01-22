@@ -1,8 +1,8 @@
 use std::str::FromStr;
 use std::sync::LazyLock;
 
-use graph::data::{DataType, EnumVariants};
 use imaginarium::ColorFormat;
+use scenarium::data::{DataType, EnumVariants};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 

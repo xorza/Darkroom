@@ -1,10 +1,10 @@
 [workspace]
 members = [
     "common",
-    "graph",
+    "scenarium",
     "editor",
     "imaginarium",
-    "vision"
+    "palantir"
 ]
 
 resolver = "2"
@@ -16,10 +16,10 @@ edition = "2024"
 
 [workspace.dependencies]
 common = { path = "common" }
-graph = { path = "graph" }
+scenarium = { path = "scenarium" }
 editor = { path = "editor" }
 imaginarium = { path = "imaginarium" }
-vision = { path = "vision" }
+palantir = { path = "palantir" }
 
 # wgpu version should be in sync with egui
 wgpu = { version = "27.0", features = ["metal", "vulkan", "dx12"] }

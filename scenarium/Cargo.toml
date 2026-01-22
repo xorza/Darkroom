@@ -1,5 +1,5 @@
 [package]
-name = "graph"
+name = "scenarium"
 version.workspace = true
 edition.workspace = true
 description = "A graph library for Scenarium"
