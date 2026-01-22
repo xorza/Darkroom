@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use egui::{Color32, CornerRadius, InnerResponse, Margin, Sense, Stroke};
+use egui::{Color32, CornerRadius, InnerResponse, Margin, Response, Sense, Stroke, UiBuilder};
 
 use crate::gui::{
     Gui,
@@ -68,19 +68,23 @@ impl Frame {
         add_contents: impl FnOnce(&mut Gui<'_>) -> R,
     ) -> InnerResponse<R> {
         let style = gui.style.clone();
-        let sense = self.sense;
 
-        let mut result = self.inner.show(gui.ui(), |ui| {
-            let mut gui = Gui::new(ui, &style);
-            add_contents(&mut gui)
-        });
+        // Use show_dyn with UiBuilder to register sense BELOW content widgets
+        let mut response = self.inner.show_dyn(
+            gui.ui(),
+            Box::new(|ui| {
+                // Create child UI with sense - this registers interaction below widgets
+                ui.scope_builder(
+                    UiBuilder::new().sense(self.sense.unwrap_or(Sense::empty())),
+                    |ui| {
+                        let mut gui = Gui::new(ui, &style);
+                        add_contents(&mut gui)
+                    },
+                )
+            }),
+        );
 
-        // if let Some(sense) = sense {
-        //     result.response |= gui
-        //         .ui()
-        //         .interact(result.response.rect, result.response.id, sense);
-        // }
-
-        result
+        response.inner.response |= response.response;
+        response.inner
     }
 }
