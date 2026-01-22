@@ -11,7 +11,7 @@ Repo layout:
 
 - `common/` — shared utilities used across the workspace.
 - `scenarium/` — the core graph library and execution logic.
-- `editor/` — the visual editor application.
+- `prism/` — the visual editor application.
 - `NOTES-AI.md` — current implementation notes and recent changes (kept up to date).
 
 ## Prerequisites
@@ -54,7 +54,7 @@ These are important for consistency and avoiding subtle bugs:
 Suggested quick tour:
 
 - `scenarium/` for graph data structures and execution logic.
-- `editor/` for UI and editor behavior.
+- `prism/` for UI and editor behavior.
 - `common/` for shared helpers and utility types.
 
 ## First Tasks
@@ -62,4 +62,4 @@ Suggested quick tour:
 1. Create a sample graph in code, similar to `scenarium::graph::test_graph()`.
 2. Execute computation for that graph using `execution_graph` (see the `execution_graph` tests).
 3. Add a GUI panel that shows details for the currently selected node, including an editable node name.
-   See `editor::main_ui` and `editor::app_data`.
+   See `prism::main_ui` and `prism::app_data`.

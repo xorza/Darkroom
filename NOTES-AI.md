@@ -18,7 +18,7 @@ scenarium/
 ├── common/          # Shared utilities and helper macros
 ├── scenarium/       # Core graph library with execution engine
 ├── imaginarium/     # GPU/CPU image processing library
-├── editor/          # Visual egui-based graph editor
+├── prism/           # Visual egui-based graph editor
 ├── palantir/        # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
 ├── test_output/     # Output folder created by unit tests

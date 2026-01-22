@@ -1,5 +1,5 @@
 [package]
-name = "scenarium-editor"
+name = "prism"
 version.workspace = true
 edition.workspace = true
 

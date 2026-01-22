@@ -2,7 +2,7 @@
 members = [
     "common",
     "scenarium",
-    "editor",
+    "prism",
     "imaginarium",
     "palantir"
 ]
@@ -17,7 +17,7 @@ edition = "2024"
 [workspace.dependencies]
 common = { path = "common" }
 scenarium = { path = "scenarium" }
-editor = { path = "editor" }
+prism = { path = "prism" }
 imaginarium = { path = "imaginarium" }
 palantir = { path = "palantir" }
 

@@ -2789,6 +2789,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
 
 [[package]]
+name = "prism"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arc-swap",
+ "bumpalo",
+ "common",
+ "dotenv",
+ "eframe",
+ "egui",
+ "hashbrown 0.15.5",
+ "imaginarium",
+ "lz4_flex",
+ "palantir",
+ "pollster",
+ "rayon",
+ "rfd",
+ "scenarium",
+ "serde",
+ "serde_json",
+ "serde_yml",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-appender",
+ "tracing-rolling-file",
+ "tracing-subscriber",
+ "uuid",
+ "wgpu",
+]
+
+[[package]]
 name = "proc-macro-crate"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3173,38 +3205,6 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
-]
-
-[[package]]
-name = "scenarium-editor"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arc-swap",
- "bumpalo",
- "common",
- "dotenv",
- "eframe",
- "egui",
- "hashbrown 0.16.1",
- "imaginarium",
- "lz4_flex",
- "palantir",
- "pollster",
- "rayon",
- "rfd",
- "scenarium",
- "serde",
- "serde_json",
- "serde_yml",
- "tokio",
- "toml",
- "tracing",
- "tracing-appender",
- "tracing-rolling-file",
- "tracing-subscriber",
- "uuid",
- "wgpu",
 ]
 
 [[package]]
