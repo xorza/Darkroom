@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
         renderer: eframe::Renderer::Wgpu,
         viewport: egui::ViewportBuilder::default()
             .with_icon(app_icon)
-            .with_app_id("prism-editor"),
+            .with_app_id("prism"),
         persist_window: true,
         ..Default::default()
     };
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 }
 
 fn load_window_icon() -> Arc<egui::IconData> {
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/prism.png"))
         .expect("window icon PNG should be a valid RGBA image");
     Arc::new(icon)
 }
