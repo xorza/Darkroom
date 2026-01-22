@@ -18,12 +18,12 @@ use crate::common::UiEquals;
 
 use crate::common::button::Button;
 
-use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::{ConnectionDragUpdate, ConnectionUi};
 use crate::gui::connection_ui::{ConnectionKey, PortKind};
 use crate::gui::graph_background::GraphBackgroundRenderer;
 use crate::gui::graph_layout::{GraphLayout, PortRef};
 use crate::gui::graph_ui_interaction::{GraphUiInteraction, RunCommand};
+use crate::gui::interaction_state::{GraphInteractionState, InteractionMode};
 use crate::gui::new_node_ui::{NewNodeSelection, NewNodeUi};
 use crate::gui::node_details_ui::NodeDetailsUi;
 use crate::gui::node_ui::{NodeUi, PortInteractCommand};
@@ -41,15 +41,6 @@ const WHEEL_ZOOM_SPEED: f32 = 0.08;
 // ============================================================================
 // Types
 // ============================================================================
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum InteractionState {
-    #[default]
-    Idle,
-    BreakingConnections,
-    DraggingNewConnection,
-    PanningGraph,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PointerButtonState {
@@ -87,8 +78,8 @@ impl std::fmt::Display for Error {
 
 #[derive(Debug, Default)]
 pub struct GraphUi {
-    state: InteractionState,
-    connection_breaker: ConnectionBreaker,
+    /// Centralized interaction state management.
+    interaction: GraphInteractionState,
     connections: ConnectionUi,
     graph_layout: GraphLayout,
     node_ui: NodeUi,
@@ -104,7 +95,8 @@ impl GraphUi {
 
     pub fn render(&mut self, gui: &mut Gui<'_>, app_data: &mut AppData, arena: &Bump) {
         if self.should_cancel_interaction(gui) {
-            self.reset_to(InteractionState::Idle);
+            self.interaction.reset_to_idle();
+            self.connections.stop_drag();
         }
 
         let rect = self.draw_background_frame(gui);
@@ -142,14 +134,12 @@ impl GraphUi {
                 &mut app_data.interaction,
             );
 
-            let breaker = (self.state == InteractionState::BreakingConnections)
-                .then_some(&self.connection_breaker);
             let port_interact_cmd = self.node_ui.render_nodes(
                 gui,
                 &mut ctx,
                 &mut self.graph_layout,
                 &mut app_data.interaction,
-                breaker,
+                self.interaction.breaker(),
             );
 
             if let Some(pointer_pos) = pointer_pos {
@@ -251,14 +241,15 @@ impl GraphUi {
     fn handle_background_click(
         &mut self,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
+        ui_interaction: &mut GraphUiInteraction,
     ) {
-        self.reset_to(InteractionState::Idle);
+        self.interaction.reset_to_idle();
+        self.connections.stop_drag();
 
         if ctx.view_graph.selected_node_id.is_some() {
             let before = ctx.view_graph.selected_node_id;
             ctx.view_graph.selected_node_id = None;
-            interaction.add_action(GraphUiAction::NodeSelected {
+            ui_interaction.add_action(GraphUiAction::NodeSelected {
                 before,
                 after: None,
             });
@@ -287,9 +278,9 @@ impl GraphUi {
             Some(PointerButtonState::Pressed | PointerButtonState::Down)
         );
 
-        match self.state {
-            InteractionState::PanningGraph => {}
-            InteractionState::Idle => {
+        match self.interaction.mode() {
+            InteractionMode::PanningGraph => {}
+            InteractionMode::Idle => {
                 self.handle_idle_state(
                     pointer_pos,
                     primary_down,
@@ -297,10 +288,10 @@ impl GraphUi {
                     port_interact_cmd,
                 );
             }
-            InteractionState::BreakingConnections => {
+            InteractionMode::BreakingConnections => {
                 self.handle_breaking_connections(ctx, interaction, pointer_pos, primary_down);
             }
-            InteractionState::DraggingNewConnection => {
+            InteractionMode::DraggingNewConnection => {
                 self.handle_dragging_connection(ctx, interaction, pointer_pos, port_interact_cmd);
             }
         }
@@ -318,29 +309,29 @@ impl GraphUi {
         }
 
         if let PortInteractCommand::DragStart(_) = port_interact_cmd {
-            self.reset_to(InteractionState::DraggingNewConnection);
+            self.interaction.start_dragging_connection();
             self.connections.update_drag(pointer_pos, port_interact_cmd);
         } else if pointer_on_background {
-            self.reset_to(InteractionState::BreakingConnections);
-            self.connection_breaker.start(pointer_pos);
+            self.interaction.start_breaking(pointer_pos);
         }
     }
 
     fn handle_breaking_connections(
         &mut self,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
+        ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         primary_down: bool,
     ) {
         if primary_down {
-            self.connection_breaker.add_point(pointer_pos);
+            self.interaction.add_breaker_point(pointer_pos);
             return;
         }
 
-        self.reset_to(InteractionState::Idle);
-        self.apply_broken_connections(ctx, interaction);
-        self.remove_nodes_hit_by_breaker(ctx, interaction);
+        self.apply_broken_connections(ctx, ui_interaction);
+        self.remove_nodes_hit_by_breaker(ctx, ui_interaction);
+        self.interaction.reset_to_idle();
+        self.connections.stop_drag();
     }
 
     fn apply_broken_connections(
@@ -419,14 +410,15 @@ impl GraphUi {
     fn handle_dragging_connection(
         &mut self,
         ctx: &mut GraphContext<'_>,
-        interaction: &mut GraphUiInteraction,
+        ui_interaction: &mut GraphUiInteraction,
         pointer_pos: Pos2,
         port_interact_cmd: PortInteractCommand,
     ) {
         match self.connections.update_drag(pointer_pos, port_interact_cmd) {
             ConnectionDragUpdate::InProgress => {}
             ConnectionDragUpdate::Finished => {
-                self.reset_to(InteractionState::Idle);
+                self.interaction.reset_to_idle();
+                self.connections.stop_drag();
             }
             ConnectionDragUpdate::FinishedWithEmptyOutput { input_port } => {
                 assert_eq!(input_port.kind, PortKind::Input);
@@ -440,8 +432,9 @@ impl GraphUi {
                 input_port,
                 output_port,
             } => {
-                self.apply_connection(ctx, interaction, input_port, output_port);
-                self.reset_to(InteractionState::Idle);
+                self.apply_connection(ctx, ui_interaction, input_port, output_port);
+                self.interaction.reset_to_idle();
+                self.connections.stop_drag();
             }
         }
     }
@@ -482,22 +475,19 @@ impl GraphUi {
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext<'_>,
         execution_stats: Option<&ExecutionStats>,
-        interaction: &mut GraphUiInteraction,
+        ui_interaction: &mut GraphUiInteraction,
     ) {
-        let breaker = (self.state == InteractionState::BreakingConnections)
-            .then_some(&self.connection_breaker);
-
         self.connections.render(
             gui,
             ctx,
             &self.graph_layout,
             execution_stats,
-            interaction,
-            breaker,
+            ui_interaction,
+            self.interaction.breaker(),
         );
 
-        if self.state == InteractionState::BreakingConnections {
-            self.connection_breaker.show(gui);
+        if self.interaction.is_breaking_connections() {
+            self.interaction.breaker_mut().show(gui);
         }
     }
 
@@ -618,7 +608,8 @@ impl GraphUi {
         if let Some(selection) = self.new_node_ui.show(gui, ctx.func_lib, arena) {
             self.handle_new_node_selection(gui, ctx, interaction, selection);
         } else if was_open && !self.new_node_ui.is_open() {
-            self.reset_to(InteractionState::Idle);
+            self.interaction.reset_to_idle();
+            self.connections.stop_drag();
         }
     }
 
@@ -645,7 +636,8 @@ impl GraphUi {
             }
             NewNodeSelection::ConstBind => {
                 self.create_const_binding(ctx, interaction);
-                self.reset_to(InteractionState::Idle);
+                self.interaction.reset_to_idle();
+                self.connections.stop_drag();
             }
         }
     }
@@ -740,15 +732,16 @@ impl GraphUi {
     }
 
     fn handle_pan_state(&mut self, ctx: &mut GraphContext<'_>, background_response: &Response) {
-        match self.state {
-            InteractionState::Idle => {
+        match self.interaction.mode() {
+            InteractionMode::Idle => {
                 if background_response.drag_started_by(PointerButton::Middle) {
-                    self.reset_to(InteractionState::PanningGraph);
+                    self.interaction.start_panning();
                 }
             }
-            InteractionState::PanningGraph => {
+            InteractionMode::PanningGraph => {
                 if background_response.drag_stopped_by(PointerButton::Middle) {
-                    self.reset_to(InteractionState::Idle);
+                    self.interaction.reset_to_idle();
+                    self.connections.stop_drag();
                 }
                 if background_response.dragged_by(PointerButton::Middle) {
                     ctx.view_graph.pan += background_response.drag_delta();
@@ -756,17 +749,6 @@ impl GraphUi {
             }
             _ => {}
         }
-    }
-
-    // ------------------------------------------------------------------------
-    // State management
-    // ------------------------------------------------------------------------
-
-    fn reset_to(&mut self, new_state: InteractionState) {
-        tracing::info!("Resetting graph UI to state {:?}", new_state);
-        self.connections.stop_drag();
-        self.connection_breaker.reset();
-        self.state = new_state;
     }
 }
 

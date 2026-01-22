@@ -347,6 +347,15 @@ The `id_type!` macro generates strongly-typed UUID wrappers:
 - Used by `node_ui.rs` for node position dragging with undo support
 - Type-safe with Clone + Default + Send + Sync bounds
 
+### Graph Interaction State
+
+`GraphInteractionState` in `gui/interaction_state.rs` centralizes UI interaction mode tracking:
+- `InteractionMode` enum: `Idle`, `BreakingConnections`, `DraggingNewConnection`, `PanningGraph`
+- Encapsulates `ConnectionBreaker` state within the interaction state
+- Clean API: `start_breaking()`, `start_dragging_connection()`, `start_panning()`, `reset_to_idle()`
+- `breaker()` returns `Option<&ConnectionBreaker>` only when in breaking mode
+- Used by `graph_ui.rs` to separate interaction logic from rendering
+
 ## Undo System
 
 Two implementations available:

@@ -12,6 +12,7 @@ pub mod graph_ctx;
 pub mod graph_layout;
 pub mod graph_ui;
 pub mod graph_ui_interaction;
+pub mod interaction_state;
 pub mod log_ui;
 pub mod new_node_ui;
 pub mod node_details_ui;
