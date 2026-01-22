@@ -48,6 +48,11 @@ impl ArgumentValuesCache {
         self.pending_requests.insert(node_id)
     }
 
+    /// Removes a node from pending requests without inserting a value.
+    pub fn clear_pending(&mut self, node_id: NodeId) {
+        self.pending_requests.remove(&node_id);
+    }
+
     pub fn clear(&mut self) {
         self.values.clear();
         self.pending_requests.clear();
@@ -57,15 +62,18 @@ impl ArgumentValuesCache {
         // Remove cached values for executed nodes (their values may have changed)
         for executed in &execution_stats.executed_nodes {
             self.values.remove(&executed.node_id);
+            self.pending_requests.remove(&executed.node_id);
         }
 
         for error in &execution_stats.node_errors {
             self.values.remove(&error.node_id);
+            self.pending_requests.remove(&error.node_id);
         }
 
         // Remove cached values for nodes with missing inputs
         for port_address in &execution_stats.missing_inputs {
             self.values.remove(&port_address.target_id);
+            self.pending_requests.remove(&port_address.target_id);
         }
     }
 }

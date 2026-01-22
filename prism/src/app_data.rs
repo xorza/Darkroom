@@ -179,8 +179,12 @@ impl AppData {
         }
 
         // Process argument values response
-        if let Some((node_id, Some(values))) = self.argument_values_rx.take() {
-            self.argument_values_cache.insert(node_id, values.into());
+        if let Some((node_id, values)) = self.argument_values_rx.take() {
+            if let Some(values) = values {
+                self.argument_values_cache.insert(node_id, values.into());
+            } else {
+                self.argument_values_cache.clear_pending(node_id);
+            }
         }
     }
 
