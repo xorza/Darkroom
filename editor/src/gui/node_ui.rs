@@ -1,27 +1,26 @@
-use std::any;
-
 use crate::common::button::Button;
-
 use crate::common::primitives::draw_circle_with_gradient_shadow;
+use crate::gui::Gui;
 use crate::gui::connection_breaker::ConnectionBreaker;
 use crate::gui::connection_ui::PortKind;
+use crate::gui::const_bind_ui::ConstBindUi;
+use crate::gui::graph_ctx::GraphContext;
 use crate::gui::graph_layout::{GraphLayout, PortInfo, PortRef};
+use crate::gui::graph_ui_interaction::GraphUiInteraction;
 use crate::gui::node_layout::NodeLayout;
-use crate::model::ViewNode;
 use crate::model::graph_ui_action::GraphUiAction;
 use common::BoolExt;
-use eframe::egui;
 use egui::epaint::CornerRadiusF32;
 use egui::{
-    Align2, Color32, CornerRadius, PointerButton, Pos2, Rect, Sense, Shadow, Shape, Stroke,
-    StrokeKind, Vec2, pos2, vec2,
+    Align2, Color32, PointerButton, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2, pos2, vec2,
 };
 use graph::execution_stats::{ExecutedNodeStats, NodeError};
 use graph::graph::{Node, NodeId};
 use graph::prelude::{ExecutionStats, Func, FuncBehavior, NodeBehavior};
 
-use crate::gui::const_bind_ui::ConstBindUi;
-use crate::gui::{Gui, graph_ctx::GraphContext, graph_ui_interaction::GraphUiInteraction};
+// ============================================================================
+// Types
+// ============================================================================
 
 #[derive(Debug, Clone)]
 pub enum PortInteractCommand {
@@ -32,11 +31,24 @@ pub enum PortInteractCommand {
     Click(PortInfo),
 }
 
-#[derive(Debug, Default)]
-pub(crate) struct NodeUi {
-    node_ids_to_remove: Vec<NodeId>,
-    pub(crate) node_ids_hit_breaker: Vec<NodeId>,
-    pub(crate) const_bind_ui: ConstBindUi,
+impl PortInteractCommand {
+    fn priority(&self) -> u8 {
+        match self {
+            Self::None => 0,
+            Self::Hover(_) => 5,
+            Self::DragStart(_) => 8,
+            Self::DragStop => 10,
+            Self::Click(_) => 15,
+        }
+    }
+
+    fn prefer(self, other: Self) -> Self {
+        if other.priority() > self.priority() {
+            other
+        } else {
+            self
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -48,211 +60,243 @@ enum NodeExecutionInfo<'a> {
     None,
 }
 
+impl<'a> NodeExecutionInfo<'a> {
+    fn from_stats(stats: Option<&'a ExecutionStats>, node_id: NodeId) -> Self {
+        let Some(stats) = stats else {
+            return Self::None;
+        };
+
+        if let Some(err) = stats.node_errors.iter().find(|e| e.node_id == node_id) {
+            return Self::Errored(err);
+        }
+
+        if stats.missing_inputs.iter().any(|p| p.target_id == node_id) {
+            return Self::MissingInputs;
+        }
+
+        if let Some(executed) = stats.executed_nodes.iter().find(|s| s.node_id == node_id) {
+            return Self::Executed(executed);
+        }
+
+        if stats.cached_nodes.contains(&node_id) {
+            return Self::Cached;
+        }
+
+        Self::None
+    }
+
+    fn shadow<'b>(&self, gui: &'b Gui<'_>) -> Option<&'b egui::Shadow> {
+        match self {
+            Self::Errored(_) => Some(&gui.style.node.errored_shadow),
+            Self::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
+            Self::Executed(_) => Some(&gui.style.node.executed_shadow),
+            Self::Cached => Some(&gui.style.node.cached_shadow),
+            Self::None => None,
+        }
+    }
+}
+
+// ============================================================================
+// NodeUi
+// ============================================================================
+
+#[derive(Debug, Default)]
+pub(crate) struct NodeUi {
+    node_ids_to_remove: Vec<NodeId>,
+    pub(crate) node_ids_hit_breaker: Vec<NodeId>,
+    pub(crate) const_bind_ui: ConstBindUi,
+}
+
 impl NodeUi {
     pub fn render_nodes(
         &mut self,
         gui: &mut Gui<'_>,
         ctx: &mut GraphContext,
         graph_layout: &mut GraphLayout,
-        ui_interaction: &mut GraphUiInteraction,
+        interaction: &mut GraphUiInteraction,
         breaker: Option<&ConnectionBreaker>,
     ) -> PortInteractCommand {
         self.node_ids_to_remove.clear();
         self.node_ids_hit_breaker.clear();
 
-        let mut drag_port_info: PortInteractCommand = PortInteractCommand::None;
+        let mut port_cmd = PortInteractCommand::None;
         let mut const_bind_frame = self.const_bind_ui.start();
 
-        let view_node_count = ctx.view_graph.view_nodes.len();
-        for view_node_idx in 0..view_node_count {
+        for view_node_idx in 0..ctx.view_graph.view_nodes.len() {
             let node_id = ctx.view_graph.view_nodes[view_node_idx].id;
-
-            let node_layout = body_drag(gui, ctx, graph_layout, ui_interaction, &node_id);
+            let layout = handle_node_drag(gui, ctx, graph_layout, interaction, &node_id);
 
             let node = ctx.view_graph.graph.by_id_mut(&node_id).unwrap();
             let func = ctx.func_lib.by_id(&node.func_id).unwrap();
 
-            const_bind_frame.render(gui, ui_interaction, node_layout, node, func, breaker);
+            const_bind_frame.render(gui, interaction, layout, node, func, breaker);
 
-            if !gui.ui().is_rect_visible(node_layout.body_rect) {
+            if !gui.ui().is_rect_visible(layout.body_rect) {
                 continue;
             }
 
-            let is_selected = ctx
-                .view_graph
-                .selected_node_id
-                .is_some_and(|id| id == node_id);
+            let is_selected = ctx.view_graph.selected_node_id == Some(node_id);
+            let exec_info = NodeExecutionInfo::from_stats(ctx.execution_stats, node_id);
 
-            let node_execution_info = node_execution_info(ctx.execution_stats, node_id);
-            if render_body(gui, node_layout, is_selected, &node_execution_info, breaker) {
+            if render_body(gui, layout, is_selected, &exec_info, breaker) {
                 self.node_ids_hit_breaker.push(node_id);
             }
-            if render_remove_btn(gui, node_layout) {
+
+            if render_remove_btn(gui, layout) {
                 self.node_ids_to_remove.push(node_id);
             }
-            render_hints(
-                gui,
-                node_layout,
-                node_id,
-                func.terminal,
-                node.behavior,
-                func,
-            );
-            render_cache_btn(gui, ui_interaction, node_layout, node);
 
-            let missing_input_ports: Vec<usize> = ctx
-                .execution_stats
-                .map(|stats| {
-                    stats
-                        .missing_inputs
-                        .iter()
-                        .filter(|p| p.target_id == node_id)
-                        .map(|p| p.port_idx)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let node_drag_port_result =
-                render_ports(gui, node_layout, node, func, &missing_input_ports);
-            drag_port_info = drag_port_info.prefer(node_drag_port_result);
+            render_status_hints(gui, layout, node_id, node.behavior, func);
+            render_cache_btn(gui, interaction, layout, node);
 
-            render_port_labels(gui, node_layout);
+            let missing_inputs = get_missing_input_ports(ctx.execution_stats, node_id);
+            let node_port_cmd = render_ports(gui, layout, node, func, &missing_inputs);
+            port_cmd = port_cmd.prefer(node_port_cmd);
+
+            render_port_labels(gui, layout);
         }
 
-        while let Some(node_id) = self.node_ids_to_remove.pop() {
+        // Process node removals (const_bind_frame is dropped here)
+        drop(const_bind_frame);
+        for node_id in self.node_ids_to_remove.drain(..) {
             let action = ctx.view_graph.removal_action(&node_id);
             ctx.view_graph.remove_node(&node_id);
-            ui_interaction.add_action(action);
+            interaction.add_action(action);
         }
 
-        drag_port_info
+        port_cmd
     }
 }
 
-fn body_drag<'a>(
+// ============================================================================
+// Node dragging
+// ============================================================================
+
+fn handle_node_drag<'a>(
     gui: &mut Gui<'_>,
     ctx: &mut GraphContext<'_>,
     graph_layout: &'a mut GraphLayout,
-    ui_interaction: &mut GraphUiInteraction,
+    interaction: &mut GraphUiInteraction,
     node_id: &NodeId,
 ) -> &'a NodeLayout {
-    let node_layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
+    let layout = graph_layout.node_layouts.by_key_mut(node_id).unwrap();
 
-    let node_body_id = gui.ui().make_persistent_id(("node_body", node_id));
-    let body_response = gui.ui().interact(
-        node_layout.body_rect,
-        node_body_id,
+    let body_id = gui.ui().make_persistent_id(("node_body", node_id));
+    let response = gui.ui().interact(
+        layout.body_rect,
+        body_id,
         Sense::click() | Sense::hover() | Sense::drag(),
     );
 
-    let dragged = body_response.dragged_by(PointerButton::Middle)
-        || body_response.dragged_by(PointerButton::Primary);
+    let dragged =
+        response.dragged_by(PointerButton::Middle) || response.dragged_by(PointerButton::Primary);
 
+    // Store drag start position
     let drag_start_id = gui.ui().make_persistent_id(("node_drag_start", node_id));
-    if body_response.drag_started() {
-        let start_pos = ctx
-            .view_graph
-            .view_nodes
-            .by_key(node_id)
-            .expect("node view must exist to start drag")
-            .pos;
+    if response.drag_started() {
+        let start_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
         gui.ui()
             .data_mut(|data| data.insert_temp(drag_start_id, start_pos));
     }
 
-    if (dragged || body_response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
+    // Handle selection
+    if (dragged || response.clicked()) && ctx.view_graph.selected_node_id != Some(*node_id) {
         let before = ctx.view_graph.selected_node_id;
-        ui_interaction.add_action(GraphUiAction::NodeSelected {
+        ctx.view_graph.selected_node_id = Some(*node_id);
+        interaction.add_action(GraphUiAction::NodeSelected {
             before,
             after: Some(*node_id),
         });
-
-        ctx.view_graph.selected_node_id = Some(*node_id);
     }
+
+    // Handle drag movement
     if dragged {
         ctx.view_graph.view_nodes.by_key_mut(node_id).unwrap().pos +=
-            body_response.drag_delta() / gui.scale();
-
-        node_layout.update(ctx, gui, graph_layout.origin);
+            response.drag_delta() / gui.scale();
+        layout.update(ctx, gui, graph_layout.origin);
     }
 
-    if body_response.drag_stopped() {
+    // Record drag end for undo
+    if response.drag_stopped() {
         let start_pos = gui
             .ui()
             .data_mut(|data| data.remove_temp::<Pos2>(drag_start_id))
-            .expect("node drag must have a start position");
-        let end_pos = ctx
-            .view_graph
-            .view_nodes
-            .by_key(node_id)
-            .expect("node view must exist after drag")
-            .pos;
-        ui_interaction.add_action(GraphUiAction::NodeMoved {
+            .expect("drag start position must exist");
+        let end_pos = ctx.view_graph.view_nodes.by_key(node_id).unwrap().pos;
+
+        interaction.add_action(GraphUiAction::NodeMoved {
             node_id: *node_id,
             before: start_pos,
             after: end_pos,
         });
     }
 
-    node_layout
+    layout
 }
+
+// ============================================================================
+// Body rendering
+// ============================================================================
 
 fn render_body(
     gui: &Gui<'_>,
-    node_layout: &NodeLayout,
+    layout: &NodeLayout,
     selected: bool,
-    node_execution_info: &NodeExecutionInfo<'_>,
+    exec_info: &NodeExecutionInfo<'_>,
     breaker: Option<&ConnectionBreaker>,
 ) -> bool {
     let corner_radius = gui.style.corner_radius;
-    let breaker_hit = breaker.is_some_and(|breaker| breaker.intersects_rect(node_layout.body_rect));
+    let breaker_hit = breaker.is_some_and(|b| b.intersects_rect(layout.body_rect));
 
+    // Base shadow
     gui.painter().add(Shape::Rect(
         gui.style
             .node
             .shadow
-            .as_shape(node_layout.body_rect, corner_radius),
+            .as_shape(layout.body_rect, corner_radius),
     ));
 
-    let shadow = match *node_execution_info {
-        NodeExecutionInfo::Errored(_) => Some(&gui.style.node.errored_shadow),
-        NodeExecutionInfo::MissingInputs => Some(&gui.style.node.missing_inputs_shadow),
-        NodeExecutionInfo::Executed(_) => Some(&gui.style.node.executed_shadow),
-        NodeExecutionInfo::Cached => Some(&gui.style.node.cached_shadow),
-        NodeExecutionInfo::None => None,
-    };
-
-    if let Some(shadow) = shadow {
+    // Execution state shadow
+    if let Some(shadow) = exec_info.shadow(gui) {
         gui.painter().add(Shape::Rect(
-            shadow.as_shape(node_layout.body_rect, corner_radius),
+            shadow.as_shape(layout.body_rect, corner_radius),
         ));
     }
 
+    // Body rectangle
     gui.painter().rect(
-        node_layout.body_rect,
+        layout.body_rect,
         corner_radius,
         gui.style.noninteractive_bg_fill,
         gui.style.inactive_bg_stroke,
         StrokeKind::Middle,
     );
-    if let NodeExecutionInfo::Executed(executed) = *node_execution_info {
+
+    // Execution time label
+    if let NodeExecutionInfo::Executed(stats) = exec_info {
         let text_pos = pos2(
-            node_layout.body_rect.min.x,
-            node_layout.body_rect.max.y + gui.style.small_padding,
+            layout.body_rect.min.x,
+            layout.body_rect.max.y + gui.style.small_padding,
         );
-        let label = format!("{:.1} ms", executed.elapsed_secs * 1000.0);
         gui.painter().text(
             text_pos,
             Align2::LEFT_TOP,
-            label,
+            format!("{:.1} ms", stats.elapsed_secs * 1000.0),
             gui.style.sub_font.clone(),
             gui.style.noninteractive_text_color,
         );
     }
+
+    // Header highlight (selected or breaker hit)
     if selected || breaker_hit {
-        let mut header_rect = node_layout.body_rect;
-        header_rect.max.y = header_rect.min.y + node_layout.header_row_height;
-        let header_fill =
-            breaker_hit.then_else(gui.style.connections.broke_clr, gui.style.active_bg_fill);
+        let header_rect = Rect::from_min_max(
+            layout.body_rect.min,
+            pos2(
+                layout.body_rect.max.x,
+                layout.body_rect.min.y + layout.header_row_height,
+            ),
+        );
+        let fill = breaker_hit.then_else(gui.style.connections.broke_clr, gui.style.active_bg_fill);
 
         gui.painter().rect(
             header_rect,
@@ -262,162 +306,177 @@ fn render_body(
                 sw: 0.0,
                 se: 0.0,
             },
-            header_fill,
+            fill,
             Stroke::NONE,
             StrokeKind::Middle,
         );
     }
-    let title_pos = node_layout.body_rect.min
+
+    // Title
+    let title_pos = layout.body_rect.min
         + vec2(
             gui.style.padding,
-            (node_layout.header_row_height - node_layout.title_galley.size().y) * 0.5,
+            (layout.header_row_height - layout.title_galley.size().y) * 0.5,
         );
+    let title_color = breaker_hit.then_else(gui.style.dark_text_color, gui.style.text_color);
     gui.painter().galley_with_override_text_color(
         title_pos,
-        node_layout.title_galley.clone(),
-        breaker_hit.then_else(gui.style.dark_text_color, gui.style.text_color),
+        layout.title_galley.clone(),
+        title_color,
     );
 
     breaker_hit
 }
 
+// ============================================================================
+// UI controls
+// ============================================================================
+
 fn render_cache_btn(
     gui: &mut Gui<'_>,
-    ui_interaction: &mut GraphUiInteraction,
-    node_layout: &NodeLayout,
+    interaction: &mut GraphUiInteraction,
+    layout: &NodeLayout,
     node: &mut Node,
 ) {
-    let visible = node_layout.has_cache_btn;
-    if visible {
-        let mut checked = node.behavior == NodeBehavior::Once;
+    if !layout.has_cache_btn {
+        return;
+    }
 
-        let response = Button::default()
-            .toggle(&mut checked)
-            .text("cache")
-            .enabled(visible)
-            .rect(node_layout.cache_button_rect)
-            .show(gui);
+    let mut checked = node.behavior == NodeBehavior::Once;
+    let response = Button::default()
+        .toggle(&mut checked)
+        .text("cache")
+        .rect(layout.cache_button_rect)
+        .show(gui);
 
-        if response.clicked() {
-            let before = node.behavior;
-            node.behavior.toggle();
-            ui_interaction.add_action(GraphUiAction::CacheToggled {
-                node_id: node.id,
-                before,
-                after: node.behavior,
-            });
-        }
+    if response.clicked() {
+        let before = node.behavior;
+        node.behavior.toggle();
+        interaction.add_action(GraphUiAction::CacheToggled {
+            node_id: node.id,
+            before,
+            after: node.behavior,
+        });
     }
 }
 
-fn render_hints(
+fn render_remove_btn(gui: &mut Gui<'_>, layout: &NodeLayout) -> bool {
+    let rect = layout.remove_btn_rect;
+    let margin = rect.width() * 0.3;
+
+    // X shape corners
+    let tl = pos2(rect.min.x + margin, rect.min.y + margin);
+    let br = pos2(rect.max.x - margin, rect.max.y - margin);
+    let bl = pos2(rect.min.x + margin, rect.max.y - margin);
+    let tr = pos2(rect.max.x - margin, rect.min.y + margin);
+
+    let stroke = Stroke::new(1.4 * gui.scale(), gui.style.text_color);
+    let shapes = [
+        Shape::line_segment([tl, br], stroke),
+        Shape::line_segment([bl, tr], stroke),
+    ];
+
+    Button::default()
+        .tooltip("Remove node")
+        .rect(rect)
+        .shapes(shapes)
+        .show(gui)
+        .clicked()
+}
+
+fn render_status_hints(
     gui: &mut Gui<'_>,
-    node_layout: &NodeLayout,
+    layout: &NodeLayout,
     node_id: NodeId,
-    _is_terminal: bool,
-    node_behavior: NodeBehavior,
+    behavior: NodeBehavior,
     func: &Func,
 ) {
-    let dot_radius = gui.style.node.status_dot_radius;
-    let dot_step = (dot_radius * 2.0) + gui.style.small_padding;
-
-    if node_behavior == NodeBehavior::AsFunction
+    // Show impure indicator for non-cached impure functions with outputs
+    let show_impure = behavior == NodeBehavior::AsFunction
         && func.behavior == FuncBehavior::Impure
-        && !func.outputs.is_empty()
-    {
-        let center = node_layout.dot_center(0, dot_step);
-        gui.painter()
-            .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
-        let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
-        let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
-        let dot_response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
-        if dot_response.hovered() {
-            dot_response.show_tooltip_text("impure");
-        }
+        && !func.outputs.is_empty();
+
+    if !show_impure {
+        return;
+    }
+
+    let dot_radius = gui.style.node.status_dot_radius;
+    let dot_step = dot_radius * 2.0 + gui.style.small_padding;
+    let center = layout.dot_center(0, dot_step);
+
+    gui.painter()
+        .circle_filled(center, dot_radius, gui.style.node.status_impure_color);
+
+    // Tooltip on hover
+    let dot_rect = Rect::from_center_size(center, vec2(dot_radius * 2.0, dot_radius * 2.0));
+    let dot_id = gui.ui().make_persistent_id(("node_status_impure", node_id));
+    let response = gui.ui().interact(dot_rect, dot_id, Sense::hover());
+
+    if response.hovered() {
+        response.show_tooltip_text("impure");
     }
 }
 
-fn render_remove_btn(gui: &mut Gui<'_>, node_layout: &NodeLayout) -> bool {
-    let remove_rect = node_layout.remove_btn_rect;
-    let remove_margin = remove_rect.width() * 0.3;
-    let a = pos2(
-        remove_rect.min.x + remove_margin,
-        remove_rect.min.y + remove_margin,
-    );
-    let b = pos2(
-        remove_rect.max.x - remove_margin,
-        remove_rect.max.y - remove_margin,
-    );
-    let c = pos2(
-        remove_rect.min.x + remove_margin,
-        remove_rect.max.y - remove_margin,
-    );
-    let d = pos2(
-        remove_rect.max.x - remove_margin,
-        remove_rect.min.y + remove_margin,
-    );
-    let remove_color = gui.style.text_color;
-    let remove_stroke = Stroke::new(1.4 * gui.scale(), remove_color);
-    let remove_shapes = [
-        Shape::line_segment([a, b], remove_stroke),
-        Shape::line_segment([c, d], remove_stroke),
-    ];
-    let remove = Button::default()
-        .enabled(true)
-        .tooltip("Remove node")
-        .rect(remove_rect)
-        .shapes(remove_shapes)
-        .show(gui)
-        .clicked();
+// ============================================================================
+// Port rendering
+// ============================================================================
 
-    if remove {
-        return true;
-    }
-
-    false
+fn get_missing_input_ports(stats: Option<&ExecutionStats>, node_id: NodeId) -> Vec<usize> {
+    stats
+        .map(|s| {
+            s.missing_inputs
+                .iter()
+                .filter(|p| p.target_id == node_id)
+                .map(|p| p.port_idx)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn render_ports(
     gui: &mut Gui<'_>,
-    node_layout: &NodeLayout,
+    layout: &NodeLayout,
     node: &Node,
     func: &Func,
-    missing_input_ports: &[usize],
+    missing_inputs: &[usize],
 ) -> PortInteractCommand {
     let port_radius = gui.style.node.port_radius;
-    let port_rect_size = Vec2::ONE * 2.0 * node_layout.port_activation_radius;
+    let port_rect_size = Vec2::splat(layout.port_activation_radius * 2.0);
+    let missing_shadow_color = gui.style.node.missing_inputs_shadow.color;
+    let missing_shadow_spread = gui.style.node.missing_inputs_shadow.spread as f32;
 
     let input_base = gui.style.node.input_port_color;
     let input_hover = gui.style.node.input_hover_color;
     let output_base = gui.style.node.output_port_color;
     let output_hover = gui.style.node.output_hover_color;
-
     let trigger_base = gui.style.node.trigger_port_color;
     let trigger_hover = gui.style.node.trigger_hover_color;
     let event_base = gui.style.node.event_port_color;
     let event_hover = gui.style.node.event_hover_color;
 
-    let missing_shadow_color = gui.style.node.missing_inputs_shadow.color;
-    let missing_shadow_spread = gui.style.node.missing_inputs_shadow.spread as f32;
+    let mut result = PortInteractCommand::None;
 
-    let mut draw_port = |center: Pos2,
-                         kind: PortKind,
-                         idx: usize,
-                         base_color: Color32,
-                         hover_color: Color32,
-                         has_missing_shadow: bool|
+    // Helper closure for drawing a single port
+    let draw_port = |gui: &mut Gui<'_>,
+                     center: Pos2,
+                     kind: PortKind,
+                     idx: usize,
+                     base_color: Color32,
+                     hover_color: Color32,
+                     show_missing_shadow: bool|
      -> PortInteractCommand {
-        let port_rect = egui::Rect::from_center_size(center, port_rect_size);
-        let ui = gui.ui();
-        let port_id = ui.make_persistent_id(("node_port", kind, node.id, idx));
-        let response = ui.interact(
+        let port_rect = Rect::from_center_size(center, port_rect_size);
+        let port_id = gui
+            .ui()
+            .make_persistent_id(("node_port", kind, node.id, idx));
+        let response = gui.ui().interact(
             port_rect,
             port_id,
             Sense::drag() | Sense::hover() | Sense::click(),
         );
-        let is_hovered = ui.rect_contains_pointer(port_rect);
+        let hovered = gui.ui().rect_contains_pointer(port_rect);
 
-        if has_missing_shadow {
+        if show_missing_shadow {
             draw_circle_with_gradient_shadow(
                 gui.painter(),
                 center,
@@ -427,7 +486,7 @@ fn render_ports(
             );
         }
 
-        let color = is_hovered.then_else(hover_color, base_color);
+        let color = hovered.then_else(hover_color, base_color);
         gui.painter().circle_filled(center, port_radius, color);
 
         let port_info = PortInfo {
@@ -438,152 +497,99 @@ fn render_ports(
             },
             center,
         };
+
         if response.drag_started_by(PointerButton::Primary) {
             PortInteractCommand::DragStart(port_info)
         } else if response.drag_stopped_by(PointerButton::Primary) {
             PortInteractCommand::DragStop
         } else if !response.dragged() && response.clicked_by(PointerButton::Primary) {
             PortInteractCommand::Click(port_info)
-        } else if is_hovered {
+        } else if hovered {
             PortInteractCommand::Hover(port_info)
         } else {
             PortInteractCommand::None
         }
     };
 
-    let mut final_port_interact_cmd: PortInteractCommand = PortInteractCommand::None;
-
+    // Trigger port (for terminal nodes)
     if func.terminal {
-        let center = node_layout.trigger_center();
-        final_port_interact_cmd = draw_port(
-            center,
+        let cmd = draw_port(
+            gui,
+            layout.trigger_center(),
             PortKind::Trigger,
             0,
             trigger_base,
             trigger_hover,
             false,
-        )
-        .prefer(final_port_interact_cmd);
+        );
+        result = result.prefer(cmd);
     }
 
-    for input_idx in 0..node_layout.input_galleys.len() {
-        let center = node_layout.input_center(input_idx);
-        let is_missing = missing_input_ports.contains(&input_idx);
-        let port_interact_cmd = draw_port(
-            center,
+    // Input ports
+    for idx in 0..layout.input_galleys.len() {
+        let cmd = draw_port(
+            gui,
+            layout.input_center(idx),
             PortKind::Input,
-            input_idx,
+            idx,
             input_base,
             input_hover,
-            is_missing,
+            missing_inputs.contains(&idx),
         );
-        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
+        result = result.prefer(cmd);
     }
 
-    for output_idx in 0..node_layout.output_galleys.len() {
-        let center = node_layout.output_center(output_idx);
-        let port_interact_cmd = draw_port(
-            center,
+    // Output ports
+    for idx in 0..layout.output_galleys.len() {
+        let cmd = draw_port(
+            gui,
+            layout.output_center(idx),
             PortKind::Output,
-            output_idx,
+            idx,
             output_base,
             output_hover,
             false,
         );
-        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
+        result = result.prefer(cmd);
     }
 
-    for event_idx in 0..node_layout.event_galleys.len() {
-        let center = node_layout.event_center(event_idx);
-        let port_interact_cmd = draw_port(
-            center,
+    // Event ports
+    for idx in 0..layout.event_galleys.len() {
+        let cmd = draw_port(
+            gui,
+            layout.event_center(idx),
             PortKind::Event,
-            event_idx,
+            idx,
             event_base,
             event_hover,
             false,
         );
-        final_port_interact_cmd = final_port_interact_cmd.prefer(port_interact_cmd);
+        result = result.prefer(cmd);
     }
 
-    final_port_interact_cmd
+    result
 }
 
-fn render_port_labels(gui: &Gui<'_>, node_layout: &NodeLayout) {
+fn render_port_labels(gui: &Gui<'_>, layout: &NodeLayout) {
     let padding = gui.style.node.port_label_side_padding;
 
-    for (input_idx, galley) in node_layout.input_galleys.iter().enumerate() {
-        let text_pos = node_layout.input_center(input_idx) + vec2(padding, -galley.size().y * 0.5);
+    for (idx, galley) in layout.input_galleys.iter().enumerate() {
+        let pos = layout.input_center(idx) + vec2(padding, -galley.size().y * 0.5);
         gui.painter()
-            .galley(text_pos, galley.clone(), gui.style.text_color);
+            .galley(pos, galley.clone(), gui.style.text_color);
     }
 
-    for (output_idx, galley) in node_layout.output_galleys.iter().enumerate() {
-        let text_pos = node_layout.output_center(output_idx)
-            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
+    for (idx, galley) in layout.output_galleys.iter().enumerate() {
+        let pos =
+            layout.output_center(idx) + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
         gui.painter()
-            .galley(text_pos, galley.clone(), gui.style.text_color);
+            .galley(pos, galley.clone(), gui.style.text_color);
     }
 
-    for (event_idx, galley) in node_layout.event_galleys.iter().enumerate() {
-        let text_pos = node_layout.event_center(event_idx)
-            + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
+    for (idx, galley) in layout.event_galleys.iter().enumerate() {
+        let pos =
+            layout.event_center(idx) + vec2(-padding - galley.size().x, -galley.size().y * 0.5);
         gui.painter()
-            .galley(text_pos, galley.clone(), gui.style.text_color);
-    }
-}
-
-fn node_execution_info<'a>(
-    execution_stats: Option<&'a ExecutionStats>,
-    node_id: NodeId,
-) -> NodeExecutionInfo<'a> {
-    let Some(execution_stats) = execution_stats else {
-        return NodeExecutionInfo::None;
-    };
-
-    if let Some(node_error) = execution_stats
-        .node_errors
-        .iter()
-        .find(|err| err.node_id == node_id)
-    {
-        return NodeExecutionInfo::Errored(node_error);
-    }
-
-    if execution_stats
-        .missing_inputs
-        .iter()
-        .any(|port_address| port_address.target_id == node_id)
-    {
-        return NodeExecutionInfo::MissingInputs;
-    }
-
-    if let Some(executed) = execution_stats
-        .executed_nodes
-        .iter()
-        .find(|stats| stats.node_id == node_id)
-    {
-        return NodeExecutionInfo::Executed(executed);
-    }
-
-    if execution_stats.cached_nodes.contains(&node_id) {
-        return NodeExecutionInfo::Cached;
-    }
-
-    NodeExecutionInfo::None
-}
-
-impl PortInteractCommand {
-    fn prio(&self) -> u8 {
-        match self {
-            PortInteractCommand::None => 0,
-            PortInteractCommand::Hover(_) => 5,
-            PortInteractCommand::DragStart(_) => 8,
-            PortInteractCommand::DragStop => 10,
-            PortInteractCommand::Click(_) => 15,
-        }
-    }
-
-    fn prefer(self, other: Self) -> Self {
-        (other.prio() > self.prio()).then_else(other, self)
+            .galley(pos, galley.clone(), gui.style.text_color);
     }
 }
