@@ -233,7 +233,6 @@ where
 pub struct CompactInsert<'a, K: Copy + Eq + Hash, V: KeyIndexKey<K>> {
     vec: &'a mut KeyIndexVec<K, V>,
     write_idx: usize,
-    finished: bool,
 }
 
 impl<'a, K, V> CompactInsert<'a, K, V>
@@ -242,11 +241,7 @@ where
     V: KeyIndexKey<K>,
 {
     fn new(vec: &'a mut KeyIndexVec<K, V>) -> Self {
-        Self {
-            vec,
-            write_idx: 0,
-            finished: false,
-        }
+        Self { vec, write_idx: 0 }
     }
 
     pub fn insert_with(&mut self, key: &K, create: impl FnOnce() -> V) -> (usize, &mut V) {
@@ -272,9 +267,7 @@ where
     V: KeyIndexKey<K>,
 {
     fn drop(&mut self) {
-        if !self.finished {
-            self.vec.compact_finish(self.write_idx);
-        }
+        self.vec.compact_finish(self.write_idx);
     }
 }
 

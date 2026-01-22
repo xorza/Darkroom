@@ -1,4 +1,3 @@
-// add comment what exactly this function does
 pub trait NormalizeString {
     /// Normalizes line endings by stripping `\r` and guarantees a trailing `\n`.
     fn normalize(&self) -> String;
