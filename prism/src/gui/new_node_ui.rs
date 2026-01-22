@@ -111,18 +111,20 @@ impl NewNodeUi {
             .fixed_pos(self.position)
             .order(Order::Foreground)
             .show(gui, |gui| {
-                Frame::popup(&gui.style.popup).show(gui, |gui| {
-                    gui.ui().set_min_width(POPUP_MIN_WIDTH);
-                    gui.ui().set_min_height(POPUP_MIN_HEIGHT);
-                    gui.ui().set_max_height(POPUP_MAX_HEIGHT);
+                Frame::popup(&gui.style.popup)
+                    .sense(Sense::all())
+                    .show(gui, |gui| {
+                        gui.ui().set_min_width(POPUP_MIN_WIDTH);
+                        gui.ui().set_min_height(POPUP_MIN_HEIGHT);
+                        gui.ui().set_max_height(POPUP_MAX_HEIGHT);
 
-                    gui.horizontal_justified(|gui| {
-                        if self.from_connection {
-                            show_const_bind_option(gui, selection);
-                        }
-                        show_function_categories(gui, func_lib, arena, selection);
+                        gui.horizontal_justified(|gui| {
+                            if self.from_connection {
+                                show_const_bind_option(gui, selection);
+                            }
+                            show_function_categories(gui, func_lib, arena, selection);
+                        });
                     });
-                });
             })
     }
 }

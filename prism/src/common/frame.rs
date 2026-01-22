@@ -75,11 +75,11 @@ impl Frame {
             add_contents(&mut gui)
         });
 
-        if let Some(sense) = sense {
-            result.response |= gui
-                .ui()
-                .interact(result.response.rect, result.response.id, sense);
-        }
+        // if let Some(sense) = sense {
+        //     result.response |= gui
+        //         .ui()
+        //         .interact(result.response.rect, result.response.id, sense);
+        // }
 
         result
     }

@@ -151,12 +151,15 @@ impl GraphUi {
             let mut overlay_hovered = self
                 .render_buttons(gui, &mut ctx, &mut app_data.interaction, app_data.autorun)
                 .hovered();
-            overlay_hovered |= self.node_details_ui.show(
-                gui,
-                &mut ctx,
-                &mut app_data.interaction,
-                &mut app_data.argument_values_cache,
-            );
+            overlay_hovered |= self
+                .node_details_ui
+                .show(
+                    gui,
+                    &mut ctx,
+                    &mut app_data.interaction,
+                    &mut app_data.argument_values_cache,
+                )
+                .hovered();
 
             overlay_hovered |= self.handle_new_node_popup(
                 gui,
@@ -527,7 +530,7 @@ impl GraphUi {
                 let padding = gui.style.padding;
 
                 Frame::none()
-                    .sense(Sense::hover())
+                    .sense(Sense::all())
                     .inner_margin(padding)
                     .show(gui, |gui| {
                         gui.horizontal(|gui| {
@@ -571,7 +574,7 @@ impl GraphUi {
             let padding = gui.style.padding;
 
             Frame::none()
-                .sense(Sense::hover())
+                .sense(Sense::all())
                 .inner_margin(padding)
                 .show(gui, |gui| {
                     gui.horizontal(|gui| {

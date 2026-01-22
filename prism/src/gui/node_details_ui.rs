@@ -1,4 +1,4 @@
-use egui::{Color32, Pos2, Rect, TextureOptions, Vec2};
+use egui::{Color32, Pos2, Rect, Response, Sense, TextureOptions, Vec2};
 use palantir::Image;
 use scenarium::data::DynamicValue;
 use scenarium::graph::{Node, NodeId};
@@ -29,13 +29,14 @@ impl NodeDetailsUi {
         ctx: &mut GraphContext<'_>,
         interaction: &mut GraphUiInteraction,
         argument_values_cache: &mut ArgumentValuesCache,
-    ) -> bool {
-        let Some(node_id) = ctx.view_graph.selected_node_id else {
-            return false;
-        };
-
+    ) -> Response {
         let panel_rect = self.compute_panel_rect(gui);
         let popup_id = gui.ui().make_persistent_id("node_details_panel");
+
+        let Some(node_id) = ctx.view_graph.selected_node_id else {
+            return gui.ui().interact(Rect::NOTHING, popup_id, Sense::empty());
+        };
+
         let scroll_id = gui.ui().make_persistent_id("node_details_scroll");
 
         PositionedUi::new(popup_id, panel_rect.min)
@@ -44,6 +45,7 @@ impl NodeDetailsUi {
             .show(gui, |gui| {
                 Frame::popup(&gui.style.popup)
                     .inner_margin(gui.style.padding)
+                    .sense(Sense::all())
                     .show(gui, |gui| {
                         ScrollArea::vertical().id(scroll_id).show(gui, |gui| {
                             self.show_content(
@@ -57,7 +59,6 @@ impl NodeDetailsUi {
                     });
             })
             .response
-            .hovered()
     }
 
     fn compute_panel_rect(&self, gui: &Gui<'_>) -> Rect {
