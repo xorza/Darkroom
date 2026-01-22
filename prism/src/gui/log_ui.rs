@@ -1,8 +1,7 @@
 use egui::collapsing_header::{CollapsingState, paint_default_icon};
-use egui::{Align, Frame, Label, Layout, Margin, ScrollArea, TextStyle, Vec2b};
+use egui::{Frame, Label, Margin, ScrollArea, Vec2b};
 
 use crate::gui::Gui;
-use crate::gui::style::Style;
 use common::StrExt;
 
 const LINE_COUNT: usize = 6;
@@ -16,58 +15,53 @@ impl LogUi {
         let line_height = gui.font_height(&body_font);
         let style = &gui.style;
 
-        gui.ui.horizontal(|ui| {
-            let frame = Frame::NONE
-                .fill(style.graph_background.bg_color)
-                .stroke(style.inactive_bg_stroke)
-                .corner_radius(style.corner_radius)
-                .outer_margin(Margin {
-                    left: style.big_padding as i8,
-                    right: style.big_padding as i8,
-                    top: 0,
-                    bottom: style.big_padding as i8,
-                })
-                .inner_margin(style.corner_radius);
+        let frame = Frame::NONE
+            .fill(style.graph_background.bg_color)
+            .stroke(style.inactive_bg_stroke)
+            .corner_radius(style.corner_radius)
+            .outer_margin(Margin {
+                left: style.big_padding as i8,
+                right: style.big_padding as i8,
+                top: 0,
+                bottom: style.big_padding as i8,
+            })
+            .inner_margin(style.corner_radius);
 
-            frame.show(ui, |ui| {
-                ui.take_available_width();
-                ui.horizontal(|ui| {
-                    let mut state = CollapsingState::load_with_default_open(
-                        ui.ctx(),
-                        ui.make_persistent_id("status_panel_state"),
-                        false,
-                    );
+        frame.show(gui.ui, |ui| {
+            ui.take_available_width();
+            ui.horizontal(|ui| {
+                let mut state = CollapsingState::load_with_default_open(
+                    ui.ctx(),
+                    ui.make_persistent_id("status_panel_state"),
+                    false,
+                );
 
-                    let is_open = state.is_open();
+                let toggle_response = state.show_toggle_button(ui, paint_default_icon);
+                ui.expand_to_include_rect(toggle_response.rect);
 
-                    let toggle_response = state.show_toggle_button(ui, paint_default_icon);
-                    ui.expand_to_include_rect(toggle_response.rect);
+                if state.is_open() {
+                    let max_height = line_height * LINE_COUNT as f32;
+                    ui.set_height(max_height);
 
-                    if is_open {
-                        let max_height = line_height * LINE_COUNT as f32;
-                        ui.set_height(max_height);
-
-                        ScrollArea::vertical()
-                            .auto_shrink(Vec2b::new(true, true))
-                            .stick_to_bottom(true)
-                            .show(ui, |ui| {
-                                ui.vertical(|ui| {
-                                    ui.take_available_width();
-                                    ui.add_space(
-                                        (max_height - status.line_count() as f32 * line_height)
-                                            .max(0.0),
-                                    );
-                                    ui.label(status);
-                                });
+                    ScrollArea::vertical()
+                        .auto_shrink(Vec2b::TRUE)
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            ui.take_available_width();
+                            ui.vertical(|ui| {
+                                let spacer = (max_height
+                                    - (status.line_count() - 1) as f32 * line_height)
+                                    .max(0.0);
+                                ui.add_space(spacer);
+                                ui.label(status);
                             });
-                    } else {
-                        ui.add(Label::new(status.last_line().to_owned()).truncate());
-                    }
+                        });
+                } else {
+                    ui.add(Label::new(status.last_line()).truncate());
+                }
 
-                    state.store(ui.ctx());
-                });
+                state.store(ui.ctx());
             });
-            // ui.add_space(style.big_padding);
         });
     }
 }
