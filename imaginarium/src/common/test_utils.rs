@@ -15,15 +15,20 @@ fn test_resource(name: &str) -> String {
 }
 
 /// Loads the lena test image as RGBA_U8 format.
+/// The image is cached and cloned on each call to avoid repeated file I/O.
 pub fn load_lena_rgba_u8() -> Image {
-    Image::read_file(test_resource("lena.tiff"))
-        .unwrap()
-        .convert(ColorFormat::from((
-            ChannelCount::Rgba,
-            ChannelSize::_8bit,
-            ChannelType::UInt,
-        )))
-        .unwrap()
+    static LENA: OnceLock<Image> = OnceLock::new();
+    LENA.get_or_init(|| {
+        Image::read_file(test_resource("lena.tiff"))
+            .unwrap()
+            .convert(ColorFormat::from((
+                ChannelCount::Rgba,
+                ChannelSize::_8bit,
+                ChannelType::UInt,
+            )))
+            .unwrap()
+    })
+    .clone()
 }
 
 /// Returns a shared GPU context for tests.
