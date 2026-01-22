@@ -208,8 +208,7 @@ impl GpuImage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ColorFormat;
-    use crate::common::test_utils::test_gpu;
+    use crate::common::test_utils::{load_lena_small_rgba_u8_61x38, test_gpu};
 
     #[test]
     fn test_to_image() {
@@ -217,14 +216,13 @@ mod tests {
             return;
         };
 
-        let desc = ImageDesc::new(64, 64, ColorFormat::RGBA_U8);
-        let image = Image::new_black(desc).unwrap();
+        let image = load_lena_small_rgba_u8_61x38();
         let gpu_image = GpuImage::from_image(&ctx, &image);
 
         let result = gpu_image.to_image(&ctx).unwrap();
 
-        assert_eq!(result.desc().width, 64);
-        assert_eq!(result.desc().height, 64);
+        assert_eq!(result.desc().width, 61);
+        assert_eq!(result.desc().height, 38);
     }
 
     #[tokio::test]
@@ -233,8 +231,7 @@ mod tests {
             return;
         };
 
-        let desc = ImageDesc::new(64, 64, ColorFormat::RGBA_U8);
-        let image = Image::new_black(desc).unwrap();
+        let image = load_lena_small_rgba_u8_61x38();
         let gpu_image = GpuImage::from_image(&ctx, &image);
 
         // Spawn a task to poll the GPU while we wait for the download
@@ -246,7 +243,7 @@ mod tests {
         let result = gpu_image.to_image_async(&ctx).await.unwrap();
         poll_handle.await.unwrap();
 
-        assert_eq!(result.desc().width, 64);
-        assert_eq!(result.desc().height, 64);
+        assert_eq!(result.desc().width, 61);
+        assert_eq!(result.desc().height, 38);
     }
 }

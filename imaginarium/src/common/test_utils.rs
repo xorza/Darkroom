@@ -33,7 +33,7 @@ pub fn load_lena_rgba_u8() -> Image {
 
 /// Loads a small lena test image as RGBA_U8 format (61x38).
 /// The image is cached and cloned on each call to avoid repeated file I/O.
-pub fn load_lena_small_rgba_u8() -> Image {
+pub fn load_lena_small_rgba_u8_61x38() -> Image {
     static LENA_SMALL: OnceLock<Image> = OnceLock::new();
     LENA_SMALL
         .get_or_init(|| {

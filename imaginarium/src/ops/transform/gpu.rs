@@ -184,27 +184,8 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_utils::{load_lena_rgba_u8, test_gpu};
+    use crate::common::test_utils::{load_lena_rgba_u8, load_lena_small_rgba_u8_61x38, test_gpu};
     use std::f32::consts::PI;
-
-    fn create_test_image(width: u32, height: u32) -> Image {
-        let format = ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let desc = ImageDesc::new(width, height, format);
-        let mut image = Image::new_black(desc).unwrap();
-
-        // Fill with a gradient pattern
-        for y in 0..height as usize {
-            for x in 0..width as usize {
-                let idx = y * image.desc().stride + x * 4;
-                image.bytes_mut()[idx] = (x % 256) as u8; // R
-                image.bytes_mut()[idx + 1] = (y % 256) as u8; // G
-                image.bytes_mut()[idx + 2] = 128; // B
-                image.bytes_mut()[idx + 3] = 255; // A
-            }
-        }
-
-        image
-    }
 
     #[test]
     fn test_identity_transform() {
@@ -214,7 +195,7 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image(64, 64);
+        let input_cpu = load_lena_small_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input_cpu.desc());
 
@@ -238,13 +219,13 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image(64, 64);
+        let input_cpu = load_lena_small_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
 
         // Create larger output for 2x scale
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new(128, 128, output_format);
+        let output_desc = ImageDesc::new(122, 76, output_format);
         let mut output = GpuImage::new_empty(&ctx, output_desc);
 
         let transform = Transform::new().scale(Vec2::new(2.0, 2.0));
@@ -266,12 +247,12 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image(64, 64);
+        let input_cpu = load_lena_small_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
         let mut output = GpuImage::new_empty(&ctx, *input_cpu.desc());
 
         // Rotate 90 degrees around center
-        let center = Vec2::new(32.0, 32.0);
+        let center = Vec2::new(30.5, 19.0);
         let transform = Transform::new().rotate_around(PI / 2.0, center);
         transform.apply_gpu(&ctx, &pipeline, &input, &mut output);
 
@@ -291,13 +272,13 @@ mod tests {
 
         let pipeline = GpuTransformPipeline::new(&ctx).unwrap();
 
-        let input_cpu = create_test_image(32, 32);
+        let input_cpu = load_lena_small_rgba_u8_61x38();
         let input = GpuImage::from_image(&ctx, &input_cpu);
 
         // Scale up with nearest neighbor
         let output_format =
             ColorFormat::from((ChannelCount::Rgba, ChannelSize::_8bit, ChannelType::UInt));
-        let output_desc = ImageDesc::new(64, 64, output_format);
+        let output_desc = ImageDesc::new(122, 76, output_format);
 
         let mut output_nearest = GpuImage::new_empty(&ctx, output_desc);
         let transform_nearest = Transform::new()
