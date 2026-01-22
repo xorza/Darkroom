@@ -4,7 +4,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ICON_DIR="$HOME/.local/share/icons/hicolor"
 APP_DIR="$HOME/.local/share/applications"
-SOURCE_ICON="$SCRIPT_DIR/prism.png"
+SOURCE_ICON="$SCRIPT_DIR/icon big.png"
 
 echo "Installing Prism icon and desktop entry..."
 
