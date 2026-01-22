@@ -159,29 +159,8 @@ pub(super) fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::common::test_utils::test_gpu;
+    use crate::common::test_utils::{create_test_image, create_test_image_f32, test_gpu};
     use crate::image::{Image, ImageDesc};
-
-    fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
-        let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_black(desc).unwrap();
-        for (i, byte) in img.bytes_mut().iter_mut().enumerate() {
-            *byte = ((i + seed) * 37 % 256) as u8;
-        }
-        img
-    }
-
-    fn create_test_image_f32(format: ColorFormat, width: u32, height: u32, value: f32) -> Image {
-        let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_black(desc).unwrap();
-        let bytes = img.bytes_mut();
-        // Fill with f32 values
-        for chunk in bytes.chunks_exact_mut(4) {
-            let val_bytes = value.to_le_bytes();
-            chunk.copy_from_slice(&val_bytes);
-        }
-        img
-    }
 
     #[test]
     fn test_gpu_contrast_brightness_no_change() {

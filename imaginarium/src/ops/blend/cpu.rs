@@ -712,27 +712,8 @@ unsafe fn process_row_rgba_f32_neon(
 mod tests {
     use super::super::{Blend, BlendMode};
     use crate::common::image_diff::max_pixel_diff;
+    use crate::common::test_utils::create_test_image;
     use crate::prelude::*;
-
-    fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
-        let desc = ImageDesc::new(width, height, format);
-        let mut img = Image::new_black(desc).unwrap();
-
-        match (format.channel_size, format.channel_type) {
-            (ChannelSize::_32bit, ChannelType::Float) => {
-                let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
-                for (i, val) in floats.iter_mut().enumerate() {
-                    *val = ((i + seed) % 100) as f32 / 100.0;
-                }
-            }
-            _ => {
-                for (i, byte) in img.bytes_mut().iter_mut().enumerate() {
-                    *byte = ((i + seed) * 37 % 256) as u8;
-                }
-            }
-        }
-        img
-    }
 
     #[test]
     fn test_normal_blend_alpha_zero() {

@@ -64,3 +64,41 @@ pub fn test_processing_context() -> ProcessingContext {
         None => ProcessingContext::cpu_only(),
     }
 }
+
+/// Creates a test image with a deterministic pattern based on seed.
+/// For integer formats, uses a byte pattern. For float formats, uses normalized values.
+pub fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
+    use crate::image::ImageDesc;
+
+    let desc = ImageDesc::new(width, height, format);
+    let mut img = Image::new_black(desc).unwrap();
+
+    match (format.channel_size, format.channel_type) {
+        (ChannelSize::_32bit, ChannelType::Float) => {
+            let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
+            for (i, val) in floats.iter_mut().enumerate() {
+                *val = ((i + seed) % 100) as f32 / 100.0;
+            }
+        }
+        _ => {
+            for (i, byte) in img.bytes_mut().iter_mut().enumerate() {
+                *byte = ((i + seed) * 37 % 256) as u8;
+            }
+        }
+    }
+    img
+}
+
+/// Creates a test image filled with a constant f32 value.
+pub fn create_test_image_f32(format: ColorFormat, width: u32, height: u32, value: f32) -> Image {
+    use crate::image::ImageDesc;
+
+    let desc = ImageDesc::new(width, height, format);
+    let mut img = Image::new_black(desc).unwrap();
+    let bytes = img.bytes_mut();
+    for chunk in bytes.chunks_exact_mut(4) {
+        let val_bytes = value.to_le_bytes();
+        chunk.copy_from_slice(&val_bytes);
+    }
+    img
+}
