@@ -8,6 +8,54 @@ use std::time::Instant;
 use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
+/// Extract CFA pattern from libraw filters field.
+///
+/// The filters field encodes the color at each position in a repeating pattern.
+/// For Bayer sensors, this is a 2x2 pattern. The formula to extract color index is:
+/// `color_index = (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3`
+///
+/// Color indices: 0=Red, 1=Green, 2=Blue, 3=Green2
+///
+/// Returns None if the pattern doesn't match a known Bayer CFA pattern
+/// (e.g., for X-Trans sensors or monochrome cameras).
+fn cfa_pattern_from_filters(filters: u32) -> Option<CfaPattern> {
+    // Extract color index for each position in the 2x2 pattern
+    let color_at =
+        |row: u32, col: u32| -> u32 { (filters >> (((row << 1 & 14) | (col & 1)) << 1)) & 3 };
+
+    let c00 = color_at(0, 0);
+    let c01 = color_at(0, 1);
+    let c10 = color_at(1, 0);
+    let c11 = color_at(1, 1);
+
+    // Color indices: 0=R, 1=G, 2=B, 3=G2 (second green)
+    // We treat both green indices (1 and 3) as green
+    let is_red = |c: u32| c == 0;
+    let is_green = |c: u32| c == 1 || c == 3;
+    let is_blue = |c: u32| c == 2;
+
+    // Match against known Bayer patterns
+    // RGGB: R at (0,0), G at (0,1) and (1,0), B at (1,1)
+    if is_red(c00) && is_green(c01) && is_green(c10) && is_blue(c11) {
+        return Some(CfaPattern::Rggb);
+    }
+    // BGGR: B at (0,0), G at (0,1) and (1,0), R at (1,1)
+    if is_blue(c00) && is_green(c01) && is_green(c10) && is_red(c11) {
+        return Some(CfaPattern::Bggr);
+    }
+    // GRBG: G at (0,0), R at (0,1), B at (1,0), G at (1,1)
+    if is_green(c00) && is_red(c01) && is_blue(c10) && is_green(c11) {
+        return Some(CfaPattern::Grbg);
+    }
+    // GBRG: G at (0,0), B at (0,1), R at (1,0), G at (1,1)
+    if is_green(c00) && is_blue(c01) && is_red(c10) && is_green(c11) {
+        return Some(CfaPattern::Gbrg);
+    }
+
+    // Unknown pattern (e.g., X-Trans, monochrome, or other exotic sensors)
+    None
+}
+
 /// RAII guard for libraw_data_t to ensure proper cleanup.
 struct LibrawGuard(*mut sys::libraw_data_t);
 
@@ -118,6 +166,22 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     // The slice is valid for the lifetime of the guard (until libraw_close is called).
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 
+    // Get CFA pattern from libraw metadata
+    // SAFETY: inner is valid, idata struct is initialized after unpack.
+    let filters = unsafe { (*inner).idata.filters };
+    let cfa_pattern = cfa_pattern_from_filters(filters).unwrap_or_else(|| {
+        tracing::warn!(
+            "Unknown CFA pattern (filters=0x{:08x}), defaulting to RGGB",
+            filters
+        );
+        CfaPattern::Rggb
+    });
+    tracing::debug!(
+        "Detected CFA pattern: {:?} (filters=0x{:08x})",
+        cfa_pattern,
+        filters
+    );
+
     // Normalize to 0.0-1.0 range using proper black and maximum values
     let bayer_data: Vec<f32> = raw_data
         .iter()
@@ -127,7 +191,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     // Drop guard is no longer needed after we've copied the data
     drop(guard);
 
-    // Demosaic Bayer to RGB (assuming RGGB pattern for libraw)
+    // Demosaic Bayer to RGB using detected CFA pattern
     let bayer = BayerImage::with_margins(
         &bayer_data,
         raw_width,
@@ -136,7 +200,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         height,
         top_margin,
         left_margin,
-        CfaPattern::Rggb,
+        cfa_pattern,
     );
     let demosaic_start = Instant::now();
     let rgb_pixels = demosaic_bilinear(&bayer);
@@ -179,6 +243,45 @@ mod tests {
     use crate::testing::{first_raw_file, init_tracing};
 
     use super::*;
+
+    #[test]
+    fn test_cfa_pattern_from_filters_rggb() {
+        // RGGB pattern: R=0, G=1, G=3, B=2
+        // Position (0,0)=R=0, (0,1)=G=1, (1,0)=G=3, (1,1)=B=2
+        // Encoded in filters with 2 bits per position
+        // Common RGGB filters value from Canon cameras
+        let filters = 0x94949494u32; // Standard RGGB encoding
+        assert_eq!(cfa_pattern_from_filters(filters), Some(CfaPattern::Rggb));
+    }
+
+    #[test]
+    fn test_cfa_pattern_from_filters_bggr() {
+        // BGGR pattern: B at (0,0), G at (0,1), G at (1,0), R at (1,1)
+        let filters = 0x16161616u32; // Standard BGGR encoding
+        assert_eq!(cfa_pattern_from_filters(filters), Some(CfaPattern::Bggr));
+    }
+
+    #[test]
+    fn test_cfa_pattern_from_filters_grbg() {
+        // GRBG pattern: G at (0,0), R at (0,1), B at (1,0), G at (1,1)
+        let filters = 0x61616161u32; // Standard GRBG encoding
+        assert_eq!(cfa_pattern_from_filters(filters), Some(CfaPattern::Grbg));
+    }
+
+    #[test]
+    fn test_cfa_pattern_from_filters_gbrg() {
+        // GBRG pattern: G at (0,0), B at (0,1), R at (1,0), G at (1,1)
+        let filters = 0x49494949u32; // Standard GBRG encoding
+        assert_eq!(cfa_pattern_from_filters(filters), Some(CfaPattern::Gbrg));
+    }
+
+    #[test]
+    fn test_cfa_pattern_from_filters_unknown() {
+        // filters=0 typically indicates monochrome or no CFA
+        assert_eq!(cfa_pattern_from_filters(0), None);
+        // X-Trans and other exotic patterns should return None
+        assert_eq!(cfa_pattern_from_filters(0x12345678), None);
+    }
 
     #[test]
     fn test_load_raw_invalid_path() {

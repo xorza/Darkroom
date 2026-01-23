@@ -765,4 +765,135 @@ mod tests {
         println!("Saved calibrated image to: {:?}", output_path);
         assert!(output_path.exists());
     }
+
+    #[test]
+    fn test_rgb_image_creation_and_operations() {
+        // Create a 2x2 RGB image (3 channels)
+        let image = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            // RGB pixels: R, G, B for each pixel, row-major order
+            // Pixel (0,0): R=10, G=20, B=30
+            // Pixel (1,0): R=40, G=50, B=60
+            // Pixel (0,1): R=70, G=80, B=90
+            // Pixel (1,1): R=100, G=110, B=120
+            pixels: vec![
+                10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0, 100.0, 110.0, 120.0,
+            ],
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        // Verify dimensions
+        assert_eq!(image.dimensions.width, 2);
+        assert_eq!(image.dimensions.height, 2);
+        assert_eq!(image.dimensions.channels, 3);
+        assert!(!image.dimensions.is_grayscale());
+        // pixel_count() returns total values (width * height * channels)
+        assert_eq!(image.pixel_count(), 12); // 2x2x3
+        assert_eq!(image.dimensions.pixel_count(), 12);
+
+        // Verify mean calculation
+        let expected_mean: f32 =
+            (10.0 + 20.0 + 30.0 + 40.0 + 50.0 + 60.0 + 70.0 + 80.0 + 90.0 + 100.0 + 110.0 + 120.0)
+                / 12.0;
+        assert!((image.mean() - expected_mean).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_calibrate_rgb_with_rgb_masters() {
+        use crate::{CalibrationMasters, StackingMethod};
+
+        // Create 2x2 RGB light frame
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![
+                100.0, 100.0, 100.0, // Pixel (0,0)
+                200.0, 200.0, 200.0, // Pixel (1,0)
+                150.0, 150.0, 150.0, // Pixel (0,1)
+                250.0, 250.0, 250.0, // Pixel (1,1)
+            ],
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        // Create RGB bias frame (5.0 for all channels)
+        let bias = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![5.0; 12],
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        let masters = CalibrationMasters {
+            master_dark: None,
+            master_flat: None,
+            master_bias: Some(bias),
+            method: StackingMethod::Median,
+        };
+
+        let calibrated = light.calibrate(&masters);
+
+        // Each channel should have 5.0 subtracted
+        assert_eq!(calibrated.pixels[0], 95.0); // R of (0,0)
+        assert_eq!(calibrated.pixels[1], 95.0); // G of (0,0)
+        assert_eq!(calibrated.pixels[2], 95.0); // B of (0,0)
+        assert_eq!(calibrated.pixels[3], 195.0); // R of (1,0)
+    }
+
+    #[test]
+    #[should_panic(expected = "don't match")]
+    fn test_calibrate_rgb_with_grayscale_bias_panics() {
+        use crate::{CalibrationMasters, StackingMethod};
+
+        // RGB light frame
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![100.0; 12], // 2x2x3
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        // Grayscale bias frame (channel mismatch!)
+        let bias = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![5.0; 4], // 2x2x1
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let masters = CalibrationMasters {
+            master_dark: None,
+            master_flat: None,
+            master_bias: Some(bias),
+            method: StackingMethod::Median,
+        };
+
+        // This should panic due to dimension mismatch (channels differ)
+        let _ = light.calibrate(&masters);
+    }
+
+    #[test]
+    #[should_panic(expected = "don't match")]
+    fn test_calibrate_grayscale_with_rgb_dark_panics() {
+        use crate::{CalibrationMasters, StackingMethod};
+
+        // Grayscale light frame
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![100.0; 4], // 2x2x1
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        // RGB dark frame (channel mismatch!)
+        let dark = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![10.0; 12], // 2x2x3
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        let masters = CalibrationMasters {
+            master_dark: Some(dark),
+            master_flat: None,
+            master_bias: None,
+            method: StackingMethod::Median,
+        };
+
+        // This should panic due to dimension mismatch (channels differ)
+        let _ = light.calibrate(&masters);
+    }
 }
