@@ -118,10 +118,10 @@ pub(super) fn apply(
             inv.matrix2.y_axis.y,
         ],
         inv_translation: [inv.translation.x, inv.translation.y],
-        input_width: input_desc.width,
-        input_height: input_desc.height,
-        output_width: output_desc.width,
-        output_height: output_desc.height,
+        input_width: input_desc.width as u32,
+        input_height: input_desc.height as u32,
+        output_width: output_desc.width as u32,
+        output_height: output_desc.height as u32,
         input_stride: input_desc.stride as u32,
         output_stride: output_desc.stride as u32,
         filter_mode: match params.filter {
@@ -173,8 +173,8 @@ pub(super) fn apply(
         pass.set_bind_group(0, &bind_group, &[]);
 
         // Dispatch workgroups (16x16 threads per group)
-        let workgroups_x = output_desc.width.div_ceil(16);
-        let workgroups_y = output_desc.height.div_ceil(16);
+        let workgroups_x = output_desc.width.div_ceil(16) as u32;
+        let workgroups_y = output_desc.height.div_ceil(16) as u32;
         pass.dispatch_workgroups(workgroups_x, workgroups_y, 1);
     }
 

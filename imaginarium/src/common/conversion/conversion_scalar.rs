@@ -256,7 +256,7 @@ where
         return;
     }
 
-    let width = from.desc().width as usize;
+    let width = from.desc().width;
     let to_channels = to.desc().color_format.channel_count.channel_count() as usize;
     let from_channels = from.desc().color_format.channel_count.channel_count() as usize;
     let from_stride = from.desc().stride;

@@ -39,7 +39,7 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     };
 
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new(img.width(), img.height(), color_format);
+    let desc = ImageDesc::new(img.width() as usize, img.height() as usize, color_format);
     let bytes = add_stride_padding(
         img.into_bytes(),
         desc.width,
@@ -99,7 +99,7 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
 
     let channel_size = ChannelSize::from_bit_count(channel_bits)?;
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
-    let desc = ImageDesc::new(w, h, color_format);
+    let desc = ImageDesc::new(w as usize, h as usize, color_format);
     let bytes = add_stride_padding(
         bytes,
         desc.width,
@@ -148,8 +148,8 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     image_lib::save_buffer_with_format(
         filename,
         &image.bytes,
-        image.desc.width,
-        image.desc.height,
+        image.desc.width as u32,
+        image.desc.height as u32,
         color_format,
         image_lib::ImageFormat::Jpeg,
     )?;
@@ -195,8 +195,8 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
     image_lib::save_buffer_with_format(
         filename,
         &image.bytes,
-        image.desc.width,
-        image.desc.height,
+        image.desc.width as u32,
+        image.desc.height as u32,
         color_format,
         image_lib::ImageFormat::Png,
     )?;

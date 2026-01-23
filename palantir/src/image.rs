@@ -40,7 +40,7 @@ impl PendingPreview for ImagePendingPreview {
 pub static IMAGE_DATA_TYPE: LazyLock<DataType> =
     LazyLock::new(|| DataType::from_custom("a69f9a9c-3be7-4d8b-abb1-dbd5c9ee4da2", "Image"));
 
-const PREVIEW_SIZE: u32 = 256;
+const PREVIEW_SIZE: usize = 256;
 
 /// Wrapper around `imaginarium::ImageBuffer` that implements `CustomValue`.
 pub struct Image {
@@ -84,8 +84,8 @@ impl CustomValue for Image {
             PREVIEW_SIZE as f32 / max_dim as f32
         };
 
-        let new_width = (desc.width as f32 * scale).round() as u32;
-        let new_height = (desc.height as f32 * scale).round() as u32;
+        let new_width = (desc.width as f32 * scale).round() as usize;
+        let new_height = (desc.height as f32 * scale).round() as usize;
 
         let vision_ctx = ctx_manager.get::<VisionCtx>(&VISION_CTX_TYPE);
 

@@ -222,8 +222,8 @@ impl From<AstroImage> for Image {
         };
 
         let desc = ImageDesc::new(
-            astro.dimensions.width as u32,
-            astro.dimensions.height as u32,
+            astro.dimensions.width,
+            astro.dimensions.height,
             color_format,
         );
 

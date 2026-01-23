@@ -131,7 +131,7 @@ fn apply_typed<T>(src: &Image, dst: &Image, output: &mut Image, params: Blend)
 where
     T: Pod + BlendApply,
 {
-    let width = src.desc().width as usize;
+    let width = src.desc().width;
     let channels = src.desc().color_format.channel_count.channel_count() as usize;
     let src_stride = src.desc().stride;
     let dst_stride = dst.desc().stride;
@@ -184,7 +184,7 @@ where
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_u8_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc().width as usize;
+    let width = src.desc().width;
     let src_stride = src.desc().stride;
     let dst_stride = dst.desc().stride;
     let out_stride = output.desc().stride;
@@ -333,7 +333,7 @@ unsafe fn process_row_rgba_u8_sse41(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "sse4.1")]
 unsafe fn apply_rgba_f32_sse41(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc().width as usize;
+    let width = src.desc().width;
     let src_stride = src.desc().stride;
     let dst_stride = dst.desc().stride;
     let out_stride = output.desc().stride;
@@ -433,7 +433,7 @@ unsafe fn process_row_rgba_f32_sse41(
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_u8_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc().width as usize;
+    let width = src.desc().width;
     let src_stride = src.desc().stride;
     let dst_stride = dst.desc().stride;
     let out_stride = output.desc().stride;
@@ -589,7 +589,7 @@ unsafe fn process_row_rgba_u8_neon(
 
 #[cfg(target_arch = "aarch64")]
 unsafe fn apply_rgba_f32_neon(src: &Image, dst: &Image, output: &mut Image, params: Blend) {
-    let width = src.desc().width as usize;
+    let width = src.desc().width;
     let src_stride = src.desc().stride;
     let dst_stride = dst.desc().stride;
     let out_stride = output.desc().stride;

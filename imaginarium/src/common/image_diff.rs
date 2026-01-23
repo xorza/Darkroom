@@ -22,8 +22,8 @@ pub fn max_pixel_diff(img1: &Image, img2: &Image) -> f64 {
         "format mismatch"
     );
 
-    let width = img1.desc().width as usize;
-    let height = img1.desc().height as usize;
+    let width = img1.desc().width;
+    let height = img1.desc().height;
     let format = img1.desc().color_format;
     let pixel_size = format.byte_count() as usize;
     let row_bytes = width * pixel_size;
@@ -91,8 +91,8 @@ pub fn pixels_equal(img1: &Image, img2: &Image) -> bool {
         "format mismatch"
     );
 
-    let width = img1.desc().width as usize;
-    let height = img1.desc().height as usize;
+    let width = img1.desc().width;
+    let height = img1.desc().height;
     let pixel_size = img1.desc().color_format.byte_count() as usize;
     let row_bytes = width * pixel_size;
     let stride1 = img1.desc().stride;

@@ -86,8 +86,8 @@ pub(super) fn apply(
     let uniform_params = Params {
         contrast: params.contrast,
         brightness: params.brightness,
-        width,
-        height,
+        width: width as u32,
+        height: height as u32,
         stride: stride as u32,
         format_type,
         _padding: [0; 2],
@@ -147,7 +147,7 @@ pub(super) fn apply(
                 width * height
             }
         };
-        let workgroup_count = work_items.div_ceil(256);
+        let workgroup_count = work_items.div_ceil(256) as u32;
         compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
 
@@ -239,7 +239,7 @@ mod tests {
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
         let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_U8);
-        let mut input_data = vec![0u8; desc.stride * desc.height as usize];
+        let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {
@@ -569,7 +569,7 @@ mod tests {
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
         let desc = ImageDesc::new(4, 4, ColorFormat::GRAY_ALPHA_U8);
-        let mut input_data = vec![0u8; desc.stride * desc.height as usize];
+        let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {
@@ -615,7 +615,7 @@ mod tests {
         let pipeline = GpuContrastBrightnessPipeline::new(&ctx).unwrap();
 
         let desc = ImageDesc::new(4, 4, ColorFormat::RGBA_F32);
-        let mut input_data = vec![0u8; desc.stride * desc.height as usize];
+        let mut input_data = vec![0u8; desc.stride * desc.height];
         // Set specific alpha values
         for y in 0..4usize {
             for x in 0..4usize {

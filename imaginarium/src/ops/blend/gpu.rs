@@ -101,8 +101,8 @@ pub(super) fn apply(
     let uniform_params = Params {
         mode: mode_u32,
         alpha: params.alpha,
-        width,
-        height,
+        width: width as u32,
+        height: height as u32,
         stride: stride as u32,
         format_type,
         _padding: [0; 2],
@@ -166,7 +166,7 @@ pub(super) fn apply(
                 width * height
             }
         };
-        let workgroup_count = work_items.div_ceil(256);
+        let workgroup_count = work_items.div_ceil(256) as u32;
         compute_pass.dispatch_workgroups(workgroup_count, 1, 1);
     }
 

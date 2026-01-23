@@ -184,7 +184,7 @@ where
 
     let mut file = File::create(filename)?;
     let mut tiff = TiffEncoder::new(&mut file)?;
-    let img = tiff.new_image::<CT>(image.desc().width, image.desc().height)?;
+    let img = tiff.new_image::<CT>(image.desc().width as u32, image.desc().height as u32)?;
 
     img.write_data(buf)?;
 

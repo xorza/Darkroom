@@ -81,7 +81,7 @@ pub fn test_processing_context() -> ProcessingContext {
 
 /// Creates a test image with a deterministic pattern based on seed.
 /// For integer formats, uses a byte pattern. For float formats, uses normalized values.
-pub fn create_test_image(format: ColorFormat, width: u32, height: u32, seed: usize) -> Image {
+pub fn create_test_image(format: ColorFormat, width: usize, height: usize, seed: usize) -> Image {
     use crate::image::ImageDesc;
 
     let desc = ImageDesc::new(width, height, format);
@@ -132,7 +132,12 @@ pub fn load_lena_rgba_f32_61x38() -> Image {
 }
 
 /// Creates a test image filled with a constant f32 value.
-pub fn create_test_image_f32(format: ColorFormat, width: u32, height: u32, value: f32) -> Image {
+pub fn create_test_image_f32(
+    format: ColorFormat,
+    width: usize,
+    height: usize,
+    value: f32,
+) -> Image {
     use crate::image::ImageDesc;
 
     let desc = ImageDesc::new(width, height, format);

@@ -104,10 +104,7 @@ fn new_empty_creates_zeroed_image() {
     let img = Image::new_black(desc).unwrap();
 
     assert!(img.bytes.iter().all(|&b| b == 0));
-    assert_eq!(
-        img.bytes.len(),
-        img.desc().stride * img.desc().height as usize
-    );
+    assert_eq!(img.bytes.len(), img.desc().stride * img.desc().height);
 }
 
 #[test]
@@ -161,7 +158,7 @@ fn image_desc_stride_alignment() {
 #[test]
 fn image_desc_size_calculation() {
     let desc = ImageDesc::new(100, 50, ColorFormat::RGBA_U8);
-    assert_eq!(desc.size_in_bytes(), desc.stride * desc.height as usize);
+    assert_eq!(desc.size_in_bytes(), desc.stride * desc.height);
 }
 
 #[test]

@@ -132,7 +132,7 @@ GPU/CPU image processing library with automatic backend selection.
 
 ```rust
 Image              // CPU image with bytes, desc, file I/O, format conversion
-ImageDesc          // { width, height, stride, color_format }
+ImageDesc          // { width: usize, height: usize, stride: usize, color_format }
 ImageBuffer        // Smart buffer with automatic CPU/GPU transfer (AtomicRefCell)
 Storage            // Cpu(Image) | Gpu(GpuImage)
 ColorFormat        // { channel_count, channel_size, channel_type }
@@ -209,11 +209,21 @@ Astrophotography image processing library for loading and stacking astronomical 
 
 ```rust
 AstroImage         // Astronomical image with metadata and f32 pixels
-AstroImageMetadata // FITS metadata (object, instrument, exposure, etc.)
-ImageDimensions    // { width, height, channels }
+AstroImageMetadata // FITS metadata (object, instrument, exposure, bitpix, etc.)
+ImageDimensions    // { width: usize, height: usize, channels: usize }
+BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
 StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
 SigmaClipConfig    // { sigma, max_iterations }
 ```
+
+**Module structure:**
+- `astro_image/mod.rs` - Main module with `AstroImage`, `BitPix`, `ImageDimensions`, `from_file()` method
+- `astro_image/fits.rs` - FITS file loading via fitsio
+- `astro_image/rawloader.rs` - RAW loading via rawloader (pure Rust)
+- `astro_image/libraw.rs` - RAW loading via libraw-rs (C library fallback)
+
+**Conversion:**
+- `From<AstroImage> for imaginarium::Image` - converts f32 pixels to Image with proper ColorFormat
 
 **RAW file loading:**
 - Tries `rawloader` first (pure Rust, faster, limited camera support)

@@ -6,18 +6,18 @@ pub(crate) fn align_stride(n: usize) -> usize {
 /// Adds stride padding to tightly packed pixel data.
 pub(crate) fn add_stride_padding(
     src: Vec<u8>,
-    width: u32,
-    height: u32,
+    width: usize,
+    height: usize,
     stride: usize,
     bpp: u8,
 ) -> Vec<u8> {
-    let row_bytes = width as usize * bpp as usize;
+    let row_bytes = width * bpp as usize;
 
     if row_bytes == stride {
         src
     } else {
-        let mut padded = vec![0u8; stride * height as usize];
-        for y in 0..height as usize {
+        let mut padded = vec![0u8; stride * height];
+        for y in 0..height {
             padded[y * stride..y * stride + row_bytes]
                 .copy_from_slice(&src[y * row_bytes..y * row_bytes + row_bytes]);
         }
@@ -28,18 +28,18 @@ pub(crate) fn add_stride_padding(
 /// Strips stride padding from image bytes, returning tightly packed pixel data.
 pub(crate) fn strip_stride_padding(
     src: Vec<u8>,
-    width: u32,
-    height: u32,
+    width: usize,
+    height: usize,
     stride: usize,
     bpp: u8,
 ) -> Vec<u8> {
-    let row_bytes = width as usize * bpp as usize;
+    let row_bytes = width * bpp as usize;
 
     if row_bytes == stride {
         src
     } else {
-        let mut packed = Vec::with_capacity(row_bytes * height as usize);
-        for y in 0..height as usize {
+        let mut packed = Vec::with_capacity(row_bytes * height);
+        for y in 0..height {
             packed.extend_from_slice(&src[y * stride..y * stride + row_bytes]);
         }
         packed
