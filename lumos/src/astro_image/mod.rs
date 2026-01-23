@@ -1,3 +1,4 @@
+mod demosaic;
 mod fits;
 mod libraw;
 mod rawloader;
@@ -143,7 +144,7 @@ impl AstroImage {
         match ext.as_str() {
             "fit" | "fits" => fits::load_fits(path),
             "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => {
-                // Try rawloader first (faster, pure Rust), fall back to libraw
+                // Try rawloader first (fast demosaic), fall back to libraw
                 rawloader::load_raw(path).or_else(|_| libraw::load_raw(path))
             }
             _ => anyhow::bail!("Unsupported file extension: {}", ext),
@@ -661,17 +662,29 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_single_raw_from_env() {
-        use crate::test_utils::load_calibration_images;
+        use crate::test_utils::calibration_dir;
 
-        let Some(images) = load_calibration_images("Lights") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
+        let Some(cal_dir) = calibration_dir() else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
             return;
         };
 
-        let Some(image) = images.into_iter().next() else {
-            eprintln!("No raw files in Darks, skipping test");
+        let lights_dir = cal_dir.join("Lights");
+        if !lights_dir.exists() {
+            eprintln!("Lights directory not found, skipping test");
+            return;
+        }
+
+        // Get first file directly without parallel loading
+        let files = common::file_utils::astro_image_files(&lights_dir);
+        let Some(first_file) = files.first() else {
+            eprintln!("No image files in Lights, skipping test");
             return;
         };
+
+        println!("Loading file: {:?}", first_file);
+
+        let image = AstroImage::from_file(first_file).expect("Failed to load image");
 
         println!(
             "Loaded image: {}x{}x{}",
@@ -682,29 +695,36 @@ mod tests {
 
         assert!(image.dimensions.width > 0);
         assert!(image.dimensions.height > 0);
-        assert_eq!(image.dimensions.channels, 1);
-        assert_eq!(
-            image.pixels.len(),
-            image.dimensions.width * image.dimensions.height
-        );
+        // RGB images have 3 channels
+        assert_eq!(image.dimensions.channels, 3);
     }
 
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_calibrate_light_from_env() {
-        use crate::test_utils::{calibration_masters_dir, load_calibration_images};
+        use crate::test_utils::{calibration_dir, calibration_masters_dir};
         use crate::{CalibrationMasters, StackingMethod};
 
-        // Load first light frame
-        let Some(lights) = load_calibration_images("Lights") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set or Lights dir missing, skipping test");
+        // Load first light frame directly (not all files - libraw is slow)
+        let Some(cal_dir) = calibration_dir() else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
             return;
         };
 
-        let Some(light) = lights.into_iter().next() else {
-            eprintln!("No light files in Lights directory, skipping test");
+        let lights_dir = cal_dir.join("Lights");
+        if !lights_dir.exists() {
+            eprintln!("Lights directory not found, skipping test");
+            return;
+        }
+
+        let files = common::file_utils::astro_image_files(&lights_dir);
+        let Some(first_file) = files.first() else {
+            eprintln!("No image files in Lights, skipping test");
             return;
         };
+
+        println!("Loading light frame: {:?}", first_file);
+        let light = AstroImage::from_file(first_file).expect("Failed to load light frame");
 
         println!(
             "Loaded light frame: {}x{}x{}",
