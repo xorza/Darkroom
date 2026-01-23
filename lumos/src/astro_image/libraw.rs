@@ -233,17 +233,31 @@ fn process_monochrome(
         anyhow::bail!("libraw: raw_image is null");
     }
 
-    let pixel_count = raw_width * raw_height;
+    // Use checked arithmetic to prevent overflow on extremely large images
+    let pixel_count = raw_width
+        .checked_mul(raw_height)
+        .expect("libraw: raw dimensions overflow");
+
     // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 
     // Extract the active area and normalize
-    let mut mono_pixels = Vec::with_capacity(width * height);
+    let output_size = width
+        .checked_mul(height)
+        .expect("libraw: output dimensions overflow");
+    let mut mono_pixels = Vec::with_capacity(output_size);
+
     for y in 0..height {
         let src_y = top_margin + y;
         for x in 0..width {
             let src_x = left_margin + x;
             let idx = src_y * raw_width + src_x;
+            debug_assert!(
+                idx < pixel_count,
+                "Index out of bounds: {} >= {}",
+                idx,
+                pixel_count
+            );
             let normalized = ((raw_data[idx] as f32) - black).max(0.0) / range;
             mono_pixels.push(normalized);
         }
