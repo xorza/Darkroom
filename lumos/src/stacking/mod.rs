@@ -1,4 +1,5 @@
 mod cpu;
+mod simd;
 
 pub use cpu::stack_frames_cpu;
 use strum_macros::Display;

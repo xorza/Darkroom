@@ -1,5 +1,6 @@
 use rayon::prelude::*;
 
+use super::simd;
 use crate::astro_image::AstroImage;
 use crate::stacking::{FrameType, SigmaClipConfig, StackingMethod};
 
@@ -62,10 +63,10 @@ fn combine_pixels(values: &[f32], method: StackingMethod) -> f32 {
     }
 }
 
-/// Calculate the mean of values.
+/// Calculate the mean of values using SIMD-accelerated sum.
 fn mean(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
-    values.iter().sum::<f32>() / values.len() as f32
+    simd::sum_f32(values) / values.len() as f32
 }
 
 /// Calculate the median of values.
@@ -83,7 +84,7 @@ fn median(values: &[f32]) -> f32 {
     }
 }
 
-/// Calculate sigma-clipped mean.
+/// Calculate sigma-clipped mean using SIMD-accelerated operations.
 fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
     debug_assert!(!values.is_empty());
 
@@ -99,8 +100,7 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
         }
 
         let avg = mean(&included);
-        let variance =
-            included.iter().map(|v| (v - avg).powi(2)).sum::<f32>() / included.len() as f32;
+        let variance = simd::sum_squared_diff(&included, avg) / included.len() as f32;
         let std_dev = variance.sqrt();
 
         if std_dev < f32::EPSILON {
@@ -132,6 +132,21 @@ mod tests {
     }
 
     #[test]
+    fn test_mean_large() {
+        // Test with enough values to exercise SIMD path (>4 elements)
+        let values: Vec<f32> = (1..=100).map(|x| x as f32).collect();
+        let expected = 50.5; // (1 + 100) / 2
+        assert!((mean(&values) - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_mean_small() {
+        // Test with <4 elements (scalar fallback)
+        let values = vec![2.0, 4.0];
+        assert!((mean(&values) - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn test_median_odd() {
         let values = vec![1.0, 3.0, 2.0, 5.0, 4.0];
         assert!((median(&values) - 3.0).abs() < f32::EPSILON);
@@ -152,6 +167,21 @@ mod tests {
         assert!(
             result < 10.0,
             "Expected outlier to be clipped, got {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_large() {
+        // Test with enough values to exercise SIMD path
+        let mut values: Vec<f32> = vec![10.0; 50];
+        values.push(1000.0); // outlier
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&values, config);
+        // Should exclude outlier and return ~10.0
+        assert!(
+            (result - 10.0).abs() < 1.0,
+            "Expected ~10.0, got {}",
             result
         );
     }
