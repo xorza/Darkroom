@@ -1,6 +1,7 @@
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum CfaPattern {
     /// RGGB: Red at (0,0), Green at (0,1) and (1,0), Blue at (1,1)
     Rggb,
@@ -62,22 +63,6 @@ impl CfaPattern {
     }
 }
 
-impl From<&rawloader::CFA> for CfaPattern {
-    fn from(cfa: &rawloader::CFA) -> Self {
-        // Sample the 2x2 pattern to determine the CFA type
-        let c00 = cfa.color_at(0, 0);
-        let c01 = cfa.color_at(0, 1);
-
-        match (c00, c01) {
-            (0, 1) => CfaPattern::Rggb, // R G
-            (2, 1) => CfaPattern::Bggr, // B G
-            (1, 0) => CfaPattern::Grbg, // G R
-            (1, 2) => CfaPattern::Gbrg, // G B
-            _ => CfaPattern::Rggb,      // Default fallback
-        }
-    }
-}
-
 /// Raw Bayer image data with metadata needed for demosaicing.
 #[derive(Debug)]
 pub struct BayerImage<'a> {
@@ -100,20 +85,6 @@ pub struct BayerImage<'a> {
 }
 
 impl<'a> BayerImage<'a> {
-    /// Create a BayerImage without margins (raw size == output size).
-    pub fn new(data: &'a [f32], width: usize, height: usize, cfa: CfaPattern) -> Self {
-        Self {
-            data,
-            raw_width: width,
-            raw_height: height,
-            width,
-            height,
-            top_margin: 0,
-            left_margin: 0,
-            cfa,
-        }
-    }
-
     /// Create a BayerImage with margins (libraw style).
     #[allow(clippy::too_many_arguments)]
     pub fn with_margins(

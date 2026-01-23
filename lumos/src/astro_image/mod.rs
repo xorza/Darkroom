@@ -1,7 +1,6 @@
 mod demosaic;
 mod fits;
 mod libraw;
-mod rawloader;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
@@ -143,10 +142,7 @@ impl AstroImage {
 
         match ext.as_str() {
             "fit" | "fits" => fits::load_fits(path),
-            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => {
-                // Try rawloader first (fast demosaic), fall back to libraw
-                rawloader::load_raw(path).or_else(|_| libraw::load_raw(path))
-            }
+            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => libraw::load_raw(path),
             _ => anyhow::bail!("Unsupported file extension: {}", ext),
         }
     }
