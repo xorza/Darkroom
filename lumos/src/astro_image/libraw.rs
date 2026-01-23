@@ -25,6 +25,18 @@ impl Drop for LibrawGuard {
     }
 }
 
+/// RAII guard for libraw_processed_image_t to ensure proper cleanup.
+struct ProcessedImageGuard(*mut sys::libraw_processed_image_t);
+
+impl Drop for ProcessedImageGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: We own this pointer and it was allocated by libraw_dcraw_make_mem_image.
+            unsafe { sys::libraw_dcraw_clear_mem(self.0) };
+        }
+    }
+}
+
 /// Load raw file using libraw (C library, broader camera support).
 ///
 /// Demosaicing strategy:
@@ -331,18 +343,21 @@ fn process_unknown_libraw_fallback(
     // Get the processed image
     // SAFETY: inner is valid and dcraw_process succeeded
     let mut errc: i32 = 0;
-    let processed = unsafe { sys::libraw_dcraw_make_mem_image(inner, &mut errc) };
-    if processed.is_null() || errc != 0 {
+    let processed_ptr = unsafe { sys::libraw_dcraw_make_mem_image(inner, &mut errc) };
+    if processed_ptr.is_null() || errc != 0 {
         anyhow::bail!("libraw: dcraw_make_mem_image failed, error code: {}", errc);
     }
 
+    // Guard ensures cleanup even on early return or panic
+    let _processed_guard = ProcessedImageGuard(processed_ptr);
+
     // Extract image data
-    // SAFETY: processed is valid (checked above)
-    let img_width = unsafe { (*processed).width } as usize;
-    let img_height = unsafe { (*processed).height } as usize;
-    let img_colors = unsafe { (*processed).colors } as usize;
-    let img_bits = unsafe { (*processed).bits } as usize;
-    let data_size = unsafe { (*processed).data_size } as usize;
+    // SAFETY: processed_ptr is valid (checked above)
+    let img_width = unsafe { (*processed_ptr).width } as usize;
+    let img_height = unsafe { (*processed_ptr).height } as usize;
+    let img_colors = unsafe { (*processed_ptr).colors } as usize;
+    let img_bits = unsafe { (*processed_ptr).bits } as usize;
+    let data_size = unsafe { (*processed_ptr).data_size } as usize;
 
     tracing::debug!(
         "libraw fallback: {}x{}x{}, {} bits, {} bytes",
@@ -354,13 +369,20 @@ fn process_unknown_libraw_fallback(
     );
 
     // The data array is at the end of the struct (flexible array member)
-    // SAFETY: processed is valid, data_size tells us the valid range
-    let data_ptr = unsafe { (*processed).data.as_ptr() };
+    // SAFETY: processed_ptr is valid, data_size tells us the valid range
+    let data_ptr = unsafe { (*processed_ptr).data.as_ptr() };
+
+    // Use checked arithmetic to prevent overflow on extremely large images
+    let pixel_count = img_width
+        .checked_mul(img_height)
+        .and_then(|v| v.checked_mul(img_colors))
+        .expect("libraw: image dimensions overflow");
 
     let pixels = if img_bits == 16 {
         // 16-bit data
-        let pixel_count = img_width * img_height * img_colors;
-        let expected_size = pixel_count * 2;
+        let expected_size = pixel_count
+            .checked_mul(2)
+            .expect("libraw: expected_size overflow");
         assert!(
             data_size >= expected_size,
             "libraw: data_size {} < expected {}",
@@ -378,7 +400,6 @@ fn process_unknown_libraw_fallback(
             .collect::<Vec<f32>>()
     } else {
         // 8-bit data
-        let pixel_count = img_width * img_height * img_colors;
         assert!(
             data_size >= pixel_count,
             "libraw: data_size {} < expected {}",
@@ -396,9 +417,7 @@ fn process_unknown_libraw_fallback(
             .collect::<Vec<f32>>()
     };
 
-    // Free the processed image memory
-    // SAFETY: processed was allocated by libraw_dcraw_make_mem_image
-    unsafe { sys::libraw_dcraw_clear_mem(processed) };
+    // Memory is freed automatically by _processed_guard when it goes out of scope
 
     let demosaic_elapsed = demosaic_start.elapsed();
     tracing::info!(
