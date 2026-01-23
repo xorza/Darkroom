@@ -2,7 +2,6 @@ pub(crate) mod demosaic;
 mod fits;
 pub(crate) mod libraw;
 mod sensor;
-pub(crate) mod xtrans;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};

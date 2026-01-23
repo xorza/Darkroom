@@ -7,9 +7,9 @@ use std::time::Instant;
 
 use crate::common::parallel_map_f32;
 
+use super::demosaic::xtrans::process_xtrans;
 use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use super::sensor::{SensorType, detect_sensor_type};
-use super::xtrans::process_xtrans;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 /// RAII guard for libraw_data_t to ensure proper cleanup.

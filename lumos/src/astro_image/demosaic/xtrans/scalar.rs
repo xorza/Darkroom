@@ -509,7 +509,7 @@ mod tests {
     #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_simd_vs_scalar_consistency() {
-        use crate::astro_image::xtrans::simd_sse4;
+        use crate::astro_image::demosaic::xtrans::simd_sse4;
 
         // Test that SIMD and scalar implementations produce identical results
         // Use a size that exercises the SIMD path
