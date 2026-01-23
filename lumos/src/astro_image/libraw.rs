@@ -9,7 +9,7 @@ use crate::common::parallel_map_f32;
 
 use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use super::sensor::{SensorType, detect_sensor_type};
-use super::xtrans::{XTransImage, XTransPattern, demosaic_xtrans_bilinear};
+use super::xtrans::process_xtrans;
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 /// RAII guard for libraw_data_t to ensure proper cleanup.
@@ -184,8 +184,33 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 "X-Trans sensor detected (filters=0x{:08x}), using X-Trans demosaic",
                 filters
             );
+            // SAFETY: inner is valid and unpack succeeded.
+            let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
+            if raw_image_ptr.is_null() {
+                anyhow::bail!("libraw: raw_image is null");
+            }
+
+            let pixel_count = raw_width
+                .checked_mul(raw_height)
+                .expect("libraw: raw dimensions overflow");
+
+            // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
+            let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
+
+            // Get X-Trans pattern from libraw
+            // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
+            let xtrans_raw = unsafe { (*inner).idata.xtrans };
+
+            // Convert libraw's i8 pattern to u8
+            let mut xtrans_pattern = [[0u8; 6]; 6];
+            for (i, row) in xtrans_raw.iter().enumerate() {
+                for (j, &val) in row.iter().enumerate() {
+                    xtrans_pattern[i][j] = val as u8;
+                }
+            }
+
             let (pixels, channels) = process_xtrans(
-                inner,
+                raw_data,
                 raw_width,
                 raw_height,
                 width,
@@ -194,7 +219,8 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
                 left_margin,
                 black,
                 range,
-            )?;
+                xtrans_pattern,
+            );
             (pixels, width, height, channels)
         }
         SensorType::Unknown => {
@@ -329,76 +355,6 @@ fn process_bayer_fast(
 
     tracing::info!(
         "Fast SIMD demosaicing {}x{} took {:.2}ms",
-        width,
-        height,
-        demosaic_elapsed.as_secs_f64() * 1000.0
-    );
-
-    Ok((rgb_pixels, 3))
-}
-
-/// Process X-Trans sensor data using our scalar demosaic.
-#[allow(clippy::too_many_arguments)]
-fn process_xtrans(
-    inner: *mut sys::libraw_data_t,
-    raw_width: usize,
-    raw_height: usize,
-    width: usize,
-    height: usize,
-    top_margin: usize,
-    left_margin: usize,
-    black: f32,
-    range: f32,
-) -> Result<(Vec<f32>, usize)> {
-    // SAFETY: inner is valid and unpack succeeded.
-    let raw_image_ptr = unsafe { (*inner).rawdata.raw_image };
-    if raw_image_ptr.is_null() {
-        anyhow::bail!("libraw: raw_image is null");
-    }
-
-    // Get X-Trans pattern from libraw
-    // SAFETY: inner is valid and xtrans is populated for X-Trans sensors
-    let xtrans_raw = unsafe { (*inner).idata.xtrans };
-
-    // Convert to our XTransPattern format
-    let mut pattern_array = [[0u8; 6]; 6];
-    for (i, row) in xtrans_raw.iter().enumerate() {
-        for (j, &val) in row.iter().enumerate() {
-            pattern_array[i][j] = val as u8;
-        }
-    }
-    let pattern = XTransPattern::new(pattern_array);
-
-    let pixel_count = raw_width
-        .checked_mul(raw_height)
-        .expect("libraw: raw dimensions overflow");
-
-    // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
-    let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
-
-    // Normalize to 0.0-1.0 range
-    let normalized_data: Vec<f32> = raw_data
-        .iter()
-        .map(|&v| ((v as f32) - black).max(0.0) / range)
-        .collect();
-
-    let xtrans = XTransImage::with_margins(
-        &normalized_data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
-        pattern,
-    );
-
-    let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_xtrans_bilinear(&xtrans);
-    let demosaic_elapsed = demosaic_start.elapsed();
-
-    tracing::info!(
-        "X-Trans demosaicing {}x{} took {:.2}ms",
         width,
         height,
         demosaic_elapsed.as_secs_f64() * 1000.0

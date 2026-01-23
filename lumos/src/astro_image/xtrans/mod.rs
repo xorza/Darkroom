@@ -10,7 +10,71 @@
 mod integration_tests;
 mod scalar;
 
+use std::time::Instant;
+
 pub use scalar::demosaic_xtrans_bilinear;
+
+/// Process X-Trans sensor raw data and demosaic to RGB.
+///
+/// # Arguments
+/// * `raw_data` - Raw sensor data (u16 values)
+/// * `raw_width` - Width of the raw data buffer
+/// * `raw_height` - Height of the raw data buffer
+/// * `width` - Width of the active/output image area
+/// * `height` - Height of the active/output image area
+/// * `top_margin` - Top margin (offset from raw to active area)
+/// * `left_margin` - Left margin (offset from raw to active area)
+/// * `black` - Black level for normalization
+/// * `range` - Range (maximum - black) for normalization
+/// * `xtrans_pattern` - The 6x6 X-Trans CFA pattern from libraw
+///
+/// # Returns
+/// Tuple of (RGB pixels, number of channels which is always 3)
+#[allow(clippy::too_many_arguments)]
+pub fn process_xtrans(
+    raw_data: &[u16],
+    raw_width: usize,
+    raw_height: usize,
+    width: usize,
+    height: usize,
+    top_margin: usize,
+    left_margin: usize,
+    black: f32,
+    range: f32,
+    xtrans_pattern: [[u8; 6]; 6],
+) -> (Vec<f32>, usize) {
+    let pattern = XTransPattern::new(xtrans_pattern);
+
+    // Normalize to 0.0-1.0 range
+    let normalized_data: Vec<f32> = raw_data
+        .iter()
+        .map(|&v| ((v as f32) - black).max(0.0) / range)
+        .collect();
+
+    let xtrans = XTransImage::with_margins(
+        &normalized_data,
+        raw_width,
+        raw_height,
+        width,
+        height,
+        top_margin,
+        left_margin,
+        pattern,
+    );
+
+    let demosaic_start = Instant::now();
+    let rgb_pixels = demosaic_xtrans_bilinear(&xtrans);
+    let demosaic_elapsed = demosaic_start.elapsed();
+
+    tracing::info!(
+        "X-Trans demosaicing {}x{} took {:.2}ms",
+        width,
+        height,
+        demosaic_elapsed.as_secs_f64() * 1000.0
+    );
+
+    (rgb_pixels, 3)
+}
 
 /// X-Trans 6x6 color filter array pattern.
 /// Values: 0=Red, 1=Green, 2=Blue
