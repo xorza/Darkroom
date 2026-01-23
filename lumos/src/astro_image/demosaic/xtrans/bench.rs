@@ -1,7 +1,7 @@
 //! Benchmark module for X-Trans demosaic operations.
 //! Run with: cargo bench --package lumos --features bench xtrans
 
-use super::scalar::{NeighborLookup, demosaic_scalar, demosaic_simd};
+use super::scalar::{LinearNeighborLookup, NeighborLookup, demosaic_scalar, demosaic_simd_linear};
 use super::{XTransImage, XTransPattern};
 use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
@@ -130,6 +130,12 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
     let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
     let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
+    // Pre-compute linear lookups for SIMD benchmark
+    let linear_red = LinearNeighborLookup::new(&xtrans.pattern, 0, xtrans.raw_width);
+    let linear_green = LinearNeighborLookup::new(&xtrans.pattern, 1, xtrans.raw_width);
+    let linear_blue = LinearNeighborLookup::new(&xtrans.pattern, 2, xtrans.raw_width);
+    let linear_lookups = [&linear_red, &linear_green, &linear_blue];
+
     let mut group = c.benchmark_group("xtrans_demosaic");
     group.sample_size(20);
 
@@ -137,13 +143,14 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
         b.iter(|| black_box(demosaic_scalar(&xtrans, &lookups)))
     });
 
-    group.bench_function(BenchmarkId::new("bilinear", "optimized"), |b| {
-        b.iter(|| black_box(demosaic_simd(&xtrans, &lookups)))
+    // Non-parallel SIMD benchmark for fair comparison
+    group.bench_function(BenchmarkId::new("bilinear", "simd"), |b| {
+        b.iter(|| black_box(demosaic_simd_linear(&xtrans, &lookups, &linear_lookups)))
     });
 
     group.finish();
 
-    // Also benchmark with different image sizes to show parallelization benefits
+    // Also benchmark with different image sizes
     let mut size_group = c.benchmark_group("xtrans_demosaic_scaling");
     size_group.sample_size(10);
 
@@ -161,13 +168,27 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
                 pattern,
             );
 
-            let red_lookup = NeighborLookup::new(&small_xtrans.pattern, 0);
-            let green_lookup = NeighborLookup::new(&small_xtrans.pattern, 1);
-            let blue_lookup = NeighborLookup::new(&small_xtrans.pattern, 2);
-            let small_lookups = [&red_lookup, &green_lookup, &blue_lookup];
+            let small_red = NeighborLookup::new(&small_xtrans.pattern, 0);
+            let small_green = NeighborLookup::new(&small_xtrans.pattern, 1);
+            let small_blue = NeighborLookup::new(&small_xtrans.pattern, 2);
+            let small_lookups = [&small_red, &small_green, &small_blue];
+
+            let small_linear_red =
+                LinearNeighborLookup::new(&small_xtrans.pattern, 0, small_xtrans.raw_width);
+            let small_linear_green =
+                LinearNeighborLookup::new(&small_xtrans.pattern, 1, small_xtrans.raw_width);
+            let small_linear_blue =
+                LinearNeighborLookup::new(&small_xtrans.pattern, 2, small_xtrans.raw_width);
+            let small_linear_lookups = [&small_linear_red, &small_linear_green, &small_linear_blue];
 
             size_group.bench_function(BenchmarkId::new("size", size), |b| {
-                b.iter(|| black_box(demosaic_simd(&small_xtrans, &small_lookups)))
+                b.iter(|| {
+                    black_box(demosaic_simd_linear(
+                        &small_xtrans,
+                        &small_lookups,
+                        &small_linear_lookups,
+                    ))
+                })
             });
         }
     }

@@ -108,6 +108,92 @@ impl NeighborLookup {
     }
 }
 
+/// Fixed-size storage for pre-computed linear offsets at one pattern position.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct LinearOffsetList {
+    offsets: [isize; MAX_NEIGHBORS],
+    len: u8,
+    /// Pre-computed reciprocal of len for fast averaging (1.0 / len).
+    inv_len: f32,
+}
+
+impl LinearOffsetList {
+    const fn new() -> Self {
+        Self {
+            offsets: [0; MAX_NEIGHBORS],
+            len: 0,
+            inv_len: 0.0,
+        }
+    }
+
+    #[inline(always)]
+    fn push(&mut self, offset: isize) {
+        debug_assert!((self.len as usize) < MAX_NEIGHBORS);
+        self.offsets[self.len as usize] = offset;
+        self.len += 1;
+    }
+
+    #[inline(always)]
+    fn finalize(&mut self) {
+        if self.len > 0 {
+            self.inv_len = 1.0 / self.len as f32;
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn as_slice(&self) -> &[isize] {
+        &self.offsets[..self.len as usize]
+    }
+
+    #[inline(always)]
+    pub(super) fn inv_len(&self) -> f32 {
+        self.inv_len
+    }
+}
+
+/// Pre-computed linear offsets (dy * stride + dx) for fast neighbor access.
+/// These are computed once per image based on the actual stride.
+#[derive(Debug)]
+pub(super) struct LinearNeighborLookup {
+    /// Linear offsets for each pattern position.
+    offsets: [[LinearOffsetList; 6]; 6],
+}
+
+impl LinearNeighborLookup {
+    pub(super) fn new(pattern: &XTransPattern, color: u8, stride: usize) -> Self {
+        let mut offsets = [[LinearOffsetList::new(); 6]; 6];
+        let stride = stride as isize;
+
+        // For each position in the 6x6 pattern
+        for (py, row) in offsets.iter_mut().enumerate() {
+            for (px, cell) in row.iter_mut().enumerate() {
+                // Find all neighbors of the target color in 5x5 window
+                for dy in -(SEARCH_RADIUS as i32)..=(SEARCH_RADIUS as i32) {
+                    for dx in -(SEARCH_RADIUS as i32)..=(SEARCH_RADIUS as i32) {
+                        // Neighbor position in pattern (with wrapping for lookup)
+                        let ny = (py as i32 + dy).rem_euclid(6) as usize;
+                        let nx = (px as i32 + dx).rem_euclid(6) as usize;
+
+                        if pattern.pattern[ny][nx] == color {
+                            // Pre-compute linear offset
+                            let linear_offset = dy as isize * stride + dx as isize;
+                            cell.push(linear_offset);
+                        }
+                    }
+                }
+                cell.finalize();
+            }
+        }
+
+        Self { offsets }
+    }
+
+    #[inline(always)]
+    pub(super) fn get(&self, pattern_y: usize, pattern_x: usize) -> &LinearOffsetList {
+        &self.offsets[pattern_y % 6][pattern_x % 6]
+    }
+}
+
 /// Minimum image width to use SIMD (need enough pixels for vectorized loads).
 const MIN_SIMD_WIDTH: usize = 8;
 
@@ -132,12 +218,20 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
     let use_simd = is_x86_feature_detected!("sse4.1") && xtrans.width >= MIN_SIMD_WIDTH;
 
-    if use_parallel {
-        tracing::info!("Using parallel demosaicing");
-        demosaic_parallel(xtrans, &lookups, use_simd)
-    } else if use_simd {
-        tracing::info!("Using simd demosaicing");
-        demosaic_simd(xtrans, &lookups)
+    if use_parallel || use_simd {
+        // Create linear lookups once for SIMD path
+        let linear_red = LinearNeighborLookup::new(&xtrans.pattern, 0, xtrans.raw_width);
+        let linear_green = LinearNeighborLookup::new(&xtrans.pattern, 1, xtrans.raw_width);
+        let linear_blue = LinearNeighborLookup::new(&xtrans.pattern, 2, xtrans.raw_width);
+        let linear_lookups = [&linear_red, &linear_green, &linear_blue];
+
+        if use_parallel {
+            tracing::info!("Using parallel demosaicing");
+            demosaic_parallel_linear(xtrans, &lookups, &linear_lookups, use_simd)
+        } else {
+            tracing::info!("Using simd demosaicing");
+            demosaic_simd_linear(xtrans, &lookups, &linear_lookups)
+        }
     } else {
         tracing::info!("Using scalar demosaicing");
         demosaic_scalar(xtrans, &lookups)
@@ -154,10 +248,18 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
     let use_simd = xtrans.width >= MIN_SIMD_WIDTH;
 
-    if use_parallel {
-        demosaic_parallel(xtrans, &lookups, use_simd)
-    } else if use_simd {
-        demosaic_simd(xtrans, &lookups)
+    if use_parallel || use_simd {
+        // Create linear lookups once for SIMD path
+        let linear_red = LinearNeighborLookup::new(&xtrans.pattern, 0, xtrans.raw_width);
+        let linear_green = LinearNeighborLookup::new(&xtrans.pattern, 1, xtrans.raw_width);
+        let linear_blue = LinearNeighborLookup::new(&xtrans.pattern, 2, xtrans.raw_width);
+        let linear_lookups = [&linear_red, &linear_green, &linear_blue];
+
+        if use_parallel {
+            demosaic_parallel_linear(xtrans, &lookups, &linear_lookups, use_simd)
+        } else {
+            demosaic_simd_linear(xtrans, &lookups, &linear_lookups)
+        }
     } else {
         demosaic_scalar(xtrans, &lookups)
     }
@@ -179,18 +281,16 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     }
 }
 
-/// Parallel row-based demosaicing.
-/// Processes rows in parallel using rayon, with each thread writing to its own
-/// row buffer to avoid false cache sharing.
-fn demosaic_parallel(
+/// Parallel row-based demosaicing with pre-computed linear lookups.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn demosaic_parallel_linear(
     xtrans: &XTransImage,
     lookups: &[&NeighborLookup; 3],
+    linear_lookups: &[&LinearNeighborLookup; 3],
     use_simd: bool,
 ) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
-    // Process rows in parallel - each row is a separate chunk
-    // This ensures no false sharing since each thread writes to different cache lines
     let row_stride = xtrans.width * 3;
     rgb.par_chunks_mut(row_stride)
         .enumerate()
@@ -198,14 +298,24 @@ fn demosaic_parallel(
             if use_simd {
                 #[cfg(target_arch = "x86_64")]
                 unsafe {
-                    super::simd_sse4::process_row_simd_sse4(xtrans, y, row_rgb, lookups);
+                    super::simd_sse4::process_row_simd_linear(
+                        xtrans,
+                        y,
+                        row_rgb,
+                        lookups,
+                        linear_lookups,
+                    );
                 }
                 #[cfg(target_arch = "aarch64")]
                 unsafe {
-                    super::simd_neon::process_row_simd_neon(xtrans, y, row_rgb, lookups);
+                    super::simd_neon::process_row_simd_linear(
+                        xtrans,
+                        y,
+                        row_rgb,
+                        lookups,
+                        linear_lookups,
+                    );
                 }
-                #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-                process_row(xtrans, y, row_rgb, lookups);
             } else {
                 process_row(xtrans, y, row_rgb, lookups);
             }
@@ -214,32 +324,59 @@ fn demosaic_parallel(
     rgb
 }
 
-/// Sequential SIMD demosaicing for medium-sized images.
+/// Parallel row-based demosaicing (non-SIMD fallback).
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn demosaic_parallel(
+    xtrans: &XTransImage,
+    lookups: &[&NeighborLookup; 3],
+    _use_simd: bool,
+) -> Vec<f32> {
+    let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
+
+    let row_stride = xtrans.width * 3;
+    rgb.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_rgb)| {
+            process_row(xtrans, y, row_rgb, lookups);
+        });
+
+    rgb
+}
+
+/// Sequential SIMD demosaicing with pre-computed linear lookups (non-parallel).
 #[cfg(target_arch = "x86_64")]
-pub(super) fn demosaic_simd(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
+pub(super) fn demosaic_simd_linear(
+    xtrans: &XTransImage,
+    lookups: &[&NeighborLookup; 3],
+    linear_lookups: &[&LinearNeighborLookup; 3],
+) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     for y in 0..xtrans.height {
         let row_start = y * xtrans.width * 3;
         let row_rgb = &mut rgb[row_start..row_start + xtrans.width * 3];
         unsafe {
-            super::simd_sse4::process_row_simd_sse4(xtrans, y, row_rgb, lookups);
+            super::simd_sse4::process_row_simd_linear(xtrans, y, row_rgb, lookups, linear_lookups);
         }
     }
 
     rgb
 }
 
-/// Sequential SIMD demosaicing for medium-sized images.
+/// Sequential SIMD demosaicing with pre-computed linear lookups (non-parallel).
 #[cfg(target_arch = "aarch64")]
-pub(super) fn demosaic_simd(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
+pub(super) fn demosaic_simd_linear(
+    xtrans: &XTransImage,
+    lookups: &[&NeighborLookup; 3],
+    linear_lookups: &[&LinearNeighborLookup; 3],
+) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     for y in 0..xtrans.height {
         let row_start = y * xtrans.width * 3;
         let row_rgb = &mut rgb[row_start..row_start + xtrans.width * 3];
         unsafe {
-            super::simd_neon::process_row_simd_neon(xtrans, y, row_rgb, lookups);
+            super::simd_neon::process_row_simd_linear(xtrans, y, row_rgb, lookups, linear_lookups);
         }
     }
 
@@ -461,6 +598,7 @@ mod tests {
     #[test]
     fn test_parallel_vs_scalar_consistency() {
         // Create an image large enough to trigger parallel path
+        // Use demosaic_xtrans_bilinear which will choose parallel/SIMD path
         let size = 256;
         let data: Vec<f32> = (0..size * size).map(|i| (i % 256) as f32 / 255.0).collect();
         let pattern = test_pattern();
@@ -471,14 +609,19 @@ mod tests {
         let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
         let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
-        let parallel_result = demosaic_parallel(&xtrans, &lookups, false);
+        // Compare optimized path against scalar
+        let optimized_result = demosaic_xtrans_bilinear(&xtrans);
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
-        assert_eq!(parallel_result.len(), scalar_result.len());
-        for (i, (p, s)) in parallel_result.iter().zip(scalar_result.iter()).enumerate() {
+        assert_eq!(optimized_result.len(), scalar_result.len());
+        for (i, (p, s)) in optimized_result
+            .iter()
+            .zip(scalar_result.iter())
+            .enumerate()
+        {
             assert!(
-                (p - s).abs() < 1e-6,
-                "Mismatch at index {}: parallel={}, scalar={}",
+                (*p - *s).abs() < 1e-5,
+                "Mismatch at index {}: optimized={}, scalar={}",
                 i,
                 p,
                 s
@@ -526,6 +669,12 @@ mod tests {
         let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
         let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
+        // Create linear lookups
+        let linear_red = LinearNeighborLookup::new(&xtrans.pattern, 0, xtrans.raw_width);
+        let linear_green = LinearNeighborLookup::new(&xtrans.pattern, 1, xtrans.raw_width);
+        let linear_blue = LinearNeighborLookup::new(&xtrans.pattern, 2, xtrans.raw_width);
+        let linear_lookups = [&linear_red, &linear_green, &linear_blue];
+
         // Get scalar result
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
@@ -536,14 +685,20 @@ mod tests {
                 let row_start = y * size * 3;
                 let row_rgb = &mut simd_result[row_start..row_start + size * 3];
                 unsafe {
-                    simd_sse4::process_row_simd_sse4(&xtrans, y, row_rgb, &lookups);
+                    simd_sse4::process_row_simd_linear(
+                        &xtrans,
+                        y,
+                        row_rgb,
+                        &lookups,
+                        &linear_lookups,
+                    );
                 }
             }
 
             assert_eq!(simd_result.len(), scalar_result.len());
             for (i, (simd, scalar)) in simd_result.iter().zip(scalar_result.iter()).enumerate() {
                 assert!(
-                    (simd - scalar).abs() < 1e-5,
+                    (*simd - *scalar).abs() < 1e-5,
                     "SIMD vs scalar mismatch at index {}: simd={}, scalar={}",
                     i,
                     simd,
@@ -570,7 +725,8 @@ mod tests {
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
         if is_x86_feature_detected!("sse4.1") {
-            let simd_parallel_result = demosaic_parallel(&xtrans, &lookups, true);
+            // demosaic_xtrans_bilinear will use parallel SIMD path for large images
+            let simd_parallel_result = demosaic_xtrans_bilinear(&xtrans);
 
             assert_eq!(simd_parallel_result.len(), scalar_result.len());
             for (i, (simd, scalar)) in simd_parallel_result
@@ -579,7 +735,7 @@ mod tests {
                 .enumerate()
             {
                 assert!(
-                    (simd - scalar).abs() < 1e-5,
+                    (*simd - *scalar).abs() < 1e-5,
                     "SIMD parallel vs scalar mismatch at index {}: simd={}, scalar={}",
                     i,
                     simd,
