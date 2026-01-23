@@ -215,11 +215,15 @@ impl AstroImage {
     /// Calibrate a light frame using calibration masters.
     ///
     /// Applies the standard calibration formula:
-    /// 1. Subtract master dark (removes thermal noise + bias)
-    /// 2. Divide by normalized master flat (corrects vignetting and dust)
+    /// 1. Subtract master bias (removes readout noise)
+    /// 2. Subtract master dark (removes thermal noise)
+    /// 3. Divide by normalized master flat (corrects vignetting and dust)
+    ///
+    /// Note: If using a dark frame that was NOT bias-subtracted, skip the separate
+    /// bias subtraction as the dark already includes the bias signal.
     ///
     /// # Arguments
-    /// * `masters` - Calibration masters containing optional dark and flat frames
+    /// * `masters` - Calibration masters containing optional bias, dark, and flat frames
     ///
     /// # Returns
     /// A new calibrated `AstroImage`
@@ -229,7 +233,20 @@ impl AstroImage {
     pub fn calibrate(&self, masters: &crate::CalibrationMasters) -> AstroImage {
         let mut result = self.clone();
 
-        // Subtract master dark (removes thermal noise + bias)
+        // Subtract master bias (removes readout noise)
+        if let Some(ref bias) = masters.master_bias {
+            assert!(
+                bias.dimensions == self.dimensions,
+                "Bias frame dimensions {:?} don't match light frame {:?}",
+                bias.dimensions,
+                self.dimensions
+            );
+            for (pixel, bias_pixel) in result.pixels.iter_mut().zip(bias.pixels.iter()) {
+                *pixel -= bias_pixel;
+            }
+        }
+
+        // Subtract master dark (removes thermal noise)
         if let Some(ref dark) = masters.master_dark {
             assert!(
                 dark.dimensions == self.dimensions,
@@ -483,6 +500,33 @@ mod tests {
     }
 
     #[test]
+    fn test_calibrate_bias_subtraction() {
+        use crate::{CalibrationMasters, StackingMethod};
+
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![100.0, 200.0, 150.0, 250.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        let bias = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![5.0, 5.0, 5.0, 5.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let masters = CalibrationMasters {
+            master_dark: None,
+            master_flat: None,
+            master_bias: Some(bias),
+            method: StackingMethod::Median,
+        };
+
+        let calibrated = light.calibrate(&masters);
+
+        assert_eq!(calibrated.pixels, vec![95.0, 195.0, 145.0, 245.0]);
+    }
+
+    #[test]
     fn test_calibrate_dark_subtraction() {
         use crate::{CalibrationMasters, StackingMethod};
 
@@ -548,7 +592,12 @@ mod tests {
 
         let light = AstroImage {
             metadata: AstroImageMetadata::default(),
-            pixels: vec![110.0, 220.0, 165.0, 275.0],
+            pixels: vec![115.0, 225.0, 170.0, 280.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        let bias = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![5.0, 5.0, 5.0, 5.0],
             dimensions: ImageDimensions::new(2, 2, 1),
         };
         let dark = AstroImage {
@@ -565,12 +614,13 @@ mod tests {
         let masters = CalibrationMasters {
             master_dark: Some(dark),
             master_flat: Some(flat),
-            master_bias: None,
+            master_bias: Some(bias),
             method: StackingMethod::Median,
         };
 
         let calibrated = light.calibrate(&masters);
 
+        // After bias: [110, 220, 165, 275]
         // After dark: [100, 200, 150, 250]
         // After flat (mean=1.0): [125, 200, 125, 250]
         assert!((calibrated.pixels[0] - 125.0).abs() < 0.01);
