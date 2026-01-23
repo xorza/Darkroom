@@ -1,7 +1,7 @@
 //! Benchmark module for X-Trans demosaic operations.
 //! Run with: cargo bench --package lumos --features bench xtrans
 
-use super::scalar::{NeighborLookup, demosaic_scalar, demosaic_xtrans_bilinear};
+use super::scalar::{NeighborLookup, demosaic_scalar, demosaic_simd};
 use super::{XTransImage, XTransPattern};
 use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
@@ -138,7 +138,7 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
     });
 
     group.bench_function(BenchmarkId::new("bilinear", "optimized"), |b| {
-        b.iter(|| black_box(demosaic_xtrans_bilinear(&xtrans)))
+        b.iter(|| black_box(demosaic_simd(&xtrans, &lookups)))
     });
 
     group.finish();
