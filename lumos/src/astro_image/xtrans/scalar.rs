@@ -4,7 +4,12 @@
 //! It's simpler and faster than advanced algorithms like Markesteijn,
 //! but produces lower quality results (may show artifacts).
 
+use rayon::prelude::*;
+
 use super::XTransImage;
+
+/// Minimum image size to use parallel processing (avoids overhead for small images).
+const MIN_PARALLEL_SIZE: usize = 128;
 
 /// Bilinear demosaicing for X-Trans CFA.
 ///
@@ -12,33 +17,73 @@ use super::XTransImage;
 /// of the same color. This is a simple approach that works but may produce
 /// artifacts in fine detail areas.
 ///
+/// Uses rayon for parallel row processing on large images to avoid false
+/// cache sharing (each thread writes to separate cache lines).
+///
 /// Returns RGB interleaved data: [R0, G0, B0, R1, G1, B1, ...]
 pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
+    let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
+
+    if use_parallel {
+        demosaic_parallel(xtrans)
+    } else {
+        demosaic_scalar(xtrans)
+    }
+}
+
+/// Parallel row-based demosaicing.
+/// Processes rows in parallel using rayon, with each thread writing to its own
+/// row buffer to avoid false cache sharing.
+fn demosaic_parallel(xtrans: &XTransImage) -> Vec<f32> {
+    let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
+
+    // Process rows in parallel - each row is a separate chunk
+    // This ensures no false sharing since each thread writes to different cache lines
+    let row_stride = xtrans.width * 3;
+    rgb.par_chunks_mut(row_stride)
+        .enumerate()
+        .for_each(|(y, row_rgb)| {
+            process_row(xtrans, y, row_rgb);
+        });
+
+    rgb
+}
+
+/// Sequential scalar demosaicing for small images.
+fn demosaic_scalar(xtrans: &XTransImage) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     for y in 0..xtrans.height {
-        let raw_y = y + xtrans.top_margin;
-
-        for x in 0..xtrans.width {
-            let raw_x = x + xtrans.left_margin;
-            let rgb_idx = (y * xtrans.width + x) * 3;
-
-            let color = xtrans.pattern.color_at(raw_y, raw_x);
-            let val = xtrans.data[raw_y * xtrans.raw_width + raw_x];
-
-            // Set the known color channel
-            rgb[rgb_idx + color as usize] = val;
-
-            // Interpolate the other two channels
-            for c in 0u8..3 {
-                if c != color {
-                    rgb[rgb_idx + c as usize] = interpolate_channel(xtrans, raw_x, raw_y, c);
-                }
-            }
-        }
+        let row_start = y * xtrans.width * 3;
+        let row_rgb = &mut rgb[row_start..row_start + xtrans.width * 3];
+        process_row(xtrans, y, row_rgb);
     }
 
     rgb
+}
+
+/// Process a single row of the image.
+#[inline]
+fn process_row(xtrans: &XTransImage, y: usize, row_rgb: &mut [f32]) {
+    let raw_y = y + xtrans.top_margin;
+
+    for x in 0..xtrans.width {
+        let raw_x = x + xtrans.left_margin;
+        let rgb_idx = x * 3;
+
+        let color = xtrans.pattern.color_at(raw_y, raw_x);
+        let val = xtrans.data[raw_y * xtrans.raw_width + raw_x];
+
+        // Set the known color channel
+        row_rgb[rgb_idx + color as usize] = val;
+
+        // Interpolate the other two channels
+        for c in 0u8..3 {
+            if c != color {
+                row_rgb[rgb_idx + c as usize] = interpolate_channel(xtrans, raw_x, raw_y, c);
+            }
+        }
+    }
 }
 
 /// Interpolate a specific color channel at position (x, y).
