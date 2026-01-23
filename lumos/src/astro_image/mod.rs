@@ -4,7 +4,7 @@ mod hot_pixels;
 pub(crate) mod libraw;
 mod sensor;
 
-pub use hot_pixels::{HotPixelMap, correct_hot_pixels};
+pub use hot_pixels::HotPixelMap;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
@@ -307,11 +307,24 @@ impl AstroImage {
                 });
         }
 
-        AstroImage {
+        let mut result = AstroImage {
             metadata: self.metadata.clone(),
             pixels,
             dimensions: self.dimensions,
+        };
+
+        // Correct hot pixels (replace with median of neighbors)
+        if let Some(ref hot_pixel_map) = masters.hot_pixel_map {
+            assert!(
+                hot_pixel_map.dimensions == self.dimensions,
+                "Hot pixel map dimensions {:?} don't match light frame {:?}",
+                hot_pixel_map.dimensions,
+                self.dimensions
+            );
+            hot_pixel_map.correct(&mut result);
         }
+
+        result
     }
 
     /// Load all astronomical images from a directory.

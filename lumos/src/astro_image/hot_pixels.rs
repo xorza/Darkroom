@@ -101,51 +101,52 @@ impl HotPixelMap {
     }
 }
 
-/// Correct hot pixels in an image by replacing them with median of 8-connected neighbors.
-///
-/// # Arguments
-/// * `image` - The image to correct (modified in place)
-/// * `hot_pixel_map` - Map of hot pixels to correct
-///
-/// # Panics
-/// Panics if hot_pixel_map dimensions don't match image dimensions.
-pub fn correct_hot_pixels(image: &mut AstroImage, hot_pixel_map: &HotPixelMap) {
-    assert!(
-        image.dimensions == hot_pixel_map.dimensions,
-        "Hot pixel map dimensions {:?} don't match image {:?}",
-        hot_pixel_map.dimensions,
-        image.dimensions
-    );
+impl HotPixelMap {
+    /// Correct hot pixels in an image by replacing them with median of 8-connected neighbors.
+    ///
+    /// # Arguments
+    /// * `image` - The image to correct (modified in place)
+    ///
+    /// # Panics
+    /// Panics if image dimensions don't match hot pixel map dimensions.
+    pub fn correct(&self, image: &mut AstroImage) {
+        assert!(
+            image.dimensions == self.dimensions,
+            "Image dimensions {:?} don't match hot pixel map {:?}",
+            image.dimensions,
+            self.dimensions
+        );
 
-    let width = image.dimensions.width;
-    let height = image.dimensions.height;
-    let channels = image.dimensions.channels;
-    let row_stride = width * channels;
+        let width = image.dimensions.width;
+        let height = image.dimensions.height;
+        let channels = image.dimensions.channels;
+        let row_stride = width * channels;
 
-    // Collect corrections first (can't mutate while iterating)
-    // Process rows in parallel - each row is independent
-    let corrections: Vec<(usize, f32)> = (0..height)
-        .into_par_iter()
-        .fold(Vec::new, |mut local_corrections, y| {
-            for x in 0..width {
-                for c in 0..channels {
-                    let idx = y * row_stride + x * channels + c;
-                    if hot_pixel_map.is_hot(idx) {
-                        let replacement = median_of_neighbors(image, x, y, c);
-                        local_corrections.push((idx, replacement));
+        // Collect corrections first (can't mutate while iterating)
+        // Process rows in parallel - each row is independent
+        let corrections: Vec<(usize, f32)> = (0..height)
+            .into_par_iter()
+            .fold(Vec::new, |mut local_corrections, y| {
+                for x in 0..width {
+                    for c in 0..channels {
+                        let idx = y * row_stride + x * channels + c;
+                        if self.is_hot(idx) {
+                            let replacement = median_of_neighbors(image, x, y, c);
+                            local_corrections.push((idx, replacement));
+                        }
                     }
                 }
-            }
-            local_corrections
-        })
-        .reduce(Vec::new, |mut a, b| {
-            a.extend(b);
-            a
-        });
+                local_corrections
+            })
+            .reduce(Vec::new, |mut a, b| {
+                a.extend(b);
+                a
+            });
 
-    // Apply corrections sequentially (hot pixels are sparse, so this is fast)
-    for (idx, value) in corrections {
-        image.pixels[idx] = value;
+        // Apply corrections sequentially (hot pixels are sparse, so this is fast)
+        for (idx, value) in corrections {
+            image.pixels[idx] = value;
+        }
     }
 }
 
@@ -256,7 +257,7 @@ mod tests {
             count: 1,
         };
 
-        correct_hot_pixels(&mut image, &hot_map);
+        hot_map.correct(&mut image);
 
         // Center should be replaced with median of 8 neighbors
         // Neighbors: 10, 20, 30, 40, 50, 60, 70, 80 -> median = 45
@@ -287,7 +288,7 @@ mod tests {
             count: 1,
         };
 
-        correct_hot_pixels(&mut image, &hot_map);
+        hot_map.correct(&mut image);
 
         // Corner has only 3 neighbors: 20, 40, 50 -> median = 40
         let corner = image.pixels[0];
@@ -317,7 +318,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "don't match")]
-    fn test_correct_hot_pixels_dimension_mismatch() {
+    fn test_correct_dimension_mismatch() {
         let image_pixels = vec![10.0; 9];
         let mut image = make_test_image(3, 3, 1, image_pixels);
 
@@ -327,6 +328,6 @@ mod tests {
             count: 0,
         };
 
-        correct_hot_pixels(&mut image, &hot_map);
+        hot_map.correct(&mut image);
     }
 }
