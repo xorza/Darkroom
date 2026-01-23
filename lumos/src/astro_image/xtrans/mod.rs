@@ -204,6 +204,17 @@ mod tests {
     use super::*;
 
     // Standard X-Trans pattern (one common variant)
+    fn test_pattern_array() -> [[u8; 6]; 6] {
+        [
+            [1, 0, 1, 1, 2, 1], // G R G G B G
+            [2, 1, 2, 0, 1, 0], // B G B R G R
+            [1, 2, 1, 1, 0, 1], // G B G G R G
+            [1, 2, 1, 1, 0, 1], // G B G G R G
+            [0, 1, 0, 2, 1, 2], // R G R B G B
+            [1, 0, 1, 1, 2, 1], // G R G G B G
+        ]
+    }
+
     fn test_pattern() -> XTransPattern {
         XTransPattern::new([
             [1, 0, 1, 1, 2, 1], // G R G G B G
@@ -267,5 +278,112 @@ mod tests {
         let data = vec![0.5f32; 30]; // Should be 36
         let pattern = test_pattern();
         XTransImage::with_margins(&data, 6, 6, 6, 6, 0, 0, pattern);
+    }
+
+    #[test]
+    fn test_process_xtrans_output_size() {
+        // 12x12 raw data, 6x6 active area
+        let raw_data: Vec<u16> = vec![1000; 12 * 12];
+        let (rgb, channels) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            0.0,
+            4096.0,
+            test_pattern_array(),
+        );
+
+        assert_eq!(channels, 3);
+        assert_eq!(rgb.len(), 6 * 6 * 3); // width * height * channels
+    }
+
+    #[test]
+    fn test_process_xtrans_normalization() {
+        // Test that black level subtraction and range normalization work
+        let black = 256.0;
+        let maximum = 4096.0;
+        let range = maximum - black;
+
+        // Create data where all values equal black + range/2 = 2176
+        // Should normalize to 0.5
+        let mid_value = (black + range / 2.0) as u16;
+        let raw_data: Vec<u16> = vec![mid_value; 12 * 12];
+
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            black,
+            range,
+            test_pattern_array(),
+        );
+
+        // All output values should be around 0.5 (interpolated from 0.5 neighbors)
+        for &val in &rgb {
+            assert!((val - 0.5).abs() < 0.01, "Expected ~0.5, got {}", val);
+        }
+    }
+
+    #[test]
+    fn test_process_xtrans_clamps_below_black() {
+        // Values below black level should be clamped to 0
+        let black = 256.0;
+        let range = 4096.0 - black;
+
+        // All values below black level
+        let raw_data: Vec<u16> = vec![100; 12 * 12];
+
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            black,
+            range,
+            test_pattern_array(),
+        );
+
+        // All output values should be 0 (clamped)
+        for &val in &rgb {
+            assert_eq!(val, 0.0, "Expected 0.0 for values below black level");
+        }
+    }
+
+    #[test]
+    fn test_process_xtrans_full_range() {
+        // Test that maximum value normalizes to 1.0
+        let black = 0.0;
+        let range = 65535.0;
+
+        let raw_data: Vec<u16> = vec![65535; 12 * 12];
+
+        let (rgb, _) = process_xtrans(
+            &raw_data,
+            12,
+            12,
+            6,
+            6,
+            3,
+            3,
+            black,
+            range,
+            test_pattern_array(),
+        );
+
+        // All output values should be 1.0
+        for &val in &rgb {
+            assert!((val - 1.0).abs() < 0.001, "Expected 1.0, got {}", val);
+        }
     }
 }
