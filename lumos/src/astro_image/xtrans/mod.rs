@@ -5,10 +5,21 @@
 //!
 //! The X-Trans pattern has ~55% green, ~22.5% red, and ~22.5% blue pixels arranged
 //! so that every row and column contains all three colors.
+//!
+//! # SIMD Support
+//! - x86_64: SSE4.1 acceleration when available
+//! - aarch64: NEON acceleration when available
+//! - Fallback: Scalar implementation on all platforms
 
 #[cfg(test)]
 mod integration_tests;
 mod scalar;
+
+#[cfg(target_arch = "x86_64")]
+mod simd_sse4;
+
+#[cfg(target_arch = "aarch64")]
+mod simd_neon;
 
 use std::time::Instant;
 
