@@ -1,6 +1,6 @@
 use crate::common::conversion::Convert;
 use crate::common::test_utils::{
-    ensure_test_output_dir, load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output,
+    load_lena_rgba_f32_895x551, load_lena_rgba_u8_895x551, test_output_path,
 };
 use crate::prelude::*;
 
@@ -61,26 +61,28 @@ fn read_case_insensitive_extension() {
 
 #[test]
 fn save_and_reload_png() {
-    ensure_test_output_dir();
     let original = load_lena_rgba_u8_895x551()
         .convert(ColorFormat::RGB_U8)
         .unwrap();
-    original.save_file(test_output("save_reload.png")).unwrap();
+    original
+        .save_file(test_output_path("save_reload.png"))
+        .unwrap();
 
-    let reloaded = Image::read_file(test_output("save_reload.png")).unwrap();
+    let reloaded = Image::read_file(test_output_path("save_reload.png")).unwrap();
     assert_eq!(original.desc, reloaded.desc);
     assert_eq!(original.bytes, reloaded.bytes);
 }
 
 #[test]
 fn save_and_reload_tiff() {
-    ensure_test_output_dir();
     let original = load_lena_rgba_f32_895x551()
         .convert(ColorFormat::RGB_F32)
         .unwrap();
-    original.save_file(test_output("save_reload.tiff")).unwrap();
+    original
+        .save_file(test_output_path("save_reload.tiff"))
+        .unwrap();
 
-    let reloaded = Image::read_file(test_output("save_reload.tiff")).unwrap();
+    let reloaded = Image::read_file(test_output_path("save_reload.tiff")).unwrap();
     assert_eq!(original.desc().width, reloaded.desc().width);
     assert_eq!(original.desc().height, reloaded.desc().height);
     assert_eq!(original.desc().color_format, reloaded.desc().color_format);
@@ -316,18 +318,29 @@ fn convert_from_float_denormalizes() {
 
 #[test]
 fn convert_and_save_various_formats() {
-    ensure_test_output_dir();
     let img = load_lena_rgba_u8_895x551();
 
     // Test various format conversions
     let conversions = [
-        (ColorFormat::GRAY_U8, test_output("conv-gray-u8.tiff")),
-        (ColorFormat::GRAY_U16, test_output("conv-gray-u16.tiff")),
-        (ColorFormat::RGB_U8, test_output("conv-rgb-u8.tiff")),
-        (ColorFormat::RGB_U16, test_output("conv-rgb-u16.tiff")),
-        (ColorFormat::RGBA_U16, test_output("conv-rgba-u16.tiff")),
-        (ColorFormat::RGBA_F32, test_output("conv-rgba-f32.tiff")),
-        (ColorFormat::GRAY_ALPHA_U8, test_output("conv-ga-u8.tiff")),
+        (ColorFormat::GRAY_U8, test_output_path("conv-gray-u8.tiff")),
+        (
+            ColorFormat::GRAY_U16,
+            test_output_path("conv-gray-u16.tiff"),
+        ),
+        (ColorFormat::RGB_U8, test_output_path("conv-rgb-u8.tiff")),
+        (ColorFormat::RGB_U16, test_output_path("conv-rgb-u16.tiff")),
+        (
+            ColorFormat::RGBA_U16,
+            test_output_path("conv-rgba-u16.tiff"),
+        ),
+        (
+            ColorFormat::RGBA_F32,
+            test_output_path("conv-rgba-f32.tiff"),
+        ),
+        (
+            ColorFormat::GRAY_ALPHA_U8,
+            test_output_path("conv-ga-u8.tiff"),
+        ),
     ];
 
     for (format, path) in conversions {

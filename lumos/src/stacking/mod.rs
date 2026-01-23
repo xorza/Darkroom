@@ -246,6 +246,7 @@ mod tests {
         assert!(!master_flat.pixels.is_empty());
 
         let img: imaginarium::Image = master_flat.into();
-        img.save_file("master_flat.tiff").unwrap();
+        img.save_file(common::test_utils::test_output_path("master_flat.tiff"))
+            .unwrap();
     }
 }

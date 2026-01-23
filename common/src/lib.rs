@@ -19,6 +19,7 @@ pub mod shared;
 pub mod shared_fn;
 pub mod slot;
 pub mod string_ext;
+pub mod test_utils;
 pub mod toggle;
 pub mod yaml_format;
 
