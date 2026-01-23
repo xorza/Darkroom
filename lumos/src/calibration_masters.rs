@@ -16,6 +16,8 @@ pub struct CalibrationMasters {
     pub master_flat: Option<AstroImage>,
     /// Master bias frame
     pub master_bias: Option<AstroImage>,
+    /// Stacking method used to create the masters
+    pub method: StackingMethod,
 }
 
 impl CalibrationMasters {
@@ -50,31 +52,32 @@ impl CalibrationMasters {
             master_dark,
             master_flat,
             master_bias,
+            method,
         })
     }
 
     /// Save all master frames to the specified directory as f32 TIFF files.
     ///
-    /// Files are saved as:
-    /// - master_dark.tiff
-    /// - master_flat.tiff
-    /// - master_bias.tiff
+    /// Files are saved as (e.g., for median stacking):
+    /// - master_dark_median.tiff
+    /// - master_flat_median.tiff
+    /// - master_bias_median.tiff
     pub fn save_to_directory<P: AsRef<Path>>(&self, dir: P) -> Result<()> {
         let dir = dir.as_ref();
         fs::create_dir_all(dir)?;
 
         if let Some(ref dark) = self.master_dark {
-            let path = dir.join("master_dark.tiff");
+            let path = dir.join(format!("master_dark_{}.tiff", self.method));
             Self::save_as_tiff(dark.clone(), &path)?;
         }
 
         if let Some(ref flat) = self.master_flat {
-            let path = dir.join("master_flat.tiff");
+            let path = dir.join(format!("master_flat_{}.tiff", self.method));
             Self::save_as_tiff(flat.clone(), &path)?;
         }
 
         if let Some(ref bias) = self.master_bias {
-            let path = dir.join("master_bias.tiff");
+            let path = dir.join(format!("master_bias_{}.tiff", self.method));
             Self::save_as_tiff(bias.clone(), &path)?;
         }
 
@@ -136,13 +139,13 @@ mod tests {
 
         // Verify files were created
         if masters.master_dark.is_some() {
-            assert!(output_dir.join("master_dark.tiff").exists());
+            assert!(output_dir.join("master_dark_median.tiff").exists());
         }
         if masters.master_flat.is_some() {
-            assert!(output_dir.join("master_flat.tiff").exists());
+            assert!(output_dir.join("master_flat_median.tiff").exists());
         }
         if masters.master_bias.is_some() {
-            assert!(output_dir.join("master_bias.tiff").exists());
+            assert!(output_dir.join("master_bias_median.tiff").exists());
         }
     }
 }

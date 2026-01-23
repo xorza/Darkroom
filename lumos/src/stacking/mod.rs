@@ -31,6 +31,18 @@ pub enum StackingMethod {
     SigmaClippedMean(SigmaClipConfig),
 }
 
+impl std::fmt::Display for StackingMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StackingMethod::Mean => write!(f, "mean"),
+            StackingMethod::Median => write!(f, "median"),
+            StackingMethod::SigmaClippedMean(config) => {
+                write!(f, "sigma{:.1}", config.sigma)
+            }
+        }
+    }
+}
+
 /// Configuration for sigma-clipped mean stacking.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SigmaClipConfig {
