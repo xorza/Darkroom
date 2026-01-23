@@ -176,6 +176,8 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::init_tracing;
+
     use super::*;
     use std::path::PathBuf;
 
@@ -244,7 +246,7 @@ mod tests {
             return;
         };
 
-        crate::test_utils::init_tracing();
+        init_tracing();
 
         let result = load_raw(&path);
         assert!(result.is_ok(), "Failed to load {:?}: {:?}", path, result);

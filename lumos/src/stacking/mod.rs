@@ -83,6 +83,8 @@ pub fn stack_frames(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::load_calibration_images;
+
     use super::*;
 
     #[test]
@@ -93,8 +95,6 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_stack_flats_from_env() {
-        use crate::test_utils::load_calibration_images;
-
         let Some(flats) = load_calibration_images("Flats") else {
             eprintln!("LUMOS_CALIBRATION_DIR not set or Flats dir missing, skipping test");
             return;

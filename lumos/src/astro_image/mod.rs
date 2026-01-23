@@ -359,6 +359,8 @@ impl From<Image> for AstroImage {
 
 #[cfg(test)]
 mod tests {
+    use crate::test_utils::{calibration_dir, init_tracing};
+
     use super::*;
 
     #[test]
@@ -658,9 +660,7 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_single_raw_from_env() {
-        use crate::test_utils::calibration_dir;
-
-        crate::test_utils::init_tracing();
+        init_tracing();
 
         let Some(cal_dir) = calibration_dir() else {
             eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
