@@ -4,6 +4,45 @@ use fitsio::hdu::HduInfo;
 use fitsio::images::ImageType;
 use std::path::Path;
 
+/// Image dimensions: width, height, and number of channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct ImageDimensions {
+    /// Image width in pixels
+    pub width: usize,
+    /// Image height in pixels
+    pub height: usize,
+    /// Number of channels (1 for grayscale, 3 for RGB)
+    pub channels: usize,
+}
+
+impl ImageDimensions {
+    pub fn new(width: usize, height: usize, channels: usize) -> Self {
+        assert!(width > 0, "Width must be positive");
+        assert!(height > 0, "Height must be positive");
+        assert!(channels > 0, "Channels must be positive");
+        Self {
+            width,
+            height,
+            channels,
+        }
+    }
+
+    /// Total number of pixel values (width * height * channels).
+    pub fn pixel_count(&self) -> usize {
+        self.width * self.height * self.channels
+    }
+
+    /// Check if this is a grayscale image (1 channel).
+    pub fn is_grayscale(&self) -> bool {
+        self.channels == 1
+    }
+
+    /// Check if this is an RGB image (3 channels).
+    pub fn is_rgb(&self) -> bool {
+        self.channels == 3
+    }
+}
+
 /// Metadata extracted from FITS file headers.
 #[derive(Debug, Clone, Default)]
 pub struct AstroImageMetadata {
@@ -19,8 +58,8 @@ pub struct AstroImageMetadata {
     pub exposure_time: Option<f64>,
     /// Bits per pixel (BITPIX keyword)
     pub bitpix: i32,
-    /// Image dimensions [width, height] or [width, height, channels]
-    pub dimensions: Vec<usize>,
+    /// Raw FITS header dimensions [height, width] or [channels, height, width]
+    pub header_dimensions: Vec<usize>,
 }
 
 /// Represents an astronomical image loaded from a FITS file.
@@ -30,12 +69,8 @@ pub struct AstroImage {
     pub metadata: AstroImageMetadata,
     /// Pixel data stored as f32 for processing flexibility
     pub pixels: Vec<f32>,
-    /// Image width in pixels
-    pub width: usize,
-    /// Image height in pixels
-    pub height: usize,
-    /// Number of channels (1 for grayscale, 3 for RGB)
-    pub channels: usize,
+    /// Image dimensions
+    pub dimensions: ImageDimensions,
 }
 
 impl AstroImage {
@@ -73,25 +108,21 @@ impl AstroImage {
 
         // FITS dimensions are in NAXIS order: NAXIS1 (width), NAXIS2 (height), NAXIS3 (channels)
         // But shape is returned in reverse order: [channels, height, width] or [height, width]
-        let (width, height, channels) = match dimensions.len() {
-            2 => (dimensions[1], dimensions[0], 1),
-            3 => (dimensions[2], dimensions[1], dimensions[0]),
+        let img_dims = match dimensions.len() {
+            2 => ImageDimensions::new(dimensions[1], dimensions[0], 1),
+            3 => ImageDimensions::new(dimensions[2], dimensions[1], dimensions[0]),
             n => anyhow::bail!("Unsupported number of dimensions: {}", n),
         };
-
-        assert!(width > 0, "Image width must be positive");
-        assert!(height > 0, "Image height must be positive");
 
         // Read pixel data as f32
         let pixels: Vec<f32> = hdu
             .read_image(&mut fptr)
             .context("Failed to read image data")?;
 
-        let expected_size = width * height * channels;
         assert!(
-            pixels.len() == expected_size,
+            pixels.len() == img_dims.pixel_count(),
             "Pixel count mismatch: expected {}, got {}",
-            expected_size,
+            img_dims.pixel_count(),
             pixels.len()
         );
 
@@ -103,54 +134,52 @@ impl AstroImage {
             date_obs: read_key_optional(&hdu, &mut fptr, "DATE-OBS"),
             exposure_time: read_key_optional(&hdu, &mut fptr, "EXPTIME"),
             bitpix,
-            dimensions: dimensions.clone(),
+            header_dimensions: dimensions.clone(),
         };
 
         Ok(AstroImage {
             metadata,
             pixels,
-            width,
-            height,
-            channels,
+            dimensions: img_dims,
         })
     }
 
     /// Get pixel value at (x, y) for single-channel images.
     /// Panics if coordinates are out of bounds.
     pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
-        debug_assert!(x < self.width, "x coordinate out of bounds");
-        debug_assert!(y < self.height, "y coordinate out of bounds");
-        debug_assert_eq!(
-            self.channels, 1,
+        debug_assert!(x < self.dimensions.width, "x coordinate out of bounds");
+        debug_assert!(y < self.dimensions.height, "y coordinate out of bounds");
+        debug_assert!(
+            self.dimensions.is_grayscale(),
             "Use get_pixel_rgb for multi-channel images"
         );
 
-        self.pixels[y * self.width + x]
+        self.pixels[y * self.dimensions.width + x]
     }
 
     /// Get pixel values at (x, y) for multi-channel images.
     /// Returns a slice of channel values.
     /// Panics if coordinates are out of bounds.
     pub fn get_pixel_rgb(&self, x: usize, y: usize) -> &[f32; 3] {
-        debug_assert!(x < self.width, "x coordinate out of bounds");
-        debug_assert!(y < self.height, "y coordinate out of bounds");
-        debug_assert_eq!(self.channels, 3, "Image must have at least 3 channels");
+        debug_assert!(x < self.dimensions.width, "x coordinate out of bounds");
+        debug_assert!(y < self.dimensions.height, "y coordinate out of bounds");
+        debug_assert!(self.dimensions.is_rgb(), "Image must have 3 channels");
 
-        let idx = (y * self.width + x) * self.channels;
+        let idx = (y * self.dimensions.width + x) * self.dimensions.channels;
         self.pixels[idx..idx + 3].as_array::<3>().unwrap()
     }
 
     /// Get mutable reference to pixel value at (x, y) for single-channel images.
     /// Panics if coordinates are out of bounds.
     pub fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
-        debug_assert!(x < self.width, "x coordinate out of bounds");
-        debug_assert!(y < self.height, "y coordinate out of bounds");
-        debug_assert_eq!(
-            self.channels, 1,
+        debug_assert!(x < self.dimensions.width, "x coordinate out of bounds");
+        debug_assert!(y < self.dimensions.height, "y coordinate out of bounds");
+        debug_assert!(
+            self.dimensions.is_grayscale(),
             "Use get_pixel_rgb_mut for multi-channel images"
         );
 
-        let idx = y * self.width + x;
+        let idx = y * self.dimensions.width + x;
         &mut self.pixels[idx]
     }
 
@@ -158,17 +187,17 @@ impl AstroImage {
     /// Returns a mutable slice of channel values.
     /// Panics if coordinates are out of bounds.
     pub fn get_pixel_rgb_mut(&mut self, x: usize, y: usize) -> &mut [f32; 3] {
-        debug_assert!(x < self.width, "x coordinate out of bounds");
-        debug_assert!(y < self.height, "y coordinate out of bounds");
-        debug_assert_eq!(self.channels, 3, "Image must have at least 3 channels");
+        debug_assert!(x < self.dimensions.width, "x coordinate out of bounds");
+        debug_assert!(y < self.dimensions.height, "y coordinate out of bounds");
+        debug_assert!(self.dimensions.is_rgb(), "Image must have 3 channels");
 
-        let idx = (y * self.width + x) * self.channels;
+        let idx = (y * self.dimensions.width + x) * self.dimensions.channels;
         (&mut self.pixels[idx..idx + 3]).try_into().unwrap()
     }
 
     /// Get the total number of pixels (width * height * channels).
     pub fn pixel_count(&self) -> usize {
-        self.pixels.len()
+        self.dimensions.pixel_count()
     }
 }
 
@@ -201,7 +230,7 @@ mod tests {
     fn test_metadata_default() {
         let meta = AstroImageMetadata::default();
         assert!(meta.object.is_none());
-        assert!(meta.dimensions.is_empty());
+        assert!(meta.header_dimensions.is_empty());
     }
 
     #[test]
@@ -212,12 +241,13 @@ mod tests {
         );
         let image = AstroImage::from_fits(path).unwrap();
 
-        assert_eq!(image.width, 100);
-        assert_eq!(image.height, 100);
-        assert_eq!(image.channels, 1);
+        assert_eq!(image.dimensions.width, 100);
+        assert_eq!(image.dimensions.height, 100);
+        assert_eq!(image.dimensions.channels, 1);
+        assert!(image.dimensions.is_grayscale());
         assert_eq!(image.pixel_count(), 10000);
         assert_eq!(image.metadata.bitpix, 32);
-        assert_eq!(image.metadata.dimensions, vec![100, 100]);
+        assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
         // Test pixel access
         let pixel = image.get_pixel_gray(5, 20);
