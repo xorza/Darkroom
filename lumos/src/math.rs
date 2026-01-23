@@ -234,4 +234,59 @@ mod tests {
         let result = sum_squared_diff(&values, mean_val);
         assert!((result - expected).abs() < 1e-4);
     }
+
+    #[test]
+    fn test_mean_f32() {
+        let values: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let expected = 4.5;
+        let result = mean_f32(&values);
+        assert!((result - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_mean_f32_single() {
+        let values = vec![42.0f32];
+        assert!((mean_f32(&values) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sum_f32_single() {
+        let values = vec![42.0f32];
+        assert!((sum_f32(&values) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sum_f32_empty() {
+        let values: Vec<f32> = vec![];
+        assert!((sum_f32(&values) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_f32_single() {
+        let values = vec![42.0f32];
+        assert!((median_f32(&values) - 42.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sum_f32_negative() {
+        let values: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0, 5.0, 6.0, 7.0, 8.0];
+        let expected: f32 = values.iter().sum();
+        let result = sum_f32(&values);
+        assert!((result - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_sum_squared_diff_negative() {
+        let values: Vec<f32> = vec![-4.0, -2.0, 0.0, 2.0, 4.0, 6.0, 8.0, 10.0];
+        let mean_val: f32 = 3.0;
+        let expected: f32 = values.iter().map(|v| (v - mean_val).powi(2)).sum();
+        let result = sum_squared_diff(&values, mean_val);
+        assert!((result - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_median_f32_negative() {
+        let values = vec![-5.0f32, -3.0, -1.0, 2.0, 4.0];
+        assert!((median_f32(&values) - (-1.0)).abs() < f32::EPSILON);
+    }
 }
