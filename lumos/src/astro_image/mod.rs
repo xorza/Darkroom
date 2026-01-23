@@ -231,7 +231,10 @@ impl AstroImage {
     /// # Panics
     /// Panics if the provided master frames have different dimensions than self.
     pub fn calibrate(&self, masters: &crate::CalibrationMasters) -> AstroImage {
-        let mut result = self.clone();
+        let pixel_count = self.pixels.len();
+
+        // Start with light frame pixels
+        let mut pixels = self.pixels.clone();
 
         // Subtract master bias (removes readout noise)
         if let Some(ref bias) = masters.master_bias {
@@ -241,9 +244,7 @@ impl AstroImage {
                 bias.dimensions,
                 self.dimensions
             );
-            for (pixel, bias_pixel) in result.pixels.iter_mut().zip(bias.pixels.iter()) {
-                *pixel -= bias_pixel;
-            }
+            pixels = crate::common::parallel_map_f32(pixel_count, |i| pixels[i] - bias.pixels[i]);
         }
 
         // Subtract master dark (removes thermal noise)
@@ -254,9 +255,7 @@ impl AstroImage {
                 dark.dimensions,
                 self.dimensions
             );
-            for (pixel, dark_pixel) in result.pixels.iter_mut().zip(dark.pixels.iter()) {
-                *pixel -= dark_pixel;
-            }
+            pixels = crate::common::parallel_map_f32(pixel_count, |i| pixels[i] - dark.pixels[i]);
         }
 
         // Divide by normalized master flat (corrects vignetting)
@@ -273,15 +272,21 @@ impl AstroImage {
                 "Flat frame mean is zero or negative"
             );
 
-            for (pixel, flat_pixel) in result.pixels.iter_mut().zip(flat.pixels.iter()) {
-                let normalized_flat = flat_pixel / flat_mean;
+            pixels = crate::common::parallel_map_f32(pixel_count, |i| {
+                let normalized_flat = flat.pixels[i] / flat_mean;
                 if normalized_flat > f32::EPSILON {
-                    *pixel /= normalized_flat;
+                    pixels[i] / normalized_flat
+                } else {
+                    pixels[i]
                 }
-            }
+            });
         }
 
-        result
+        AstroImage {
+            metadata: self.metadata.clone(),
+            pixels,
+            dimensions: self.dimensions,
+        }
     }
 
     /// Load all astronomical images from a directory.
