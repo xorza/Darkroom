@@ -212,30 +212,25 @@ impl AstroImage {
         crate::common::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
     }
 
-    /// Calibrate a light frame using master dark and flat frames.
+    /// Calibrate a light frame using calibration masters.
     ///
     /// Applies the standard calibration formula:
     /// 1. Subtract master dark (removes thermal noise + bias)
     /// 2. Divide by normalized master flat (corrects vignetting and dust)
     ///
     /// # Arguments
-    /// * `master_dark` - Optional master dark frame (if None, dark subtraction is skipped)
-    /// * `master_flat` - Optional master flat frame (if None, flat correction is skipped)
+    /// * `masters` - Calibration masters containing optional dark and flat frames
     ///
     /// # Returns
     /// A new calibrated `AstroImage`
     ///
     /// # Panics
     /// Panics if the provided master frames have different dimensions than self.
-    pub fn calibrate(
-        &self,
-        master_dark: Option<&AstroImage>,
-        master_flat: Option<&AstroImage>,
-    ) -> AstroImage {
+    pub fn calibrate(&self, masters: &crate::CalibrationMasters) -> AstroImage {
         let mut result = self.clone();
 
         // Subtract master dark (removes thermal noise + bias)
-        if let Some(dark) = master_dark {
+        if let Some(ref dark) = masters.master_dark {
             assert!(
                 dark.dimensions == self.dimensions,
                 "Dark frame dimensions {:?} don't match light frame {:?}",
@@ -248,7 +243,7 @@ impl AstroImage {
         }
 
         // Divide by normalized master flat (corrects vignetting)
-        if let Some(flat) = master_flat {
+        if let Some(ref flat) = masters.master_flat {
             assert!(
                 flat.dimensions == self.dimensions,
                 "Flat frame dimensions {:?} don't match light frame {:?}",
@@ -489,6 +484,8 @@ mod tests {
 
     #[test]
     fn test_calibrate_dark_subtraction() {
+        use crate::{CalibrationMasters, StackingMethod};
+
         let light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0, 200.0, 150.0, 250.0],
@@ -500,13 +497,22 @@ mod tests {
             dimensions: ImageDimensions::new(2, 2, 1),
         };
 
-        let calibrated = light.calibrate(Some(&dark), None);
+        let masters = CalibrationMasters {
+            master_dark: Some(dark),
+            master_flat: None,
+            master_bias: None,
+            method: StackingMethod::Median,
+        };
+
+        let calibrated = light.calibrate(&masters);
 
         assert_eq!(calibrated.pixels, vec![90.0, 180.0, 135.0, 225.0]);
     }
 
     #[test]
     fn test_calibrate_flat_correction() {
+        use crate::{CalibrationMasters, StackingMethod};
+
         let light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0, 200.0, 150.0, 250.0],
@@ -519,7 +525,14 @@ mod tests {
             dimensions: ImageDimensions::new(2, 2, 1),
         };
 
-        let calibrated = light.calibrate(None, Some(&flat));
+        let masters = CalibrationMasters {
+            master_dark: None,
+            master_flat: Some(flat),
+            master_bias: None,
+            method: StackingMethod::Median,
+        };
+
+        let calibrated = light.calibrate(&masters);
 
         // Each pixel divided by (flat_pixel / flat_mean)
         // flat_mean = 1.0, so: 100/0.8=125, 200/1.0=200, 150/1.2=125, 250/1.0=250
@@ -531,6 +544,8 @@ mod tests {
 
     #[test]
     fn test_calibrate_full() {
+        use crate::{CalibrationMasters, StackingMethod};
+
         let light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![110.0, 220.0, 165.0, 275.0],
@@ -547,7 +562,14 @@ mod tests {
             dimensions: ImageDimensions::new(2, 2, 1),
         };
 
-        let calibrated = light.calibrate(Some(&dark), Some(&flat));
+        let masters = CalibrationMasters {
+            master_dark: Some(dark),
+            master_flat: Some(flat),
+            master_bias: None,
+            method: StackingMethod::Median,
+        };
+
+        let calibrated = light.calibrate(&masters);
 
         // After dark: [100, 200, 150, 250]
         // After flat (mean=1.0): [125, 200, 125, 250]
