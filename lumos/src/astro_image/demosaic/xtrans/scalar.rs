@@ -46,6 +46,14 @@ use super::{XTransImage, XTransPattern};
 /// Minimum image size to use parallel processing (avoids overhead for small images).
 const MIN_PARALLEL_SIZE: usize = 128;
 
+/// Cached SSE4.1 feature detection result (x86_64 only).
+#[cfg(target_arch = "x86_64")]
+fn has_sse41() -> bool {
+    use std::sync::OnceLock;
+    static HAS_SSE41: OnceLock<bool> = OnceLock::new();
+    *HAS_SSE41.get_or_init(|| is_x86_feature_detected!("sse4.1"))
+}
+
 /// Search radius for interpolation (5x5 neighborhood).
 const SEARCH_RADIUS: usize = 2;
 
@@ -245,7 +253,7 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
-    let use_simd = is_x86_feature_detected!("sse4.1") && xtrans.width >= MIN_SIMD_WIDTH;
+    let use_simd = has_sse41() && xtrans.width >= MIN_SIMD_WIDTH;
 
     if use_parallel || use_simd {
         // Create linear lookups once for SIMD path
@@ -454,74 +462,54 @@ fn process_row(
             is_interior_y && raw_x >= SEARCH_RADIUS && raw_x + SEARCH_RADIUS < xtrans.raw_width;
 
         // Interpolate the other two channels
-        if is_interior {
-            // Fast path: no bounds checking
-            for c in 0u8..3 {
-                if c != color {
-                    row_rgb[rgb_idx + c as usize] =
-                        interpolate_channel_fast(xtrans, raw_x, raw_y, lookups[c as usize]);
-                }
-            }
-        } else {
-            // Slow path: with bounds checking for edge pixels
-            for c in 0u8..3 {
-                if c != color {
-                    row_rgb[rgb_idx + c as usize] =
-                        interpolate_channel_safe(xtrans, raw_x, raw_y, lookups[c as usize]);
-                }
+        for c in 0u8..3 {
+            if c != color {
+                row_rgb[rgb_idx + c as usize] =
+                    interpolate_channel(xtrans, raw_x, raw_y, lookups[c as usize], is_interior);
             }
         }
     }
 }
 
-/// Fast interpolation for interior pixels (no bounds checking).
+/// Interpolate a color channel from neighboring pixels.
+/// When `is_interior` is true, skips bounds checking for better performance.
 #[inline(always)]
-fn interpolate_channel_fast(
+fn interpolate_channel(
     xtrans: &XTransImage,
     x: usize,
     y: usize,
     lookup: &NeighborLookup,
+    is_interior: bool,
 ) -> f32 {
     let offset_list = lookup.get(y, x);
-    let mut sum = 0.0f32;
 
-    for &(dy, dx) in offset_list.as_slice() {
-        let ny = (y as i32 + dy) as usize;
-        let nx = (x as i32 + dx) as usize;
-        sum += xtrans.data[ny * xtrans.raw_width + nx];
-    }
-
-    sum * offset_list.inv_len()
-}
-
-/// Safe interpolation with bounds checking for edge pixels.
-#[inline]
-fn interpolate_channel_safe(
-    xtrans: &XTransImage,
-    x: usize,
-    y: usize,
-    lookup: &NeighborLookup,
-) -> f32 {
-    let offset_list = lookup.get(y, x);
-    let mut sum = 0.0f32;
-    let mut count = 0u32;
-
-    for &(dy, dx) in offset_list.as_slice() {
-        let ny = y as i32 + dy;
-        let nx = x as i32 + dx;
-
-        // Bounds check
-        if ny >= 0
-            && nx >= 0
-            && (ny as usize) < xtrans.raw_height
-            && (nx as usize) < xtrans.raw_width
-        {
-            sum += xtrans.data[ny as usize * xtrans.raw_width + nx as usize];
-            count += 1;
+    if is_interior {
+        // Fast path: no bounds checking, use pre-computed inv_len
+        let mut sum = 0.0f32;
+        for &(dy, dx) in offset_list.as_slice() {
+            let ny = (y as i32 + dy) as usize;
+            let nx = (x as i32 + dx) as usize;
+            sum += xtrans.data[ny * xtrans.raw_width + nx];
         }
+        sum * offset_list.inv_len()
+    } else {
+        // Slow path: with bounds checking for edge pixels
+        let mut sum = 0.0f32;
+        let mut count = 0u32;
+        for &(dy, dx) in offset_list.as_slice() {
+            let ny = y as i32 + dy;
+            let nx = x as i32 + dx;
+            if ny >= 0
+                && nx >= 0
+                && (ny as usize) < xtrans.raw_height
+                && (nx as usize) < xtrans.raw_width
+            {
+                sum += xtrans.data[ny as usize * xtrans.raw_width + nx as usize];
+                count += 1;
+            }
+        }
+        if count > 0 { sum / count as f32 } else { 0.0 }
     }
-
-    if count > 0 { sum / count as f32 } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -614,13 +602,13 @@ mod tests {
         let green_lookup = NeighborLookup::new(&xtrans.pattern, 1);
         let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
 
-        let val = interpolate_channel_safe(&xtrans, 6, 6, &red_lookup); // Red
+        let val = interpolate_channel(&xtrans, 6, 6, &red_lookup, false); // Red
         assert!(val > 0.0, "Should find red neighbors");
 
-        let val = interpolate_channel_safe(&xtrans, 6, 6, &green_lookup); // Green
+        let val = interpolate_channel(&xtrans, 6, 6, &green_lookup, false); // Green
         assert!(val > 0.0, "Should find green neighbors");
 
-        let val = interpolate_channel_safe(&xtrans, 6, 6, &blue_lookup); // Blue
+        let val = interpolate_channel(&xtrans, 6, 6, &blue_lookup, false); // Blue
         assert!(val > 0.0, "Should find blue neighbors");
     }
 
@@ -670,8 +658,8 @@ mod tests {
         // Test at interior position (well within bounds)
         let x = 12;
         let y = 12;
-        let fast = interpolate_channel_fast(&xtrans, x, y, &red_lookup);
-        let safe = interpolate_channel_safe(&xtrans, x, y, &red_lookup);
+        let fast = interpolate_channel(&xtrans, x, y, &red_lookup, true);
+        let safe = interpolate_channel(&xtrans, x, y, &red_lookup, false);
 
         assert!(
             (fast - safe).abs() < 1e-6,

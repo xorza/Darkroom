@@ -28,6 +28,14 @@ use rayon::prelude::*;
 /// Minimum image size to use parallel processing (avoids overhead for small images).
 const MIN_PARALLEL_SIZE: usize = 128;
 
+/// Cached SSE3 feature detection result (x86_64 only).
+#[cfg(target_arch = "x86_64")]
+fn has_sse3() -> bool {
+    use std::sync::OnceLock;
+    static HAS_SSE3: OnceLock<bool> = OnceLock::new();
+    *HAS_SSE3.get_or_init(|| is_x86_feature_detected!("sse3"))
+}
+
 /// Bayer CFA (Color Filter Array) pattern.
 /// Represents the 2x2 pattern of color filters on the sensor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,7 +194,7 @@ impl<'a> BayerImage<'a> {
 #[cfg(target_arch = "x86_64")]
 pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     let use_parallel = bayer.width >= MIN_PARALLEL_SIZE && bayer.height >= MIN_PARALLEL_SIZE;
-    let use_simd = is_x86_feature_detected!("sse3") && bayer.width >= 8 && bayer.height >= 4;
+    let use_simd = has_sse3() && bayer.width >= 8 && bayer.height >= 4;
 
     if use_parallel {
         demosaic_parallel(bayer, use_simd)
