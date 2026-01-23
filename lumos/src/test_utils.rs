@@ -3,6 +3,15 @@ use std::path::PathBuf;
 
 use crate::AstroImage;
 
+/// Initialize tracing subscriber for tests.
+/// Safe to call multiple times - will only initialize once.
+pub fn init_tracing() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("info")
+        .with_test_writer()
+        .try_init();
+}
+
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
 /// Returns None if not set. Prints a message to stderr if not set.
 pub fn calibration_dir() -> Option<PathBuf> {

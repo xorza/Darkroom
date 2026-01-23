@@ -664,6 +664,8 @@ mod tests {
     fn test_load_single_raw_from_env() {
         use crate::test_utils::calibration_dir;
 
+        crate::test_utils::init_tracing();
+
         let Some(cal_dir) = calibration_dir() else {
             eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
             return;
