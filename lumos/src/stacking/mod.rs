@@ -44,55 +44,6 @@ impl SigmaClipConfig {
     }
 }
 
-/// Create a master dark frame by stacking multiple dark frames.
-///
-/// All input images must have the same dimensions.
-///
-/// # Arguments
-/// * `darks` - Slice of dark frames to stack
-/// * `method` - Stacking method to use
-///
-/// # Returns
-/// * `AstroImage` - The combined master dark frame
-pub fn stack_darks(darks: &[AstroImage], method: StackingMethod) -> AstroImage {
-    assert!(!darks.is_empty(), "Must provide at least one dark frame");
-
-    let first = &darks[0];
-    let dims = first.dimensions;
-    let pixel_count = first.pixel_count();
-
-    // Verify all images have same dimensions
-    for (i, dark) in darks.iter().enumerate().skip(1) {
-        assert!(
-            dark.dimensions == dims,
-            "Dark frame {} has different dimensions: {:?} vs {:?}",
-            i,
-            dark.dimensions,
-            dims
-        );
-    }
-
-    let mut result_pixels = vec![0.0f32; pixel_count];
-
-    // Collect values for each pixel position and combine
-    let mut values = Vec::with_capacity(darks.len());
-
-    for (pixel_idx, result) in result_pixels.iter_mut().enumerate() {
-        values.clear();
-        for dark in darks {
-            values.push(dark.pixels[pixel_idx]);
-        }
-
-        *result = combine_pixels(&values, method);
-    }
-
-    AstroImage {
-        metadata: first.metadata.clone(),
-        pixels: result_pixels,
-        dimensions: dims,
-    }
-}
-
 /// Combine pixel values using the specified method.
 fn combine_pixels(values: &[f32], method: StackingMethod) -> f32 {
     match method {
@@ -159,6 +110,51 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
     }
 
     mean(&included)
+}
+
+/// Stack frames with the given method, verifying dimensions match.
+pub fn stack_frames(frames: &[AstroImage], method: StackingMethod, frame_type: &str) -> AstroImage {
+    assert!(
+        !frames.is_empty(),
+        "Must provide at least one {} frame",
+        frame_type
+    );
+
+    let first = &frames[0];
+    let dims = first.dimensions;
+    let pixel_count = first.pixel_count();
+
+    // Verify all images have same dimensions
+    for (i, frame) in frames.iter().enumerate().skip(1) {
+        assert!(
+            frame.dimensions == dims,
+            "{} frame {} has different dimensions: {:?} vs {:?}",
+            frame_type,
+            i,
+            frame.dimensions,
+            dims
+        );
+    }
+
+    let mut result_pixels = vec![0.0f32; pixel_count];
+
+    // Collect values for each pixel position and combine
+    let mut values = Vec::with_capacity(frames.len());
+
+    for (pixel_idx, result) in result_pixels.iter_mut().enumerate() {
+        values.clear();
+        for frame in frames {
+            values.push(frame.pixels[pixel_idx]);
+        }
+
+        *result = combine_pixels(&values, method);
+    }
+
+    AstroImage {
+        metadata: first.metadata.clone(),
+        pixels: result_pixels,
+        dimensions: dims,
+    }
 }
 
 #[cfg(test)]
