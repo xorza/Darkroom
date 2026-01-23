@@ -5,9 +5,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
+use crate::astro_image::HotPixelMap;
 use crate::{AstroImage, FrameType, StackingMethod, stack_frames};
 
-/// Holds master calibration frames (dark, flat, bias).
+/// Default sigma threshold for hot pixel detection.
+const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
+
+/// Holds master calibration frames (dark, flat, bias) and hot pixel map.
 #[derive(Debug)]
 pub struct CalibrationMasters {
     /// Master dark frame
@@ -16,6 +20,8 @@ pub struct CalibrationMasters {
     pub master_flat: Option<AstroImage>,
     /// Master bias frame
     pub master_bias: Option<AstroImage>,
+    /// Hot pixel map derived from master dark
+    pub hot_pixel_map: Option<HotPixelMap>,
     /// Stacking method used to create the masters
     pub method: StackingMethod,
 }
@@ -39,6 +45,7 @@ impl CalibrationMasters {
     ///
     /// Looks for files named master_dark_<method>.tiff, master_flat_<method>.tiff, etc.
     /// Returns None for any masters that don't exist.
+    /// Automatically generates hot pixel map from master dark if available.
     pub fn load_from_directory<P: AsRef<Path>>(dir: P, method: StackingMethod) -> Result<Self> {
         let dir = dir.as_ref();
 
@@ -46,10 +53,16 @@ impl CalibrationMasters {
         let master_flat = Self::load_master(dir, FrameType::Flat, method);
         let master_bias = Self::load_master(dir, FrameType::Bias, method);
 
+        // Generate hot pixel map from master dark
+        let hot_pixel_map = master_dark
+            .as_ref()
+            .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
+
         Ok(Self {
             master_dark,
             master_flat,
             master_bias,
+            hot_pixel_map,
             method,
         })
     }
@@ -58,6 +71,7 @@ impl CalibrationMasters {
     ///
     /// First tries to load existing master files from the directory. If not found,
     /// creates new masters by stacking raw frames from subdirectories.
+    /// Automatically generates hot pixel map from master dark if available.
     ///
     /// Expected directory structure:
     /// ```text
@@ -88,10 +102,16 @@ impl CalibrationMasters {
         let master_bias = Self::load_master(dir, FrameType::Bias, method)
             .or_else(|| Self::create_master(dir, "Bias", FrameType::Bias, method));
 
+        // Generate hot pixel map from master dark
+        let hot_pixel_map = master_dark
+            .as_ref()
+            .map(|dark| HotPixelMap::from_master_dark(dark, DEFAULT_HOT_PIXEL_SIGMA));
+
         Ok(Self {
             master_dark,
             master_flat,
             master_bias,
+            hot_pixel_map,
             method,
         })
     }

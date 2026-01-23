@@ -550,6 +550,7 @@ mod tests {
             master_dark: None,
             master_flat: None,
             master_bias: Some(bias),
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -577,6 +578,7 @@ mod tests {
             master_dark: Some(dark),
             master_flat: None,
             master_bias: None,
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -605,6 +607,7 @@ mod tests {
             master_dark: None,
             master_flat: Some(flat),
             master_bias: None,
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -647,6 +650,7 @@ mod tests {
             master_dark: Some(dark),
             master_flat: Some(flat),
             master_bias: Some(bias),
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -861,6 +865,7 @@ mod tests {
             master_dark: None,
             master_flat: None,
             master_bias: Some(bias),
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -896,6 +901,7 @@ mod tests {
             master_dark: None,
             master_flat: None,
             master_bias: Some(bias),
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
@@ -926,6 +932,7 @@ mod tests {
             master_dark: Some(dark),
             master_flat: None,
             master_bias: None,
+            hot_pixel_map: None,
             method: StackingMethod::Median,
         };
 
