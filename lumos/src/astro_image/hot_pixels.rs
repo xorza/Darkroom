@@ -35,21 +35,45 @@ impl HotPixelMap {
         let pixels = &master_dark.pixels;
         let median = crate::math::median_f32(pixels);
 
+        // Chunk size to avoid false cache sharing (16KB of f32s)
+        const CHUNK_SIZE: usize = 4096;
+
         // Use MAD (Median Absolute Deviation) for robust std dev estimation
         // MAD is not affected by outliers like regular std dev
-        let abs_deviations: Vec<f32> = pixels.iter().map(|&p| (p - median).abs()).collect();
+        let mut abs_deviations = vec![0.0f32; pixels.len()];
+        abs_deviations
+            .par_chunks_mut(CHUNK_SIZE)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                let start = chunk_idx * CHUNK_SIZE;
+                for (i, val) in chunk.iter_mut().enumerate() {
+                    *val = (pixels[start + i] - median).abs();
+                }
+            });
         let mad = crate::math::median_f32(&abs_deviations);
 
         // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
         const MAD_TO_SIGMA: f32 = 1.4826;
-        let robust_sigma = mad * MAD_TO_SIGMA;
+        let threshold = median + sigma_threshold * mad * MAD_TO_SIGMA;
 
-        let threshold = median + sigma_threshold * robust_sigma;
-
-        // Detect hot pixels in parallel
-        let mask: Vec<bool> = pixels.par_iter().map(|&p| p > threshold).collect();
-
-        let count = mask.iter().filter(|&&b| b).count();
+        // Detect hot pixels in parallel with chunking to avoid false sharing
+        // For bool (1 byte), use larger chunks to ensure cache line separation
+        const BOOL_CHUNK_SIZE: usize = 16384; // 16KB of bools
+        let mut mask = vec![false; pixels.len()];
+        let count = mask
+            .par_chunks_mut(BOOL_CHUNK_SIZE)
+            .enumerate()
+            .map(|(chunk_idx, chunk)| {
+                let start = chunk_idx * BOOL_CHUNK_SIZE;
+                let mut local_count = 0usize;
+                for (i, val) in chunk.iter_mut().enumerate() {
+                    let is_hot = pixels[start + i] > threshold;
+                    *val = is_hot;
+                    local_count += is_hot as usize;
+                }
+                local_count
+            })
+            .sum();
 
         Self {
             mask,
@@ -96,15 +120,16 @@ pub fn correct_hot_pixels(image: &mut AstroImage, hot_pixel_map: &HotPixelMap) {
     let width = image.dimensions.width;
     let height = image.dimensions.height;
     let channels = image.dimensions.channels;
+    let row_stride = width * channels;
 
     // Collect corrections first (can't mutate while iterating)
+    // Process rows in parallel - each row is independent
     let corrections: Vec<(usize, f32)> = (0..height)
         .into_par_iter()
-        .flat_map(|y| {
-            let mut local_corrections = Vec::new();
+        .fold(Vec::new, |mut local_corrections, y| {
             for x in 0..width {
                 for c in 0..channels {
-                    let idx = (y * width + x) * channels + c;
+                    let idx = y * row_stride + x * channels + c;
                     if hot_pixel_map.is_hot(idx) {
                         let replacement = median_of_neighbors(image, x, y, c);
                         local_corrections.push((idx, replacement));
@@ -113,9 +138,12 @@ pub fn correct_hot_pixels(image: &mut AstroImage, hot_pixel_map: &HotPixelMap) {
             }
             local_corrections
         })
-        .collect();
+        .reduce(Vec::new, |mut a, b| {
+            a.extend(b);
+            a
+        });
 
-    // Apply corrections
+    // Apply corrections sequentially (hot pixels are sparse, so this is fast)
     for (idx, value) in corrections {
         image.pixels[idx] = value;
     }
