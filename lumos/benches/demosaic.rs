@@ -1,12 +1,6 @@
 use criterion::{criterion_group, criterion_main};
+use lumos::bench::calibration_dir;
 use std::path::PathBuf;
-
-/// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
-fn calibration_dir() -> Option<PathBuf> {
-    std::env::var("LUMOS_CALIBRATION_DIR")
-        .ok()
-        .map(PathBuf::from)
-}
 
 /// Returns the first RAW file from the Lights subdirectory.
 fn first_raw_file() -> Option<PathBuf> {
