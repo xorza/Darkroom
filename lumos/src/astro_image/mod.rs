@@ -229,9 +229,12 @@ impl AstroImage {
     /// # Panics
     /// Panics if the provided master frames have different dimensions than self.
     pub fn calibrate(&self, masters: &crate::CalibrationMasters) -> AstroImage {
-        let pixel_count = self.pixels.len();
+        use rayon::prelude::*;
 
-        // Start with light frame pixels
+        // Chunk size to avoid false cache sharing (16KB of f32s)
+        const CHUNK_SIZE: usize = 4096;
+
+        // Single allocation - clone once, then modify in place
         let mut pixels = self.pixels.clone();
 
         // Subtract master bias (removes readout noise)
@@ -242,7 +245,15 @@ impl AstroImage {
                 bias.dimensions,
                 self.dimensions
             );
-            pixels = crate::common::parallel_map_f32(pixel_count, |i| pixels[i] - bias.pixels[i]);
+            pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        *p -= bias.pixels[start + i];
+                    }
+                });
         }
 
         // Subtract master dark (removes thermal noise)
@@ -253,7 +264,15 @@ impl AstroImage {
                 dark.dimensions,
                 self.dimensions
             );
-            pixels = crate::common::parallel_map_f32(pixel_count, |i| pixels[i] - dark.pixels[i]);
+            pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        *p -= dark.pixels[start + i];
+                    }
+                });
         }
 
         // Divide by normalized master flat (corrects vignetting)
@@ -269,15 +288,20 @@ impl AstroImage {
                 flat_mean > f32::EPSILON,
                 "Flat frame mean is zero or negative"
             );
+            let inv_flat_mean = 1.0 / flat_mean;
 
-            pixels = crate::common::parallel_map_f32(pixel_count, |i| {
-                let normalized_flat = flat.pixels[i] / flat_mean;
-                if normalized_flat > f32::EPSILON {
-                    pixels[i] / normalized_flat
-                } else {
-                    pixels[i]
-                }
-            });
+            pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        let normalized_flat = flat.pixels[start + i] * inv_flat_mean;
+                        if normalized_flat > f32::EPSILON {
+                            *p /= normalized_flat;
+                        }
+                    }
+                });
         }
 
         AstroImage {
