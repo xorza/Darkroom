@@ -10,6 +10,7 @@ imaginarium = { workspace = true }
 
 fitsio = { workspace = true }
 rawloader = { workspace = true }
+libraw-rs = { workspace = true }
 
 anyhow = { workspace = true }
 thiserror = { workspace = true }

@@ -1895,6 +1895,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
+name = "libraw-rs"
+version = "0.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24ec60aab878560c299c6e70a0c6dc2278a2159ac6fe09650917266b8985387f"
+dependencies = [
+ "libraw-rs-sys",
+]
+
+[[package]]
+name = "libraw-rs-sys"
+version = "0.0.4+libraw-0.20.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba094a3b8b04cc42fdeafaff06f81d3b13a7d01cc7a8eae55b943dae1b65c3cc"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
 name = "libredox"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1993,6 +2012,7 @@ dependencies = [
  "fitsio",
  "glam",
  "imaginarium",
+ "libraw-rs",
  "rawloader",
  "rayon",
  "thiserror 2.0.18",

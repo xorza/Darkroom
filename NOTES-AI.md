@@ -18,6 +18,7 @@ scenarium/
 ├── common/          # Shared utilities and helper macros
 ├── scenarium/       # Core graph library with execution engine
 ├── imaginarium/     # GPU/CPU image processing library
+├── lumos/           # Astrophotography image processing library
 ├── prism/           # Visual egui-based graph editor
 ├── palantir/        # Image processing funclib (imaginarium adapter)
 ├── test_resources/  # Sample graphs and media for tests
@@ -194,6 +195,38 @@ Image processing function library adapting imaginarium operations to the node-ba
 - `blend` - Blends two images with configurable mode and alpha
 
 **Dependencies:** common, graph, imaginarium, anyhow, strum, strum_macros
+
+### lumos
+
+Astrophotography image processing library for loading and stacking astronomical images.
+
+**Key modules:**
+
+- `astro_image.rs` - `AstroImage` for loading FITS and RAW camera files
+- `stacking.rs` - Image stacking algorithms (mean, median, sigma-clipped mean)
+
+**Key types:**
+
+```rust
+AstroImage         // Astronomical image with metadata and f32 pixels
+AstroImageMetadata // FITS metadata (object, instrument, exposure, etc.)
+ImageDimensions    // { width, height, channels }
+StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
+SigmaClipConfig    // { sigma, max_iterations }
+```
+
+**RAW file loading:**
+- Tries `rawloader` first (pure Rust, faster, limited camera support)
+- Falls back to `libraw` (C library via libraw-rs, broader camera support)
+- Supports RAF, CR2, CR3, NEF, ARW, DNG formats
+- Data normalized to 0.0-1.0 range
+
+**FITS file loading:**
+- Via `fitsio` crate with cfitsio backend
+- Reads primary HDU image data as f32
+- Extracts metadata (OBJECT, INSTRUME, TELESCOP, DATE-OBS, EXPTIME, BITPIX)
+
+**Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon
 
 ## Key Data Structures
 
