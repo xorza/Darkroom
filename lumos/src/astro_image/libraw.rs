@@ -384,14 +384,12 @@ fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Ve
 #[inline]
 fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     #[cfg(target_arch = "x86_64")]
-    {
-        if is_x86_feature_detected!("sse2") {
-            // SAFETY: We've verified SSE2 is available
-            unsafe {
-                normalize_chunk_sse2(input, output, black, inv_range);
-            }
-            return;
+    if is_x86_feature_detected!("sse2") {
+        // SAFETY: We've verified SSE2 is available
+        unsafe {
+            normalize_chunk_sse2(input, output, black, inv_range);
         }
+        return;
     }
 
     #[cfg(target_arch = "aarch64")]
@@ -400,17 +398,17 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
         unsafe {
             normalize_chunk_neon(input, output, black, inv_range);
         }
+        return;
     }
 
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    #[cfg(not(target_arch = "aarch64"))]
     {
-        // Scalar fallback for other architectures
+        // Scalar fallback for other architectures or when SIMD not available
         normalize_chunk_scalar(input, output, black, inv_range);
     }
 }
 
 /// Scalar normalization fallback.
-#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 #[inline]
 fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     for (out, &val) in output.iter_mut().zip(input.iter()) {

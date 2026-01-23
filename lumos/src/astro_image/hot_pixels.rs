@@ -21,7 +21,10 @@ pub struct HotPixelMap {
 impl HotPixelMap {
     /// Detect hot pixels from a master dark frame.
     ///
-    /// Hot pixels are defined as pixels with values > sigma_threshold * σ above the median.
+    /// Hot pixels are detected per-channel: each channel (R, G, B) is analyzed separately
+    /// to compute its own median and MAD. A pixel is marked hot if ANY of its channels
+    /// exceeds the threshold for that channel.
+    ///
     /// Uses Median Absolute Deviation (MAD) for robust σ estimation that isn't affected
     /// by the outliers we're trying to detect.
     /// Typical threshold is 5.0σ.
@@ -33,41 +36,47 @@ impl HotPixelMap {
         assert!(sigma_threshold > 0.0, "Sigma threshold must be positive");
 
         let pixels = &master_dark.pixels;
-        let median = crate::math::median_f32(pixels);
+        let channels = master_dark.dimensions.channels;
+        let pixel_count = master_dark.dimensions.width * master_dark.dimensions.height;
 
-        // Chunk size to avoid false cache sharing (16KB of f32s)
-        const CHUNK_SIZE: usize = 4096;
+        // Compute per-channel thresholds
+        let channel_stats: Vec<ChannelStats> = (0..channels)
+            .map(|c| compute_channel_stats(pixels, channels, c, sigma_threshold))
+            .collect();
 
-        // Use MAD (Median Absolute Deviation) for robust std dev estimation
-        // MAD is not affected by outliers like regular std dev
-        let mut abs_deviations = vec![0.0f32; pixels.len()];
-        abs_deviations
-            .par_chunks_mut(CHUNK_SIZE)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                let start = chunk_idx * CHUNK_SIZE;
-                for (i, val) in chunk.iter_mut().enumerate() {
-                    *val = (pixels[start + i] - median).abs();
-                }
-            });
-        let mad = crate::math::median_f32(&abs_deviations);
+        tracing::debug!(
+            "Hot pixel detection per-channel stats ({}x{}x{}):",
+            master_dark.dimensions.width,
+            master_dark.dimensions.height,
+            channels
+        );
+        for (c, stats) in channel_stats.iter().enumerate() {
+            tracing::debug!(
+                "  Channel {}: median={:.6}, MAD={:.6}, sigma={:.6}, threshold={:.6}",
+                c,
+                stats.median,
+                stats.mad,
+                stats.sigma,
+                stats.threshold
+            );
+        }
 
-        // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
-        const MAD_TO_SIGMA: f32 = 1.4826;
-        let threshold = median + sigma_threshold * mad * MAD_TO_SIGMA;
+        let thresholds: Vec<f32> = channel_stats.iter().map(|s| s.threshold).collect();
 
-        // Detect hot pixels in parallel with chunking to avoid false sharing
-        // For bool (1 byte), use larger chunks to ensure cache line separation
-        const BOOL_CHUNK_SIZE: usize = 16384; // 16KB of bools
+        // Detect hot pixels - a pixel is hot if ANY channel exceeds its threshold
+        // The mask is per-value (not per-pixel), so we check each channel value
+        const BOOL_CHUNK_SIZE: usize = 16384;
         let mut mask = vec![false; pixels.len()];
-        let count = mask
+        let _count: usize = mask
             .par_chunks_mut(BOOL_CHUNK_SIZE)
             .enumerate()
             .map(|(chunk_idx, chunk)| {
                 let start = chunk_idx * BOOL_CHUNK_SIZE;
                 let mut local_count = 0usize;
                 for (i, val) in chunk.iter_mut().enumerate() {
-                    let is_hot = pixels[start + i] > threshold;
+                    let idx = start + i;
+                    let channel = idx % channels;
+                    let is_hot = pixels[idx] > thresholds[channel];
                     *val = is_hot;
                     local_count += is_hot as usize;
                 }
@@ -75,10 +84,19 @@ impl HotPixelMap {
             })
             .sum();
 
+        // For reporting, count unique pixels (not channel values)
+        let pixel_hot_count = (0..pixel_count)
+            .into_par_iter()
+            .filter(|&p| {
+                let base = p * channels;
+                (0..channels).any(|c| mask[base + c])
+            })
+            .count();
+
         Self {
             mask,
             dimensions: master_dark.dimensions,
-            count,
+            count: pixel_hot_count,
         }
     }
 
@@ -95,9 +113,10 @@ impl HotPixelMap {
         self.mask[idx]
     }
 
-    /// Get the percentage of hot pixels.
+    /// Get the percentage of hot pixels (as percentage of total pixels, not channel values).
     pub fn percentage(&self) -> f32 {
-        100.0 * self.count as f32 / self.mask.len() as f32
+        let pixel_count = self.dimensions.width * self.dimensions.height;
+        100.0 * self.count as f32 / pixel_count as f32
     }
 }
 
@@ -147,6 +166,53 @@ impl HotPixelMap {
         for (idx, value) in corrections {
             image.pixels[idx] = value;
         }
+    }
+}
+
+/// Statistics for a single channel used in hot pixel detection.
+#[derive(Debug)]
+struct ChannelStats {
+    median: f32,
+    mad: f32,
+    sigma: f32,
+    threshold: f32,
+}
+
+/// Compute statistics and threshold for a single channel using MAD (Median Absolute Deviation).
+fn compute_channel_stats(
+    pixels: &[f32],
+    channels: usize,
+    channel: usize,
+    sigma_threshold: f32,
+) -> ChannelStats {
+    // Extract values for this channel only
+    let channel_values: Vec<f32> = pixels
+        .iter()
+        .skip(channel)
+        .step_by(channels)
+        .copied()
+        .collect();
+
+    let median = crate::math::median_f32(&channel_values);
+
+    // Compute MAD for this channel
+    let abs_deviations: Vec<f32> = channel_values.iter().map(|&p| (p - median).abs()).collect();
+    let mad = crate::math::median_f32(&abs_deviations);
+
+    // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
+    const MAD_TO_SIGMA: f32 = 1.4826;
+    let computed_sigma = mad * MAD_TO_SIGMA;
+
+    // Apply minimum sigma floor: stacked master darks have compressed noise,
+    // so use at least 1% of median to avoid overly tight thresholds
+    let sigma = computed_sigma.max(median * 0.01);
+    let threshold = median + sigma_threshold * sigma;
+
+    ChannelStats {
+        median,
+        mad,
+        sigma,
+        threshold,
     }
 }
 

@@ -753,8 +753,10 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_calibrate_light_from_env() {
-        use crate::testing::{calibration_dir, calibration_masters_dir};
+        use crate::testing::{calibration_dir, calibration_masters_dir, init_tracing};
         use crate::{CalibrationMasters, StackingMethod};
+
+        init_tracing();
 
         // Load first light frame directly (not all files - libraw is slow)
         let Some(cal_dir) = calibration_dir() else {
@@ -774,8 +776,10 @@ mod tests {
             return;
         };
 
+        let start = std::time::Instant::now();
         println!("Loading light frame: {:?}", first_file);
         let light = AstroImage::from_file(first_file).expect("Failed to load light frame");
+        println!("  Load light: {:?}", start.elapsed());
 
         println!(
             "Loaded light frame: {}x{}x{}",
@@ -788,8 +792,10 @@ mod tests {
             return;
         };
 
+        let start = std::time::Instant::now();
         let masters =
             CalibrationMasters::load_from_directory(&masters_dir, StackingMethod::Median).unwrap();
+        println!("  Load masters: {:?}", start.elapsed());
 
         println!(
             "Loaded masters: dark={}, flat={}, bias={}",
@@ -798,8 +804,18 @@ mod tests {
             masters.master_bias.is_some()
         );
 
+        if let Some(ref hot_map) = masters.hot_pixel_map {
+            println!(
+                "  Hot pixels: {} ({:.4}%)",
+                hot_map.count,
+                hot_map.percentage()
+            );
+        }
+
         // Calibrate the light frame
+        let start = std::time::Instant::now();
         let calibrated = light.calibrate(&masters);
+        println!("  Calibrate: {:?}", start.elapsed());
 
         println!(
             "Calibrated frame: {}x{}x{}",
@@ -813,9 +829,11 @@ mod tests {
         assert_eq!(calibrated.dimensions, light.dimensions);
 
         // Save calibrated image to output
+        let start = std::time::Instant::now();
         let output_path = common::test_utils::test_output_path("calibrated_light.tiff");
         let img: imaginarium::Image = calibrated.into();
         img.save_file(&output_path).unwrap();
+        println!("  Save: {:?}", start.elapsed());
 
         println!("Saved calibrated image to: {:?}", output_path);
         assert!(output_path.exists());
