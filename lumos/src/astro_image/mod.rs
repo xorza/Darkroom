@@ -3,6 +3,7 @@ mod libraw;
 mod rawloader;
 
 use anyhow::Result;
+use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
 use std::path::Path;
 
 /// FITS BITPIX values representing pixel data types.
@@ -206,6 +207,32 @@ impl AstroImage {
     }
 }
 
+impl From<AstroImage> for Image {
+    fn from(astro: AstroImage) -> Self {
+        let channel_count = match astro.dimensions.channels {
+            1 => ChannelCount::Gray,
+            3 => ChannelCount::Rgb,
+            _ => panic!("Unsupported channel count: {}", astro.dimensions.channels),
+        };
+
+        let color_format = ColorFormat {
+            channel_count,
+            channel_size: ChannelSize::_32bit,
+            channel_type: ChannelType::Float,
+        };
+
+        let desc = ImageDesc::new(
+            astro.dimensions.width as u32,
+            astro.dimensions.height as u32,
+            color_format,
+        );
+
+        let bytes: Vec<u8> = bytemuck::cast_slice(&astro.pixels).to_vec();
+
+        Image::new_with_data(desc, bytes).expect("Failed to create Image from AstroImage")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +244,81 @@ mod tests {
         let meta = AstroImageMetadata::default();
         assert!(meta.object.is_none());
         assert!(meta.header_dimensions.is_empty());
+    }
+
+    #[test]
+    fn test_convert_to_imaginarium_image_grayscale() {
+        let astro = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![0.0, 0.25, 0.5, 0.75, 1.0, 0.5],
+            dimensions: ImageDimensions::new(3, 2, 1),
+        };
+
+        let image: Image = astro.into();
+        let desc = image.desc();
+
+        assert_eq!(desc.width, 3);
+        assert_eq!(desc.height, 2);
+        assert_eq!(desc.color_format.channel_count, ChannelCount::Gray);
+        assert_eq!(desc.color_format.channel_size, ChannelSize::_32bit);
+        assert_eq!(desc.color_format.channel_type, ChannelType::Float);
+
+        // Verify pixel data
+        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(pixels.len(), 6);
+        assert_eq!(pixels[0], 0.0);
+        assert_eq!(pixels[1], 0.25);
+        assert_eq!(pixels[4], 1.0);
+    }
+
+    #[test]
+    fn test_convert_to_imaginarium_image_rgb() {
+        let astro = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![
+                1.0, 0.0, 0.0, // red
+                0.0, 1.0, 0.0, // green
+                0.0, 0.0, 1.0, // blue
+                1.0, 1.0, 1.0, // white
+            ],
+            dimensions: ImageDimensions::new(2, 2, 3),
+        };
+
+        let image: Image = astro.into();
+        let desc = image.desc();
+
+        assert_eq!(desc.width, 2);
+        assert_eq!(desc.height, 2);
+        assert_eq!(desc.color_format.channel_count, ChannelCount::Rgb);
+        assert_eq!(desc.color_format.channel_size, ChannelSize::_32bit);
+        assert_eq!(desc.color_format.channel_type, ChannelType::Float);
+
+        // Verify pixel data
+        let pixels: &[f32] = bytemuck::cast_slice(image.bytes());
+        assert_eq!(pixels.len(), 12);
+        // First pixel (red)
+        assert_eq!(pixels[0], 1.0);
+        assert_eq!(pixels[1], 0.0);
+        assert_eq!(pixels[2], 0.0);
+        // Last pixel (white)
+        assert_eq!(pixels[9], 1.0);
+        assert_eq!(pixels[10], 1.0);
+        assert_eq!(pixels[11], 1.0);
+    }
+
+    #[test]
+    fn test_convert_fits_to_imaginarium_image() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test_resources/full_example.fits"
+        );
+        let astro = AstroImage::from_file(path).unwrap();
+        let image: Image = astro.into();
+
+        let desc = image.desc();
+        assert_eq!(desc.width, 100);
+        assert_eq!(desc.height, 100);
+        assert_eq!(desc.color_format, ColorFormat::GRAY_F32);
     }
 
     #[test]
