@@ -663,7 +663,7 @@ mod tests {
     fn test_load_single_raw_from_env() {
         use crate::test_utils::load_calibration_images;
 
-        let Some(images) = load_calibration_images("Darks") else {
+        let Some(images) = load_calibration_images("Lights") else {
             eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
             return;
         };
@@ -677,6 +677,8 @@ mod tests {
             "Loaded image: {}x{}x{}",
             image.dimensions.width, image.dimensions.height, image.dimensions.channels
         );
+
+        println!("Mean: {}", image.mean());
 
         assert!(image.dimensions.width > 0);
         assert!(image.dimensions.height > 0);
