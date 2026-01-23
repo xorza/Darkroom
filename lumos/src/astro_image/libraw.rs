@@ -332,11 +332,9 @@ fn process_bayer_fast(
     // SAFETY: raw_image_ptr is valid (checked above), and we've validated dimensions.
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 
-    // Normalize to 0.0-1.0 range
-    let normalized_data: Vec<f32> = raw_data
-        .iter()
-        .map(|&v| ((v as f32) - black).max(0.0) / range)
-        .collect();
+    // Normalize to 0.0-1.0 range using parallel processing
+    let inv_range = 1.0 / range;
+    let normalized_data = normalize_u16_to_f32_parallel(raw_data, black, inv_range);
 
     let bayer = BayerImage::with_margins(
         &normalized_data,
@@ -361,6 +359,143 @@ fn process_bayer_fast(
     );
 
     Ok((rgb_pixels, 3))
+}
+
+/// Normalize u16 raw data to f32 in [0.0, 1.0] range using parallel SIMD processing.
+/// Formula: ((value - black).max(0) * inv_range)
+fn normalize_u16_to_f32_parallel(data: &[u16], black: f32, inv_range: f32) -> Vec<f32> {
+    use rayon::prelude::*;
+
+    const CHUNK_SIZE: usize = 16384; // Process 64KB chunks (16K * 4 bytes)
+
+    let mut result = vec![0.0f32; data.len()];
+
+    result
+        .par_chunks_mut(CHUNK_SIZE)
+        .zip(data.par_chunks(CHUNK_SIZE))
+        .for_each(|(out_chunk, in_chunk)| {
+            normalize_chunk_simd(in_chunk, out_chunk, black, inv_range);
+        });
+
+    result
+}
+
+/// Normalize a chunk of u16 data to f32 using SIMD when available.
+#[inline]
+fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            // SAFETY: We've verified SSE2 is available
+            unsafe {
+                normalize_chunk_sse2(input, output, black, inv_range);
+            }
+            return;
+        }
+    }
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        // SAFETY: NEON is always available on aarch64
+        unsafe {
+            normalize_chunk_neon(input, output, black, inv_range);
+        }
+        return;
+    }
+
+    // Scalar fallback
+    normalize_chunk_scalar(input, output, black, inv_range);
+}
+
+/// Scalar normalization fallback.
+#[inline]
+fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+    for (out, &val) in output.iter_mut().zip(input.iter()) {
+        *out = ((val as f32) - black).max(0.0) * inv_range;
+    }
+}
+
+/// SSE2 SIMD normalization for x86_64.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse2")]
+unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+    use std::arch::x86_64::*;
+
+    // SAFETY: All operations in this function require SSE2, which is guaranteed by target_feature
+    unsafe {
+        let black_vec = _mm_set1_ps(black);
+        let inv_range_vec = _mm_set1_ps(inv_range);
+        let zero_vec = _mm_setzero_ps();
+
+        let chunks = input.len() / 4;
+        let remainder = input.len() % 4;
+
+        for i in 0..chunks {
+            let idx = i * 4;
+            // Load 4 u16 values and convert to f32
+            // SSE2 doesn't have direct u16->f32, so we go through i32
+            let v0 = input[idx] as i32;
+            let v1 = input[idx + 1] as i32;
+            let v2 = input[idx + 2] as i32;
+            let v3 = input[idx + 3] as i32;
+
+            let vals = _mm_set_epi32(v3, v2, v1, v0);
+            let vals_f32 = _mm_cvtepi32_ps(vals);
+
+            // Subtract black, clamp to 0, multiply by inv_range
+            let subtracted = _mm_sub_ps(vals_f32, black_vec);
+            let clamped = _mm_max_ps(subtracted, zero_vec);
+            let normalized = _mm_mul_ps(clamped, inv_range_vec);
+
+            // Store result
+            _mm_storeu_ps(output.as_mut_ptr().add(idx), normalized);
+        }
+
+        // Handle remainder with scalar
+        let start = chunks * 4;
+        for i in 0..remainder {
+            let idx = start + i;
+            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+        }
+    }
+}
+
+/// NEON SIMD normalization for aarch64.
+#[cfg(target_arch = "aarch64")]
+unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
+    use std::arch::aarch64::*;
+
+    let black_vec = vdupq_n_f32(black);
+    let inv_range_vec = vdupq_n_f32(inv_range);
+    let zero_vec = vdupq_n_f32(0.0);
+
+    let chunks = input.len() / 4;
+    let remainder = input.len() % 4;
+
+    for i in 0..chunks {
+        let idx = i * 4;
+        // Load 4 u16 values
+        let vals_u16 = vld1_u16(input.as_ptr().add(idx));
+        // Widen to u32
+        let vals_u32 = vmovl_u16(vals_u16);
+        // Convert to f32
+        let vals_f32 = vcvtq_f32_u32(vals_u32);
+
+        // Subtract black, clamp to 0, multiply by inv_range
+        let subtracted = vsubq_f32(vals_f32, black_vec);
+        let clamped = vmaxq_f32(subtracted, zero_vec);
+        let normalized = vmulq_f32(clamped, inv_range_vec);
+
+        // Store result
+        vst1q_f32(output.as_mut_ptr().add(idx), normalized);
+    }
+
+    // Handle remainder with scalar
+    let start = chunks * 4;
+    for i in 0..remainder {
+        let idx = start + i;
+        output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+    }
 }
 
 /// Process unknown CFA pattern using libraw's built-in demosaic.
@@ -600,5 +735,69 @@ mod tests {
         // Test that LibrawGuard handles null pointer safely
         let _guard = LibrawGuard(std::ptr::null_mut());
         // Should not crash on drop
+    }
+
+    #[test]
+    fn test_normalize_u16_to_f32_parallel() {
+        // Test the SIMD normalization function
+        let black = 512.0;
+        let maximum = 16383.0;
+        let inv_range = 1.0 / (maximum - black);
+
+        // Test data with known values
+        let input: Vec<u16> = vec![
+            0,     // Below black -> 0.0
+            512,   // At black -> 0.0
+            8447,  // Midpoint -> ~0.5
+            16383, // At maximum -> 1.0
+            20000, // Above maximum -> >1.0
+        ];
+
+        let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
+
+        assert_eq!(result.len(), input.len());
+
+        // Below black should be 0
+        assert!((result[0] - 0.0).abs() < 1e-6, "Below black should be 0");
+        // At black should be 0
+        assert!((result[1] - 0.0).abs() < 1e-6, "At black should be 0");
+        // Midpoint should be ~0.5
+        assert!(
+            (result[2] - 0.5).abs() < 0.01,
+            "Midpoint should be ~0.5, got {}",
+            result[2]
+        );
+        // At maximum should be 1.0
+        assert!(
+            (result[3] - 1.0).abs() < 1e-6,
+            "At maximum should be 1.0, got {}",
+            result[3]
+        );
+        // Above maximum should be >1.0
+        assert!(result[4] > 1.0, "Above maximum should be >1.0");
+    }
+
+    #[test]
+    fn test_normalize_u16_large_array() {
+        // Test with a large array to exercise parallel processing
+        let size = 100_000;
+        let input: Vec<u16> = (0..size).map(|i| (i % 65536) as u16).collect();
+        let black = 0.0;
+        let inv_range = 1.0 / 65535.0;
+
+        let result = normalize_u16_to_f32_parallel(&input, black, inv_range);
+
+        assert_eq!(result.len(), size);
+
+        // Verify no NaN or infinite values
+        for (i, &v) in result.iter().enumerate() {
+            assert!(!v.is_nan(), "NaN at index {}", i);
+            assert!(v.is_finite(), "Infinite at index {}", i);
+            assert!(v >= 0.0, "Negative value at index {}", i);
+        }
+
+        // Check first and last values
+        assert!((result[0] - 0.0).abs() < 1e-6);
+        assert!((result[65535] - 1.0).abs() < 1e-4);
     }
 }
