@@ -117,11 +117,11 @@ impl AstroImage {
 
     /// Get pixel value at (x, y) for single-channel images.
     /// Panics if coordinates are out of bounds.
-    pub fn get_pixel(&self, x: usize, y: usize) -> f32 {
+    pub fn get_pixel_gray(&self, x: usize, y: usize) -> f32 {
         debug_assert!(x < self.width, "x coordinate out of bounds");
         debug_assert!(y < self.height, "y coordinate out of bounds");
-        debug_assert!(
-            self.channels == 1,
+        debug_assert_eq!(
+            self.channels, 1,
             "Use get_pixel_rgb for multi-channel images"
         );
 
@@ -131,12 +131,39 @@ impl AstroImage {
     /// Get pixel values at (x, y) for multi-channel images.
     /// Returns a slice of channel values.
     /// Panics if coordinates are out of bounds.
-    pub fn get_pixel_channels(&self, x: usize, y: usize) -> &[f32] {
+    pub fn get_pixel_rgb(&self, x: usize, y: usize) -> &[f32; 3] {
         debug_assert!(x < self.width, "x coordinate out of bounds");
         debug_assert!(y < self.height, "y coordinate out of bounds");
+        debug_assert_eq!(self.channels, 3, "Image must have at least 3 channels");
 
         let idx = (y * self.width + x) * self.channels;
-        &self.pixels[idx..idx + self.channels]
+        self.pixels[idx..idx + 3].as_array::<3>().unwrap()
+    }
+
+    /// Get mutable reference to pixel value at (x, y) for single-channel images.
+    /// Panics if coordinates are out of bounds.
+    pub fn get_pixel_gray_mut(&mut self, x: usize, y: usize) -> &mut f32 {
+        debug_assert!(x < self.width, "x coordinate out of bounds");
+        debug_assert!(y < self.height, "y coordinate out of bounds");
+        debug_assert_eq!(
+            self.channels, 1,
+            "Use get_pixel_rgb_mut for multi-channel images"
+        );
+
+        let idx = y * self.width + x;
+        &mut self.pixels[idx]
+    }
+
+    /// Get mutable reference to pixel values at (x, y) for multi-channel images.
+    /// Returns a mutable slice of channel values.
+    /// Panics if coordinates are out of bounds.
+    pub fn get_pixel_rgb_mut(&mut self, x: usize, y: usize) -> &mut [f32; 3] {
+        debug_assert!(x < self.width, "x coordinate out of bounds");
+        debug_assert!(y < self.height, "y coordinate out of bounds");
+        debug_assert_eq!(self.channels, 3, "Image must have at least 3 channels");
+
+        let idx = (y * self.width + x) * self.channels;
+        (&mut self.pixels[idx..idx + 3]).try_into().unwrap()
     }
 
     /// Get the total number of pixels (width * height * channels).
@@ -193,7 +220,7 @@ mod tests {
         assert_eq!(image.metadata.dimensions, vec![100, 100]);
 
         // Test pixel access
-        let pixel = image.get_pixel(5, 20);
+        let pixel = image.get_pixel_gray(5, 20);
         assert_eq!(pixel, 152.0);
     }
 }
