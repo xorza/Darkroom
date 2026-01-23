@@ -8,6 +8,8 @@ description = ""
 common = { workspace = true }
 imaginarium = { workspace = true }
 
+fitsio = { workspace = true }
+
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 bytemuck = { workspace = true }
