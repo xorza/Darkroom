@@ -17,7 +17,6 @@ pub fn stack_frames_cpu(
 
     let first = &frames[0];
     let dims = first.dimensions;
-    let pixel_count = first.pixel_count();
 
     // Verify all images have same dimensions
     for (i, frame) in frames.iter().enumerate().skip(1) {
@@ -31,12 +30,19 @@ pub fn stack_frames_cpu(
         );
     }
 
-    // Process pixels in parallel using rayon
-    let result_pixels: Vec<f32> = (0..pixel_count)
+    // Process rows in parallel using rayon (better cache locality than per-pixel)
+    let row_stride = dims.width * dims.channels;
+    let result_pixels: Vec<f32> = (0..dims.height)
         .into_par_iter()
-        .map(|pixel_idx| {
-            let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
-            combine_pixels(&values, method)
+        .flat_map(|row| {
+            let row_start = row * row_stride;
+            let row_end = row_start + row_stride;
+            (row_start..row_end)
+                .map(|pixel_idx| {
+                    let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
+                    combine_pixels(&values, method)
+                })
+                .collect::<Vec<f32>>()
         })
         .collect();
 
