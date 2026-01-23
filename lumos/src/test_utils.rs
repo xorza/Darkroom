@@ -5,9 +5,12 @@ use crate::AstroImage;
 
 /// Initialize tracing subscriber for tests.
 /// Safe to call multiple times - will only initialize once.
+/// Respects RUST_LOG env var, defaults to "info".
 pub fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = tracing_subscriber::fmt()
-        .with_env_filter("info")
+        .with_env_filter(filter)
         .with_test_writer()
         .try_init();
 }

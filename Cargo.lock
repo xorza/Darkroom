@@ -2013,6 +2013,7 @@ dependencies = [
  "glam",
  "imaginarium",
  "libraw-rs",
+ "libraw-rs-sys",
  "rawloader",
  "rayon",
  "strum",

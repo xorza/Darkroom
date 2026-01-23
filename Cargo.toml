@@ -32,6 +32,7 @@ fitsio = { git = "https://github.com/simonrw/rust-fitsio", features = ["fitsio-s
 
 rawloader = { version = "*" }
 libraw-rs = { version = "*" }
+libraw-rs-sys = { version = "*" }
 
 serde = { version = "*", features = ["derive"] }
 serde_yml = { version = "*" }
