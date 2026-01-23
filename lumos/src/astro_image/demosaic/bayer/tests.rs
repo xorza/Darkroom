@@ -373,3 +373,209 @@ fn test_interpolate_vertical_edge_cases() {
     let v1 = scalar::interpolate_vertical(&bayer, 0, 1);
     assert!((v1 - 0.0).abs() < 0.01); // (data[0] + data[0]) / 2
 }
+
+// Additional tests for channel preservation and edge cases
+
+#[test]
+fn test_demosaic_preserves_green_at_green_pixel() {
+    // RGGB pattern: (0,1) and (1,0) are green
+    let mut data = vec![0.0f32; 16];
+    // Set green pixels to 1.0
+    // Row 0: positions 1, 3 are green
+    // Row 1: positions 0, 2 are green
+    // Row 2: positions 1, 3 are green
+    // Row 3: positions 0, 2 are green
+    data[1] = 1.0; // (0,1)
+    data[3] = 1.0; // (0,3)
+    data[4] = 1.0; // (1,0)
+    data[6] = 1.0; // (1,2)
+    data[9] = 1.0; // (2,1)
+    data[11] = 1.0; // (2,3)
+    data[12] = 1.0; // (3,0)
+    data[14] = 1.0; // (3,2)
+
+    let bayer = BayerImage::with_margins(&data, 4, 4, 4, 4, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    // At (0,1), G channel (index 1) should be 1.0
+    let idx_01 = 3; // row 0, col 1
+    assert!(
+        (rgb[idx_01 + 1] - 1.0).abs() < 0.01,
+        "Green at (0,1) should be 1.0, got {}",
+        rgb[idx_01 + 1]
+    );
+
+    // At (1,0), G channel should be 1.0
+    let idx_10 = 4 * 3; // row 1, col 0
+    assert!(
+        (rgb[idx_10 + 1] - 1.0).abs() < 0.01,
+        "Green at (1,0) should be 1.0, got {}",
+        rgb[idx_10 + 1]
+    );
+}
+
+#[test]
+fn test_demosaic_preserves_blue_at_blue_pixel() {
+    // RGGB pattern: (1,1), (1,3), (3,1), (3,3) are blue
+    let mut data = vec![0.0f32; 16];
+    // Set blue pixels to 1.0
+    data[5] = 1.0; // (1,1)
+    data[7] = 1.0; // (1,3)
+    data[13] = 1.0; // (3,1)
+    data[15] = 1.0; // (3,3)
+
+    let bayer = BayerImage::with_margins(&data, 4, 4, 4, 4, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    // At (1,1), B channel (index 2) should be 1.0
+    let idx_11 = 5 * 3; // row 1, col 1
+    assert!(
+        (rgb[idx_11 + 2] - 1.0).abs() < 0.01,
+        "Blue at (1,1) should be 1.0, got {}",
+        rgb[idx_11 + 2]
+    );
+}
+
+#[test]
+fn test_demosaic_all_zeros() {
+    // All black input should produce all black output
+    let data = vec![0.0f32; 16];
+    let bayer = BayerImage::with_margins(&data, 4, 4, 4, 4, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    for (i, &v) in rgb.iter().enumerate() {
+        assert!(v.abs() < 1e-6, "Expected 0.0 at index {}, got {}", i, v);
+    }
+}
+
+#[test]
+fn test_demosaic_all_max() {
+    // All white input should produce all white output
+    let data = vec![1.0f32; 16];
+    let bayer = BayerImage::with_margins(&data, 4, 4, 4, 4, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    for (i, &v) in rgb.iter().enumerate() {
+        assert!(
+            (v - 1.0).abs() < 0.01,
+            "Expected ~1.0 at index {}, got {}",
+            i,
+            v
+        );
+    }
+}
+
+#[test]
+fn test_demosaic_no_nan_or_infinity() {
+    // Test various inputs don't produce NaN or Infinity
+    let test_values = [0.0, 0.5, 1.0, 0.001, 0.999];
+
+    for &val in &test_values {
+        let data = vec![val; 16];
+        let bayer = BayerImage::with_margins(&data, 4, 4, 4, 4, 0, 0, CfaPattern::Rggb);
+        let rgb = demosaic_bilinear(&bayer);
+
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!(v.is_finite(), "Non-finite value at index {}: {}", i, v);
+        }
+    }
+}
+
+#[test]
+fn test_demosaic_corner_pixels() {
+    // Test that corner pixels are handled correctly
+    let data: Vec<f32> = (0..64).map(|i| i as f32 / 64.0).collect();
+    let bayer = BayerImage::with_margins(&data, 8, 8, 8, 8, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    // Check corners are valid and finite
+    let corners = [(0, 0), (0, 7), (7, 0), (7, 7)];
+    for (y, x) in corners {
+        let idx = (y * 8 + x) * 3;
+        for c in 0..3 {
+            let v = rgb[idx + c];
+            assert!(
+                v.is_finite(),
+                "Corner ({},{}) channel {} is not finite: {}",
+                y,
+                x,
+                c,
+                v
+            );
+            assert!(
+                v >= 0.0,
+                "Corner ({},{}) channel {} is negative: {}",
+                y,
+                x,
+                c,
+                v
+            );
+        }
+    }
+}
+
+#[test]
+fn test_demosaic_asymmetric_margins() {
+    // Test with different top and left margins
+    let data = vec![0.5f32; 36]; // 6x6 raw
+    let bayer = BayerImage::with_margins(&data, 6, 6, 4, 3, 2, 1, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    assert_eq!(rgb.len(), 4 * 3 * 3); // 4x3x3
+
+    // All values should be around 0.5
+    for &v in &rgb {
+        assert!((v - 0.5).abs() < 0.01, "Expected ~0.5, got {}", v);
+    }
+}
+
+#[test]
+fn test_demosaic_non_square_image() {
+    // Test with wide rectangle
+    let data = vec![0.5f32; 32]; // 8x4 raw
+    let bayer = BayerImage::with_margins(&data, 8, 4, 8, 4, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    assert_eq!(rgb.len(), 8 * 4 * 3);
+
+    for &v in &rgb {
+        assert!(v.is_finite());
+        assert!((v - 0.5).abs() < 0.01);
+    }
+
+    // Test with tall rectangle
+    let data = vec![0.5f32; 32]; // 4x8 raw
+    let bayer = BayerImage::with_margins(&data, 4, 8, 4, 8, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    assert_eq!(rgb.len(), 4 * 8 * 3);
+}
+
+#[test]
+fn test_demosaic_gradient_pattern() {
+    // Test with horizontal gradient
+    let size = 8;
+    let data: Vec<f32> = (0..size * size)
+        .map(|i| (i % size) as f32 / (size - 1) as f32)
+        .collect();
+    let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, CfaPattern::Rggb);
+    let rgb = demosaic_bilinear(&bayer);
+
+    // Output should have increasing values left to right
+    for y in 0..size {
+        let left_idx = y * size * 3;
+        let right_idx = (y * size + (size - 1)) * 3;
+
+        // Average of RGB at each position
+        let left_avg = (rgb[left_idx] + rgb[left_idx + 1] + rgb[left_idx + 2]) / 3.0;
+        let right_avg = (rgb[right_idx] + rgb[right_idx + 1] + rgb[right_idx + 2]) / 3.0;
+
+        assert!(
+            right_avg >= left_avg - 0.1,
+            "Row {}: right ({}) should be >= left ({})",
+            y,
+            right_avg,
+            left_avg
+        );
+    }
+}

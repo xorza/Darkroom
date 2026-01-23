@@ -272,7 +272,9 @@ CalibrationMasters // Container for master dark/flat/bias frames
   - `bayer/simd_sse3.rs` - x86_64 SSE3 SIMD implementation
   - `bayer/simd_neon.rs` - ARM aarch64 NEON SIMD implementation
   - `bayer/bench.rs` - Criterion benchmarks for Bayer demosaic (feature-gated)
+  - `bayer/tests.rs` - Comprehensive unit tests
   - `xtrans/` - Submodule for X-Trans demosaicing (see below)
+- **Test coverage:** Channel preservation (R/G/B at known positions), NaN/Infinity detection, extreme values (zeros, max), corner pixels, asymmetric margins, non-square images, gradient patterns, SIMD vs scalar consistency
 - Benchmarks in `lumos/benches/`: `demosaic.rs` (Bayer), `xtrans.rs` (X-Trans)
 - Run with: `cargo bench --package lumos --features bench demosaic` or `xtrans`
 
@@ -291,13 +293,20 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `demosaic_xtrans_bilinear()` - Bilinear interpolation demosaicing with SIMD acceleration
 - Multi-threaded row-based processing via rayon for large images
 - SIMD acceleration: SSE4.1 (x86_64) and NEON (aarch64) for neighbor lookup
+- **Key optimizations:**
+  - `OffsetList` - Pre-computed (dy, dx) offsets for each color at each of 36 pattern positions, eliminating pattern lookups and modulo operations in hot loops
+  - `LinearOffsetList` - Pre-computed linear offsets (`dy * stride + dx`) eliminating multiply operations in inner loop
+  - `NeighborLookup` - 6x6 lookup table of OffsetLists for each color
+  - `LinearNeighborLookup` - Same with linear offsets, requires stride at construction time
+  - 4 independent accumulators in SIMD for instruction-level parallelism (ILP)
 - Module structure:
   - `mod.rs` - `XTransPattern`, `XTransImage` types with validation
-  - `scalar.rs` - Scalar bilinear demosaic implementation using 5x5 neighborhood search
-  - `simd_sse4.rs` - x86_64 SSE4.1 SIMD neighbor lookup implementation
-  - `simd_neon.rs` - ARM aarch64 NEON SIMD neighbor lookup implementation
+  - `scalar.rs` - Scalar bilinear demosaic with lookup tables and detailed optimization docs
+  - `simd_sse4.rs` - x86_64 SSE4.1 SIMD using linear offsets and 4-accumulator ILP
+  - `simd_neon.rs` - ARM aarch64 NEON SIMD using same optimization strategy
   - `bench.rs` - Criterion benchmarks for X-Trans demosaic (feature-gated)
   - `integration_tests.rs` - Integration tests requiring RAF files
+- **Test coverage:** Channel preservation, NaN/Infinity detection, extreme values, corner pixels, asymmetric margins, non-square images, gradient patterns, SIMD vs scalar consistency
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 

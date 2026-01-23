@@ -5,10 +5,39 @@
 //! but produces lower quality results (may show artifacts).
 //!
 //! # Optimizations
-//! - Pre-computed neighbor offset lookup tables per pattern position
+//!
+//! ## Pre-computed Neighbor Offset Tables
+//!
+//! The X-Trans CFA pattern is a 6x6 repeating grid where each pixel only samples
+//! one color (R, G, or B). To reconstruct full RGB at each pixel, we need to
+//! interpolate the missing channels from nearby pixels of the target color.
+//!
+//! **Naive approach (slow):** For each output pixel, scan the 5x5 neighborhood
+//! and check pattern.color_at(y+dy, x+dx) for each (dy, dx). This involves:
+//! - 25 pattern lookups per channel × 2 missing channels = 50 lookups/pixel
+//! - Each lookup involves modulo operations on y and x
+//!
+//! **Optimized approach (OffsetList):** Pre-compute which (dy, dx) offsets contain
+//! each color for each of the 36 pattern positions. At runtime, we just iterate
+//! the pre-computed list without any pattern lookups or modulo operations.
+//!
+//! ## Pre-computed Linear Offsets (LinearOffsetList)
+//!
+//! Taking optimization further: in the hot loop, converting (dy, dx) to a linear
+//! index requires `base_idx + dy * stride + dx`. The multiply by stride is expensive.
+//!
+//! **Solution:** Pre-compute `dy * stride + dx` as a single `isize` offset for each
+//! neighbor, creating `LinearNeighborLookup`. This requires knowing the image stride
+//! at construction time, but eliminates the multiply from the inner loop entirely.
+//!
+//! The linear offset can then be used with simple pointer arithmetic:
+//! `data_ptr.offset(linear_offset)` instead of `data[y * stride + x]`.
+//!
+//! ## Other Optimizations
 //! - Separate fast path for interior pixels (no bounds checking)
 //! - Row base index pre-computation
 //! - Parallel processing via rayon for large images
+//! - SIMD acceleration on x86_64 (SSE4.1) and aarch64 (NEON)
 
 use rayon::prelude::*;
 
@@ -767,6 +796,296 @@ mod tests {
         for (i, &v) in rgb.iter().enumerate() {
             assert!(v.is_finite(), "Non-finite value at index {}: {}", i, v);
             assert!(v >= 0.0, "Negative value at index {}: {}", i, v);
+        }
+    }
+
+    #[test]
+    fn test_demosaic_all_zeros() {
+        // All zeros input should produce all zeros output
+        let data = vec![0.0f32; 12 * 12];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, 12, 12, 12, 12, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!(v.abs() < 1e-6, "Expected 0.0 at index {}, got {}", i, v);
+        }
+    }
+
+    #[test]
+    fn test_demosaic_all_max() {
+        // All 1.0 input should produce all 1.0 output
+        let data = vec![1.0f32; 12 * 12];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, 12, 12, 12, 12, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!(
+                (v - 1.0).abs() < 0.01,
+                "Expected ~1.0 at index {}, got {}",
+                i,
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_demosaic_no_nan_or_infinity() {
+        // Test with extreme gradient values that might cause numerical issues
+        let size = 24;
+        let mut data = vec![0.0f32; size * size];
+
+        // Create alternating extreme values
+        for (i, val) in data.iter_mut().enumerate() {
+            *val = if i % 2 == 0 { 0.0 } else { 1.0 };
+        }
+
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!(!v.is_nan(), "NaN at index {}", i);
+            assert!(v.is_finite(), "Infinite at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_demosaic_corner_pixels() {
+        // Test that corner pixels are correctly interpolated
+        let size = 12;
+        let data = vec![0.5f32; size * size];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        // Check corners: (0,0), (0,w-1), (h-1,0), (h-1,w-1)
+        let corners = [(0, 0), (0, size - 1), (size - 1, 0), (size - 1, size - 1)];
+
+        for (y, x) in corners {
+            let idx = (y * size + x) * 3;
+            for c in 0..3 {
+                let v = rgb[idx + c];
+                assert!(!v.is_nan(), "NaN at corner ({}, {}), channel {}", y, x, c);
+                assert!(
+                    v.is_finite(),
+                    "Infinite at corner ({}, {}), channel {}",
+                    y,
+                    x,
+                    c
+                );
+                // With uniform 0.5 input, all outputs should be approximately 0.5
+                assert!(
+                    (v - 0.5).abs() < 0.1,
+                    "Unexpected value {} at corner ({}, {}), channel {}",
+                    v,
+                    y,
+                    x,
+                    c
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_demosaic_asymmetric_margins() {
+        // Test with non-symmetric margins
+        let raw_w = 18;
+        let raw_h = 15;
+        let left = 2;
+        let top = 1;
+        let out_w = 12;
+        let out_h = 12;
+
+        let data = vec![0.5f32; raw_w * raw_h];
+        let pattern = test_pattern();
+        let xtrans =
+            XTransImage::with_margins(&data, raw_w, raw_h, out_w, out_h, left, top, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+        assert_eq!(rgb.len(), out_w * out_h * 3);
+
+        // Verify no NaN or infinite values
+        for (i, &v) in rgb.iter().enumerate() {
+            assert!(v.is_finite(), "Non-finite at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_demosaic_non_square_image() {
+        // Test with wide image
+        let data = vec![0.5f32; 24 * 12];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, 24, 12, 24, 12, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+        assert_eq!(rgb.len(), 24 * 12 * 3);
+
+        // Test with tall image
+        let data = vec![0.5f32; 12 * 24];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, 12, 24, 12, 24, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+        assert_eq!(rgb.len(), 12 * 24 * 3);
+    }
+
+    #[test]
+    fn test_demosaic_preserves_green_at_green_pixel() {
+        // Position (0,0) is Green in test pattern
+        // Verify it is preserved exactly
+        let size = 12;
+        let mut data = vec![0.0f32; size * size];
+        data[0] = 0.75; // (0,0) is Green
+
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        // Position (0,0) -> RGB index 0, Green channel is index 1
+        let green_at_0_0 = rgb[1];
+        assert!(
+            (green_at_0_0 - 0.75).abs() < 0.001,
+            "Green channel at (0,0) should be 0.75, got {}",
+            green_at_0_0
+        );
+    }
+
+    #[test]
+    fn test_demosaic_preserves_blue_at_blue_pixel() {
+        // Position (1,0) is Blue in test pattern
+        let size = 12;
+        let mut data = vec![0.0f32; size * size];
+        data[size] = 0.8; // (1,0) is Blue
+
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        // Position (1,0) -> RGB index (1*12+0)*3 = 36, Blue channel is +2 = 38
+        let blue_at_1_0 = rgb[38];
+        assert!(
+            (blue_at_1_0 - 0.8).abs() < 0.001,
+            "Blue channel at (1,0) should be 0.8, got {}",
+            blue_at_1_0
+        );
+    }
+
+    #[test]
+    fn test_neighbor_lookup_finds_correct_colors() {
+        // Verify that NeighborLookup finds the correct neighbors
+        let pattern = test_pattern();
+
+        // For Red color (0)
+        let red_lookup = NeighborLookup::new(&pattern, 0);
+
+        // At position (0,0) which is Green, check that red neighbors are found
+        let offsets = red_lookup.get(0, 0);
+        assert!(
+            !offsets.as_slice().is_empty(),
+            "Should find red neighbors from position (0,0)"
+        );
+
+        // For Green color (1)
+        let green_lookup = NeighborLookup::new(&pattern, 1);
+        let offsets = green_lookup.get(0, 0);
+        // (0,0) is Green itself, so (0,0) offset should be in the list
+        assert!(
+            offsets.as_slice().contains(&(0, 0)),
+            "Green lookup at Green position should include (0,0)"
+        );
+
+        // For Blue color (2)
+        let blue_lookup = NeighborLookup::new(&pattern, 2);
+        let offsets = blue_lookup.get(0, 0);
+        assert!(
+            !offsets.as_slice().is_empty(),
+            "Should find blue neighbors from position (0,0)"
+        );
+    }
+
+    #[test]
+    fn test_linear_neighbor_lookup_consistency() {
+        // Verify that LinearNeighborLookup produces consistent results with NeighborLookup
+        let pattern = test_pattern();
+        let stride = 24usize;
+
+        let neighbor_lookup = NeighborLookup::new(&pattern, 0);
+        let linear_lookup = LinearNeighborLookup::new(&pattern, 0, stride);
+
+        // Check several positions
+        for py in 0..6 {
+            for px in 0..6 {
+                let neighbor_offsets = neighbor_lookup.get(py, px);
+                let linear_offsets = linear_lookup.get(py, px);
+
+                assert_eq!(
+                    neighbor_offsets.as_slice().len(),
+                    linear_offsets.as_slice().len(),
+                    "Length mismatch at ({}, {})",
+                    py,
+                    px
+                );
+
+                // Verify linear offsets match dy*stride + dx
+                for (i, &(dy, dx)) in neighbor_offsets.as_slice().iter().enumerate() {
+                    let expected_linear = dy as isize * stride as isize + dx as isize;
+                    assert_eq!(
+                        linear_offsets.as_slice()[i],
+                        expected_linear,
+                        "Linear offset mismatch at ({}, {})[{}]: expected {}, got {}",
+                        py,
+                        px,
+                        i,
+                        expected_linear,
+                        linear_offsets.as_slice()[i]
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_gradient_pattern_interpolation() {
+        // Test that gradient patterns interpolate smoothly
+        let size = 24;
+        let data: Vec<f32> = (0..size * size)
+            .map(|i| {
+                let x = i % size;
+                x as f32 / (size - 1) as f32
+            })
+            .collect();
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let rgb = demosaic_xtrans_bilinear(&xtrans);
+
+        // Check that values increase from left to right
+        for y in 0..size {
+            let mut prev_sum = 0.0f32;
+            for x in 0..size {
+                let idx = (y * size + x) * 3;
+                let sum: f32 = rgb[idx..idx + 3].iter().sum();
+                if x > 0 {
+                    // Allow small tolerance for interpolation differences
+                    assert!(
+                        sum >= prev_sum - 0.5,
+                        "Gradient should generally increase: row {}, col {} has sum {} < prev {}",
+                        y,
+                        x,
+                        sum,
+                        prev_sum
+                    );
+                }
+                prev_sum = sum;
+            }
         }
     }
 }
