@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use fitsio::FitsFile;
 use fitsio::hdu::HduInfo;
 use fitsio::images::ImageType;
+use rawloader::RawImageData;
 use std::path::Path;
 
 /// Image dimensions: width, height, and number of channels.
@@ -199,6 +200,68 @@ impl AstroImage {
     pub fn pixel_count(&self) -> usize {
         self.dimensions.pixel_count()
     }
+
+    /// Load an astronomical image from a raw camera file (RAF, CR2, NEF, etc.).
+    ///
+    /// Returns the raw Bayer mosaic data as a single-channel image.
+    /// The data is normalized to 0.0-1.0 range based on black/white levels.
+    ///
+    /// # Arguments
+    /// * `path` - Path to the raw file
+    ///
+    /// # Returns
+    /// * `Result<AstroImage>` - The loaded image or an error
+    pub fn from_raw<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        let raw_image = rawloader::decode_file(path)
+            .with_context(|| format!("Failed to decode raw file: {}", path.display()))?;
+
+        let width = raw_image.width;
+        let height = raw_image.height;
+        let cpp = raw_image.cpp; // components per pixel (1 for Bayer, 3 for RGB sensors)
+
+        let dimensions = ImageDimensions::new(width, height, cpp);
+
+        // Get black and white levels for normalization
+        let black_level = raw_image.blacklevels[0] as f32;
+        let white_level = raw_image.whitelevels[0] as f32;
+        let range = white_level - black_level;
+
+        let is_float = matches!(&raw_image.data, RawImageData::Float(_));
+        let pixels: Vec<f32> = match raw_image.data {
+            RawImageData::Integer(data) => data
+                .iter()
+                .map(|&v| ((v as f32) - black_level) / range)
+                .collect(),
+            RawImageData::Float(data) => data.iter().map(|&v| (v - black_level) / range).collect(),
+        };
+
+        assert!(
+            pixels.len() == dimensions.pixel_count(),
+            "Pixel count mismatch: expected {}, got {}",
+            dimensions.pixel_count(),
+            pixels.len()
+        );
+
+        let metadata = AstroImageMetadata {
+            object: None,
+            instrument: Some(format!(
+                "{} {}",
+                raw_image.clean_make, raw_image.clean_model
+            )),
+            telescope: None,
+            date_obs: None,
+            exposure_time: None,
+            bitpix: if is_float { -32 } else { 16 },
+            header_dimensions: vec![height, width],
+        };
+
+        Ok(AstroImage {
+            metadata,
+            pixels,
+            dimensions,
+        })
+    }
 }
 
 /// Convert ImageType to BITPIX value.
@@ -225,6 +288,8 @@ fn read_key_optional<T: fitsio::headers::ReadsKey>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use std::fs;
 
     #[test]
     fn test_metadata_default() {
@@ -252,5 +317,96 @@ mod tests {
         // Test pixel access
         let pixel = image.get_pixel_gray(5, 20);
         assert_eq!(pixel, 152.0);
+    }
+
+    #[test]
+    fn test_load_darks_from_env() {
+        let Ok(calibration_dir) = env::var("LUMOS_CALIBRATION_DIR") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+            return;
+        };
+
+        let darks_dir = std::path::Path::new(&calibration_dir).join("Darks");
+        assert!(
+            darks_dir.exists(),
+            "Darks directory does not exist: {}",
+            darks_dir.display()
+        );
+
+        let entries: Vec<_> = fs::read_dir(&darks_dir)
+            .expect("Failed to read Darks directory")
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let path = e.path();
+                if !path.is_file() {
+                    return false;
+                }
+                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                matches!(
+                    ext.to_lowercase().as_str(),
+                    "fit" | "fits" | "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng"
+                )
+            })
+            .collect();
+
+        assert!(
+            !entries.is_empty(),
+            "No image files found in Darks directory"
+        );
+
+        println!(
+            "Found {} dark frames in {}",
+            entries.len(),
+            darks_dir.display()
+        );
+
+        let mut images = Vec::new();
+        let mut first_dims: Option<ImageDimensions> = None;
+
+        for entry in &entries {
+            let path = entry.path();
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+
+            let image = if matches!(ext.to_lowercase().as_str(), "fit" | "fits") {
+                AstroImage::from_fits(&path)
+            } else {
+                AstroImage::from_raw(&path)
+            };
+
+            match image {
+                Ok(img) => {
+                    println!(
+                        "Loaded: {} ({}x{}x{})",
+                        path.file_name().unwrap().to_string_lossy(),
+                        img.dimensions.width,
+                        img.dimensions.height,
+                        img.dimensions.channels
+                    );
+
+                    // Verify all images have same dimensions
+                    if let Some(dims) = first_dims {
+                        assert_eq!(
+                            img.dimensions,
+                            dims,
+                            "Dimension mismatch in {}",
+                            path.display()
+                        );
+                    } else {
+                        first_dims = Some(img.dimensions);
+                    }
+
+                    images.push(img);
+                }
+                Err(e) => {
+                    eprintln!("Failed to load {}: {}", path.display(), e);
+                }
+            }
+        }
+
+        assert!(
+            !images.is_empty(),
+            "Failed to load any images from Darks directory"
+        );
+        println!("Successfully loaded {} dark frames", images.len());
     }
 }
