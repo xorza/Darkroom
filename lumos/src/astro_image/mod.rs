@@ -1,7 +1,10 @@
 pub(crate) mod demosaic;
 mod fits;
+mod hot_pixels;
 pub(crate) mod libraw;
 mod sensor;
+
+pub use hot_pixels::{HotPixelMap, correct_hot_pixels};
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};

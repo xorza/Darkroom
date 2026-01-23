@@ -6,7 +6,9 @@ mod stacking;
 #[cfg(any(test, feature = "bench"))]
 mod testing;
 
-pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
+pub use astro_image::{
+    AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions, correct_hot_pixels,
+};
 pub use calibration_masters::CalibrationMasters;
 pub use stacking::{FrameType, SigmaClipConfig, StackingMethod, stack_frames};
 
