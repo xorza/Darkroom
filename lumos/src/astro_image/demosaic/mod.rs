@@ -12,4 +12,7 @@ pub(crate) mod xtrans;
 pub use bayer::{BayerImage, CfaPattern, demosaic_bilinear};
 
 #[cfg(feature = "bench")]
-pub use bayer::bench;
+pub mod bench {
+    pub use super::bayer::bench as bayer;
+    pub use super::xtrans::bench as xtrans;
+}
