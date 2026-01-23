@@ -343,6 +343,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_single_raw_from_env() {
         let Ok(calibration_dir) = env::var("LUMOS_CALIBRATION_DIR") else {
             eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
