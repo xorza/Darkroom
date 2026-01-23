@@ -156,7 +156,34 @@ impl<'a> BayerImage<'a> {
 ///
 /// Takes a Bayer pattern image and produces an RGB image using bilinear interpolation.
 /// The output has 3 channels (RGB) interleaved: [R0, G0, B0, R1, G1, B1, ...].
+///
+/// Uses SIMD acceleration on x86_64 (SSE3) and aarch64 (NEON) when available,
+/// with automatic fallback to scalar implementation.
+#[cfg(target_arch = "x86_64")]
 pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
+    if is_x86_feature_detected!("sse3") && bayer.width >= 8 && bayer.height >= 4 {
+        unsafe { demosaic_bilinear_sse3(bayer) }
+    } else {
+        demosaic_bilinear_scalar(bayer)
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
+    if bayer.width >= 8 && bayer.height >= 4 {
+        unsafe { demosaic_bilinear_neon(bayer) }
+    } else {
+        demosaic_bilinear_scalar(bayer)
+    }
+}
+
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
+    demosaic_bilinear_scalar(bayer)
+}
+
+/// Scalar implementation of bilinear demosaicing.
+fn demosaic_bilinear_scalar(bayer: &BayerImage) -> Vec<f32> {
     let mut rgb = vec![0.0f32; bayer.width * bayer.height * 3];
 
     for y in 0..bayer.height {
@@ -201,6 +228,328 @@ pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     }
 
     rgb
+}
+
+// =============================================================================
+// x86_64 SSE3 Implementation
+// =============================================================================
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "sse3")]
+unsafe fn demosaic_bilinear_sse3(bayer: &BayerImage) -> Vec<f32> {
+    use std::arch::x86_64::*;
+
+    let mut rgb = vec![0.0f32; bayer.width * bayer.height * 3];
+    let half = _mm_set1_ps(0.5);
+    let quarter = _mm_set1_ps(0.25);
+
+    unsafe {
+        // Process interior pixels with SIMD (skip 1-pixel border for safe neighbor access)
+        for y in 1..bayer.height.saturating_sub(1) {
+            let raw_y = y + bayer.top_margin;
+            let row_above = (raw_y - 1) * bayer.raw_width;
+            let row_current = raw_y * bayer.raw_width;
+            let row_below = (raw_y + 1) * bayer.raw_width;
+
+            // Process 4 pixels at a time (2 pairs of RGGB/GRBG patterns)
+            let mut x = 1;
+            while x + 4 <= bayer.width.saturating_sub(1) {
+                let raw_x = x + bayer.left_margin;
+
+                // Load 4 consecutive pixels and their neighbors
+                let center = _mm_loadu_ps(bayer.data.as_ptr().add(row_current + raw_x));
+                let left = _mm_loadu_ps(bayer.data.as_ptr().add(row_current + raw_x - 1));
+                let right = _mm_loadu_ps(bayer.data.as_ptr().add(row_current + raw_x + 1));
+                let top = _mm_loadu_ps(bayer.data.as_ptr().add(row_above + raw_x));
+                let bottom = _mm_loadu_ps(bayer.data.as_ptr().add(row_below + raw_x));
+
+                // Diagonal neighbors
+                let top_left = _mm_loadu_ps(bayer.data.as_ptr().add(row_above + raw_x - 1));
+                let top_right = _mm_loadu_ps(bayer.data.as_ptr().add(row_above + raw_x + 1));
+                let bottom_left = _mm_loadu_ps(bayer.data.as_ptr().add(row_below + raw_x - 1));
+                let bottom_right = _mm_loadu_ps(bayer.data.as_ptr().add(row_below + raw_x + 1));
+
+                // Compute interpolations
+                let h_interp = _mm_mul_ps(_mm_add_ps(left, right), half);
+                let v_interp = _mm_mul_ps(_mm_add_ps(top, bottom), half);
+                let cross_interp = _mm_mul_ps(
+                    _mm_add_ps(_mm_add_ps(left, right), _mm_add_ps(top, bottom)),
+                    quarter,
+                );
+                let diag_interp = _mm_mul_ps(
+                    _mm_add_ps(
+                        _mm_add_ps(top_left, top_right),
+                        _mm_add_ps(bottom_left, bottom_right),
+                    ),
+                    quarter,
+                );
+
+                // Extract values and assign based on CFA pattern
+                let center_arr: [f32; 4] = std::mem::transmute(center);
+                let h_arr: [f32; 4] = std::mem::transmute(h_interp);
+                let v_arr: [f32; 4] = std::mem::transmute(v_interp);
+                let cross_arr: [f32; 4] = std::mem::transmute(cross_interp);
+                let diag_arr: [f32; 4] = std::mem::transmute(diag_interp);
+
+                for i in 0..4 {
+                    let px = x + i;
+                    let raw_px = raw_x + i;
+                    let color = bayer.cfa.color_at(raw_y, raw_px);
+                    let rgb_idx = (y * bayer.width + px) * 3;
+
+                    match color {
+                        0 => {
+                            // Red pixel
+                            rgb[rgb_idx] = center_arr[i];
+                            rgb[rgb_idx + 1] = cross_arr[i];
+                            rgb[rgb_idx + 2] = diag_arr[i];
+                        }
+                        1 => {
+                            // Green pixel
+                            if bayer.cfa.red_in_row(raw_y) {
+                                rgb[rgb_idx] = h_arr[i];
+                                rgb[rgb_idx + 2] = v_arr[i];
+                            } else {
+                                rgb[rgb_idx] = v_arr[i];
+                                rgb[rgb_idx + 2] = h_arr[i];
+                            }
+                            rgb[rgb_idx + 1] = center_arr[i];
+                        }
+                        2 => {
+                            // Blue pixel
+                            rgb[rgb_idx] = diag_arr[i];
+                            rgb[rgb_idx + 1] = cross_arr[i];
+                            rgb[rgb_idx + 2] = center_arr[i];
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                x += 4;
+            }
+
+            // Handle remaining pixels in this row with scalar code
+            while x < bayer.width {
+                let raw_x = x + bayer.left_margin;
+                process_pixel_scalar(bayer, &mut rgb, x, y, raw_x, raw_y);
+                x += 1;
+            }
+        }
+
+        // Process border rows with scalar code
+        for y in 0..bayer.height {
+            if y == 0 || y == bayer.height - 1 || y >= bayer.height.saturating_sub(1) {
+                for x in 0..bayer.width {
+                    let raw_y = y + bayer.top_margin;
+                    let raw_x = x + bayer.left_margin;
+                    process_pixel_scalar(bayer, &mut rgb, x, y, raw_x, raw_y);
+                }
+            } else {
+                // Process left and right border pixels
+                let raw_y = y + bayer.top_margin;
+                if bayer.width > 0 {
+                    process_pixel_scalar(bayer, &mut rgb, 0, y, bayer.left_margin, raw_y);
+                }
+                if bayer.width > 1 {
+                    let last_x = bayer.width - 1;
+                    process_pixel_scalar(
+                        bayer,
+                        &mut rgb,
+                        last_x,
+                        y,
+                        last_x + bayer.left_margin,
+                        raw_y,
+                    );
+                }
+            }
+        }
+    }
+
+    rgb
+}
+
+// =============================================================================
+// ARM NEON Implementation
+// =============================================================================
+
+#[cfg(target_arch = "aarch64")]
+#[target_feature(enable = "neon")]
+unsafe fn demosaic_bilinear_neon(bayer: &BayerImage) -> Vec<f32> {
+    use std::arch::aarch64::*;
+
+    let mut rgb = vec![0.0f32; bayer.width * bayer.height * 3];
+    let half = vdupq_n_f32(0.5);
+    let quarter = vdupq_n_f32(0.25);
+
+    unsafe {
+        // Process interior pixels with SIMD (skip 1-pixel border for safe neighbor access)
+        for y in 1..bayer.height.saturating_sub(1) {
+            let raw_y = y + bayer.top_margin;
+            let row_above = (raw_y - 1) * bayer.raw_width;
+            let row_current = raw_y * bayer.raw_width;
+            let row_below = (raw_y + 1) * bayer.raw_width;
+
+            // Process 4 pixels at a time
+            let mut x = 1;
+            while x + 4 <= bayer.width.saturating_sub(1) {
+                let raw_x = x + bayer.left_margin;
+
+                // Load 4 consecutive pixels and their neighbors
+                let center = vld1q_f32(bayer.data.as_ptr().add(row_current + raw_x));
+                let left = vld1q_f32(bayer.data.as_ptr().add(row_current + raw_x - 1));
+                let right = vld1q_f32(bayer.data.as_ptr().add(row_current + raw_x + 1));
+                let top = vld1q_f32(bayer.data.as_ptr().add(row_above + raw_x));
+                let bottom = vld1q_f32(bayer.data.as_ptr().add(row_below + raw_x));
+
+                // Diagonal neighbors
+                let top_left = vld1q_f32(bayer.data.as_ptr().add(row_above + raw_x - 1));
+                let top_right = vld1q_f32(bayer.data.as_ptr().add(row_above + raw_x + 1));
+                let bottom_left = vld1q_f32(bayer.data.as_ptr().add(row_below + raw_x - 1));
+                let bottom_right = vld1q_f32(bayer.data.as_ptr().add(row_below + raw_x + 1));
+
+                // Compute interpolations
+                let h_interp = vmulq_f32(vaddq_f32(left, right), half);
+                let v_interp = vmulq_f32(vaddq_f32(top, bottom), half);
+                let cross_interp = vmulq_f32(
+                    vaddq_f32(vaddq_f32(left, right), vaddq_f32(top, bottom)),
+                    quarter,
+                );
+                let diag_interp = vmulq_f32(
+                    vaddq_f32(
+                        vaddq_f32(top_left, top_right),
+                        vaddq_f32(bottom_left, bottom_right),
+                    ),
+                    quarter,
+                );
+
+                // Extract values and assign based on CFA pattern
+                let center_arr: [f32; 4] = std::mem::transmute(center);
+                let h_arr: [f32; 4] = std::mem::transmute(h_interp);
+                let v_arr: [f32; 4] = std::mem::transmute(v_interp);
+                let cross_arr: [f32; 4] = std::mem::transmute(cross_interp);
+                let diag_arr: [f32; 4] = std::mem::transmute(diag_interp);
+
+                for i in 0..4 {
+                    let px = x + i;
+                    let raw_px = raw_x + i;
+                    let color = bayer.cfa.color_at(raw_y, raw_px);
+                    let rgb_idx = (y * bayer.width + px) * 3;
+
+                    match color {
+                        0 => {
+                            // Red pixel
+                            rgb[rgb_idx] = center_arr[i];
+                            rgb[rgb_idx + 1] = cross_arr[i];
+                            rgb[rgb_idx + 2] = diag_arr[i];
+                        }
+                        1 => {
+                            // Green pixel
+                            if bayer.cfa.red_in_row(raw_y) {
+                                rgb[rgb_idx] = h_arr[i];
+                                rgb[rgb_idx + 2] = v_arr[i];
+                            } else {
+                                rgb[rgb_idx] = v_arr[i];
+                                rgb[rgb_idx + 2] = h_arr[i];
+                            }
+                            rgb[rgb_idx + 1] = center_arr[i];
+                        }
+                        2 => {
+                            // Blue pixel
+                            rgb[rgb_idx] = diag_arr[i];
+                            rgb[rgb_idx + 1] = cross_arr[i];
+                            rgb[rgb_idx + 2] = center_arr[i];
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                x += 4;
+            }
+
+            // Handle remaining pixels in this row with scalar code
+            while x < bayer.width {
+                let raw_x = x + bayer.left_margin;
+                process_pixel_scalar(bayer, &mut rgb, x, y, raw_x, raw_y);
+                x += 1;
+            }
+        }
+
+        // Process border rows with scalar code
+        for y in 0..bayer.height {
+            if y == 0 || y == bayer.height - 1 || y >= bayer.height.saturating_sub(1) {
+                for x in 0..bayer.width {
+                    let raw_y = y + bayer.top_margin;
+                    let raw_x = x + bayer.left_margin;
+                    process_pixel_scalar(bayer, &mut rgb, x, y, raw_x, raw_y);
+                }
+            } else {
+                // Process left and right border pixels
+                let raw_y = y + bayer.top_margin;
+                if bayer.width > 0 {
+                    process_pixel_scalar(bayer, &mut rgb, 0, y, bayer.left_margin, raw_y);
+                }
+                if bayer.width > 1 {
+                    let last_x = bayer.width - 1;
+                    process_pixel_scalar(
+                        bayer,
+                        &mut rgb,
+                        last_x,
+                        y,
+                        last_x + bayer.left_margin,
+                        raw_y,
+                    );
+                }
+            }
+        }
+    }
+
+    rgb
+}
+
+// =============================================================================
+// Shared Helper Functions
+// =============================================================================
+
+/// Process a single pixel with scalar code (used for borders and fallback).
+#[inline]
+fn process_pixel_scalar(
+    bayer: &BayerImage,
+    rgb: &mut [f32],
+    x: usize,
+    y: usize,
+    raw_x: usize,
+    raw_y: usize,
+) {
+    let color = bayer.cfa.color_at(raw_y, raw_x);
+    let rgb_idx = (y * bayer.width + x) * 3;
+    let val = bayer.data[raw_y * bayer.raw_width + raw_x];
+
+    match color {
+        0 => {
+            // Red pixel - interpolate G and B
+            rgb[rgb_idx] = val;
+            rgb[rgb_idx + 1] = interpolate_cross(bayer, raw_x, raw_y);
+            rgb[rgb_idx + 2] = interpolate_diagonal(bayer, raw_x, raw_y);
+        }
+        1 => {
+            // Green pixel - interpolate R and B
+            if bayer.cfa.red_in_row(raw_y) {
+                rgb[rgb_idx] = interpolate_horizontal(bayer, raw_x, raw_y);
+                rgb[rgb_idx + 2] = interpolate_vertical(bayer, raw_x, raw_y);
+            } else {
+                rgb[rgb_idx] = interpolate_vertical(bayer, raw_x, raw_y);
+                rgb[rgb_idx + 2] = interpolate_horizontal(bayer, raw_x, raw_y);
+            }
+            rgb[rgb_idx + 1] = val;
+        }
+        2 => {
+            // Blue pixel - interpolate R and G
+            rgb[rgb_idx] = interpolate_diagonal(bayer, raw_x, raw_y);
+            rgb[rgb_idx + 1] = interpolate_cross(bayer, raw_x, raw_y);
+            rgb[rgb_idx + 2] = val;
+        }
+        _ => unreachable!(),
+    }
 }
 
 /// Interpolate from horizontal neighbors.
@@ -557,5 +906,80 @@ mod tests {
         // At y=1, should use top neighbor twice
         let v1 = interpolate_vertical(&bayer, 0, 1);
         assert!((v1 - 0.0).abs() < 0.01); // (data[0] + data[0]) / 2
+    }
+
+    #[test]
+    fn test_demosaic_simd_vs_scalar_consistency() {
+        // Test that SIMD and scalar produce identical results for larger images
+        let data: Vec<f32> = (0..100).map(|i| (i as f32 % 10.0) / 10.0).collect();
+        let bayer = BayerImage::with_margins(&data, 10, 10, 10, 10, 0, 0, CfaPattern::Rggb);
+
+        let rgb_main = demosaic_bilinear(&bayer);
+        let rgb_scalar = demosaic_bilinear_scalar(&bayer);
+
+        assert_eq!(rgb_main.len(), rgb_scalar.len());
+        for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
+            assert!(
+                (a - b).abs() < 1e-5,
+                "Mismatch at index {}: SIMD={}, scalar={}",
+                i,
+                a,
+                b
+            );
+        }
+    }
+
+    #[test]
+    fn test_demosaic_large_image() {
+        // Test with a larger image that exercises SIMD paths
+        let size = 64;
+        let data: Vec<f32> = (0..size * size)
+            .map(|i| (i as f32 % 256.0) / 255.0)
+            .collect();
+        let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, CfaPattern::Rggb);
+
+        let rgb = demosaic_bilinear(&bayer);
+        assert_eq!(rgb.len(), size * size * 3);
+
+        // All values should be in valid range
+        for &v in &rgb {
+            assert!(
+                (0.0..=1.5).contains(&v),
+                "Value {} out of expected range",
+                v
+            );
+        }
+    }
+
+    #[test]
+    fn test_demosaic_all_cfa_large() {
+        // Test all CFA patterns with larger images to exercise SIMD
+        let size = 32;
+        let data: Vec<f32> = (0..size * size)
+            .map(|i| (i as f32 % 100.0) / 100.0)
+            .collect();
+
+        for cfa in [
+            CfaPattern::Rggb,
+            CfaPattern::Bggr,
+            CfaPattern::Grbg,
+            CfaPattern::Gbrg,
+        ] {
+            let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, cfa);
+
+            let rgb_main = demosaic_bilinear(&bayer);
+            let rgb_scalar = demosaic_bilinear_scalar(&bayer);
+
+            for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-5,
+                    "CFA {:?}: Mismatch at index {}: SIMD={}, scalar={}",
+                    cfa,
+                    i,
+                    a,
+                    b
+                );
+            }
+        }
     }
 }
