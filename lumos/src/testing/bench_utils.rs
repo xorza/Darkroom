@@ -1,8 +1,6 @@
 //! Benchmark utilities for lumos.
 
-use crate::astro_image::demosaic::CfaPattern;
-
-use super::common::first_raw_file;
+use crate::{astro_image::demosaic::CfaPattern, testing::first_raw_file};
 
 /// Returns the raw Bayer data from the first light image for benchmarking.
 /// Returns: (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa_pattern)

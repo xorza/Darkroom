@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use crate::AstroImage;
 
-use super::common::{calibration_dir, calibration_masters_dir};
+use crate::testing::{calibration_dir, calibration_masters_dir};
 
 /// Initialize tracing subscriber for tests.
 /// Safe to call multiple times - will only initialize once.
