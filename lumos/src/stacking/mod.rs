@@ -83,7 +83,7 @@ pub fn stack_frames(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::test_utils::load_calibration_images;
+    use crate::testing::load_calibration_images;
 
     use super::*;
 
