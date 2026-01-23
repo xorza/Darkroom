@@ -232,7 +232,7 @@ pub(super) fn demosaic_simd(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]
 
 /// Sequential SIMD demosaicing for medium-sized images.
 #[cfg(target_arch = "aarch64")]
-fn demosaic_simd(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
+pub(super) fn demosaic_simd(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     for y in 0..xtrans.height {
