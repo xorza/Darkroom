@@ -110,7 +110,7 @@ pub struct AstroImageMetadata {
 }
 
 /// Represents an astronomical image loaded from a FITS file.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AstroImage {
     /// Image metadata from FITS headers
     pub metadata: AstroImageMetadata,
@@ -204,6 +204,25 @@ impl AstroImage {
     /// Get the total number of pixels (width * height * channels).
     pub fn pixel_count(&self) -> usize {
         self.dimensions.pixel_count()
+    }
+
+    /// Load all astronomical images from a directory.
+    ///
+    /// Loads all supported image files (RAW and FITS) from the directory
+    /// using parallel loading for better performance.
+    ///
+    /// # Arguments
+    /// * `dir` - Path to the directory containing image files
+    ///
+    /// # Returns
+    /// * `Vec<AstroImage>` - Vector of loaded images (empty if directory doesn't exist or has no supported files)
+    pub fn load_from_directory<P: AsRef<Path>>(dir: P) -> Vec<Self> {
+        use rayon::prelude::*;
+
+        common::file_utils::astro_image_files(dir.as_ref())
+            .par_iter()
+            .map(|path| Self::from_file(path).expect("Failed to load image"))
+            .collect()
     }
 }
 

@@ -1,48 +1,18 @@
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::AstroImage;
 
 /// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
-/// Returns None if not set.
-fn calibration_dir() -> Option<PathBuf> {
-    env::var("LUMOS_CALIBRATION_DIR").ok().map(PathBuf::from)
-}
-
-/// Returns paths to all RAW image files in the given directory.
-/// Supports: RAF, CR2, CR3, NEF, ARW, DNG
-fn raw_files_in_dir(dir: &Path) -> Vec<PathBuf> {
-    if !dir.exists() {
-        return Vec::new();
+/// Returns None if not set. Prints a message to stderr if not set.
+pub fn calibration_dir() -> Option<PathBuf> {
+    match env::var("LUMOS_CALIBRATION_DIR") {
+        Ok(dir) => Some(PathBuf::from(dir)),
+        Err(_) => {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+            None
+        }
     }
-
-    fs::read_dir(dir)
-        .expect("Failed to read directory")
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            if !path.is_file() {
-                return false;
-            }
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            matches!(
-                ext.to_lowercase().as_str(),
-                "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng"
-            )
-        })
-        .map(|e| e.path())
-        .collect()
-}
-
-/// Loads all RAW images from the given directory using parallel loading.
-fn load_raw_images(dir: &Path) -> Vec<AstroImage> {
-    use rayon::prelude::*;
-
-    raw_files_in_dir(dir)
-        .par_iter()
-        .map(|path| AstroImage::from_file(path).expect("Failed to load image"))
-        .collect()
 }
 
 /// Loads all images from a subdirectory of the calibration directory.
@@ -55,5 +25,5 @@ pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
         return None;
     }
 
-    Some(load_raw_images(&dir))
+    Some(AstroImage::load_from_directory(&dir))
 }

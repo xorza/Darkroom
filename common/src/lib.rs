@@ -5,6 +5,7 @@ pub mod bump_vec_deque;
 pub mod constants;
 pub mod debug;
 pub mod file_format;
+pub mod file_utils;
 pub mod float_ext;
 pub mod key_index_vec;
 pub mod lambda;
