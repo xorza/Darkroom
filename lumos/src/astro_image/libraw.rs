@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Instant;
 
-use super::demosaic::demosaic_bilinear_libraw;
+use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 /// Load raw file using libraw (C library, broader camera support).
@@ -30,19 +30,21 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 
     // Normalize to 0.0-1.0 range
     let max_value = raw_data.iter().max().copied().unwrap_or(65535) as f32;
-    let bayer: Vec<f32> = raw_data.iter().map(|&v| (v as f32) / max_value).collect();
+    let bayer_data: Vec<f32> = raw_data.iter().map(|&v| (v as f32) / max_value).collect();
 
-    // Demosaic Bayer to RGB
-    let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_bilinear_libraw(
-        &bayer,
+    // Demosaic Bayer to RGB (assuming RGGB pattern for libraw)
+    let bayer = BayerImage::with_margins(
+        &bayer_data,
         raw_width,
         raw_height,
         width,
         height,
         top_margin,
         left_margin,
+        CfaPattern::Rggb,
     );
+    let demosaic_start = Instant::now();
+    let rgb_pixels = demosaic_bilinear(&bayer);
     let demosaic_elapsed = demosaic_start.elapsed();
     tracing::info!(
         "Demosaicing {}x{} (libraw) took {:.2}ms",

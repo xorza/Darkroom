@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 use std::time::Instant;
 
-use super::demosaic::demosaic_bilinear;
+use super::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use super::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 
 /// Load raw file using rawloader (pure Rust, faster but limited camera support).
@@ -19,7 +19,7 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     let white_level = raw_image.whitelevels[0] as f32;
     let range = white_level - black_level;
 
-    let bayer: Vec<f32> = match &raw_image.data {
+    let bayer_data: Vec<f32> = match &raw_image.data {
         rawloader::RawImageData::Integer(data) => data
             .iter()
             .map(|&v| ((v as f32) - black_level) / range)
@@ -29,10 +29,13 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         }
     };
 
+    // Convert rawloader CFA to our CfaPattern
+    let cfa = CfaPattern::from(&raw_image.cropped_cfa());
+
     // Demosaic Bayer to RGB
-    let cfa = raw_image.cropped_cfa();
+    let bayer = BayerImage::new(&bayer_data, width, height, cfa);
     let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_bilinear(&bayer, width, height, &cfa);
+    let rgb_pixels = demosaic_bilinear(&bayer);
     let demosaic_elapsed = demosaic_start.elapsed();
     tracing::info!(
         "Demosaicing {}x{} took {:.2}ms",
