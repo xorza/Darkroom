@@ -274,11 +274,21 @@ CalibrationMasters // Container for master dark/flat/bias frames
   - `bench.rs` - Criterion benchmarks (feature-gated)
 
 **Sensor module (`astro_image/sensor.rs`):**
-- `SensorType` enum: `Monochrome`, `Bayer(CfaPattern)`, `Unknown`
+- `SensorType` enum: `Monochrome`, `Bayer(CfaPattern)`, `XTrans`, `Unknown`
 - `detect_sensor_type(filters, colors)` - detects sensor type from libraw metadata
 - `cfa_pattern_from_filters(filters)` - converts libraw filters field to `CfaPattern`
 - Monochrome detection: `filters == 0` or `colors == 1`
-- X-Trans and other non-Bayer patterns return `Unknown`
+- X-Trans detection: `filters == 9` (Fujifilm sensors)
+- Other non-Bayer patterns return `Unknown`
+
+**X-Trans module (`astro_image/xtrans/`):**
+- Bilinear demosaicing for Fujifilm X-Trans sensors (6x6 CFA pattern)
+- `XTransPattern` - 6x6 pattern array with values 0=Red, 1=Green, 2=Blue
+- `XTransImage` - Raw X-Trans data with margins, dimensions, and pattern
+- `demosaic_xtrans_bilinear()` - Scalar bilinear interpolation demosaicing
+- Module structure:
+  - `mod.rs` - `XTransPattern`, `XTransImage` types with validation
+  - `scalar.rs` - Scalar bilinear demosaic implementation using 5x5 neighborhood search
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 

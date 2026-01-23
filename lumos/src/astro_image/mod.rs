@@ -2,6 +2,7 @@ pub(crate) mod demosaic;
 mod fits;
 pub(crate) mod libraw;
 mod sensor;
+pub(crate) mod xtrans;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
@@ -358,6 +359,8 @@ impl From<Image> for AstroImage {
 
 #[cfg(test)]
 mod tests {
+    use common::test_utils::test_output_path;
+
     use crate::testing::{calibration_dir, init_tracing};
 
     use super::*;
@@ -696,7 +699,10 @@ mod tests {
         assert_eq!(image.dimensions.channels, 3);
 
         let image: imaginarium::Image = image.into();
-        image.save_file("filename.tiff").unwrap();
+
+        image
+            .save_file(test_output_path("light_from_raw.tiff"))
+            .unwrap();
     }
 
     #[test]

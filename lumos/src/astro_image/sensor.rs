@@ -1,13 +1,15 @@
 use super::demosaic::CfaPattern;
 
 /// Sensor type detected from libraw metadata.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SensorType {
     /// Monochrome sensor (no CFA)
     Monochrome,
     /// Standard 2x2 Bayer pattern (RGGB, BGGR, GRBG, GBRG)
     Bayer(CfaPattern),
-    /// Unknown CFA pattern (X-Trans, exotic sensors) - requires libraw fallback
+    /// Fujifilm X-Trans 6x6 CFA pattern
+    XTrans,
+    /// Unknown CFA pattern (exotic sensors) - requires libraw fallback
     Unknown,
 }
 
@@ -16,11 +18,17 @@ pub enum SensorType {
 /// Returns:
 /// - `SensorType::Monochrome` for monochrome sensors (no CFA)
 /// - `SensorType::Bayer(pattern)` for known 2x2 Bayer patterns
-/// - `SensorType::Unknown` for X-Trans (filters=9) and other exotic sensors
+/// - `SensorType::XTrans` for Fujifilm X-Trans sensors (filters=9)
+/// - `SensorType::Unknown` for other exotic sensors
 pub fn detect_sensor_type(filters: u32, colors: i32) -> SensorType {
     // Monochrome: no CFA pattern or single color channel
     if filters == 0 || colors == 1 {
         return SensorType::Monochrome;
+    }
+
+    // X-Trans: libraw uses filters=9 to indicate 6x6 X-Trans pattern
+    if filters == 9 {
+        return SensorType::XTrans;
     }
 
     // Try to match known Bayer patterns
@@ -28,7 +36,7 @@ pub fn detect_sensor_type(filters: u32, colors: i32) -> SensorType {
         return SensorType::Bayer(pattern);
     }
 
-    // Unknown pattern (X-Trans filters=9, or other exotic sensors)
+    // Unknown pattern (other exotic sensors)
     SensorType::Unknown
 }
 
@@ -144,9 +152,13 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_sensor_type_unknown() {
+    fn test_detect_sensor_type_xtrans() {
         // X-Trans (filters=9)
-        assert_eq!(detect_sensor_type(9, 3), SensorType::Unknown);
+        assert_eq!(detect_sensor_type(9, 3), SensorType::XTrans);
+    }
+
+    #[test]
+    fn test_detect_sensor_type_unknown() {
         // Other exotic patterns
         assert_eq!(detect_sensor_type(0x12345678, 3), SensorType::Unknown);
     }
