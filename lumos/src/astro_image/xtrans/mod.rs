@@ -6,6 +6,8 @@
 //! The X-Trans pattern has ~55% green, ~22.5% red, and ~22.5% blue pixels arranged
 //! so that every row and column contains all three colors.
 
+#[cfg(test)]
+mod integration_tests;
 mod scalar;
 
 pub use scalar::demosaic_xtrans_bilinear;
