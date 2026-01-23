@@ -120,15 +120,33 @@ pub struct AstroImage {
 }
 
 impl AstroImage {
-    /// Load an astronomical image from a FITS file.
+    /// Load an astronomical image from a file.
+    ///
+    /// Automatically detects the file type based on extension:
+    /// - FITS files: .fit, .fits
+    /// - RAW camera files: .raf, .cr2, .cr3, .nef, .arw, .dng
     ///
     /// # Arguments
-    /// * `path` - Path to the FITS file
+    /// * `path` - Path to the image file
     ///
     /// # Returns
     /// * `Result<AstroImage>` - The loaded image or an error
-    pub fn from_fits<P: AsRef<Path>>(path: P) -> Result<Self> {
-        fits::load_fits(path.as_ref())
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let path = path.as_ref();
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match ext.as_str() {
+            "fit" | "fits" => fits::load_fits(path),
+            "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng" => {
+                // Try rawloader first (faster, pure Rust), fall back to libraw
+                rawloader::load_raw(path).or_else(|_| libraw::load_raw(path))
+            }
+            _ => anyhow::bail!("Unsupported file extension: {}", ext),
+        }
     }
 
     /// Get pixel value at (x, y) for single-channel images.
@@ -186,30 +204,6 @@ impl AstroImage {
     pub fn pixel_count(&self) -> usize {
         self.dimensions.pixel_count()
     }
-
-    /// Load an astronomical image from a raw camera file (RAF, CR2, NEF, etc.).
-    ///
-    /// Returns the raw Bayer mosaic data as a single-channel image.
-    /// The data is normalized to 0.0-1.0 range.
-    ///
-    /// Tries rawloader first (faster, pure Rust), falls back to libraw if unsupported.
-    ///
-    /// # Arguments
-    /// * `path` - Path to the raw file
-    ///
-    /// # Returns
-    /// * `Result<AstroImage>` - The loaded image or an error
-    pub fn from_raw<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let path = path.as_ref();
-
-        // Try rawloader first (faster, pure Rust)
-        if let Ok(image) = rawloader::load_raw(path) {
-            return Ok(image);
-        }
-
-        // Fall back to libraw for unsupported cameras
-        libraw::load_raw(path)
-    }
 }
 
 #[cfg(test)]
@@ -231,7 +225,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../test_resources/full_example.fits"
         );
-        let image = AstroImage::from_fits(path).unwrap();
+        let image = AstroImage::from_file(path).unwrap();
 
         assert_eq!(image.dimensions.width, 100);
         assert_eq!(image.dimensions.height, 100);
@@ -284,7 +278,7 @@ mod tests {
         let path = entry.path();
         println!("Loading raw file: {}", path.display());
 
-        let image = AstroImage::from_raw(&path).expect("Failed to load raw file");
+        let image = AstroImage::from_file(&path).expect("Failed to load raw file");
 
         println!(
             "Loaded: {} ({}x{}x{})",
