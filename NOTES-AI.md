@@ -265,6 +265,20 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - Pre-computed CFA pattern lookup tables for branchless color determination
 - Optimized scalar fallback with fast-path for interior pixels
 - Automatic backend selection based on image size and platform capabilities
+- Module structure:
+  - `mod.rs` - Main module with `CfaPattern`, `BayerImage`, `demosaic_bilinear()`, and parallel row processors
+  - `bayer/mod.rs` - Submodule organizing Bayer demosaic implementations
+  - `bayer/scalar.rs` - Scalar (non-SIMD) bilinear demosaicing implementation
+  - `bayer/simd_sse3.rs` - x86_64 SSE3 SIMD implementation
+  - `bayer/simd_neon.rs` - ARM aarch64 NEON SIMD implementation
+  - `bench.rs` - Criterion benchmarks (feature-gated)
+
+**Sensor module (`astro_image/sensor.rs`):**
+- `SensorType` enum: `Monochrome`, `Bayer(CfaPattern)`, `Unknown`
+- `detect_sensor_type(filters, colors)` - detects sensor type from libraw metadata
+- `cfa_pattern_from_filters(filters)` - converts libraw filters field to `CfaPattern`
+- Monochrome detection: `filters == 0` or `colors == 1`
+- X-Trans and other non-Bayer patterns return `Unknown`
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 

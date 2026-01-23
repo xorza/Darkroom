@@ -1,6 +1,6 @@
 //! x86_64 SSE3 SIMD implementation of bilinear demosaicing.
 
-use super::BayerImage;
+use super::super::BayerImage;
 use super::scalar;
 
 #[target_feature(enable = "sse3")]

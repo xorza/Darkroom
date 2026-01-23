@@ -1,6 +1,6 @@
 //! ARM aarch64 NEON SIMD implementation of bilinear demosaicing.
 
-use super::BayerImage;
+use super::super::BayerImage;
 use super::scalar;
 
 #[target_feature(enable = "neon")]

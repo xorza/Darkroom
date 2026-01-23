@@ -9,13 +9,7 @@
 //! - **Vectorized CFA lookup**: Pre-computed lookup tables for 2x2 pattern blocks
 //! - **Pattern specialization**: Separate code paths per CFA pattern to eliminate branching
 
-mod scalar;
-
-#[cfg(target_arch = "x86_64")]
-mod simd_sse3;
-
-#[cfg(target_arch = "aarch64")]
-mod simd_neon;
+mod bayer;
 
 use rayon::prelude::*;
 
@@ -185,9 +179,9 @@ pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     if use_parallel {
         demosaic_parallel(bayer, use_simd)
     } else if use_simd {
-        unsafe { simd_sse3::demosaic_bilinear_sse3(bayer) }
+        unsafe { bayer::simd_sse3::demosaic_bilinear_sse3(bayer) }
     } else {
-        scalar::demosaic_bilinear_scalar(bayer)
+        bayer::scalar::demosaic_bilinear_scalar(bayer)
     }
 }
 
@@ -199,9 +193,9 @@ pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     if use_parallel {
         demosaic_parallel(bayer, use_simd)
     } else if use_simd {
-        unsafe { simd_neon::demosaic_bilinear_neon(bayer) }
+        unsafe { bayer::simd_neon::demosaic_bilinear_neon(bayer) }
     } else {
-        scalar::demosaic_bilinear_scalar(bayer)
+        bayer::scalar::demosaic_bilinear_scalar(bayer)
     }
 }
 
@@ -212,7 +206,7 @@ pub fn demosaic_bilinear(bayer: &BayerImage) -> Vec<f32> {
     if use_parallel {
         demosaic_parallel(bayer, false)
     } else {
-        scalar::demosaic_bilinear_scalar(bayer)
+        bayer::scalar::demosaic_bilinear_scalar(bayer)
     }
 }
 
@@ -265,24 +259,25 @@ fn process_row_scalar(bayer: &BayerImage, row_rgb: &mut [f32], y: usize) {
             0 => {
                 // Red pixel
                 row_rgb[rgb_idx] = val;
-                row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
+                row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
             }
             1 => {
                 // Green pixel
                 if red_in_row {
-                    row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
                 } else {
-                    row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] =
+                        bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
                 }
                 row_rgb[rgb_idx + 1] = val;
             }
             2 => {
                 // Blue pixel
-                row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                row_rgb[rgb_idx] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
                 row_rgb[rgb_idx + 2] = val;
             }
             _ => unreachable!(),
@@ -330,22 +325,25 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             match color {
                 0 => {
                     row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
                 }
                 1 => {
                     if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
                     } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
                     }
                     row_rgb[rgb_idx + 1] = val;
                 }
                 2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
                     row_rgb[rgb_idx + 2] = val;
                 }
                 _ => unreachable!(),
@@ -444,22 +442,25 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             match color {
                 0 => {
                     row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
                 }
                 1 => {
                     if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
                     } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
                     }
                     row_rgb[rgb_idx + 1] = val;
                 }
                 2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
                     row_rgb[rgb_idx + 2] = val;
                 }
                 _ => unreachable!(),
@@ -508,22 +509,25 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             match color {
                 0 => {
                     row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
                 }
                 1 => {
                     if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
                     } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
                     }
                     row_rgb[rgb_idx + 1] = val;
                 }
                 2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
                     row_rgb[rgb_idx + 2] = val;
                 }
                 _ => unreachable!(),
@@ -620,22 +624,25 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
             match color {
                 0 => {
                     row_rgb[rgb_idx] = val;
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 2] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 2] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
                 }
                 1 => {
                     if red_in_row {
-                        row_rgb[rgb_idx] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
                     } else {
-                        row_rgb[rgb_idx] = scalar::interpolate_vertical(bayer, raw_x, raw_y);
-                        row_rgb[rgb_idx + 2] = scalar::interpolate_horizontal(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx] = bayer::scalar::interpolate_vertical(bayer, raw_x, raw_y);
+                        row_rgb[rgb_idx + 2] =
+                            bayer::scalar::interpolate_horizontal(bayer, raw_x, raw_y);
                     }
                     row_rgb[rgb_idx + 1] = val;
                 }
                 2 => {
-                    row_rgb[rgb_idx] = scalar::interpolate_diagonal(bayer, raw_x, raw_y);
-                    row_rgb[rgb_idx + 1] = scalar::interpolate_cross(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx] = bayer::scalar::interpolate_diagonal(bayer, raw_x, raw_y);
+                    row_rgb[rgb_idx + 1] = bayer::scalar::interpolate_cross(bayer, raw_x, raw_y);
                     row_rgb[rgb_idx + 2] = val;
                 }
                 _ => unreachable!(),
@@ -891,7 +898,7 @@ mod tests {
         let bayer = BayerImage::with_margins(&data, 10, 10, 10, 10, 0, 0, CfaPattern::Rggb);
 
         let rgb_main = demosaic_bilinear(&bayer);
-        let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+        let rgb_scalar = bayer::scalar::demosaic_bilinear_scalar(&bayer);
 
         assert_eq!(rgb_main.len(), rgb_scalar.len());
         for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
@@ -944,7 +951,7 @@ mod tests {
             let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, cfa);
 
             let rgb_main = demosaic_bilinear(&bayer);
-            let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+            let rgb_scalar = bayer::scalar::demosaic_bilinear_scalar(&bayer);
 
             for (i, (&a, &b)) in rgb_main.iter().zip(rgb_scalar.iter()).enumerate() {
                 assert!(
@@ -976,7 +983,7 @@ mod tests {
             let bayer = BayerImage::with_margins(&data, size, size, size, size, 0, 0, cfa);
 
             let rgb_parallel = demosaic_bilinear(&bayer);
-            let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
+            let rgb_scalar = bayer::scalar::demosaic_bilinear_scalar(&bayer);
 
             assert_eq!(rgb_parallel.len(), rgb_scalar.len());
             for (i, (&a, &b)) in rgb_parallel.iter().zip(rgb_scalar.iter()).enumerate() {
@@ -998,11 +1005,11 @@ mod tests {
         let bayer = BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 0, CfaPattern::Rggb);
 
         // At x=0, should use right neighbor twice
-        let h0 = scalar::interpolate_horizontal(&bayer, 0, 0);
+        let h0 = bayer::scalar::interpolate_horizontal(&bayer, 0, 0);
         assert!((h0 - 1.0).abs() < 0.01); // (data[1] + data[1]) / 2
 
         // At x=1, should use left neighbor twice
-        let h1 = scalar::interpolate_horizontal(&bayer, 1, 0);
+        let h1 = bayer::scalar::interpolate_horizontal(&bayer, 1, 0);
         assert!((h1 - 0.0).abs() < 0.01); // (data[0] + data[0]) / 2
     }
 
@@ -1012,11 +1019,11 @@ mod tests {
         let bayer = BayerImage::with_margins(&data, 2, 2, 2, 2, 0, 0, CfaPattern::Rggb);
 
         // At y=0, should use bottom neighbor twice
-        let v0 = scalar::interpolate_vertical(&bayer, 0, 0);
+        let v0 = bayer::scalar::interpolate_vertical(&bayer, 0, 0);
         assert!((v0 - 1.0).abs() < 0.01); // (data[2] + data[2]) / 2
 
         // At y=1, should use top neighbor twice
-        let v1 = scalar::interpolate_vertical(&bayer, 0, 1);
+        let v1 = bayer::scalar::interpolate_vertical(&bayer, 0, 1);
         assert!((v1 - 0.0).abs() < 0.01); // (data[0] + data[0]) / 2
     }
 }
