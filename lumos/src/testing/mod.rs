@@ -58,3 +58,16 @@ pub fn load_calibration_images(subdir: &str) -> Option<Vec<AstroImage>> {
 
     Some(AstroImage::load_from_directory(&dir))
 }
+
+/// Returns the first RAW file from the Lights subdirectory.
+/// Returns None if LUMOS_CALIBRATION_DIR is not set or no RAW files found.
+pub fn first_raw_file() -> Option<PathBuf> {
+    let cal_dir = calibration_dir()?;
+    let lights = cal_dir.join("Lights");
+    if !lights.exists() {
+        return None;
+    }
+    common::file_utils::astro_image_files(&lights)
+        .first()
+        .cloned()
+}

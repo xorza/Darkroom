@@ -1,18 +1,5 @@
 use criterion::{criterion_group, criterion_main};
-use lumos::bench::calibration_dir;
-use std::path::PathBuf;
-
-/// Returns the first RAW file from the Lights subdirectory.
-fn first_raw_file() -> Option<PathBuf> {
-    let cal_dir = calibration_dir()?;
-    let lights = cal_dir.join("Lights");
-    if !lights.exists() {
-        return None;
-    }
-    common::file_utils::astro_image_files(&lights)
-        .first()
-        .cloned()
-}
+use lumos::bench::first_raw_file;
 
 fn demosaic_benchmarks(c: &mut criterion::Criterion) {
     let raw_file = first_raw_file().expect("LUMOS_CALIBRATION_DIR must be set with Lights subdir");

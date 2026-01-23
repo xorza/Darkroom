@@ -176,32 +176,9 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::init_tracing;
+    use crate::testing::{first_raw_file, init_tracing};
 
     use super::*;
-    use std::path::PathBuf;
-
-    fn test_raw_path() -> Option<PathBuf> {
-        std::env::var("LUMOS_CALIBRATION_DIR")
-            .ok()
-            .map(PathBuf::from)
-            .and_then(|dir| {
-                let lights = dir.join("Lights");
-                if lights.exists() {
-                    common::file_utils::astro_image_files(&lights)
-                        .into_iter()
-                        .find(|p| {
-                            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
-                            matches!(
-                                ext.to_lowercase().as_str(),
-                                "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng"
-                            )
-                        })
-                } else {
-                    None
-                }
-            })
-    }
 
     #[test]
     fn test_load_raw_invalid_path() {
@@ -241,7 +218,7 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_raw_valid_file() {
-        let Some(path) = test_raw_path() else {
+        let Some(path) = first_raw_file() else {
             eprintln!("No RAW file found for testing, skipping");
             return;
         };
@@ -277,7 +254,7 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_raw_dimensions_match() {
-        let Some(path) = test_raw_path() else {
+        let Some(path) = first_raw_file() else {
             eprintln!("No RAW file found for testing, skipping");
             return;
         };
