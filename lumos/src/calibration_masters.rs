@@ -130,6 +130,7 @@ impl CalibrationMasters {
         method: StackingMethod,
     ) -> Option<AstroImage> {
         let path = Self::master_path(dir, frame_type, method);
+
         if !path.exists() {
             return None;
         }
