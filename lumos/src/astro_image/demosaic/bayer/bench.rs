@@ -119,29 +119,4 @@ pub fn benchmarks(c: &mut Criterion, raw_file_path: &Path) {
     });
 
     group.finish();
-
-    // Also benchmark with different image sizes to show parallelization benefits
-    let mut size_group = c.benchmark_group("demosaic_scaling");
-    size_group.sample_size(10);
-
-    for size in [64, 128, 256, 512, 1024] {
-        if size <= width && size <= height {
-            let small_bayer = BayerImage::with_margins(
-                &data,
-                raw_width,
-                raw_height,
-                size,
-                size,
-                top_margin,
-                left_margin,
-                cfa,
-            );
-
-            size_group.bench_function(BenchmarkId::new("size", size), |b| {
-                b.iter(|| black_box(demosaic_bilinear(&small_bayer)))
-            });
-        }
-    }
-
-    size_group.finish();
 }

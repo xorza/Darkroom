@@ -338,8 +338,10 @@ impl AstroImage {
     /// # Returns
     /// * `Vec<AstroImage>` - Vector of loaded images (empty if directory doesn't exist or has no supported files)
     pub fn load_from_directory<P: AsRef<Path>>(dir: P) -> Vec<Self> {
+        use rayon::prelude::*;
+
         common::file_utils::astro_image_files(dir.as_ref())
-            .iter()
+            .par_iter()
             .map(|path| Self::from_file(path).expect("Failed to load image"))
             .collect()
     }

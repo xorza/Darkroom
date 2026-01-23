@@ -149,49 +149,4 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
     });
 
     group.finish();
-
-    // Also benchmark with different image sizes
-    let mut size_group = c.benchmark_group("xtrans_demosaic_scaling");
-    size_group.sample_size(10);
-
-    for size in [64, 128, 256, 512, 1024] {
-        if size <= width && size <= height {
-            let pattern = XTransPattern::new(xtrans_pattern);
-            let small_xtrans = XTransImage::with_margins(
-                &data,
-                raw_width,
-                raw_height,
-                size,
-                size,
-                top_margin,
-                left_margin,
-                pattern,
-            );
-
-            let small_red = NeighborLookup::new(&small_xtrans.pattern, 0);
-            let small_green = NeighborLookup::new(&small_xtrans.pattern, 1);
-            let small_blue = NeighborLookup::new(&small_xtrans.pattern, 2);
-            let small_lookups = [&small_red, &small_green, &small_blue];
-
-            let small_linear_red =
-                LinearNeighborLookup::new(&small_xtrans.pattern, 0, small_xtrans.raw_width);
-            let small_linear_green =
-                LinearNeighborLookup::new(&small_xtrans.pattern, 1, small_xtrans.raw_width);
-            let small_linear_blue =
-                LinearNeighborLookup::new(&small_xtrans.pattern, 2, small_xtrans.raw_width);
-            let small_linear_lookups = [&small_linear_red, &small_linear_green, &small_linear_blue];
-
-            size_group.bench_function(BenchmarkId::new("size", size), |b| {
-                b.iter(|| {
-                    black_box(demosaic_simd_linear(
-                        &small_xtrans,
-                        &small_lookups,
-                        &small_linear_lookups,
-                    ))
-                })
-            });
-        }
-    }
-
-    size_group.finish();
 }

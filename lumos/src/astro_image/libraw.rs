@@ -400,14 +400,17 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
         unsafe {
             normalize_chunk_neon(input, output, black, inv_range);
         }
-        return;
     }
 
-    // Scalar fallback
-    normalize_chunk_scalar(input, output, black, inv_range);
+    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+    {
+        // Scalar fallback for other architectures
+        normalize_chunk_scalar(input, output, black, inv_range);
+    }
 }
 
 /// Scalar normalization fallback.
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 #[inline]
 fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     for (out, &val) in output.iter_mut().zip(input.iter()) {
@@ -465,36 +468,42 @@ unsafe fn normalize_chunk_sse2(input: &[u16], output: &mut [f32], black: f32, in
 unsafe fn normalize_chunk_neon(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     use std::arch::aarch64::*;
 
-    let black_vec = vdupq_n_f32(black);
-    let inv_range_vec = vdupq_n_f32(inv_range);
-    let zero_vec = vdupq_n_f32(0.0);
+    // SAFETY: All NEON intrinsics in this function are safe because:
+    // - NEON is guaranteed available on aarch64
+    // - We validate array bounds before accessing memory
+    // - All pointer arithmetic stays within bounds of the slices
+    unsafe {
+        let black_vec = vdupq_n_f32(black);
+        let inv_range_vec = vdupq_n_f32(inv_range);
+        let zero_vec = vdupq_n_f32(0.0);
 
-    let chunks = input.len() / 4;
-    let remainder = input.len() % 4;
+        let chunks = input.len() / 4;
+        let remainder = input.len() % 4;
 
-    for i in 0..chunks {
-        let idx = i * 4;
-        // Load 4 u16 values
-        let vals_u16 = vld1_u16(input.as_ptr().add(idx));
-        // Widen to u32
-        let vals_u32 = vmovl_u16(vals_u16);
-        // Convert to f32
-        let vals_f32 = vcvtq_f32_u32(vals_u32);
+        for i in 0..chunks {
+            let idx = i * 4;
+            // Load 4 u16 values
+            let vals_u16 = vld1_u16(input.as_ptr().add(idx));
+            // Widen to u32
+            let vals_u32 = vmovl_u16(vals_u16);
+            // Convert to f32
+            let vals_f32 = vcvtq_f32_u32(vals_u32);
 
-        // Subtract black, clamp to 0, multiply by inv_range
-        let subtracted = vsubq_f32(vals_f32, black_vec);
-        let clamped = vmaxq_f32(subtracted, zero_vec);
-        let normalized = vmulq_f32(clamped, inv_range_vec);
+            // Subtract black, clamp to 0, multiply by inv_range
+            let subtracted = vsubq_f32(vals_f32, black_vec);
+            let clamped = vmaxq_f32(subtracted, zero_vec);
+            let normalized = vmulq_f32(clamped, inv_range_vec);
 
-        // Store result
-        vst1q_f32(output.as_mut_ptr().add(idx), normalized);
-    }
+            // Store result
+            vst1q_f32(output.as_mut_ptr().add(idx), normalized);
+        }
 
-    // Handle remainder with scalar
-    let start = chunks * 4;
-    for i in 0..remainder {
-        let idx = start + i;
-        output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+        // Handle remainder with scalar
+        let start = chunks * 4;
+        for i in 0..remainder {
+            let idx = start + i;
+            output[idx] = ((input[idx] as f32) - black).max(0.0) * inv_range;
+        }
     }
 }
 

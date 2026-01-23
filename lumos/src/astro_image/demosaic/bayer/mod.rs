@@ -654,6 +654,8 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
                 }
                 _ => unreachable!(),
             }
+
+            x += 1;
         }
     }
 }
