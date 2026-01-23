@@ -529,17 +529,37 @@ mod tests {
         let v1 = scalar::interpolate_vertical(&bayer, 0, 1);
         assert!((v1 - 0.0).abs() < 0.01); // (data[0] + data[0]) / 2
     }
+}
 
-    /// Benchmark comparing SIMD vs scalar demosaic performance.
-    /// Run with: cargo test --release bench_demosaic_simd_vs_scalar -- --ignored --nocapture
-    #[test]
-    #[ignore]
-    fn bench_demosaic_simd_vs_scalar() {
-        use crate::testing::bench_utils::first_light_raw_bayer;
-        use std::time::Instant;
+/// Benchmark module for demosaic operations.
+/// Run with: cargo bench --package lumos --features bench demosaic
+#[cfg(feature = "bench")]
+pub mod bench {
+    use super::*;
+    use criterion::{BenchmarkId, Criterion};
+    use std::hint::black_box;
 
+    pub use super::CfaPattern;
+
+    /// Register demosaic benchmarks with Criterion.
+    ///
+    /// The `load_bayer_data` function should return:
+    /// (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa_pattern)
+    pub fn benchmarks<F>(c: &mut Criterion, load_bayer_data: F)
+    where
+        F: FnOnce() -> (
+            Vec<f32>,
+            usize,
+            usize,
+            usize,
+            usize,
+            usize,
+            usize,
+            CfaPattern,
+        ),
+    {
         let (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa) =
-            first_light_raw_bayer();
+            load_bayer_data();
 
         let bayer = BayerImage::with_margins(
             &data,
@@ -552,57 +572,17 @@ mod tests {
             cfa,
         );
 
-        println!(
-            "\nBenchmarking demosaic on {}x{} image (raw: {}x{})",
-            width, height, raw_width, raw_height
-        );
+        let mut group = c.benchmark_group("demosaic");
+        group.sample_size(20);
 
-        const WARMUP: usize = 3;
-        const ITERATIONS: usize = 10;
+        group.bench_function(BenchmarkId::new("bilinear", "scalar"), |b| {
+            b.iter(|| black_box(scalar::demosaic_bilinear_scalar(&bayer)))
+        });
 
-        // Warmup scalar
-        for _ in 0..WARMUP {
-            let _ = scalar::demosaic_bilinear_scalar(&bayer);
-        }
+        group.bench_function(BenchmarkId::new("bilinear", "simd"), |b| {
+            b.iter(|| black_box(demosaic_bilinear(&bayer)))
+        });
 
-        // Benchmark scalar
-        let start = Instant::now();
-        for _ in 0..ITERATIONS {
-            let _ = scalar::demosaic_bilinear_scalar(&bayer);
-        }
-        let scalar_time = start.elapsed();
-        let scalar_avg = scalar_time / ITERATIONS as u32;
-        println!("Scalar: {:?} avg ({} iterations)", scalar_avg, ITERATIONS);
-
-        // Warmup SIMD (demosaic_bilinear dispatches to SIMD when available)
-        for _ in 0..WARMUP {
-            let _ = demosaic_bilinear(&bayer);
-        }
-
-        // Benchmark SIMD
-        let start = Instant::now();
-        for _ in 0..ITERATIONS {
-            let _ = demosaic_bilinear(&bayer);
-        }
-        let simd_time = start.elapsed();
-        let simd_avg = simd_time / ITERATIONS as u32;
-        println!("SIMD:   {:?} avg ({} iterations)", simd_avg, ITERATIONS);
-
-        let speedup = scalar_avg.as_secs_f64() / simd_avg.as_secs_f64();
-        println!("Speedup: {:.2}x", speedup);
-
-        // Verify results match
-        let rgb_scalar = scalar::demosaic_bilinear_scalar(&bayer);
-        let rgb_simd = demosaic_bilinear(&bayer);
-        for (i, (&a, &b)) in rgb_scalar.iter().zip(rgb_simd.iter()).enumerate() {
-            assert!(
-                (a - b).abs() < 1e-5,
-                "Results differ at index {}: scalar={}, simd={}",
-                i,
-                a,
-                b
-            );
-        }
-        println!("Results verified: SIMD and scalar produce identical output");
+        group.finish();
     }
 }

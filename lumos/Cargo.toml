@@ -6,7 +6,7 @@ description = ""
 
 [features]
 slow-tests = []
-bench = []
+bench = ["dep:criterion"]
 
 [dependencies]
 common = { workspace = true }
@@ -24,6 +24,12 @@ glam = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 tracing-subscriber = { workspace = true }
+criterion = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+
+[[bench]]
+name = "demosaic"
+harness = false
+required-features = ["bench"]

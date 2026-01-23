@@ -9,3 +9,8 @@ mod testing;
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 pub use calibration_masters::CalibrationMasters;
 pub use stacking::{FrameType, SigmaClipConfig, StackingMethod, stack_frames};
+
+#[cfg(feature = "bench")]
+pub mod bench {
+    pub use crate::astro_image::demosaic::bench as demosaic;
+}

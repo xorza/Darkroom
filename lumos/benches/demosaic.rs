@@ -1,13 +1,31 @@
-//! Benchmark utilities for lumos.
+use criterion::{criterion_group, criterion_main};
+use lumos::bench::demosaic::CfaPattern;
+use std::path::PathBuf;
 
-use crate::{astro_image::demosaic::CfaPattern, testing::first_raw_file};
+/// Returns the calibration directory from LUMOS_CALIBRATION_DIR env var.
+fn calibration_dir() -> Option<PathBuf> {
+    std::env::var("LUMOS_CALIBRATION_DIR")
+        .ok()
+        .map(PathBuf::from)
+}
+
+/// Returns the first RAW file from the Lights subdirectory.
+fn first_raw_file() -> Option<PathBuf> {
+    let cal_dir = calibration_dir()?;
+    let lights = cal_dir.join("Lights");
+    if !lights.exists() {
+        return None;
+    }
+    common::file_utils::astro_image_files(&lights)
+        .first()
+        .cloned()
+}
 
 /// Returns the raw Bayer data from the first light image for benchmarking.
-/// Returns: (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa_pattern)
 ///
 /// # Panics
 /// Panics if LUMOS_CALIBRATION_DIR is not set or no light images found.
-pub fn first_light_raw_bayer() -> (
+fn first_light_raw_bayer() -> (
     Vec<f32>,
     usize,
     usize,
@@ -86,3 +104,10 @@ pub fn first_light_raw_bayer() -> (
         cfa,
     )
 }
+
+fn demosaic_benchmarks(c: &mut criterion::Criterion) {
+    lumos::bench::demosaic::benchmarks(c, first_light_raw_bayer);
+}
+
+criterion_group!(benches, demosaic_benchmarks);
+criterion_main!(benches);
