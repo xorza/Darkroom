@@ -206,9 +206,10 @@ impl AstroImage {
         self.dimensions.pixel_count()
     }
 
-    /// Calculate the mean pixel value across all pixels using SIMD acceleration.
+    /// Calculate the mean pixel value across all pixels using parallel processing.
     pub fn mean(&self) -> f32 {
-        crate::math::mean_f32(&self.pixels)
+        debug_assert!(!self.pixels.is_empty());
+        crate::common::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
     }
 
     /// Calibrate a light frame using master dark and flat frames.

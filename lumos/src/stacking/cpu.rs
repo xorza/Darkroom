@@ -29,14 +29,12 @@ pub(crate) fn stack_frames_cpu(
         );
     }
 
-    // Process pixels
+    // Process pixels in parallel
     let pixel_count = dims.pixel_count();
-    let result_pixels: Vec<f32> = (0..pixel_count)
-        .map(|pixel_idx| {
-            let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
-            combine_pixels(&values, method)
-        })
-        .collect();
+    let result_pixels = crate::common::parallel_map_f32(pixel_count, |pixel_idx| {
+        let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
+        combine_pixels(&values, method)
+    });
 
     AstroImage {
         metadata: first.metadata.clone(),
