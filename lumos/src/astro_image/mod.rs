@@ -252,6 +252,31 @@ impl From<AstroImage> for Image {
     }
 }
 
+impl From<Image> for AstroImage {
+    fn from(image: Image) -> Self {
+        let desc = image.desc();
+
+        // Determine target format: Gray or RGB, always f32
+        let (target_format, channels) = match desc.color_format.channel_count {
+            ChannelCount::Gray | ChannelCount::GrayAlpha => (ColorFormat::GRAY_F32, 1),
+            ChannelCount::Rgb | ChannelCount::Rgba => (ColorFormat::RGB_F32, 3),
+        };
+
+        let image = image
+            .convert(target_format)
+            .expect("Failed to convert image to f32")
+            .packed();
+
+        let pixels: Vec<f32> = bytemuck::cast_slice(image.bytes()).to_vec();
+
+        AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels,
+            dimensions: ImageDimensions::new(image.desc().width, image.desc().height, channels),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,9 +379,60 @@ mod tests {
         assert_eq!(image.metadata.bitpix, BitPix::Int32);
         assert_eq!(image.metadata.header_dimensions, vec![100, 100]);
 
+        // Verify no stride padding (pixels.len() == width * height * channels)
+        assert_eq!(image.pixels.len(), image.dimensions.pixel_count());
+
         // Test pixel access
         let pixel = image.get_pixel_gray(5, 20);
         assert_eq!(pixel, 152.0);
+    }
+
+    #[test]
+    fn test_from_image_no_stride_padding() {
+        // Create an Image with potential stride padding
+        let desc = ImageDesc::new(3, 2, ColorFormat::GRAY_F32);
+        let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let bytes: Vec<u8> = bytemuck::cast_slice(&pixels).to_vec();
+        let image = Image::new_with_data(desc, bytes).unwrap();
+
+        // Convert to AstroImage
+        let astro: AstroImage = image.into();
+
+        // Verify dimensions
+        assert_eq!(astro.dimensions.width, 3);
+        assert_eq!(astro.dimensions.height, 2);
+        assert_eq!(astro.dimensions.channels, 1);
+
+        // Verify no stride padding (pixels.len() == width * height * channels)
+        assert_eq!(astro.pixels.len(), astro.dimensions.pixel_count());
+        assert_eq!(astro.pixels.len(), 6);
+
+        // Verify pixel values
+        assert_eq!(astro.pixels, pixels);
+    }
+
+    #[test]
+    fn test_roundtrip_astro_to_image_to_astro() {
+        let original = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            dimensions: ImageDimensions::new(3, 2, 1),
+        };
+
+        // Convert to Image and back
+        let image: Image = original.clone().into();
+        let restored: AstroImage = image.into();
+
+        // Verify dimensions preserved
+        assert_eq!(restored.dimensions, original.dimensions);
+
+        // Verify no stride padding
+        assert_eq!(restored.pixels.len(), restored.dimensions.pixel_count());
+
+        // Verify pixel values preserved
+        for (a, b) in original.pixels.iter().zip(restored.pixels.iter()) {
+            assert!((a - b).abs() < 1e-6, "Pixel mismatch: {} vs {}", a, b);
+        }
     }
 
     #[test]
