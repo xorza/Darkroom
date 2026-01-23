@@ -3,13 +3,93 @@
 //! This is a basic bilinear interpolation for X-Trans sensors.
 //! It's simpler and faster than advanced algorithms like Markesteijn,
 //! but produces lower quality results (may show artifacts).
+//!
+//! # Optimizations
+//! - Pre-computed neighbor offset lookup tables per pattern position
+//! - Separate fast path for interior pixels (no bounds checking)
+//! - Row base index pre-computation
+//! - Parallel processing via rayon for large images
 
 use rayon::prelude::*;
 
-use super::XTransImage;
+use super::{XTransImage, XTransPattern};
 
 /// Minimum image size to use parallel processing (avoids overhead for small images).
 const MIN_PARALLEL_SIZE: usize = 128;
+
+/// Search radius for interpolation (5x5 neighborhood).
+const SEARCH_RADIUS: usize = 2;
+
+/// Maximum number of neighbors in a 5x5 window.
+const MAX_NEIGHBORS: usize = 25;
+
+/// Fixed-size storage for neighbor offsets at one pattern position.
+#[derive(Debug, Clone, Copy)]
+struct OffsetList {
+    offsets: [(i32, i32); MAX_NEIGHBORS],
+    len: u8,
+}
+
+impl OffsetList {
+    const fn new() -> Self {
+        Self {
+            offsets: [(0, 0); MAX_NEIGHBORS],
+            len: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn push(&mut self, offset: (i32, i32)) {
+        debug_assert!((self.len as usize) < MAX_NEIGHBORS);
+        self.offsets[self.len as usize] = offset;
+        self.len += 1;
+    }
+
+    #[inline(always)]
+    fn as_slice(&self) -> &[(i32, i32)] {
+        &self.offsets[..self.len as usize]
+    }
+}
+
+/// Pre-computed neighbor offsets for each color within the 5x5 search window.
+/// For each position in the 6x6 pattern, stores the relative offsets (dy, dx)
+/// where each color (R=0, G=1, B=2) can be found.
+#[derive(Debug)]
+struct NeighborLookup {
+    /// Offsets for each color at each pattern position.
+    offsets: [[OffsetList; 6]; 6],
+}
+
+impl NeighborLookup {
+    fn new(pattern: &XTransPattern, color: u8) -> Self {
+        let mut offsets = [[OffsetList::new(); 6]; 6];
+
+        // For each position in the 6x6 pattern
+        for (py, row) in offsets.iter_mut().enumerate() {
+            for (px, cell) in row.iter_mut().enumerate() {
+                // Find all neighbors of the target color in 5x5 window
+                for dy in -(SEARCH_RADIUS as i32)..=(SEARCH_RADIUS as i32) {
+                    for dx in -(SEARCH_RADIUS as i32)..=(SEARCH_RADIUS as i32) {
+                        // Neighbor position in pattern (with wrapping for lookup)
+                        let ny = (py as i32 + dy).rem_euclid(6) as usize;
+                        let nx = (px as i32 + dx).rem_euclid(6) as usize;
+
+                        if pattern.pattern[ny][nx] == color {
+                            cell.push((dy, dx));
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { offsets }
+    }
+
+    #[inline(always)]
+    fn get_offsets(&self, pattern_y: usize, pattern_x: usize) -> &[(i32, i32)] {
+        self.offsets[pattern_y % 6][pattern_x % 6].as_slice()
+    }
+}
 
 /// Bilinear demosaicing for X-Trans CFA.
 ///
@@ -22,19 +102,25 @@ const MIN_PARALLEL_SIZE: usize = 128;
 ///
 /// Returns RGB interleaved data: [R0, G0, B0, R1, G1, B1, ...]
 pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
+    // Pre-compute neighbor lookup tables for each color
+    let red_lookup = NeighborLookup::new(&xtrans.pattern, 0);
+    let green_lookup = NeighborLookup::new(&xtrans.pattern, 1);
+    let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
+    let lookups = [&red_lookup, &green_lookup, &blue_lookup];
+
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
 
     if use_parallel {
-        demosaic_parallel(xtrans)
+        demosaic_parallel(xtrans, &lookups)
     } else {
-        demosaic_scalar(xtrans)
+        demosaic_scalar(xtrans, &lookups)
     }
 }
 
 /// Parallel row-based demosaicing.
 /// Processes rows in parallel using rayon, with each thread writing to its own
 /// row buffer to avoid false cache sharing.
-fn demosaic_parallel(xtrans: &XTransImage) -> Vec<f32> {
+fn demosaic_parallel(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     // Process rows in parallel - each row is a separate chunk
@@ -43,20 +129,20 @@ fn demosaic_parallel(xtrans: &XTransImage) -> Vec<f32> {
     rgb.par_chunks_mut(row_stride)
         .enumerate()
         .for_each(|(y, row_rgb)| {
-            process_row(xtrans, y, row_rgb);
+            process_row(xtrans, y, row_rgb, lookups);
         });
 
     rgb
 }
 
 /// Sequential scalar demosaicing for small images.
-fn demosaic_scalar(xtrans: &XTransImage) -> Vec<f32> {
+fn demosaic_scalar(xtrans: &XTransImage, lookups: &[&NeighborLookup; 3]) -> Vec<f32> {
     let mut rgb = vec![0.0f32; xtrans.width * xtrans.height * 3];
 
     for y in 0..xtrans.height {
         let row_start = y * xtrans.width * 3;
         let row_rgb = &mut rgb[row_start..row_start + xtrans.width * 3];
-        process_row(xtrans, y, row_rgb);
+        process_row(xtrans, y, row_rgb, lookups);
     }
 
     rgb
@@ -64,67 +150,101 @@ fn demosaic_scalar(xtrans: &XTransImage) -> Vec<f32> {
 
 /// Process a single row of the image.
 #[inline]
-fn process_row(xtrans: &XTransImage, y: usize, row_rgb: &mut [f32]) {
+fn process_row(
+    xtrans: &XTransImage,
+    y: usize,
+    row_rgb: &mut [f32],
+    lookups: &[&NeighborLookup; 3],
+) {
     let raw_y = y + xtrans.top_margin;
+    let row_base = raw_y * xtrans.raw_width;
+
+    // Check if this row is in the interior (no vertical bounds checking needed)
+    let is_interior_y = raw_y >= SEARCH_RADIUS && raw_y + SEARCH_RADIUS < xtrans.raw_height;
 
     for x in 0..xtrans.width {
         let raw_x = x + xtrans.left_margin;
         let rgb_idx = x * 3;
 
         let color = xtrans.pattern.color_at(raw_y, raw_x);
-        let val = xtrans.data[raw_y * xtrans.raw_width + raw_x];
+        let val = xtrans.data[row_base + raw_x];
 
         // Set the known color channel
         row_rgb[rgb_idx + color as usize] = val;
 
+        // Check if this pixel is in the interior (no bounds checking needed)
+        let is_interior =
+            is_interior_y && raw_x >= SEARCH_RADIUS && raw_x + SEARCH_RADIUS < xtrans.raw_width;
+
         // Interpolate the other two channels
-        for c in 0u8..3 {
-            if c != color {
-                row_rgb[rgb_idx + c as usize] = interpolate_channel(xtrans, raw_x, raw_y, c);
+        if is_interior {
+            // Fast path: no bounds checking
+            for c in 0u8..3 {
+                if c != color {
+                    row_rgb[rgb_idx + c as usize] =
+                        interpolate_channel_fast(xtrans, raw_x, raw_y, lookups[c as usize]);
+                }
+            }
+        } else {
+            // Slow path: with bounds checking for edge pixels
+            for c in 0u8..3 {
+                if c != color {
+                    row_rgb[rgb_idx + c as usize] =
+                        interpolate_channel_safe(xtrans, raw_x, raw_y, lookups[c as usize]);
+                }
             }
         }
     }
 }
 
-/// Interpolate a specific color channel at position (x, y).
-/// Searches nearby pixels for the same color and averages them.
+/// Fast interpolation for interior pixels (no bounds checking).
+#[inline(always)]
+fn interpolate_channel_fast(
+    xtrans: &XTransImage,
+    x: usize,
+    y: usize,
+    lookup: &NeighborLookup,
+) -> f32 {
+    let offsets = lookup.get_offsets(y, x);
+    let mut sum = 0.0f32;
+
+    for &(dy, dx) in offsets {
+        let ny = (y as i32 + dy) as usize;
+        let nx = (x as i32 + dx) as usize;
+        sum += xtrans.data[ny * xtrans.raw_width + nx];
+    }
+
+    sum / offsets.len() as f32
+}
+
+/// Safe interpolation with bounds checking for edge pixels.
 #[inline]
-fn interpolate_channel(xtrans: &XTransImage, x: usize, y: usize, target_color: u8) -> f32 {
-    // Search in a 5x5 neighborhood for pixels of the target color
-    // This is sufficient for X-Trans since within any 6x6 block,
-    // each color appears multiple times
+fn interpolate_channel_safe(
+    xtrans: &XTransImage,
+    x: usize,
+    y: usize,
+    lookup: &NeighborLookup,
+) -> f32 {
+    let offsets = lookup.get_offsets(y, x);
     let mut sum = 0.0f32;
     let mut count = 0u32;
 
-    // Search radius of 2 pixels (5x5 neighborhood)
-    for dy in -2i32..=2 {
-        for dx in -2i32..=2 {
-            let ny = y as i32 + dy;
-            let nx = x as i32 + dx;
+    for &(dy, dx) in offsets {
+        let ny = y as i32 + dy;
+        let nx = x as i32 + dx;
 
-            // Bounds check
-            if ny < 0 || nx < 0 || ny >= xtrans.raw_height as i32 || nx >= xtrans.raw_width as i32 {
-                continue;
-            }
-
-            let ny = ny as usize;
-            let nx = nx as usize;
-
-            // Check if this pixel has the target color
-            if xtrans.pattern.color_at(ny, nx) == target_color {
-                sum += xtrans.data[ny * xtrans.raw_width + nx];
-                count += 1;
-            }
+        // Bounds check
+        if ny >= 0
+            && nx >= 0
+            && (ny as usize) < xtrans.raw_height
+            && (nx as usize) < xtrans.raw_width
+        {
+            sum += xtrans.data[ny as usize * xtrans.raw_width + nx as usize];
+            count += 1;
         }
     }
 
-    if count > 0 {
-        sum / count as f32
-    } else {
-        // Fallback: shouldn't happen with valid X-Trans pattern
-        // but return 0 if no matching pixels found
-        0.0
-    }
+    if count > 0 { sum / count as f32 } else { 0.0 }
 }
 
 #[cfg(test)]
@@ -212,14 +332,18 @@ mod tests {
         let pattern = test_pattern();
         let xtrans = XTransImage::with_margins(&data, 12, 12, 12, 12, 0, 0, pattern);
 
-        // Test interpolation at center of image
-        let val = interpolate_channel(&xtrans, 6, 6, 0); // Red
+        // Test interpolation at center of image using the safe path
+        let red_lookup = NeighborLookup::new(&xtrans.pattern, 0);
+        let green_lookup = NeighborLookup::new(&xtrans.pattern, 1);
+        let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
+
+        let val = interpolate_channel_safe(&xtrans, 6, 6, &red_lookup); // Red
         assert!(val > 0.0, "Should find red neighbors");
 
-        let val = interpolate_channel(&xtrans, 6, 6, 1); // Green
+        let val = interpolate_channel_safe(&xtrans, 6, 6, &green_lookup); // Green
         assert!(val > 0.0, "Should find green neighbors");
 
-        let val = interpolate_channel(&xtrans, 6, 6, 2); // Blue
+        let val = interpolate_channel_safe(&xtrans, 6, 6, &blue_lookup); // Blue
         assert!(val > 0.0, "Should find blue neighbors");
     }
 }
