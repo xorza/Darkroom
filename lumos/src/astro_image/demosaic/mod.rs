@@ -1029,4 +1029,4 @@ mod tests {
 }
 
 #[cfg(feature = "bench")]
-pub mod bench;
+pub use bayer::bench;

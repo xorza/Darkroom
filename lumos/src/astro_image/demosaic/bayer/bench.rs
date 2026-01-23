@@ -1,13 +1,14 @@
-//! Benchmark module for demosaic operations.
+//! Benchmark module for Bayer demosaic operations.
 //! Run with: cargo bench --package lumos --features bench demosaic
 
-use super::{BayerImage, CfaPattern, scalar};
+use super::scalar;
+use crate::astro_image::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
 use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::path::Path;
 
-pub use super::CfaPattern as CfaPatternExport;
-pub use super::demosaic_bilinear;
+pub use crate::astro_image::demosaic::CfaPattern as CfaPatternExport;
+pub use crate::astro_image::demosaic::demosaic_bilinear as demosaic_bilinear_export;
 
 /// Loads raw Bayer data from a RAW file for benchmarking.
 ///
@@ -118,7 +119,7 @@ pub fn benchmarks(c: &mut Criterion, raw_file_path: &Path) {
     });
 
     group.bench_function(BenchmarkId::new("bilinear", "optimized"), |b| {
-        b.iter(|| black_box(super::demosaic_bilinear(&bayer)))
+        b.iter(|| black_box(demosaic_bilinear(&bayer)))
     });
 
     group.finish();
@@ -141,7 +142,7 @@ pub fn benchmarks(c: &mut Criterion, raw_file_path: &Path) {
             );
 
             size_group.bench_function(BenchmarkId::new("size", size), |b| {
-                b.iter(|| black_box(super::demosaic_bilinear(&small_bayer)))
+                b.iter(|| black_box(demosaic_bilinear(&small_bayer)))
             });
         }
     }

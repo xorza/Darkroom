@@ -13,3 +13,6 @@ pub(crate) mod simd_sse3;
 
 #[cfg(target_arch = "aarch64")]
 pub(crate) mod simd_neon;
+
+#[cfg(feature = "bench")]
+pub mod bench;
