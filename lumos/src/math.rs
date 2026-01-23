@@ -77,18 +77,28 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
-/// Calculate the median of f32 values.
+/// Calculate the median of f32 values using quickselect (O(n) average).
 pub fn median_f32(values: &[f32]) -> f32 {
     debug_assert!(!values.is_empty());
 
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let mut data = values.to_vec();
+    let len = data.len();
+    let mid = len / 2;
 
-    let len = sorted.len();
     if len.is_multiple_of(2) {
-        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+        // For even length, need both middle elements
+        let (_, right_median, _) =
+            data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let right = *right_median;
+        // Left median is max of left partition (after select_nth, left partition contains all elements < right_median)
+        let left = data[..mid]
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        (left + right) / 2.0
     } else {
-        sorted[len / 2]
+        let (_, median, _) = data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        *median
     }
 }
 
