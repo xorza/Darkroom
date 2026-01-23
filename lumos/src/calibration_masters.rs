@@ -209,4 +209,63 @@ mod tests {
         assert_eq!(masters.master_flat.is_some(), loaded.master_flat.is_some());
         assert_eq!(masters.master_bias.is_some(), loaded.master_bias.is_some());
     }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_load_masters_from_calibration_masters_subdir() {
+        use crate::test_utils::calibration_masters_dir;
+
+        let Some(masters_dir) = calibration_masters_dir() else {
+            return;
+        };
+
+        let method = StackingMethod::Median;
+        let masters = CalibrationMasters::load_from_directory(&masters_dir, method).unwrap();
+
+        // Print what was found
+        println!(
+            "Loaded from calibration_masters: dark={}, flat={}, bias={}",
+            masters.master_dark.is_some(),
+            masters.master_flat.is_some(),
+            masters.master_bias.is_some()
+        );
+
+        // At least one master should exist
+        assert!(
+            masters.master_dark.is_some()
+                || masters.master_flat.is_some()
+                || masters.master_bias.is_some(),
+            "No master frames found in calibration_masters directory"
+        );
+
+        // Verify dimensions if dark exists
+        if let Some(ref dark) = masters.master_dark {
+            println!(
+                "Master dark: {}x{}x{}",
+                dark.dimensions.width, dark.dimensions.height, dark.dimensions.channels
+            );
+            assert!(dark.dimensions.width > 0);
+            assert!(dark.dimensions.height > 0);
+        }
+
+        // Verify dimensions if flat exists
+        if let Some(ref flat) = masters.master_flat {
+            println!(
+                "Master flat: {}x{}x{}",
+                flat.dimensions.width, flat.dimensions.height, flat.dimensions.channels
+            );
+            assert!(flat.dimensions.width > 0);
+            assert!(flat.dimensions.height > 0);
+        }
+
+        // Verify dimensions if bias exists
+        if let Some(ref bias) = masters.master_bias {
+            println!(
+                "Master flat: {}x{}x{}",
+                bias.dimensions.width, bias.dimensions.height, bias.dimensions.channels
+            );
+            assert!(bias.dimensions.width > 0);
+            assert!(bias.dimensions.height > 0);
+        }
+    }
 }
