@@ -1,6 +1,6 @@
-mod demosaic;
+pub(crate) mod demosaic;
 mod fits;
-mod libraw;
+pub(crate) mod libraw;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
@@ -359,7 +359,9 @@ impl From<Image> for AstroImage {
 
 #[cfg(test)]
 mod tests {
-    use crate::test_utils::{calibration_dir, init_tracing};
+    use crate::testing::test_utils::{
+        calibration_dir_with_message as calibration_dir, init_tracing,
+    };
 
     use super::*;
 
@@ -700,7 +702,10 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_calibrate_light_from_env() {
-        use crate::test_utils::{calibration_dir, calibration_masters_dir};
+        use crate::testing::test_utils::{
+            calibration_dir_with_message as calibration_dir,
+            calibration_masters_dir_with_message as calibration_masters_dir,
+        };
         use crate::{CalibrationMasters, StackingMethod};
 
         // Load first light frame directly (not all files - libraw is slow)

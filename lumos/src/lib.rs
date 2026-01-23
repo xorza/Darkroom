@@ -4,7 +4,7 @@ mod common;
 pub mod math;
 mod stacking;
 #[cfg(test)]
-mod test_utils;
+mod testing;
 
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
 pub use calibration_masters::CalibrationMasters;
