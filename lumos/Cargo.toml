@@ -33,3 +33,8 @@ criterion = { workspace = true }
 name = "demosaic"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "xtrans"
+harness = false
+required-features = ["bench"]

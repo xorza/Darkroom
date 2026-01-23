@@ -271,7 +271,10 @@ CalibrationMasters // Container for master dark/flat/bias frames
   - `bayer/scalar.rs` - Scalar (non-SIMD) bilinear demosaicing implementation
   - `bayer/simd_sse3.rs` - x86_64 SSE3 SIMD implementation
   - `bayer/simd_neon.rs` - ARM aarch64 NEON SIMD implementation
-  - `bench.rs` - Criterion benchmarks (feature-gated)
+  - `bayer/bench.rs` - Criterion benchmarks for Bayer demosaic (feature-gated)
+  - `xtrans/` - Submodule for X-Trans demosaicing (see below)
+- Benchmarks in `lumos/benches/`: `demosaic.rs` (Bayer), `xtrans.rs` (X-Trans)
+- Run with: `cargo bench --package lumos --features bench demosaic` or `xtrans`
 
 **Sensor module (`astro_image/sensor.rs`):**
 - `SensorType` enum: `Monochrome`, `Bayer(CfaPattern)`, `XTrans`, `Unknown`
@@ -281,14 +284,20 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - X-Trans detection: `filters == 9` (Fujifilm sensors)
 - Other non-Bayer patterns return `Unknown`
 
-**X-Trans module (`astro_image/xtrans/`):**
+**X-Trans module (`astro_image/demosaic/xtrans/`):**
 - Bilinear demosaicing for Fujifilm X-Trans sensors (6x6 CFA pattern)
 - `XTransPattern` - 6x6 pattern array with values 0=Red, 1=Green, 2=Blue
 - `XTransImage` - Raw X-Trans data with margins, dimensions, and pattern
-- `demosaic_xtrans_bilinear()` - Scalar bilinear interpolation demosaicing
+- `demosaic_xtrans_bilinear()` - Bilinear interpolation demosaicing with SIMD acceleration
+- Multi-threaded row-based processing via rayon for large images
+- SIMD acceleration: SSE4.1 (x86_64) and NEON (aarch64) for neighbor lookup
 - Module structure:
   - `mod.rs` - `XTransPattern`, `XTransImage` types with validation
   - `scalar.rs` - Scalar bilinear demosaic implementation using 5x5 neighborhood search
+  - `simd_sse4.rs` - x86_64 SSE4.1 SIMD neighbor lookup implementation
+  - `simd_neon.rs` - ARM aarch64 NEON SIMD neighbor lookup implementation
+  - `bench.rs` - Criterion benchmarks for X-Trans demosaic (feature-gated)
+  - `integration_tests.rs` - Integration tests requiring RAF files
 
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
