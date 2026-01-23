@@ -133,10 +133,13 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let use_simd = is_x86_feature_detected!("sse4.1") && xtrans.width >= MIN_SIMD_WIDTH;
 
     if use_parallel {
+        tracing::info!("Using parallel demosaicing");
         demosaic_parallel(xtrans, &lookups, use_simd)
     } else if use_simd {
+        tracing::info!("Using simd demosaicing");
         demosaic_simd(xtrans, &lookups)
     } else {
+        tracing::info!("Using scalar demosaicing");
         demosaic_scalar(xtrans, &lookups)
     }
 }

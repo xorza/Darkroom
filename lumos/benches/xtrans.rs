@@ -3,7 +3,7 @@ use lumos::bench::calibration_dir;
 
 fn xtrans_benchmarks(c: &mut criterion::Criterion) {
     let cal_dir = calibration_dir().expect("LUMOS_CALIBRATION_DIR must be set");
-    let lights_dir = cal_dir.join("Siril_Tutorial/Lights");
+    let lights_dir = cal_dir.join("Lights");
     let raf_file = common::file_utils::astro_image_files(&lights_dir)
         .into_iter()
         .find(|p| {
