@@ -1934,6 +1934,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "common",
+ "criterion",
+ "glam",
+ "imaginarium",
+ "rayon",
+ "thiserror 1.0.69",
+ "tracing",
+]
+
+[[package]]
 name = "lz4_flex"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

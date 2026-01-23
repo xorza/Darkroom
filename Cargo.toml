@@ -4,7 +4,8 @@ members = [
     "scenarium",
     "prism",
     "imaginarium",
-    "palantir"
+    "palantir",
+    "lumos"
 ]
 
 resolver = "2"

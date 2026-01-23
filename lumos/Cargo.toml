@@ -1,0 +1,19 @@
+[package]
+name = "lumos"
+version.workspace = true
+edition.workspace = true
+description = ""
+
+[dependencies]
+common = { workspace = true }
+imaginarium = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+rayon = { workspace = true }
+tracing = { workspace = true }
+glam = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
