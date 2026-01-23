@@ -258,6 +258,14 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `sum_squared_diff()` - SIMD-accelerated sum of squared differences from mean
 - Scalar fallback for unsupported platforms and small arrays (<4 elements)
 
+**Demosaic module (`astro_image/demosaic/`):**
+- Bilinear demosaicing of Bayer CFA patterns (RGGB, BGGR, GRBG, GBRG)
+- Multi-threaded row-based processing via rayon for large images (128x128+)
+- SIMD acceleration: SSE3 (x86_64) and NEON (aarch64) processing 4 pixels in parallel
+- Pre-computed CFA pattern lookup tables for branchless color determination
+- Optimized scalar fallback with fast-path for interior pixels
+- Automatic backend selection based on image size and platform capabilities
+
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
 ## Key Data Structures
