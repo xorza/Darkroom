@@ -161,8 +161,13 @@ pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
                 pattern,
             );
 
+            let red_lookup = NeighborLookup::new(&small_xtrans.pattern, 0);
+            let green_lookup = NeighborLookup::new(&small_xtrans.pattern, 1);
+            let blue_lookup = NeighborLookup::new(&small_xtrans.pattern, 2);
+            let small_lookups = [&red_lookup, &green_lookup, &blue_lookup];
+
             size_group.bench_function(BenchmarkId::new("size", size), |b| {
-                b.iter(|| black_box(demosaic_xtrans_bilinear(&small_xtrans)))
+                b.iter(|| black_box(demosaic_simd(&small_xtrans, &small_lookups)))
             });
         }
     }
