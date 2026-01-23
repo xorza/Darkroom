@@ -1,7 +1,6 @@
 //! ARM aarch64 NEON SIMD implementation of bilinear demosaicing.
 
-use super::super::BayerImage;
-use super::scalar;
+use super::{BayerImage, scalar};
 
 #[target_feature(enable = "neon")]
 pub(crate) unsafe fn demosaic_bilinear_neon(bayer: &BayerImage) -> Vec<f32> {

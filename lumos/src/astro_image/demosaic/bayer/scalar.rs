@@ -1,6 +1,6 @@
 //! Scalar (non-SIMD) implementation of bilinear demosaicing.
 
-use super::super::BayerImage;
+use super::BayerImage;
 
 /// Scalar implementation of bilinear demosaicing.
 pub(crate) fn demosaic_bilinear_scalar(bayer: &BayerImage) -> Vec<f32> {

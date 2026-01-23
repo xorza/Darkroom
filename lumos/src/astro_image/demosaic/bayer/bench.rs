@@ -1,14 +1,13 @@
 //! Benchmark module for Bayer demosaic operations.
 //! Run with: cargo bench --package lumos --features bench demosaic
 
-use super::scalar;
-use crate::astro_image::demosaic::{BayerImage, CfaPattern, demosaic_bilinear};
+use super::{BayerImage, CfaPattern, demosaic_bilinear, scalar};
 use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::path::Path;
 
-pub use crate::astro_image::demosaic::CfaPattern as CfaPatternExport;
-pub use crate::astro_image::demosaic::demosaic_bilinear as demosaic_bilinear_export;
+pub use super::CfaPattern as CfaPatternExport;
+pub use super::demosaic_bilinear as demosaic_bilinear_export;
 
 /// Loads raw Bayer data from a RAW file for benchmarking.
 ///

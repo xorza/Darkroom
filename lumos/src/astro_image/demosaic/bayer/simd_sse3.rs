@@ -1,7 +1,6 @@
 //! x86_64 SSE3 SIMD implementation of bilinear demosaicing.
 
-use super::super::BayerImage;
-use super::scalar;
+use super::{BayerImage, scalar};
 
 #[target_feature(enable = "sse3")]
 pub(crate) unsafe fn demosaic_bilinear_sse3(bayer: &BayerImage) -> Vec<f32> {
