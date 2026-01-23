@@ -166,24 +166,15 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     // The slice is valid for the lifetime of the guard (until libraw_close is called).
     let raw_data = unsafe { slice::from_raw_parts(raw_image_ptr, pixel_count) };
 
-    // Get CFA pattern from libraw metadata
+    // Get sensor info from libraw metadata
     // SAFETY: inner is valid, idata struct is initialized after unpack.
     let filters = unsafe { (*inner).idata.filters };
-    let cfa_pattern = cfa_pattern_from_filters(filters).unwrap_or_else(|| {
-        tracing::warn!(
-            "Unknown CFA pattern (filters=0x{:08x}), defaulting to RGGB",
-            filters
-        );
-        CfaPattern::Rggb
-    });
-    tracing::debug!(
-        "Detected CFA pattern: {:?} (filters=0x{:08x})",
-        cfa_pattern,
-        filters
-    );
+    let colors = unsafe { (*inner).idata.colors };
+
+    tracing::debug!("libraw: filters=0x{:08x}, colors={}", filters, colors);
 
     // Normalize to 0.0-1.0 range using proper black and maximum values
-    let bayer_data: Vec<f32> = raw_data
+    let normalized_data: Vec<f32> = raw_data
         .iter()
         .map(|&v| ((v as f32) - black).max(0.0) / range)
         .collect();
@@ -191,34 +182,75 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
     // Drop guard is no longer needed after we've copied the data
     drop(guard);
 
-    // Demosaic Bayer to RGB using detected CFA pattern
-    let bayer = BayerImage::with_margins(
-        &bayer_data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
-        cfa_pattern,
-    );
-    let demosaic_start = Instant::now();
-    let rgb_pixels = demosaic_bilinear(&bayer);
-    let demosaic_elapsed = demosaic_start.elapsed();
-    tracing::info!(
-        "Demosaicing {}x{} (libraw) took {:.2}ms",
-        width,
-        height,
-        demosaic_elapsed.as_secs_f64() * 1000.0
-    );
+    // Check if this is a monochrome sensor (no Bayer filter)
+    // filters == 0 means no CFA pattern (monochrome or already full-color)
+    // colors == 1 confirms it's a true monochrome sensor
+    let is_monochrome = filters == 0 || colors == 1;
 
-    let dimensions = ImageDimensions::new(width, height, 3);
+    let (pixels, num_channels) = if is_monochrome {
+        tracing::info!(
+            "Monochrome sensor detected (filters=0x{:08x}, colors={}), skipping demosaic",
+            filters,
+            colors
+        );
+
+        // Extract the active area from the raw data (apply margins)
+        let mut mono_pixels = Vec::with_capacity(width * height);
+        for y in 0..height {
+            let src_y = top_margin + y;
+            for x in 0..width {
+                let src_x = left_margin + x;
+                let idx = src_y * raw_width + src_x;
+                mono_pixels.push(normalized_data[idx]);
+            }
+        }
+
+        (mono_pixels, 1)
+    } else {
+        // Bayer sensor - need to demosaic
+        let cfa_pattern = cfa_pattern_from_filters(filters).unwrap_or_else(|| {
+            tracing::warn!(
+                "Unknown CFA pattern (filters=0x{:08x}), defaulting to RGGB",
+                filters
+            );
+            CfaPattern::Rggb
+        });
+        tracing::debug!(
+            "Detected CFA pattern: {:?} (filters=0x{:08x})",
+            cfa_pattern,
+            filters
+        );
+
+        let bayer = BayerImage::with_margins(
+            &normalized_data,
+            raw_width,
+            raw_height,
+            width,
+            height,
+            top_margin,
+            left_margin,
+            cfa_pattern,
+        );
+        let demosaic_start = Instant::now();
+        let rgb_pixels = demosaic_bilinear(&bayer);
+        let demosaic_elapsed = demosaic_start.elapsed();
+        tracing::info!(
+            "Demosaicing {}x{} (libraw) took {:.2}ms",
+            width,
+            height,
+            demosaic_elapsed.as_secs_f64() * 1000.0
+        );
+
+        (rgb_pixels, 3)
+    };
+
+    let dimensions = ImageDimensions::new(width, height, num_channels);
 
     assert!(
-        rgb_pixels.len() == dimensions.pixel_count(),
+        pixels.len() == dimensions.pixel_count(),
         "Pixel count mismatch: expected {}, got {}",
         dimensions.pixel_count(),
-        rgb_pixels.len()
+        pixels.len()
     );
 
     let metadata = AstroImageMetadata {
@@ -228,12 +260,12 @@ pub fn load_raw(path: &Path) -> Result<AstroImage> {
         date_obs: None,
         exposure_time: None,
         bitpix: BitPix::Int16,
-        header_dimensions: vec![height, width, 3],
+        header_dimensions: vec![height, width, num_channels],
     };
 
     Ok(AstroImage {
         metadata,
-        pixels: rgb_pixels,
+        pixels,
         dimensions,
     })
 }

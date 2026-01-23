@@ -693,6 +693,9 @@ mod tests {
         assert!(image.dimensions.height > 0);
         // RGB images have 3 channels
         assert_eq!(image.dimensions.channels, 3);
+
+        let image: imaginarium::Image = image.into();
+        image.save_file("filename.tiff").unwrap();
     }
 
     #[test]
