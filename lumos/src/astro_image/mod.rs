@@ -206,6 +206,71 @@ impl AstroImage {
         self.dimensions.pixel_count()
     }
 
+    /// Calculate the mean pixel value across all pixels using SIMD acceleration.
+    pub fn mean(&self) -> f32 {
+        crate::math::mean_f32(&self.pixels)
+    }
+
+    /// Calibrate a light frame using master dark and flat frames.
+    ///
+    /// Applies the standard calibration formula:
+    /// 1. Subtract master dark (removes thermal noise + bias)
+    /// 2. Divide by normalized master flat (corrects vignetting and dust)
+    ///
+    /// # Arguments
+    /// * `master_dark` - Optional master dark frame (if None, dark subtraction is skipped)
+    /// * `master_flat` - Optional master flat frame (if None, flat correction is skipped)
+    ///
+    /// # Returns
+    /// A new calibrated `AstroImage`
+    ///
+    /// # Panics
+    /// Panics if the provided master frames have different dimensions than self.
+    pub fn calibrate(
+        &self,
+        master_dark: Option<&AstroImage>,
+        master_flat: Option<&AstroImage>,
+    ) -> AstroImage {
+        let mut result = self.clone();
+
+        // Subtract master dark (removes thermal noise + bias)
+        if let Some(dark) = master_dark {
+            assert!(
+                dark.dimensions == self.dimensions,
+                "Dark frame dimensions {:?} don't match light frame {:?}",
+                dark.dimensions,
+                self.dimensions
+            );
+            for (pixel, dark_pixel) in result.pixels.iter_mut().zip(dark.pixels.iter()) {
+                *pixel -= dark_pixel;
+            }
+        }
+
+        // Divide by normalized master flat (corrects vignetting)
+        if let Some(flat) = master_flat {
+            assert!(
+                flat.dimensions == self.dimensions,
+                "Flat frame dimensions {:?} don't match light frame {:?}",
+                flat.dimensions,
+                self.dimensions
+            );
+            let flat_mean = flat.mean();
+            assert!(
+                flat_mean > f32::EPSILON,
+                "Flat frame mean is zero or negative"
+            );
+
+            for (pixel, flat_pixel) in result.pixels.iter_mut().zip(flat.pixels.iter()) {
+                let normalized_flat = flat_pixel / flat_mean;
+                if normalized_flat > f32::EPSILON {
+                    *pixel /= normalized_flat;
+                }
+            }
+        }
+
+        result
+    }
+
     /// Load all astronomical images from a directory.
     ///
     /// Loads all supported image files (RAW and FITS) from the directory
@@ -409,6 +474,86 @@ mod tests {
 
         // Verify pixel values
         assert_eq!(astro.pixels, pixels);
+    }
+
+    #[test]
+    fn test_mean() {
+        let image = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![1.0, 2.0, 3.0, 4.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        assert!((image.mean() - 2.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_calibrate_dark_subtraction() {
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![100.0, 200.0, 150.0, 250.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        let dark = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![10.0, 20.0, 15.0, 25.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let calibrated = light.calibrate(Some(&dark), None);
+
+        assert_eq!(calibrated.pixels, vec![90.0, 180.0, 135.0, 225.0]);
+    }
+
+    #[test]
+    fn test_calibrate_flat_correction() {
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![100.0, 200.0, 150.0, 250.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        // Flat with mean = 1.0, so normalized flat equals the flat itself
+        let flat = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![0.8, 1.0, 1.2, 1.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let calibrated = light.calibrate(None, Some(&flat));
+
+        // Each pixel divided by (flat_pixel / flat_mean)
+        // flat_mean = 1.0, so: 100/0.8=125, 200/1.0=200, 150/1.2=125, 250/1.0=250
+        assert!((calibrated.pixels[0] - 125.0).abs() < 0.01);
+        assert!((calibrated.pixels[1] - 200.0).abs() < 0.01);
+        assert!((calibrated.pixels[2] - 125.0).abs() < 0.01);
+        assert!((calibrated.pixels[3] - 250.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_calibrate_full() {
+        let light = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![110.0, 220.0, 165.0, 275.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        let dark = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![10.0, 20.0, 15.0, 25.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+        let flat = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: vec![0.8, 1.0, 1.2, 1.0],
+            dimensions: ImageDimensions::new(2, 2, 1),
+        };
+
+        let calibrated = light.calibrate(Some(&dark), Some(&flat));
+
+        // After dark: [100, 200, 150, 250]
+        // After flat (mean=1.0): [125, 200, 125, 250]
+        assert!((calibrated.pixels[0] - 125.0).abs() < 0.01);
+        assert!((calibrated.pixels[1] - 200.0).abs() < 0.01);
+        assert!((calibrated.pixels[2] - 125.0).abs() < 0.01);
+        assert!((calibrated.pixels[3] - 250.0).abs() < 0.01);
     }
 
     #[test]

@@ -1,5 +1,4 @@
 mod cpu;
-mod simd;
 use strum_macros::Display;
 
 use crate::AstroImage;

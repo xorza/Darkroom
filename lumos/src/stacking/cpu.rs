@@ -1,7 +1,7 @@
 use rayon::prelude::*;
 
-use super::simd;
 use crate::astro_image::AstroImage;
+use crate::math;
 use crate::stacking::{FrameType, SigmaClipConfig, StackingMethod};
 
 /// Stack frames with the given method using parallel CPU processing.
@@ -65,8 +65,7 @@ fn combine_pixels(values: &[f32], method: StackingMethod) -> f32 {
 
 /// Calculate the mean of values using SIMD-accelerated sum.
 fn mean(values: &[f32]) -> f32 {
-    debug_assert!(!values.is_empty());
-    simd::sum_f32(values) / values.len() as f32
+    math::mean_f32(values)
 }
 
 /// Calculate the median of values.
@@ -100,7 +99,7 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
         }
 
         let avg = mean(&included);
-        let variance = simd::sum_squared_diff(&included, avg) / included.len() as f32;
+        let variance = math::sum_squared_diff(&included, avg) / included.len() as f32;
         let std_dev = variance.sqrt();
 
         if std_dev < f32::EPSILON {

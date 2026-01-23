@@ -198,12 +198,14 @@ Image processing function library adapting imaginarium operations to the node-ba
 
 ### lumos
 
-Astrophotography image processing library for loading and stacking astronomical images.
+Astrophotography image processing library for loading, calibrating, and stacking astronomical images.
 
 **Key modules:**
 
-- `astro_image.rs` - `AstroImage` for loading FITS and RAW camera files
-- `stacking.rs` - Image stacking algorithms (mean, median, sigma-clipped mean)
+- `astro_image/mod.rs` - `AstroImage` for loading FITS and RAW camera files
+- `stacking/mod.rs` - Image stacking algorithms (mean, median, sigma-clipped mean)
+- `calibration_masters.rs` - Master dark/flat/bias frame management
+- `math.rs` - SIMD-accelerated math utilities (ARM NEON, x86 SSE4)
 
 **Key types:**
 
@@ -214,16 +216,29 @@ ImageDimensions    // { width: usize, height: usize, channels: usize }
 BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
 StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
 SigmaClipConfig    // { sigma, max_iterations }
+FrameType          // Dark | Flat | Bias | Light
+CalibrationMasters // Container for master dark/flat/bias frames
 ```
 
 **Module structure:**
-- `astro_image/mod.rs` - Main module with `AstroImage`, `BitPix`, `ImageDimensions`, `from_file()` method
+- `astro_image/mod.rs` - Main module with `AstroImage`, `BitPix`, `ImageDimensions`, `from_file()`, `calibrate()`
 - `astro_image/fits.rs` - FITS file loading via fitsio
 - `astro_image/rawloader.rs` - RAW loading via rawloader (pure Rust)
 - `astro_image/libraw.rs` - RAW loading via libraw-rs (C library fallback)
+- `stacking/mod.rs` - `StackingMethod`, `FrameType`, `stack_frames()` function
+- `stacking/cpu.rs` - Row-parallel CPU stacking implementation
+- `calibration_masters.rs` - `CalibrationMasters` struct with `from_directory()`, `load_from_directory()`, `save_to_directory()`
+- `math.rs` - SIMD math: `sum_f32()`, `mean_f32()`, `sum_squared_diff()`
 
-**Conversion:**
-- `From<AstroImage> for imaginarium::Image` - converts f32 pixels to Image with proper ColorFormat
+**Conversions:**
+- `From<AstroImage> for imaginarium::Image` - converts f32 pixels to Image
+- `From<imaginarium::Image> for AstroImage` - converts to GRAY_F32 or RGB_F32, removes stride padding
+
+**Calibration:**
+- `AstroImage::calibrate(master_dark, master_flat)` - applies dark subtraction and flat field correction
+- `CalibrationMasters::from_directory()` - stacks raw calibration frames into masters
+- `CalibrationMasters::load_from_directory()` - loads existing master TIFF files
+- Master filenames include stacking method: `master_dark_median.tiff`
 
 **RAW file loading:**
 - Tries `rawloader` first (pure Rust, faster, limited camera support)
@@ -236,7 +251,14 @@ SigmaClipConfig    // { sigma, max_iterations }
 - Reads primary HDU image data as f32
 - Extracts metadata (OBJECT, INSTRUME, TELESCOP, DATE-OBS, EXPTIME, BITPIX)
 
-**Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon
+**SIMD math utilities:**
+- Platform-specific optimizations for ARM NEON (aarch64) and x86 SSE4
+- `sum_f32()` - SIMD-accelerated sum of f32 values
+- `mean_f32()` - SIMD-accelerated mean calculation
+- `sum_squared_diff()` - SIMD-accelerated sum of squared differences from mean
+- Scalar fallback for unsupported platforms and small arrays (<4 elements)
+
+**Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
 ## Key Data Structures
 

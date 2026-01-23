@@ -1,10 +1,10 @@
-//! SIMD-accelerated math operations for stacking.
+//! Math utilities with SIMD acceleration.
 //!
-//! Provides platform-specific optimizations for ARM NEON (aarch64) and x86 SSE4.
+//! Provides optimized math operations with platform-specific SIMD for ARM NEON (aarch64) and x86 SSE4.
 
 /// Sum f32 values using SIMD when available.
 #[cfg(target_arch = "aarch64")]
-pub(super) fn sum_f32(values: &[f32]) -> f32 {
+pub fn sum_f32(values: &[f32]) -> f32 {
     use std::arch::aarch64::*;
 
     if values.len() < 4 {
@@ -31,7 +31,7 @@ pub(super) fn sum_f32(values: &[f32]) -> f32 {
 
 /// Sum f32 values using SIMD when available.
 #[cfg(target_arch = "x86_64")]
-pub(super) fn sum_f32(values: &[f32]) -> f32 {
+pub fn sum_f32(values: &[f32]) -> f32 {
     if values.len() < 4 || !is_x86_feature_detected!("sse4.1") {
         return values.iter().sum();
     }
@@ -65,13 +65,19 @@ unsafe fn sum_f32_sse(values: &[f32]) -> f32 {
 
 /// Fallback for other architectures.
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-pub(super) fn sum_f32(values: &[f32]) -> f32 {
+pub fn sum_f32(values: &[f32]) -> f32 {
     values.iter().sum()
+}
+
+/// Calculate the mean of f32 values using SIMD-accelerated sum.
+pub fn mean_f32(values: &[f32]) -> f32 {
+    debug_assert!(!values.is_empty());
+    sum_f32(values) / values.len() as f32
 }
 
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "aarch64")]
-pub(super) fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
+pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     use std::arch::aarch64::*;
 
     if values.len() < 4 {
@@ -98,7 +104,7 @@ pub(super) fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "x86_64")]
-pub(super) fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
+pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     if values.len() < 4 || !is_x86_feature_detected!("sse4.1") {
         return values.iter().map(|v| (v - mean).powi(2)).sum();
     }
@@ -135,7 +141,7 @@ unsafe fn sum_squared_diff_sse(values: &[f32], mean: f32) -> f32 {
 
 /// Fallback for other architectures.
 #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-pub(super) fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
+pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     values.iter().map(|v| (v - mean).powi(2)).sum()
 }
 

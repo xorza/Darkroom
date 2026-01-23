@@ -1,5 +1,6 @@
 mod astro_image;
 mod calibration_masters;
+pub mod math;
 mod stacking;
 #[cfg(test)]
 mod test_utils;
