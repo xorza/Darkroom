@@ -185,19 +185,31 @@ fn compute_channel_stats(
     channel: usize,
     sigma_threshold: f32,
 ) -> ChannelStats {
-    // Extract values for this channel only
-    let channel_values: Vec<f32> = pixels
-        .iter()
-        .skip(channel)
-        .step_by(channels)
-        .copied()
-        .collect();
+    let pixel_count = pixels.len() / channels;
 
-    let median = crate::math::median_f32(&channel_values);
+    // Extract values for this channel in parallel
+    let mut values: Vec<f32> = vec![0.0; pixel_count];
+    const CHUNK_SIZE: usize = 4096;
+    values
+        .par_chunks_mut(CHUNK_SIZE)
+        .enumerate()
+        .for_each(|(chunk_idx, chunk)| {
+            let start_pixel = chunk_idx * CHUNK_SIZE;
+            for (i, v) in chunk.iter_mut().enumerate() {
+                let pixel_idx = start_pixel + i;
+                *v = pixels[pixel_idx * channels + channel];
+            }
+        });
 
-    // Compute MAD for this channel
-    let abs_deviations: Vec<f32> = channel_values.iter().map(|&p| (p - median).abs()).collect();
-    let mad = crate::math::median_f32(&abs_deviations);
+    let median = crate::math::median_f32(&values);
+
+    // Compute absolute deviations in parallel, reusing the same buffer
+    values.par_chunks_mut(CHUNK_SIZE).for_each(|chunk| {
+        for v in chunk.iter_mut() {
+            *v = (*v - median).abs();
+        }
+    });
+    let mad = crate::math::median_f32(&values);
 
     // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
     const MAD_TO_SIGMA: f32 = 1.4826;
