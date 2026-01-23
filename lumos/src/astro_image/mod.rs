@@ -236,8 +236,6 @@ impl From<AstroImage> for Image {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use std::fs;
 
     #[test]
     fn test_metadata_default() {
@@ -345,50 +343,21 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_load_single_raw_from_env() {
-        let Ok(calibration_dir) = env::var("LUMOS_CALIBRATION_DIR") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping test");
+        use crate::test_utils::load_calibration_images;
+
+        let Some(images) = load_calibration_images("Darks") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
             return;
         };
 
-        let darks_dir = std::path::Path::new(&calibration_dir).join("Darks");
-        assert!(
-            darks_dir.exists(),
-            "Darks directory does not exist: {}",
-            darks_dir.display()
-        );
-
-        // Find first raw file
-        let first_raw = fs::read_dir(&darks_dir)
-            .expect("Failed to read Darks directory")
-            .filter_map(|e| e.ok())
-            .find(|e| {
-                let path = e.path();
-                if !path.is_file() {
-                    return false;
-                }
-                let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                matches!(
-                    ext.to_lowercase().as_str(),
-                    "raf" | "cr2" | "cr3" | "nef" | "arw" | "dng"
-                )
-            });
-
-        let Some(entry) = first_raw else {
-            eprintln!("No raw files found in Darks directory, skipping test");
+        let Some(image) = images.into_iter().next() else {
+            eprintln!("No raw files in Darks, skipping test");
             return;
         };
-
-        let path = entry.path();
-        println!("Loading raw file: {}", path.display());
-
-        let image = AstroImage::from_file(&path).expect("Failed to load raw file");
 
         println!(
-            "Loaded: {} ({}x{}x{})",
-            path.file_name().unwrap().to_string_lossy(),
-            image.dimensions.width,
-            image.dimensions.height,
-            image.dimensions.channels
+            "Loaded image: {}x{}x{}",
+            image.dimensions.width, image.dimensions.height, image.dimensions.channels
         );
 
         assert!(image.dimensions.width > 0);

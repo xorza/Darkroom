@@ -1,4 +1,20 @@
+use strum_macros::Display;
+
 use crate::AstroImage;
+
+/// Type of calibration frame being stacked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
+#[strum(serialize_all = "lowercase")]
+pub enum FrameType {
+    /// Dark frames - thermal noise calibration
+    Dark,
+    /// Flat frames - vignetting and dust correction
+    Flat,
+    /// Bias frames - readout noise calibration
+    Bias,
+    /// Light frames - actual image data
+    Light,
+}
 
 /// Method used for combining multiple frames during stacking.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -113,7 +129,11 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
 }
 
 /// Stack frames with the given method, verifying dimensions match.
-pub fn stack_frames(frames: &[AstroImage], method: StackingMethod, frame_type: &str) -> AstroImage {
+pub fn stack_frames(
+    frames: &[AstroImage],
+    method: StackingMethod,
+    frame_type: FrameType,
+) -> AstroImage {
     assert!(
         !frames.is_empty(),
         "Must provide at least one {} frame",
@@ -195,5 +215,34 @@ mod tests {
     #[test]
     fn test_stacking_method_default() {
         assert_eq!(StackingMethod::default(), StackingMethod::Median);
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_stack_flats_from_env() {
+        use crate::test_utils::load_calibration_images;
+
+        let Some(flats) = load_calibration_images("Flats") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set or Flats dir missing, skipping test");
+            return;
+        };
+
+        if flats.is_empty() {
+            eprintln!("No flat files found in Flats directory, skipping test");
+            return;
+        }
+
+        println!("Stacking {} flats with median method...", flats.len());
+        let master_flat = stack_frames(&flats, StackingMethod::Median, FrameType::Flat);
+
+        println!(
+            "Master flat: {}x{}x{}",
+            master_flat.dimensions.width,
+            master_flat.dimensions.height,
+            master_flat.dimensions.channels
+        );
+
+        assert_eq!(master_flat.dimensions, flats[0].dimensions);
+        assert!(!master_flat.pixels.is_empty());
     }
 }
