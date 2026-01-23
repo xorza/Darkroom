@@ -1,6 +1,7 @@
 pub(crate) mod demosaic;
 mod fits;
 pub(crate) mod libraw;
+mod sensor;
 
 use anyhow::Result;
 use imaginarium::{ChannelCount, ChannelSize, ChannelType, ColorFormat, Image, ImageDesc};
