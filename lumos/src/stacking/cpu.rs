@@ -5,7 +5,7 @@ use crate::astro_image::AstroImage;
 use crate::stacking::{FrameType, SigmaClipConfig, StackingMethod};
 
 /// Stack frames with the given method using parallel CPU processing.
-pub fn stack_frames_cpu(
+pub(crate) fn stack_frames_cpu(
     frames: &[AstroImage],
     method: StackingMethod,
     frame_type: FrameType,

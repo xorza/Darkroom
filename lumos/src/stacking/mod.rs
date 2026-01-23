@@ -1,7 +1,5 @@
 mod cpu;
 mod simd;
-
-pub use cpu::stack_frames_cpu;
 use strum_macros::Display;
 
 use crate::AstroImage;
@@ -69,7 +67,7 @@ pub fn stack_frames(
     method: StackingMethod,
     frame_type: FrameType,
 ) -> AstroImage {
-    stack_frames_cpu(frames, method, frame_type)
+    cpu::stack_frames_cpu(frames, method, frame_type)
 }
 
 #[cfg(test)]
