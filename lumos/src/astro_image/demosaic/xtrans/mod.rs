@@ -90,9 +90,9 @@ pub fn process_xtrans(
 /// X-Trans 6x6 color filter array pattern.
 /// Values: 0=Red, 1=Green, 2=Blue
 #[derive(Debug, Clone)]
-pub struct XTransPattern {
+pub(crate) struct XTransPattern {
     /// 6x6 pattern array indexed by [row % 6][col % 6]
-    pub pattern: [[u8; 6]; 6],
+    pub(crate) pattern: [[u8; 6]; 6],
 }
 
 impl XTransPattern {
@@ -100,7 +100,7 @@ impl XTransPattern {
     ///
     /// # Panics
     /// Panics if any value in the pattern is not 0, 1, or 2.
-    pub fn new(pattern: [[u8; 6]; 6]) -> Self {
+    pub(crate) fn new(pattern: [[u8; 6]; 6]) -> Self {
         for row in &pattern {
             for &val in row {
                 assert!(
@@ -116,30 +116,30 @@ impl XTransPattern {
     /// Get the color at position (row, col).
     /// Returns: 0=Red, 1=Green, 2=Blue
     #[inline(always)]
-    pub fn color_at(&self, row: usize, col: usize) -> u8 {
+    pub(crate) fn color_at(&self, row: usize, col: usize) -> u8 {
         self.pattern[row % 6][col % 6]
     }
 }
 
 /// Raw X-Trans image data with metadata needed for demosaicing.
 #[derive(Debug)]
-pub struct XTransImage<'a> {
+pub(crate) struct XTransImage<'a> {
     /// Raw pixel data (normalized to 0.0-1.0)
-    pub data: &'a [f32],
+    pub(crate) data: &'a [f32],
     /// Width of the raw data buffer
-    pub raw_width: usize,
+    pub(crate) raw_width: usize,
     /// Height of the raw data buffer
-    pub raw_height: usize,
+    pub(crate) raw_height: usize,
     /// Width of the active/output image area
-    pub width: usize,
+    pub(crate) width: usize,
     /// Height of the active/output image area
-    pub height: usize,
+    pub(crate) height: usize,
     /// Top margin (offset from raw to active area)
-    pub top_margin: usize,
+    pub(crate) top_margin: usize,
     /// Left margin (offset from raw to active area)
-    pub left_margin: usize,
+    pub(crate) left_margin: usize,
     /// X-Trans CFA pattern
-    pub pattern: XTransPattern,
+    pub(crate) pattern: XTransPattern,
 }
 
 impl<'a> XTransImage<'a> {
@@ -152,7 +152,7 @@ impl<'a> XTransImage<'a> {
     /// - `left_margin + width > raw_width`
     /// - `width == 0` or `height == 0`
     #[allow(clippy::too_many_arguments)]
-    pub fn with_margins(
+    pub(crate) fn with_margins(
         data: &'a [f32],
         raw_width: usize,
         raw_height: usize,

@@ -6,9 +6,6 @@ use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::path::Path;
 
-pub use super::CfaPattern as CfaPatternExport;
-pub use super::demosaic_bilinear as demosaic_bilinear_export;
-
 /// Loads raw Bayer data from a RAW file for benchmarking.
 ///
 /// # Panics
