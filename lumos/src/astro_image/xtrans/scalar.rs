@@ -28,6 +28,8 @@ const MAX_NEIGHBORS: usize = 25;
 struct OffsetList {
     offsets: [(i32, i32); MAX_NEIGHBORS],
     len: u8,
+    /// Pre-computed reciprocal of len for fast averaging (1.0 / len).
+    inv_len: f32,
 }
 
 impl OffsetList {
@@ -35,6 +37,7 @@ impl OffsetList {
         Self {
             offsets: [(0, 0); MAX_NEIGHBORS],
             len: 0,
+            inv_len: 0.0,
         }
     }
 
@@ -45,9 +48,22 @@ impl OffsetList {
         self.len += 1;
     }
 
+    /// Finalize the list by computing the reciprocal of len.
+    #[inline(always)]
+    fn finalize(&mut self) {
+        if self.len > 0 {
+            self.inv_len = 1.0 / self.len as f32;
+        }
+    }
+
     #[inline(always)]
     fn as_slice(&self) -> &[(i32, i32)] {
         &self.offsets[..self.len as usize]
+    }
+
+    #[inline(always)]
+    fn inv_len(&self) -> f32 {
+        self.inv_len
     }
 }
 
@@ -79,6 +95,7 @@ impl NeighborLookup {
                         }
                     }
                 }
+                cell.finalize();
             }
         }
 
@@ -86,8 +103,8 @@ impl NeighborLookup {
     }
 
     #[inline(always)]
-    fn get_offsets(&self, pattern_y: usize, pattern_x: usize) -> &[(i32, i32)] {
-        self.offsets[pattern_y % 6][pattern_x % 6].as_slice()
+    fn get(&self, pattern_y: usize, pattern_x: usize) -> &OffsetList {
+        &self.offsets[pattern_y % 6][pattern_x % 6]
     }
 }
 
@@ -205,16 +222,16 @@ fn interpolate_channel_fast(
     y: usize,
     lookup: &NeighborLookup,
 ) -> f32 {
-    let offsets = lookup.get_offsets(y, x);
+    let offset_list = lookup.get(y, x);
     let mut sum = 0.0f32;
 
-    for &(dy, dx) in offsets {
+    for &(dy, dx) in offset_list.as_slice() {
         let ny = (y as i32 + dy) as usize;
         let nx = (x as i32 + dx) as usize;
         sum += xtrans.data[ny * xtrans.raw_width + nx];
     }
 
-    sum / offsets.len() as f32
+    sum * offset_list.inv_len()
 }
 
 /// Safe interpolation with bounds checking for edge pixels.
@@ -225,11 +242,11 @@ fn interpolate_channel_safe(
     y: usize,
     lookup: &NeighborLookup,
 ) -> f32 {
-    let offsets = lookup.get_offsets(y, x);
+    let offset_list = lookup.get(y, x);
     let mut sum = 0.0f32;
     let mut count = 0u32;
 
-    for &(dy, dx) in offsets {
+    for &(dy, dx) in offset_list.as_slice() {
         let ny = y as i32 + dy;
         let nx = x as i32 + dx;
 
@@ -345,5 +362,56 @@ mod tests {
 
         let val = interpolate_channel_safe(&xtrans, 6, 6, &blue_lookup); // Blue
         assert!(val > 0.0, "Should find blue neighbors");
+    }
+
+    #[test]
+    fn test_parallel_vs_scalar_consistency() {
+        // Create an image large enough to trigger parallel path
+        let size = 256;
+        let data: Vec<f32> = (0..size * size).map(|i| (i % 256) as f32 / 255.0).collect();
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, size, size, size, size, 0, 0, pattern);
+
+        let red_lookup = NeighborLookup::new(&xtrans.pattern, 0);
+        let green_lookup = NeighborLookup::new(&xtrans.pattern, 1);
+        let blue_lookup = NeighborLookup::new(&xtrans.pattern, 2);
+        let lookups = [&red_lookup, &green_lookup, &blue_lookup];
+
+        let parallel_result = demosaic_parallel(&xtrans, &lookups);
+        let scalar_result = demosaic_scalar(&xtrans, &lookups);
+
+        assert_eq!(parallel_result.len(), scalar_result.len());
+        for (i, (p, s)) in parallel_result.iter().zip(scalar_result.iter()).enumerate() {
+            assert!(
+                (p - s).abs() < 1e-6,
+                "Mismatch at index {}: parallel={}, scalar={}",
+                i,
+                p,
+                s
+            );
+        }
+    }
+
+    #[test]
+    fn test_fast_vs_safe_interpolation_consistency() {
+        // Test that fast and safe paths produce identical results for interior pixels
+        let data = vec![0.5f32; 24 * 24];
+        let pattern = test_pattern();
+        let xtrans = XTransImage::with_margins(&data, 24, 24, 24, 24, 0, 0, pattern);
+
+        let red_lookup = NeighborLookup::new(&xtrans.pattern, 0);
+
+        // Test at interior position (well within bounds)
+        let x = 12;
+        let y = 12;
+        let fast = interpolate_channel_fast(&xtrans, x, y, &red_lookup);
+        let safe = interpolate_channel_safe(&xtrans, x, y, &red_lookup);
+
+        assert!(
+            (fast - safe).abs() < 1e-6,
+            "Fast and safe paths differ: fast={}, safe={}",
+            fast,
+            safe
+        );
     }
 }
