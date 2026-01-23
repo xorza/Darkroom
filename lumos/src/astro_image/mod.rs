@@ -686,4 +686,65 @@ mod tests {
             image.dimensions.width * image.dimensions.height
         );
     }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_calibrate_light_from_env() {
+        use crate::test_utils::{calibration_masters_dir, load_calibration_images};
+        use crate::{CalibrationMasters, StackingMethod};
+
+        // Load first light frame
+        let Some(lights) = load_calibration_images("Lights") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set or Lights dir missing, skipping test");
+            return;
+        };
+
+        let Some(light) = lights.into_iter().next() else {
+            eprintln!("No light files in Lights directory, skipping test");
+            return;
+        };
+
+        println!(
+            "Loaded light frame: {}x{}x{}",
+            light.dimensions.width, light.dimensions.height, light.dimensions.channels
+        );
+
+        // Load calibration masters
+        let Some(masters_dir) = calibration_masters_dir() else {
+            eprintln!("calibration_masters directory not found, skipping test");
+            return;
+        };
+
+        let masters =
+            CalibrationMasters::load_from_directory(&masters_dir, StackingMethod::Median).unwrap();
+
+        println!(
+            "Loaded masters: dark={}, flat={}, bias={}",
+            masters.master_dark.is_some(),
+            masters.master_flat.is_some(),
+            masters.master_bias.is_some()
+        );
+
+        // Calibrate the light frame
+        let calibrated = light.calibrate(&masters);
+
+        println!(
+            "Calibrated frame: {}x{}x{}",
+            calibrated.dimensions.width,
+            calibrated.dimensions.height,
+            calibrated.dimensions.channels
+        );
+
+        println!("Mean: {}", calibrated.mean());
+
+        assert_eq!(calibrated.dimensions, light.dimensions);
+
+        // Save calibrated image to output
+        let output_path = common::test_utils::test_output_path("calibrated_light.tiff");
+        let img: imaginarium::Image = calibrated.into();
+        img.save_file(&output_path).unwrap();
+
+        println!("Saved calibrated image to: {:?}", output_path);
+        assert!(output_path.exists());
+    }
 }
