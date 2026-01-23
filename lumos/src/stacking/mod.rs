@@ -244,5 +244,8 @@ mod tests {
 
         assert_eq!(master_flat.dimensions, flats[0].dimensions);
         assert!(!master_flat.pixels.is_empty());
+
+        let img: imaginarium::Image = master_flat.into();
+        img.save_file("master_flat.tiff").unwrap();
     }
 }

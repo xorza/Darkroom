@@ -35,10 +35,12 @@ fn raw_files_in_dir(dir: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Loads all RAW images from the given directory.
+/// Loads all RAW images from the given directory using parallel loading.
 fn load_raw_images(dir: &Path) -> Vec<AstroImage> {
+    use rayon::prelude::*;
+
     raw_files_in_dir(dir)
-        .iter()
+        .par_iter()
         .map(|path| AstroImage::from_file(path).expect("Failed to load image"))
         .collect()
 }
