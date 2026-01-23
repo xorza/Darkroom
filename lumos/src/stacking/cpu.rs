@@ -62,7 +62,13 @@ fn median(values: &[f32]) -> f32 {
     math::median_f32(values)
 }
 
-/// Calculate sigma-clipped mean using SIMD-accelerated operations.
+/// Calculate sigma-clipped mean using median for robust center estimation.
+///
+/// Algorithm:
+/// 1. Use median as center (robust to outliers)
+/// 2. Compute std dev from median
+/// 3. Clip values beyond κσ from median
+/// 4. Return mean of remaining values (statistically efficient)
 fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
     debug_assert!(!values.is_empty());
 
@@ -77,8 +83,9 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
             break;
         }
 
-        let avg = mean(&included);
-        let variance = math::sum_squared_diff(&included, avg) / included.len() as f32;
+        // Use median as center - robust to outliers
+        let center = median(&included);
+        let variance = math::sum_squared_diff(&included, center) / included.len() as f32;
         let std_dev = variance.sqrt();
 
         if std_dev < f32::EPSILON {
@@ -88,7 +95,7 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
         let threshold = config.sigma * std_dev;
         let prev_len = included.len();
 
-        included.retain(|&v| (v - avg).abs() <= threshold);
+        included.retain(|&v| (v - center).abs() <= threshold);
 
         // Stop if no values were clipped
         if included.len() == prev_len {
@@ -96,6 +103,7 @@ fn sigma_clipped_mean(values: &[f32], config: SigmaClipConfig) -> f32 {
         }
     }
 
+    // Return mean of remaining values (lower noise than median for Gaussian data)
     mean(&included)
 }
 
