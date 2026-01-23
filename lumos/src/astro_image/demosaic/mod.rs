@@ -531,58 +531,5 @@ mod tests {
     }
 }
 
-/// Benchmark module for demosaic operations.
-/// Run with: cargo bench --package lumos --features bench demosaic
 #[cfg(feature = "bench")]
-pub mod bench {
-    use super::*;
-    use criterion::{BenchmarkId, Criterion};
-    use std::hint::black_box;
-
-    pub use super::CfaPattern;
-
-    /// Register demosaic benchmarks with Criterion.
-    ///
-    /// The `load_bayer_data` function should return:
-    /// (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa_pattern)
-    pub fn benchmarks<F>(c: &mut Criterion, load_bayer_data: F)
-    where
-        F: FnOnce() -> (
-            Vec<f32>,
-            usize,
-            usize,
-            usize,
-            usize,
-            usize,
-            usize,
-            CfaPattern,
-        ),
-    {
-        let (data, raw_width, raw_height, width, height, top_margin, left_margin, cfa) =
-            load_bayer_data();
-
-        let bayer = BayerImage::with_margins(
-            &data,
-            raw_width,
-            raw_height,
-            width,
-            height,
-            top_margin,
-            left_margin,
-            cfa,
-        );
-
-        let mut group = c.benchmark_group("demosaic");
-        group.sample_size(20);
-
-        group.bench_function(BenchmarkId::new("bilinear", "scalar"), |b| {
-            b.iter(|| black_box(scalar::demosaic_bilinear_scalar(&bayer)))
-        });
-
-        group.bench_function(BenchmarkId::new("bilinear", "simd"), |b| {
-            b.iter(|| black_box(demosaic_bilinear(&bayer)))
-        });
-
-        group.finish();
-    }
-}
+pub mod bench;

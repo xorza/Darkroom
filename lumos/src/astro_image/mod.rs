@@ -359,7 +359,7 @@ impl From<Image> for AstroImage {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{calibration_dir_with_message as calibration_dir, init_tracing};
+    use crate::testing::{calibration_dir, init_tracing};
 
     use super::*;
 
@@ -700,10 +700,7 @@ mod tests {
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_calibrate_light_from_env() {
-        use crate::testing::{
-            calibration_dir_with_message as calibration_dir,
-            calibration_masters_dir_with_message as calibration_masters_dir,
-        };
+        use crate::testing::{calibration_dir, calibration_masters_dir};
         use crate::{CalibrationMasters, StackingMethod};
 
         // Load first light frame directly (not all files - libraw is slow)
