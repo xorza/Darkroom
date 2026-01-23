@@ -1,5 +1,3 @@
-use rayon::prelude::*;
-
 use crate::astro_image::AstroImage;
 use crate::math;
 use crate::stacking::{FrameType, SigmaClipConfig, StackingMethod};
@@ -31,19 +29,12 @@ pub(crate) fn stack_frames_cpu(
         );
     }
 
-    // Process rows in parallel using rayon (better cache locality than per-pixel)
-    let row_stride = dims.width * dims.channels;
-    let result_pixels: Vec<f32> = (0..dims.height)
-        .into_par_iter()
-        .flat_map(|row| {
-            let row_start = row * row_stride;
-            let row_end = row_start + row_stride;
-            (row_start..row_end)
-                .map(|pixel_idx| {
-                    let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
-                    combine_pixels(&values, method)
-                })
-                .collect::<Vec<f32>>()
+    // Process pixels
+    let pixel_count = dims.pixel_count();
+    let result_pixels: Vec<f32> = (0..pixel_count)
+        .map(|pixel_idx| {
+            let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
+            combine_pixels(&values, method)
         })
         .collect();
 
@@ -70,17 +61,7 @@ fn mean(values: &[f32]) -> f32 {
 
 /// Calculate the median of values.
 fn median(values: &[f32]) -> f32 {
-    debug_assert!(!values.is_empty());
-
-    let mut sorted = values.to_vec();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-    let len = sorted.len();
-    if len.is_multiple_of(2) {
-        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
-    } else {
-        sorted[len / 2]
-    }
+    math::median_f32(values)
 }
 
 /// Calculate sigma-clipped mean using SIMD-accelerated operations.

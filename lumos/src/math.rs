@@ -75,6 +75,21 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
+/// Calculate the median of f32 values.
+pub fn median_f32(values: &[f32]) -> f32 {
+    debug_assert!(!values.is_empty());
+
+    let mut sorted = values.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    let len = sorted.len();
+    if len.is_multiple_of(2) {
+        (sorted[len / 2 - 1] + sorted[len / 2]) / 2.0
+    } else {
+        sorted[len / 2]
+    }
+}
+
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "aarch64")]
 pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
@@ -148,6 +163,18 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_median_odd() {
+        let values = vec![1.0f32, 3.0, 2.0, 5.0, 4.0];
+        assert!((median_f32(&values) - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_median_even() {
+        let values = vec![1.0f32, 2.0, 3.0, 4.0];
+        assert!((median_f32(&values) - 2.5).abs() < f32::EPSILON);
+    }
 
     #[test]
     fn test_sum_f32() {
