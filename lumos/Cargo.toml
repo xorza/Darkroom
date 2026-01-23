@@ -12,7 +12,6 @@ common = { workspace = true }
 imaginarium = { workspace = true }
 
 fitsio = { workspace = true }
-libraw-rs = { workspace = true }
 libraw-rs-sys = { workspace = true }
 
 anyhow = { workspace = true }

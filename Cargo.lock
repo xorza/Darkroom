@@ -1883,15 +1883,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de"
 
 [[package]]
-name = "libraw-rs"
-version = "0.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24ec60aab878560c299c6e70a0c6dc2278a2159ac6fe09650917266b8985387f"
-dependencies = [
- "libraw-rs-sys",
-]
-
-[[package]]
 name = "libraw-rs-sys"
 version = "0.0.4+libraw-0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2000,7 +1991,6 @@ dependencies = [
  "fitsio",
  "glam",
  "imaginarium",
- "libraw-rs",
  "libraw-rs-sys",
  "rayon",
  "strum",
