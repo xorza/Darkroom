@@ -1,19 +1,18 @@
 //! x86_64 SSE4.1 SIMD implementation of X-Trans bilinear demosaicing.
 //!
-//! This implementation processes 4 pixels at a time using SSE4.1 intrinsics.
-//! For each pixel, it loads neighboring pixels and computes the interpolated
-//! RGB values in parallel.
+//! This implementation processes rows using SIMD for the neighbor summation.
+//! The key optimization is vectorizing the sum of neighbor values.
 
 use super::XTransImage;
 use super::scalar::NeighborLookup;
-
-/// Minimum image width to use SIMD (need enough pixels for vectorized loads).
-const MIN_SIMD_WIDTH: usize = 8;
 
 /// Search radius for interpolation (5x5 neighborhood).
 const SEARCH_RADIUS: usize = 2;
 
 /// Process a row of X-Trans image data using SSE4.1 SIMD.
+///
+/// The SIMD optimization focuses on vectorizing the neighbor value summation
+/// for interior pixels where we can safely access all neighbors without bounds checking.
 ///
 /// # Safety
 /// Caller must ensure SSE4.1 is available on the target CPU.
@@ -30,10 +29,10 @@ pub(crate) unsafe fn process_row_simd_sse4(
     // Check if this row is in the interior (no vertical bounds checking needed)
     let is_interior_y = raw_y >= SEARCH_RADIUS && raw_y + SEARCH_RADIUS < xtrans.raw_height;
 
-    // Determine SIMD-safe range
-    let simd_start = SEARCH_RADIUS.saturating_sub(xtrans.left_margin);
+    // Determine safe range for interior processing
+    let interior_start = SEARCH_RADIUS.saturating_sub(xtrans.left_margin);
 
-    let simd_end = if xtrans.left_margin + xtrans.width + SEARCH_RADIUS <= xtrans.raw_width {
+    let interior_end = if xtrans.left_margin + xtrans.width + SEARCH_RADIUS <= xtrans.raw_width {
         xtrans.width
     } else {
         xtrans
@@ -41,158 +40,128 @@ pub(crate) unsafe fn process_row_simd_sse4(
             .saturating_sub(xtrans.left_margin + SEARCH_RADIUS)
     };
 
-    // Process left edge pixels with scalar
-    for x in 0..simd_start.min(xtrans.width) {
-        process_pixel_scalar(xtrans, x, raw_y, row_base, row_rgb, lookups, false);
-    }
+    // Process interior pixels with SIMD-optimized interpolation if possible
+    if is_interior_y && interior_end > interior_start {
+        // Process left edge pixels with safe scalar
+        for x in 0..interior_start {
+            process_pixel_safe(xtrans, x, raw_y, row_base, row_rgb, lookups);
+        }
 
-    // Process interior with SIMD if row is interior and we have enough width
-    if is_interior_y && simd_end > simd_start && xtrans.width >= MIN_SIMD_WIDTH {
-        let mut x = simd_start;
+        // Process interior pixels with SIMD-optimized interpolation
+        for x in interior_start..interior_end {
+            let raw_x = x + xtrans.left_margin;
+            let rgb_idx = x * 3;
+            let color = xtrans.pattern.color_at(raw_y, raw_x);
+            let center_val = xtrans.data[row_base + raw_x];
 
-        // Process 4 pixels at a time
-        while x + 4 <= simd_end {
-            // SAFETY: We're inside an unsafe fn with sse4.1 target feature,
-            // and we've verified this is an interior region
-            unsafe {
-                process_4_pixels_simd(xtrans, x, raw_y, row_rgb, lookups);
+            // Set the known color channel
+            row_rgb[rgb_idx + color as usize] = center_val;
+
+            // Interpolate the other two channels using SIMD
+            for c in 0u8..3 {
+                if c != color {
+                    let offset_list = lookups[c as usize].get(raw_y, raw_x);
+                    let offsets = offset_list.as_slice();
+                    let inv_len = offset_list.inv_len();
+
+                    // Use SIMD to sum neighbor values
+                    // SAFETY: We're in an unsafe fn with sse4.1 target feature
+                    let sum = unsafe { sum_neighbors_simd(xtrans, raw_x, raw_y, offsets) };
+                    row_rgb[rgb_idx + c as usize] = sum * inv_len;
+                }
             }
-            x += 4;
         }
 
-        // Process remaining interior pixels with scalar (fast path)
-        while x < simd_end {
-            process_pixel_scalar(xtrans, x, raw_y, row_base, row_rgb, lookups, true);
-            x += 1;
-        }
-
-        // Process right edge pixels with scalar (safe path)
-        for x in simd_end..xtrans.width {
-            process_pixel_scalar(xtrans, x, raw_y, row_base, row_rgb, lookups, false);
+        // Process right edge pixels with safe scalar
+        for x in interior_end..xtrans.width {
+            process_pixel_safe(xtrans, x, raw_y, row_base, row_rgb, lookups);
         }
     } else {
-        // Fall back to scalar for entire row
-        for x in simd_start.min(xtrans.width)..xtrans.width {
-            let is_interior = is_interior_y
-                && (x + xtrans.left_margin) >= SEARCH_RADIUS
-                && (x + xtrans.left_margin) + SEARCH_RADIUS < xtrans.raw_width;
-            process_pixel_scalar(xtrans, x, raw_y, row_base, row_rgb, lookups, is_interior);
+        // Fall back to safe scalar for entire row (edge rows or narrow images)
+        for x in 0..xtrans.width {
+            process_pixel_safe(xtrans, x, raw_y, row_base, row_rgb, lookups);
         }
     }
 }
 
-/// Process 4 consecutive pixels using SSE4.1 SIMD.
-///
-/// # Safety
-/// - Caller must ensure SSE4.1 is available
-/// - Pixels must be in interior (no bounds checking)
+/// Sum neighbor values using SIMD.
+/// Processes 4 neighbors at a time using SSE.
 #[target_feature(enable = "sse4.1")]
 #[inline]
-unsafe fn process_4_pixels_simd(
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn sum_neighbors_simd(
     xtrans: &XTransImage,
-    x: usize,
+    raw_x: usize,
     raw_y: usize,
-    row_rgb: &mut [f32],
-    lookups: &[&NeighborLookup; 3],
-) {
+    offsets: &[(i32, i32)],
+) -> f32 {
     use std::arch::x86_64::*;
 
-    // Pre-compute raw positions
-    let raw_x_base = x + xtrans.left_margin;
+    let data_ptr = xtrans.data.as_ptr();
+    let raw_width = xtrans.raw_width;
 
-    // Load 4 center pixel values
-    let row_base = raw_y * xtrans.raw_width;
+    // Process 4 neighbors at a time
+    let chunks = offsets.len() / 4;
+    let remainder = offsets.len() % 4;
 
-    // SAFETY: We're in an unsafe block, sse4.1 is enabled, and we've verified bounds
-    let center = unsafe { _mm_loadu_ps(xtrans.data.as_ptr().add(row_base + raw_x_base)) };
+    let mut sum_vec = _mm_setzero_ps();
 
-    // Interpolate each color channel for all 4 pixels
-    let red_interp = unsafe { interpolate_4_pixels(xtrans, raw_x_base, raw_y, lookups[0]) };
-    let green_interp = unsafe { interpolate_4_pixels(xtrans, raw_x_base, raw_y, lookups[1]) };
-    let blue_interp = unsafe { interpolate_4_pixels(xtrans, raw_x_base, raw_y, lookups[2]) };
+    // Process chunks of 4
+    for chunk_idx in 0..chunks {
+        let base = chunk_idx * 4;
 
-    // Extract values to arrays for assignment
-    // SAFETY: __m128 and [f32; 4] have the same memory layout
-    let center_arr: [f32; 4] = unsafe { std::mem::transmute(center) };
-    let red_arr: [f32; 4] = unsafe { std::mem::transmute(red_interp) };
-    let green_arr: [f32; 4] = unsafe { std::mem::transmute(green_interp) };
-    let blue_arr: [f32; 4] = unsafe { std::mem::transmute(blue_interp) };
+        // Gather 4 neighbor values
+        // Calculate addresses and load individually (no AVX2 gather available)
+        let (dy0, dx0) = offsets[base];
+        let (dy1, dx1) = offsets[base + 1];
+        let (dy2, dx2) = offsets[base + 2];
+        let (dy3, dx3) = offsets[base + 3];
 
-    // Assign based on pattern - use known value for pixel's color, interpolated for others
-    for i in 0..4 {
-        let px = x + i;
-        let raw_px = raw_x_base + i;
-        let rgb_idx = px * 3;
-        let color = xtrans.pattern.color_at(raw_y, raw_px);
+        let idx0 = ((raw_y as i32 + dy0) as usize) * raw_width + (raw_x as i32 + dx0) as usize;
+        let idx1 = ((raw_y as i32 + dy1) as usize) * raw_width + (raw_x as i32 + dx1) as usize;
+        let idx2 = ((raw_y as i32 + dy2) as usize) * raw_width + (raw_x as i32 + dx2) as usize;
+        let idx3 = ((raw_y as i32 + dy3) as usize) * raw_width + (raw_x as i32 + dx3) as usize;
 
-        match color {
-            0 => {
-                // Red pixel - use center for red, interpolated for green/blue
-                row_rgb[rgb_idx] = center_arr[i];
-                row_rgb[rgb_idx + 1] = green_arr[i];
-                row_rgb[rgb_idx + 2] = blue_arr[i];
-            }
-            1 => {
-                // Green pixel - use center for green, interpolated for red/blue
-                row_rgb[rgb_idx] = red_arr[i];
-                row_rgb[rgb_idx + 1] = center_arr[i];
-                row_rgb[rgb_idx + 2] = blue_arr[i];
-            }
-            2 => {
-                // Blue pixel - use center for blue, interpolated for red/green
-                row_rgb[rgb_idx] = red_arr[i];
-                row_rgb[rgb_idx + 1] = green_arr[i];
-                row_rgb[rgb_idx + 2] = center_arr[i];
-            }
-            _ => unreachable!(),
-        }
-    }
-}
+        // SAFETY: We've verified these indices are valid for interior pixels
+        let v0 = *data_ptr.add(idx0);
+        let v1 = *data_ptr.add(idx1);
+        let v2 = *data_ptr.add(idx2);
+        let v3 = *data_ptr.add(idx3);
 
-/// Interpolate a color channel for 4 consecutive pixels using SIMD.
-///
-/// Returns a vector of 4 interpolated values.
-#[target_feature(enable = "sse4.1")]
-#[inline]
-unsafe fn interpolate_4_pixels(
-    xtrans: &XTransImage,
-    raw_x_base: usize,
-    raw_y: usize,
-    lookup: &NeighborLookup,
-) -> std::arch::x86_64::__m128 {
-    use std::arch::x86_64::*;
-
-    // For each of the 4 pixels, accumulate neighbor values
-    let mut sums = [0.0f32; 4];
-
-    for (i, sum_out) in sums.iter_mut().enumerate() {
-        let raw_x = raw_x_base + i;
-        let offset_list = lookup.get(raw_y, raw_x);
-        let offsets = offset_list.as_slice();
-
-        let mut sum = 0.0f32;
-        for &(dy, dx) in offsets {
-            let ny = (raw_y as i32 + dy) as usize;
-            let nx = (raw_x as i32 + dx) as usize;
-            sum += xtrans.data[ny * xtrans.raw_width + nx];
-        }
-        *sum_out = sum * offset_list.inv_len();
+        let vals = _mm_set_ps(v3, v2, v1, v0);
+        sum_vec = _mm_add_ps(sum_vec, vals);
     }
 
-    // SAFETY: sse4.1 is enabled
-    unsafe { _mm_loadu_ps(sums.as_ptr()) }
+    // Horizontal sum of the vector
+    // sum_vec = [a, b, c, d]
+    // We want a + b + c + d
+    let shuf = _mm_movehdup_ps(sum_vec); // [b, b, d, d]
+    let sums = _mm_add_ps(sum_vec, shuf); // [a+b, b+b, c+d, d+d]
+    let shuf2 = _mm_movehl_ps(sums, sums); // [c+d, d+d, c+d, d+d]
+    let sums2 = _mm_add_ss(sums, shuf2); // [a+b+c+d, ...]
+
+    let mut total = _mm_cvtss_f32(sums2);
+
+    // Handle remainder with scalar
+    for i in 0..remainder {
+        let (dy, dx) = offsets[chunks * 4 + i];
+        let idx = ((raw_y as i32 + dy) as usize) * raw_width + (raw_x as i32 + dx) as usize;
+        // SAFETY: We've verified these indices are valid for interior pixels
+        total += *data_ptr.add(idx);
+    }
+
+    total
 }
 
-/// Process a single pixel with scalar code.
+/// Process a single pixel with bounds checking (for edge pixels).
 #[inline]
-fn process_pixel_scalar(
+fn process_pixel_safe(
     xtrans: &XTransImage,
     x: usize,
     raw_y: usize,
     row_base: usize,
     row_rgb: &mut [f32],
     lookups: &[&NeighborLookup; 3],
-    is_interior: bool,
 ) {
     let raw_x = x + xtrans.left_margin;
     let rgb_idx = x * 3;
@@ -202,42 +171,13 @@ fn process_pixel_scalar(
     // Set the known color channel
     row_rgb[rgb_idx + color as usize] = val;
 
-    // Interpolate the other two channels
-    if is_interior {
-        for c in 0u8..3 {
-            if c != color {
-                row_rgb[rgb_idx + c as usize] =
-                    interpolate_channel_fast(xtrans, raw_x, raw_y, lookups[c as usize]);
-            }
-        }
-    } else {
-        for c in 0u8..3 {
-            if c != color {
-                row_rgb[rgb_idx + c as usize] =
-                    interpolate_channel_safe(xtrans, raw_x, raw_y, lookups[c as usize]);
-            }
+    // Interpolate the other two channels with bounds checking
+    for c in 0u8..3 {
+        if c != color {
+            row_rgb[rgb_idx + c as usize] =
+                interpolate_channel_safe(xtrans, raw_x, raw_y, lookups[c as usize]);
         }
     }
-}
-
-/// Fast interpolation for interior pixels (no bounds checking).
-#[inline(always)]
-fn interpolate_channel_fast(
-    xtrans: &XTransImage,
-    x: usize,
-    y: usize,
-    lookup: &NeighborLookup,
-) -> f32 {
-    let offset_list = lookup.get(y, x);
-    let mut sum = 0.0f32;
-
-    for &(dy, dx) in offset_list.as_slice() {
-        let ny = (y as i32 + dy) as usize;
-        let nx = (x as i32 + dx) as usize;
-        sum += xtrans.data[ny * xtrans.raw_width + nx];
-    }
-
-    sum * offset_list.inv_len()
 }
 
 /// Safe interpolation with bounds checking for edge pixels.
