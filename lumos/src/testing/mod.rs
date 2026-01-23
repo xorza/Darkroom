@@ -2,7 +2,6 @@
 //! Common utilities shared between test and benchmark code.
 
 pub mod bench_utils;
-mod common;
 pub mod test_utils;
 
 use std::path::PathBuf;

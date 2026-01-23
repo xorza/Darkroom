@@ -6,6 +6,7 @@ description = ""
 
 [features]
 slow-tests = []
+bench = []
 
 [dependencies]
 common = { workspace = true }

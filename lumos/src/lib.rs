@@ -3,7 +3,7 @@ mod calibration_masters;
 mod common;
 pub mod math;
 mod stacking;
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 mod testing;
 
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, ImageDimensions};
