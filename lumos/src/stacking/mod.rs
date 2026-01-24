@@ -452,6 +452,6 @@ mod tests {
         .unwrap();
 
         // Cleanup
-        let _ = std::fs::remove_dir_all(&config.cache_dir);
+        // let _ = std::fs::remove_dir_all(&config.cache_dir);
     }
 }
