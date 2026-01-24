@@ -7,8 +7,6 @@ use std::path::PathBuf;
 
 /// Minimum chunk rows to avoid excessive I/O overhead.
 pub const MIN_CHUNK_ROWS: usize = 64;
-/// Maximum chunk rows to avoid excessive memory usage.
-pub const MAX_CHUNK_ROWS: usize = 1024;
 /// Fraction of available memory to use (10%).
 pub const MEMORY_FRACTION: u64 = 10;
 
@@ -51,7 +49,7 @@ impl CacheConfig {
 /// * `frame_count` - Number of frames being stacked
 ///
 /// # Returns
-/// Chunk rows clamped between `MIN_CHUNK_ROWS` and `MAX_CHUNK_ROWS`.
+/// Chunk rows with minimum of `MIN_CHUNK_ROWS`. No upper cap - image height is the natural limit.
 pub fn compute_optimal_chunk_rows(width: usize, channels: usize, frame_count: usize) -> usize {
     compute_optimal_chunk_rows_with_memory(width, channels, frame_count, get_available_memory())
 }
@@ -86,7 +84,7 @@ pub fn compute_optimal_chunk_rows_with_memory(
     }
 
     let chunk_rows = (usable_memory / bytes_per_row) as usize;
-    let chunk_rows = chunk_rows.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS);
+    let chunk_rows = chunk_rows.max(MIN_CHUNK_ROWS);
 
     tracing::info!(
         available_memory_mb = available_memory / (1024 * 1024),
@@ -133,7 +131,7 @@ mod tests {
         let bytes_per_row = 6000u64 * 3 * 4 * 20;
         let usable = available / MEMORY_FRACTION;
         let expected = (usable / bytes_per_row) as usize;
-        assert_eq!(rows, expected.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS));
+        assert_eq!(rows, expected.max(MIN_CHUNK_ROWS));
         println!("Typical image (6000x3 x 20 frames, 8GB RAM): {} rows", rows);
     }
 
@@ -145,8 +143,11 @@ mod tests {
 
         // bytes_per_row = 1000 * 3 * 4 * 5 = 60,000 bytes
         // usable = 400MB
-        // chunk_rows = 400MB / 60KB ≈ 6666, clamped to MAX
-        assert_eq!(rows, MAX_CHUNK_ROWS);
+        // chunk_rows = 400MB / 60KB ≈ 6982 (no cap)
+        let bytes_per_row = 1000u64 * 3 * 4 * 5;
+        let usable = available / MEMORY_FRACTION;
+        let expected = (usable / bytes_per_row) as usize;
+        assert_eq!(rows, expected);
         println!("Small image (1000x3 x 5 frames, 4GB RAM): {} rows", rows);
     }
 
@@ -158,10 +159,9 @@ mod tests {
 
         // bytes_per_row = 8000 * 3 * 4 * 100 = 9,600,000 bytes ≈ 9.6MB
         // usable = 1.6GB (10% of 16GB)
-        // chunk_rows = 1.6GB / 9.6MB ≈ 166
+        // chunk_rows = 1.6GB / 9.6MB ≈ 178
         println!("Large stack (8000x3 x 100 frames, 16GB RAM): {} rows", rows);
         assert!(rows >= MIN_CHUNK_ROWS);
-        assert!(rows <= MAX_CHUNK_ROWS);
     }
 
     #[test]
@@ -175,7 +175,6 @@ mod tests {
         // chunk_rows = 100MB / 1.44MB ≈ 69
         println!("Low memory (6000x3 x 20 frames, 1GB RAM): {} rows", rows);
         assert!(rows >= MIN_CHUNK_ROWS);
-        assert!(rows <= MAX_CHUNK_ROWS);
     }
 
     #[test]
@@ -195,8 +194,8 @@ mod tests {
     }
 
     #[test]
-    fn test_chunk_rows_always_in_range() {
-        // Test various combinations
+    fn test_chunk_rows_respects_minimum() {
+        // Test various combinations ensure minimum is respected
         let test_cases = [
             (100, 1, 2, 0u64),                        // Degenerate
             (1000, 3, 5, 256 * 1024 * 1024),          // Small
@@ -209,8 +208,8 @@ mod tests {
         for (width, channels, frames, available) in test_cases {
             let rows = compute_optimal_chunk_rows_with_memory(width, channels, frames, available);
             assert!(
-                (MIN_CHUNK_ROWS..=MAX_CHUNK_ROWS).contains(&rows),
-                "Chunk rows {} out of range for {}x{} x {} frames, {} bytes",
+                rows >= MIN_CHUNK_ROWS,
+                "Chunk rows {} below minimum for {}x{} x {} frames, {} bytes",
                 rows,
                 width,
                 channels,
@@ -227,8 +226,12 @@ mod tests {
         let rows = compute_optimal_chunk_rows_with_memory(6000, 1, 20, available);
 
         // bytes_per_row = 6000 * 1 * 4 * 20 = 480,000 bytes
-        // chunk_rows = 512MB / 480KB ≈ 1066, clamped to MAX
-        assert_eq!(rows, MAX_CHUNK_ROWS);
+        // usable = 800MB
+        // chunk_rows = 800MB / 480KB ≈ 1747 (no cap)
+        let bytes_per_row = 6000u64 * 4 * 20; // width * sizeof(f32) * frames (1 channel)
+        let usable = available / MEMORY_FRACTION;
+        let expected = (usable / bytes_per_row) as usize;
+        assert_eq!(rows, expected);
         println!("Grayscale (6000x1 x 20 frames, 8GB RAM): {} rows", rows);
     }
 
@@ -260,6 +263,5 @@ mod tests {
         println!("=====================================");
 
         assert!(rows >= MIN_CHUNK_ROWS);
-        assert!(rows <= MAX_CHUNK_ROWS);
     }
 }
