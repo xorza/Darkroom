@@ -659,4 +659,132 @@ mod tests {
         std::fs::remove_file(&cache_path).unwrap();
         let _ = std::fs::remove_dir(&temp_dir);
     }
+
+    // ========== Error Path Tests ==========
+
+    #[test]
+    fn test_from_paths_empty_returns_no_paths_error() {
+        let paths: Vec<PathBuf> = vec![];
+        let config = CacheConfig::default();
+        let result = ImageCache::from_paths(&paths, &config, FrameType::Dark);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, Error::NoPaths));
+    }
+
+    #[test]
+    fn test_from_paths_nonexistent_file_returns_image_load_error() {
+        let paths = vec![PathBuf::from("/nonexistent/path/to/image.fits")];
+        let config = CacheConfig::default();
+        let result = ImageCache::from_paths(&paths, &config, FrameType::Dark);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            Error::ImageLoad { path, .. } => {
+                assert!(path.to_string_lossy().contains("nonexistent"));
+            }
+            _ => panic!("Expected ImageLoad error, got {:?}", err),
+        }
+    }
+
+    #[test]
+    fn test_cache_reuse_with_matching_dimensions() {
+        let temp_dir = std::env::temp_dir().join("lumos_reuse_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let dims = ImageDimensions {
+            width: 4,
+            height: 3,
+            channels: 3,
+        };
+        let pixels: Vec<f32> = (0..36).map(|i| i as f32).collect();
+        let image = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels,
+            dimensions: dims,
+        };
+
+        let cache_path = temp_dir.join("reuse_frame.bin");
+        write_cache_file(&cache_path, &image).unwrap();
+
+        // File should be reusable with same dimensions
+        assert!(try_reuse_cache_file(&cache_path, dims));
+
+        // File should not be reusable with different dimensions
+        let different_dims = ImageDimensions {
+            width: 8,
+            height: 3,
+            channels: 3,
+        };
+        assert!(!try_reuse_cache_file(&cache_path, different_dims));
+
+        std::fs::remove_file(&cache_path).unwrap();
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_cache_reuse_nonexistent_file() {
+        let dims = ImageDimensions {
+            width: 4,
+            height: 3,
+            channels: 3,
+        };
+        // Nonexistent file should not be reusable
+        assert!(!try_reuse_cache_file(
+            Path::new("/nonexistent/file.bin"),
+            dims
+        ));
+    }
+
+    #[test]
+    fn test_cache_reuse_wrong_size_file() {
+        let temp_dir = std::env::temp_dir().join("lumos_wrong_size_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let cache_path = temp_dir.join("wrong_size.bin");
+        // Write a file with wrong size
+        std::fs::write(&cache_path, b"too short").unwrap();
+
+        let dims = ImageDimensions {
+            width: 4,
+            height: 3,
+            channels: 3,
+        };
+        assert!(!try_reuse_cache_file(&cache_path, dims));
+
+        std::fs::remove_file(&cache_path).unwrap();
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
+
+    #[test]
+    fn test_write_cache_file_creates_valid_file() {
+        let temp_dir = std::env::temp_dir().join("lumos_write_test");
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let dims = ImageDimensions {
+            width: 2,
+            height: 2,
+            channels: 1,
+        };
+        let pixels: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0];
+        let image = AstroImage {
+            metadata: AstroImageMetadata::default(),
+            pixels: pixels.clone(),
+            dimensions: dims,
+        };
+
+        let cache_path = temp_dir.join("valid_write.bin");
+        let result = write_cache_file(&cache_path, &image);
+        assert!(result.is_ok());
+
+        // Verify file exists and has correct size
+        let metadata = std::fs::metadata(&cache_path).unwrap();
+        let expected_size = size_of::<CacheHeader>() + 4 * size_of::<f32>();
+        assert_eq!(metadata.len(), expected_size as u64);
+
+        std::fs::remove_file(&cache_path).unwrap();
+        let _ = std::fs::remove_dir(&temp_dir);
+    }
 }

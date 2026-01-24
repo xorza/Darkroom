@@ -93,3 +93,65 @@ fn scale_parallel(data: &mut [f32], scale_val: f32) {
             math::scale(chunk, scale_val);
         });
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn test_empty_paths_returns_no_paths_error() {
+        let paths: Vec<PathBuf> = vec![];
+        let result = stack_mean_from_paths(&paths, FrameType::Dark);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+    }
+
+    #[test]
+    fn test_nonexistent_file_returns_image_load_error() {
+        let paths = vec![PathBuf::from("/nonexistent/image.fits")];
+        let result = stack_mean_from_paths(&paths, FrameType::Flat);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::ImageLoad { path, .. } => {
+                assert!(path.to_string_lossy().contains("nonexistent"));
+            }
+            e => panic!("Expected ImageLoad error, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_accumulate_parallel_correctness() {
+        let mut dst = vec![1.0, 2.0, 3.0, 4.0];
+        let src = vec![0.5, 0.5, 0.5, 0.5];
+        accumulate_parallel(&mut dst, &src);
+        assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5]);
+    }
+
+    #[test]
+    fn test_scale_parallel_correctness() {
+        let mut data = vec![2.0, 4.0, 6.0, 8.0];
+        scale_parallel(&mut data, 0.5);
+        assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn test_accumulate_parallel_large_array() {
+        let size = ACCUMULATE_CHUNK_SIZE * 3 + 100; // Multiple chunks plus remainder
+        let mut dst = vec![1.0; size];
+        let src = vec![2.0; size];
+        accumulate_parallel(&mut dst, &src);
+        assert!(dst.iter().all(|&x| (x - 3.0).abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn test_scale_parallel_large_array() {
+        let size = ACCUMULATE_CHUNK_SIZE * 3 + 100;
+        let mut data = vec![4.0; size];
+        scale_parallel(&mut data, 0.25);
+        assert!(data.iter().all(|&x| (x - 1.0).abs() < f32::EPSILON));
+    }
+}

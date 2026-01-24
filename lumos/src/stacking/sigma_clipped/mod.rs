@@ -214,12 +214,43 @@ fn sigma_clipped_mean_with_stats(values: &mut [f32], config: &SigmaClipConfig) -
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     /// Calculate sigma-clipped mean in-place (test helper).
     fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> f32 {
         sigma_clipped_mean_with_stats(values, config).0
     }
+
+    // ========== Error Path Tests ==========
+
+    #[test]
+    fn test_empty_paths_returns_no_paths_error() {
+        let paths: Vec<PathBuf> = vec![];
+        let config = SigmaClippedConfig::default();
+        let result = stack_sigma_clipped_from_paths(&paths, FrameType::Light, &config);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+    }
+
+    #[test]
+    fn test_nonexistent_file_returns_image_load_error() {
+        let paths = vec![PathBuf::from("/nonexistent/sigma_image.fits")];
+        let config = SigmaClippedConfig::default();
+        let result = stack_sigma_clipped_from_paths(&paths, FrameType::Light, &config);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::ImageLoad { path, .. } => {
+                assert!(path.to_string_lossy().contains("nonexistent"));
+            }
+            e => panic!("Expected ImageLoad error, got {:?}", e),
+        }
+    }
+
+    // ========== Algorithm Tests ==========
 
     #[test]
     fn test_sigma_clipped_mean_removes_outlier() {
@@ -244,5 +275,59 @@ mod tests {
             "Expected ~10.0, got {}",
             result
         );
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_single_value() {
+        let mut values = vec![5.0];
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&mut values, &config);
+        assert!((result - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_two_values() {
+        let mut values = vec![3.0, 7.0];
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&mut values, &config);
+        // With only 2 values, should return mean
+        assert!((result - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_identical_values() {
+        let mut values = vec![5.0; 10];
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&mut values, &config);
+        // All identical, std_dev = 0, should return mean
+        assert!((result - 5.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_with_stats_tracks_clipping() {
+        let mut values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
+        let config = SigmaClipConfig::new(2.0, 3);
+        let (result, final_len) = sigma_clipped_mean_with_stats(&mut values, &config);
+
+        // Should have clipped the outlier
+        assert!(final_len < 6);
+        assert!(result < 10.0);
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_no_clipping_needed() {
+        let mut values = vec![1.0, 1.1, 1.2, 1.0, 0.9];
+        let config = SigmaClipConfig::new(3.0, 3); // High sigma, shouldn't clip
+        let (_, final_len) = sigma_clipped_mean_with_stats(&mut values, &config);
+
+        // No values should be clipped
+        assert_eq!(final_len, 5);
+    }
+
+    #[test]
+    fn test_sigma_clipped_config_with_sigma() {
+        let config = SigmaClippedConfig::with_sigma(1.5);
+        assert!((config.clip.sigma - 1.5).abs() < f32::EPSILON);
+        assert_eq!(config.clip.max_iterations, 3);
     }
 }

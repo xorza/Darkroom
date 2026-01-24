@@ -45,3 +45,35 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn test_empty_paths_returns_no_paths_error() {
+        let paths: Vec<PathBuf> = vec![];
+        let config = MedianConfig::default();
+        let result = stack_median_from_paths(&paths, FrameType::Dark, &config);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+    }
+
+    #[test]
+    fn test_nonexistent_file_returns_image_load_error() {
+        let paths = vec![PathBuf::from("/nonexistent/median_image.fits")];
+        let config = MedianConfig::default();
+        let result = stack_median_from_paths(&paths, FrameType::Bias, &config);
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::ImageLoad { path, .. } => {
+                assert!(path.to_string_lossy().contains("nonexistent"));
+            }
+            e => panic!("Expected ImageLoad error, got {:?}", e),
+        }
+    }
+}

@@ -160,12 +160,124 @@ mod tests {
 
     use super::*;
 
+    // ========== Error Path Tests ==========
+
+    #[test]
+    fn test_image_stack_empty_paths_returns_no_paths_error() {
+        let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, Vec::<PathBuf>::new());
+        let result = stack.process();
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::NoPaths));
+    }
+
+    #[test]
+    fn test_image_stack_mean_nonexistent_file() {
+        let paths = vec![PathBuf::from("/nonexistent/stack_image.fits")];
+        let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, paths);
+        let result = stack.process();
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            Error::ImageLoad { path, .. } => {
+                assert!(path.to_string_lossy().contains("nonexistent"));
+            }
+            e => panic!("Expected ImageLoad error, got {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_image_stack_median_nonexistent_file() {
+        let paths = vec![PathBuf::from("/nonexistent/median_stack.fits")];
+        let stack = ImageStack::new(FrameType::Flat, StackingMethod::default(), paths);
+        let result = stack.process();
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
+    }
+
+    #[test]
+    fn test_image_stack_sigma_clipped_nonexistent_file() {
+        let paths = vec![PathBuf::from("/nonexistent/sigma_stack.fits")];
+        let config = SigmaClippedConfig::default();
+        let stack = ImageStack::new(
+            FrameType::Bias,
+            StackingMethod::SigmaClippedMean(config),
+            paths,
+        );
+        let result = stack.process();
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), Error::ImageLoad { .. }));
+    }
+
+    // ========== Configuration Tests ==========
+
     #[test]
     fn test_stacking_method_default() {
         assert_eq!(
             StackingMethod::default(),
             StackingMethod::Median(MedianConfig::default())
         );
+    }
+
+    #[test]
+    fn test_stacking_method_display() {
+        assert_eq!(StackingMethod::Mean.to_string(), "mean");
+        assert_eq!(
+            StackingMethod::Median(MedianConfig::default()).to_string(),
+            "median"
+        );
+
+        let sigma_config = SigmaClippedConfig {
+            clip: SigmaClipConfig::new(2.5, 3),
+            ..Default::default()
+        };
+        assert_eq!(
+            StackingMethod::SigmaClippedMean(sigma_config).to_string(),
+            "sigma2.5"
+        );
+    }
+
+    #[test]
+    fn test_sigma_clip_config_new() {
+        let config = SigmaClipConfig::new(3.0, 5);
+        assert!((config.sigma - 3.0).abs() < f32::EPSILON);
+        assert_eq!(config.max_iterations, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "Sigma must be positive")]
+    fn test_sigma_clip_config_zero_sigma_panics() {
+        SigmaClipConfig::new(0.0, 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "Sigma must be positive")]
+    fn test_sigma_clip_config_negative_sigma_panics() {
+        SigmaClipConfig::new(-1.0, 3);
+    }
+
+    #[test]
+    #[should_panic(expected = "Max iterations must be at least 1")]
+    fn test_sigma_clip_config_zero_iterations_panics() {
+        SigmaClipConfig::new(2.0, 0);
+    }
+
+    #[test]
+    fn test_frame_type_display() {
+        assert_eq!(FrameType::Dark.to_string(), "dark");
+        assert_eq!(FrameType::Flat.to_string(), "flat");
+        assert_eq!(FrameType::Bias.to_string(), "bias");
+        assert_eq!(FrameType::Light.to_string(), "light");
+    }
+
+    #[test]
+    fn test_image_stack_new() {
+        let paths = vec![PathBuf::from("/a"), PathBuf::from("/b")];
+        let stack = ImageStack::new(FrameType::Light, StackingMethod::Mean, paths);
+        // Verify it was created (no panic)
+        assert_eq!(format!("{:?}", stack.frame_type), "Light");
     }
 
     /// Helper to test stacking with a given frame type, method, and output filename.
