@@ -270,7 +270,9 @@ impl From<AstroImage> for Image {
             color_format,
         );
 
-        let bytes: Vec<u8> = bytemuck::cast_slice(&astro.pixels).to_vec();
+        // Try zero-copy cast, fall back to copy if alignment doesn't match
+        let bytes: Vec<u8> = bytemuck::try_cast_vec(astro.pixels)
+            .unwrap_or_else(|(_, pixels)| bytemuck::cast_slice(&pixels).to_vec());
 
         Image::new_with_data(desc, bytes).expect("Failed to create Image from AstroImage")
     }
@@ -291,12 +293,16 @@ impl From<Image> for AstroImage {
             .expect("Failed to convert image to f32")
             .packed();
 
-        let pixels: Vec<f32> = bytemuck::cast_slice(image.bytes()).to_vec();
+        let width = image.desc().width;
+        let height = image.desc().height;
+        // Try zero-copy cast, fall back to copy if alignment doesn't match
+        let pixels: Vec<f32> = bytemuck::try_cast_vec(image.into_bytes())
+            .unwrap_or_else(|(_, bytes)| bytemuck::cast_slice(&bytes).to_vec());
 
         AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels,
-            dimensions: ImageDimensions::new(image.desc().width, image.desc().height, channels),
+            dimensions: ImageDimensions::new(width, height, channels),
         }
     }
 }

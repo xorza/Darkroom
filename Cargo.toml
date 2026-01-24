@@ -38,7 +38,7 @@ serde_json = { version = "*" }
 uuid = { version = "*", features = ["v4", "serde"] }
 anyhow = { version = "*" }
 thiserror = { version = "*" }
-bytemuck = { version = "*", features = ["derive"] }
+bytemuck = { version = "*", features = ["derive", "extern_crate_alloc"] }
 pollster = { version = "*" }
 num-traits = { version = "*" }
 glam = { version = "*", features = ["serde"] }
