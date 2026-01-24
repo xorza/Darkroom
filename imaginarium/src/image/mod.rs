@@ -11,7 +11,7 @@ use std::path::Path;
 pub const SUPPORTED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "tiff", "tif"];
 
 use crate::common::conversion::convert_image;
-use crate::common::{ColorFormat, Error, Result};
+use crate::common::{AlignedBytes, ColorFormat, Error, Result};
 
 use stride::{add_stride_padding, align_stride, strip_stride_padding};
 
@@ -23,10 +23,13 @@ pub struct ImageDesc {
     pub color_format: ColorFormat,
 }
 
+/// An image with pixel data stored in 8-byte aligned memory.
+///
+/// The 8-byte alignment allows zero-copy casting to/from `Vec<f32>` or `Vec<f64>`.
 #[derive(Clone, Debug)]
 pub struct Image {
     desc: ImageDesc,
-    bytes: Vec<u8>,
+    bytes: AlignedBytes,
 }
 
 impl Image {
@@ -37,22 +40,23 @@ impl Image {
 
     /// Returns the image bytes as a slice.
     pub fn bytes(&self) -> &[u8] {
-        &self.bytes
+        self.bytes.as_slice()
     }
 
+    /// Convert to owned bytes (zero-copy due to 8-byte alignment).
     pub fn into_bytes(self) -> Vec<u8> {
-        self.bytes
+        self.bytes.into_vec()
     }
 
     /// Returns the image bytes as a mutable slice.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
-        &mut self.bytes
+        self.bytes.as_mut_slice()
     }
 
     pub fn new_black(desc: ImageDesc) -> Result<Image> {
         desc.color_format.validate()?;
 
-        let bytes = vec![0; desc.size_in_bytes()];
+        let bytes = AlignedBytes::new_zeroed(desc.size_in_bytes());
 
         Ok(Image { desc, bytes })
     }
@@ -68,7 +72,10 @@ impl Image {
             )));
         }
 
-        Ok(Image { desc, bytes })
+        Ok(Image {
+            desc,
+            bytes: AlignedBytes::from_vec(bytes),
+        })
     }
 
     pub fn read_file<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -156,7 +163,7 @@ impl Image {
                 stride: desc.row_bytes(),
                 color_format: desc.color_format,
             },
-            bytes,
+            bytes: AlignedBytes::from_vec(bytes),
         }
     }
 
@@ -183,7 +190,7 @@ impl Image {
                 stride: aligned_stride,
                 color_format: desc.color_format,
             },
-            bytes,
+            bytes: AlignedBytes::from_vec(bytes),
         }
     }
 }

@@ -5,6 +5,7 @@ use image as image_lib;
 use tiff::decoder::DecodingResult;
 
 use super::stride::add_stride_padding;
+use crate::common::AlignedBytes;
 use crate::prelude::*;
 
 pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -48,7 +49,10 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
         color_format.byte_count(),
     );
 
-    Ok(Image { desc, bytes })
+    Ok(Image {
+        desc,
+        bytes: AlignedBytes::from_vec(bytes),
+    })
 }
 
 pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -110,7 +114,10 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
         color_format.byte_count(),
     );
 
-    Ok(Image { desc, bytes })
+    Ok(Image {
+        desc,
+        bytes: AlignedBytes::from_vec(bytes),
+    })
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {
@@ -149,7 +156,7 @@ pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 
     image_lib::save_buffer_with_format(
         filename,
-        &image.bytes,
+        image.bytes(),
         image.desc.width as u32,
         image.desc.height as u32,
         color_format,
@@ -196,7 +203,7 @@ pub(crate) fn save_png<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()>
 
     image_lib::save_buffer_with_format(
         filename,
-        &image.bytes,
+        image.bytes(),
         image.desc.width as u32,
         image.desc.height as u32,
         color_format,

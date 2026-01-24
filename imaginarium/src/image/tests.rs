@@ -69,8 +69,8 @@ fn save_and_reload_png() {
         .unwrap();
 
     let reloaded = Image::read_file(test_output_path("save_reload.png")).unwrap();
-    assert_eq!(original.desc, reloaded.desc);
-    assert_eq!(original.bytes, reloaded.bytes);
+    assert_eq!(original.desc(), reloaded.desc());
+    assert_eq!(original.bytes(), reloaded.bytes());
 }
 
 #[test]
@@ -105,8 +105,8 @@ fn new_empty_creates_zeroed_image() {
     let desc = ImageDesc::new(10, 10, ColorFormat::RGBA_U8);
     let img = Image::new_black(desc).unwrap();
 
-    assert!(img.bytes.iter().all(|&b| b == 0));
-    assert_eq!(img.bytes.len(), img.desc().stride * img.desc().height);
+    assert!(img.bytes().iter().all(|&b| b == 0));
+    assert_eq!(img.bytes().len(), img.desc().stride * img.desc().height);
 }
 
 #[test]
@@ -115,7 +115,7 @@ fn new_with_data_preserves_bytes() {
     let data = vec![1, 2, 0, 0, 3, 4, 0, 0]; // 2x2 with 4-byte stride
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
-    assert_eq!(img.bytes, data);
+    assert_eq!(img.bytes(), &data[..]);
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn convert_same_format_returns_same_image() {
     let img = Image::new_with_data(desc, data.clone()).unwrap();
 
     let converted = img.convert(ColorFormat::RGBA_U8).unwrap();
-    assert_eq!(converted.bytes, data);
+    assert_eq!(converted.bytes(), &data[..]);
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn convert_rgba_u8_to_rgba_u16() {
         64u8.convert(),
     ];
     let expected_bytes: Vec<u8> = bytemuck::cast_slice(&expected_vals).to_vec();
-    assert_eq!(result.bytes, expected_bytes);
+    assert_eq!(result.bytes(), &expected_bytes[..]);
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn convert_rgb_u8_to_rgb_u16() {
     let expected_vals: [u16; 3] = [0u8.convert(), 128u8.convert(), 255u8.convert()];
     let mut expected_bytes: Vec<u8> = bytemuck::cast_slice(&expected_vals).to_vec();
     expected_bytes.extend_from_slice(&[0, 0]); // padding to 8 bytes
-    assert_eq!(result.bytes, expected_bytes);
+    assert_eq!(result.bytes(), &expected_bytes[..]);
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn convert_gray_u8_to_gray_u16() {
     let expected_val: u16 = 200u8.convert();
     let mut expected_bytes: Vec<u8> = bytemuck::cast_slice(&[expected_val]).to_vec();
     expected_bytes.extend_from_slice(&[0, 0]); // padding
-    assert_eq!(result.bytes, expected_bytes);
+    assert_eq!(result.bytes(), &expected_bytes[..]);
 }
 
 #[test]
@@ -394,6 +394,6 @@ fn clone_image() {
     let img = Image::new_with_data(desc, data.clone()).unwrap();
     let cloned = img.clone();
 
-    assert_eq!(img.desc, cloned.desc);
-    assert_eq!(img.bytes, cloned.bytes);
+    assert_eq!(img.desc(), cloned.desc());
+    assert_eq!(img.bytes(), cloned.bytes());
 }
