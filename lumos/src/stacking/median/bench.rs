@@ -31,7 +31,7 @@ pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
     group.sample_size(10);
 
     // Benchmark with different chunk sizes
-    for chunk_rows in [128, 512] {
+    for chunk_rows in [128] {
         let config = MedianStackConfig {
             chunk_rows,
             cache_dir: std::env::temp_dir().join("lumos_bench_cache"),

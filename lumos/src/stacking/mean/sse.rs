@@ -7,7 +7,7 @@ use std::arch::x86_64::*;
 /// # Safety
 /// Caller must ensure SSE2 is available (checked via is_x86_feature_detected).
 #[target_feature(enable = "sse2")]
-pub unsafe fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
+pub(super) unsafe fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
     let chunks = dst.len() / 4;
     let remainder = dst.len() % 4;
 
@@ -33,7 +33,7 @@ pub unsafe fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
 /// # Safety
 /// Caller must ensure SSE2 is available (checked via is_x86_feature_detected).
 #[target_feature(enable = "sse2")]
-pub unsafe fn divide_chunk(data: &mut [f32], inv_count: f32) {
+pub(super) unsafe fn divide_chunk(data: &mut [f32], inv_count: f32) {
     let chunks = data.len() / 4;
     let remainder = data.len() % 4;
 

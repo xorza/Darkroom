@@ -10,7 +10,7 @@ use crate::stacking::SigmaClipConfig;
 /// 2. Compute std dev from median
 /// 3. Clip values beyond sigma threshold from median
 /// 4. Return mean of remaining values (statistically efficient)
-pub fn sigma_clipped_mean(values: &[f32], config: &SigmaClipConfig) -> f32 {
+pub(super) fn sigma_clipped_mean(values: &[f32], config: &SigmaClipConfig) -> f32 {
     debug_assert!(!values.is_empty());
 
     if values.len() <= 2 {

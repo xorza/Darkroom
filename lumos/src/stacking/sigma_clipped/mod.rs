@@ -5,12 +5,6 @@
 
 mod scalar;
 
-#[cfg(target_arch = "aarch64")]
-mod neon;
-
-#[cfg(target_arch = "x86_64")]
-mod sse;
-
 use std::path::{Path, PathBuf};
 
 use crate::astro_image::AstroImage;
