@@ -134,33 +134,44 @@ impl HotPixelMap {
             self.dimensions
         );
 
+        // Early exit if no hot pixels
+        if self.count == 0 {
+            return;
+        }
+
         let width = image.dimensions.width;
         let height = image.dimensions.height;
         let channels = image.dimensions.channels;
         let row_stride = width * channels;
 
-        // Collect corrections first (can't mutate while iterating)
-        // Process rows in parallel - each row is independent
-        let corrections: Vec<(usize, f32)> = (0..height)
+        // Pre-compute all corrections in parallel chunks for cache locality
+        // Processing consecutive rows together keeps neighbor data in cache
+        // Hot pixels are sparse (~0.01-0.1%), so total corrections are small
+        const ROW_CHUNK_SIZE: usize = 64;
+
+        let corrections: Vec<(usize, f32)> = (0..height.div_ceil(ROW_CHUNK_SIZE))
             .into_par_iter()
-            .fold(Vec::new, |mut local_corrections, y| {
-                for x in 0..width {
-                    for c in 0..channels {
-                        let idx = y * row_stride + x * channels + c;
-                        if self.is_hot(idx) {
-                            let replacement = median_of_neighbors(image, x, y, c);
-                            local_corrections.push((idx, replacement));
+            .flat_map(|chunk_idx| {
+                let start_y = chunk_idx * ROW_CHUNK_SIZE;
+                let end_y = (start_y + ROW_CHUNK_SIZE).min(height);
+
+                let mut chunk_corrections = Vec::new();
+                for y in start_y..end_y {
+                    for x in 0..width {
+                        for c in 0..channels {
+                            let idx = y * row_stride + x * channels + c;
+                            if self.is_hot(idx) {
+                                let replacement = median_of_neighbors(image, x, y, c);
+                                chunk_corrections.push((idx, replacement));
+                            }
                         }
                     }
                 }
-                local_corrections
+                chunk_corrections
             })
-            .reduce(Vec::new, |mut a, b| {
-                a.extend(b);
-                a
-            });
+            .collect();
 
-        // Apply corrections sequentially (hot pixels are sparse, so this is fast)
+        // Apply corrections
         for (idx, value) in corrections {
             image.pixels[idx] = value;
         }
