@@ -177,109 +177,82 @@ mod tests {
         );
     }
 
-    #[test]
-    #[cfg_attr(not(feature = "slow-tests"), ignore)]
-    fn test_stack_flats_median_from_env() {
-        let Some(paths) = calibration_image_paths("Flats") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set or Flats dir missing, skipping test");
+    /// Helper to test stacking with a given frame type, method, and output filename.
+    fn test_stack_from_env(
+        subdir: &str,
+        frame_type: FrameType,
+        method: StackingMethod,
+        output_name: &str,
+    ) {
+        let Some(paths) = calibration_image_paths(subdir) else {
+            eprintln!(
+                "LUMOS_CALIBRATION_DIR not set or {} dir missing, skipping test",
+                subdir
+            );
             return;
         };
 
         if paths.is_empty() {
-            eprintln!("No flat files found in Flats directory, skipping test");
+            eprintln!("No files found in {} directory, skipping test", subdir);
             return;
         }
 
-        println!("Stacking {} flats with median method...", paths.len());
-        let stack = ImageStack::new(FrameType::Flat, StackingMethod::default(), paths.clone());
-        let master_flat = stack.process();
+        println!(
+            "Stacking {} {}s with {:?} method...",
+            paths.len(),
+            subdir.to_lowercase(),
+            method
+        );
+        let stack = ImageStack::new(frame_type, method, paths.clone());
+        let master = stack.process();
 
-        // Load first frame to verify dimensions match
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(
-            "Master flat: {}x{}x{}",
-            master_flat.dimensions.width,
-            master_flat.dimensions.height,
-            master_flat.dimensions.channels
+            "Master {}: {}x{}x{}",
+            subdir.to_lowercase(),
+            master.dimensions.width,
+            master.dimensions.height,
+            master.dimensions.channels
         );
 
-        assert_eq!(master_flat.dimensions, first.dimensions);
-        assert!(!master_flat.pixels.is_empty());
+        assert_eq!(master.dimensions, first.dimensions);
+        assert!(!master.pixels.is_empty());
 
-        let img: imaginarium::Image = master_flat.into();
-        img.save_file(common::test_utils::test_output_path("master_flat.tiff"))
+        let img: imaginarium::Image = master.into();
+        img.save_file(common::test_utils::test_output_path(output_name))
             .unwrap();
     }
 
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_stack_darks_mean_from_env() {
-        let Some(paths) = calibration_image_paths("Darks") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
-            return;
-        };
-
-        if paths.is_empty() {
-            eprintln!("No dark files found in Darks directory, skipping test");
-            return;
-        }
-
-        println!("Stacking {} darks with mean method...", paths.len());
-        let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, paths.clone());
-        let master_dark = stack.process();
-
-        // Load first frame to verify dimensions match
-        let first = AstroImage::from_file(&paths[0]).unwrap();
-        println!(
-            "Master dark: {}x{}x{}",
-            master_dark.dimensions.width,
-            master_dark.dimensions.height,
-            master_dark.dimensions.channels
-        );
-
-        assert_eq!(master_dark.dimensions, first.dimensions);
-        assert!(!master_dark.pixels.is_empty());
-
-        let img: imaginarium::Image = master_dark.into();
-        img.save_file(common::test_utils::test_output_path(
+        test_stack_from_env(
+            "Darks",
+            FrameType::Dark,
+            StackingMethod::Mean,
             "master_dark_mean.tiff",
-        ))
-        .unwrap();
+        );
     }
 
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
     fn test_stack_darks_median_from_env() {
-        let Some(paths) = calibration_image_paths("Darks") else {
-            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
-            return;
-        };
-
-        if paths.is_empty() {
-            eprintln!("No dark files found in Darks directory, skipping test");
-            return;
-        }
-
-        println!("Stacking {} darks with median method...", paths.len());
-        let stack = ImageStack::new(FrameType::Dark, StackingMethod::default(), paths.clone());
-        let master_dark = stack.process();
-
-        // Load first frame to verify dimensions match
-        let first = AstroImage::from_file(&paths[0]).unwrap();
-        println!(
-            "Master dark: {}x{}x{}",
-            master_dark.dimensions.width,
-            master_dark.dimensions.height,
-            master_dark.dimensions.channels
-        );
-
-        assert_eq!(master_dark.dimensions, first.dimensions);
-        assert!(!master_dark.pixels.is_empty());
-
-        let img: imaginarium::Image = master_dark.into();
-        img.save_file(common::test_utils::test_output_path(
+        test_stack_from_env(
+            "Darks",
+            FrameType::Dark,
+            StackingMethod::default(),
             "master_dark_median.tiff",
-        ))
-        .unwrap();
+        );
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_stack_darks_sigma_clipped_from_env() {
+        test_stack_from_env(
+            "Darks",
+            FrameType::Dark,
+            StackingMethod::SigmaClippedMean(SigmaClippedConfig::default()),
+            "master_dark_sigma_clipped.tiff",
+        );
     }
 }
