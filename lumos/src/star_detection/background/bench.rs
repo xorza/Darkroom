@@ -53,7 +53,7 @@ pub fn benchmarks(c: &mut Criterion) {
     group.sample_size(20);
 
     // Test different image sizes
-    for &(width, height) in &[(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
+    for &(width, height) in &[(512, 512), (2048, 2048), (4096, 4096)] {
         let pixels = generate_test_image(width, height);
         let size_name = format!("{}x{}", width, height);
 

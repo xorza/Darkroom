@@ -67,3 +67,8 @@ required-features = ["bench"]
 name = "math"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "star_detection_background"
+harness = false
+required-features = ["bench"]
