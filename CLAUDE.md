@@ -15,3 +15,6 @@ AI coding rules for Rust projects:
 - `NOTES-AI.md` is AI-generated and contains implementation details, project structure, and functionality notes. Avoid
   editing `README.md` unless asked; instead, update `NOTES-AI.md` and keep it current for fast AI access. Do not store
   changes there, only current state of the project.
+- Read `NOTES-AI.md` for summarized knowledge about the project.
+- When running benchmarks, use `cargo bench -p <crate> --features bench --bench <name>` to compile only the needed
+  crate and enable the bench feature (e.g., `cargo bench -p lumos --features bench --bench math`).
