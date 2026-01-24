@@ -6,6 +6,7 @@ use crate::star_detection::{StarDetectionConfig, find_stars, median_filter_3x3};
 use crate::testing::{calibration_dir, init_tracing};
 use image::{GrayImage, Rgb, RgbImage};
 use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use imaginarium::ColorFormat;
 
 /// Convert f32 pixels to grayscale image (auto-stretched to full range).
 fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
@@ -94,22 +95,13 @@ fn test_debug_star_detection_steps() {
         return;
     };
 
-    // Look for cropped test image first, fall back to full image
-    let cropped_path = cal_dir.join("calibrated_light_500x500.tiff");
-    let image_path = if cropped_path.exists() {
-        cropped_path
-    } else {
-        let full_path = cal_dir.join("calibrated_light.tiff");
-        if !full_path.exists() {
-            eprintln!("No test image found, skipping");
-            return;
-        }
-        full_path
-    };
+    let image_path = cal_dir.join("calibrated_light_500x500.tiff");
 
     println!("Loading image: {:?}", image_path);
-    let imag_image = imaginarium::Image::read_file(&image_path).expect("Failed to load image");
-    let astro_image: crate::AstroImage = imag_image.into();
+    let imag_image = imaginarium::Image::read_file(&image_path)
+        .expect("Failed to load image")
+        .packed();
+    let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
 
     let width = astro_image.dimensions.width;
     let height = astro_image.dimensions.height;
@@ -118,18 +110,7 @@ fn test_debug_star_detection_steps() {
     println!("Image size: {}x{}, channels: {}", width, height, channels);
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = if channels == 3 {
-        (0..width * height)
-            .map(|i| {
-                let r = astro_image.pixels[i];
-                let g = astro_image.pixels[width * height + i];
-                let b = astro_image.pixels[2 * width * height + i];
-                0.2126 * r + 0.7152 * g + 0.0722 * b
-            })
-            .collect()
-    } else {
-        astro_image.pixels.clone()
-    };
+    let grayscale: Vec<f32> = astro_image.pixels;
 
     // Print pixel statistics
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
