@@ -39,10 +39,8 @@ impl HotPixelMap {
         let channels = master_dark.dimensions.channels;
         let pixel_count = master_dark.dimensions.width * master_dark.dimensions.height;
 
-        // Compute per-channel thresholds
-        let channel_stats: Vec<ChannelStats> = (0..channels)
-            .map(|c| compute_channel_stats(pixels, channels, c, sigma_threshold))
-            .collect();
+        // Compute per-channel thresholds in a single pass
+        let channel_stats = compute_all_channel_stats(pixels, channels, sigma_threshold);
 
         tracing::debug!(
             "Hot pixel detection per-channel stats ({}x{}x{}):",
@@ -178,54 +176,73 @@ struct ChannelStats {
     threshold: f32,
 }
 
-/// Compute statistics and threshold for a single channel using MAD (Median Absolute Deviation).
-fn compute_channel_stats(
+/// Compute statistics and thresholds for all channels in a single pass using MAD.
+///
+/// This is more cache-efficient than computing each channel separately, as we only
+/// iterate through the interleaved pixel data once to extract all channel values.
+fn compute_all_channel_stats(
     pixels: &[f32],
     channels: usize,
-    channel: usize,
     sigma_threshold: f32,
-) -> ChannelStats {
+) -> Vec<ChannelStats> {
     let pixel_count = pixels.len() / channels;
 
-    // Extract values for this channel in parallel
-    let mut values: Vec<f32> = vec![0.0; pixel_count];
+    // Allocate buffers for all channels at once
+    let channel_values: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0; pixel_count]).collect();
+
+    // Extract all channel values in a single pass through the pixel data
     const CHUNK_SIZE: usize = 4096;
-    values
-        .par_chunks_mut(CHUNK_SIZE)
-        .enumerate()
-        .for_each(|(chunk_idx, chunk)| {
-            let start_pixel = chunk_idx * CHUNK_SIZE;
-            for (i, v) in chunk.iter_mut().enumerate() {
-                let pixel_idx = start_pixel + i;
-                *v = pixels[pixel_idx * channels + channel];
+    let chunk_count = pixel_count.div_ceil(CHUNK_SIZE);
+
+    // Process chunks in parallel, each chunk writes to its portion of all channel buffers
+    (0..chunk_count).into_par_iter().for_each(|chunk_idx| {
+        let start_pixel = chunk_idx * CHUNK_SIZE;
+        let end_pixel = (start_pixel + CHUNK_SIZE).min(pixel_count);
+
+        for pixel_idx in start_pixel..end_pixel {
+            let base = pixel_idx * channels;
+            for c in 0..channels {
+                // SAFETY: We're writing to disjoint ranges (each chunk_idx gets unique pixel indices)
+                // and each channel buffer is independent
+                unsafe {
+                    let ptr = channel_values[c].as_ptr().add(pixel_idx) as *mut f32;
+                    *ptr = pixels[base + c];
+                }
             }
-        });
-
-    let median = crate::math::median_f32(&values);
-
-    // Compute absolute deviations in parallel, reusing the same buffer
-    values.par_chunks_mut(CHUNK_SIZE).for_each(|chunk| {
-        for v in chunk.iter_mut() {
-            *v = (*v - median).abs();
         }
     });
-    let mad = crate::math::median_f32(&values);
 
-    // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
-    const MAD_TO_SIGMA: f32 = 1.4826;
-    let computed_sigma = mad * MAD_TO_SIGMA;
+    // Compute stats for each channel
+    channel_values
+        .into_iter()
+        .map(|mut values| {
+            let median = crate::math::median_f32(&values);
 
-    // Apply minimum sigma floor: stacked master darks have compressed noise,
-    // so use at least 1% of median to avoid overly tight thresholds
-    let sigma = computed_sigma.max(median * 0.01);
-    let threshold = median + sigma_threshold * sigma;
+            // Compute absolute deviations in parallel, reusing the same buffer
+            values.par_chunks_mut(CHUNK_SIZE).for_each(|chunk| {
+                for v in chunk.iter_mut() {
+                    *v = (*v - median).abs();
+                }
+            });
+            let mad = crate::math::median_f32(&values);
 
-    ChannelStats {
-        median,
-        mad,
-        sigma,
-        threshold,
-    }
+            // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
+            const MAD_TO_SIGMA: f32 = 1.4826;
+            let computed_sigma = mad * MAD_TO_SIGMA;
+
+            // Apply minimum sigma floor: stacked master darks have compressed noise,
+            // so use at least 1% of median to avoid overly tight thresholds
+            let sigma = computed_sigma.max(median * 0.01);
+            let threshold = median + sigma_threshold * sigma;
+
+            ChannelStats {
+                median,
+                mad,
+                sigma,
+                threshold,
+            }
+        })
+        .collect()
 }
 
 /// Calculate median of 8-connected neighbors for a specific channel.
