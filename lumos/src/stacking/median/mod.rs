@@ -3,8 +3,6 @@
 //! This implementation decodes images to a binary cache format, then processes
 //! the images in horizontal strips to keep memory usage bounded.
 
-mod cache;
-
 #[cfg(feature = "bench")]
 pub mod bench;
 
@@ -15,8 +13,7 @@ use rayon::prelude::*;
 use crate::astro_image::AstroImage;
 use crate::math;
 use crate::stacking::FrameType;
-
-use cache::ImageCache;
+use crate::stacking::cache::ImageCache;
 
 /// Configuration for memory-efficient median stacking.
 #[derive(Debug, Clone, PartialEq)]

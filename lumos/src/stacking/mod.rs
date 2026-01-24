@@ -1,10 +1,12 @@
-mod cpu;
+mod cache;
 mod mean;
 mod median;
+mod sigma_clipped;
 
 use strum_macros::Display;
 
 pub use median::MedianStackConfig;
+pub use sigma_clipped::SigmaClippedConfig;
 
 #[cfg(feature = "bench")]
 pub mod bench {
@@ -36,8 +38,8 @@ pub enum StackingMethod {
     /// Uses memory-mapped chunked processing for efficiency.
     Median(MedianStackConfig),
     /// Average after excluding pixels beyond N sigma from the mean.
-    /// The f32 parameter specifies the sigma threshold (typically 2.0-3.0).
-    SigmaClippedMean(SigmaClipConfig),
+    /// Uses memory-mapped chunked processing for efficiency.
+    SigmaClippedMean(SigmaClippedConfig),
 }
 
 impl Default for StackingMethod {
@@ -52,7 +54,7 @@ impl std::fmt::Display for StackingMethod {
             StackingMethod::Mean => write!(f, "mean"),
             StackingMethod::Median(_) => write!(f, "median"),
             StackingMethod::SigmaClippedMean(config) => {
-                write!(f, "sigma{:.1}", config.sigma)
+                write!(f, "sigma{:.1}", config.clip.sigma)
             }
         }
     }
@@ -131,14 +133,8 @@ impl ImageStack {
             StackingMethod::Median(config) => {
                 median::stack_median_from_paths(&self.paths, self.frame_type, config)
             }
-            StackingMethod::SigmaClippedMean(_) => {
-                // Sigma-clipped needs all values for iterative clipping
-                let frames: Vec<AstroImage> = self
-                    .paths
-                    .iter()
-                    .map(|p| AstroImage::from_file(p).expect("Failed to load image"))
-                    .collect();
-                cpu::stack_frames_cpu(&frames, &self.method, self.frame_type)
+            StackingMethod::SigmaClippedMean(config) => {
+                sigma_clipped::stack_sigma_clipped_from_paths(&self.paths, self.frame_type, config)
             }
         }
     }
