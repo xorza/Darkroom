@@ -32,7 +32,7 @@ impl Default for MedianStackConfig {
         Self {
             chunk_rows: 64,
             cache_dir: std::env::temp_dir().join("lumos_cache"),
-            keep_cache: true,
+            keep_cache: false,
         }
     }
 }
