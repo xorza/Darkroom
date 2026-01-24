@@ -235,8 +235,10 @@ CalibrationMasters // Container for master dark/flat/bias frames
   - `sse.rs` - x86 SSE2 SIMD implementation
 - `stacking/median/` - Median stacking module (memory-efficient via mmap)
   - `mod.rs` - Public API with `stack_median_from_paths()`, `MedianStackConfig`
-  - `cpu.rs` - Proxy to scalar implementation
-  - `scalar.rs` - Scalar median calculation
+  - `cpu.rs` - SIMD dispatch proxy (NEON/SSE/scalar)
+  - `scalar.rs` - Scalar median using quickselect
+  - `neon.rs` - ARM NEON SIMD sorting networks for small arrays (≤16 elements)
+  - `sse.rs` - x86 SSE2 SIMD sorting networks for small arrays (≤16 elements)
 - `stacking/sigma_clipped/` - Sigma-clipped mean stacking (memory-efficient via mmap)
   - `mod.rs` - Public API with `stack_sigma_clipped_from_paths()`, `SigmaClippedConfig`, `SigmaClipConfig`
   - `cpu.rs` - Proxy to scalar implementation
