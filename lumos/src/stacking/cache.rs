@@ -8,7 +8,9 @@
 //! - Header: CacheHeader struct (width, height, channels as u32)
 //! - Data: f32 pixels in row-major order (width * height * channels * 4 bytes)
 
+use std::collections::hash_map::DefaultHasher;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::{self, BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -22,6 +24,14 @@ use crate::stacking::cache_config::{
     CacheConfig, CacheStage, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
 use crate::stacking::error::Error;
+
+/// Generate a cache filename from the hash of the source path.
+fn cache_filename_for_path(path: &Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    path.hash(&mut hasher);
+    let hash = hasher.finish();
+    format!("{:016x}.bin", hash)
+}
 
 /// Header for cached image files.
 #[derive(Debug, Clone, Copy)]
@@ -193,7 +203,8 @@ impl ImageCache {
         let mut cache_paths = Vec::with_capacity(paths.len());
 
         // Write first image (or reuse existing cache)
-        let first_cache_path = cache_dir.join("frame_0000.bin");
+        let first_path = paths[0].as_ref();
+        let first_cache_path = cache_dir.join(cache_filename_for_path(first_path));
         if !try_reuse_cache_file(&first_cache_path, dimensions) {
             write_cache_file(&first_cache_path, &first_image)?;
         }
@@ -213,11 +224,11 @@ impl ImageCache {
 
         // Process remaining images
         for (i, path) in paths.iter().enumerate().skip(1) {
-            let cache_path = cache_dir.join(format!("frame_{:04}.bin", i));
+            let path_ref = path.as_ref();
+            let cache_path = cache_dir.join(cache_filename_for_path(path_ref));
 
             // Try to reuse existing cache file if dimensions match
             if !try_reuse_cache_file(&cache_path, dimensions) {
-                let path_ref = path.as_ref();
                 let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
                     path: path_ref.to_path_buf(),
                     source: io::Error::other(e.to_string()),
