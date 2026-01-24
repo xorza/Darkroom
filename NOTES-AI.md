@@ -216,6 +216,7 @@ ImageDimensions    // { width: usize, height: usize, channels: usize }
 BitPix             // FITS pixel type enum (UInt8, Int16, Int32, Int64, Float32, Float64)
 StackingMethod     // Mean | Median | SigmaClippedMean(SigmaClipConfig)
 SigmaClipConfig    // { sigma, max_iterations }
+CacheConfig        // { chunk_rows, cache_dir, keep_cache } - adaptive chunk sizing
 FrameType          // Dark | Flat | Bias | Light
 CalibrationMasters // Container for master dark/flat/bias frames
 ```
@@ -227,6 +228,7 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `astro_image/libraw.rs` - RAW loading via libraw-rs (C library fallback)
 - `stacking/mod.rs` - `StackingMethod`, `FrameType`, `stack_frames()` dispatch
 - `stacking/cache.rs` - `ImageCache` with memory-mapped binary cache and `process_chunked()` for shared chunked processing
+- `stacking/cache_config.rs` - `CacheConfig` struct with adaptive chunk sizing based on available system memory (uses sysinfo)
 - `stacking/mean/` - Mean stacking module
   - `mod.rs` - Public API with `stack_mean_from_images()`
   - `cpu.rs` - SIMD dispatch proxy (NEON/SSE/scalar)

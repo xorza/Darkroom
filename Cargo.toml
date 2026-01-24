@@ -64,6 +64,7 @@ image = { version = "*" }
 paste = { version = "*" }
 atomic_refcell = { version = "*" }
 arc-swap = { version = "*" }
+sysinfo = { version = "*" }
 bumpalo = { version = "*", features = ["collections", "allocator-api2"] }
 lz4_flex = { version = "*", features = ["std"] }
 bitcode = { version = "*", features = ["serde"] }
