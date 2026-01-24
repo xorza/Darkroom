@@ -93,6 +93,54 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     scalar::sum_squared_diff(values, mean)
 }
 
+/// Accumulate src into dst (dst[i] += src[i]) using SIMD when available.
+#[cfg(target_arch = "aarch64")]
+pub fn accumulate(dst: &mut [f32], src: &[f32]) {
+    if dst.len() < 4 {
+        return scalar::accumulate(dst, src);
+    }
+    unsafe { neon::accumulate(dst, src) }
+}
+
+/// Accumulate src into dst (dst[i] += src[i]) using SIMD when available.
+#[cfg(target_arch = "x86_64")]
+pub fn accumulate(dst: &mut [f32], src: &[f32]) {
+    if dst.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
+        return scalar::accumulate(dst, src);
+    }
+    unsafe { sse::accumulate(dst, src) }
+}
+
+/// Fallback for other architectures.
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+pub fn accumulate(dst: &mut [f32], src: &[f32]) {
+    scalar::accumulate(dst, src)
+}
+
+/// Scale values in-place (data[i] *= scale) using SIMD when available.
+#[cfg(target_arch = "aarch64")]
+pub fn scale(data: &mut [f32], scale_val: f32) {
+    if data.len() < 4 {
+        return scalar::scale(data, scale_val);
+    }
+    unsafe { neon::scale(data, scale_val) }
+}
+
+/// Scale values in-place (data[i] *= scale) using SIMD when available.
+#[cfg(target_arch = "x86_64")]
+pub fn scale(data: &mut [f32], scale_val: f32) {
+    if data.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
+        return scalar::scale(data, scale_val);
+    }
+    unsafe { sse::scale(data, scale_val) }
+}
+
+/// Fallback for other architectures.
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+pub fn scale(data: &mut [f32], scale_val: f32) {
+    scalar::scale(data, scale_val)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +288,77 @@ mod tests {
             scalar_result,
             simd_result
         );
+    }
+
+    #[test]
+    fn test_accumulate() {
+        let mut dst: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let src: Vec<f32> = vec![0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+        accumulate(&mut dst, &src);
+        assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5]);
+    }
+
+    #[test]
+    fn test_accumulate_remainder() {
+        let mut dst: Vec<f32> = vec![1.0, 2.0, 3.0, 4.0, 5.0];
+        let src: Vec<f32> = vec![0.5, 0.5, 0.5, 0.5, 0.5];
+        accumulate(&mut dst, &src);
+        assert_eq!(dst, vec![1.5, 2.5, 3.5, 4.5, 5.5]);
+    }
+
+    #[test]
+    fn test_accumulate_small() {
+        let mut dst: Vec<f32> = vec![1.0, 2.0];
+        let src: Vec<f32> = vec![0.5, 0.5];
+        accumulate(&mut dst, &src);
+        assert_eq!(dst, vec![1.5, 2.5]);
+    }
+
+    #[test]
+    fn test_scale() {
+        let mut data: Vec<f32> = vec![2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0];
+        scale(&mut data, 0.5);
+        assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+    }
+
+    #[test]
+    fn test_scale_remainder() {
+        let mut data: Vec<f32> = vec![2.0, 4.0, 6.0, 8.0, 10.0];
+        scale(&mut data, 0.5);
+        assert_eq!(data, vec![1.0, 2.0, 3.0, 4.0, 5.0]);
+    }
+
+    #[test]
+    fn test_scale_small() {
+        let mut data: Vec<f32> = vec![2.0, 4.0];
+        scale(&mut data, 0.5);
+        assert_eq!(data, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_accumulate() {
+        let mut dst_scalar: Vec<f32> = (0..1000).map(|x| x as f32).collect();
+        let mut dst_simd: Vec<f32> = dst_scalar.clone();
+        let src: Vec<f32> = (0..1000).map(|x| x as f32 * 0.1).collect();
+
+        scalar::accumulate(&mut dst_scalar, &src);
+        accumulate(&mut dst_simd, &src);
+
+        for (s, d) in dst_scalar.iter().zip(dst_simd.iter()) {
+            assert!((s - d).abs() < 1e-4, "scalar={}, simd={}", s, d);
+        }
+    }
+
+    #[test]
+    fn test_simd_vs_scalar_scale() {
+        let mut data_scalar: Vec<f32> = (0..1000).map(|x| x as f32).collect();
+        let mut data_simd: Vec<f32> = data_scalar.clone();
+
+        scalar::scale(&mut data_scalar, 0.123);
+        scale(&mut data_simd, 0.123);
+
+        for (s, d) in data_scalar.iter().zip(data_simd.iter()) {
+            assert!((s - d).abs() < 1e-4, "scalar={}, simd={}", s, d);
+        }
     }
 }

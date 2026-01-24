@@ -58,3 +58,55 @@ pub unsafe fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
         sum + remainder.iter().map(|v| (v - mean).powi(2)).sum::<f32>()
     }
 }
+
+/// Accumulate src into dst (dst[i] += src[i]) using SSE4.1 SIMD.
+///
+/// # Safety
+/// Caller must ensure SSE4.1 is available.
+#[target_feature(enable = "sse4.1")]
+pub unsafe fn accumulate(dst: &mut [f32], src: &[f32]) {
+    debug_assert_eq!(dst.len(), src.len());
+    unsafe {
+        let mut dst_chunks = dst.chunks_exact_mut(4);
+        let mut src_chunks = src.chunks_exact(4);
+
+        for (dst_chunk, src_chunk) in dst_chunks.by_ref().zip(src_chunks.by_ref()) {
+            let d = _mm_loadu_ps(dst_chunk.as_ptr());
+            let s = _mm_loadu_ps(src_chunk.as_ptr());
+            let sum = _mm_add_ps(d, s);
+            _mm_storeu_ps(dst_chunk.as_mut_ptr(), sum);
+        }
+
+        // Handle remainder
+        for (d, &s) in dst_chunks
+            .into_remainder()
+            .iter_mut()
+            .zip(src_chunks.remainder())
+        {
+            *d += s;
+        }
+    }
+}
+
+/// Scale values in-place (data[i] *= scale) using SSE4.1 SIMD.
+///
+/// # Safety
+/// Caller must ensure SSE4.1 is available.
+#[target_feature(enable = "sse4.1")]
+pub unsafe fn scale(data: &mut [f32], scale_val: f32) {
+    unsafe {
+        let scale_vec = _mm_set1_ps(scale_val);
+        let mut chunks = data.chunks_exact_mut(4);
+
+        for chunk in chunks.by_ref() {
+            let v = _mm_loadu_ps(chunk.as_ptr());
+            let scaled = _mm_mul_ps(v, scale_vec);
+            _mm_storeu_ps(chunk.as_mut_ptr(), scaled);
+        }
+
+        // Handle remainder
+        for d in chunks.into_remainder() {
+            *d *= scale_val;
+        }
+    }
+}
