@@ -72,3 +72,8 @@ required-features = ["bench"]
 name = "star_detection_background"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "median_filter"
+harness = false
+required-features = ["bench"]
