@@ -1,6 +1,9 @@
 //! Tests for star detection.
 
-use super::{Star, StarDetectionConfig, compute_fwhm_median_mad, filter_fwhm_outliers, find_stars};
+use super::{
+    Star, StarDetectionConfig, compute_fwhm_median_mad, filter_fwhm_outliers, find_stars,
+    remove_duplicate_stars,
+};
 use crate::AstroImage;
 use crate::testing::{calibration_dir, init_tracing};
 
@@ -416,4 +419,246 @@ fn test_filter_fwhm_outliers_negative_deviation_disabled() {
 
     assert_eq!(removed, 0);
     assert_eq!(stars.len(), 10);
+}
+
+// =============================================================================
+// Duplicate Star Removal Tests
+// =============================================================================
+
+fn make_star_at(x: f32, y: f32, flux: f32) -> Star {
+    Star {
+        x,
+        y,
+        flux,
+        fwhm: 3.0,
+        eccentricity: 0.1,
+        snr: 50.0,
+        peak: 0.5,
+    }
+}
+
+#[test]
+fn test_remove_duplicate_stars_empty() {
+    let mut stars: Vec<Star> = vec![];
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 0);
+    assert!(stars.is_empty());
+}
+
+#[test]
+fn test_remove_duplicate_stars_single() {
+    let mut stars = vec![make_star_at(10.0, 10.0, 100.0)];
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 0);
+    assert_eq!(stars.len(), 1);
+}
+
+#[test]
+fn test_remove_duplicate_stars_no_duplicates() {
+    // Stars far apart - no removal
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(50.0, 50.0, 90.0),
+        make_star_at(100.0, 100.0, 80.0),
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 0);
+    assert_eq!(stars.len(), 3);
+}
+
+#[test]
+fn test_remove_duplicate_stars_one_pair() {
+    // Two stars within separation - keep brighter one
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0), // Brighter - keep
+        make_star_at(12.0, 12.0, 90.0),  // Within 8 pixels - remove
+        make_star_at(50.0, 50.0, 80.0),  // Far away - keep
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 2);
+    assert!((stars[0].x - 10.0).abs() < 0.01);
+    assert!((stars[1].x - 50.0).abs() < 0.01);
+}
+
+#[test]
+fn test_remove_duplicate_stars_keeps_brightest() {
+    // Stars sorted by flux (brightest first) - keep first one
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0), // Brightest
+        make_star_at(11.0, 11.0, 50.0),  // Dimmer duplicate
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 1);
+    assert!((stars[0].flux - 100.0).abs() < 0.01);
+}
+
+#[test]
+fn test_remove_duplicate_stars_exact_separation() {
+    // Stars exactly at separation distance - should NOT be removed
+    // Distance = sqrt(6^2 + 6^2) = 8.485 > 8.0
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(16.0, 16.0, 90.0),
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 0);
+    assert_eq!(stars.len(), 2);
+}
+
+#[test]
+fn test_remove_duplicate_stars_just_under_separation() {
+    // Stars just under separation - should be removed
+    // Distance = sqrt(5^2 + 5^2) = 7.07 < 8.0
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(15.0, 15.0, 90.0),
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 1);
+}
+
+#[test]
+fn test_remove_duplicate_stars_cluster_of_three() {
+    // Three stars in a cluster - keep only brightest
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0), // Keep
+        make_star_at(12.0, 10.0, 90.0),  // Remove (close to first)
+        make_star_at(14.0, 10.0, 80.0),  // Remove (close to first)
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 2);
+    assert_eq!(stars.len(), 1);
+    assert!((stars[0].flux - 100.0).abs() < 0.01);
+}
+
+#[test]
+fn test_remove_duplicate_stars_two_separate_pairs() {
+    // Two pairs of duplicates, far apart from each other
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),  // Pair 1 - keep
+        make_star_at(12.0, 10.0, 90.0),   // Pair 1 - remove
+        make_star_at(100.0, 100.0, 80.0), // Pair 2 - keep
+        make_star_at(102.0, 100.0, 70.0), // Pair 2 - remove
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 2);
+    assert_eq!(stars.len(), 2);
+    assert!((stars[0].x - 10.0).abs() < 0.01);
+    assert!((stars[1].x - 100.0).abs() < 0.01);
+}
+
+#[test]
+fn test_remove_duplicate_stars_horizontal_line() {
+    // Stars in a horizontal line with spacing
+    let mut stars = vec![
+        make_star_at(0.0, 0.0, 100.0),
+        make_star_at(5.0, 0.0, 90.0),  // Within 8 of first
+        make_star_at(10.0, 0.0, 80.0), // Within 8 of second (but second removed)
+        make_star_at(20.0, 0.0, 70.0), // Far from all remaining
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    // First removes second (5 < 8)
+    // First doesn't remove third (10 >= 8)
+    // Third is kept, then compared with fourth (distance 10 >= 8)
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 3);
+}
+
+#[test]
+fn test_remove_duplicate_stars_vertical_separation() {
+    // Stars separated only vertically
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(10.0, 15.0, 90.0), // 5 pixels vertical - remove
+        make_star_at(10.0, 25.0, 80.0), // 15 pixels from first - keep
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 2);
+}
+
+#[test]
+fn test_remove_duplicate_stars_zero_separation() {
+    // Zero separation - removes all but one
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(10.0, 10.0, 90.0), // Exact same position
+        make_star_at(10.0, 10.0, 80.0), // Exact same position
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    assert_eq!(removed, 2);
+    assert_eq!(stars.len(), 1);
+}
+
+#[test]
+fn test_remove_duplicate_stars_large_separation_threshold() {
+    // Large separation threshold removes more
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(30.0, 10.0, 90.0), // 20 pixels away
+        make_star_at(50.0, 10.0, 80.0), // 40 pixels from first
+    ];
+
+    let removed = remove_duplicate_stars(&mut stars, 25.0);
+
+    // 20 < 25, so second is removed
+    // 40 >= 25, so third is kept
+    assert_eq!(removed, 1);
+    assert_eq!(stars.len(), 2);
+}
+
+#[test]
+fn test_remove_duplicate_stars_preserves_order() {
+    // Remaining stars should maintain their relative order
+    let mut stars = vec![
+        make_star_at(10.0, 10.0, 100.0),
+        make_star_at(12.0, 10.0, 95.0), // Remove
+        make_star_at(50.0, 50.0, 90.0),
+        make_star_at(100.0, 100.0, 85.0),
+    ];
+
+    remove_duplicate_stars(&mut stars, 8.0);
+
+    // Check order is preserved
+    assert!(stars[0].flux > stars[1].flux);
+    assert!(stars[1].flux > stars[2].flux);
+}
+
+#[test]
+fn test_remove_duplicate_stars_many_duplicates() {
+    // Many stars clustered around one point
+    let mut stars: Vec<Star> = (0..20)
+        .map(|i| make_star_at(10.0 + (i as f32 * 0.5), 10.0, 100.0 - i as f32))
+        .collect();
+
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+
+    // Many should be removed since they're within 8 pixels of each other
+    assert!(removed > 10);
+    assert!(stars.len() < 10);
 }

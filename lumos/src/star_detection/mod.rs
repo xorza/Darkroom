@@ -163,8 +163,24 @@ pub fn find_stars(
     }
 
     // Remove duplicate detections - keep only the brightest star within min_separation pixels
-    // Use half the typical FWHM as separation threshold
-    let min_separation = 8.0f32;
+    let removed = remove_duplicate_stars(&mut stars, 8.0);
+    if removed > 0 {
+        tracing::debug!("Removed {} duplicate star detections", removed);
+    }
+
+    stars
+}
+
+/// Remove duplicate star detections that are too close together.
+///
+/// Keeps the brightest star (by flux) within `min_separation` pixels of each other.
+/// Stars must be sorted by flux (brightest first) before calling.
+/// Returns the number of stars removed.
+fn remove_duplicate_stars(stars: &mut Vec<Star>, min_separation: f32) -> usize {
+    if stars.len() < 2 {
+        return 0;
+    }
+
     let min_sep_sq = min_separation * min_separation;
     let mut kept = vec![true; stars.len()];
 
@@ -185,17 +201,21 @@ pub fn find_stars(
         }
     }
 
-    let dedup_count = kept.iter().filter(|&&k| !k).count();
-    if dedup_count > 0 {
-        tracing::debug!("Removed {} duplicate star detections", dedup_count);
-    }
+    let removed_count = kept.iter().filter(|&&k| !k).count();
 
-    stars
-        .into_iter()
-        .enumerate()
-        .filter(|(i, _)| kept[*i])
-        .map(|(_, s)| s)
-        .collect()
+    // Filter in place
+    let mut write_idx = 0;
+    for read_idx in 0..stars.len() {
+        if kept[read_idx] {
+            if write_idx != read_idx {
+                stars[write_idx] = stars[read_idx];
+            }
+            write_idx += 1;
+        }
+    }
+    stars.truncate(write_idx);
+
+    removed_count
 }
 
 /// Compute median and MAD (median absolute deviation) for FWHM filtering.

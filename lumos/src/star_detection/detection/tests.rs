@@ -850,6 +850,239 @@ fn test_extract_candidates_width_height() {
     assert_eq!(c.height(), 2);
 }
 
+#[test]
+fn test_extract_candidates_multiple_peaks_same_value() {
+    // When multiple pixels have the same peak value, the first one encountered wins
+    let pixels = vec![
+        0.1, 0.1, 0.1, //
+        0.9, 0.9, 0.9, // Three pixels with same peak value
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        0, 0, 0, //
+        1, 1, 1, //
+        0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    // First pixel with peak value is at (0, 1)
+    assert_eq!(c.peak_x, 0);
+    assert_eq!(c.peak_y, 1);
+    assert!((c.peak_value - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_peak_at_corner() {
+    // Component with peak at corner of bounding box
+    let pixels = vec![
+        0.9, 0.5, 0.1, //
+        0.5, 0.3, 0.1, //
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        1, 1, 0, //
+        1, 1, 0, //
+        0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.peak_x, 0);
+    assert_eq!(c.peak_y, 0);
+    assert_eq!(c.x_min, 0);
+    assert_eq!(c.x_max, 1);
+    assert_eq!(c.y_min, 0);
+    assert_eq!(c.y_max, 1);
+}
+
+#[test]
+fn test_extract_candidates_single_pixel_component() {
+    let pixels = vec![
+        0.1, 0.1, 0.1, //
+        0.1, 0.8, 0.1, //
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        0, 0, 0, //
+        0, 1, 0, //
+        0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.area, 1);
+    assert_eq!(c.x_min, 1);
+    assert_eq!(c.x_max, 1);
+    assert_eq!(c.y_min, 1);
+    assert_eq!(c.y_max, 1);
+    assert_eq!(c.width(), 1);
+    assert_eq!(c.height(), 1);
+    assert_eq!(c.peak_x, 1);
+    assert_eq!(c.peak_y, 1);
+}
+
+#[test]
+fn test_extract_candidates_diagonal_component() {
+    // Diagonal stripe (connected via 4-connectivity would be separate,
+    // but here we test extraction from pre-labeled data)
+    let pixels = vec![
+        0.9, 0.1, 0.1, //
+        0.1, 0.8, 0.1, //
+        0.1, 0.1, 0.7,
+    ];
+    let labels = vec![
+        1, 0, 0, //
+        0, 1, 0, //
+        0, 0, 1,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.area, 3);
+    assert_eq!(c.x_min, 0);
+    assert_eq!(c.x_max, 2);
+    assert_eq!(c.y_min, 0);
+    assert_eq!(c.y_max, 2);
+    // Peak is at (0, 0) with value 0.9
+    assert_eq!(c.peak_x, 0);
+    assert_eq!(c.peak_y, 0);
+}
+
+#[test]
+fn test_extract_candidates_sparse_labels() {
+    // Labels are not contiguous (1 and 3, no 2)
+    let pixels = vec![
+        0.8, 0.1, 0.7, //
+        0.1, 0.1, 0.1, //
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        1, 0, 3, //
+        0, 0, 0, //
+        0, 0, 0,
+    ];
+
+    // num_labels should be 3 to account for label 3
+    let candidates = extract_candidates(&pixels, &labels, 3, 3, 3);
+
+    assert_eq!(candidates.len(), 3);
+    // Label 1 at (0, 0)
+    assert_eq!(candidates[0].area, 1);
+    assert_eq!(candidates[0].peak_x, 0);
+    // Label 2 doesn't exist - will have default/invalid values
+    assert_eq!(candidates[1].area, 0);
+    // Label 3 at (2, 0)
+    assert_eq!(candidates[2].area, 1);
+    assert_eq!(candidates[2].peak_x, 2);
+}
+
+#[test]
+fn test_extract_candidates_full_image_component() {
+    // Component covering entire image
+    let pixels: Vec<f32> = (0..9).map(|i| 0.1 + i as f32 * 0.1).collect();
+    let labels = vec![1u32; 9];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.area, 9);
+    assert_eq!(c.x_min, 0);
+    assert_eq!(c.x_max, 2);
+    assert_eq!(c.y_min, 0);
+    assert_eq!(c.y_max, 2);
+    // Peak is last pixel (2, 2) with value 0.9
+    assert_eq!(c.peak_x, 2);
+    assert_eq!(c.peak_y, 2);
+    assert!((c.peak_value - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_negative_pixel_values() {
+    // Negative pixel values (can happen with background subtraction)
+    let pixels = vec![
+        -0.5, -0.1, 0.1, //
+        -0.1, 0.3, 0.1, //
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        1, 1, 0, //
+        1, 1, 0, //
+        0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    // Peak is at (1, 1) with value 0.3
+    assert_eq!(c.peak_x, 1);
+    assert_eq!(c.peak_y, 1);
+    assert!((c.peak_value - 0.3).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_many_components() {
+    // 10 separate single-pixel components
+    let mut pixels = vec![0.1f32; 100];
+    let mut labels = vec![0u32; 100];
+
+    for i in 0..10 {
+        let idx = i * 10 + i; // Diagonal positions
+        pixels[idx] = 0.5 + i as f32 * 0.05;
+        labels[idx] = (i + 1) as u32;
+    }
+
+    let candidates = extract_candidates(&pixels, &labels, 10, 10, 10);
+
+    assert_eq!(candidates.len(), 10);
+    for (i, c) in candidates.iter().enumerate() {
+        assert_eq!(c.area, 1);
+        assert_eq!(c.peak_x, i);
+        assert_eq!(c.peak_y, i);
+    }
+}
+
+#[test]
+fn test_extract_candidates_non_square_image() {
+    // Wide image (7x2)
+    let pixels = vec![
+        0.1, 0.2, 0.9, 0.2, 0.1, 0.8, 0.1, //
+        0.1, 0.2, 0.3, 0.2, 0.1, 0.7, 0.1,
+    ];
+    let labels = vec![
+        0, 1, 1, 1, 0, 2, 0, //
+        0, 1, 1, 1, 0, 2, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 2, 7, 2);
+
+    assert_eq!(candidates.len(), 2);
+
+    // Component 1: columns 1-3, both rows
+    assert_eq!(candidates[0].area, 6);
+    assert_eq!(candidates[0].x_min, 1);
+    assert_eq!(candidates[0].x_max, 3);
+    assert_eq!(candidates[0].peak_x, 2);
+    assert_eq!(candidates[0].peak_y, 0);
+
+    // Component 2: column 5, both rows
+    assert_eq!(candidates[1].area, 2);
+    assert_eq!(candidates[1].x_min, 5);
+    assert_eq!(candidates[1].x_max, 5);
+    assert_eq!(candidates[1].peak_x, 5);
+    assert_eq!(candidates[1].peak_y, 0);
+}
+
 // =============================================================================
 // Integration Tests for Connected Components + Extract Candidates
 // =============================================================================
