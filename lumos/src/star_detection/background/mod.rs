@@ -51,8 +51,8 @@ impl BackgroundMap {
 }
 
 /// Tile statistics computed during background estimation.
-#[derive(Clone, Copy)]
-struct TileStats {
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct TileStats {
     median: f32,
     sigma: f32,
 }
@@ -215,7 +215,10 @@ fn compute_tile_stats(
 }
 
 /// Compute sigma-clipped median and standard deviation using scratch buffers.
-fn sigma_clipped_stats(
+///
+/// Uses MAD (median absolute deviation) scaled by 1.4826 to estimate sigma.
+/// Values outside `kappa * sigma` from the median are iteratively removed.
+pub(crate) fn sigma_clipped_stats(
     values: &mut [f32],
     deviations: &mut Vec<f32>,
     kappa: f32,

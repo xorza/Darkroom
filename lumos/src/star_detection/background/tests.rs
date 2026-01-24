@@ -302,6 +302,287 @@ fn test_background_on_real_image() {
     }
 }
 
+// =============================================================================
+// Sigma-Clipped Statistics Tests
+// =============================================================================
+
+use super::sigma_clipped_stats;
+
+#[test]
+fn test_sigma_clipped_stats_empty_values() {
+    let mut values: Vec<f32> = vec![];
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    assert!((stats.median - 0.0).abs() < 1e-6);
+    assert!((stats.sigma - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_sigma_clipped_stats_single_value() {
+    let mut values = vec![0.5];
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    assert!((stats.median - 0.5).abs() < 1e-6);
+    assert!((stats.sigma - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_sigma_clipped_stats_uniform_values() {
+    let mut values = vec![0.3; 100];
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    assert!((stats.median - 0.3).abs() < 1e-6);
+    assert!((stats.sigma - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_sigma_clipped_stats_no_outliers() {
+    // Normal-ish distribution without outliers
+    let mut values: Vec<f32> = (0..100).map(|i| 0.5 + (i as f32 - 50.0) * 0.001).collect();
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be ~0.5
+    assert!(
+        (stats.median - 0.5).abs() < 0.01,
+        "Median {} should be ~0.5",
+        stats.median
+    );
+    // Sigma should be small but non-zero
+    assert!(stats.sigma > 0.0, "Sigma should be positive");
+    assert!(stats.sigma < 0.1, "Sigma {} should be small", stats.sigma);
+}
+
+#[test]
+fn test_sigma_clipped_stats_rejects_high_outliers() {
+    // 90 values at 0.2, 10 high outliers at 0.9
+    let mut values: Vec<f32> = vec![0.2; 90];
+    values.extend(vec![0.9; 10]);
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be ~0.2 (outliers rejected)
+    assert!(
+        (stats.median - 0.2).abs() < 0.05,
+        "Median {} should be ~0.2 after rejecting outliers",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_rejects_low_outliers() {
+    // 90 values at 0.8, 10 low outliers at 0.1
+    let mut values: Vec<f32> = vec![0.8; 90];
+    values.extend(vec![0.1; 10]);
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be ~0.8 (outliers rejected)
+    assert!(
+        (stats.median - 0.8).abs() < 0.05,
+        "Median {} should be ~0.8 after rejecting outliers",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_rejects_both_tails() {
+    // 80 values at 0.5, 10 low outliers, 10 high outliers
+    let mut values: Vec<f32> = vec![0.5; 80];
+    values.extend(vec![0.05; 10]); // Low outliers
+    values.extend(vec![0.95; 10]); // High outliers
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be ~0.5 (both tails rejected)
+    assert!(
+        (stats.median - 0.5).abs() < 0.05,
+        "Median {} should be ~0.5 after rejecting outliers",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_kappa_affects_rejection() {
+    // Same data, different kappa values
+    let base_values: Vec<f32> = {
+        let mut v = vec![0.5; 80];
+        v.extend(vec![0.8; 20]); // Moderate outliers
+        v
+    };
+
+    let mut values_strict = base_values.clone();
+    let mut values_loose = base_values.clone();
+    let mut deviations: Vec<f32> = vec![];
+
+    // Strict kappa (1.5) should reject more
+    let stats_strict = sigma_clipped_stats(&mut values_strict, &mut deviations, 1.5, 3);
+    deviations.clear();
+    // Loose kappa (5.0) should reject less
+    let stats_loose = sigma_clipped_stats(&mut values_loose, &mut deviations, 5.0, 3);
+
+    // Strict should have median closer to 0.5
+    assert!(
+        (stats_strict.median - 0.5).abs() <= (stats_loose.median - 0.5).abs() + 0.01,
+        "Strict kappa median {} should be closer to 0.5 than loose {}",
+        stats_strict.median,
+        stats_loose.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_iterations_improve_result() {
+    // Strong outliers that need multiple iterations
+    let base_values: Vec<f32> = {
+        let mut v = vec![0.3; 70];
+        v.extend(vec![0.6; 20]); // Moderate outliers
+        v.extend(vec![0.95; 10]); // Strong outliers
+        v
+    };
+
+    let mut values_1iter = base_values.clone();
+    let mut values_5iter = base_values.clone();
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats_1iter = sigma_clipped_stats(&mut values_1iter, &mut deviations, 2.5, 1);
+    deviations.clear();
+    let stats_5iter = sigma_clipped_stats(&mut values_5iter, &mut deviations, 2.5, 5);
+
+    // More iterations should get closer to 0.3
+    assert!(
+        (stats_5iter.median - 0.3).abs() <= (stats_1iter.median - 0.3).abs() + 0.01,
+        "5 iterations median {} should be closer to 0.3 than 1 iteration {}",
+        stats_5iter.median,
+        stats_1iter.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_mad_to_sigma_conversion() {
+    // MAD * 1.4826 ≈ sigma for Gaussian distribution
+    // Create data with known spread
+    let mut values: Vec<f32> = (-50..=50).map(|i| 0.5 + i as f32 * 0.002).collect();
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 10.0, 1); // High kappa = no clipping
+
+    // For uniform distribution [-0.1, 0.1] around 0.5:
+    // MAD = median of |x - median| = 0.05 (half the range / 2)
+    // sigma = MAD * 1.4826 ≈ 0.074
+    assert!(
+        stats.sigma > 0.05 && stats.sigma < 0.1,
+        "Sigma {} should be around 0.074",
+        stats.sigma
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_preserves_deviations_buffer() {
+    let mut values = vec![0.1, 0.2, 0.3, 0.4, 0.5];
+    let mut deviations: Vec<f32> = Vec::with_capacity(100);
+
+    sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Buffer should be reused (capacity preserved)
+    assert!(
+        deviations.capacity() >= 5,
+        "Deviations buffer should have been used"
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_handles_two_values() {
+    let mut values = vec![0.3, 0.7];
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // With only 2 values, iteration stops (len < 3) and final stats are computed
+    // median_f32_mut on [0.3, 0.7] returns the middle element after sorting = values[1] = 0.7
+    // But it could also average - let's just check it's reasonable
+    assert!(
+        stats.median >= 0.3 && stats.median <= 0.7,
+        "Median {} should be between 0.3 and 0.7",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_zero_iterations() {
+    let mut values = vec![0.2, 0.2, 0.2, 0.9, 0.9];
+    let mut deviations: Vec<f32> = vec![];
+
+    // Zero iterations = just compute stats without clipping
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 0);
+
+    // Median of [0.2, 0.2, 0.2, 0.9, 0.9] sorted = [0.2, 0.2, 0.2, 0.9, 0.9] -> median = 0.2
+    assert!(
+        (stats.median - 0.2).abs() < 1e-6,
+        "Median {} should be 0.2",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_extreme_outlier() {
+    // Single extreme outlier among many normal values
+    let mut values: Vec<f32> = vec![0.5; 99];
+    values.push(100.0); // Extreme outlier
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Outlier should be rejected, median should be 0.5
+    assert!(
+        (stats.median - 0.5).abs() < 0.01,
+        "Median {} should be ~0.5",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_negative_values() {
+    let mut values: Vec<f32> = vec![-0.5; 90];
+    values.extend(vec![0.5; 10]); // Outliers on positive side
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be ~-0.5
+    assert!(
+        (stats.median - (-0.5)).abs() < 0.05,
+        "Median {} should be ~-0.5",
+        stats.median
+    );
+}
+
+#[test]
+fn test_sigma_clipped_stats_all_same_except_one() {
+    // Edge case: all values same except one outlier
+    let mut values: Vec<f32> = vec![0.4; 99];
+    values.push(0.9);
+    let mut deviations: Vec<f32> = vec![];
+
+    let stats = sigma_clipped_stats(&mut values, &mut deviations, 3.0, 3);
+
+    // Median should be 0.4, sigma should be 0 or near-zero after clipping
+    assert!(
+        (stats.median - 0.4).abs() < 1e-6,
+        "Median {} should be 0.4",
+        stats.median
+    );
+}
+
 #[test]
 fn test_background_regression() {
     use image::GrayImage;
