@@ -46,14 +46,6 @@ use super::{XTransImage, XTransPattern};
 /// Minimum image size to use parallel processing (avoids overhead for small images).
 const MIN_PARALLEL_SIZE: usize = 128;
 
-/// Cached SSE4.1 feature detection result (x86_64 only).
-#[cfg(target_arch = "x86_64")]
-fn has_sse41() -> bool {
-    use std::sync::OnceLock;
-    static HAS_SSE41: OnceLock<bool> = OnceLock::new();
-    *HAS_SSE41.get_or_init(|| is_x86_feature_detected!("sse4.1"))
-}
-
 /// Search radius for interpolation (5x5 neighborhood).
 const SEARCH_RADIUS: usize = 2;
 
@@ -253,7 +245,7 @@ pub fn demosaic_xtrans_bilinear(xtrans: &XTransImage) -> Vec<f32> {
     let lookups = [&red_lookup, &green_lookup, &blue_lookup];
 
     let use_parallel = xtrans.width >= MIN_PARALLEL_SIZE && xtrans.height >= MIN_PARALLEL_SIZE;
-    let use_simd = has_sse41() && xtrans.width >= MIN_SIMD_WIDTH;
+    let use_simd = crate::common::cpu_features::has_sse4_1() && xtrans.width >= MIN_SIMD_WIDTH;
 
     if use_parallel || use_simd {
         // Create linear lookups once for SIMD path
@@ -696,7 +688,7 @@ mod tests {
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
         // Get SIMD result if SSE4.1 is available
-        if is_x86_feature_detected!("sse4.1") {
+        if crate::common::cpu_features::has_sse4_1() {
             let mut simd_result = vec![0.0f32; size * size * 3];
             for y in 0..size {
                 let row_start = y * size * 3;
@@ -741,7 +733,7 @@ mod tests {
 
         let scalar_result = demosaic_scalar(&xtrans, &lookups);
 
-        if is_x86_feature_detected!("sse4.1") {
+        if crate::common::cpu_features::has_sse4_1() {
             // demosaic_xtrans_bilinear will use parallel SIMD path for large images
             let simd_parallel_result = demosaic_xtrans_bilinear(&xtrans);
 

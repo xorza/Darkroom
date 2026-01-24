@@ -32,7 +32,7 @@ pub fn sum_f32(values: &[f32]) -> f32 {
 /// Sum f32 values using SIMD when available.
 #[cfg(target_arch = "x86_64")]
 pub fn sum_f32(values: &[f32]) -> f32 {
-    if values.len() < 4 || !is_x86_feature_detected!("sse4.1") {
+    if values.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
         return values.iter().sum();
     }
 
@@ -133,7 +133,7 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
 /// Calculate sum of squared differences from mean using SIMD.
 #[cfg(target_arch = "x86_64")]
 pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
-    if values.len() < 4 || !is_x86_feature_detected!("sse4.1") {
+    if values.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
         return values.iter().map(|v| (v - mean).powi(2)).sum();
     }
 

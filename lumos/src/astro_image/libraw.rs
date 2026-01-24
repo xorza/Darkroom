@@ -386,12 +386,12 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
     #[cfg(target_arch = "x86_64")]
     {
         // Prefer SSE4.1 for faster u16->i32 conversion (pmovzxwd)
-        if is_x86_feature_detected!("sse4.1") {
+        if crate::common::cpu_features::has_sse4_1() {
             // SAFETY: We've verified SSE4.1 is available
             unsafe {
                 normalize_chunk_sse41(input, output, black, inv_range);
             }
-        } else if is_x86_feature_detected!("sse2") {
+        } else if crate::common::cpu_features::has_sse2() {
             // SAFETY: We've verified SSE2 is available
             unsafe {
                 normalize_chunk_sse2(input, output, black, inv_range);
