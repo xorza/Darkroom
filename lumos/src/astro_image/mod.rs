@@ -1,6 +1,6 @@
 pub(crate) mod demosaic;
 mod fits;
-mod hot_pixels;
+pub(crate) mod hot_pixels;
 pub(crate) mod libraw;
 mod sensor;
 

@@ -398,17 +398,17 @@ fn normalize_chunk_simd(input: &[u16], output: &mut [f32], black: f32, inv_range
         unsafe {
             normalize_chunk_neon(input, output, black, inv_range);
         }
-        return;
     }
 
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
     {
-        // Scalar fallback for other architectures or when SIMD not available
+        // Scalar fallback for other architectures
         normalize_chunk_scalar(input, output, black, inv_range);
     }
 }
 
 /// Scalar normalization fallback.
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
 #[inline]
 fn normalize_chunk_scalar(input: &[u16], output: &mut [f32], black: f32, inv_range: f32) {
     for (out, &val) in output.iter_mut().zip(input.iter()) {

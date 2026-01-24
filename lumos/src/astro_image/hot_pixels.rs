@@ -267,6 +267,37 @@ fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -
     crate::math::median_f32(&neighbors)
 }
 
+#[cfg(feature = "bench")]
+pub mod bench {
+    //! Benchmark module for hot pixel detection.
+    //! Run with: cargo bench --package lumos --features bench hot_pixels
+
+    use super::HotPixelMap;
+    use crate::{CalibrationMasters, StackingMethod};
+    use criterion::{BenchmarkId, Criterion};
+    use std::hint::black_box;
+    use std::path::Path;
+
+    /// Register hot pixel detection benchmarks with Criterion.
+    pub fn benchmarks(c: &mut Criterion, masters_dir: &Path) {
+        let masters = CalibrationMasters::load_from_directory(masters_dir, StackingMethod::Median)
+            .expect("Failed to load calibration masters");
+
+        let master_dark = masters
+            .master_dark
+            .expect("Master dark not found in calibration_masters directory");
+
+        let mut group = c.benchmark_group("hot_pixels");
+        group.sample_size(20);
+
+        group.bench_function(BenchmarkId::new("from_master_dark", "sigma_5.0"), |b| {
+            b.iter(|| black_box(HotPixelMap::from_master_dark(&master_dark, 5.0)))
+        });
+
+        group.finish();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -38,3 +38,8 @@ required-features = ["bench"]
 name = "xtrans"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "hot_pixels"
+harness = false
+required-features = ["bench"]

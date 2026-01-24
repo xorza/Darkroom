@@ -13,5 +13,6 @@ pub use stacking::{FrameType, SigmaClipConfig, StackingMethod, stack_frames};
 #[cfg(feature = "bench")]
 pub mod bench {
     pub use crate::astro_image::demosaic::bench as demosaic;
-    pub use crate::testing::{calibration_dir, first_raw_file};
+    pub use crate::astro_image::hot_pixels::bench as hot_pixels;
+    pub use crate::testing::{calibration_dir, calibration_masters_dir, first_raw_file};
 }
