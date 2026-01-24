@@ -87,23 +87,32 @@ fn process_chunked(cache: &ImageCache, chunk_rows: usize) -> AstroImage {
         let rows_in_chunk = end_row - start_row;
         let pixels_in_chunk = rows_in_chunk * width * channels;
 
-        // Load chunk from all frames
-        let chunks: Vec<Vec<f32>> = (0..frame_count)
+        // Get slices from all frames (zero-copy from mmap)
+        let chunks: Vec<&[f32]> = (0..frame_count)
             .map(|frame_idx| cache.read_chunk(frame_idx, start_row, end_row))
             .collect();
 
         // Compute median for each pixel in chunk (parallel over pixels)
-        let chunk_output: Vec<f32> = (0..pixels_in_chunk)
-            .into_par_iter()
-            .map(|pixel_idx| {
-                let values: Vec<f32> = chunks.iter().map(|c| c[pixel_idx]).collect();
-                math::median_f32(&values)
-            })
-            .collect();
+        // Each thread reuses its own buffer to avoid per-pixel allocation
+        let output_slice = &mut output_pixels[start_row * width * channels..][..pixels_in_chunk];
 
-        // Copy to output
-        let output_start = start_row * width * channels;
-        output_pixels[output_start..output_start + pixels_in_chunk].copy_from_slice(&chunk_output);
+        output_slice
+            .par_chunks_mut(width * channels)
+            .enumerate()
+            .for_each(|(row_in_chunk, row_output)| {
+                // One buffer per thread, reused for all pixels in row
+                let mut values = vec![0.0f32; frame_count];
+                let row_offset = row_in_chunk * width * channels;
+
+                for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                    let pixel_idx = row_offset + pixel_in_row;
+                    // Gather values from all frames
+                    for (frame_idx, chunk) in chunks.iter().enumerate() {
+                        values[frame_idx] = chunk[pixel_idx];
+                    }
+                    *out = math::median_f32(&values);
+                }
+            });
     }
 
     AstroImage {

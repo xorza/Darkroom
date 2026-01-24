@@ -109,7 +109,8 @@ impl ImageCache {
     }
 
     /// Read a horizontal chunk (rows start_row..end_row) from a cached frame.
-    pub fn read_chunk(&self, frame_idx: usize, start_row: usize, end_row: usize) -> Vec<f32> {
+    /// Returns a slice directly from the memory-mapped file (zero-copy).
+    pub fn read_chunk(&self, frame_idx: usize, start_row: usize, end_row: usize) -> &[f32] {
         let mmap = &self.mmaps[frame_idx];
         let width = self.dimensions.width;
         let channels = self.dimensions.channels;
@@ -119,10 +120,7 @@ impl ImageCache {
         let end_offset = size_of::<CacheHeader>() + end_row * row_size * 4;
 
         let bytes = &mmap[start_offset..end_offset];
-
-        // Convert bytes to f32
-        let floats: &[f32] = bytemuck::cast_slice(bytes);
-        floats.to_vec()
+        bytemuck::cast_slice(bytes)
     }
 
     /// Remove all cache files.
