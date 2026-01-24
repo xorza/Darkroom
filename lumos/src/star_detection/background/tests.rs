@@ -301,3 +301,144 @@ fn test_background_on_real_image() {
         })
     }
 }
+
+#[test]
+fn test_background_regression() {
+    use image::GrayImage;
+    use imaginarium::ColorFormat;
+
+    let test_resources = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .join("test_resources");
+
+    let image_path = test_resources.join("calibrated_light_500x500_stretched.tiff");
+    if !image_path.exists() {
+        panic!(
+            "Test resource not found: {:?}. Please add calibrated_light_500x500_stretched.tiff to test_resources/",
+            image_path
+        );
+    }
+
+    // Load input image
+    let imag_image = imaginarium::Image::read_file(&image_path)
+        .expect("Failed to load image")
+        .packed();
+    let astro_image: crate::AstroImage = imag_image.convert(ColorFormat::GRAY_F32).unwrap().into();
+
+    let width = astro_image.dimensions.width;
+    let height = astro_image.dimensions.height;
+    let pixels = &astro_image.pixels;
+
+    // Estimate background
+    let bg = estimate_background(pixels, width, height, 64);
+
+    // Load reference images
+    let ref_bg_path = test_resources.join("background_map.tiff");
+    let ref_noise_path = test_resources.join("background_noise.tiff");
+
+    assert!(
+        ref_bg_path.exists(),
+        "Reference background_map.tiff not found in test_resources/"
+    );
+    assert!(
+        ref_noise_path.exists(),
+        "Reference background_noise.tiff not found in test_resources/"
+    );
+
+    let ref_bg_img = image::open(&ref_bg_path)
+        .expect("Failed to load reference background map")
+        .into_luma8();
+    let ref_noise_img = image::open(&ref_noise_path)
+        .expect("Failed to load reference noise map")
+        .into_luma8();
+
+    // Generate current output as grayscale images
+    let bg_img = to_gray_image(&bg.background, width, height);
+
+    // Auto-scale noise the same way as in the visual test
+    let noise_min = bg.noise.iter().cloned().fold(f32::INFINITY, f32::min);
+    let noise_max = bg.noise.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let noise_range = (noise_max - noise_min).max(f32::EPSILON);
+    let noise_scaled: Vec<f32> = bg
+        .noise
+        .iter()
+        .map(|n| (n - noise_min) / noise_range)
+        .collect();
+    let noise_img = to_gray_image(&noise_scaled, width, height);
+
+    // Compare dimensions
+    assert_eq!(
+        (bg_img.width(), bg_img.height()),
+        (ref_bg_img.width(), ref_bg_img.height()),
+        "Background map dimensions mismatch"
+    );
+    assert_eq!(
+        (noise_img.width(), noise_img.height()),
+        (ref_noise_img.width(), ref_noise_img.height()),
+        "Noise map dimensions mismatch"
+    );
+
+    // Compare pixel values with tolerance (allow small differences due to floating point)
+    const MAX_DIFF: u8 = 2; // Allow up to 2 levels difference per pixel
+
+    let mut bg_diff_count = 0;
+    let mut bg_max_diff: u8 = 0;
+    for (current, reference) in bg_img.pixels().zip(ref_bg_img.pixels()) {
+        let diff = (current.0[0] as i16 - reference.0[0] as i16).unsigned_abs() as u8;
+        if diff > MAX_DIFF {
+            bg_diff_count += 1;
+        }
+        bg_max_diff = bg_max_diff.max(diff);
+    }
+
+    let mut noise_diff_count = 0;
+    let mut noise_max_diff: u8 = 0;
+    for (current, reference) in noise_img.pixels().zip(ref_noise_img.pixels()) {
+        let diff = (current.0[0] as i16 - reference.0[0] as i16).unsigned_abs() as u8;
+        if diff > MAX_DIFF {
+            noise_diff_count += 1;
+        }
+        noise_max_diff = noise_max_diff.max(diff);
+    }
+
+    let total_pixels = width * height;
+    let bg_diff_pct = bg_diff_count as f64 / total_pixels as f64 * 100.0;
+    let noise_diff_pct = noise_diff_count as f64 / total_pixels as f64 * 100.0;
+
+    // Allow at most 0.1% of pixels to differ by more than MAX_DIFF
+    const MAX_DIFF_PCT: f64 = 0.1;
+
+    assert!(
+        bg_diff_pct <= MAX_DIFF_PCT,
+        "Background map regression: {:.2}% pixels differ by more than {} (max diff: {})",
+        bg_diff_pct,
+        MAX_DIFF,
+        bg_max_diff
+    );
+
+    assert!(
+        noise_diff_pct <= MAX_DIFF_PCT,
+        "Noise map regression: {:.2}% pixels differ by more than {} (max diff: {})",
+        noise_diff_pct,
+        MAX_DIFF,
+        noise_max_diff
+    );
+
+    println!(
+        "Background map: max diff = {}, pixels > {} diff = {} ({:.4}%)",
+        bg_max_diff, MAX_DIFF, bg_diff_count, bg_diff_pct
+    );
+    println!(
+        "Noise map: max diff = {}, pixels > {} diff = {} ({:.4}%)",
+        noise_max_diff, MAX_DIFF, noise_diff_count, noise_diff_pct
+    );
+
+    /// Convert f32 pixels to grayscale image (assumes 0-1 range).
+    fn to_gray_image(pixels: &[f32], width: usize, height: usize) -> GrayImage {
+        GrayImage::from_fn(width as u32, height as u32, |x, y| {
+            let val = pixels[y as usize * width + x as usize];
+            image::Luma([(val.clamp(0.0, 1.0) * 255.0) as u8])
+        })
+    }
+}
