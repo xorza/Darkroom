@@ -283,3 +283,456 @@ fn test_bayer_pattern_removal() {
         interior_mean
     );
 }
+
+// --- Tests for median_of_n ---
+
+#[test]
+fn test_median_of_n_empty() {
+    let mut v: [f32; 0] = [];
+    assert!((median_of_n(&mut v) - 0.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_median_of_n_single() {
+    let mut v = [0.42];
+    assert!((median_of_n(&mut v) - 0.42).abs() < 1e-6);
+}
+
+#[test]
+fn test_median_of_n_two() {
+    let mut v = [0.2, 0.8];
+    // Average of two = 0.5
+    assert!((median_of_n(&mut v) - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn test_median_of_n_seven() {
+    // 7 elements - uses fallback sort
+    let mut v = [0.7, 0.1, 0.6, 0.2, 0.5, 0.3, 0.4];
+    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7], median = v[3] = 0.4
+    assert!((median_of_n(&mut v) - 0.4).abs() < 1e-6);
+}
+
+#[test]
+fn test_median_of_n_eight() {
+    // 8 elements - uses fallback sort
+    let mut v = [0.8, 0.1, 0.7, 0.2, 0.6, 0.3, 0.5, 0.4];
+    // Sorted: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], median = v[4] = 0.5
+    assert!((median_of_n(&mut v) - 0.5).abs() < 1e-6);
+}
+
+// --- Tests for median_at_left_edge ---
+
+#[test]
+fn test_median_at_left_edge() {
+    // 5x5 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4, 0.5,
+        0.6, 0.7, 0.8, 0.9, 1.0,
+        1.1, 1.2, 1.3, 1.4, 1.5,
+        1.6, 1.7, 1.8, 1.9, 2.0,
+        2.1, 2.2, 2.3, 2.4, 2.5,
+    ];
+
+    // Left edge at y=1 (interior row), x=0
+    // Neighbors: [0.1, 0.2, 0.6, 0.7, 1.1, 1.2]
+    // Sorted: [0.1, 0.2, 0.6, 0.7, 1.1, 1.2]
+    // Median of 6 = (0.6 + 0.7) / 2 = 0.65
+    let result = median_at_left_edge(&pixels, 5, 1);
+    assert!(
+        (result - 0.65).abs() < 1e-6,
+        "Left edge median should be 0.65, got {}",
+        result
+    );
+}
+
+// --- Tests for median_at_right_edge ---
+
+#[test]
+fn test_median_at_right_edge() {
+    // 5x5 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4, 0.5,
+        0.6, 0.7, 0.8, 0.9, 1.0,
+        1.1, 1.2, 1.3, 1.4, 1.5,
+        1.6, 1.7, 1.8, 1.9, 2.0,
+        2.1, 2.2, 2.3, 2.4, 2.5,
+    ];
+
+    // Right edge at y=1 (interior row), x=4
+    // Neighbors: [0.4, 0.5, 0.9, 1.0, 1.4, 1.5]
+    // Sorted: [0.4, 0.5, 0.9, 1.0, 1.4, 1.5]
+    // Median of 6 = (0.9 + 1.0) / 2 = 0.95
+    let result = median_at_right_edge(&pixels, 5, 1);
+    assert!(
+        (result - 0.95).abs() < 1e-6,
+        "Right edge median should be 0.95, got {}",
+        result
+    );
+}
+
+// --- Tests for median_at_edge ---
+
+#[test]
+fn test_median_at_edge_top_left_corner() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Top-left corner (0,0): neighbors [0.1, 0.2, 0.5, 0.6]
+    // Median of 4 = (0.2 + 0.5) / 2 = 0.35
+    let result = median_at_edge(&pixels, 4, 4, 0, 0);
+    assert!(
+        (result - 0.35).abs() < 1e-6,
+        "Top-left corner should be 0.35, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median_at_edge_top_right_corner() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Top-right corner (3,0): neighbors [0.3, 0.4, 0.7, 0.8]
+    // Median of 4 = (0.4 + 0.7) / 2 = 0.55
+    let result = median_at_edge(&pixels, 4, 4, 3, 0);
+    assert!(
+        (result - 0.55).abs() < 1e-6,
+        "Top-right corner should be 0.55, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median_at_edge_bottom_left_corner() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Bottom-left corner (0,3): neighbors [0.9, 1.0, 1.3, 1.4]
+    // Median of 4 = (1.0 + 1.3) / 2 = 1.15
+    let result = median_at_edge(&pixels, 4, 4, 0, 3);
+    assert!(
+        (result - 1.15).abs() < 1e-6,
+        "Bottom-left corner should be 1.15, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median_at_edge_bottom_right_corner() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Bottom-right corner (3,3): neighbors [1.1, 1.2, 1.5, 1.6]
+    // Median of 4 = (1.2 + 1.5) / 2 = 1.35
+    let result = median_at_edge(&pixels, 4, 4, 3, 3);
+    assert!(
+        (result - 1.35).abs() < 1e-6,
+        "Bottom-right corner should be 1.35, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median_at_edge_top_row() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Top row middle (1,0): neighbors [0.1, 0.2, 0.3, 0.5, 0.6, 0.7]
+    // Median of 6 = (0.3 + 0.5) / 2 = 0.4
+    let result = median_at_edge(&pixels, 4, 4, 1, 0);
+    assert!(
+        (result - 0.4).abs() < 1e-6,
+        "Top row should be 0.4, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median_at_edge_bottom_row() {
+    // 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4,
+        0.5, 0.6, 0.7, 0.8,
+        0.9, 1.0, 1.1, 1.2,
+        1.3, 1.4, 1.5, 1.6,
+    ];
+
+    // Bottom row middle (1,3): neighbors [0.9, 1.0, 1.1, 1.3, 1.4, 1.5]
+    // Median of 6 = (1.1 + 1.3) / 2 = 1.2
+    let result = median_at_edge(&pixels, 4, 4, 1, 3);
+    assert!(
+        (result - 1.2).abs() < 1e-6,
+        "Bottom row should be 1.2, got {}",
+        result
+    );
+}
+
+// --- Tests for median9_inline ---
+
+#[test]
+fn test_median9_inline() {
+    // Same as median9 but with inline function
+    let result = median9_inline(0.9, 0.1, 0.8, 0.2, 0.7, 0.3, 0.6, 0.4, 0.5);
+    assert!(
+        (result - 0.5).abs() < 1e-6,
+        "median9_inline should be 0.5, got {}",
+        result
+    );
+}
+
+#[test]
+fn test_median9_inline_all_same() {
+    let result = median9_inline(0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5);
+    assert!(
+        (result - 0.5).abs() < 1e-6,
+        "median9_inline all same should be 0.5, got {}",
+        result
+    );
+}
+
+// --- Tests for filter_interior_row ---
+
+#[test]
+fn test_filter_interior_row() {
+    // 5x5 image with known values
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.1, 0.1, 0.1, 0.1,
+        0.1, 0.5, 0.5, 0.5, 0.1,
+        0.1, 0.5, 1.0, 0.5, 0.1,  // Hot pixel in center
+        0.1, 0.5, 0.5, 0.5, 0.1,
+        0.1, 0.1, 0.1, 0.1, 0.1,
+    ];
+
+    let mut output_row = vec![0.0f32; 5];
+    filter_interior_row(&pixels, 5, 2, &mut output_row);
+
+    // Center pixel (x=2) should be filtered
+    // Neighborhood: [0.5, 0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5]
+    // Median = 0.5
+    assert!(
+        (output_row[2] - 0.5).abs() < 1e-6,
+        "Interior row center should be 0.5, got {}",
+        output_row[2]
+    );
+}
+
+// --- Tests for filter_edge_row ---
+
+#[test]
+fn test_filter_edge_row_top() {
+    // 5x5 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4, 0.5,
+        0.6, 0.7, 0.8, 0.9, 1.0,
+        1.1, 1.2, 1.3, 1.4, 1.5,
+        1.6, 1.7, 1.8, 1.9, 2.0,
+        2.1, 2.2, 2.3, 2.4, 2.5,
+    ];
+
+    let mut output_row = vec![0.0f32; 5];
+    filter_edge_row(&pixels, 5, 5, 0, &mut output_row);
+
+    // Check first pixel (corner)
+    // Neighbors: [0.1, 0.2, 0.6, 0.7] -> median = (0.2 + 0.6) / 2 = 0.4
+    assert!(
+        (output_row[0] - 0.4).abs() < 1e-6,
+        "Top-left should be 0.4, got {}",
+        output_row[0]
+    );
+}
+
+#[test]
+fn test_filter_edge_row_bottom() {
+    // 5x5 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        0.1, 0.2, 0.3, 0.4, 0.5,
+        0.6, 0.7, 0.8, 0.9, 1.0,
+        1.1, 1.2, 1.3, 1.4, 1.5,
+        1.6, 1.7, 1.8, 1.9, 2.0,
+        2.1, 2.2, 2.3, 2.4, 2.5,
+    ];
+
+    let mut output_row = vec![0.0f32; 5];
+    filter_edge_row(&pixels, 5, 5, 4, &mut output_row);
+
+    // Check last pixel (corner)
+    // Neighbors: [1.9, 2.0, 2.4, 2.5] -> median = (2.0 + 2.4) / 2 = 2.2
+    assert!(
+        (output_row[4] - 2.2).abs() < 1e-6,
+        "Bottom-right should be 2.2, got {}",
+        output_row[4]
+    );
+}
+
+// --- Additional edge case tests ---
+
+#[test]
+fn test_4x4_all_corners_and_edges() {
+    // Test all positions in a 4x4 image
+    #[rustfmt::skip]
+    let pixels = vec![
+        1.0, 2.0, 3.0, 4.0,
+        5.0, 6.0, 7.0, 8.0,
+        9.0, 10.0, 11.0, 12.0,
+        13.0, 14.0, 15.0, 16.0,
+    ];
+
+    let result = median_filter_3x3(&pixels, 4, 4);
+
+    // All 16 pixels should be computed
+    assert_eq!(result.len(), 16);
+
+    // Check all values are finite and reasonable
+    for (i, &val) in result.iter().enumerate() {
+        assert!(val.is_finite(), "Pixel {} is not finite", i);
+        assert!(
+            (1.0..=16.0).contains(&val),
+            "Pixel {} out of range: {}",
+            i,
+            val
+        );
+    }
+}
+
+#[test]
+fn test_wide_image() {
+    // Very wide, short image
+    let width = 100;
+    let height = 4;
+    let pixels = vec![0.5f32; width * height];
+
+    let result = median_filter_3x3(&pixels, width, height);
+
+    assert_eq!(result.len(), width * height);
+    for &val in &result {
+        assert!((val - 0.5).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_tall_image() {
+    // Very tall, narrow image
+    let width = 4;
+    let height = 100;
+    let pixels = vec![0.5f32; width * height];
+
+    let result = median_filter_3x3(&pixels, width, height);
+
+    assert_eq!(result.len(), width * height);
+    for &val in &result {
+        assert!((val - 0.5).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn test_median3_all_permutations() {
+    // Test all 6 permutations of [0.1, 0.2, 0.3]
+    let permutations = [
+        [0.1, 0.2, 0.3],
+        [0.1, 0.3, 0.2],
+        [0.2, 0.1, 0.3],
+        [0.2, 0.3, 0.1],
+        [0.3, 0.1, 0.2],
+        [0.3, 0.2, 0.1],
+    ];
+
+    for perm in permutations {
+        let mut v = perm;
+        let result = median3(&mut v);
+        assert!(
+            (result - 0.2).abs() < 1e-6,
+            "median3 of {:?} should be 0.2, got {}",
+            perm,
+            result
+        );
+    }
+}
+
+#[test]
+fn test_median_with_duplicates() {
+    // Test median functions with duplicate values
+    let mut v3 = [0.5, 0.5, 0.5];
+    assert!((median3(&mut v3) - 0.5).abs() < 1e-6);
+
+    let mut v4 = [0.3, 0.3, 0.7, 0.7];
+    assert!((median4(&mut v4) - 0.5).abs() < 1e-6);
+
+    let mut v5 = [0.1, 0.5, 0.5, 0.5, 0.9];
+    assert!((median5(&mut v5) - 0.5).abs() < 1e-6);
+
+    let mut v6 = [0.1, 0.1, 0.5, 0.5, 0.9, 0.9];
+    assert!((median6(&mut v6) - 0.5).abs() < 1e-6);
+
+    let mut v9 = [0.1, 0.1, 0.1, 0.5, 0.5, 0.5, 0.9, 0.9, 0.9];
+    assert!((median9(&mut v9) - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn test_extreme_values() {
+    // Test with extreme float values
+    let mut v = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+    assert!((median9(&mut v) - 0.5).abs() < 1e-6);
+
+    let mut v = [f32::MIN_POSITIVE, 0.5, 1.0 - f32::EPSILON];
+    assert!((median3(&mut v) - 0.5).abs() < 1e-6);
+}
+
+#[test]
+fn test_chunk_boundary() {
+    // Test image height that's not a multiple of ROWS_PER_CHUNK (8)
+    // This ensures chunk boundary handling is correct
+    for height in [7, 9, 15, 17, 23, 25] {
+        let width = 10;
+        let pixels = vec![0.5f32; width * height];
+
+        let result = median_filter_3x3(&pixels, width, height);
+
+        assert_eq!(result.len(), width * height);
+        for (i, &val) in result.iter().enumerate() {
+            assert!(
+                (val - 0.5).abs() < 1e-6,
+                "Height {}: Pixel {} should be 0.5, got {}",
+                height,
+                i,
+                val
+            );
+        }
+    }
+}
