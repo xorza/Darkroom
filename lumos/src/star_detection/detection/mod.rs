@@ -65,9 +65,10 @@ impl From<&StarDetectionConfig> for DetectionConfig {
     }
 }
 
-/// Detect star candidates in an image.
+/// Detect star candidates in an image (without matched filtering).
 ///
 /// Uses connected component labeling to find regions above the detection threshold.
+/// For better faint-star detection, use `find_stars()` with `expected_fwhm > 0`.
 ///
 /// # Arguments
 /// * `pixels` - Image pixel data
@@ -254,6 +255,85 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
             parent[(root_a - 1) as usize] = root_b;
         }
     }
+}
+
+/// Detect star candidates using a filtered image for thresholding.
+///
+/// This variant uses matched filtering (Gaussian convolution) to improve SNR
+/// for faint star detection. The filtered image is used for thresholding,
+/// while the original image is used for peak values and centroiding.
+///
+/// # Arguments
+/// * `pixels` - Original image pixel data (for peak values)
+/// * `filtered` - Matched-filtered image (background-subtracted and convolved)
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `background` - Background map (for noise estimates)
+/// * `config` - Detection configuration
+pub fn detect_stars_filtered(
+    pixels: &[f32],
+    filtered: &[f32],
+    width: usize,
+    height: usize,
+    background: &BackgroundMap,
+    config: &StarDetectionConfig,
+) -> Vec<StarCandidate> {
+    let detection_config = DetectionConfig::from(config);
+
+    // Create binary mask from the filtered image
+    // The threshold is based on noise in the filtered image
+    let mask =
+        create_threshold_mask_filtered(filtered, background, detection_config.sigma_threshold);
+
+    // Dilate mask - use smaller radius (1) when matched filter is applied
+    // since convolution already "connects" nearby pixels
+    let dilation_radius = if config.expected_fwhm > 0.0 { 1 } else { 2 };
+    let mask = dilate_mask(&mask, width, height, dilation_radius);
+
+    // Find connected components
+    let (labels, num_labels) = connected_components(&mask, width, height);
+
+    // Extract candidate properties using ORIGINAL pixels for peak values
+    let mut candidates = extract_candidates(pixels, &labels, num_labels, width, height);
+
+    // Filter candidates
+    candidates.retain(|c| {
+        // Size filter
+        c.area >= detection_config.min_area
+            && c.area <= detection_config.max_area
+            // Edge filter
+            && c.x_min >= detection_config.edge_margin
+            && c.y_min >= detection_config.edge_margin
+            && c.x_max < width - detection_config.edge_margin
+            && c.y_max < height - detection_config.edge_margin
+    });
+
+    candidates
+}
+
+/// Create binary mask from a filtered (convolved) image.
+///
+/// For matched-filtered images, the noise is reduced by a factor related to
+/// the kernel size. We use a simpler threshold based on the filtered values
+/// being positive and above a noise-scaled threshold.
+fn create_threshold_mask_filtered(
+    filtered: &[f32],
+    background: &BackgroundMap,
+    sigma_threshold: f32,
+) -> Vec<bool> {
+    // For a matched filter with Gaussian kernel of width σ_k, the noise
+    // in the convolved image is reduced by approximately 1/sqrt(2πσ_k²)
+    // We use the background noise estimate scaled appropriately.
+    filtered
+        .iter()
+        .zip(background.noise.iter())
+        .map(|(&px, &noise)| {
+            // The filtered image is already background-subtracted
+            // Threshold is sigma_threshold times the (reduced) noise
+            let threshold = sigma_threshold * noise.max(1e-6);
+            px > threshold
+        })
+        .collect()
 }
 
 /// Extract candidate properties from labeled image.

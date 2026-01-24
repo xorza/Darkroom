@@ -21,6 +21,7 @@
 
 mod background;
 mod centroid;
+mod convolution;
 mod detection;
 mod median_filter;
 
@@ -39,7 +40,8 @@ pub mod bench {
 
 pub use background::estimate_background;
 pub use centroid::compute_centroid;
-pub use detection::detect_stars;
+pub use convolution::matched_filter;
+pub use detection::{detect_stars, detect_stars_filtered};
 pub use median_filter::median_filter_3x3;
 
 /// A detected star with sub-pixel position and quality metrics.
@@ -99,6 +101,11 @@ pub struct StarDetectionConfig {
     /// Stars with FWHM > median + max_fwhm_deviation * MAD are rejected as spurious.
     /// Typical value is 3.0-5.0 (similar to sigma clipping). Set to 0.0 to disable.
     pub max_fwhm_deviation: f32,
+    /// Expected FWHM of stars in pixels for matched filtering.
+    /// The matched filter (Gaussian convolution) dramatically improves detection of
+    /// faint stars by boosting SNR. Set to 0.0 to disable matched filtering.
+    /// Typical values are 2.0-6.0 pixels depending on seeing and sampling.
+    pub expected_fwhm: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -112,6 +119,7 @@ impl Default for StarDetectionConfig {
             min_snr: 10.0,
             background_tile_size: 64,
             max_fwhm_deviation: 3.0,
+            expected_fwhm: 4.0, // Typical value for well-sampled images
         }
     }
 }
@@ -140,11 +148,29 @@ pub fn find_stars(
     // Step 1: Estimate background
     let background = estimate_background(&smoothed, width, height, config.background_tile_size);
 
-    // Step 2: Detect star candidates (use smoothed for detection)
-    let candidates = detect_stars(&smoothed, width, height, &background, config);
+    // Step 2: Detect star candidates
+    let candidates = if config.expected_fwhm > 0.0 {
+        // Apply matched filter (Gaussian convolution) for better faint star detection
+        // This is the DAOFIND/SExtractor technique
+        tracing::debug!(
+            "Applying matched filter with FWHM={:.1} pixels",
+            config.expected_fwhm
+        );
+        let filtered = matched_filter(
+            &smoothed,
+            width,
+            height,
+            &background.background,
+            config.expected_fwhm,
+        );
+        detect_stars_filtered(&smoothed, &filtered, width, height, &background, config)
+    } else {
+        // No matched filter - use standard detection
+        detect_stars(&smoothed, width, height, &background, config)
+    };
     tracing::debug!("Detected {} star candidates", candidates.len());
 
-    // Step 3: Compute precise centroids and filter
+    // Step 4: Compute precise centroids and filter
     let mut stars: Vec<Star> = candidates
         .into_iter()
         .filter_map(|candidate| {
