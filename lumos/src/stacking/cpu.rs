@@ -2,6 +2,10 @@ use crate::astro_image::AstroImage;
 use crate::math;
 use crate::stacking::{FrameType, SigmaClipConfig, StackingMethod};
 
+/// Maximum number of frames supported for stack-allocated buffer.
+/// Beyond this, heap allocation is used.
+const MAX_STACK_FRAMES: usize = 256;
+
 /// Stack frames with the given method using parallel CPU processing.
 pub(crate) fn stack_frames_cpu(
     frames: &[AstroImage],
@@ -16,6 +20,7 @@ pub(crate) fn stack_frames_cpu(
 
     let first = &frames[0];
     let dims = first.dimensions;
+    let frame_count = frames.len();
 
     // Verify all images have same dimensions
     for (i, frame) in frames.iter().enumerate().skip(1) {
@@ -29,11 +34,21 @@ pub(crate) fn stack_frames_cpu(
         );
     }
 
-    // Process pixels in parallel
+    // Process pixels in parallel - use stack buffer to avoid per-pixel allocations
     let pixel_count = dims.pixel_count();
     let result_pixels = crate::common::parallel_map_f32(pixel_count, |pixel_idx| {
-        let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
-        combine_pixels(&values, method)
+        if frame_count <= MAX_STACK_FRAMES {
+            // Fast path: use stack-allocated array (no heap allocation per pixel)
+            let mut values = [0.0f32; MAX_STACK_FRAMES];
+            for (i, frame) in frames.iter().enumerate() {
+                values[i] = frame.pixels[pixel_idx];
+            }
+            combine_pixels(&values[..frame_count], method)
+        } else {
+            // Fallback for very large frame counts (rare)
+            let values: Vec<f32> = frames.iter().map(|f| f.pixels[pixel_idx]).collect();
+            combine_pixels(&values, method)
+        }
     });
 
     AstroImage {
