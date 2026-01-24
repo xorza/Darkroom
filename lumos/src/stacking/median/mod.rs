@@ -5,6 +5,9 @@
 
 mod cache;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;

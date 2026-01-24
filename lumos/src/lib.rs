@@ -14,5 +14,6 @@ pub use stacking::{FrameType, ImageStack, MedianStackConfig, SigmaClipConfig, St
 pub mod bench {
     pub use crate::astro_image::demosaic::bench as demosaic;
     pub use crate::astro_image::hot_pixels::bench as hot_pixels;
+    pub use crate::stacking::bench::median;
     pub use crate::testing::{calibration_dir, calibration_masters_dir, first_raw_file};
 }

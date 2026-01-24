@@ -6,6 +6,11 @@ use strum_macros::Display;
 
 pub use median::MedianStackConfig;
 
+#[cfg(feature = "bench")]
+pub mod bench {
+    pub use super::median::bench as median;
+}
+
 use crate::AstroImage;
 
 /// Type of calibration frame being stacked.

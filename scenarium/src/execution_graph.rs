@@ -178,7 +178,6 @@ pub struct ExecutionNode {
     #[serde(skip)]
     pub lambda: FuncLambda,
 
-    #[cfg(debug_assertions)]
     #[serde(default)]
     pub name: String,
 }
@@ -245,11 +244,8 @@ impl ExecutionNode {
         assert_eq!(self.outputs.len(), func.outputs.len());
         assert_eq!(self.events.len(), func.events.len());
 
-        #[cfg(debug_assertions)]
-        {
-            self.name.clear();
-            self.name.push_str(&node.name);
-        }
+        self.name.clear();
+        self.name.push_str(&node.name);
     }
 
     fn init_from_func(&mut self, func: &Func) {
@@ -336,12 +332,10 @@ impl ExecutionGraph {
         self.e_nodes.by_key_mut(node_id)
     }
 
-    #[cfg(debug_assertions)]
     pub fn by_name(&self, node_name: &str) -> Option<&ExecutionNode> {
         self.e_nodes.iter().find(|node| node.name == node_name)
     }
 
-    #[cfg(debug_assertions)]
     pub fn by_name_mut(&mut self, node_name: &str) -> Option<&mut ExecutionNode> {
         self.e_nodes.iter_mut().find(|node| node.name == node_name)
     }

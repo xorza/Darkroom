@@ -31,16 +31,21 @@ criterion = { workspace = true, optional = true }
 criterion = { workspace = true }
 
 [[bench]]
-name = "demosaic"
+name = "demosaic_bayer"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
-name = "xtrans"
+name = "demosaic_xtrans"
 harness = false
 required-features = ["bench"]
 
 [[bench]]
 name = "hot_pixels"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "stack_median"
 harness = false
 required-features = ["bench"]
