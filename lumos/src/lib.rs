@@ -8,7 +8,7 @@ mod testing;
 
 pub use astro_image::{AstroImage, AstroImageMetadata, BitPix, HotPixelMap, ImageDimensions};
 pub use calibration_masters::CalibrationMasters;
-pub use stacking::{FrameType, ImageStack, MedianStackConfig, SigmaClipConfig, StackingMethod};
+pub use stacking::{FrameType, ImageStack, MedianConfig, SigmaClipConfig, StackingMethod};
 
 #[cfg(feature = "bench")]
 pub mod bench {

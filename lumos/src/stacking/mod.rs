@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use strum_macros::Display;
 
-pub use median::MedianStackConfig;
+pub use median::MedianConfig;
 pub use sigma_clipped::SigmaClippedConfig;
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
@@ -61,7 +61,7 @@ pub enum StackingMethod {
     Mean,
     /// Take the median pixel value. Best for outlier rejection.
     /// Uses memory-mapped chunked processing for efficiency.
-    Median(MedianStackConfig),
+    Median(MedianConfig),
     /// Average after excluding pixels beyond N sigma from the mean.
     /// Uses memory-mapped chunked processing for efficiency.
     SigmaClippedMean(SigmaClippedConfig),
@@ -69,7 +69,7 @@ pub enum StackingMethod {
 
 impl Default for StackingMethod {
     fn default() -> Self {
-        Self::Median(MedianStackConfig::default())
+        Self::Median(MedianConfig::default())
     }
 }
 
@@ -173,7 +173,7 @@ mod tests {
     fn test_stacking_method_default() {
         assert_eq!(
             StackingMethod::default(),
-            StackingMethod::Median(MedianStackConfig::default())
+            StackingMethod::Median(MedianConfig::default())
         );
     }
 

@@ -11,13 +11,13 @@ use crate::stacking::cache::ImageCache;
 use crate::stacking::{CacheConfig, FrameType};
 
 /// Configuration for memory-efficient median stacking.
-pub type MedianStackConfig = CacheConfig;
+pub type MedianConfig = CacheConfig;
 
 /// Stack images using median with bounded memory usage.
 pub fn stack_median_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
-    config: &MedianStackConfig,
+    config: &MedianConfig,
 ) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
