@@ -7,7 +7,7 @@ use super::median_filter_3x3;
 pub fn bench_median_filter(c: &mut Criterion) {
     let mut group = c.benchmark_group("median_filter_3x3");
 
-    for (width, height) in [(512, 512), (1024, 1024), (2048, 2048), (4096, 4096)] {
+    for (width, height) in [(512, 512), (1024, 1024), (4096, 4096)] {
         let pixels: Vec<f32> = (0..width * height)
             .map(|i| (i % 256) as f32 / 255.0)
             .collect();
