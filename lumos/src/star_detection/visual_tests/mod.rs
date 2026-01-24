@@ -1,11 +1,13 @@
 //! Visual tests for star detection - generates debug images for inspection.
 
+mod synthetic;
+
 use crate::AstroImage;
-use crate::star_detection::synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 use crate::star_detection::{StarDetectionConfig, find_stars};
 use crate::testing::{calibration_dir, init_tracing};
 use image::{GrayImage, Rgb, RgbImage};
 use imageproc::drawing::{draw_cross_mut, draw_hollow_circle_mut};
+use synthetic::{SyntheticFieldConfig, SyntheticStar, generate_star_field};
 
 #[test]
 #[cfg_attr(not(feature = "slow-tests"), ignore)]
