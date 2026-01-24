@@ -58,6 +58,7 @@ bytes = { version = "*" }
 lazy_static = { version = "*" }
 mlua = { version = "*", features = ["serialize", "send", "anyhow", "async", "lua54", "vendored"] }
 criterion = { version = "*" }
+memmap2 = { version = "*" }
 tiff = { version = "*" }
 image = { version = "*" }
 paste = { version = "*" }

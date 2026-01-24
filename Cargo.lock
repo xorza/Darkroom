@@ -1992,6 +1992,7 @@ dependencies = [
  "glam",
  "imaginarium",
  "libraw-rs-sys",
+ "memmap2",
  "rayon",
  "strum",
  "strum_macros",

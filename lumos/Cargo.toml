@@ -24,6 +24,7 @@ glam = { workspace = true }
 strum = { workspace = true }
 strum_macros = { workspace = true }
 tracing-subscriber = { workspace = true }
+memmap2 = { workspace = true }
 criterion = { workspace = true, optional = true }
 
 [dev-dependencies]
