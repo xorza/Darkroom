@@ -56,7 +56,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
 
     let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
     let clip = config.clip;
-    let result = cache.process_chunked(config.chunk_rows, |values| {
+    let result = cache.process_chunked(config.chunk_rows, |values: &mut [f32]| {
         sigma_clipped_mean(values, &clip)
     });
 
@@ -88,8 +88,8 @@ fn sigma_clipped_mean(values: &[f32], config: &SigmaClipConfig) -> f32 {
             break;
         }
 
-        // Use median as center - robust to outliers
-        let center = math::median_f32(&included);
+        // Use median as center - robust to outliers (in-place)
+        let center = math::median_f32_mut(&mut included);
         let variance = math::sum_squared_diff(&included, center) / included.len() as f32;
         let std_dev = variance.sqrt();
 

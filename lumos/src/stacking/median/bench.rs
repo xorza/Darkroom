@@ -23,8 +23,10 @@ fn benchmark_median_calculation(c: &mut Criterion) {
         group.throughput(Throughput::Elements(size as u64));
 
         group.bench_function(BenchmarkId::new("quickselect", size), |b| {
+            let mut buf = values.clone();
             b.iter(|| {
-                let result = crate::math::median_f32(black_box(&values));
+                buf.copy_from_slice(&values);
+                let result = crate::math::median_f32_mut(black_box(&mut buf));
                 black_box(result)
             })
         });

@@ -127,9 +127,10 @@ impl ImageCache {
     ///
     /// This is the core processing loop shared by median and sigma-clipped stacking.
     /// Each thread gets its own buffer to avoid per-pixel allocation.
+    /// The combine function receives a mutable slice to allow in-place operations.
     pub fn process_chunked<F>(&self, chunk_rows: usize, combine: F) -> AstroImage
     where
-        F: Fn(&[f32]) -> f32 + Sync,
+        F: Fn(&mut [f32]) -> f32 + Sync,
     {
         let dims = self.dimensions;
         let frame_count = self.frame_count();
@@ -168,7 +169,7 @@ impl ImageCache {
                         for (frame_idx, chunk) in chunks.iter().enumerate() {
                             values[frame_idx] = chunk[pixel_idx];
                         }
-                        *out = combine(&values);
+                        *out = combine(&mut values);
                     }
                 });
         }

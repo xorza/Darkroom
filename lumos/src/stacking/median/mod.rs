@@ -42,7 +42,7 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
     std::fs::create_dir_all(&config.cache_dir).expect("Failed to create cache directory");
 
     let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
-    let result = cache.process_chunked(config.chunk_rows, math::median_f32);
+    let result = cache.process_chunked(config.chunk_rows, math::median_f32_mut);
 
     if !config.keep_cache {
         cache.cleanup();

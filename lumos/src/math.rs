@@ -77,11 +77,12 @@ pub fn mean_f32(values: &[f32]) -> f32 {
     sum_f32(values) / values.len() as f32
 }
 
-/// Calculate the median of f32 values using quickselect (O(n) average).
-pub fn median_f32(values: &[f32]) -> f32 {
-    debug_assert!(!values.is_empty());
+/// Calculate the median of f32 values in-place using quickselect (O(n) average).
+/// Mutates the input buffer (partial sort).
+#[inline]
+pub fn median_f32_mut(data: &mut [f32]) -> f32 {
+    debug_assert!(!data.is_empty());
 
-    let mut data = values.to_vec();
     let len = data.len();
     let mid = len / 2;
 
@@ -90,7 +91,7 @@ pub fn median_f32(values: &[f32]) -> f32 {
         let (_, right_median, _) =
             data.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
         let right = *right_median;
-        // Left median is max of left partition (after select_nth, left partition contains all elements < right_median)
+        // Left median is max of left partition
         let left = data[..mid]
             .iter()
             .copied()
@@ -180,14 +181,14 @@ mod tests {
 
     #[test]
     fn test_median_odd() {
-        let values = vec![1.0f32, 3.0, 2.0, 5.0, 4.0];
-        assert!((median_f32(&values) - 3.0).abs() < f32::EPSILON);
+        let mut values = [1.0f32, 3.0, 2.0, 5.0, 4.0];
+        assert!((median_f32_mut(&mut values) - 3.0).abs() < f32::EPSILON);
     }
 
     #[test]
     fn test_median_even() {
-        let values = vec![1.0f32, 2.0, 3.0, 4.0];
-        assert!((median_f32(&values) - 2.5).abs() < f32::EPSILON);
+        let mut values = [1.0f32, 2.0, 3.0, 4.0];
+        assert!((median_f32_mut(&mut values) - 2.5).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -273,8 +274,8 @@ mod tests {
 
     #[test]
     fn test_median_f32_single() {
-        let values = vec![42.0f32];
-        assert!((median_f32(&values) - 42.0).abs() < f32::EPSILON);
+        let mut values = [42.0f32];
+        assert!((median_f32_mut(&mut values) - 42.0).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -296,7 +297,7 @@ mod tests {
 
     #[test]
     fn test_median_f32_negative() {
-        let values = vec![-5.0f32, -3.0, -1.0, 2.0, 4.0];
-        assert!((median_f32(&values) - (-1.0)).abs() < f32::EPSILON);
+        let mut values = [-5.0f32, -3.0, -1.0, 2.0, 4.0];
+        assert!((median_f32_mut(&mut values) - (-1.0)).abs() < f32::EPSILON);
     }
 }

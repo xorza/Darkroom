@@ -324,7 +324,7 @@ fn median_of_neighbors(image: &AstroImage, x: usize, y: usize, channel: usize) -
         return image.pixels[idx];
     }
 
-    crate::math::median_f32(&neighbors)
+    crate::math::median_f32_mut(&mut neighbors)
 }
 
 #[cfg(feature = "bench")]
