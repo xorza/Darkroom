@@ -253,13 +253,14 @@ fn convert_channel_count_gray_to_rgb() {
 #[test]
 fn convert_channel_count_rgb_to_gray() {
     let desc = ImageDesc::new(1, 1, ColorFormat::RGB_U8);
-    // R=100, G=150, B=200, average = 150
+    // R=100, G=150, B=200
+    // Luminance (Rec.709) = 0.2126*100 + 0.7152*150 + 0.0722*200 = 142.98
     let src = Image::new_with_data(desc, vec![100, 150, 200, 0]).unwrap();
     let result = src.convert(ColorFormat::GRAY_U8).unwrap();
 
     assert_eq!(result.desc().color_format, ColorFormat::GRAY_U8);
-    // Should be average of RGB
-    assert_eq!(result.bytes()[0], 150);
+    // Should be luminance-weighted grayscale
+    assert_eq!(result.bytes()[0], 142);
 }
 
 #[test]

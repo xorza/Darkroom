@@ -15,8 +15,10 @@ pub(crate) trait ChannelConvert<To>: Copy {
     fn convert(self) -> To;
 }
 
-pub(crate) trait ChannelAverage: Copy {
-    fn average3(a: Self, b: Self, c: Self) -> Self;
+/// Trait for computing luminance from RGB channels.
+/// Uses Rec. 709 (sRGB) weights: 0.2126*R + 0.7152*G + 0.0722*B
+pub(crate) trait RgbToLuminance: Copy {
+    fn luminance(r: Self, g: Self, b: Self) -> Self;
 }
 
 /// Trait for getting the opaque alpha value for a channel type.
@@ -112,34 +114,39 @@ impl_convert_float_to_int!(f32, u8);
 impl_convert_float_to_int!(f32, u16);
 
 // =============================================================================
-// Implement ChannelAverage
+// Implement RgbToLuminance
 // =============================================================================
 
-macro_rules! impl_average_int {
-    ($t:ty, $wider:ty) => {
-        impl ChannelAverage for $t {
-            #[inline]
-            fn average3(a: Self, b: Self, c: Self) -> Self {
-                ((a as $wider + b as $wider + c as $wider) / 3) as $t
-            }
-        }
-    };
+// Rec. 709 (sRGB) luminance weights scaled to fixed-point for integer math
+// R: 0.2126 * 65536 = 13933
+// G: 0.7152 * 65536 = 46871
+// B: 0.0722 * 65536 = 4732
+// Total: 65536 (allows shift by 16 instead of divide)
+const LUMA_R: u32 = 13933;
+const LUMA_G: u32 = 46871;
+const LUMA_B: u32 = 4732;
+
+impl RgbToLuminance for u8 {
+    #[inline]
+    fn luminance(r: Self, g: Self, b: Self) -> Self {
+        ((r as u32 * LUMA_R + g as u32 * LUMA_G + b as u32 * LUMA_B) >> 16) as u8
+    }
 }
 
-macro_rules! impl_average_float {
-    ($t:ty) => {
-        impl ChannelAverage for $t {
-            #[inline]
-            fn average3(a: Self, b: Self, c: Self) -> Self {
-                (a + b + c) / 3.0
-            }
-        }
-    };
+impl RgbToLuminance for u16 {
+    #[inline]
+    fn luminance(r: Self, g: Self, b: Self) -> Self {
+        ((r as u64 * LUMA_R as u64 + g as u64 * LUMA_G as u64 + b as u64 * LUMA_B as u64) >> 16)
+            as u16
+    }
 }
 
-impl_average_int!(u8, u16);
-impl_average_int!(u16, u32);
-impl_average_float!(f32);
+impl RgbToLuminance for f32 {
+    #[inline]
+    fn luminance(r: Self, g: Self, b: Self) -> Self {
+        0.2126 * r + 0.7152 * g + 0.0722 * b
+    }
+}
 
 // =============================================================================
 // Implement OpaqueAlpha
@@ -238,7 +245,7 @@ pub(crate) fn convert_image(from: &Image, to: &mut Image) -> Result<()> {
 
 fn convert_pixels<From, To>(from: &Image, to: &mut Image)
 where
-    From: Pod + ChannelConvert<To> + ChannelAverage + Sync,
+    From: Pod + ChannelConvert<To> + RgbToLuminance + Sync,
     To: Pod + OpaqueAlpha + Send,
 {
     debug_assert_eq!(from.desc().width, to.desc().width);
@@ -279,8 +286,8 @@ where
                 match (to_channels, from_channels) {
                     (1, 1) => dst[0] = src[0].convert(),
                     (1, 2) => dst[0] = src[0].convert(),
-                    (1, 3) => dst[0] = From::average3(src[0], src[1], src[2]).convert(),
-                    (1, 4) => dst[0] = From::average3(src[0], src[1], src[2]).convert(),
+                    (1, 3) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
+                    (1, 4) => dst[0] = From::luminance(src[0], src[1], src[2]).convert(),
 
                     (2, 1) => {
                         dst[0] = src[0].convert();
@@ -291,11 +298,11 @@ where
                         dst[1] = src[1].convert();
                     }
                     (2, 3) => {
-                        dst[0] = From::average3(src[0], src[1], src[2]).convert();
+                        dst[0] = From::luminance(src[0], src[1], src[2]).convert();
                         dst[1] = To::opaque_alpha();
                     }
                     (2, 4) => {
-                        dst[0] = From::average3(src[0], src[1], src[2]).convert();
+                        dst[0] = From::luminance(src[0], src[1], src[2]).convert();
                         dst[1] = src[3].convert();
                     }
 
