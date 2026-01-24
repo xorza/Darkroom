@@ -247,7 +247,7 @@ fn test_background_on_real_image() {
 
     // Save background map
     let bg_img = to_gray_image(&bg.background, width, height);
-    let path = common::test_utils::test_output_path("background_map.png");
+    let path = common::test_utils::test_output_path("background_map.tiff");
     bg_img.save(&path).unwrap();
     println!("Saved background map: {:?}", path);
 
@@ -261,7 +261,7 @@ fn test_background_on_real_image() {
         .map(|n| (n - noise_min) / noise_range)
         .collect();
     let noise_img = to_gray_image(&noise_scaled, width, height);
-    let path = common::test_utils::test_output_path("background_noise.png");
+    let path = common::test_utils::test_output_path("background_noise.tiff");
     noise_img.save(&path).unwrap();
     println!("Saved noise map: {:?}", path);
     println!("Noise range: min={:.6}, max={:.6}", noise_min, noise_max);
