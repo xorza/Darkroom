@@ -118,11 +118,15 @@ pub fn find_stars(
 ) -> Vec<Star> {
     assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
 
-    // Step 1: Estimate background
-    let background = estimate_background(pixels, width, height, config.background_tile_size);
+    // Step 0: Apply 3x3 median filter to remove Bayer pattern artifacts
+    // This smooths out alternating-row sensitivity differences from CFA sensors
+    let smoothed = median_filter_3x3(pixels, width, height);
 
-    // Step 2: Detect star candidates
-    let candidates = detect_stars(pixels, width, height, &background, config);
+    // Step 1: Estimate background
+    let background = estimate_background(&smoothed, width, height, config.background_tile_size);
+
+    // Step 2: Detect star candidates (use smoothed for detection)
+    let candidates = detect_stars(&smoothed, width, height, &background, config);
     tracing::debug!("Detected {} star candidates", candidates.len());
 
     // Step 3: Compute precise centroids and filter
@@ -171,4 +175,37 @@ pub fn find_stars(
         .filter(|(i, _)| kept[*i])
         .map(|(_, s)| s)
         .collect()
+}
+
+/// Apply 3x3 median filter to remove Bayer pattern artifacts.
+///
+/// This is essential for images from color sensors where alternating rows
+/// have different sensitivities due to the Bayer color filter array.
+pub fn median_filter_3x3(pixels: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut output = vec![0.0f32; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            let mut neighbors = [0.0f32; 9];
+            let mut count = 0;
+
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    let nx = x as i32 + dx;
+                    let ny = y as i32 + dy;
+                    if nx >= 0 && nx < width as i32 && ny >= 0 && ny < height as i32 {
+                        neighbors[count] = pixels[ny as usize * width + nx as usize];
+                        count += 1;
+                    }
+                }
+            }
+
+            // Sort and take median
+            let slice = &mut neighbors[..count];
+            slice.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            output[y * width + x] = slice[count / 2];
+        }
+    }
+
+    output
 }
