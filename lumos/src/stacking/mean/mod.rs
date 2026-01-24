@@ -9,6 +9,9 @@ mod neon;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 
+#[cfg(feature = "bench")]
+pub mod bench;
+
 use std::path::Path;
 
 use crate::AstroImage;

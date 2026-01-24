@@ -2,7 +2,7 @@
 
 /// Accumulate src into dst using scalar operations.
 #[inline]
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+#[cfg_attr(all(target_arch = "aarch64", not(feature = "bench")), allow(dead_code))]
 pub(super) fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
     for (d, &s) in dst.iter_mut().zip(src.iter()) {
         *d += s;
@@ -11,7 +11,7 @@ pub(super) fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
 
 /// Divide all values by a scalar using scalar operations.
 #[inline]
-#[cfg_attr(target_arch = "aarch64", allow(dead_code))]
+#[cfg_attr(all(target_arch = "aarch64", not(feature = "bench")), allow(dead_code))]
 pub(super) fn divide_chunk(data: &mut [f32], inv_count: f32) {
     for d in data.iter_mut() {
         *d *= inv_count;
