@@ -143,7 +143,7 @@ pub fn stack_frames(
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::load_calibration_images;
+    use crate::testing::{calibration_image_paths, load_calibration_images};
 
     use super::*;
 
@@ -181,5 +181,41 @@ mod tests {
         let img: imaginarium::Image = master_flat.into();
         img.save_file(common::test_utils::test_output_path("master_flat.tiff"))
             .unwrap();
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_stack_darks_mean_from_env() {
+        let Some(paths) = calibration_image_paths("Darks") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
+            return;
+        };
+
+        if paths.is_empty() {
+            eprintln!("No dark files found in Darks directory, skipping test");
+            return;
+        }
+
+        println!("Stacking {} darks with mean method...", paths.len());
+        let stack = ImageStack::new(FrameType::Dark, StackingMethod::Mean, paths.clone());
+        let master_dark = stack.process();
+
+        // Load first frame to verify dimensions match
+        let first = AstroImage::from_file(&paths[0]).unwrap();
+        println!(
+            "Master dark: {}x{}x{}",
+            master_dark.dimensions.width,
+            master_dark.dimensions.height,
+            master_dark.dimensions.channels
+        );
+
+        assert_eq!(master_dark.dimensions, first.dimensions);
+        assert!(!master_dark.pixels.is_empty());
+
+        let img: imaginarium::Image = master_dark.into();
+        img.save_file(common::test_utils::test_output_path(
+            "master_dark_mean.tiff",
+        ))
+        .unwrap();
     }
 }

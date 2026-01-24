@@ -71,3 +71,16 @@ pub fn first_raw_file() -> Option<PathBuf> {
         .first()
         .cloned()
 }
+
+/// Returns paths to all images in a subdirectory of the calibration directory.
+/// Returns None if LUMOS_CALIBRATION_DIR is not set or the subdirectory doesn't exist.
+pub fn calibration_image_paths(subdir: &str) -> Option<Vec<PathBuf>> {
+    let cal_dir = calibration_dir()?;
+    let dir = cal_dir.join(subdir);
+
+    if !dir.exists() {
+        return None;
+    }
+
+    Some(common::file_utils::astro_image_files(&dir))
+}
