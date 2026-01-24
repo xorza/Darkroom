@@ -590,6 +590,223 @@ fn test_snr_decreases_with_higher_noise() {
 }
 
 // =============================================================================
+// Additional Quality Metrics Tests
+// =============================================================================
+
+#[test]
+fn test_fwhm_formula_for_known_gaussian() {
+    // For a Gaussian with known sigma, verify FWHM ≈ 2.355 * sigma
+    let width = 128;
+    let height = 128;
+    let sigma = 3.0f32;
+    let expected_fwhm = 2.355 * sigma;
+
+    let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.001); // Very low noise
+
+    let metrics = compute_metrics(&pixels, width, height, &bg, 64.0, 64.0).unwrap();
+
+    // Allow 10% error due to discrete sampling and finite aperture
+    let error = (metrics.fwhm - expected_fwhm).abs() / expected_fwhm;
+    assert!(
+        error < 0.1,
+        "FWHM should be close to 2.355*sigma: expected {}, got {}, error {}",
+        expected_fwhm,
+        metrics.fwhm,
+        error
+    );
+}
+
+#[test]
+fn test_flux_proportional_to_amplitude() {
+    let width = 64;
+    let height = 64;
+
+    let pixels_amp1 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.4);
+    let pixels_amp2 = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    let metrics1 = compute_metrics(&pixels_amp1, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics2 = compute_metrics(&pixels_amp2, width, height, &bg, 32.0, 32.0).unwrap();
+
+    // Flux should scale roughly proportionally with amplitude
+    let flux_ratio = metrics2.flux / metrics1.flux;
+    let amp_ratio = 0.8 / 0.4;
+
+    assert!(
+        (flux_ratio - amp_ratio).abs() < 0.5,
+        "Flux ratio {} should be close to amplitude ratio {}",
+        flux_ratio,
+        amp_ratio
+    );
+}
+
+#[test]
+fn test_eccentricity_bounds() {
+    // Eccentricity should always be in [0, 1]
+    let width = 64;
+    let height = 64;
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    // Test various star shapes
+    let circular = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+    let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 5.0, 2.0, 0.8);
+    let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 5.0, 0.8);
+
+    for (name, pixels) in [
+        ("circular", circular),
+        ("elongated_x", elongated_x),
+        ("elongated_y", elongated_y),
+    ] {
+        let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0).unwrap();
+        assert!(
+            metrics.eccentricity >= 0.0 && metrics.eccentricity <= 1.0,
+            "{} eccentricity {} out of bounds [0,1]",
+            name,
+            metrics.eccentricity
+        );
+    }
+}
+
+#[test]
+fn test_eccentricity_orientation_invariant() {
+    // Eccentricity should be similar regardless of orientation (x vs y elongation)
+    let width = 64;
+    let height = 64;
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    let elongated_x = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
+    let elongated_y = make_elliptical_star(width, height, 32.0, 32.0, 2.0, 4.0, 0.8);
+
+    let metrics_x = compute_metrics(&elongated_x, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_y = compute_metrics(&elongated_y, width, height, &bg, 32.0, 32.0).unwrap();
+
+    // Should have similar eccentricity (within 20%)
+    let diff = (metrics_x.eccentricity - metrics_y.eccentricity).abs();
+    let avg = (metrics_x.eccentricity + metrics_y.eccentricity) / 2.0;
+    assert!(
+        diff / avg < 0.2,
+        "X and Y elongated stars should have similar eccentricity: {} vs {}",
+        metrics_x.eccentricity,
+        metrics_y.eccentricity
+    );
+}
+
+#[test]
+fn test_snr_formula_consistency() {
+    // SNR = flux / (noise * sqrt(aperture_area))
+    // Verify the formula behaves as expected
+    let width = 64;
+    let height = 64;
+    let pixels = make_gaussian_star(width, height, 32.0, 32.0, 2.5, 0.8);
+
+    let noise1 = 0.02f32;
+    let noise2 = 0.04f32; // 2x noise
+
+    let bg1 = make_uniform_background(width, height, 0.1, noise1);
+    let bg2 = make_uniform_background(width, height, 0.1, noise2);
+
+    let metrics1 = compute_metrics(&pixels, width, height, &bg1, 32.0, 32.0).unwrap();
+    let metrics2 = compute_metrics(&pixels, width, height, &bg2, 32.0, 32.0).unwrap();
+
+    // SNR should halve when noise doubles (same flux)
+    let snr_ratio = metrics1.snr / metrics2.snr;
+    assert!(
+        (snr_ratio - 2.0).abs() < 0.1,
+        "SNR ratio should be ~2 when noise doubles: got {}",
+        snr_ratio
+    );
+}
+
+#[test]
+fn test_metrics_with_high_background() {
+    // Stars should still be measurable with high but uniform background
+    let width = 64;
+    let height = 64;
+
+    // High background value
+    let mut pixels = vec![0.5f32; width * height];
+    // Add star on top of high background
+    for y in 0..height {
+        for x in 0..width {
+            let dx = x as f32 - 32.0;
+            let dy = y as f32 - 32.0;
+            let r2 = dx * dx + dy * dy;
+            let value = 0.4 * (-r2 / (2.0 * 2.5 * 2.5)).exp();
+            if value > 0.001 {
+                pixels[y * width + x] += value;
+            }
+        }
+    }
+
+    let bg = make_uniform_background(width, height, 0.5, 0.02);
+    let metrics = compute_metrics(&pixels, width, height, &bg, 32.0, 32.0);
+
+    assert!(
+        metrics.is_some(),
+        "Should compute metrics with high background"
+    );
+    let m = metrics.unwrap();
+    assert!(m.flux > 0.0, "Flux should be positive");
+    assert!(m.fwhm > 0.0, "FWHM should be positive");
+}
+
+#[test]
+fn test_fwhm_independent_of_amplitude() {
+    // FWHM should be the same regardless of star brightness (same sigma)
+    let width = 64;
+    let height = 64;
+    let sigma = 2.5f32;
+
+    let pixels_dim = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.3);
+    let pixels_bright = make_gaussian_star(width, height, 32.0, 32.0, sigma, 0.9);
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    let metrics_dim = compute_metrics(&pixels_dim, width, height, &bg, 32.0, 32.0).unwrap();
+    let metrics_bright = compute_metrics(&pixels_bright, width, height, &bg, 32.0, 32.0).unwrap();
+
+    // FWHM should be within 20% of each other
+    let diff = (metrics_dim.fwhm - metrics_bright.fwhm).abs();
+    let avg = (metrics_dim.fwhm + metrics_bright.fwhm) / 2.0;
+    assert!(
+        diff / avg < 0.2,
+        "FWHM should be amplitude-independent: dim={}, bright={}",
+        metrics_dim.fwhm,
+        metrics_bright.fwhm
+    );
+}
+
+#[test]
+fn test_eccentricity_increases_with_elongation() {
+    let width = 64;
+    let height = 64;
+    let bg = make_uniform_background(width, height, 0.1, 0.01);
+
+    // Create stars with increasing elongation ratios
+    let ratio_1_1 = make_elliptical_star(width, height, 32.0, 32.0, 2.5, 2.5, 0.8); // circular
+    let ratio_2_1 = make_elliptical_star(width, height, 32.0, 32.0, 4.0, 2.0, 0.8);
+    let ratio_3_1 = make_elliptical_star(width, height, 32.0, 32.0, 6.0, 2.0, 0.8);
+
+    let ecc_1 = compute_metrics(&ratio_1_1, width, height, &bg, 32.0, 32.0)
+        .unwrap()
+        .eccentricity;
+    let ecc_2 = compute_metrics(&ratio_2_1, width, height, &bg, 32.0, 32.0)
+        .unwrap()
+        .eccentricity;
+    let ecc_3 = compute_metrics(&ratio_3_1, width, height, &bg, 32.0, 32.0)
+        .unwrap()
+        .eccentricity;
+
+    assert!(
+        ecc_1 < ecc_2 && ecc_2 < ecc_3,
+        "Eccentricity should increase with elongation: {} < {} < {}",
+        ecc_1,
+        ecc_2,
+        ecc_3
+    );
+}
+
+// =============================================================================
 // compute_centroid Integration Tests
 // =============================================================================
 

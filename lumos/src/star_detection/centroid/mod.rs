@@ -214,9 +214,10 @@ pub(crate) fn compute_metrics(
     }
 
     // FWHM from second moment (assuming Gaussian PSF)
-    // For Gaussian: sigma^2 = sum(r^2 * I) / sum(I)
+    // For 2D Gaussian: E[r^2] = E[x^2 + y^2] = 2*sigma^2
+    // So sigma^2 = sum(r^2 * I) / sum(I) / 2
     // FWHM = 2.355 * sigma
-    let sigma_sq = sum_r2 / flux;
+    let sigma_sq = sum_r2 / flux / 2.0;
     let fwhm = 2.355 * sigma_sq.sqrt();
 
     // Eccentricity from covariance matrix
