@@ -22,16 +22,6 @@ fn to_gray_stretched(pixels: &[f32], width: usize, height: usize) -> GrayImage {
     GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
 }
 
-/// Convert f32 pixels to grayscale without stretching (0-1 mapped to 0-255).
-fn to_gray_direct(pixels: &[f32], width: usize, height: usize) -> GrayImage {
-    let bytes: Vec<u8> = pixels
-        .iter()
-        .map(|&p| (p.clamp(0.0, 1.0) * 255.0) as u8)
-        .collect();
-
-    GrayImage::from_raw(width as u32, height as u32, bytes).unwrap()
-}
-
 /// Convert bool mask to grayscale image.
 fn mask_to_gray(mask: &[bool], width: usize, height: usize) -> GrayImage {
     let bytes: Vec<u8> = mask.iter().map(|&b| if b { 255 } else { 0 }).collect();
@@ -95,7 +85,7 @@ fn test_debug_star_detection_steps() {
         return;
     };
 
-    let image_path = cal_dir.join("calibrated_light_500x500.tiff");
+    let image_path = cal_dir.join("calibrated_light_500x500_stretched.tiff");
 
     println!("Loading image: {:?}", image_path);
     let imag_image = imaginarium::Image::read_file(&image_path)
@@ -465,7 +455,6 @@ fn test_debug_synthetic_steps() {
 #[test]
 fn test_noise_analysis() {
     use crate::star_detection::estimate_background;
-    use common::test_utils;
 
     let cal_dir = match std::env::var("LUMOS_CALIBRATION_DIR") {
         Ok(dir) => std::path::PathBuf::from(dir),
@@ -570,7 +559,7 @@ fn test_noise_analysis() {
     }
     local_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let local_mad = local_diffs[local_diffs.len() / 2];
-    let local_sigma = local_mad * 1.4826 / 1.4142; // Divide by sqrt(2) for difference of 2 values
+    let local_sigma = local_mad * 1.4826 / std::f32::consts::SQRT_2; // Divide by sqrt(2) for difference of 2 values
     println!(
         "\nLocal difference-based noise estimate: {:.6}",
         local_sigma
@@ -763,5 +752,157 @@ fn test_find_striped_region() {
             row.push_str(&format!("{:5.1} ", v));
         }
         println!("y={:3}: {}", y, row);
+    }
+}
+
+#[test]
+fn test_dilation_comparison() {
+    use crate::star_detection::detection::dilate_mask;
+    use crate::star_detection::estimate_background;
+
+    let cal_dir = match std::env::var("LUMOS_CALIBRATION_DIR") {
+        Ok(dir) => std::path::PathBuf::from(dir),
+        Err(_) => {
+            eprintln!("LUMOS_CALIBRATION_DIR not set, skipping");
+            return;
+        }
+    };
+
+    let cropped_path = cal_dir.join("calibrated_light_500x500.tiff");
+    if !cropped_path.exists() {
+        eprintln!("No cropped test image found, skipping");
+        return;
+    }
+
+    let imag_image = imaginarium::Image::read_file(&cropped_path).expect("Failed to load image");
+    let astro_image: crate::AstroImage = imag_image.into();
+
+    let width = astro_image.dimensions.width;
+    let height = astro_image.dimensions.height;
+
+    // Convert to grayscale
+    let grayscale: Vec<f32> = (0..width * height)
+        .map(|i| {
+            let r = astro_image.pixels[i];
+            let g = astro_image.pixels[width * height + i];
+            let b = astro_image.pixels[2 * width * height + i];
+            0.2126 * r + 0.7152 * g + 0.0722 * b
+        })
+        .collect();
+
+    // Apply median filter
+    let smoothed = median_filter_3x3(&grayscale, width, height);
+
+    let bg = estimate_background(&smoothed, width, height, 64);
+
+    // Create threshold mask
+    let mask: Vec<bool> = smoothed
+        .iter()
+        .zip(bg.background.iter())
+        .zip(bg.noise.iter())
+        .map(|((&p, &b), &n)| p > b + 4.0 * n.max(1e-6))
+        .collect();
+
+    let mask_count = mask.iter().filter(|&&b| b).count();
+    println!("Threshold mask: {} pixels", mask_count);
+
+    // Count connected components WITHOUT dilation
+    let (_labels_no_dil, num_no_dil) = connected_components(&mask, width, height);
+    println!("Without dilation: {} connected components", num_no_dil);
+
+    // Count connected components WITH dilation (radius 1)
+    let dilated_1 = dilate_mask(&mask, width, height, 1);
+    let (_labels_dil_1, num_dil_1) = connected_components(&dilated_1, width, height);
+    println!("With dilation radius=1: {} connected components", num_dil_1);
+
+    // Count connected components WITH dilation (radius 2)
+    let dilated_2 = dilate_mask(&mask, width, height, 2);
+    let (_labels_dil_2, num_dil_2) = connected_components(&dilated_2, width, height);
+    println!("With dilation radius=2: {} connected components", num_dil_2);
+
+    // Save both masks for visual comparison
+    let no_dil_img = mask_to_gray(&mask, width, height);
+    let path = common::test_utils::test_output_path("compare_no_dilation.png");
+    no_dil_img.save(&path).unwrap();
+    println!("Saved: {:?}", path);
+
+    let dil_2_img = mask_to_gray(&dilated_2, width, height);
+    let path = common::test_utils::test_output_path("compare_dilation_r2.png");
+    dil_2_img.save(&path).unwrap();
+    println!("Saved: {:?}", path);
+}
+
+fn connected_components(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
+    let mut labels = vec![0u32; width * height];
+    let mut parent: Vec<u32> = Vec::new();
+    let mut next_label = 1u32;
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if !mask[idx] {
+                continue;
+            }
+
+            let mut neighbors = Vec::with_capacity(2);
+
+            if x > 0 && mask[idx - 1] {
+                neighbors.push(labels[idx - 1]);
+            }
+            if y > 0 && mask[idx - width] {
+                neighbors.push(labels[idx - width]);
+            }
+
+            if neighbors.is_empty() {
+                labels[idx] = next_label;
+                parent.push(next_label);
+                next_label += 1;
+            } else {
+                let min_label = *neighbors.iter().min().unwrap();
+                labels[idx] = min_label;
+                for &label in &neighbors {
+                    union(&mut parent, min_label, label);
+                }
+            }
+        }
+    }
+
+    let mut label_map = vec![0u32; parent.len() + 1];
+    let mut num_labels = 0u32;
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            if labels[idx] == 0 {
+                continue;
+            }
+            let root = find(&parent, labels[idx]);
+            if label_map[root as usize] == 0 {
+                num_labels += 1;
+                label_map[root as usize] = num_labels;
+            }
+            labels[idx] = label_map[root as usize];
+        }
+    }
+
+    (labels, num_labels as usize)
+}
+
+fn find(parent: &[u32], mut label: u32) -> u32 {
+    while parent[(label - 1) as usize] != label {
+        label = parent[(label - 1) as usize];
+    }
+    label
+}
+
+fn union(parent: &mut [u32], a: u32, b: u32) {
+    let root_a = find(parent, a);
+    let root_b = find(parent, b);
+    if root_a != root_b {
+        if root_a < root_b {
+            parent[(root_b - 1) as usize] = root_a;
+        } else {
+            parent[(root_a - 1) as usize] = root_b;
+        }
     }
 }

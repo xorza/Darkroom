@@ -328,7 +328,11 @@ mod tests {
         let pixels = make_gaussian_star(width, height, 64.0, 64.0, sigma, 0.8);
 
         let bg = estimate_background(&pixels, width, height, 32);
-        let config = StarDetectionConfig::default();
+        // Use higher max_area because dilation (radius=2) expands the star region
+        let config = StarDetectionConfig {
+            max_area: 1000,
+            ..StarDetectionConfig::default()
+        };
         let candidates = detect_stars(&pixels, width, height, &bg, &config);
 
         assert_eq!(candidates.len(), 1);

@@ -119,7 +119,7 @@ pub fn detect_stars(
 /// Dilate a binary mask by the given radius (morphological dilation).
 ///
 /// This connects nearby pixels that might be separated due to variable threshold.
-fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
     let mut dilated = vec![false; width * height];
 
     for y in 0..height {

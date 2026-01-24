@@ -54,9 +54,16 @@ pub struct Star {
 ```
 
 **Algorithm:**
-1. **Background estimation** (`background.rs`): Tiled sigma-clipped median with bilinear interpolation
-2. **Detection** (`detection.rs`): Threshold mask + connected component labeling (union-find)
-3. **Centroid** (`centroid.rs`): Iterative Gaussian-weighted centroid refinement
+1. **Preprocessing**: 3x3 median filter to remove Bayer pattern artifacts from CFA sensors
+2. **Background estimation** (`background.rs`): Tiled sigma-clipped median with bilinear interpolation
+3. **Detection** (`detection.rs`): Threshold mask + morphological dilation (radius 2) + connected component labeling (union-find)
+4. **Centroid** (`centroid.rs`): Iterative Gaussian-weighted centroid refinement on original (unfiltered) pixels
+5. **Filtering**: SNR, eccentricity, area constraints + deduplication (8px separation)
+
+**Key Implementation Details:**
+- **Median filter**: Removes alternating-row sensitivity differences from Bayer CFA patterns that cause horizontal striping in threshold masks
+- **Dilation (radius 2)**: Connects fragmented star regions that may have gaps at faint signal levels
+- **Centroid uses original pixels**: Smoothed data for detection, original for sub-pixel accuracy
 
 ### Hot Pixel Detection (`hot_pixels.rs`)
 
