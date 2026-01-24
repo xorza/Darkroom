@@ -336,25 +336,29 @@ fn interpolate_row(bg_row: &mut [f32], noise_row: &mut [f32], y: usize, grid: &T
         let left_noise = wy_inv * t00.sigma + wy * t01.sigma;
         let right_noise = wy_inv * t10.sigma + wy * t11.sigma;
 
-        // Precompute X interpolation constants
-        let (x_scale, x_offset) = if tx1 != tx0 {
+        let bg_segment = &mut bg_row[x..segment_end];
+        let noise_segment = &mut noise_row[x..segment_end];
+
+        if tx1 != tx0 {
+            // Interpolation needed
             let inv_dx = 1.0 / (grid.centers_x[tx1] - grid.centers_x[tx0]);
-            (inv_dx, grid.centers_x[tx0])
+            let x_offset = grid.centers_x[tx0];
+
+            for (j, (bg, noise)) in bg_segment
+                .iter_mut()
+                .zip(noise_segment.iter_mut())
+                .enumerate()
+            {
+                let px = (x + j) as f32;
+                let wx = ((px - x_offset) * inv_dx).clamp(0.0, 1.0);
+                let wx_inv = 1.0 - wx;
+                *bg = wx_inv * left_bg + wx * right_bg;
+                *noise = wx_inv * left_noise + wx * right_noise;
+            }
         } else {
-            (0.0, 0.0)
-        };
-
-        // Process all pixels in this segment with simple linear interpolation
-        for px in x..segment_end {
-            let wx = if tx1 != tx0 {
-                ((px as f32 - x_offset) * x_scale).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
-            let wx_inv = 1.0 - wx;
-
-            bg_row[px] = wx_inv * left_bg + wx * right_bg;
-            noise_row[px] = wx_inv * left_noise + wx * right_noise;
+            // Constant fill (single tile column)
+            bg_segment.fill(left_bg);
+            noise_segment.fill(left_noise);
         }
 
         x = segment_end;
