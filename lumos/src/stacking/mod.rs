@@ -2,6 +2,7 @@ mod cpu;
 use strum_macros::Display;
 
 use crate::AstroImage;
+use crate::astro_image::ImageDimensions;
 
 /// Type of calibration frame being stacked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
@@ -72,6 +73,37 @@ impl SigmaClipConfig {
         }
     }
 }
+
+use std::path::PathBuf;
+
+/// Accumulator for incrementally stacking frames using running mean.
+///
+/// More memory efficient than storing all frames - only keeps running sum and count.
+/// Only supports mean stacking (not median or sigma-clipped).
+#[derive(Debug)]
+pub struct ImageStack {
+    paths: Vec<PathBuf>,
+    dimensions: Option<ImageDimensions>,
+    frame_type: FrameType,
+    method: StackingMethod,
+}
+
+impl ImageStack {
+    /// Create a new stack for the given frame type with paths to load.
+    pub fn new<I, P>(frame_type: FrameType, method: StackingMethod, paths: I) -> Self
+    where
+        I: IntoIterator<Item = P>,
+        P: Into<PathBuf>,
+    {
+        Self {
+            paths: paths.into_iter().map(|p| p.into()).collect(),
+            dimensions: None,
+            frame_type,
+            method,
+        }
+    }
+}
+
 /// Stack frames with the given method (uses parallel CPU implementation).
 pub fn stack_frames(
     frames: &[AstroImage],

@@ -37,6 +37,7 @@ pub(crate) fn stack_frames_cpu(
     // Process pixels in parallel - use stack buffer to avoid per-pixel allocations
     let pixel_count = dims.pixel_count();
     let result_pixels = crate::common::parallel_map_f32(pixel_count, |pixel_idx| {
+        // todo unoptimal
         if frame_count <= MAX_STACK_FRAMES {
             // Fast path: use stack-allocated array (no heap allocation per pixel)
             let mut values = [0.0f32; MAX_STACK_FRAMES];
