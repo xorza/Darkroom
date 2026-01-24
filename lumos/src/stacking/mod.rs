@@ -1,8 +1,9 @@
 mod cpu;
+mod mean;
+
 use strum_macros::Display;
 
 use crate::AstroImage;
-use crate::astro_image::ImageDimensions;
 
 /// Type of calibration frame being stacked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Display)]
@@ -83,7 +84,6 @@ use std::path::PathBuf;
 #[derive(Debug)]
 pub struct ImageStack {
     paths: Vec<PathBuf>,
-    dimensions: Option<ImageDimensions>,
     frame_type: FrameType,
     method: StackingMethod,
 }
@@ -97,10 +97,38 @@ impl ImageStack {
     {
         Self {
             paths: paths.into_iter().map(|p| p.into()).collect(),
-            dimensions: None,
             frame_type,
             method,
         }
+    }
+
+    /// Process all frames and return the stacked result.
+    ///
+    /// Loads images one at a time for memory efficiency.
+    /// Currently only supports mean stacking.
+    ///
+    /// # Panics
+    /// Panics if no paths were provided or if frames have mismatched dimensions.
+    pub fn process(&self) -> AstroImage {
+        assert!(!self.paths.is_empty(), "No paths provided for stacking");
+
+        match self.method {
+            StackingMethod::Mean => self.process_mean(),
+            _ => {
+                // For median/sigma-clipped, load all frames and use existing implementation
+                let frames: Vec<AstroImage> = self
+                    .paths
+                    .iter()
+                    .map(|p| AstroImage::from_file(p).expect("Failed to load image"))
+                    .collect();
+                cpu::stack_frames_cpu(&frames, self.method, self.frame_type)
+            }
+        }
+    }
+
+    /// Process frames using running mean (memory efficient).
+    fn process_mean(&self) -> AstroImage {
+        mean::stack_mean_from_paths(&self.paths, self.frame_type)
     }
 }
 

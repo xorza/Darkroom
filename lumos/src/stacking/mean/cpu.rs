@@ -1,0 +1,77 @@
+//! CPU-based mean stacking with parallel processing.
+
+use rayon::prelude::*;
+
+/// Accumulate src into dst in parallel chunks.
+#[inline]
+pub fn accumulate_parallel(dst: &mut [f32], src: &[f32], chunk_size: usize) {
+    dst.par_chunks_mut(chunk_size)
+        .zip(src.par_chunks(chunk_size))
+        .for_each(|(dst_chunk, src_chunk)| {
+            accumulate_chunk(dst_chunk, src_chunk);
+        });
+}
+
+/// Accumulate a chunk using SIMD when available.
+#[inline]
+fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { super::neon::accumulate_chunk(dst, src) };
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse2") {
+        unsafe { super::sse::accumulate_chunk(dst, src) };
+        return;
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    accumulate_chunk_scalar(dst, src);
+}
+
+/// Scalar fallback for accumulation.
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+#[inline]
+fn accumulate_chunk_scalar(dst: &mut [f32], src: &[f32]) {
+    for (d, &s) in dst.iter_mut().zip(src.iter()) {
+        *d += s;
+    }
+}
+
+/// Divide all values by a scalar in parallel.
+#[inline]
+pub fn divide_parallel(data: &mut [f32], inv_count: f32, chunk_size: usize) {
+    data.par_chunks_mut(chunk_size).for_each(|chunk| {
+        divide_chunk(chunk, inv_count);
+    });
+}
+
+/// Divide a chunk by a scalar using SIMD when available.
+#[inline]
+fn divide_chunk(data: &mut [f32], inv_count: f32) {
+    #[cfg(target_arch = "aarch64")]
+    {
+        unsafe { super::neon::divide_chunk(data, inv_count) };
+        return;
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    if is_x86_feature_detected!("sse2") {
+        unsafe { super::sse::divide_chunk(data, inv_count) };
+        return;
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    divide_chunk_scalar(data, inv_count);
+}
+
+/// Scalar fallback for division.
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+#[inline]
+fn divide_chunk_scalar(data: &mut [f32], inv_count: f32) {
+    for d in data.iter_mut() {
+        *d *= inv_count;
+    }
+}
