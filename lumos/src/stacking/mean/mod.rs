@@ -1,6 +1,7 @@
 //! Mean stacking implementation with SIMD optimizations.
 
 mod cpu;
+mod scalar;
 
 #[cfg(target_arch = "aarch64")]
 mod neon;

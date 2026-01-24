@@ -225,8 +225,22 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - `astro_image/fits.rs` - FITS file loading via fitsio
 - `astro_image/rawloader.rs` - RAW loading via rawloader (pure Rust)
 - `astro_image/libraw.rs` - RAW loading via libraw-rs (C library fallback)
-- `stacking/mod.rs` - `StackingMethod`, `FrameType`, `stack_frames()` function
-- `stacking/cpu.rs` - Row-parallel CPU stacking implementation
+- `stacking/mod.rs` - `StackingMethod`, `FrameType`, `stack_frames()` dispatch
+- `stacking/cache.rs` - `ImageCache` with memory-mapped binary cache and `process_chunked()` for shared chunked processing
+- `stacking/mean/` - Mean stacking module
+  - `mod.rs` - Public API with `stack_mean_from_images()`
+  - `cpu.rs` - SIMD dispatch proxy (NEON/SSE/scalar)
+  - `scalar.rs` - Scalar fallback implementation
+  - `neon.rs` - ARM NEON SIMD implementation
+  - `sse.rs` - x86 SSE2 SIMD implementation
+- `stacking/median/` - Median stacking module (memory-efficient via mmap)
+  - `mod.rs` - Public API with `stack_median_from_paths()`, `MedianStackConfig`
+  - `cpu.rs` - Proxy to scalar implementation
+  - `scalar.rs` - Scalar median calculation
+- `stacking/sigma_clipped/` - Sigma-clipped mean stacking (memory-efficient via mmap)
+  - `mod.rs` - Public API with `stack_sigma_clipped_from_paths()`, `SigmaClippedConfig`, `SigmaClipConfig`
+  - `cpu.rs` - Proxy to scalar implementation
+  - `scalar.rs` - Iterative sigma clipping algorithm
 - `calibration_masters.rs` - `CalibrationMasters` struct with `from_directory()`, `load_from_directory()`, `save_to_directory()`
 - `math.rs` - SIMD math: `sum_f32()`, `mean_f32()`, `sum_squared_diff()`
 

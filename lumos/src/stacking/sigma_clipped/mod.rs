@@ -3,7 +3,6 @@
 //! This implementation decodes images to a binary cache format, then processes
 //! the images in horizontal strips to keep memory usage bounded.
 
-mod cpu;
 mod scalar;
 
 #[cfg(target_arch = "aarch64")]
@@ -72,8 +71,11 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     // Decode all images to cache
     let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
 
-    // Process in chunks
-    let result = cpu::process_chunked(&cache, config.chunk_rows, &config.clip);
+    // Process in chunks using shared infrastructure
+    let clip = config.clip;
+    let result = cache.process_chunked(config.chunk_rows, |values| {
+        scalar::sigma_clipped_mean(values, &clip)
+    });
 
     // Cleanup
     if !config.keep_cache {

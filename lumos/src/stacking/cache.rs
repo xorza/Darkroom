@@ -10,6 +10,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
+use rayon::prelude::*;
 
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::stacking::FrameType;
@@ -93,16 +94,6 @@ impl ImageCache {
         }
     }
 
-    /// Get image dimensions.
-    pub fn dimensions(&self) -> ImageDimensions {
-        self.dimensions
-    }
-
-    /// Get metadata from first frame.
-    pub fn metadata(&self) -> &AstroImageMetadata {
-        &self.metadata
-    }
-
     /// Get number of cached frames.
     pub fn frame_count(&self) -> usize {
         self.mmaps.len()
@@ -130,6 +121,63 @@ impl ImageCache {
         }
         // Try to remove cache dir if empty
         let _ = std::fs::remove_dir(&self.cache_dir);
+    }
+
+    /// Process cached images in horizontal chunks, applying a combine function to each pixel.
+    ///
+    /// This is the core processing loop shared by median and sigma-clipped stacking.
+    /// Each thread gets its own buffer to avoid per-pixel allocation.
+    pub fn process_chunked<F>(&self, chunk_rows: usize, combine: F) -> AstroImage
+    where
+        F: Fn(&[f32]) -> f32 + Sync,
+    {
+        let dims = self.dimensions;
+        let frame_count = self.frame_count();
+        let width = dims.width;
+        let height = dims.height;
+        let channels = dims.channels;
+
+        let mut output_pixels = vec![0.0f32; dims.pixel_count()];
+        let num_chunks = height.div_ceil(chunk_rows);
+
+        for chunk_idx in 0..num_chunks {
+            let start_row = chunk_idx * chunk_rows;
+            let end_row = (start_row + chunk_rows).min(height);
+            let rows_in_chunk = end_row - start_row;
+            let pixels_in_chunk = rows_in_chunk * width * channels;
+
+            // Get slices from all frames (zero-copy from mmap)
+            let chunks: Vec<&[f32]> = (0..frame_count)
+                .map(|frame_idx| self.read_chunk(frame_idx, start_row, end_row))
+                .collect();
+
+            let output_slice =
+                &mut output_pixels[start_row * width * channels..][..pixels_in_chunk];
+
+            output_slice
+                .par_chunks_mut(width * channels)
+                .enumerate()
+                .for_each(|(row_in_chunk, row_output)| {
+                    // One buffer per thread, reused for all pixels in row
+                    let mut values = vec![0.0f32; frame_count];
+                    let row_offset = row_in_chunk * width * channels;
+
+                    for (pixel_in_row, out) in row_output.iter_mut().enumerate() {
+                        let pixel_idx = row_offset + pixel_in_row;
+                        // Gather values from all frames
+                        for (frame_idx, chunk) in chunks.iter().enumerate() {
+                            values[frame_idx] = chunk[pixel_idx];
+                        }
+                        *out = combine(&values);
+                    }
+                });
+        }
+
+        AstroImage {
+            metadata: self.metadata.clone(),
+            pixels: output_pixels,
+            dimensions: dims,
+        }
     }
 }
 

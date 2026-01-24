@@ -1,4 +1,7 @@
-//! CPU-based mean stacking with parallel processing.
+//! CPU dispatch for mean stacking with SIMD support.
+
+#[cfg(not(target_arch = "aarch64"))]
+use super::scalar;
 
 use rayon::prelude::*;
 
@@ -12,29 +15,6 @@ pub fn accumulate_parallel(dst: &mut [f32], src: &[f32], chunk_size: usize) {
         });
 }
 
-/// Accumulate a chunk using SIMD when available.
-#[inline]
-fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
-    #[cfg(target_arch = "aarch64")]
-    unsafe {
-        super::neon::accumulate_chunk(dst, src)
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("sse2") {
-        unsafe { super::sse::accumulate_chunk(dst, src) };
-    } else {
-        for (d, &s) in dst.iter_mut().zip(src.iter()) {
-            *d += s;
-        }
-    }
-
-    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    for (d, &s) in dst.iter_mut().zip(src.iter()) {
-        *d += s;
-    }
-}
-
 /// Divide all values by a scalar in parallel.
 #[inline]
 pub fn divide_parallel(data: &mut [f32], inv_count: f32, chunk_size: usize) {
@@ -43,7 +23,30 @@ pub fn divide_parallel(data: &mut [f32], inv_count: f32, chunk_size: usize) {
     });
 }
 
-/// Divide a chunk by a scalar using SIMD when available.
+/// Accumulate a chunk, dispatching to best available implementation.
+#[inline]
+fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
+    #[cfg(target_arch = "aarch64")]
+    unsafe {
+        super::neon::accumulate_chunk(dst, src)
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        if is_x86_feature_detected!("sse2") {
+            unsafe { super::sse::accumulate_chunk(dst, src) };
+        } else {
+            scalar::accumulate_chunk(dst, src);
+        }
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        scalar::accumulate_chunk(dst, src);
+    }
+}
+
+/// Divide a chunk, dispatching to best available implementation.
 #[inline]
 fn divide_chunk(data: &mut [f32], inv_count: f32) {
     #[cfg(target_arch = "aarch64")]
@@ -52,16 +55,16 @@ fn divide_chunk(data: &mut [f32], inv_count: f32) {
     }
 
     #[cfg(target_arch = "x86_64")]
-    if is_x86_feature_detected!("sse2") {
-        unsafe { super::sse::divide_chunk(data, inv_count) };
-    } else {
-        for d in data.iter_mut() {
-            *d *= inv_count;
+    {
+        if is_x86_feature_detected!("sse2") {
+            unsafe { super::sse::divide_chunk(data, inv_count) };
+        } else {
+            scalar::divide_chunk(data, inv_count);
         }
     }
 
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    for d in data.iter_mut() {
-        *d *= inv_count;
+    {
+        scalar::divide_chunk(data, inv_count);
     }
 }
