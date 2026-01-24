@@ -16,25 +16,20 @@ pub fn accumulate_parallel(dst: &mut [f32], src: &[f32], chunk_size: usize) {
 #[inline]
 fn accumulate_chunk(dst: &mut [f32], src: &[f32]) {
     #[cfg(target_arch = "aarch64")]
-    {
-        unsafe { super::neon::accumulate_chunk(dst, src) };
-        return;
+    unsafe {
+        super::neon::accumulate_chunk(dst, src)
     }
 
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse2") {
         unsafe { super::sse::accumulate_chunk(dst, src) };
-        return;
+    } else {
+        for (d, &s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
     }
 
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    accumulate_chunk_scalar(dst, src);
-}
-
-/// Scalar fallback for accumulation.
-#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-#[inline]
-fn accumulate_chunk_scalar(dst: &mut [f32], src: &[f32]) {
     for (d, &s) in dst.iter_mut().zip(src.iter()) {
         *d += s;
     }
@@ -52,25 +47,20 @@ pub fn divide_parallel(data: &mut [f32], inv_count: f32, chunk_size: usize) {
 #[inline]
 fn divide_chunk(data: &mut [f32], inv_count: f32) {
     #[cfg(target_arch = "aarch64")]
-    {
-        unsafe { super::neon::divide_chunk(data, inv_count) };
-        return;
+    unsafe {
+        super::neon::divide_chunk(data, inv_count)
     }
 
     #[cfg(target_arch = "x86_64")]
     if is_x86_feature_detected!("sse2") {
         unsafe { super::sse::divide_chunk(data, inv_count) };
-        return;
+    } else {
+        for d in data.iter_mut() {
+            *d *= inv_count;
+        }
     }
 
     #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-    divide_chunk_scalar(data, inv_count);
-}
-
-/// Scalar fallback for division.
-#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
-#[inline]
-fn divide_chunk_scalar(data: &mut [f32], inv_count: f32) {
     for d in data.iter_mut() {
         *d *= inv_count;
     }
