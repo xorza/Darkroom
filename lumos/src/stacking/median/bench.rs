@@ -23,7 +23,7 @@ fn benchmark_median_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("median_calculation");
 
     // Test various array sizes typical for astrophotography stacking
-    for size in [5, 8, 10, 15, 16, 20, 30, 50] {
+    for size in [20, 50, 100] {
         // Create test data - reversed sequence is worst case for sorting
         let values: Vec<f32> = (1..=size).map(|x| x as f32).rev().collect();
 
