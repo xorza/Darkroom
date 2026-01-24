@@ -164,7 +164,7 @@ fn test_subpixel_shift_detection() {
     }
 
     // Assert sub-pixel accuracy (should be within 0.1 pixel)
-    let tolerance = 0.1;
+    let tolerance = 0.05;
     assert!(
         error_x < tolerance,
         "X shift error {:.4} exceeds tolerance {:.4}",
