@@ -7,22 +7,23 @@ use criterion::{BenchmarkId, Criterion};
 use std::hint::black_box;
 use std::path::Path;
 
+/// Raw X-Trans data loaded from a RAF file.
+pub struct XTransRawData {
+    pub data: Vec<f32>,
+    pub raw_width: usize,
+    pub raw_height: usize,
+    pub width: usize,
+    pub height: usize,
+    pub top_margin: usize,
+    pub left_margin: usize,
+    pub xtrans_pattern: [[u8; 6]; 6],
+}
+
 /// Loads raw X-Trans data from a RAF file for benchmarking.
 ///
 /// # Panics
 /// Panics if the file cannot be read or is not an X-Trans sensor file.
-pub fn load_xtrans_data(
-    path: &Path,
-) -> (
-    Vec<f32>,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    usize,
-    [[u8; 6]; 6],
-) {
+pub fn load_xtrans_data(path: &Path) -> XTransRawData {
     use libraw_sys as sys;
     use std::fs;
     use std::slice;
@@ -95,7 +96,7 @@ pub fn load_xtrans_data(
     // SAFETY: inner is valid
     unsafe { sys::libraw_close(inner) };
 
-    (
+    XTransRawData {
         data,
         raw_width,
         raw_height,
@@ -104,23 +105,22 @@ pub fn load_xtrans_data(
         top_margin,
         left_margin,
         xtrans_pattern,
-    )
+    }
 }
 
 /// Register X-Trans demosaic benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion, raf_file_path: &Path) {
-    let (data, raw_width, raw_height, width, height, top_margin, left_margin, xtrans_pattern) =
-        load_xtrans_data(raf_file_path);
+    let raw = load_xtrans_data(raf_file_path);
 
-    let pattern = XTransPattern::new(xtrans_pattern);
+    let pattern = XTransPattern::new(raw.xtrans_pattern);
     let xtrans = XTransImage::with_margins(
-        &data,
-        raw_width,
-        raw_height,
-        width,
-        height,
-        top_margin,
-        left_margin,
+        &raw.data,
+        raw.raw_width,
+        raw.raw_height,
+        raw.width,
+        raw.height,
+        raw.top_margin,
+        raw.left_margin,
         pattern.clone(),
     );
 
