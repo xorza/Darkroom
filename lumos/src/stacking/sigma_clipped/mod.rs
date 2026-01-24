@@ -128,7 +128,7 @@ impl ClipStats {
 /// - Image dimensions don't match
 /// - Cache directory creation fails
 /// - Cache file I/O fails
-pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
+pub fn stack_sigma_clipped_from_paths<P: AsRef<Path> + Sync>(
     paths: &[P],
     frame_type: FrameType,
     config: &SigmaClippedConfig,

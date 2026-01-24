@@ -76,7 +76,7 @@ impl ImageCache {
     /// Automatically chooses storage mode based on available memory:
     /// - If all images fit in 75% of available RAM, keeps them in memory
     /// - Otherwise, writes to disk cache and uses memory-mapped access
-    pub fn from_paths<P: AsRef<Path>>(
+    pub fn from_paths<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
         frame_type: FrameType,
@@ -125,36 +125,51 @@ impl ImageCache {
     }
 
     /// Load all images into memory.
-    fn load_in_memory<P: AsRef<Path>>(
+    fn load_in_memory<P: AsRef<Path> + Sync>(
         paths: &[P],
         config: &CacheConfig,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: AstroImage,
     ) -> Result<Storage, Error> {
-        let mut images = Vec::with_capacity(paths.len());
-        images.push(first_image);
         config.report_progress(1, paths.len(), CacheStage::Loading);
 
-        for (i, path) in paths.iter().enumerate().skip(1) {
-            let path_ref = path.as_ref();
-            let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
-                path: path_ref.to_path_buf(),
-                source: io::Error::other(e.to_string()),
-            })?;
+        // Load remaining images in parallel
+        let remaining_results: Result<Vec<(usize, AstroImage)>, Error> = paths[1..]
+            .par_iter()
+            .enumerate()
+            .map(|(i, path)| {
+                let actual_index = i + 1;
+                let path_ref = path.as_ref();
+                let image = AstroImage::from_file(path_ref).map_err(|e| Error::ImageLoad {
+                    path: path_ref.to_path_buf(),
+                    source: io::Error::other(e.to_string()),
+                })?;
 
-            if image.dimensions != dimensions {
-                return Err(Error::DimensionMismatch {
-                    frame_type,
-                    index: i,
-                    expected: dimensions,
-                    actual: image.dimensions,
-                });
-            }
+                if image.dimensions != dimensions {
+                    return Err(Error::DimensionMismatch {
+                        frame_type,
+                        index: actual_index,
+                        expected: dimensions,
+                        actual: image.dimensions,
+                    });
+                }
 
-            images.push(image);
-            config.report_progress(i + 1, paths.len(), CacheStage::Loading);
-        }
+                Ok((actual_index, image))
+            })
+            .collect();
+
+        let mut remaining = remaining_results?;
+
+        // Sort by index to maintain order
+        remaining.sort_by_key(|(i, _)| *i);
+
+        // Build final vector
+        let mut images = Vec::with_capacity(paths.len());
+        images.push(first_image);
+        images.extend(remaining.into_iter().map(|(_, img)| img));
+
+        config.report_progress(paths.len(), paths.len(), CacheStage::Loading);
 
         tracing::info!("Loaded {} frames into memory", images.len());
         Ok(Storage::InMemory(images))

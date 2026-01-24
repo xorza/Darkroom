@@ -156,7 +156,7 @@ impl ImageStack {
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::calibration_image_paths;
+    use crate::testing::{calibration_image_paths, init_tracing};
 
     use super::*;
 
@@ -287,6 +287,8 @@ mod tests {
         method: StackingMethod,
         output_name: &str,
     ) {
+        init_tracing();
+
         let Some(paths) = calibration_image_paths(subdir) else {
             eprintln!(
                 "LUMOS_CALIBRATION_DIR not set or {} dir missing, skipping test",
