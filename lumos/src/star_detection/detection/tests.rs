@@ -563,6 +563,176 @@ fn test_create_threshold_mask_zero_noise_uses_epsilon() {
     assert!(!mask[1]);
 }
 
+#[test]
+fn test_create_threshold_mask_exact_threshold_is_false() {
+    // Pixel exactly at threshold should NOT be detected (must be strictly greater)
+    let pixels = vec![1.3, 1.30001];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0],
+        noise: vec![0.1, 0.1],
+        width: 2,
+        height: 1,
+    };
+
+    // threshold = 1.0 + 3.0 * 0.1 = 1.3
+    // pixel 0: 1.3 is NOT > 1.3 -> false
+    // pixel 1: 1.30001 > 1.3 -> true
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(!mask[0], "Exact threshold value should be false");
+    assert!(mask[1], "Just above threshold should be true");
+}
+
+#[test]
+fn test_create_threshold_mask_different_sigma_values() {
+    let pixels = vec![1.5, 1.5, 1.5, 1.5];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0, 1.0, 1.0],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    // sigma=3: threshold=1.3, 1.5 > 1.3 -> all true
+    let mask_sigma3 = create_threshold_mask(&pixels, &background, 3.0);
+    assert!(mask_sigma3.iter().all(|&x| x));
+
+    // sigma=5: threshold=1.5, 1.5 is NOT > 1.5 -> all false
+    let mask_sigma5 = create_threshold_mask(&pixels, &background, 5.0);
+    assert!(mask_sigma5.iter().all(|&x| !x));
+
+    // sigma=4: threshold=1.4, 1.5 > 1.4 -> all true
+    let mask_sigma4 = create_threshold_mask(&pixels, &background, 4.0);
+    assert!(mask_sigma4.iter().all(|&x| x));
+}
+
+#[test]
+fn test_create_threshold_mask_high_noise_region() {
+    // High noise regions require higher pixel values
+    let pixels = vec![2.0, 2.0];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0],
+        noise: vec![0.1, 0.5], // Second pixel has high noise
+        width: 2,
+        height: 1,
+    };
+
+    // pixel 0: threshold = 1.0 + 3.0*0.1 = 1.3, 2.0 > 1.3 -> true
+    // pixel 1: threshold = 1.0 + 3.0*0.5 = 2.5, 2.0 NOT > 2.5 -> false
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(mask[0]);
+    assert!(
+        !mask[1],
+        "High noise region should require higher threshold"
+    );
+}
+
+// =============================================================================
+// Additional Dilate Mask Tests
+// =============================================================================
+
+#[test]
+fn test_dilate_mask_large_radius() {
+    // 11x11 image with center pixel, radius 5 should fill most of image
+    let mut mask = vec![false; 121];
+    mask[5 * 11 + 5] = true; // center
+
+    let dilated = dilate_mask(&mask, 11, 11, 5);
+
+    // Should create 11x11 square (capped at image bounds)
+    assert!(dilated.iter().all(|&x| x), "All pixels should be dilated");
+}
+
+#[test]
+fn test_dilate_mask_radius_larger_than_image() {
+    // Radius larger than image dimensions
+    let mut mask = vec![false; 9];
+    mask[4] = true; // center of 3x3
+
+    let dilated = dilate_mask(&mask, 3, 3, 100);
+
+    // Should fill entire image
+    assert!(dilated.iter().all(|&x| x));
+}
+
+#[test]
+fn test_dilate_mask_all_corners() {
+    // All four corners set
+    let mut mask = vec![false; 25]; // 5x5
+    mask[0 * 5 + 0] = true; // top-left
+    mask[0 * 5 + 4] = true; // top-right
+    mask[4 * 5 + 0] = true; // bottom-left
+    mask[4 * 5 + 4] = true; // bottom-right
+
+    let dilated = dilate_mask(&mask, 5, 5, 1);
+
+    // Check corner expansions
+    // Top-left expands to (0,0), (0,1), (1,0), (1,1)
+    assert!(dilated[0 * 5 + 0]);
+    assert!(dilated[0 * 5 + 1]);
+    assert!(dilated[1 * 5 + 0]);
+    assert!(dilated[1 * 5 + 1]);
+
+    // Center should still be false (corners don't reach it with radius 1)
+    assert!(!dilated[2 * 5 + 2]);
+}
+
+#[test]
+fn test_dilate_mask_full_coverage_radius_2() {
+    // Two pixels that should merge with radius 2
+    // 9x1: #...#....
+    let mut mask = vec![false; 9];
+    mask[0] = true;
+    mask[4] = true;
+
+    let dilated = dilate_mask(&mask, 9, 1, 2);
+
+    // Pixel 0 expands to 0,1,2
+    // Pixel 4 expands to 2,3,4,5,6
+    // Together: 0,1,2,3,4,5,6 (overlap at 2)
+    for (i, &val) in dilated.iter().enumerate().take(7) {
+        assert!(val, "Pixel {} should be true", i);
+    }
+    assert!(!dilated[7]);
+    assert!(!dilated[8]);
+}
+
+#[test]
+fn test_dilate_mask_non_square_image() {
+    // 7x3 image with pixel at (3, 1)
+    let mut mask = vec![false; 21];
+    mask[1 * 7 + 3] = true;
+
+    let dilated = dilate_mask(&mask, 7, 3, 1);
+
+    // Should create 3x3 square centered at (3, 1)
+    for y in 0..3 {
+        for x in 2..=4 {
+            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+        }
+    }
+    // Outside should be false
+    assert!(!dilated[0 * 7 + 0]);
+    assert!(!dilated[0 * 7 + 6]);
+}
+
+#[test]
+fn test_dilate_mask_preserves_original_pixels() {
+    // Original pixels should always be in dilated result
+    let mut mask = vec![false; 25];
+    mask[0] = true;
+    mask[12] = true; // center
+    mask[24] = true;
+
+    let dilated = dilate_mask(&mask, 5, 5, 1);
+
+    // All original pixels must be present
+    assert!(dilated[0]);
+    assert!(dilated[12]);
+    assert!(dilated[24]);
+}
+
 // =============================================================================
 // Extract Candidates Tests
 // =============================================================================
