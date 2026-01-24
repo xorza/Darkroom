@@ -52,7 +52,7 @@ fn benchmark_sum_f32(c: &mut Criterion) {
     group.finish();
 }
 
-/// Benchmark accumulate comparing scalar vs SIMD.
+/// Benchmark accumulate (scalar only - compiler auto-vectorizes effectively).
 fn benchmark_accumulate(c: &mut Criterion) {
     let mut group = c.benchmark_group("accumulate");
 
@@ -67,30 +67,12 @@ fn benchmark_accumulate(c: &mut Criterion) {
                 super::scalar::accumulate(black_box(&mut dst), black_box(&src));
             })
         });
-
-        #[cfg(target_arch = "aarch64")]
-        group.bench_function(BenchmarkId::new("neon", size), |b| {
-            let mut dst: Vec<f32> = vec![0.0; size];
-            b.iter(|| {
-                unsafe { super::neon::accumulate(black_box(&mut dst), black_box(&src)) };
-            })
-        });
-
-        #[cfg(target_arch = "x86_64")]
-        if crate::common::cpu_features::has_sse4_1() {
-            group.bench_function(BenchmarkId::new("sse", size), |b| {
-                let mut dst: Vec<f32> = vec![0.0; size];
-                b.iter(|| {
-                    unsafe { super::sse::accumulate(black_box(&mut dst), black_box(&src)) };
-                })
-            });
-        }
     }
 
     group.finish();
 }
 
-/// Benchmark scale comparing scalar vs SIMD.
+/// Benchmark scale (scalar only - compiler auto-vectorizes effectively).
 fn benchmark_scale(c: &mut Criterion) {
     let mut group = c.benchmark_group("scale");
 
@@ -105,24 +87,6 @@ fn benchmark_scale(c: &mut Criterion) {
                 super::scalar::scale(black_box(&mut data), black_box(0.5));
             })
         });
-
-        #[cfg(target_arch = "aarch64")]
-        group.bench_function(BenchmarkId::new("neon", size), |b| {
-            let mut data = original.clone();
-            b.iter(|| {
-                unsafe { super::neon::scale(black_box(&mut data), black_box(0.5)) };
-            })
-        });
-
-        #[cfg(target_arch = "x86_64")]
-        if crate::common::cpu_features::has_sse4_1() {
-            group.bench_function(BenchmarkId::new("sse", size), |b| {
-                let mut data = original.clone();
-                b.iter(|| {
-                    unsafe { super::sse::scale(black_box(&mut data), black_box(0.5)) };
-                })
-            });
-        }
     }
 
     group.finish();

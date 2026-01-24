@@ -93,50 +93,16 @@ pub fn sum_squared_diff(values: &[f32], mean: f32) -> f32 {
     scalar::sum_squared_diff(values, mean)
 }
 
-/// Accumulate src into dst (dst[i] += src[i]) using SIMD when available.
-#[cfg(target_arch = "aarch64")]
-pub fn accumulate(dst: &mut [f32], src: &[f32]) {
-    if dst.len() < 4 {
-        return scalar::accumulate(dst, src);
-    }
-    unsafe { neon::accumulate(dst, src) }
-}
-
-/// Accumulate src into dst (dst[i] += src[i]) using SIMD when available.
-#[cfg(target_arch = "x86_64")]
-pub fn accumulate(dst: &mut [f32], src: &[f32]) {
-    if dst.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
-        return scalar::accumulate(dst, src);
-    }
-    unsafe { sse::accumulate(dst, src) }
-}
-
-/// Fallback for other architectures.
-#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+/// Accumulate src into dst (dst[i] += src[i]).
+/// Uses scalar implementation (compiler auto-vectorizes effectively).
+#[inline]
 pub fn accumulate(dst: &mut [f32], src: &[f32]) {
     scalar::accumulate(dst, src)
 }
 
-/// Scale values in-place (data[i] *= scale) using SIMD when available.
-#[cfg(target_arch = "aarch64")]
-pub fn scale(data: &mut [f32], scale_val: f32) {
-    if data.len() < 4 {
-        return scalar::scale(data, scale_val);
-    }
-    unsafe { neon::scale(data, scale_val) }
-}
-
-/// Scale values in-place (data[i] *= scale) using SIMD when available.
-#[cfg(target_arch = "x86_64")]
-pub fn scale(data: &mut [f32], scale_val: f32) {
-    if data.len() < 4 || !crate::common::cpu_features::has_sse4_1() {
-        return scalar::scale(data, scale_val);
-    }
-    unsafe { sse::scale(data, scale_val) }
-}
-
-/// Fallback for other architectures.
-#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+/// Scale values in-place (data[i] *= scale).
+/// Uses scalar implementation (compiler auto-vectorizes effectively).
+#[inline]
 pub fn scale(data: &mut [f32], scale_val: f32) {
     scalar::scale(data, scale_val)
 }
