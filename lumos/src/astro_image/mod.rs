@@ -216,18 +216,49 @@ impl AstroImage {
     /// Convert to grayscale using luminance weights.
     ///
     /// If already grayscale, returns a clone.
-    /// For RGB images, uses standard luminance weights: 0.2126*R + 0.7152*G + 0.0722*B
+    /// For RGB images, uses Rec. 709 luminance weights: 0.2126*R + 0.7152*G + 0.0722*B
     pub fn to_grayscale(&self) -> Self {
+        use rayon::prelude::*;
+
         if self.dimensions.is_grayscale() {
             return self.clone();
         }
 
-        //todo implement directly
-        let image: Image = self.clone().into();
-        image
-            .convert(ColorFormat::GRAY_F32)
-            .expect("Failed to convert to grayscale")
-            .into()
+        assert!(
+            self.dimensions.is_rgb(),
+            "to_grayscale only supports grayscale (1) or RGB (3) channel images"
+        );
+
+        // Rec. 709 luminance weights
+        const R_WEIGHT: f32 = 0.2126;
+        const G_WEIGHT: f32 = 0.7152;
+        const B_WEIGHT: f32 = 0.0722;
+
+        let pixel_count = self.dimensions.width * self.dimensions.height;
+        let mut gray_pixels = vec![0.0f32; pixel_count];
+
+        // Process in parallel chunks to maintain cache locality
+        const CHUNK_SIZE: usize = 4096;
+
+        gray_pixels
+            .par_chunks_mut(CHUNK_SIZE)
+            .enumerate()
+            .for_each(|(chunk_idx, chunk)| {
+                let base_idx = chunk_idx * CHUNK_SIZE;
+                for (i, gray) in chunk.iter_mut().enumerate() {
+                    let src_idx = (base_idx + i) * 3;
+                    let r = self.pixels[src_idx];
+                    let g = self.pixels[src_idx + 1];
+                    let b = self.pixels[src_idx + 2];
+                    *gray = R_WEIGHT * r + G_WEIGHT * g + B_WEIGHT * b;
+                }
+            });
+
+        AstroImage {
+            metadata: self.metadata.clone(),
+            pixels: gray_pixels,
+            dimensions: ImageDimensions::new(self.dimensions.width, self.dimensions.height, 1),
+        }
     }
 
     /// Load all astronomical images from a directory.
