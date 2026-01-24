@@ -1,14 +1,12 @@
 //! Memory-efficient median stacking using chunked processing and memory-mapped files.
 
-mod cpu;
-mod scalar;
-
 #[cfg(feature = "bench")]
 pub mod bench;
 
 use std::path::{Path, PathBuf};
 
 use crate::astro_image::AstroImage;
+use crate::math;
 use crate::stacking::FrameType;
 use crate::stacking::cache::ImageCache;
 
@@ -44,7 +42,7 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
     std::fs::create_dir_all(&config.cache_dir).expect("Failed to create cache directory");
 
     let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
-    let result = cache.process_chunked(config.chunk_rows, cpu::median_f32);
+    let result = cache.process_chunked(config.chunk_rows, math::median_f32);
 
     if !config.keep_cache {
         cache.cleanup();

@@ -1,9 +1,4 @@
 //! Memory-efficient sigma-clipped mean stacking using chunked processing and memory-mapped files.
-//!
-//! This implementation decodes images to a binary cache format, then processes
-//! the images in horizontal strips to keep memory usage bounded.
-
-mod scalar;
 
 #[cfg(feature = "bench")]
 pub mod bench;
@@ -11,6 +6,7 @@ pub mod bench;
 use std::path::{Path, PathBuf};
 
 use crate::astro_image::AstroImage;
+use crate::math;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::{FrameType, SigmaClipConfig};
 
@@ -20,7 +16,6 @@ pub struct SigmaClippedConfig {
     /// Sigma clipping parameters.
     pub clip: SigmaClipConfig,
     /// Number of rows to process at once (memory vs seeks tradeoff).
-    /// Default: 128 rows.
     pub chunk_rows: usize,
     /// Directory for decoded image cache.
     pub cache_dir: PathBuf,
@@ -50,11 +45,6 @@ impl SigmaClippedConfig {
 }
 
 /// Stack images using sigma-clipped mean with bounded memory usage.
-///
-/// 1. Decodes all images to binary cache (f32 format)
-/// 2. Processes in horizontal strips, loading strip from all cached files
-/// 3. Computes sigma-clipped mean per pixel within each strip
-/// 4. Cleans up cache unless keep_cache is set
 pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
@@ -62,22 +52,92 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
 ) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
-    // Create cache directory
     std::fs::create_dir_all(&config.cache_dir).expect("Failed to create cache directory");
 
-    // Decode all images to cache
     let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
-
-    // Process in chunks using shared infrastructure
     let clip = config.clip;
     let result = cache.process_chunked(config.chunk_rows, |values| {
-        scalar::sigma_clipped_mean(values, &clip)
+        sigma_clipped_mean(values, &clip)
     });
 
-    // Cleanup
     if !config.keep_cache {
         cache.cleanup();
     }
 
     result
+}
+
+/// Calculate sigma-clipped mean.
+///
+/// Algorithm:
+/// 1. Use median as center (robust to outliers)
+/// 2. Compute std dev from median
+/// 3. Clip values beyond sigma threshold from median
+/// 4. Return mean of remaining values (statistically efficient)
+fn sigma_clipped_mean(values: &[f32], config: &SigmaClipConfig) -> f32 {
+    debug_assert!(!values.is_empty());
+
+    if values.len() <= 2 {
+        return math::mean_f32(values);
+    }
+
+    let mut included: Vec<f32> = values.to_vec();
+
+    for _ in 0..config.max_iterations {
+        if included.len() <= 2 {
+            break;
+        }
+
+        // Use median as center - robust to outliers
+        let center = math::median_f32(&included);
+        let variance = math::sum_squared_diff(&included, center) / included.len() as f32;
+        let std_dev = variance.sqrt();
+
+        if std_dev < f32::EPSILON {
+            break;
+        }
+
+        let threshold = config.sigma * std_dev;
+        let prev_len = included.len();
+
+        included.retain(|&v| (v - center).abs() <= threshold);
+
+        // Stop if no values were clipped
+        if included.len() == prev_len {
+            break;
+        }
+    }
+
+    // Return mean of remaining values (lower noise than median for Gaussian data)
+    math::mean_f32(&included)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sigma_clipped_mean_removes_outlier() {
+        let values = vec![1.0, 2.0, 2.0, 2.0, 2.0, 100.0];
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&values, &config);
+        assert!(
+            result < 10.0,
+            "Expected outlier to be clipped, got {}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sigma_clipped_mean_large() {
+        let mut values: Vec<f32> = vec![10.0; 50];
+        values.push(1000.0);
+        let config = SigmaClipConfig::new(2.0, 3);
+        let result = sigma_clipped_mean(&values, &config);
+        assert!(
+            (result - 10.0).abs() < 1.0,
+            "Expected ~10.0, got {}",
+            result
+        );
+    }
 }

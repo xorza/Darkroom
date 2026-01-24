@@ -9,7 +9,6 @@ use criterion::{BenchmarkId, Criterion, Throughput};
 /// Register mean stacking benchmarks with Criterion.
 pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
     benchmark_accumulate(c);
-    benchmark_divide(c);
 }
 
 /// Benchmark the accumulate operation.
@@ -21,28 +20,13 @@ fn benchmark_accumulate(c: &mut Criterion) {
 
         group.throughput(Throughput::Elements(size as u64));
 
-        group.bench_function(BenchmarkId::new("scalar", size), |b| {
+        group.bench_function(BenchmarkId::new("accumulate", size), |b| {
             let mut dst: Vec<f32> = vec![0.0; size];
             b.iter(|| {
-                super::scalar::accumulate_chunk(black_box(&mut dst), black_box(&src));
-            })
-        });
-    }
-
-    group.finish();
-}
-
-/// Benchmark the divide operation.
-fn benchmark_divide(c: &mut Criterion) {
-    let mut group = c.benchmark_group("mean_divide");
-
-    for size in [1024, 4096, 16384] {
-        group.throughput(Throughput::Elements(size as u64));
-
-        group.bench_function(BenchmarkId::new("scalar", size), |b| {
-            let mut data: Vec<f32> = (0..size).map(|x| x as f32).collect();
-            b.iter(|| {
-                super::scalar::divide_chunk(black_box(&mut data), black_box(0.1));
+                for (d, &s) in dst.iter_mut().zip(src.iter()) {
+                    *d += s;
+                }
+                black_box(&dst);
             })
         });
     }

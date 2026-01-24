@@ -1,12 +1,11 @@
 //! Mean stacking implementation.
 
-mod cpu;
-mod scalar;
-
 #[cfg(feature = "bench")]
 pub mod bench;
 
 use std::path::Path;
+
+use rayon::prelude::*;
 
 use crate::AstroImage;
 use crate::astro_image::ImageDimensions;
@@ -18,7 +17,7 @@ const ACCUMULATE_CHUNK_SIZE: usize = 4096;
 /// Stack frames from paths using running mean (memory efficient).
 ///
 /// Loads images one at a time and accumulates sum, then divides by count.
-/// Uses parallel processing for accumulation and SIMD for vector operations.
+/// Uses parallel processing for accumulation.
 pub fn stack_mean_from_paths<P: AsRef<Path>>(paths: &[P], frame_type: FrameType) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
@@ -39,7 +38,7 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(paths: &[P], frame_type: FrameType)
                 dims
             );
             // Accumulate pixel values in parallel chunks
-            cpu::accumulate_parallel(&mut sum, &frame.pixels, ACCUMULATE_CHUNK_SIZE);
+            accumulate_parallel(&mut sum, &frame.pixels);
         } else {
             dimensions = Some(frame.dimensions);
             sum = frame.pixels.clone();
@@ -49,11 +48,56 @@ pub fn stack_mean_from_paths<P: AsRef<Path>>(paths: &[P], frame_type: FrameType)
 
     // Divide by count in parallel
     let inv_count = 1.0 / paths.len() as f32;
-    cpu::divide_parallel(&mut sum, inv_count, ACCUMULATE_CHUNK_SIZE);
+    divide_parallel(&mut sum, inv_count);
 
     AstroImage {
         metadata: metadata.unwrap(),
         pixels: sum,
         dimensions: dimensions.unwrap(),
+    }
+}
+
+/// Accumulate src into dst in parallel chunks.
+#[inline]
+fn accumulate_parallel(dst: &mut [f32], src: &[f32]) {
+    dst.par_chunks_mut(ACCUMULATE_CHUNK_SIZE)
+        .zip(src.par_chunks(ACCUMULATE_CHUNK_SIZE))
+        .for_each(|(dst_chunk, src_chunk)| {
+            for (d, &s) in dst_chunk.iter_mut().zip(src_chunk.iter()) {
+                *d += s;
+            }
+        });
+}
+
+/// Divide all values by a scalar in parallel.
+#[inline]
+fn divide_parallel(data: &mut [f32], inv_count: f32) {
+    data.par_chunks_mut(ACCUMULATE_CHUNK_SIZE)
+        .for_each(|chunk| {
+            for d in chunk.iter_mut() {
+                *d *= inv_count;
+            }
+        });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_accumulate() {
+        let mut dst = [1.0, 2.0, 3.0, 4.0];
+        let src = [0.5, 0.5, 0.5, 0.5];
+        for (d, &s) in dst.iter_mut().zip(src.iter()) {
+            *d += s;
+        }
+        assert_eq!(dst, [1.5, 2.5, 3.5, 4.5]);
+    }
+
+    #[test]
+    fn test_divide() {
+        let mut data = [2.0, 4.0, 6.0, 8.0];
+        for d in data.iter_mut() {
+            *d *= 0.5;
+        }
+        assert_eq!(data, [1.0, 2.0, 3.0, 4.0]);
     }
 }
