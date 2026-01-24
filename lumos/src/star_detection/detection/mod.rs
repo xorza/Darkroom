@@ -142,7 +142,7 @@ pub fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) ->
 }
 
 /// Create binary mask of pixels above threshold.
-fn create_threshold_mask(
+pub(crate) fn create_threshold_mask(
     pixels: &[f32],
     background: &BackgroundMap,
     sigma_threshold: f32,
@@ -159,7 +159,11 @@ fn create_threshold_mask(
 }
 
 /// Connected component labeling using union-find.
-fn connected_components(mask: &[bool], width: usize, height: usize) -> (Vec<u32>, usize) {
+pub(crate) fn connected_components(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+) -> (Vec<u32>, usize) {
     let mut labels = vec![0u32; width * height];
     let mut parent: Vec<u32> = Vec::new();
     let mut next_label = 1u32;
@@ -253,7 +257,7 @@ fn union(parent: &mut [u32], a: u32, b: u32) {
 }
 
 /// Extract candidate properties from labeled image.
-fn extract_candidates(
+pub(crate) fn extract_candidates(
     pixels: &[f32],
     labels: &[u32],
     num_labels: usize,

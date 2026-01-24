@@ -1,7 +1,10 @@
 //! Tests for star detection.
 
+// Allow identity operations like `y * width + x` for clarity in 2D indexing
+#![allow(clippy::identity_op, clippy::erasing_op)]
+
 use super::*;
-use crate::star_detection::background::estimate_background;
+use crate::star_detection::background::{BackgroundMap, estimate_background};
 
 fn make_test_image_with_star(
     width: usize,
@@ -128,4 +131,637 @@ fn test_empty_image() {
     let candidates = detect_stars(&pixels, width, height, &bg, &config);
 
     assert!(candidates.is_empty(), "Uniform image should have no stars");
+}
+
+// =============================================================================
+// Connected Components Tests
+// =============================================================================
+
+#[test]
+fn test_connected_components_empty_mask() {
+    let mask = vec![false; 16];
+    let (labels, num_labels) = connected_components(&mask, 4, 4);
+
+    assert_eq!(num_labels, 0);
+    assert!(labels.iter().all(|&l| l == 0));
+}
+
+#[test]
+fn test_connected_components_single_pixel() {
+    // 4x4 mask with single pixel at (1, 1)
+    let mut mask = vec![false; 16];
+    mask[1 * 4 + 1] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 4, 4);
+
+    assert_eq!(num_labels, 1);
+    assert_eq!(labels[1 * 4 + 1], 1);
+    assert_eq!(labels.iter().filter(|&&l| l == 1).count(), 1);
+}
+
+#[test]
+fn test_connected_components_horizontal_line() {
+    // 5x3 mask with horizontal line in middle row
+    // .....
+    // ###..
+    // .....
+    let mut mask = vec![false; 15];
+    mask[1 * 5 + 0] = true;
+    mask[1 * 5 + 1] = true;
+    mask[1 * 5 + 2] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 5, 3);
+
+    assert_eq!(num_labels, 1);
+    // All three pixels should have the same label
+    let label = labels[1 * 5 + 0];
+    assert!(label > 0);
+    assert_eq!(labels[1 * 5 + 1], label);
+    assert_eq!(labels[1 * 5 + 2], label);
+}
+
+#[test]
+fn test_connected_components_vertical_line() {
+    // 3x5 mask with vertical line in middle column
+    let mut mask = vec![false; 15];
+    mask[0 * 3 + 1] = true;
+    mask[1 * 3 + 1] = true;
+    mask[2 * 3 + 1] = true;
+    mask[3 * 3 + 1] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 3, 5);
+
+    assert_eq!(num_labels, 1);
+    let label = labels[0 * 3 + 1];
+    assert!(label > 0);
+    assert_eq!(labels[1 * 3 + 1], label);
+    assert_eq!(labels[2 * 3 + 1], label);
+    assert_eq!(labels[3 * 3 + 1], label);
+}
+
+#[test]
+fn test_connected_components_two_separate_regions() {
+    // 6x3 mask with two separate single pixels
+    // #....#
+    // ......
+    // ......
+    let mut mask = vec![false; 18];
+    mask[0] = true; // (0, 0)
+    mask[5] = true; // (5, 0)
+
+    let (labels, num_labels) = connected_components(&mask, 6, 3);
+
+    assert_eq!(num_labels, 2);
+    assert!(labels[0] > 0);
+    assert!(labels[5] > 0);
+    assert_ne!(labels[0], labels[5]);
+}
+
+#[test]
+fn test_connected_components_l_shape() {
+    // 4x4 mask with L-shape
+    // #...
+    // #...
+    // ##..
+    // ....
+    let mut mask = vec![false; 16];
+    mask[0 * 4 + 0] = true;
+    mask[1 * 4 + 0] = true;
+    mask[2 * 4 + 0] = true;
+    mask[2 * 4 + 1] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 4, 4);
+
+    assert_eq!(num_labels, 1);
+    let label = labels[0];
+    assert!(label > 0);
+    assert_eq!(labels[1 * 4 + 0], label);
+    assert_eq!(labels[2 * 4 + 0], label);
+    assert_eq!(labels[2 * 4 + 1], label);
+}
+
+#[test]
+fn test_connected_components_diagonal_not_connected() {
+    // 3x3 mask with diagonal pixels (4-connectivity means they're separate)
+    // #..
+    // .#.
+    // ..#
+    let mut mask = vec![false; 9];
+    mask[0 * 3 + 0] = true;
+    mask[1 * 3 + 1] = true;
+    mask[2 * 3 + 2] = true;
+
+    let (_labels, num_labels) = connected_components(&mask, 3, 3);
+
+    // With 4-connectivity, diagonal pixels are NOT connected
+    assert_eq!(num_labels, 3);
+}
+
+#[test]
+fn test_connected_components_u_shape_union_find() {
+    // This tests the union-find when labels need to be merged
+    // 5x3 mask forming a U shape:
+    // #...#
+    // #...#
+    // #####
+    let mut mask = vec![false; 15];
+    // Left column
+    mask[0 * 5 + 0] = true;
+    mask[1 * 5 + 0] = true;
+    mask[2 * 5 + 0] = true;
+    // Right column
+    mask[0 * 5 + 4] = true;
+    mask[1 * 5 + 4] = true;
+    mask[2 * 5 + 4] = true;
+    // Bottom row connecting them
+    mask[2 * 5 + 1] = true;
+    mask[2 * 5 + 2] = true;
+    mask[2 * 5 + 3] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 5, 3);
+
+    // All pixels should be in one component due to union-find
+    assert_eq!(num_labels, 1);
+    let label = labels[0];
+    assert!(label > 0);
+    for i in 0..15 {
+        if mask[i] {
+            assert_eq!(
+                labels[i], label,
+                "All U-shape pixels should have same label"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_connected_components_checkerboard() {
+    // 4x4 checkerboard pattern - no pixels should be connected
+    // #.#.
+    // .#.#
+    // #.#.
+    // .#.#
+    let mut mask = vec![false; 16];
+    for y in 0..4 {
+        for x in 0..4 {
+            if (x + y) % 2 == 0 {
+                mask[y * 4 + x] = true;
+            }
+        }
+    }
+
+    let (_labels, num_labels) = connected_components(&mask, 4, 4);
+
+    // Each pixel is isolated (4-connectivity)
+    assert_eq!(num_labels, 8);
+}
+
+#[test]
+fn test_connected_components_filled_rectangle() {
+    // 3x3 all true
+    let mask = vec![true; 9];
+    let (labels, num_labels) = connected_components(&mask, 3, 3);
+
+    assert_eq!(num_labels, 1);
+    assert!(labels.iter().all(|&l| l == 1));
+}
+
+#[test]
+fn test_connected_components_labels_are_sequential() {
+    // 6x1 with three separate pixels
+    // #.#.#.
+    let mut mask = vec![false; 6];
+    mask[0] = true;
+    mask[2] = true;
+    mask[4] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 6, 1);
+
+    assert_eq!(num_labels, 3);
+    // Labels should be 1, 2, 3 (sequential)
+    assert_eq!(labels[0], 1);
+    assert_eq!(labels[2], 2);
+    assert_eq!(labels[4], 3);
+}
+
+// =============================================================================
+// Dilate Mask Tests
+// =============================================================================
+
+#[test]
+fn test_dilate_mask_empty() {
+    let mask = vec![false; 9];
+    let dilated = dilate_mask(&mask, 3, 3, 1);
+    assert!(dilated.iter().all(|&x| !x));
+}
+
+#[test]
+fn test_dilate_mask_single_pixel_radius_0() {
+    // Radius 0 should not expand
+    let mut mask = vec![false; 9];
+    mask[4] = true; // center
+
+    let dilated = dilate_mask(&mask, 3, 3, 0);
+
+    assert_eq!(dilated.iter().filter(|&&x| x).count(), 1);
+    assert!(dilated[4]);
+}
+
+#[test]
+fn test_dilate_mask_single_pixel_radius_1() {
+    // 3x3 mask with center pixel, radius 1 should create 3x3 square
+    let mut mask = vec![false; 25]; // 5x5
+    mask[2 * 5 + 2] = true; // center at (2, 2)
+
+    let dilated = dilate_mask(&mask, 5, 5, 1);
+
+    // Should dilate to 3x3 square centered at (2,2)
+    for y in 1..=3 {
+        for x in 1..=3 {
+            assert!(dilated[y * 5 + x], "Pixel ({}, {}) should be true", x, y);
+        }
+    }
+    // Corners should be false
+    assert!(!dilated[0 * 5 + 0]);
+    assert!(!dilated[0 * 5 + 4]);
+    assert!(!dilated[4 * 5 + 0]);
+    assert!(!dilated[4 * 5 + 4]);
+}
+
+#[test]
+fn test_dilate_mask_single_pixel_radius_2() {
+    // 7x7 mask with center pixel, radius 2 should create 5x5 square
+    let mut mask = vec![false; 49];
+    mask[3 * 7 + 3] = true; // center at (3, 3)
+
+    let dilated = dilate_mask(&mask, 7, 7, 2);
+
+    // Should dilate to 5x5 square centered at (3,3)
+    let mut count = 0;
+    for y in 1..=5 {
+        for x in 1..=5 {
+            assert!(dilated[y * 7 + x], "Pixel ({}, {}) should be true", x, y);
+            count += 1;
+        }
+    }
+    assert_eq!(count, 25);
+}
+
+#[test]
+fn test_dilate_mask_corner_pixel() {
+    // Pixel at corner (0,0), dilation should be clipped to image bounds
+    let mut mask = vec![false; 16];
+    mask[0] = true;
+
+    let dilated = dilate_mask(&mask, 4, 4, 1);
+
+    // Only 2x2 corner should be dilated
+    assert!(dilated[0 * 4 + 0]);
+    assert!(dilated[0 * 4 + 1]);
+    assert!(dilated[1 * 4 + 0]);
+    assert!(dilated[1 * 4 + 1]);
+    // Rest should be false
+    assert!(!dilated[0 * 4 + 2]);
+    assert!(!dilated[2 * 4 + 0]);
+}
+
+#[test]
+fn test_dilate_mask_edge_pixel() {
+    // Pixel at edge (0, 2) in 5x5
+    let mut mask = vec![false; 25];
+    mask[2 * 5 + 0] = true;
+
+    let dilated = dilate_mask(&mask, 5, 5, 1);
+
+    // Should expand but clip at left edge
+    assert!(dilated[1 * 5 + 0]);
+    assert!(dilated[1 * 5 + 1]);
+    assert!(dilated[2 * 5 + 0]);
+    assert!(dilated[2 * 5 + 1]);
+    assert!(dilated[3 * 5 + 0]);
+    assert!(dilated[3 * 5 + 1]);
+}
+
+#[test]
+fn test_dilate_mask_merges_nearby_pixels() {
+    // Two pixels separated by gap, dilation should merge them
+    // 7x1: #..#...
+    let mut mask = vec![false; 7];
+    mask[0] = true;
+    mask[3] = true;
+
+    let dilated = dilate_mask(&mask, 7, 1, 2);
+
+    // Both should expand and merge
+    // Pixel 0 expands to 0,1,2
+    // Pixel 3 expands to 1,2,3,4,5
+    // Merged: 0,1,2,3,4,5
+    for (i, &val) in dilated.iter().enumerate().take(6) {
+        assert!(val, "Pixel {} should be true after dilation", i);
+    }
+    assert!(!dilated[6]);
+}
+
+// =============================================================================
+// Create Threshold Mask Tests
+// =============================================================================
+
+#[test]
+fn test_create_threshold_mask_all_below() {
+    let pixels = vec![0.5, 0.5, 0.5, 0.5];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0, 1.0, 1.0],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(mask.iter().all(|&x| !x));
+}
+
+#[test]
+fn test_create_threshold_mask_all_above() {
+    let pixels = vec![2.0, 2.0, 2.0, 2.0];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0, 1.0, 1.0],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    // threshold = 1.0 + 3.0 * 0.1 = 1.3
+    // pixels at 2.0 > 1.3, so all true
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(mask.iter().all(|&x| x));
+}
+
+#[test]
+fn test_create_threshold_mask_mixed() {
+    let pixels = vec![1.0, 2.0, 0.5, 1.5];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0, 1.0, 1.0],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    // threshold = 1.0 + 3.0 * 0.1 = 1.3
+    // pixel 0: 1.0 <= 1.3 -> false
+    // pixel 1: 2.0 > 1.3 -> true
+    // pixel 2: 0.5 <= 1.3 -> false
+    // pixel 3: 1.5 > 1.3 -> true
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(!mask[0]);
+    assert!(mask[1]);
+    assert!(!mask[2]);
+    assert!(mask[3]);
+}
+
+#[test]
+fn test_create_threshold_mask_variable_background() {
+    let pixels = vec![1.5, 1.5, 1.5, 1.5];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.2, 1.4, 0.8],
+        noise: vec![0.1, 0.1, 0.1, 0.1],
+        width: 2,
+        height: 2,
+    };
+
+    // thresholds: 1.3, 1.5, 1.7, 1.1
+    // pixel 0: 1.5 > 1.3 -> true
+    // pixel 1: 1.5 <= 1.5 -> false (not strictly greater)
+    // pixel 2: 1.5 <= 1.7 -> false
+    // pixel 3: 1.5 > 1.1 -> true
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(mask[0]);
+    assert!(!mask[1]);
+    assert!(!mask[2]);
+    assert!(mask[3]);
+}
+
+#[test]
+fn test_create_threshold_mask_zero_noise_uses_epsilon() {
+    let pixels = vec![1.1, 0.9];
+    let background = BackgroundMap {
+        background: vec![1.0, 1.0],
+        noise: vec![0.0, 0.0], // Zero noise
+        width: 2,
+        height: 1,
+    };
+
+    // With noise.max(1e-6), threshold ≈ 1.0 + 3.0 * 1e-6 ≈ 1.000003
+    // pixel 0: 1.1 > 1.000003 -> true
+    // pixel 1: 0.9 <= 1.000003 -> false
+    let mask = create_threshold_mask(&pixels, &background, 3.0);
+
+    assert!(mask[0]);
+    assert!(!mask[1]);
+}
+
+// =============================================================================
+// Extract Candidates Tests
+// =============================================================================
+
+#[test]
+fn test_extract_candidates_empty() {
+    let pixels = vec![0.5; 9];
+    let labels = vec![0u32; 9];
+
+    let candidates = extract_candidates(&pixels, &labels, 0, 3, 3);
+
+    assert!(candidates.is_empty());
+}
+
+#[test]
+fn test_extract_candidates_single_component() {
+    // 3x3 with single component covering center 3 pixels horizontally
+    let pixels = vec![
+        0.1, 0.1, 0.1, //
+        0.5, 0.9, 0.6, // <- component here
+        0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        0, 0, 0, //
+        1, 1, 1, //
+        0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 3);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.area, 3);
+    assert_eq!(c.x_min, 0);
+    assert_eq!(c.x_max, 2);
+    assert_eq!(c.y_min, 1);
+    assert_eq!(c.y_max, 1);
+    assert_eq!(c.peak_x, 1);
+    assert_eq!(c.peak_y, 1);
+    assert!((c.peak_value - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_two_components() {
+    // 5x3 with two separate components
+    let pixels = vec![
+        0.8, 0.1, 0.1, 0.1, 0.7, //
+        0.1, 0.1, 0.1, 0.1, 0.1, //
+        0.1, 0.1, 0.1, 0.1, 0.1,
+    ];
+    let labels = vec![
+        1, 0, 0, 0, 2, //
+        0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0,
+    ];
+
+    let candidates = extract_candidates(&pixels, &labels, 2, 5, 3);
+
+    assert_eq!(candidates.len(), 2);
+
+    // First component
+    assert_eq!(candidates[0].area, 1);
+    assert_eq!(candidates[0].peak_x, 0);
+    assert_eq!(candidates[0].peak_y, 0);
+    assert!((candidates[0].peak_value - 0.8).abs() < 1e-6);
+
+    // Second component
+    assert_eq!(candidates[1].area, 1);
+    assert_eq!(candidates[1].peak_x, 4);
+    assert_eq!(candidates[1].peak_y, 0);
+    assert!((candidates[1].peak_value - 0.7).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_bounding_box() {
+    // 5x5 with L-shaped component
+    let mut pixels = vec![0.1; 25];
+    let mut labels = vec![0u32; 25];
+
+    // L-shape: (0,0), (0,1), (0,2), (1,2)
+    labels[0 * 5 + 0] = 1;
+    pixels[0 * 5 + 0] = 0.5;
+    labels[1 * 5 + 0] = 1;
+    pixels[1 * 5 + 0] = 0.6;
+    labels[2 * 5 + 0] = 1;
+    pixels[2 * 5 + 0] = 0.9; // peak
+    labels[2 * 5 + 1] = 1;
+    pixels[2 * 5 + 1] = 0.7;
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 5, 5);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.area, 4);
+    assert_eq!(c.x_min, 0);
+    assert_eq!(c.x_max, 1);
+    assert_eq!(c.y_min, 0);
+    assert_eq!(c.y_max, 2);
+    assert_eq!(c.peak_x, 0);
+    assert_eq!(c.peak_y, 2);
+    assert!((c.peak_value - 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn test_extract_candidates_width_height() {
+    let pixels = vec![0.5; 6];
+    // 3x2 component covering full image
+    let labels = vec![1u32; 6];
+
+    let candidates = extract_candidates(&pixels, &labels, 1, 3, 2);
+
+    assert_eq!(candidates.len(), 1);
+    let c = &candidates[0];
+    assert_eq!(c.width(), 3);
+    assert_eq!(c.height(), 2);
+}
+
+// =============================================================================
+// Integration Tests for Connected Components + Extract Candidates
+// =============================================================================
+
+#[test]
+fn test_connected_components_and_extract_integration() {
+    // Create a 10x10 image with two star-like regions
+    let mut mask = vec![false; 100];
+    let mut pixels = vec![0.1f32; 100];
+
+    // Star 1 at (2, 2) - 3x3 region
+    for dy in 0..3 {
+        for dx in 0..3 {
+            let idx = (2 + dy) * 10 + (2 + dx);
+            mask[idx] = true;
+            pixels[idx] =
+                0.5 + 0.4 * (1.0 - ((dx as f32 - 1.0).powi(2) + (dy as f32 - 1.0).powi(2)) / 2.0);
+        }
+    }
+    // Peak at center (3, 3)
+    pixels[3 * 10 + 3] = 0.9;
+
+    // Star 2 at (7, 7) - 2x2 region
+    for dy in 0..2 {
+        for dx in 0..2 {
+            let idx = (7 + dy) * 10 + (7 + dx);
+            mask[idx] = true;
+            pixels[idx] = 0.6;
+        }
+    }
+    // Peak at (7, 7)
+    pixels[7 * 10 + 7] = 0.8;
+
+    let (labels, num_labels) = connected_components(&mask, 10, 10);
+    let candidates = extract_candidates(&pixels, &labels, num_labels, 10, 10);
+
+    assert_eq!(num_labels, 2);
+    assert_eq!(candidates.len(), 2);
+
+    // Verify star 1
+    let star1 = candidates
+        .iter()
+        .find(|c| c.peak_x == 3 && c.peak_y == 3)
+        .unwrap();
+    assert_eq!(star1.area, 9);
+    assert!((star1.peak_value - 0.9).abs() < 1e-6);
+
+    // Verify star 2
+    let star2 = candidates
+        .iter()
+        .find(|c| c.peak_x == 7 && c.peak_y == 7)
+        .unwrap();
+    assert_eq!(star2.area, 4);
+    assert!((star2.peak_value - 0.8).abs() < 1e-6);
+}
+
+#[test]
+fn test_connected_components_complex_merge() {
+    // Test a complex scenario where union-find needs to merge multiple times
+    // Shape like:
+    //   ###
+    //   ..#
+    //   ###
+    // The bottom row connects with top through right column
+    let mut mask = vec![false; 9];
+    // Top row
+    mask[0] = true;
+    mask[1] = true;
+    mask[2] = true;
+    // Middle right
+    mask[5] = true;
+    // Bottom row
+    mask[6] = true;
+    mask[7] = true;
+    mask[8] = true;
+
+    let (labels, num_labels) = connected_components(&mask, 3, 3);
+
+    // All should be one component connected through the right column
+    assert_eq!(num_labels, 1);
+    let label = labels[0];
+    for i in [0, 1, 2, 5, 6, 7, 8] {
+        assert_eq!(labels[i], label, "Pixel {} should be in same component", i);
+    }
 }
