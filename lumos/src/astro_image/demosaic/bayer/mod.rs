@@ -405,12 +405,17 @@ unsafe fn process_row_simd_sse3(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
                 quarter,
             );
 
-            // Extract to arrays for assignment
-            let center_arr: [f32; 4] = std::mem::transmute(center);
-            let h_arr: [f32; 4] = std::mem::transmute(h_interp);
-            let v_arr: [f32; 4] = std::mem::transmute(v_interp);
-            let cross_arr: [f32; 4] = std::mem::transmute(cross_interp);
-            let diag_arr: [f32; 4] = std::mem::transmute(diag_interp);
+            // Store SIMD results to stack arrays for per-pixel assignment
+            let mut center_arr = [0.0f32; 4];
+            let mut h_arr = [0.0f32; 4];
+            let mut v_arr = [0.0f32; 4];
+            let mut cross_arr = [0.0f32; 4];
+            let mut diag_arr = [0.0f32; 4];
+            _mm_storeu_ps(center_arr.as_mut_ptr(), center);
+            _mm_storeu_ps(h_arr.as_mut_ptr(), h_interp);
+            _mm_storeu_ps(v_arr.as_mut_ptr(), v_interp);
+            _mm_storeu_ps(cross_arr.as_mut_ptr(), cross_interp);
+            _mm_storeu_ps(diag_arr.as_mut_ptr(), diag_interp);
 
             // Assign based on pattern (unrolled for efficiency)
             // The pattern repeats every 2 pixels, so we handle 2 pairs
@@ -583,12 +588,17 @@ unsafe fn process_row_simd_neon(bayer: &BayerImage, row_rgb: &mut [f32], y: usiz
                 quarter,
             );
 
-            // Extract to arrays
-            let center_arr: [f32; 4] = std::mem::transmute(center);
-            let h_arr: [f32; 4] = std::mem::transmute(h_interp);
-            let v_arr: [f32; 4] = std::mem::transmute(v_interp);
-            let cross_arr: [f32; 4] = std::mem::transmute(cross_interp);
-            let diag_arr: [f32; 4] = std::mem::transmute(diag_interp);
+            // Store SIMD results to stack arrays for per-pixel assignment
+            let mut center_arr = [0.0f32; 4];
+            let mut h_arr = [0.0f32; 4];
+            let mut v_arr = [0.0f32; 4];
+            let mut cross_arr = [0.0f32; 4];
+            let mut diag_arr = [0.0f32; 4];
+            vst1q_f32(center_arr.as_mut_ptr(), center);
+            vst1q_f32(h_arr.as_mut_ptr(), h_interp);
+            vst1q_f32(v_arr.as_mut_ptr(), v_interp);
+            vst1q_f32(cross_arr.as_mut_ptr(), cross_interp);
+            vst1q_f32(diag_arr.as_mut_ptr(), diag_interp);
 
             for i in 0..4 {
                 let px = x + i;
