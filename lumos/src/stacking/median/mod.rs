@@ -1,4 +1,7 @@
-//! Memory-efficient median stacking using chunked processing and memory-mapped files.
+//! Median stacking with automatic memory management.
+//!
+//! Automatically chooses between in-memory and disk-based processing
+//! based on available system memory.
 
 #[cfg(feature = "bench")]
 pub mod bench;
@@ -10,12 +13,14 @@ use crate::math;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::{CacheConfig, FrameType};
 
-/// Configuration for memory-efficient median stacking.
+/// Configuration for median stacking.
 pub type MedianConfig = CacheConfig;
 
-/// Stack images using median with bounded memory usage.
+/// Stack images using median.
 ///
-/// Chunk size is computed adaptively based on available system memory and image dimensions.
+/// Automatically chooses storage mode based on available memory:
+/// - If all images fit in 75% of available RAM, processes entirely in memory
+/// - Otherwise, uses disk cache with memory-mapped access
 pub fn stack_median_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
@@ -23,9 +28,7 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
 ) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
-    std::fs::create_dir_all(&config.cache_dir).expect("Failed to create cache directory");
-
-    let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
+    let cache = ImageCache::from_paths(paths, config, frame_type);
     let result = cache.process_chunked(math::median_f32_mut);
 
     if !config.keep_cache {

@@ -1,4 +1,7 @@
-//! Memory-efficient sigma-clipped mean stacking using chunked processing and memory-mapped files.
+//! Sigma-clipped mean stacking with automatic memory management.
+//!
+//! Automatically chooses between in-memory and disk-based processing
+//! based on available system memory.
 
 #[cfg(feature = "bench")]
 pub mod bench;
@@ -11,7 +14,7 @@ use crate::math;
 use crate::stacking::cache::ImageCache;
 use crate::stacking::{CacheConfig, FrameType, SigmaClipConfig};
 
-/// Configuration for memory-efficient sigma-clipped mean stacking.
+/// Configuration for sigma-clipped mean stacking.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SigmaClippedConfig {
     /// Sigma clipping parameters.
@@ -110,9 +113,11 @@ impl ClipStats {
     }
 }
 
-/// Stack images using sigma-clipped mean with bounded memory usage.
+/// Stack images using sigma-clipped mean.
 ///
-/// Chunk size is computed adaptively based on available system memory and image dimensions.
+/// Automatically chooses storage mode based on available memory:
+/// - If all images fit in 75% of available RAM, processes entirely in memory
+/// - Otherwise, uses disk cache with memory-mapped access
 pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
@@ -120,9 +125,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
 ) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
-    std::fs::create_dir_all(&config.cache.cache_dir).expect("Failed to create cache directory");
-
-    let cache = ImageCache::from_paths(paths, &config.cache.cache_dir, frame_type);
+    let cache = ImageCache::from_paths(paths, &config.cache, frame_type);
     let clip = config.clip;
     let stats = ClipStats::default();
 

@@ -17,6 +17,8 @@ pub struct CacheConfig {
     pub cache_dir: PathBuf,
     /// Keep cache after stacking (useful for re-processing).
     pub keep_cache: bool,
+    /// Available memory override in bytes. If None, queries system for available memory.
+    pub available_memory: Option<u64>,
 }
 
 impl Default for CacheConfig {
@@ -24,6 +26,7 @@ impl Default for CacheConfig {
         Self {
             cache_dir: std::env::temp_dir().join("lumos_cache"),
             keep_cache: cfg!(debug_assertions) || cfg!(test),
+            available_memory: None,
         }
     }
 }
@@ -36,22 +39,11 @@ impl CacheConfig {
             ..Default::default()
         }
     }
-}
 
-/// Compute optimal chunk rows based on available system memory and image dimensions.
-///
-/// Uses a fraction of available RAM to determine chunk size, balancing
-/// memory usage against I/O performance. More available RAM = larger chunks.
-///
-/// # Arguments
-/// * `width` - Image width in pixels
-/// * `channels` - Number of color channels
-/// * `frame_count` - Number of frames being stacked
-///
-/// # Returns
-/// Chunk rows with minimum of `MIN_CHUNK_ROWS`. No upper cap - image height is the natural limit.
-pub fn compute_optimal_chunk_rows(width: usize, channels: usize, frame_count: usize) -> usize {
-    compute_optimal_chunk_rows_with_memory(width, channels, frame_count, get_available_memory())
+    /// Get available memory - uses override if set, otherwise queries system.
+    pub fn get_available_memory(&self) -> u64 {
+        self.available_memory.unwrap_or_else(get_available_memory)
+    }
 }
 
 /// Get available system memory in bytes.
@@ -243,7 +235,7 @@ mod tests {
         let frame_count = 20;
 
         let available = get_available_memory();
-        let rows = compute_optimal_chunk_rows(width, channels, frame_count);
+        let rows = compute_optimal_chunk_rows_with_memory(width, channels, frame_count, available);
         let bytes_per_row = (width * channels * 4 * frame_count) as u64;
         let estimated_mem = rows as u64 * bytes_per_row;
 
