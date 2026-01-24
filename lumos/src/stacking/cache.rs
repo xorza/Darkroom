@@ -206,7 +206,7 @@ impl ImageCache {
         let first_path = paths[0].as_ref();
         let first_cache_filename = cache_filename_for_path(first_path);
         let first_cache_path = cache_dir.join(&first_cache_filename);
-        tracing::debug!(
+        tracing::info!(
             source = %first_path.display(),
             cache_file = %first_cache_filename,
             "Mapping source to cache file"
@@ -233,7 +233,7 @@ impl ImageCache {
             let path_ref = path.as_ref();
             let cache_filename = cache_filename_for_path(path_ref);
             let cache_path = cache_dir.join(&cache_filename);
-            tracing::debug!(
+            tracing::info!(
                 source = %path_ref.display(),
                 cache_file = %cache_filename,
                 "Mapping source to cache file"

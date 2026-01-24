@@ -143,6 +143,41 @@ impl ImageStack {
         }
 
         match &self.method {
+            StackingMethod::Mean => {
+                tracing::info!(
+                    frame_type = %self.frame_type,
+                    method = "Mean",
+                    frame_count = self.paths.len(),
+                    "Starting stacking"
+                );
+            }
+            StackingMethod::Median(config) => {
+                tracing::info!(
+                    frame_type = %self.frame_type,
+                    method = "Median",
+                    frame_count = self.paths.len(),
+                    cache_dir = %config.cache_dir.display(),
+                    keep_cache = config.keep_cache,
+                    available_memory = ?config.available_memory,
+                    "Starting stacking"
+                );
+            }
+            StackingMethod::SigmaClippedMean(config) => {
+                tracing::info!(
+                    frame_type = %self.frame_type,
+                    method = "SigmaClippedMean",
+                    frame_count = self.paths.len(),
+                    sigma = config.clip.sigma,
+                    max_iterations = config.clip.max_iterations,
+                    cache_dir = %config.cache.cache_dir.display(),
+                    keep_cache = config.cache.keep_cache,
+                    available_memory = ?config.cache.available_memory,
+                    "Starting stacking"
+                );
+            }
+        }
+
+        match &self.method {
             StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
             StackingMethod::Median(config) => {
                 median::stack_median_from_paths(&self.paths, self.frame_type, config)
@@ -359,5 +394,64 @@ mod tests {
             StackingMethod::SigmaClippedMean(SigmaClippedConfig::default()),
             "master_dark_sigma_clipped.tiff",
         );
+    }
+
+    #[test]
+    #[cfg_attr(not(feature = "slow-tests"), ignore)]
+    fn test_stack_darks_median_limited_ram() {
+        init_tracing();
+
+        let Some(paths) = calibration_image_paths("Darks") else {
+            eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
+            return;
+        };
+
+        if paths.is_empty() {
+            eprintln!("No files found in Darks directory, skipping test");
+            return;
+        }
+
+        // Create config with very limited RAM (1 byte) to force disk-backed storage
+        let config = MedianConfig {
+            available_memory: Some(1),
+            cache_dir: std::env::temp_dir().join("lumos_limited_ram_test"),
+            ..Default::default()
+        };
+
+        println!(
+            "Stacking {} darks with median method (simulated limited RAM)...",
+            paths.len()
+        );
+
+        let stack = ImageStack::new(
+            FrameType::Dark,
+            StackingMethod::Median(config.clone()),
+            paths.clone(),
+        );
+        let master = stack.process().unwrap();
+
+        let first = AstroImage::from_file(&paths[0]).unwrap();
+        println!(
+            "Master dark: {}x{}x{}",
+            master.dimensions.width, master.dimensions.height, master.dimensions.channels
+        );
+
+        assert_eq!(master.dimensions, first.dimensions);
+        assert!(!master.pixels.is_empty());
+
+        // Verify cache files were created (disk-backed mode)
+        assert!(
+            config.cache_dir.exists(),
+            "Cache directory should exist for disk-backed mode"
+        );
+
+        let img: imaginarium::Image = master.into();
+        img.save_file(common::test_utils::test_output_path(
+            "master_dark_median_limited_ram.tiff",
+        ))
+        .unwrap();
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&config.cache_dir);
     }
 }
