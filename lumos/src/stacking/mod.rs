@@ -28,23 +28,29 @@ pub enum FrameType {
 }
 
 /// Method used for combining multiple frames during stacking.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StackingMethod {
     /// Average all pixel values. Fast but sensitive to outliers.
     Mean,
     /// Take the median pixel value. Best for outlier rejection.
-    #[default]
-    Median,
+    /// Uses memory-mapped chunked processing for efficiency.
+    Median(MedianStackConfig),
     /// Average after excluding pixels beyond N sigma from the mean.
     /// The f32 parameter specifies the sigma threshold (typically 2.0-3.0).
     SigmaClippedMean(SigmaClipConfig),
+}
+
+impl Default for StackingMethod {
+    fn default() -> Self {
+        Self::Median(MedianStackConfig::default())
+    }
 }
 
 impl std::fmt::Display for StackingMethod {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StackingMethod::Mean => write!(f, "mean"),
-            StackingMethod::Median => write!(f, "median"),
+            StackingMethod::Median(_) => write!(f, "median"),
             StackingMethod::SigmaClippedMean(config) => {
                 write!(f, "sigma{:.1}", config.sigma)
             }
@@ -120,13 +126,11 @@ impl ImageStack {
     pub fn process(&self) -> AstroImage {
         assert!(!self.paths.is_empty(), "No paths provided for stacking");
 
-        match self.method {
+        match &self.method {
             StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
-            StackingMethod::Median => median::stack_median_from_paths(
-                &self.paths,
-                self.frame_type,
-                &MedianStackConfig::default(),
-            ),
+            StackingMethod::Median(config) => {
+                median::stack_median_from_paths(&self.paths, self.frame_type, config)
+            }
             StackingMethod::SigmaClippedMean(_) => {
                 // Sigma-clipped needs all values for iterative clipping
                 let frames: Vec<AstroImage> = self
@@ -134,7 +138,7 @@ impl ImageStack {
                     .iter()
                     .map(|p| AstroImage::from_file(p).expect("Failed to load image"))
                     .collect();
-                cpu::stack_frames_cpu(&frames, self.method, self.frame_type)
+                cpu::stack_frames_cpu(&frames, &self.method, self.frame_type)
             }
         }
     }
@@ -148,7 +152,10 @@ mod tests {
 
     #[test]
     fn test_stacking_method_default() {
-        assert_eq!(StackingMethod::default(), StackingMethod::Median);
+        assert_eq!(
+            StackingMethod::default(),
+            StackingMethod::Median(MedianStackConfig::default())
+        );
     }
 
     #[test]
@@ -165,7 +172,7 @@ mod tests {
         }
 
         println!("Stacking {} flats with median method...", paths.len());
-        let stack = ImageStack::new(FrameType::Flat, StackingMethod::Median, paths.clone());
+        let stack = ImageStack::new(FrameType::Flat, StackingMethod::default(), paths.clone());
         let master_flat = stack.process();
 
         // Load first frame to verify dimensions match
@@ -235,7 +242,7 @@ mod tests {
         }
 
         println!("Stacking {} darks with median method...", paths.len());
-        let stack = ImageStack::new(FrameType::Dark, StackingMethod::Median, paths.clone());
+        let stack = ImageStack::new(FrameType::Dark, StackingMethod::default(), paths.clone());
         let master_dark = stack.process();
 
         // Load first frame to verify dimensions match

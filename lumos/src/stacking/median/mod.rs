@@ -19,7 +19,7 @@ use crate::stacking::FrameType;
 use cache::ImageCache;
 
 /// Configuration for memory-efficient median stacking.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MedianStackConfig {
     /// Number of rows to process at once (memory vs seeks tradeoff).
     /// Default: 64 rows.

@@ -566,7 +566,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         let calibrated = light.calibrate(&masters);
@@ -594,7 +594,7 @@ mod tests {
             master_flat: None,
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         let calibrated = light.calibrate(&masters);
@@ -623,7 +623,7 @@ mod tests {
             master_flat: Some(flat),
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         let calibrated = light.calibrate(&masters);
@@ -666,7 +666,7 @@ mod tests {
             master_flat: Some(flat),
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         let calibrated = light.calibrate(&masters);
@@ -794,7 +794,8 @@ mod tests {
 
         let start = std::time::Instant::now();
         let masters =
-            CalibrationMasters::load_from_directory(&masters_dir, StackingMethod::Median).unwrap();
+            CalibrationMasters::load_from_directory(&masters_dir, StackingMethod::default())
+                .unwrap();
         println!("  Load masters: {:?}", start.elapsed());
 
         println!(
@@ -899,7 +900,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         let calibrated = light.calibrate(&masters);
@@ -935,7 +936,7 @@ mod tests {
             master_flat: None,
             master_bias: Some(bias),
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         // This should panic due to dimension mismatch (channels differ)
@@ -966,7 +967,7 @@ mod tests {
             master_flat: None,
             master_bias: None,
             hot_pixel_map: None,
-            method: StackingMethod::Median,
+            method: StackingMethod::default(),
         };
 
         // This should panic due to dimension mismatch (channels differ)

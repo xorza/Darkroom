@@ -9,7 +9,7 @@ const MAX_STACK_FRAMES: usize = 256;
 /// Stack frames with the given method using parallel CPU processing.
 pub(crate) fn stack_frames_cpu(
     frames: &[AstroImage],
-    method: StackingMethod,
+    method: &StackingMethod,
     frame_type: FrameType,
 ) -> AstroImage {
     assert!(
@@ -60,11 +60,13 @@ pub(crate) fn stack_frames_cpu(
 }
 
 /// Combine pixel values using the specified method.
-fn combine_pixels(values: &[f32], method: StackingMethod) -> f32 {
+fn combine_pixels(values: &[f32], method: &StackingMethod) -> f32 {
     match method {
         StackingMethod::Mean => mean(values),
-        StackingMethod::Median => median(values),
-        StackingMethod::SigmaClippedMean(config) => sigma_clipped_mean(values, config),
+        StackingMethod::Median(_) => {
+            unreachable!("Median should use memory-mapped implementation")
+        }
+        StackingMethod::SigmaClippedMean(config) => sigma_clipped_mean(values, *config),
     }
 }
 
