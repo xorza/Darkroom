@@ -95,6 +95,10 @@ pub struct StarDetectionConfig {
     pub min_snr: f32,
     /// Tile size for background estimation.
     pub background_tile_size: usize,
+    /// Maximum FWHM deviation from median in MAD (median absolute deviation) units.
+    /// Stars with FWHM > median + max_fwhm_deviation * MAD are rejected as spurious.
+    /// Typical value is 3.0-5.0 (similar to sigma clipping). Set to 0.0 to disable.
+    pub max_fwhm_deviation: f32,
 }
 
 impl Default for StarDetectionConfig {
@@ -107,6 +111,7 @@ impl Default for StarDetectionConfig {
             edge_margin: 10,
             min_snr: 10.0,
             background_tile_size: 64,
+            max_fwhm_deviation: 3.0,
         }
     }
 }
@@ -150,6 +155,42 @@ pub fn find_stars(
 
     // Sort by flux (brightest first)
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+
+    // Filter FWHM outliers - spurious detections often have abnormally large FWHM
+    // Use MAD-based outlier detection on top stars by flux (more likely to be real)
+    if config.max_fwhm_deviation > 0.0 && stars.len() >= 5 {
+        // Stars are sorted by flux; use top half for robust median/MAD estimate
+        let reference_count = (stars.len() / 2).max(5).min(stars.len());
+        let (median_fwhm, mad) = {
+            let mut fwhms: Vec<f32> = stars.iter().take(reference_count).map(|s| s.fwhm).collect();
+            fwhms.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let median = fwhms[fwhms.len() / 2];
+
+            // Compute MAD (median absolute deviation)
+            let mut deviations: Vec<f32> = fwhms.iter().map(|&f| (f - median).abs()).collect();
+            deviations.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let mad = deviations[deviations.len() / 2];
+
+            (median, mad)
+        };
+
+        // max_fwhm_deviation is number of MAD units above median
+        // Use at least 10% of median as minimum MAD to handle very uniform FWHM
+        let effective_mad = mad.max(median_fwhm * 0.1);
+        let max_fwhm = median_fwhm + config.max_fwhm_deviation * effective_mad;
+        let before_count = stars.len();
+        stars.retain(|s| s.fwhm <= max_fwhm);
+        let removed = before_count - stars.len();
+        if removed > 0 {
+            tracing::debug!(
+                "Removed {} stars with FWHM > {:.1} (median={:.1}, MAD={:.2})",
+                removed,
+                max_fwhm,
+                median_fwhm,
+                mad
+            );
+        }
+    }
 
     // Remove duplicate detections - keep only the brightest star within min_separation pixels
     // Use half the typical FWHM as separation threshold

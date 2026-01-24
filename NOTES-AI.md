@@ -341,6 +341,47 @@ CalibrationMasters // Container for master dark/flat/bias frames
 - For large images (>200K pixels), uses adaptive sampling (100K samples) for fast median estimation
 - MAD-to-sigma conversion: σ ≈ 1.4826 * MAD (Gaussian property)
 
+**Star detection module (`star_detection/`):**
+- Detects stars in astronomical images and computes sub-pixel accurate centroids
+- Module structure:
+  - `mod.rs` - `Star`, `StarDetectionConfig`, `find_stars()` main API
+  - `background/mod.rs` - `BackgroundMap`, `estimate_background()` using tile-based sigma-clipped median
+  - `detection/mod.rs` - `StarCandidate`, `detect_stars()` using thresholding and connected components
+  - `centroid/mod.rs` - `compute_centroid()` using iterative weighted centroid algorithm
+  - `median_filter/mod.rs` - `median_filter_3x3()` for Bayer pattern artifact removal
+
+**Key types:**
+```rust
+Star               // { x, y, flux, fwhm, eccentricity, snr, peak } - detected star with metrics
+StarDetectionConfig // Detection parameters (sigma, area, eccentricity, SNR, FWHM filtering)
+StarCandidate      // { centroid_x, centroid_y, area, bbox } - initial detection before refinement
+BackgroundMap      // { background, noise } - per-pixel background and noise estimates
+```
+
+**Algorithm pipeline:**
+1. **Median filter** - 3x3 median removes Bayer pattern artifacts from CFA sensors
+2. **Background estimation** - Tile-based sigma-clipped median with bilinear interpolation
+3. **Star detection** - Threshold (background + k×σ), connected components with union-find (path compression)
+4. **Centroid refinement** - Iterative Gaussian-weighted centroid (~0.05 pixel accuracy)
+5. **Quality filtering** - SNR, eccentricity, saturation, and FWHM outlier rejection
+6. **Duplicate removal** - Spatial deduplication (8 pixel separation)
+
+**FWHM outlier filtering:**
+- Uses MAD (median absolute deviation) for robust outlier detection
+- Computes median FWHM from top half of stars by flux (more reliable)
+- Rejects stars with FWHM > median + max_fwhm_deviation × MAD
+- Default `max_fwhm_deviation = 3.0` (similar to 3-sigma clipping)
+- Effective at rejecting spurious noise detections with abnormally large FWHM
+
+**Configuration defaults:**
+- `detection_sigma: 4.0` - Detection threshold in sigma above background
+- `min_area: 5` - Minimum star area in pixels
+- `max_area: 500` - Maximum star area in pixels
+- `max_eccentricity: 0.6` - Maximum allowed elongation
+- `min_snr: 10.0` - Minimum signal-to-noise ratio
+- `max_fwhm_deviation: 3.0` - MAD units for FWHM outlier rejection
+- `background_tile_size: 64` - Tile size for background estimation
+
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
 ## Key Data Structures
