@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::astro_image::AstroImage;
 use crate::math;
-use crate::stacking::cache::ImageCache;
+use crate::stacking::cache::{CacheError, ImageCache};
 use crate::stacking::{CacheConfig, FrameType, SigmaClipConfig};
 
 /// Configuration for sigma-clipped mean stacking.
@@ -118,14 +118,21 @@ impl ClipStats {
 /// Automatically chooses storage mode based on available memory:
 /// - If all images fit in 75% of available RAM, processes entirely in memory
 /// - Otherwise, uses disk cache with memory-mapped access
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No paths are provided
+/// - Image loading fails
+/// - Image dimensions don't match
+/// - Cache directory creation fails
+/// - Cache file I/O fails
 pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
     config: &SigmaClippedConfig,
-) -> AstroImage {
-    assert!(!paths.is_empty(), "No paths provided for stacking");
-
-    let cache = ImageCache::from_paths(paths, &config.cache, frame_type);
+) -> Result<AstroImage, CacheError> {
+    let cache = ImageCache::from_paths(paths, &config.cache, frame_type)?;
     let clip = config.clip;
     let stats = ClipStats::default();
 
@@ -142,7 +149,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
         cache.cleanup();
     }
 
-    result
+    Ok(result)
 }
 
 /// Calculate sigma-clipped mean in-place, returning both the result and final value count.

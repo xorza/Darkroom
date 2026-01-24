@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 use strum_macros::Display;
 
+pub use cache::CacheError;
 pub use cache_config::CacheConfig;
 pub use median::MedianConfig;
 pub use sigma_clipped::SigmaClippedConfig;
@@ -127,13 +128,21 @@ impl ImageStack {
     /// Uses memory-efficient streaming for mean and median stacking.
     /// For sigma-clipped, loads all frames into memory.
     ///
-    /// # Panics
-    /// Panics if no paths were provided or if frames have mismatched dimensions.
-    pub fn process(&self) -> AstroImage {
-        assert!(!self.paths.is_empty(), "No paths provided for stacking");
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No paths are provided
+    /// - Image loading fails
+    /// - Image dimensions don't match
+    /// - Cache directory creation fails (for disk-backed storage)
+    /// - Cache file I/O fails (for disk-backed storage)
+    pub fn process(&self) -> Result<AstroImage, CacheError> {
+        if self.paths.is_empty() {
+            return Err(CacheError::NoPaths);
+        }
 
         match &self.method {
-            StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
+            StackingMethod::Mean => Ok(mean::stack_mean_from_paths(&self.paths, self.frame_type)),
             StackingMethod::Median(config) => {
                 median::stack_median_from_paths(&self.paths, self.frame_type, config)
             }
@@ -185,7 +194,7 @@ mod tests {
             method
         );
         let stack = ImageStack::new(frame_type, method, paths.clone());
-        let master = stack.process();
+        let master = stack.process().unwrap();
 
         let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(

@@ -4,14 +4,38 @@
 //! balancing RAM usage against disk I/O performance.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Minimum chunk rows to avoid excessive I/O overhead.
 pub const MIN_CHUNK_ROWS: usize = 64;
 /// Percentage of available memory to use (75%).
 pub const MEMORY_PERCENT: u64 = 75;
 
+/// Progress information for cache operations.
+#[derive(Debug, Clone)]
+pub struct CacheProgress {
+    /// Current step (0-based).
+    pub current: usize,
+    /// Total number of steps.
+    pub total: usize,
+    /// Description of current operation.
+    pub stage: CacheStage,
+}
+
+/// Stage of cache operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheStage {
+    /// Loading images into memory or writing to disk cache.
+    Loading,
+    /// Processing chunks during stacking.
+    Processing,
+}
+
+/// Callback type for progress reporting.
+pub type ProgressCallback = Arc<dyn Fn(CacheProgress) + Send + Sync>;
+
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone)]
 pub struct CacheConfig {
     /// Directory for decoded image cache.
     pub cache_dir: PathBuf,
@@ -19,6 +43,28 @@ pub struct CacheConfig {
     pub keep_cache: bool,
     /// Available memory override in bytes. If None, queries system for available memory.
     pub available_memory: Option<u64>,
+    /// Optional progress callback.
+    pub progress: Option<ProgressCallback>,
+}
+
+impl std::fmt::Debug for CacheConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CacheConfig")
+            .field("cache_dir", &self.cache_dir)
+            .field("keep_cache", &self.keep_cache)
+            .field("available_memory", &self.available_memory)
+            .field("progress", &self.progress.is_some())
+            .finish()
+    }
+}
+
+impl PartialEq for CacheConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.cache_dir == other.cache_dir
+            && self.keep_cache == other.keep_cache
+            && self.available_memory == other.available_memory
+        // Intentionally ignores `progress` callback - not comparable
+    }
 }
 
 impl Default for CacheConfig {
@@ -27,6 +73,7 @@ impl Default for CacheConfig {
             cache_dir: std::env::temp_dir().join("lumos_cache"),
             keep_cache: cfg!(debug_assertions) || cfg!(test),
             available_memory: None,
+            progress: None,
         }
     }
 }
@@ -43,6 +90,17 @@ impl CacheConfig {
     /// Get available memory - uses override if set, otherwise queries system.
     pub fn get_available_memory(&self) -> u64 {
         self.available_memory.unwrap_or_else(get_available_memory)
+    }
+
+    /// Report progress if callback is set.
+    pub fn report_progress(&self, current: usize, total: usize, stage: CacheStage) {
+        if let Some(ref callback) = self.progress {
+            callback(CacheProgress {
+                current,
+                total,
+                stage,
+            });
+        }
     }
 }
 

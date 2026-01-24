@@ -9,18 +9,78 @@
 //! - Data: f32 pixels in row-major order (width * height * channels * 4 bytes)
 
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, BufWriter, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 
 use memmap2::Mmap;
 use rayon::prelude::*;
+use thiserror::Error;
 
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::stacking::FrameType;
 use crate::stacking::cache_config::{
-    CacheConfig, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
+    CacheConfig, CacheStage, MEMORY_PERCENT, compute_optimal_chunk_rows_with_memory,
 };
+
+/// Errors that can occur during cache operations.
+#[derive(Debug, Error)]
+pub enum CacheError {
+    #[error("No paths provided for caching")]
+    NoPaths,
+
+    #[error("Failed to load image '{path}': {source}")]
+    ImageLoad {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error(
+        "Dimension mismatch for {frame_type} frame {index}: expected {expected:?}, got {actual:?}"
+    )]
+    DimensionMismatch {
+        frame_type: FrameType,
+        index: usize,
+        expected: ImageDimensions,
+        actual: ImageDimensions,
+    },
+
+    #[error("Failed to create cache directory '{path}': {source}")]
+    CreateDir {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to create cache file '{path}': {source}")]
+    CreateFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to write cache file '{path}': {source}")]
+    WriteFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to open cache file '{path}': {source}")]
+    OpenFile {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    #[error("Failed to memory-map cache file '{path}': {source}")]
+    Mmap {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+}
 
 /// Header for cached image files.
 #[derive(Debug, Clone, Copy)]
@@ -55,8 +115,8 @@ pub struct ImageCache {
     dimensions: ImageDimensions,
     /// Metadata from first frame.
     metadata: AstroImageMetadata,
-    /// Available memory for chunk computation.
-    available_memory: u64,
+    /// Configuration for cache operations.
+    config: CacheConfig,
 }
 
 impl ImageCache {
@@ -79,11 +139,20 @@ impl ImageCache {
         paths: &[P],
         config: &CacheConfig,
         frame_type: FrameType,
-    ) -> Self {
-        assert!(!paths.is_empty(), "No paths provided");
+    ) -> Result<Self, CacheError> {
+        if paths.is_empty() {
+            return Err(CacheError::NoPaths);
+        }
+
+        // Report initial progress
+        config.report_progress(0, paths.len(), CacheStage::Loading);
 
         // Load first image to get dimensions
-        let first_image = AstroImage::from_file(&paths[0]).expect("Failed to load first image");
+        let first_path = paths[0].as_ref();
+        let first_image = AstroImage::from_file(first_path).map_err(|e| CacheError::ImageLoad {
+            path: first_path.to_path_buf(),
+            source: io::Error::other(e.to_string()),
+        })?;
         let dimensions = first_image.dimensions;
         let metadata = first_image.metadata.clone();
 
@@ -101,102 +170,138 @@ impl ImageCache {
         );
 
         let storage = if use_in_memory {
-            Self::load_in_memory(paths, frame_type, dimensions, first_image)
+            Self::load_in_memory(paths, config, frame_type, dimensions, first_image)?
         } else {
-            Self::load_to_disk(
-                paths,
-                &config.cache_dir,
-                frame_type,
-                dimensions,
-                first_image,
-            )
+            Self::load_to_disk(paths, config, frame_type, dimensions, first_image)?
         };
 
-        Self {
+        Ok(Self {
             storage,
             dimensions,
             metadata,
-            available_memory,
-        }
+            config: config.clone(),
+        })
     }
 
     /// Load all images into memory.
     fn load_in_memory<P: AsRef<Path>>(
         paths: &[P],
+        config: &CacheConfig,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: AstroImage,
-    ) -> Storage {
+    ) -> Result<Storage, CacheError> {
         let mut images = Vec::with_capacity(paths.len());
         images.push(first_image);
+        config.report_progress(1, paths.len(), CacheStage::Loading);
 
         for (i, path) in paths.iter().enumerate().skip(1) {
-            let image = AstroImage::from_file(path).expect("Failed to load image");
-            assert!(
-                image.dimensions == dimensions,
-                "{} frame {} has different dimensions: {:?} vs {:?}",
-                frame_type,
-                i,
-                image.dimensions,
-                dimensions
-            );
+            let path_ref = path.as_ref();
+            let image = AstroImage::from_file(path_ref).map_err(|e| CacheError::ImageLoad {
+                path: path_ref.to_path_buf(),
+                source: io::Error::other(e.to_string()),
+            })?;
+
+            if image.dimensions != dimensions {
+                return Err(CacheError::DimensionMismatch {
+                    frame_type,
+                    index: i,
+                    expected: dimensions,
+                    actual: image.dimensions,
+                });
+            }
+
             images.push(image);
+            config.report_progress(i + 1, paths.len(), CacheStage::Loading);
         }
 
         tracing::info!("Loaded {} frames into memory", images.len());
-        Storage::InMemory(images)
+        Ok(Storage::InMemory(images))
     }
 
     /// Load images to disk cache with memory-mapped access.
     fn load_to_disk<P: AsRef<Path>>(
         paths: &[P],
-        cache_dir: &Path,
+        config: &CacheConfig,
         frame_type: FrameType,
         dimensions: ImageDimensions,
         first_image: AstroImage,
-    ) -> Storage {
-        std::fs::create_dir_all(cache_dir).expect("Failed to create cache directory");
+    ) -> Result<Storage, CacheError> {
+        let cache_dir = &config.cache_dir;
+        std::fs::create_dir_all(cache_dir).map_err(|e| CacheError::CreateDir {
+            path: cache_dir.to_path_buf(),
+            source: e,
+        })?;
 
         let mut mmaps = Vec::with_capacity(paths.len());
         let mut cache_paths = Vec::with_capacity(paths.len());
 
-        // Write first image
+        // Write first image (or reuse existing cache)
         let first_cache_path = cache_dir.join("frame_0000.bin");
-        write_cache_file(&first_cache_path, &first_image);
-        let file = File::open(&first_cache_path).expect("Failed to open cache file");
-        let mmap = unsafe { Mmap::map(&file).expect("Failed to mmap cache file") };
+        if !try_reuse_cache_file(&first_cache_path, dimensions) {
+            write_cache_file(&first_cache_path, &first_image)?;
+        }
+        let file = File::open(&first_cache_path).map_err(|e| CacheError::OpenFile {
+            path: first_cache_path.clone(),
+            source: e,
+        })?;
+        let mmap = unsafe {
+            Mmap::map(&file).map_err(|e| CacheError::Mmap {
+                path: first_cache_path.clone(),
+                source: e,
+            })?
+        };
         mmaps.push(mmap);
         cache_paths.push(first_cache_path);
+        config.report_progress(1, paths.len(), CacheStage::Loading);
 
         // Process remaining images
         for (i, path) in paths.iter().enumerate().skip(1) {
-            let image = AstroImage::from_file(path).expect("Failed to load image");
-            assert!(
-                image.dimensions == dimensions,
-                "{} frame {} has different dimensions: {:?} vs {:?}",
-                frame_type,
-                i,
-                image.dimensions,
-                dimensions
-            );
-
             let cache_path = cache_dir.join(format!("frame_{:04}.bin", i));
-            write_cache_file(&cache_path, &image);
 
-            let file = File::open(&cache_path).expect("Failed to open cache file");
-            let mmap = unsafe { Mmap::map(&file).expect("Failed to mmap cache file") };
+            // Try to reuse existing cache file if dimensions match
+            if !try_reuse_cache_file(&cache_path, dimensions) {
+                let path_ref = path.as_ref();
+                let image = AstroImage::from_file(path_ref).map_err(|e| CacheError::ImageLoad {
+                    path: path_ref.to_path_buf(),
+                    source: io::Error::other(e.to_string()),
+                })?;
+
+                if image.dimensions != dimensions {
+                    return Err(CacheError::DimensionMismatch {
+                        frame_type,
+                        index: i,
+                        expected: dimensions,
+                        actual: image.dimensions,
+                    });
+                }
+
+                write_cache_file(&cache_path, &image)?;
+            }
+
+            let file = File::open(&cache_path).map_err(|e| CacheError::OpenFile {
+                path: cache_path.clone(),
+                source: e,
+            })?;
+            let mmap = unsafe {
+                Mmap::map(&file).map_err(|e| CacheError::Mmap {
+                    path: cache_path.clone(),
+                    source: e,
+                })?
+            };
 
             mmaps.push(mmap);
             cache_paths.push(cache_path);
+            config.report_progress(i + 1, paths.len(), CacheStage::Loading);
         }
 
         tracing::info!("Cached {} frames to disk at {:?}", mmaps.len(), cache_dir);
 
-        Storage::DiskBacked {
+        Ok(Storage::DiskBacked {
             mmaps,
             cache_paths,
             cache_dir: cache_dir.to_path_buf(),
-        }
+        })
     }
 
     /// Get number of cached frames.
@@ -239,6 +344,7 @@ impl ImageCache {
         let width = dims.width;
         let height = dims.height;
         let channels = dims.channels;
+        let available_memory = self.config.get_available_memory();
 
         // For in-memory, process entire image; for disk, use adaptive chunking
         let chunk_rows = match &self.storage {
@@ -247,12 +353,15 @@ impl ImageCache {
                 width,
                 channels,
                 frame_count,
-                self.available_memory,
+                available_memory,
             ),
         };
 
         let mut output_pixels = vec![0.0f32; dims.pixel_count()];
         let num_chunks = height.div_ceil(chunk_rows);
+
+        self.config
+            .report_progress(0, num_chunks, CacheStage::Processing);
 
         for chunk_idx in 0..num_chunks {
             let start_row = chunk_idx * chunk_rows;
@@ -285,6 +394,9 @@ impl ImageCache {
                         *out = combine(&mut values);
                     }
                 });
+
+            self.config
+                .report_progress(chunk_idx + 1, num_chunks, CacheStage::Processing);
         }
 
         AstroImage {
@@ -315,19 +427,73 @@ impl ImageCache {
     }
 }
 
+/// Try to reuse an existing cache file if it exists and has matching dimensions.
+///
+/// Returns true if the file can be reused, false if it needs to be rewritten.
+fn try_reuse_cache_file(path: &Path, expected_dims: ImageDimensions) -> bool {
+    let Ok(file) = File::open(path) else {
+        return false;
+    };
+
+    // Check file size matches expected
+    let expected_size = size_of::<CacheHeader>() + expected_dims.pixel_count() * size_of::<f32>();
+    let Ok(metadata) = file.metadata() else {
+        return false;
+    };
+    if metadata.len() != expected_size as u64 {
+        return false;
+    }
+
+    // Check header dimensions match
+    let Ok(mmap) = (unsafe { Mmap::map(&file) }) else {
+        return false;
+    };
+    if mmap.len() < size_of::<CacheHeader>() {
+        return false;
+    }
+
+    let header: &CacheHeader = bytemuck::from_bytes(&mmap[..size_of::<CacheHeader>()]);
+    let matches = header.width == expected_dims.width as u32
+        && header.height == expected_dims.height as u32
+        && header.channels == expected_dims.channels as u32;
+
+    if matches {
+        tracing::debug!("Reusing existing cache file: {:?}", path);
+    }
+    matches
+}
+
 /// Write image to binary cache file.
-fn write_cache_file(path: &Path, image: &AstroImage) {
-    let mut file = File::create(path).expect("Failed to create cache file");
+fn write_cache_file(path: &Path, image: &AstroImage) -> Result<(), CacheError> {
+    let file = File::create(path).map_err(|e| CacheError::CreateFile {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let mut writer = BufWriter::new(file);
 
     let header = CacheHeader {
         width: image.dimensions.width as u32,
         height: image.dimensions.height as u32,
         channels: image.dimensions.channels as u32,
     };
-    file.write_all(bytemuck::bytes_of(&header)).unwrap();
+    writer
+        .write_all(bytemuck::bytes_of(&header))
+        .map_err(|e| CacheError::WriteFile {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
 
     let bytes: &[u8] = bytemuck::cast_slice(&image.pixels);
-    file.write_all(bytes).unwrap();
+    writer.write_all(bytes).map_err(|e| CacheError::WriteFile {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    writer.flush().map_err(|e| CacheError::WriteFile {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -489,7 +655,7 @@ mod tests {
         };
 
         let cache_path = temp_dir.join("test_frame.bin");
-        write_cache_file(&cache_path, &image);
+        write_cache_file(&cache_path, &image).unwrap();
 
         let file = File::open(&cache_path).unwrap();
         let mmap = unsafe { Mmap::map(&file).unwrap() };
@@ -529,7 +695,7 @@ mod tests {
         };
 
         let cache_path = temp_dir.join("chunk_frame.bin");
-        write_cache_file(&cache_path, &image);
+        write_cache_file(&cache_path, &image).unwrap();
 
         let file = File::open(&cache_path).unwrap();
         let mmap = unsafe { Mmap::map(&file).unwrap() };

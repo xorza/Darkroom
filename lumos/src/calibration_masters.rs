@@ -276,7 +276,13 @@ impl CalibrationMasters {
         }
 
         let stack = ImageStack::new(frame_type, method.clone(), paths);
-        Some(stack.process())
+        match stack.process() {
+            Ok(image) => Some(image),
+            Err(e) => {
+                tracing::error!("Failed to stack {:?} frames: {}", frame_type, e);
+                None
+            }
+        }
     }
 
     fn save_as_tiff(image: AstroImage, path: &Path) -> Result<()> {

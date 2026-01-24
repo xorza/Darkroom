@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::astro_image::AstroImage;
 use crate::math;
-use crate::stacking::cache::ImageCache;
+use crate::stacking::cache::{CacheError, ImageCache};
 use crate::stacking::{CacheConfig, FrameType};
 
 /// Configuration for median stacking.
@@ -21,19 +21,26 @@ pub type MedianConfig = CacheConfig;
 /// Automatically chooses storage mode based on available memory:
 /// - If all images fit in 75% of available RAM, processes entirely in memory
 /// - Otherwise, uses disk cache with memory-mapped access
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No paths are provided
+/// - Image loading fails
+/// - Image dimensions don't match
+/// - Cache directory creation fails
+/// - Cache file I/O fails
 pub fn stack_median_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
     config: &MedianConfig,
-) -> AstroImage {
-    assert!(!paths.is_empty(), "No paths provided for stacking");
-
-    let cache = ImageCache::from_paths(paths, config, frame_type);
+) -> Result<AstroImage, CacheError> {
+    let cache = ImageCache::from_paths(paths, config, frame_type)?;
     let result = cache.process_chunked(math::median_f32_mut);
 
     if !config.keep_cache {
         cache.cleanup();
     }
 
-    result
+    Ok(result)
 }
