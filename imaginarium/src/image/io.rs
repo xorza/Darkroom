@@ -1,12 +1,11 @@
 use std::fs::File;
 use std::path::Path;
 
-use aligned_vec::AVec;
 use image as image_lib;
 use tiff::decoder::DecodingResult;
 
-use super::ALIGNMENT;
 use super::stride::add_stride_padding;
+use super::vec_to_avec;
 use crate::prelude::*;
 
 pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -43,17 +42,14 @@ pub(crate) fn load_png_jpeg<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
     let desc = ImageDesc::new(img.width() as usize, img.height() as usize, color_format);
     let bytes = add_stride_padding(
-        img.into_bytes(),
+        vec_to_avec(img.into_bytes()),
         desc.width,
         desc.height,
         desc.stride,
         color_format.byte_count(),
     );
 
-    Ok(Image {
-        desc,
-        bytes: AVec::from_slice(ALIGNMENT, &bytes),
-    })
+    Ok(Image { desc, bytes })
 }
 
 pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
@@ -108,17 +104,14 @@ pub(crate) fn load_tiff<P: AsRef<Path>>(filename: P) -> Result<Image> {
     let color_format = ColorFormat::from((channel_count, channel_size, channel_type));
     let desc = ImageDesc::new(w as usize, h as usize, color_format);
     let bytes = add_stride_padding(
-        bytes,
+        vec_to_avec(bytes),
         desc.width,
         desc.height,
         desc.stride,
         color_format.byte_count(),
     );
 
-    Ok(Image {
-        desc,
-        bytes: AVec::from_slice(ALIGNMENT, &bytes),
-    })
+    Ok(Image { desc, bytes })
 }
 
 pub(crate) fn save_jpg<P: AsRef<Path>>(image: &Image, filename: P) -> Result<()> {

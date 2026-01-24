@@ -397,3 +397,68 @@ fn clone_image() {
     assert_eq!(img.desc(), cloned.desc());
     assert_eq!(img.bytes(), cloned.bytes());
 }
+
+// =============================================================================
+// Alignment tests (AVec)
+// =============================================================================
+
+#[test]
+fn image_bytes_are_8_byte_aligned() {
+    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
+    let img = Image::new_black(desc).unwrap();
+    let ptr = img.bytes().as_ptr() as usize;
+    assert_eq!(ptr % 8, 0, "Image bytes should be 8-byte aligned");
+}
+
+#[test]
+fn into_bytes_is_zero_copy() {
+    let desc = ImageDesc::new(100, 100, ColorFormat::RGBA_U8);
+    let img = Image::new_black(desc).unwrap();
+    let original_ptr = img.bytes().as_ptr();
+    let vec = img.into_bytes();
+    let vec_ptr = vec.as_ptr();
+    assert_eq!(original_ptr, vec_ptr, "into_bytes should be zero-copy");
+}
+
+#[test]
+fn new_with_data_from_aligned_vec_preserves_pointer() {
+    // Create an aligned Vec by going through AVec
+    let mut aligned = aligned_vec::AVec::<u8>::with_capacity(8, 16);
+    aligned.resize(16, 42);
+    let original_ptr = aligned.as_ptr();
+
+    // Convert to Vec (this is zero-copy from AVec to Vec)
+    let (ptr, _align, len, capacity) = aligned.into_raw_parts();
+    let vec = unsafe { Vec::from_raw_parts(ptr, len, capacity) };
+
+    // Now create Image from the aligned Vec
+    let desc = ImageDesc::new(2, 2, ColorFormat::RGBA_U8);
+    let img = Image::new_with_data(desc, vec).unwrap();
+
+    // Should preserve the pointer since it was already 8-byte aligned
+    assert_eq!(
+        img.bytes().as_ptr(),
+        original_ptr,
+        "Should preserve pointer for aligned input"
+    );
+}
+
+#[test]
+fn cast_to_f32_slice_works() {
+    let desc = ImageDesc::new(1, 1, ColorFormat::RGBA_F32);
+    let mut img = Image::new_black(desc).unwrap();
+
+    // Write f32 values via bytemuck
+    let floats: &mut [f32] = bytemuck::cast_slice_mut(img.bytes_mut());
+    floats[0] = 1.0;
+    floats[1] = 0.5;
+    floats[2] = 0.25;
+    floats[3] = 1.0;
+
+    // Read back
+    let floats: &[f32] = bytemuck::cast_slice(img.bytes());
+    assert_eq!(floats[0], 1.0);
+    assert_eq!(floats[1], 0.5);
+    assert_eq!(floats[2], 0.25);
+    assert_eq!(floats[3], 1.0);
+}

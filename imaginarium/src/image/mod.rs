@@ -55,6 +55,11 @@ impl Image {
         unsafe { Vec::from_raw_parts(ptr, len, capacity) }
     }
 
+    /// Convert to owned aligned bytes (internal use).
+    fn into_aligned_bytes(self) -> AVec<u8> {
+        self.bytes
+    }
+
     /// Returns the image bytes as a mutable slice.
     pub fn bytes_mut(&mut self) -> &mut [u8] {
         &mut self.bytes
@@ -82,7 +87,7 @@ impl Image {
 
         Ok(Image {
             desc,
-            bytes: AVec::from_slice(ALIGNMENT, &bytes),
+            bytes: vec_to_avec(bytes),
         })
     }
 
@@ -157,7 +162,7 @@ impl Image {
         }
         let desc = *self.desc();
         let bytes = strip_stride_padding(
-            self.into_bytes(),
+            self.into_aligned_bytes(),
             desc.width,
             desc.height,
             desc.stride,
@@ -171,7 +176,7 @@ impl Image {
                 stride: desc.row_bytes(),
                 color_format: desc.color_format,
             },
-            bytes: AVec::from_slice(ALIGNMENT, &bytes),
+            bytes,
         }
     }
 
@@ -184,7 +189,7 @@ impl Image {
 
         let desc = *self.desc();
         let bytes = add_stride_padding(
-            self.into_bytes(),
+            self.into_aligned_bytes(),
             desc.width,
             desc.height,
             aligned_stride,
@@ -198,8 +203,25 @@ impl Image {
                 stride: aligned_stride,
                 color_format: desc.color_format,
             },
-            bytes: AVec::from_slice(ALIGNMENT, &bytes),
+            bytes,
         }
+    }
+}
+
+/// Convert Vec<u8> to AVec<u8>, zero-copy if already aligned, otherwise copies.
+fn vec_to_avec(bytes: Vec<u8>) -> AVec<u8> {
+    let ptr = bytes.as_ptr();
+    if (ptr as usize).is_multiple_of(ALIGNMENT) {
+        // Already aligned - zero-copy conversion
+        let (ptr, len, capacity) = {
+            let mut bytes = std::mem::ManuallyDrop::new(bytes);
+            (bytes.as_mut_ptr(), bytes.len(), bytes.capacity())
+        };
+        // Safety: pointer is verified to be ALIGNMENT-aligned, and we own the memory
+        unsafe { AVec::from_raw_parts(ptr, ALIGNMENT, len, capacity) }
+    } else {
+        // Not aligned - must copy
+        AVec::from_slice(ALIGNMENT, &bytes)
     }
 }
 
