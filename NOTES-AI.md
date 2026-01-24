@@ -328,6 +328,19 @@ CalibrationMasters // Container for master dark/flat/bias frames
   - `integration_tests.rs` - Integration tests requiring RAF files
 - **Test coverage:** Channel preservation, NaN/Infinity detection, extreme values, corner pixels, asymmetric margins, non-square images, gradient patterns, SIMD vs scalar consistency
 
+**Hot pixel module (`astro_image/hot_pixels.rs`):**
+- `HotPixelMap` - Boolean mask of defective sensor pixels detected from master darks
+- Detection uses Median Absolute Deviation (MAD) for robust σ estimation
+- Per-channel thresholds: each channel (R/G/B) analyzed separately
+- Correction replaces hot pixels with median of 8-connected neighbors
+- **Parallelization:**
+  - Sampling extracted in parallel chunks (4096 samples per chunk)
+  - Per-channel stats computed in parallel via `par_iter()`
+  - Hot pixel detection uses parallel chunk processing
+  - Correction computation parallelized by row chunks (64 rows)
+- For large images (>200K pixels), uses adaptive sampling (100K samples) for fast median estimation
+- MAD-to-sigma conversion: σ ≈ 1.4826 * MAD (Gaussian property)
+
 **Dependencies:** common, imaginarium, fitsio, rawloader, libraw-rs, anyhow, rayon, strum_macros
 
 ## Key Data Structures

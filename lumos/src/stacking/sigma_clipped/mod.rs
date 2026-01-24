@@ -212,6 +212,12 @@ fn sigma_clipped_mean_with_stats(values: &mut [f32], config: &SigmaClipConfig) -
     (math::mean_f32(&values[..len]), len)
 }
 
+/// Calculate sigma-clipped mean in-place (for benchmarks).
+#[cfg(feature = "bench")]
+pub fn sigma_clipped_mean(values: &mut [f32], config: &SigmaClipConfig) -> f32 {
+    sigma_clipped_mean_with_stats(values, config).0
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
