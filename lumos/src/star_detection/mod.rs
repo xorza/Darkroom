@@ -123,6 +123,7 @@ pub fn find_stars(
 
     // Step 2: Detect star candidates
     let candidates = detect_stars(pixels, width, height, &background, config);
+    tracing::debug!("Detected {} star candidates", candidates.len());
 
     // Step 3: Compute precise centroids and filter
     let mut stars: Vec<Star> = candidates
@@ -136,5 +137,38 @@ pub fn find_stars(
     // Sort by flux (brightest first)
     stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
 
+    // Remove duplicate detections - keep only the brightest star within min_separation pixels
+    // Use half the typical FWHM as separation threshold
+    let min_separation = 8.0f32;
+    let min_sep_sq = min_separation * min_separation;
+    let mut kept = vec![true; stars.len()];
+
+    for i in 0..stars.len() {
+        if !kept[i] {
+            continue;
+        }
+        for j in (i + 1)..stars.len() {
+            if !kept[j] {
+                continue;
+            }
+            let dx = stars[i].x - stars[j].x;
+            let dy = stars[i].y - stars[j].y;
+            if dx * dx + dy * dy < min_sep_sq {
+                // Keep i (higher flux since sorted), mark j for removal
+                kept[j] = false;
+            }
+        }
+    }
+
+    let dedup_count = kept.iter().filter(|&&k| !k).count();
+    if dedup_count > 0 {
+        tracing::debug!("Removed {} duplicate star detections", dedup_count);
+    }
+
     stars
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| kept[*i])
+        .map(|(_, s)| s)
+        .collect()
 }

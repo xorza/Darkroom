@@ -28,6 +28,16 @@ fn test_visualize_star_detection() {
     let image: AstroImage = imag_image.into();
     let (width, height) = (image.dimensions.width, image.dimensions.height);
     println!("Image size: {}x{}", width, height);
+    println!("Channels: {}", image.dimensions.channels);
+
+    // Print pixel value statistics
+    let min_val = image.pixels.iter().cloned().fold(f32::INFINITY, f32::min);
+    let max_val = image
+        .pixels
+        .iter()
+        .cloned()
+        .fold(f32::NEG_INFINITY, f32::max);
+    println!("Pixel range: {:.6} - {:.6}", min_val, max_val);
 
     // Convert to grayscale for star detection
     let grayscale: Vec<f32> = if image.dimensions.channels == 3 {
@@ -48,8 +58,46 @@ fn test_visualize_star_detection() {
     let stars = find_stars(&grayscale, width, height, &config);
     println!("Found {} stars", stars.len());
 
+    // Check for duplicates (stars within 5 pixels of each other)
+    let mut duplicate_count = 0;
+    for i in 0..stars.len() {
+        for j in (i + 1)..stars.len() {
+            let dx = stars[i].x - stars[j].x;
+            let dy = stars[i].y - stars[j].y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist < 10.0 {
+                duplicate_count += 1;
+                if duplicate_count <= 5 {
+                    println!(
+                        "  Close stars: ({:.1}, {:.1}) and ({:.1}, {:.1}) dist={:.1}",
+                        stars[i].x, stars[i].y, stars[j].x, stars[j].y, dist
+                    );
+                }
+            }
+        }
+    }
+    println!("Close star pairs (within 10px): {}", duplicate_count);
+
+    // Normalize image to 0-1 range for proper display (auto-stretch)
+    let mut display_image = image.clone();
+    let min_val = display_image
+        .pixels
+        .iter()
+        .cloned()
+        .fold(f32::INFINITY, f32::min);
+    let max_val = display_image
+        .pixels
+        .iter()
+        .cloned()
+        .fold(f32::NEG_INFINITY, f32::max);
+    let range = (max_val - min_val).max(1e-6);
+    for p in &mut display_image.pixels {
+        *p = (*p - min_val) / range;
+    }
+    println!("Normalized pixel range: {:.6} - {:.6}", 0.0, 1.0);
+
     // Convert AstroImage to imaginarium::Image, then to RGB_U8
-    let imag_image: imaginarium::Image = image.into();
+    let imag_image: imaginarium::Image = display_image.into();
     let imag_image = imag_image
         .convert(imaginarium::ColorFormat::RGB_U8)
         .expect("Failed to convert to RGB_U8");
@@ -64,6 +112,20 @@ fn test_visualize_star_detection() {
     let top_stars: Vec<_> = stars.iter().take(max_stars).collect();
 
     println!("Drawing top {} stars", top_stars.len());
+
+    // Print first few stars for debugging
+    for (i, star) in top_stars.iter().take(10).enumerate() {
+        println!(
+            "  Star {}: pos=({:.1}, {:.1}) flux={:.1} fwhm={:.1} snr={:.1} ecc={:.3}",
+            i + 1,
+            star.x,
+            star.y,
+            star.flux,
+            star.fwhm,
+            star.snr,
+            star.eccentricity
+        );
+    }
 
     // Green color for markers
     let color = Rgb([0u8, 255, 0]);

@@ -89,6 +89,11 @@ pub fn detect_stars(
         detection_config.sigma_threshold,
     );
 
+    // Dilate mask to connect nearby pixels that may be separated due to
+    // background estimation variance across a single star.
+    // Use radius 1 (3x3 structuring element) for conservative dilation.
+    let mask = dilate_mask(&mask, width, height, 1);
+
     // Find connected components
     let (labels, num_labels) = connected_components(&mask, width, height);
 
@@ -108,6 +113,33 @@ pub fn detect_stars(
     });
 
     candidates
+}
+
+/// Dilate a binary mask by the given radius (morphological dilation).
+///
+/// This connects nearby pixels that might be separated due to variable threshold.
+fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+    let mut dilated = vec![false; width * height];
+
+    for y in 0..height {
+        for x in 0..width {
+            if mask[y * width + x] {
+                // Set all pixels within radius
+                let y_min = y.saturating_sub(radius);
+                let y_max = (y + radius).min(height - 1);
+                let x_min = x.saturating_sub(radius);
+                let x_max = (x + radius).min(width - 1);
+
+                for dy in y_min..=y_max {
+                    for dx in x_min..=x_max {
+                        dilated[dy * width + dx] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    dilated
 }
 
 /// Create binary mask of pixels above threshold.
@@ -391,12 +423,13 @@ mod tests {
         let height = 64;
         let mut pixels = vec![0.1f32; width * height];
 
-        // Single bright pixel (area = 1, below min_area)
+        // Single bright pixel - after dilation (radius 1), becomes 9 pixels (3x3).
+        // Use min_area > 9 to reject single-pixel noise.
         pixels[32 * width + 32] = 0.9;
 
         let bg = estimate_background(&pixels, width, height, 32);
         let config = StarDetectionConfig {
-            min_area: 3,
+            min_area: 10, // Must be > 9 to reject dilated single pixel
             ..Default::default()
         };
         let candidates = detect_stars(&pixels, width, height, &bg, &config);
