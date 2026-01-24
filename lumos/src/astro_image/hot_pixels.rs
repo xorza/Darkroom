@@ -176,73 +176,103 @@ struct ChannelStats {
     threshold: f32,
 }
 
-/// Compute statistics and thresholds for all channels in a single pass using MAD.
+/// Maximum number of samples to use for median estimation.
+/// 100K samples gives <0.5% error for median estimation with very high confidence.
+const MAX_MEDIAN_SAMPLES: usize = 100_000;
+
+/// Compute statistics and thresholds for all channels using sampled median.
 ///
-/// This is more cache-efficient than computing each channel separately, as we only
-/// iterate through the interleaved pixel data once to extract all channel values.
+/// For large images, computing exact median is expensive (O(n) but with large constant).
+/// Instead, we sample a subset of pixels and compute median on the sample.
+/// With 100K samples, the median estimate is accurate to within ~0.5% with high probability.
 fn compute_all_channel_stats(
     pixels: &[f32],
     channels: usize,
     sigma_threshold: f32,
 ) -> Vec<ChannelStats> {
+    (0..channels)
+        .map(|c| compute_channel_stats_sampled(pixels, channels, c, sigma_threshold))
+        .collect()
+}
+
+/// Compute statistics for a single channel using sampled median.
+fn compute_channel_stats_sampled(
+    pixels: &[f32],
+    channels: usize,
+    channel: usize,
+    sigma_threshold: f32,
+) -> ChannelStats {
     let pixel_count = pixels.len() / channels;
 
-    // Allocate buffers for all channels at once
-    let channel_values: Vec<Vec<f32>> = (0..channels).map(|_| vec![0.0; pixel_count]).collect();
+    // Determine sampling strategy
+    let use_sampling = pixel_count > MAX_MEDIAN_SAMPLES * 2;
+    let sample_count = if use_sampling {
+        MAX_MEDIAN_SAMPLES
+    } else {
+        pixel_count
+    };
 
-    // Extract all channel values in a single pass through the pixel data
-    const CHUNK_SIZE: usize = 4096;
-    let chunk_count = pixel_count.div_ceil(CHUNK_SIZE);
+    // Calculate stride for uniform sampling across the image
+    let stride = if use_sampling {
+        pixel_count / sample_count
+    } else {
+        1
+    };
 
-    // Process chunks in parallel, each chunk writes to its portion of all channel buffers
-    (0..chunk_count).into_par_iter().for_each(|chunk_idx| {
-        let start_pixel = chunk_idx * CHUNK_SIZE;
-        let end_pixel = (start_pixel + CHUNK_SIZE).min(pixel_count);
+    // Extract samples for this channel into a contiguous buffer
+    let mut samples: Vec<f32> = Vec::with_capacity(sample_count);
+    for i in 0..sample_count {
+        let pixel_idx = i * stride;
+        samples.push(pixels[pixel_idx * channels + channel]);
+    }
 
-        for pixel_idx in start_pixel..end_pixel {
-            let base = pixel_idx * channels;
-            for c in 0..channels {
-                // SAFETY: We're writing to disjoint ranges (each chunk_idx gets unique pixel indices)
-                // and each channel buffer is independent
-                unsafe {
-                    let ptr = channel_values[c].as_ptr().add(pixel_idx) as *mut f32;
-                    *ptr = pixels[base + c];
-                }
-            }
-        }
-    });
+    let median = median_f32_in_place(&mut samples);
 
-    // Compute stats for each channel
-    channel_values
-        .into_iter()
-        .map(|mut values| {
-            let median = crate::math::median_f32(&values);
+    // Compute absolute deviations in place, reusing the buffer
+    for v in samples.iter_mut() {
+        *v = (*v - median).abs();
+    }
+    let mad = median_f32_in_place(&mut samples);
 
-            // Compute absolute deviations in parallel, reusing the same buffer
-            values.par_chunks_mut(CHUNK_SIZE).for_each(|chunk| {
-                for v in chunk.iter_mut() {
-                    *v = (*v - median).abs();
-                }
-            });
-            let mad = crate::math::median_f32(&values);
+    // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
+    const MAD_TO_SIGMA: f32 = 1.4826;
+    let computed_sigma = mad * MAD_TO_SIGMA;
 
-            // Convert MAD to σ equivalent (for normal distribution, σ ≈ 1.4826 * MAD)
-            const MAD_TO_SIGMA: f32 = 1.4826;
-            let computed_sigma = mad * MAD_TO_SIGMA;
+    // Apply minimum sigma floor: stacked master darks have compressed noise,
+    // so use at least 1% of median to avoid overly tight thresholds
+    let sigma = computed_sigma.max(median * 0.01);
+    let threshold = median + sigma_threshold * sigma;
 
-            // Apply minimum sigma floor: stacked master darks have compressed noise,
-            // so use at least 1% of median to avoid overly tight thresholds
-            let sigma = computed_sigma.max(median * 0.01);
-            let threshold = median + sigma_threshold * sigma;
+    ChannelStats {
+        median,
+        mad,
+        sigma,
+        threshold,
+    }
+}
 
-            ChannelStats {
-                median,
-                mad,
-                sigma,
-                threshold,
-            }
-        })
-        .collect()
+/// Calculate median in place without allocating a new vector.
+fn median_f32_in_place(values: &mut [f32]) -> f32 {
+    debug_assert!(!values.is_empty());
+
+    let len = values.len();
+    let mid = len / 2;
+
+    if len.is_multiple_of(2) {
+        // For even length, need both middle elements
+        let (_, right_median, _) =
+            values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        let right = *right_median;
+        // Left median is max of left partition
+        let left = values[..mid]
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        (left + right) / 2.0
+    } else {
+        let (_, median, _) = values.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+        *median
+    }
 }
 
 /// Calculate median of 8-connected neighbors for a specific channel.
@@ -455,5 +485,63 @@ mod tests {
         };
 
         hot_map.correct(&mut image);
+    }
+
+    #[test]
+    fn test_sampled_median_accuracy() {
+        // Test that sampled median gives accurate results on large data
+        // Create a 1000x1000 grayscale image (1M pixels, triggers sampling)
+        let size = 1000;
+        let pixel_count = size * size;
+
+        // Create data with known distribution: values 0..pixel_count
+        // True median should be (pixel_count - 1) / 2 = 499999.5
+        let pixels: Vec<f32> = (0..pixel_count).map(|i| i as f32).collect();
+        let dark = make_test_image(size, size, 1, pixels.clone());
+
+        // Get stats using our sampled approach
+        let stats = super::compute_channel_stats_sampled(&dark.pixels, 1, 0, 5.0);
+
+        // Exact median
+        let exact_median = (pixel_count - 1) as f32 / 2.0;
+
+        // Sampled median should be within 1% of exact
+        let error_pct = (stats.median - exact_median).abs() / exact_median * 100.0;
+        assert!(
+            error_pct < 1.0,
+            "Sampled median {} differs from exact {} by {:.2}%",
+            stats.median,
+            exact_median,
+            error_pct
+        );
+    }
+
+    #[test]
+    fn test_hot_pixel_detection_large_image() {
+        // Test hot pixel detection on an image large enough to trigger sampling
+        let size = 500;
+        let pixel_count = size * size;
+
+        // Create image with uniform background and a few hot pixels
+        let mut pixels: Vec<f32> = vec![100.0; pixel_count];
+
+        // Add 10 hot pixels (0.004% of total)
+        let hot_indices = [
+            0, 1000, 5000, 10000, 50000, 100000, 150000, 200000, 240000, 249999,
+        ];
+        for &idx in &hot_indices {
+            pixels[idx] = 10000.0; // 100x background
+        }
+
+        let dark = make_test_image(size, size, 1, pixels);
+        let hot_map = HotPixelMap::from_master_dark(&dark, 5.0);
+
+        // Should detect all 10 hot pixels
+        assert_eq!(hot_map.count, 10);
+
+        // Verify specific hot pixels are detected
+        for &idx in &hot_indices {
+            assert!(hot_map.is_hot(idx), "Hot pixel at {} not detected", idx);
+        }
     }
 }
