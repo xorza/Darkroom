@@ -10,35 +10,22 @@ use crate::stacking::FrameType;
 use crate::stacking::median::{MedianStackConfig, stack_median_from_paths};
 
 /// Register median stacking benchmarks with Criterion.
-pub fn benchmarks(c: &mut Criterion, calibration_dir: &Path) {
-    // Benchmark the per-pixel median calculation (scalar vs SIMD)
+pub fn benchmarks(c: &mut Criterion, _calibration_dir: &Path) {
     benchmark_median_calculation(c);
-
-    // Benchmark full stacking pipeline
-    benchmark_full_stacking(c, calibration_dir);
 }
 
-/// Benchmark the core median calculation comparing scalar vs SIMD.
+/// Benchmark the core median calculation.
 fn benchmark_median_calculation(c: &mut Criterion) {
     let mut group = c.benchmark_group("median_calculation");
 
-    // Test various array sizes typical for astrophotography stacking
+    // Realistic astrophotography stack sizes (20-100+ frames typical)
     for size in [20, 50, 100] {
         // Create test data - reversed sequence is worst case for sorting
         let values: Vec<f32> = (1..=size).map(|x| x as f32).rev().collect();
 
         group.throughput(Throughput::Elements(size as u64));
 
-        // Benchmark scalar implementation
-        group.bench_function(BenchmarkId::new("scalar", size), |b| {
-            b.iter(|| {
-                let result = super::scalar::median_f32(black_box(&values));
-                black_box(result)
-            })
-        });
-
-        // Benchmark SIMD implementation (via cpu dispatch)
-        group.bench_function(BenchmarkId::new("simd", size), |b| {
+        group.bench_function(BenchmarkId::new("quickselect", size), |b| {
             b.iter(|| {
                 let result = super::cpu::median_f32(black_box(&values));
                 black_box(result)
@@ -50,6 +37,7 @@ fn benchmark_median_calculation(c: &mut Criterion) {
 }
 
 /// Benchmark full median stacking pipeline with real images.
+#[allow(dead_code)]
 fn benchmark_full_stacking(c: &mut Criterion, calibration_dir: &Path) {
     let darks_dir = calibration_dir.join("Darks");
     if !darks_dir.exists() {
