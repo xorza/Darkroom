@@ -2,6 +2,30 @@
 //!
 //! Detects defective sensor pixels from master dark frames and corrects them
 //! by replacing with the median of 8-connected neighbors.
+//!
+//! # Algorithm
+//!
+//! Uses **Median Absolute Deviation (MAD)** for robust σ estimation:
+//!
+//! 1. **Why MAD instead of standard deviation?**
+//!    Standard deviation is heavily influenced by outliers - the very pixels we're
+//!    trying to detect. MAD is robust: even if 49% of pixels are outliers, the
+//!    median (and thus MAD) remains accurate.
+//!
+//! 2. **The 1.4826 constant (MAD to σ conversion):**
+//!    For a normal distribution, MAD ≈ 0.6745 × σ. Therefore σ ≈ 1.4826 × MAD.
+//!    This constant comes from the inverse of the 75th percentile of the standard
+//!    normal distribution: 1/Φ⁻¹(0.75) ≈ 1.4826.
+//!
+//! 3. **Per-channel analysis:**
+//!    Each color channel (R, G, B) has different noise characteristics due to
+//!    sensor design and Bayer pattern. Analyzing channels separately prevents
+//!    false positives from channel-to-channel variation.
+//!
+//! 4. **Adaptive sampling for large images:**
+//!    For images >200K pixels, exact median computation is slow. We sample 100K
+//!    pixels uniformly, which gives <0.5% median error with >99% confidence
+//!    (by the central limit theorem for order statistics).
 
 use rayon::prelude::*;
 

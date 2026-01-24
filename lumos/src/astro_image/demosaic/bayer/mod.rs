@@ -158,6 +158,13 @@ impl<'a> BayerImage<'a> {
             raw_width
         );
 
+        // Debug-only check for corrupted data (NaN/Infinity)
+        // This catches upstream bugs without impacting release performance
+        debug_assert!(
+            data.iter().all(|v| v.is_finite()),
+            "BayerImage data contains NaN or Infinity values - indicates corrupted raw data"
+        );
+
         Self {
             data,
             raw_width,
