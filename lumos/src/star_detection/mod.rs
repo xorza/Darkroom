@@ -22,6 +22,7 @@
 mod background;
 mod centroid;
 mod detection;
+pub mod synthetic;
 
 #[cfg(test)]
 mod tests;

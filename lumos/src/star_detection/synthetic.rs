@@ -1,0 +1,262 @@
+//! Synthetic star field generation for testing star detection algorithms.
+
+/// A synthetic star to be placed in a generated image.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+pub struct SyntheticStar {
+    /// X coordinate (center).
+    pub x: f32,
+    /// Y coordinate (center).
+    pub y: f32,
+    /// Peak brightness (0.0-1.0).
+    pub brightness: f32,
+    /// Sigma of the Gaussian profile (FWHM ≈ 2.355 * sigma).
+    pub sigma: f32,
+}
+
+#[allow(dead_code)]
+impl SyntheticStar {
+    /// Create a new synthetic star.
+    pub fn new(x: f32, y: f32, brightness: f32, sigma: f32) -> Self {
+        Self {
+            x,
+            y,
+            brightness,
+            sigma,
+        }
+    }
+
+    /// Get the FWHM (Full Width at Half Maximum) of this star.
+    pub fn fwhm(&self) -> f32 {
+        2.355 * self.sigma
+    }
+}
+
+/// Configuration for synthetic star field generation.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct SyntheticFieldConfig {
+    /// Image width in pixels.
+    pub width: usize,
+    /// Image height in pixels.
+    pub height: usize,
+    /// Background level (0.0-1.0).
+    pub background: f32,
+    /// Background noise standard deviation.
+    pub noise_sigma: f32,
+}
+
+impl Default for SyntheticFieldConfig {
+    fn default() -> Self {
+        Self {
+            width: 256,
+            height: 256,
+            background: 0.1,
+            noise_sigma: 0.01,
+        }
+    }
+}
+
+/// Generate a synthetic star field image.
+///
+/// Returns a grayscale image as a Vec<f32> with values in range 0.0-1.0.
+#[allow(dead_code)]
+pub fn generate_star_field(config: &SyntheticFieldConfig, stars: &[SyntheticStar]) -> Vec<f32> {
+    let mut pixels = vec![config.background; config.width * config.height];
+
+    // Add stars
+    for star in stars {
+        add_gaussian_star(&mut pixels, config.width, config.height, star);
+    }
+
+    // Add noise if configured
+    if config.noise_sigma > 0.0 {
+        add_noise(&mut pixels, config.noise_sigma);
+    }
+
+    // Clamp to valid range
+    for p in &mut pixels {
+        *p = p.clamp(0.0, 1.0);
+    }
+
+    pixels
+}
+
+/// Add a Gaussian star profile to the image.
+#[allow(dead_code)]
+fn add_gaussian_star(pixels: &mut [f32], width: usize, height: usize, star: &SyntheticStar) {
+    // Only render within 4 sigma of center (covers >99.99% of flux)
+    let radius = (4.0 * star.sigma).ceil() as i32;
+
+    let cx = star.x.round() as i32;
+    let cy = star.y.round() as i32;
+
+    let x_min = (cx - radius).max(0) as usize;
+    let x_max = ((cx + radius) as usize).min(width - 1);
+    let y_min = (cy - radius).max(0) as usize;
+    let y_max = ((cy + radius) as usize).min(height - 1);
+
+    let two_sigma_sq = 2.0 * star.sigma * star.sigma;
+
+    for y in y_min..=y_max {
+        for x in x_min..=x_max {
+            let dx = x as f32 - star.x;
+            let dy = y as f32 - star.y;
+            let r_sq = dx * dx + dy * dy;
+
+            let value = star.brightness * (-r_sq / two_sigma_sq).exp();
+            pixels[y * width + x] += value;
+        }
+    }
+}
+
+/// Add Gaussian noise to the image.
+#[allow(dead_code)]
+fn add_noise(pixels: &mut [f32], sigma: f32) {
+    use std::f32::consts::PI;
+
+    // Simple Box-Muller transform for Gaussian noise
+    // Using a simple LCG for reproducibility in tests
+    let mut seed: u64 = 12345;
+    let lcg_next = |s: &mut u64| -> f32 {
+        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1);
+        (*s >> 33) as f32 / (1u64 << 31) as f32
+    };
+
+    for p in pixels.iter_mut() {
+        let u1 = lcg_next(&mut seed).max(1e-10);
+        let u2 = lcg_next(&mut seed);
+
+        let z = (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos();
+        *p += z * sigma;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_synthetic_star_fwhm() {
+        let star = SyntheticStar::new(50.0, 50.0, 0.8, 2.0);
+        let expected_fwhm = 2.355 * 2.0;
+        assert!((star.fwhm() - expected_fwhm).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_generate_empty_field() {
+        let config = SyntheticFieldConfig {
+            width: 64,
+            height: 64,
+            background: 0.1,
+            noise_sigma: 0.0,
+        };
+
+        let pixels = generate_star_field(&config, &[]);
+
+        // All pixels should be background level
+        for &p in &pixels {
+            assert!((p - 0.1).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_generate_single_star() {
+        let config = SyntheticFieldConfig {
+            width: 64,
+            height: 64,
+            background: 0.1,
+            noise_sigma: 0.0,
+        };
+
+        let stars = vec![SyntheticStar::new(32.0, 32.0, 0.8, 2.0)];
+        let pixels = generate_star_field(&config, &stars);
+
+        // Peak should be at center
+        let peak_idx = 32 * 64 + 32;
+        let peak = pixels[peak_idx];
+
+        // Peak should be background + brightness
+        assert!(
+            (peak - 0.9).abs() < 0.01,
+            "Peak value {} not close to expected 0.9",
+            peak
+        );
+
+        // Corner should be near background
+        let corner = pixels[0];
+        assert!(
+            (corner - 0.1).abs() < 0.01,
+            "Corner value {} not close to background 0.1",
+            corner
+        );
+    }
+
+    #[test]
+    fn test_generate_with_noise() {
+        let config = SyntheticFieldConfig {
+            width: 64,
+            height: 64,
+            background: 0.5,
+            noise_sigma: 0.05,
+        };
+
+        let pixels = generate_star_field(&config, &[]);
+
+        // Calculate mean and std dev
+        let mean: f32 = pixels.iter().sum::<f32>() / pixels.len() as f32;
+        let variance: f32 =
+            pixels.iter().map(|&p| (p - mean).powi(2)).sum::<f32>() / pixels.len() as f32;
+        let std_dev = variance.sqrt();
+
+        // Mean should be close to background
+        assert!(
+            (mean - 0.5).abs() < 0.02,
+            "Mean {} not close to background 0.5",
+            mean
+        );
+
+        // Std dev should be close to noise_sigma
+        assert!(
+            (std_dev - 0.05).abs() < 0.02,
+            "Std dev {} not close to noise_sigma 0.05",
+            std_dev
+        );
+    }
+
+    #[test]
+    fn test_star_at_subpixel_position() {
+        let config = SyntheticFieldConfig {
+            width: 64,
+            height: 64,
+            background: 0.0,
+            noise_sigma: 0.0,
+        };
+
+        // Star at sub-pixel position
+        let stars = vec![SyntheticStar::new(32.3, 32.7, 1.0, 2.0)];
+        let pixels = generate_star_field(&config, &stars);
+
+        // Find the actual peak pixel
+        let (max_idx, _) = pixels
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+            .unwrap();
+
+        let max_x = max_idx % 64;
+        let max_y = max_idx / 64;
+
+        // Peak should be within 1 pixel of the star center
+        assert!(
+            (max_x as f32 - 32.3).abs() <= 1.0,
+            "Peak X {} too far from star center 32.3",
+            max_x
+        );
+        assert!(
+            (max_y as f32 - 32.7).abs() <= 1.0,
+            "Peak Y {} too far from star center 32.7",
+            max_y
+        );
+    }
+}
