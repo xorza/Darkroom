@@ -1,0 +1,194 @@
+//! Star detection and centroid computation for image registration.
+//!
+//! This module detects stars in astronomical images and computes sub-pixel
+//! accurate centroids for use in image alignment and stacking.
+//!
+//! # Algorithm Overview
+//!
+//! 1. **Background estimation**: Divide image into tiles, compute sigma-clipped
+//!    median per tile, then bilinearly interpolate to create a smooth background map.
+//!
+//! 2. **Star detection**: Threshold pixels above background + k×σ, then use
+//!    connected component labeling to group pixels into candidate stars.
+//!
+//! 3. **Filtering**: Reject candidates that are too small, too large, elongated,
+//!    near edges, or saturated.
+//!
+//! 4. **Sub-pixel centroid**: Compute precise centroid using iterative weighted
+//!    centroid algorithm (achieves ~0.05 pixel accuracy).
+//!
+//! 5. **Quality metrics**: Compute FWHM, SNR, and eccentricity for each star.
+
+mod background;
+mod centroid;
+mod detection;
+
+pub use background::{BackgroundMap, estimate_background};
+pub use centroid::compute_centroid;
+pub use detection::{StarCandidate, detect_stars};
+
+/// A detected star with sub-pixel position and quality metrics.
+#[derive(Debug, Clone, Copy)]
+pub struct Star {
+    /// X coordinate (sub-pixel accurate).
+    pub x: f32,
+    /// Y coordinate (sub-pixel accurate).
+    pub y: f32,
+    /// Total flux (sum of background-subtracted pixel values).
+    pub flux: f32,
+    /// Full Width at Half Maximum in pixels.
+    pub fwhm: f32,
+    /// Eccentricity (0 = circular, 1 = elongated). Used to reject non-stellar objects.
+    pub eccentricity: f32,
+    /// Signal-to-noise ratio.
+    pub snr: f32,
+    /// Peak pixel value (for saturation detection).
+    pub peak: f32,
+}
+
+impl Star {
+    /// Check if star is likely saturated.
+    ///
+    /// Stars with peak values near the maximum (>0.95 for normalized data)
+    /// have unreliable centroids.
+    pub fn is_saturated(&self) -> bool {
+        self.peak > 0.95
+    }
+
+    /// Check if star is usable for registration.
+    ///
+    /// Filters out saturated, elongated, and low-SNR stars.
+    pub fn is_usable(&self, min_snr: f32, max_eccentricity: f32) -> bool {
+        !self.is_saturated() && self.snr >= min_snr && self.eccentricity <= max_eccentricity
+    }
+}
+
+/// Configuration for star detection.
+#[derive(Debug, Clone)]
+pub struct StarDetectionConfig {
+    /// Detection threshold in sigma above background (typically 3.0-5.0).
+    pub detection_sigma: f32,
+    /// Minimum star area in pixels.
+    pub min_area: usize,
+    /// Maximum star area in pixels.
+    pub max_area: usize,
+    /// Maximum eccentricity (0-1, higher = more elongated allowed).
+    pub max_eccentricity: f32,
+    /// Edge margin in pixels (stars too close to edge are rejected).
+    pub edge_margin: usize,
+    /// Minimum SNR for a star to be considered valid.
+    pub min_snr: f32,
+    /// Tile size for background estimation.
+    pub background_tile_size: usize,
+}
+
+impl Default for StarDetectionConfig {
+    fn default() -> Self {
+        Self {
+            detection_sigma: 4.0,
+            min_area: 5,
+            max_area: 500,
+            max_eccentricity: 0.6,
+            edge_margin: 10,
+            min_snr: 10.0,
+            background_tile_size: 64,
+        }
+    }
+}
+
+/// Detect stars in an image.
+///
+/// Returns a list of detected stars sorted by flux (brightest first).
+///
+/// # Arguments
+/// * `pixels` - Image pixel data (grayscale, normalized 0.0-1.0)
+/// * `width` - Image width
+/// * `height` - Image height
+/// * `config` - Detection configuration
+pub fn find_stars(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    config: &StarDetectionConfig,
+) -> Vec<Star> {
+    assert_eq!(pixels.len(), width * height, "Pixel count mismatch");
+
+    // Step 1: Estimate background
+    let background = estimate_background(pixels, width, height, config.background_tile_size);
+
+    // Step 2: Detect star candidates
+    let candidates = detect_stars(pixels, width, height, &background, config);
+
+    // Step 3: Compute precise centroids and filter
+    let mut stars: Vec<Star> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            compute_centroid(pixels, width, height, &background, &candidate, config)
+        })
+        .filter(|star| star.is_usable(config.min_snr, config.max_eccentricity))
+        .collect();
+
+    // Sort by flux (brightest first)
+    stars.sort_by(|a, b| b.flux.partial_cmp(&a.flux).unwrap());
+
+    stars
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_star_is_saturated() {
+        let star = Star {
+            x: 10.0,
+            y: 10.0,
+            flux: 100.0,
+            fwhm: 3.0,
+            eccentricity: 0.1,
+            snr: 50.0,
+            peak: 0.96,
+        };
+        assert!(star.is_saturated());
+
+        let star2 = Star { peak: 0.8, ..star };
+        assert!(!star2.is_saturated());
+    }
+
+    #[test]
+    fn test_star_is_usable() {
+        let star = Star {
+            x: 10.0,
+            y: 10.0,
+            flux: 100.0,
+            fwhm: 3.0,
+            eccentricity: 0.2,
+            snr: 50.0,
+            peak: 0.8,
+        };
+        assert!(star.is_usable(10.0, 0.5));
+
+        // Low SNR
+        let low_snr = Star { snr: 5.0, ..star };
+        assert!(!low_snr.is_usable(10.0, 0.5));
+
+        // Too elongated
+        let elongated = Star {
+            eccentricity: 0.7,
+            ..star
+        };
+        assert!(!elongated.is_usable(10.0, 0.5));
+
+        // Saturated
+        let saturated = Star { peak: 0.98, ..star };
+        assert!(!saturated.is_usable(10.0, 0.5));
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = StarDetectionConfig::default();
+        assert_eq!(config.detection_sigma, 4.0);
+        assert_eq!(config.min_area, 5);
+        assert_eq!(config.background_tile_size, 64);
+    }
+}
