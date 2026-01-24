@@ -28,9 +28,9 @@ mod tests;
 #[cfg(test)]
 mod visual_tests;
 
-pub use background::{BackgroundMap, estimate_background};
+pub use background::estimate_background;
 pub use centroid::compute_centroid;
-pub use detection::{StarCandidate, detect_stars};
+pub use detection::detect_stars;
 
 /// A detected star with sub-pixel position and quality metrics.
 #[derive(Debug, Clone, Copy)]
