@@ -33,7 +33,7 @@ pub struct MedianStackConfig {
 impl Default for MedianStackConfig {
     fn default() -> Self {
         Self {
-            chunk_rows: 64,
+            chunk_rows: 128,
             cache_dir: std::env::temp_dir().join("lumos_cache"),
             keep_cache: false,
         }
