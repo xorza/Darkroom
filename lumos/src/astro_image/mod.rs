@@ -213,6 +213,23 @@ impl AstroImage {
         crate::math::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
     }
 
+    /// Convert to grayscale using luminance weights.
+    ///
+    /// If already grayscale, returns a clone.
+    /// For RGB images, uses standard luminance weights: 0.2126*R + 0.7152*G + 0.0722*B
+    pub fn to_grayscale(&self) -> Self {
+        if self.dimensions.is_grayscale() {
+            return self.clone();
+        }
+
+        //todo implement directly
+        let image: Image = self.clone().into();
+        image
+            .convert(ColorFormat::GRAY_F32)
+            .expect("Failed to convert to grayscale")
+            .into()
+    }
+
     /// Load all astronomical images from a directory.
     ///
     /// Loads all supported image files (RAW and FITS) from the directory

@@ -90,21 +90,9 @@ fn test_find_stars_on_light_frame() {
         start.elapsed()
     );
 
-    // Convert to grayscale for star detection (use luminance)
+    // Convert to grayscale for star detection
     let (width, height) = (image.dimensions.width, image.dimensions.height);
-    let grayscale: Vec<f32> = if image.dimensions.channels == 3 {
-        // Use luminance: 0.2126*R + 0.7152*G + 0.0722*B
-        (0..width * height)
-            .map(|i| {
-                let r = image.pixels[i];
-                let g = image.pixels[width * height + i];
-                let b = image.pixels[2 * width * height + i];
-                0.2126 * r + 0.7152 * g + 0.0722 * b
-            })
-            .collect()
-    } else {
-        image.pixels.clone()
-    };
+    let grayscale = image.to_grayscale().pixels;
 
     // Find stars
     let config = StarDetectionConfig::default();

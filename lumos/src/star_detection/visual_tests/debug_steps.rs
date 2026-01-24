@@ -475,21 +475,9 @@ fn test_noise_analysis() {
 
     let width = astro_image.dimensions.width;
     let height = astro_image.dimensions.height;
-    let channels = astro_image.dimensions.channels;
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = if channels == 3 {
-        (0..width * height)
-            .map(|i| {
-                let r = astro_image.pixels[i];
-                let g = astro_image.pixels[width * height + i];
-                let b = astro_image.pixels[2 * width * height + i];
-                0.2126 * r + 0.7152 * g + 0.0722 * b
-            })
-            .collect()
-    } else {
-        astro_image.pixels.clone()
-    };
+    let grayscale = astro_image.to_grayscale().pixels;
 
     // Print pixel value histogram
     let min_val = grayscale.iter().cloned().fold(f32::INFINITY, f32::min);
@@ -591,14 +579,7 @@ fn test_threshold_detail() {
     let height = astro_image.dimensions.height;
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = (0..width * height)
-        .map(|i| {
-            let r = astro_image.pixels[i];
-            let g = astro_image.pixels[width * height + i];
-            let b = astro_image.pixels[2 * width * height + i];
-            0.2126 * r + 0.7152 * g + 0.0722 * b
-        })
-        .collect();
+    let grayscale = astro_image.to_grayscale().pixels;
 
     // Look at a small 20x20 region in detail
     let region_x = 100;
@@ -690,14 +671,7 @@ fn test_find_striped_region() {
     let height = astro_image.dimensions.height;
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = (0..width * height)
-        .map(|i| {
-            let r = astro_image.pixels[i];
-            let g = astro_image.pixels[width * height + i];
-            let b = astro_image.pixels[2 * width * height + i];
-            0.2126 * r + 0.7152 * g + 0.0722 * b
-        })
-        .collect();
+    let grayscale = astro_image.to_grayscale().pixels;
 
     let bg = estimate_background(&grayscale, width, height, 64);
 
@@ -781,14 +755,7 @@ fn test_dilation_comparison() {
     let height = astro_image.dimensions.height;
 
     // Convert to grayscale
-    let grayscale: Vec<f32> = (0..width * height)
-        .map(|i| {
-            let r = astro_image.pixels[i];
-            let g = astro_image.pixels[width * height + i];
-            let b = astro_image.pixels[2 * width * height + i];
-            0.2126 * r + 0.7152 * g + 0.0722 * b
-        })
-        .collect();
+    let grayscale = astro_image.to_grayscale().pixels;
 
     // Apply median filter
     let smoothed = median_filter_3x3(&grayscale, width, height);

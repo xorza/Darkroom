@@ -45,18 +45,7 @@ fn test_visualize_star_detection() {
     println!("Pixel range: {:.6} - {:.6}", min_val, max_val);
 
     // Convert to grayscale for star detection
-    let grayscale: Vec<f32> = if image.dimensions.channels == 3 {
-        (0..width * height)
-            .map(|i| {
-                let r = image.pixels[i];
-                let g = image.pixels[width * height + i];
-                let b = image.pixels[2 * width * height + i];
-                0.2126 * r + 0.7152 * g + 0.0722 * b
-            })
-            .collect()
-    } else {
-        image.pixels.clone()
-    };
+    let grayscale = image.to_grayscale().pixels;
 
     // Find stars
     let config = StarDetectionConfig::default();

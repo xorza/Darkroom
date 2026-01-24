@@ -286,6 +286,7 @@ fn test_subpixel_accuracy_sweep() {
     println!("\nSUCCESS: All sub-pixel shifts detected within 0.1 pixel tolerance");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn save_subpixel_visualization(
     pixels1: &[f32],
     pixels2: &[f32],
