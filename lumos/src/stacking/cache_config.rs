@@ -1,6 +1,6 @@
 //! Cache configuration for memory-mapped stacking operations.
 //!
-//! Provides adaptive chunk sizing based on available system memory,
+//! Provides adaptive chunk sizing based on available system memory and image dimensions,
 //! balancing RAM usage against disk I/O performance.
 
 use std::path::PathBuf;
@@ -13,16 +13,10 @@ pub const MAX_CHUNK_ROWS: usize = 1024;
 pub const TARGET_CHUNK_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
 /// Fraction of available memory to use (10%).
 pub const MEMORY_FRACTION: u64 = 10;
-/// Estimated bytes per row for chunk sizing calculation.
-/// Based on: ~6000 width × 3 channels × 4 bytes × ~20 frames ≈ 1.4 MB/row
-pub const ESTIMATED_BYTES_PER_ROW: u64 = 6000 * 3 * 4 * 20;
 
 /// Common configuration for cache-based stacking methods (median, sigma-clipped).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CacheConfig {
-    /// Number of rows to process at once (memory vs seeks tradeoff).
-    /// Higher values use more RAM but reduce disk I/O.
-    pub chunk_rows: usize,
     /// Directory for decoded image cache.
     pub cache_dir: PathBuf,
     /// Keep cache after stacking (useful for re-processing).
@@ -32,7 +26,6 @@ pub struct CacheConfig {
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            chunk_rows: compute_optimal_chunk_rows(),
             cache_dir: std::env::temp_dir().join("lumos_cache"),
             keep_cache: cfg!(debug_assertions) || cfg!(test),
         }
@@ -40,14 +33,6 @@ impl Default for CacheConfig {
 }
 
 impl CacheConfig {
-    /// Create a new cache configuration with custom chunk rows.
-    pub fn with_chunk_rows(chunk_rows: usize) -> Self {
-        Self {
-            chunk_rows,
-            ..Default::default()
-        }
-    }
-
     /// Create a new cache configuration with custom cache directory.
     pub fn with_cache_dir(cache_dir: PathBuf) -> Self {
         Self {
@@ -57,15 +42,20 @@ impl CacheConfig {
     }
 }
 
-/// Compute optimal chunk rows based on available system memory.
+/// Compute optimal chunk rows based on available system memory and image dimensions.
 ///
 /// Uses a fraction of available RAM to determine chunk size, balancing
 /// memory usage against I/O performance. More available RAM = larger chunks.
 ///
+/// # Arguments
+/// * `width` - Image width in pixels
+/// * `channels` - Number of color channels
+/// * `frame_count` - Number of frames being stacked
+///
 /// # Returns
 /// Chunk rows clamped between `MIN_CHUNK_ROWS` and `MAX_CHUNK_ROWS`.
-pub fn compute_optimal_chunk_rows() -> usize {
-    compute_optimal_chunk_rows_with_available(get_available_memory())
+pub fn compute_optimal_chunk_rows(width: usize, channels: usize, frame_count: usize) -> usize {
+    compute_optimal_chunk_rows_with_memory(width, channels, frame_count, get_available_memory())
 }
 
 /// Get available system memory in bytes.
@@ -77,51 +67,41 @@ fn get_available_memory() -> u64 {
     sys.available_memory()
 }
 
-/// Compute optimal chunk rows given available memory.
+/// Compute optimal chunk rows given available memory and image parameters.
 ///
 /// This is the core computation, separated from system calls for testability.
-pub fn compute_optimal_chunk_rows_with_available(available_memory: u64) -> usize {
+pub fn compute_optimal_chunk_rows_with_memory(
+    width: usize,
+    channels: usize,
+    frame_count: usize,
+    available_memory: u64,
+) -> usize {
     // Use ~10% of available memory for chunk processing, capped at target
     let usable_memory = (available_memory / MEMORY_FRACTION).min(TARGET_CHUNK_MEMORY_BYTES);
 
-    let chunk_rows = (usable_memory / ESTIMATED_BYTES_PER_ROW) as usize;
+    // Bytes per row = width * channels * sizeof(f32) * frame_count
+    let bytes_per_row = (width * channels * 4 * frame_count) as u64;
+
+    // Avoid division by zero for degenerate cases
+    if bytes_per_row == 0 {
+        return MIN_CHUNK_ROWS;
+    }
+
+    let chunk_rows = (usable_memory / bytes_per_row) as usize;
     let chunk_rows = chunk_rows.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS);
 
     tracing::info!(
         available_memory_mb = available_memory / (1024 * 1024),
         usable_memory_mb = usable_memory / (1024 * 1024),
+        width,
+        channels,
+        frame_count,
+        bytes_per_row,
         chunk_rows,
-        min_rows = MIN_CHUNK_ROWS,
-        max_rows = MAX_CHUNK_ROWS,
         "Adaptive chunk sizing computed"
     );
 
     chunk_rows
-}
-
-/// Estimate memory usage for a given chunk configuration.
-///
-/// # Arguments
-/// * `chunk_rows` - Number of rows per chunk
-/// * `width` - Image width in pixels
-/// * `channels` - Number of color channels
-/// * `frame_count` - Number of frames being stacked
-///
-/// # Returns
-/// Estimated memory usage in bytes.
-#[cfg(test)]
-pub fn estimate_chunk_memory(
-    chunk_rows: usize,
-    width: usize,
-    channels: usize,
-    frame_count: usize,
-) -> u64 {
-    let bytes_per_pixel = 4u64; // f32
-    (chunk_rows as u64)
-        * (width as u64)
-        * (channels as u64)
-        * bytes_per_pixel
-        * (frame_count as u64)
 }
 
 #[cfg(test)]
@@ -131,17 +111,9 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = CacheConfig::default();
-        assert!(config.chunk_rows >= MIN_CHUNK_ROWS);
-        assert!(config.chunk_rows <= MAX_CHUNK_ROWS);
         assert!(config.cache_dir.ends_with("lumos_cache"));
         // In test mode, keep_cache should be true
         assert!(config.keep_cache);
-    }
-
-    #[test]
-    fn test_with_chunk_rows() {
-        let config = CacheConfig::with_chunk_rows(256);
-        assert_eq!(config.chunk_rows, 256);
     }
 
     #[test]
@@ -152,109 +124,130 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_optimal_rows_low_memory() {
-        // 1 GB available → 100 MB usable → ~69 rows → clamp to 69
-        let available = 1024 * 1024 * 1024; // 1 GB
-        let rows = compute_optimal_chunk_rows_with_available(available);
-
-        let expected_usable = available / MEMORY_FRACTION; // 100 MB
-        let expected_rows = (expected_usable / ESTIMATED_BYTES_PER_ROW) as usize;
-        let expected_clamped = expected_rows.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS);
-
-        assert_eq!(rows, expected_clamped);
-        println!("Low memory (1GB): {} rows", rows);
-    }
-
-    #[test]
-    fn test_compute_optimal_rows_medium_memory() {
-        // 8 GB available → 800 MB usable → capped at 512 MB → ~356 rows
-        let available = 8 * 1024 * 1024 * 1024; // 8 GB
-        let rows = compute_optimal_chunk_rows_with_available(available);
+    fn test_compute_optimal_rows_typical_image() {
+        // Typical case: 6000x4000 image, 3 channels, 20 frames, 8GB available
+        let available = 8 * 1024 * 1024 * 1024u64; // 8 GB
+        let rows = compute_optimal_chunk_rows_with_memory(6000, 3, 20, available);
 
         // 10% of 8GB = 800MB, capped at 512MB
-        let usable = (available / MEMORY_FRACTION).min(TARGET_CHUNK_MEMORY_BYTES);
-        assert_eq!(usable, TARGET_CHUNK_MEMORY_BYTES);
-
-        let expected_rows = (usable / ESTIMATED_BYTES_PER_ROW) as usize;
-        assert_eq!(rows, expected_rows.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS));
-        println!("Medium memory (8GB): {} rows", rows);
+        // bytes_per_row = 6000 * 3 * 4 * 20 = 1,440,000 bytes
+        // chunk_rows = 512MB / 1.44MB ≈ 355
+        let bytes_per_row = 6000 * 3 * 4 * 20;
+        let expected = (TARGET_CHUNK_MEMORY_BYTES / bytes_per_row as u64) as usize;
+        assert_eq!(rows, expected.clamp(MIN_CHUNK_ROWS, MAX_CHUNK_ROWS));
+        println!("Typical image (6000x3 x 20 frames, 8GB RAM): {} rows", rows);
     }
 
     #[test]
-    fn test_compute_optimal_rows_high_memory() {
-        // 64 GB available → 6.4 GB usable → capped at 512 MB → ~356 rows
-        let available = 64 * 1024 * 1024 * 1024u64; // 64 GB
-        let rows = compute_optimal_chunk_rows_with_available(available);
+    fn test_compute_optimal_rows_small_image() {
+        // Small image: 1000x3, 5 frames, 4GB available
+        let available = 4 * 1024 * 1024 * 1024u64;
+        let rows = compute_optimal_chunk_rows_with_memory(1000, 3, 5, available);
 
-        // Should be capped at TARGET_CHUNK_MEMORY_BYTES
-        let usable = (available / MEMORY_FRACTION).min(TARGET_CHUNK_MEMORY_BYTES);
-        assert_eq!(usable, TARGET_CHUNK_MEMORY_BYTES);
+        // bytes_per_row = 1000 * 3 * 4 * 5 = 60,000 bytes
+        // usable = min(400MB, 512MB) = 400MB
+        // chunk_rows = 400MB / 60KB ≈ 6666, clamped to MAX
+        assert_eq!(rows, MAX_CHUNK_ROWS);
+        println!("Small image (1000x3 x 5 frames, 4GB RAM): {} rows", rows);
+    }
 
-        println!("High memory (64GB): {} rows", rows);
+    #[test]
+    fn test_compute_optimal_rows_large_stack() {
+        // Large stack: 8000x3, 100 frames, 16GB available
+        let available = 16 * 1024 * 1024 * 1024u64;
+        let rows = compute_optimal_chunk_rows_with_memory(8000, 3, 100, available);
+
+        // bytes_per_row = 8000 * 3 * 4 * 100 = 9,600,000 bytes ≈ 9.6MB
+        // usable = 512MB (capped)
+        // chunk_rows = 512MB / 9.6MB ≈ 53, but clamped to MIN
+        println!("Large stack (8000x3 x 100 frames, 16GB RAM): {} rows", rows);
+        assert!(rows >= MIN_CHUNK_ROWS);
+    }
+
+    #[test]
+    fn test_compute_optimal_rows_low_memory() {
+        // Low memory: 6000x3, 20 frames, 1GB available
+        let available = 1024 * 1024 * 1024u64; // 1 GB
+        let rows = compute_optimal_chunk_rows_with_memory(6000, 3, 20, available);
+
+        // usable = 100MB (10% of 1GB)
+        // bytes_per_row = 1,440,000 bytes
+        // chunk_rows = 100MB / 1.44MB ≈ 69
+        println!("Low memory (6000x3 x 20 frames, 1GB RAM): {} rows", rows);
+        assert!(rows >= MIN_CHUNK_ROWS);
+        assert!(rows <= MAX_CHUNK_ROWS);
     }
 
     #[test]
     fn test_compute_optimal_rows_very_low_memory() {
-        // 256 MB available → 25.6 MB usable → ~17 rows → clamp to MIN
-        let available = 256 * 1024 * 1024; // 256 MB
-        let rows = compute_optimal_chunk_rows_with_available(available);
+        // Very low memory: 6000x3, 20 frames, 256MB available
+        let available = 256 * 1024 * 1024u64;
+        let rows = compute_optimal_chunk_rows_with_memory(6000, 3, 20, available);
 
+        // usable = 25.6MB
+        // bytes_per_row = 1,440,000 bytes
+        // chunk_rows = 25.6MB / 1.44MB ≈ 17, clamped to MIN
         assert_eq!(rows, MIN_CHUNK_ROWS);
-        println!("Very low memory (256MB): {} rows (clamped to min)", rows);
+        println!(
+            "Very low memory (6000x3 x 20 frames, 256MB RAM): {} rows (clamped to min)",
+            rows
+        );
     }
 
     #[test]
     fn test_chunk_rows_always_in_range() {
-        // Test various memory sizes
+        // Test various combinations
         let test_cases = [
-            0u64,                     // No memory
-            100 * 1024 * 1024,        // 100 MB
-            512 * 1024 * 1024,        // 512 MB
-            1024 * 1024 * 1024,       // 1 GB
-            4 * 1024 * 1024 * 1024,   // 4 GB
-            16 * 1024 * 1024 * 1024,  // 16 GB
-            128 * 1024 * 1024 * 1024, // 128 GB
-            u64::MAX / 2,             // Extremely high
+            (100, 1, 2, 0u64),                        // Degenerate
+            (1000, 3, 5, 256 * 1024 * 1024),          // Small
+            (6000, 3, 20, 1024 * 1024 * 1024),        // Typical, low mem
+            (6000, 3, 20, 8 * 1024 * 1024 * 1024),    // Typical, high mem
+            (8000, 3, 100, 16 * 1024 * 1024 * 1024),  // Large stack
+            (12000, 3, 200, 64 * 1024 * 1024 * 1024), // Very large
         ];
 
-        for available in test_cases {
-            let rows = compute_optimal_chunk_rows_with_available(available);
+        for (width, channels, frames, available) in test_cases {
+            let rows = compute_optimal_chunk_rows_with_memory(width, channels, frames, available);
             assert!(
                 (MIN_CHUNK_ROWS..=MAX_CHUNK_ROWS).contains(&rows),
-                "Chunk rows {} out of range [{}, {}] for {} bytes available",
+                "Chunk rows {} out of range for {}x{} x {} frames, {} bytes",
                 rows,
-                MIN_CHUNK_ROWS,
-                MAX_CHUNK_ROWS,
+                width,
+                channels,
+                frames,
                 available
             );
         }
     }
 
     #[test]
-    fn test_estimate_chunk_memory() {
-        // Typical case: 6000x4000 image, 3 channels, 20 frames, 100 rows
-        let mem = estimate_chunk_memory(100, 6000, 3, 20);
-        // 100 * 6000 * 3 * 4 * 20 = 144,000,000 bytes = ~137 MB
-        assert_eq!(mem, 144_000_000);
-        println!("Estimated memory for 100 rows: {} MB", mem / (1024 * 1024));
-    }
+    fn test_compute_optimal_rows_grayscale() {
+        // Grayscale: 6000x1, 20 frames, 8GB available
+        let available = 8 * 1024 * 1024 * 1024u64;
+        let rows = compute_optimal_chunk_rows_with_memory(6000, 1, 20, available);
 
-    #[test]
-    fn test_estimate_chunk_memory_matches_constant() {
-        // Verify ESTIMATED_BYTES_PER_ROW matches our formula for 1 row
-        let estimated = estimate_chunk_memory(1, 6000, 3, 20);
-        assert_eq!(estimated, ESTIMATED_BYTES_PER_ROW);
+        // bytes_per_row = 6000 * 1 * 4 * 20 = 480,000 bytes
+        // chunk_rows = 512MB / 480KB ≈ 1066, clamped to MAX
+        assert_eq!(rows, MAX_CHUNK_ROWS);
+        println!("Grayscale (6000x1 x 20 frames, 8GB RAM): {} rows", rows);
     }
 
     #[test]
     fn test_current_system_allocation() {
         // This test shows actual allocation on the current system
+        let width = 6000;
+        let channels = 3;
+        let frame_count = 20;
+
         let available = get_available_memory();
-        let rows = compute_optimal_chunk_rows();
-        let estimated_mem = estimate_chunk_memory(rows, 6000, 3, 20);
+        let rows = compute_optimal_chunk_rows(width, channels, frame_count);
+        let bytes_per_row = (width * channels * 4 * frame_count) as u64;
+        let estimated_mem = rows as u64 * bytes_per_row;
 
         println!("=== Current System RAM Allocation ===");
         println!("Available memory: {} MB", available / (1024 * 1024));
+        println!("Image: {}x{} x {} frames", width, channels, frame_count);
+        println!("Bytes per row: {} KB", bytes_per_row / 1024);
         println!("Computed chunk rows: {}", rows);
         println!(
             "Estimated chunk memory: {} MB",
@@ -266,7 +259,6 @@ mod tests {
         );
         println!("=====================================");
 
-        // Sanity check
         assert!(rows >= MIN_CHUNK_ROWS);
         assert!(rows <= MAX_CHUNK_ROWS);
     }

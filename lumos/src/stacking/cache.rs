@@ -14,6 +14,7 @@ use rayon::prelude::*;
 
 use crate::astro_image::{AstroImage, AstroImageMetadata, ImageDimensions};
 use crate::stacking::FrameType;
+use crate::stacking::cache_config::compute_optimal_chunk_rows;
 
 /// Header for cached image files.
 #[derive(Debug, Clone, Copy)]
@@ -128,12 +129,15 @@ impl ImageCache {
     /// This is the core processing loop shared by median and sigma-clipped stacking.
     /// Each thread gets its own buffer to avoid per-pixel allocation.
     /// The combine function receives a mutable slice to allow in-place operations.
-    pub fn process_chunked<F>(&self, chunk_rows: usize, combine: F) -> AstroImage
+    ///
+    /// Chunk size is computed adaptively based on available system memory and image dimensions.
+    pub fn process_chunked<F>(&self, combine: F) -> AstroImage
     where
         F: Fn(&mut [f32]) -> f32 + Sync,
     {
         let dims = self.dimensions;
         let frame_count = self.frame_count();
+        let chunk_rows = compute_optimal_chunk_rows(dims.width, dims.channels, frame_count);
         let width = dims.width;
         let height = dims.height;
         let channels = dims.channels;

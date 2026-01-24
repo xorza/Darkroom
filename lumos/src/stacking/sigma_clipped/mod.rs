@@ -111,6 +111,8 @@ impl ClipStats {
 }
 
 /// Stack images using sigma-clipped mean with bounded memory usage.
+///
+/// Chunk size is computed adaptively based on available system memory and image dimensions.
 pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     paths: &[P],
     frame_type: FrameType,
@@ -124,7 +126,7 @@ pub fn stack_sigma_clipped_from_paths<P: AsRef<Path>>(
     let clip = config.clip;
     let stats = ClipStats::default();
 
-    let result = cache.process_chunked(config.cache.chunk_rows, |values: &mut [f32]| {
+    let result = cache.process_chunked(|values: &mut [f32]| {
         let original_len = values.len();
         let (result, final_len) = sigma_clipped_mean_with_stats(values, &clip);
         stats.record(original_len, final_len);
