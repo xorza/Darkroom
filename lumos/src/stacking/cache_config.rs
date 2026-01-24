@@ -116,6 +116,7 @@ fn get_available_memory() -> u64 {
 /// Compute optimal chunk rows given available memory and image parameters.
 ///
 /// This is the core computation, separated from system calls for testability.
+/// Uses checked arithmetic to handle pathologically large datasets gracefully.
 pub fn compute_optimal_chunk_rows_with_memory(
     width: usize,
     channels: usize,
@@ -126,7 +127,13 @@ pub fn compute_optimal_chunk_rows_with_memory(
     let usable_memory = available_memory * MEMORY_PERCENT / 100;
 
     // Bytes per row = width * channels * sizeof(f32) * frame_count
-    let bytes_per_row = (width * channels * 4 * frame_count) as u64;
+    // Use checked arithmetic to handle overflow gracefully
+    let bytes_per_row = width
+        .checked_mul(channels)
+        .and_then(|v| v.checked_mul(4))
+        .and_then(|v| v.checked_mul(frame_count))
+        .map(|v| v as u64)
+        .unwrap_or(u64::MAX); // Overflow means very large, use minimum chunk
 
     // Avoid division by zero for degenerate cases
     if bytes_per_row == 0 {
@@ -294,7 +301,7 @@ mod tests {
 
         let available = get_available_memory();
         let rows = compute_optimal_chunk_rows_with_memory(width, channels, frame_count, available);
-        let bytes_per_row = (width * channels * 4 * frame_count) as u64;
+        let bytes_per_row = (width * channels * 4 * frame_count) as u64; // Safe: small test values
         let estimated_mem = rows as u64 * bytes_per_row;
 
         println!("=== Current System RAM Allocation ===");

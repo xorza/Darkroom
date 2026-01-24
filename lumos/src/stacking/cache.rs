@@ -74,9 +74,15 @@ impl ImageCache {
     /// Check if images would fit in memory given available memory.
     ///
     /// Returns true if total image size fits within usable memory (75% of available).
+    ///
+    /// Uses checked arithmetic to handle pathologically large datasets gracefully.
     fn fits_in_memory(pixel_count: usize, frame_count: usize, available_memory: u64) -> bool {
-        let bytes_per_image = pixel_count * size_of::<f32>();
-        let total_bytes_needed = bytes_per_image * frame_count;
+        let Some(bytes_per_image) = pixel_count.checked_mul(size_of::<f32>()) else {
+            return false; // Overflow means definitely doesn't fit
+        };
+        let Some(total_bytes_needed) = bytes_per_image.checked_mul(frame_count) else {
+            return false; // Overflow means definitely doesn't fit
+        };
         let usable_memory = available_memory * MEMORY_PERCENT / 100;
         (total_bytes_needed as u64) <= usable_memory
     }
