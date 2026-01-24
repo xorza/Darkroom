@@ -1,9 +1,12 @@
 //! Benchmarks for 3x3 median filter.
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group};
+use std::hint::black_box;
+
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group};
 
 use super::median_filter_3x3;
 
+#[allow(dead_code)]
 pub fn bench_median_filter(c: &mut Criterion) {
     let mut group = c.benchmark_group("median_filter_3x3");
 

@@ -31,7 +31,9 @@ mod visual_tests;
 
 #[cfg(feature = "bench")]
 pub mod bench {
+    #[allow(unused_imports)]
     pub use super::background::bench as background;
+    #[allow(unused_imports)]
     pub use super::median_filter::bench as median_filter;
 }
 
