@@ -80,15 +80,6 @@ where
     result
 }
 
-/// Compute sum of f32 slice in parallel using rayon.
-/// Each thread computes a partial sum, then results are combined.
-pub fn parallel_sum_f32(values: &[f32]) -> f32 {
-    values
-        .par_chunks(CHUNK_SIZE)
-        .map(|chunk| chunk.iter().sum::<f32>())
-        .sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,13 +91,5 @@ mod tests {
         for (i, &v) in result.iter().enumerate() {
             assert!((v - i as f32 * 2.0).abs() < f32::EPSILON);
         }
-    }
-
-    #[test]
-    fn test_parallel_sum_f32() {
-        let values: Vec<f32> = (1..=100).map(|x| x as f32).collect();
-        let result = parallel_sum_f32(&values);
-        let expected: f32 = values.iter().sum();
-        assert!((result - expected).abs() < f32::EPSILON);
     }
 }

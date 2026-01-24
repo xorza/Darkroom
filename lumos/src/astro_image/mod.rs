@@ -210,7 +210,7 @@ impl AstroImage {
     /// Calculate the mean pixel value across all pixels using parallel processing.
     pub fn mean(&self) -> f32 {
         debug_assert!(!self.pixels.is_empty());
-        crate::common::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
+        crate::math::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
     }
 
     /// Load all astronomical images from a directory.
