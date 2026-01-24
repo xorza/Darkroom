@@ -21,8 +21,8 @@ pub struct MedianStackConfig {
     /// Number of rows to process at once (memory vs seeks tradeoff).
     /// Default: 64 rows.
     pub chunk_rows: usize,
-    /// Directory for decoded image cache. None uses system temp dir.
-    pub cache_dir: Option<PathBuf>,
+    /// Directory for decoded image cache.
+    pub cache_dir: PathBuf,
     /// Keep cache after stacking (useful for re-processing).
     pub keep_cache: bool,
 }
@@ -31,8 +31,8 @@ impl Default for MedianStackConfig {
     fn default() -> Self {
         Self {
             chunk_rows: 64,
-            cache_dir: None,
-            keep_cache: false,
+            cache_dir: std::env::temp_dir().join("lumos_cache"),
+            keep_cache: true,
         }
     }
 }
@@ -50,16 +50,11 @@ pub fn stack_median_from_paths<P: AsRef<Path>>(
 ) -> AstroImage {
     assert!(!paths.is_empty(), "No paths provided for stacking");
 
-    // Create cache
-    let cache_dir = config
-        .cache_dir
-        .clone()
-        .unwrap_or_else(|| std::env::temp_dir().join("lumos_median_cache"));
-
-    std::fs::create_dir_all(&cache_dir).expect("Failed to create cache directory");
+    // Create cache directory
+    std::fs::create_dir_all(&config.cache_dir).expect("Failed to create cache directory");
 
     // Decode all images to cache
-    let cache = ImageCache::from_paths(paths, &cache_dir, frame_type);
+    let cache = ImageCache::from_paths(paths, &config.cache_dir, frame_type);
 
     // Process in chunks
     let result = process_chunked(&cache, config.chunk_rows);

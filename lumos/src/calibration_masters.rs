@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 
 use crate::astro_image::HotPixelMap;
-use crate::{AstroImage, FrameType, StackingMethod, stack_frames};
+use crate::{AstroImage, FrameType, ImageStack, StackingMethod};
 
 /// Default sigma threshold for hot pixel detection.
 const DEFAULT_HOT_PIXEL_SIGMA: f32 = 5.0;
@@ -170,12 +170,13 @@ impl CalibrationMasters {
             return None;
         }
 
-        let frames = AstroImage::load_from_directory(&dir);
-        if frames.is_empty() {
+        let paths = common::file_utils::astro_image_files(&dir);
+        if paths.is_empty() {
             return None;
         }
 
-        Some(stack_frames(&frames, method, frame_type))
+        let stack = ImageStack::new(frame_type, method, paths);
+        Some(stack.process())
     }
 
     fn save_as_tiff(image: AstroImage, path: &Path) -> Result<()> {

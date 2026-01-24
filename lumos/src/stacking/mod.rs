@@ -107,8 +107,8 @@ impl ImageStack {
 
     /// Process all frames and return the stacked result.
     ///
-    /// For mean stacking, loads images one at a time for memory efficiency.
-    /// For median/sigma-clipped, loads all frames into memory.
+    /// Uses memory-efficient streaming for mean and median stacking.
+    /// For sigma-clipped, loads all frames into memory.
     ///
     /// # Panics
     /// Panics if no paths were provided or if frames have mismatched dimensions.
@@ -116,38 +116,14 @@ impl ImageStack {
         assert!(!self.paths.is_empty(), "No paths provided for stacking");
 
         match self.method {
-            StackingMethod::Mean => self.process_mean(),
-            _ => {
-                // For median/sigma-clipped, load all frames and use existing implementation
-                let frames: Vec<AstroImage> = self
-                    .paths
-                    .iter()
-                    .map(|p| AstroImage::from_file(p).expect("Failed to load image"))
-                    .collect();
-                cpu::stack_frames_cpu(&frames, self.method, self.frame_type)
-            }
-        }
-    }
-
-    /// Process all frames with memory-efficient median stacking.
-    ///
-    /// Uses disk-based caching and chunked processing to keep memory bounded.
-    /// Ideal for large numbers of high-resolution images.
-    ///
-    /// # Panics
-    /// Panics if no paths were provided or if frames have mismatched dimensions.
-    pub fn process_streamed(&self, config: &MedianStackConfig) -> AstroImage {
-        assert!(!self.paths.is_empty(), "No paths provided for stacking");
-
-        match self.method {
             StackingMethod::Mean => mean::stack_mean_from_paths(&self.paths, self.frame_type),
-            StackingMethod::Median => {
-                median::stack_median_from_paths(&self.paths, self.frame_type, config)
-            }
+            StackingMethod::Median => median::stack_median_from_paths(
+                &self.paths,
+                self.frame_type,
+                &MedianStackConfig::default(),
+            ),
             StackingMethod::SigmaClippedMean(_) => {
-                // Sigma-clipped still needs all values, use median streamed approach
-                // but compute sigma-clipped mean instead
-                // For now, fall back to loading all frames
+                // Sigma-clipped needs all values for iterative clipping
                 let frames: Vec<AstroImage> = self
                     .paths
                     .iter()
@@ -157,25 +133,11 @@ impl ImageStack {
             }
         }
     }
-
-    /// Process frames using running mean (memory efficient).
-    fn process_mean(&self) -> AstroImage {
-        mean::stack_mean_from_paths(&self.paths, self.frame_type)
-    }
-}
-
-/// Stack frames with the given method (uses parallel CPU implementation).
-pub fn stack_frames(
-    frames: &[AstroImage],
-    method: StackingMethod,
-    frame_type: FrameType,
-) -> AstroImage {
-    cpu::stack_frames_cpu(frames, method, frame_type)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::testing::{calibration_image_paths, load_calibration_images};
+    use crate::testing::calibration_image_paths;
 
     use super::*;
 
@@ -186,20 +148,23 @@ mod tests {
 
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
-    fn test_stack_flats_from_env() {
-        let Some(flats) = load_calibration_images("Flats") else {
+    fn test_stack_flats_median_from_env() {
+        let Some(paths) = calibration_image_paths("Flats") else {
             eprintln!("LUMOS_CALIBRATION_DIR not set or Flats dir missing, skipping test");
             return;
         };
 
-        if flats.is_empty() {
+        if paths.is_empty() {
             eprintln!("No flat files found in Flats directory, skipping test");
             return;
         }
 
-        println!("Stacking {} flats with median method...", flats.len());
-        let master_flat = stack_frames(&flats, StackingMethod::Median, FrameType::Flat);
+        println!("Stacking {} flats with median method...", paths.len());
+        let stack = ImageStack::new(FrameType::Flat, StackingMethod::Median, paths.clone());
+        let master_flat = stack.process();
 
+        // Load first frame to verify dimensions match
+        let first = AstroImage::from_file(&paths[0]).unwrap();
         println!(
             "Master flat: {}x{}x{}",
             master_flat.dimensions.width,
@@ -207,7 +172,7 @@ mod tests {
             master_flat.dimensions.channels
         );
 
-        assert_eq!(master_flat.dimensions, flats[0].dimensions);
+        assert_eq!(master_flat.dimensions, first.dimensions);
         assert!(!master_flat.pixels.is_empty());
 
         let img: imaginarium::Image = master_flat.into();
@@ -253,7 +218,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(not(feature = "slow-tests"), ignore)]
-    fn test_stack_darks_median_streamed_from_env() {
+    fn test_stack_darks_median_from_env() {
         let Some(paths) = calibration_image_paths("Darks") else {
             eprintln!("LUMOS_CALIBRATION_DIR not set or Darks dir missing, skipping test");
             return;
@@ -264,13 +229,9 @@ mod tests {
             return;
         }
 
-        println!(
-            "Stacking {} darks with streamed median method...",
-            paths.len()
-        );
+        println!("Stacking {} darks with median method...", paths.len());
         let stack = ImageStack::new(FrameType::Dark, StackingMethod::Median, paths.clone());
-        let config = MedianStackConfig::default();
-        let master_dark = stack.process_streamed(&config);
+        let master_dark = stack.process();
 
         // Load first frame to verify dimensions match
         let first = AstroImage::from_file(&paths[0]).unwrap();
@@ -286,7 +247,7 @@ mod tests {
 
         let img: imaginarium::Image = master_dark.into();
         img.save_file(common::test_utils::test_output_path(
-            "master_dark_median_streamed.tiff",
+            "master_dark_median.tiff",
         ))
         .unwrap();
     }
