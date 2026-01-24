@@ -213,120 +213,6 @@ impl AstroImage {
         crate::common::parallel_sum_f32(&self.pixels) / self.pixels.len() as f32
     }
 
-    /// Calibrate a light frame using calibration masters.
-    ///
-    /// Applies the standard calibration formula:
-    /// 1. Subtract master bias (removes readout noise)
-    /// 2. Subtract master dark (removes thermal noise)
-    /// 3. Divide by normalized master flat (corrects vignetting and dust)
-    ///
-    /// Note: If using a dark frame that was NOT bias-subtracted, skip the separate
-    /// bias subtraction as the dark already includes the bias signal.
-    ///
-    /// # Arguments
-    /// * `masters` - Calibration masters containing optional bias, dark, and flat frames
-    ///
-    /// # Returns
-    /// A new calibrated `AstroImage`
-    ///
-    /// # Panics
-    /// Panics if the provided master frames have different dimensions than self.
-    pub fn calibrate(&self, masters: &crate::CalibrationMasters) -> AstroImage {
-        use rayon::prelude::*;
-
-        // Chunk size to avoid false cache sharing (16KB of f32s)
-        const CHUNK_SIZE: usize = 4096;
-
-        // Single allocation - clone once, then modify in place
-        let mut pixels = self.pixels.clone();
-
-        // Subtract master bias (removes readout noise)
-        if let Some(ref bias) = masters.master_bias {
-            assert!(
-                bias.dimensions == self.dimensions,
-                "Bias frame dimensions {:?} don't match light frame {:?}",
-                bias.dimensions,
-                self.dimensions
-            );
-            pixels
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= bias.pixels[start + i];
-                    }
-                });
-        }
-
-        // Subtract master dark (removes thermal noise)
-        if let Some(ref dark) = masters.master_dark {
-            assert!(
-                dark.dimensions == self.dimensions,
-                "Dark frame dimensions {:?} don't match light frame {:?}",
-                dark.dimensions,
-                self.dimensions
-            );
-            pixels
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        *p -= dark.pixels[start + i];
-                    }
-                });
-        }
-
-        // Divide by normalized master flat (corrects vignetting)
-        if let Some(ref flat) = masters.master_flat {
-            assert!(
-                flat.dimensions == self.dimensions,
-                "Flat frame dimensions {:?} don't match light frame {:?}",
-                flat.dimensions,
-                self.dimensions
-            );
-            let flat_mean = flat.mean();
-            assert!(
-                flat_mean > f32::EPSILON,
-                "Flat frame mean is zero or negative"
-            );
-            let inv_flat_mean = 1.0 / flat_mean;
-
-            pixels
-                .par_chunks_mut(CHUNK_SIZE)
-                .enumerate()
-                .for_each(|(chunk_idx, chunk)| {
-                    let start = chunk_idx * CHUNK_SIZE;
-                    for (i, p) in chunk.iter_mut().enumerate() {
-                        let normalized_flat = flat.pixels[start + i] * inv_flat_mean;
-                        if normalized_flat > f32::EPSILON {
-                            *p /= normalized_flat;
-                        }
-                    }
-                });
-        }
-
-        let mut result = AstroImage {
-            metadata: self.metadata.clone(),
-            pixels,
-            dimensions: self.dimensions,
-        };
-
-        // Correct hot pixels (replace with median of neighbors)
-        if let Some(ref hot_pixel_map) = masters.hot_pixel_map {
-            assert!(
-                hot_pixel_map.dimensions == self.dimensions,
-                "Hot pixel map dimensions {:?} don't match light frame {:?}",
-                hot_pixel_map.dimensions,
-                self.dimensions
-            );
-            hot_pixel_map.correct(&mut result);
-        }
-
-        result
-    }
-
     /// Load all astronomical images from a directory.
     ///
     /// Loads all supported image files (RAW and FITS) from the directory
@@ -550,7 +436,7 @@ mod tests {
     fn test_calibrate_bias_subtraction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0, 200.0, 150.0, 250.0],
             dimensions: ImageDimensions::new(2, 2, 1),
@@ -569,16 +455,16 @@ mod tests {
             method: StackingMethod::default(),
         };
 
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
 
-        assert_eq!(calibrated.pixels, vec![95.0, 195.0, 145.0, 245.0]);
+        assert_eq!(light.pixels, vec![95.0, 195.0, 145.0, 245.0]);
     }
 
     #[test]
     fn test_calibrate_dark_subtraction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0, 200.0, 150.0, 250.0],
             dimensions: ImageDimensions::new(2, 2, 1),
@@ -597,16 +483,16 @@ mod tests {
             method: StackingMethod::default(),
         };
 
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
 
-        assert_eq!(calibrated.pixels, vec![90.0, 180.0, 135.0, 225.0]);
+        assert_eq!(light.pixels, vec![90.0, 180.0, 135.0, 225.0]);
     }
 
     #[test]
     fn test_calibrate_flat_correction() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0, 200.0, 150.0, 250.0],
             dimensions: ImageDimensions::new(2, 2, 1),
@@ -626,21 +512,21 @@ mod tests {
             method: StackingMethod::default(),
         };
 
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
 
         // Each pixel divided by (flat_pixel / flat_mean)
         // flat_mean = 1.0, so: 100/0.8=125, 200/1.0=200, 150/1.2=125, 250/1.0=250
-        assert!((calibrated.pixels[0] - 125.0).abs() < 0.01);
-        assert!((calibrated.pixels[1] - 200.0).abs() < 0.01);
-        assert!((calibrated.pixels[2] - 125.0).abs() < 0.01);
-        assert!((calibrated.pixels[3] - 250.0).abs() < 0.01);
+        assert!((light.pixels[0] - 125.0).abs() < 0.01);
+        assert!((light.pixels[1] - 200.0).abs() < 0.01);
+        assert!((light.pixels[2] - 125.0).abs() < 0.01);
+        assert!((light.pixels[3] - 250.0).abs() < 0.01);
     }
 
     #[test]
     fn test_calibrate_full() {
         use crate::{CalibrationMasters, StackingMethod};
 
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![115.0, 225.0, 170.0, 280.0],
             dimensions: ImageDimensions::new(2, 2, 1),
@@ -669,15 +555,15 @@ mod tests {
             method: StackingMethod::default(),
         };
 
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
 
         // After bias: [110, 220, 165, 275]
         // After dark: [100, 200, 150, 250]
         // After flat (mean=1.0): [125, 200, 125, 250]
-        assert!((calibrated.pixels[0] - 125.0).abs() < 0.01);
-        assert!((calibrated.pixels[1] - 200.0).abs() < 0.01);
-        assert!((calibrated.pixels[2] - 125.0).abs() < 0.01);
-        assert!((calibrated.pixels[3] - 250.0).abs() < 0.01);
+        assert!((light.pixels[0] - 125.0).abs() < 0.01);
+        assert!((light.pixels[1] - 200.0).abs() < 0.01);
+        assert!((light.pixels[2] - 125.0).abs() < 0.01);
+        assert!((light.pixels[3] - 250.0).abs() < 0.01);
     }
 
     #[test]
@@ -778,8 +664,10 @@ mod tests {
 
         let start = std::time::Instant::now();
         println!("Loading light frame: {:?}", first_file);
-        let light = AstroImage::from_file(first_file).expect("Failed to load light frame");
+        let mut light = AstroImage::from_file(first_file).expect("Failed to load light frame");
         println!("  Load light: {:?}", start.elapsed());
+
+        let original_dimensions = light.dimensions;
 
         println!(
             "Loaded light frame: {}x{}x{}",
@@ -815,24 +703,22 @@ mod tests {
 
         // Calibrate the light frame
         let start = std::time::Instant::now();
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
         println!("  Calibrate: {:?}", start.elapsed());
 
         println!(
             "Calibrated frame: {}x{}x{}",
-            calibrated.dimensions.width,
-            calibrated.dimensions.height,
-            calibrated.dimensions.channels
+            light.dimensions.width, light.dimensions.height, light.dimensions.channels
         );
 
-        println!("Mean: {}", calibrated.mean());
+        println!("Mean: {}", light.mean());
 
-        assert_eq!(calibrated.dimensions, light.dimensions);
+        assert_eq!(light.dimensions, original_dimensions);
 
         // Save calibrated image to output
         let start = std::time::Instant::now();
         let output_path = common::test_utils::test_output_path("calibrated_light.tiff");
-        let img: imaginarium::Image = calibrated.into();
+        let img: imaginarium::Image = light.into();
         img.save_file(&output_path).unwrap();
         println!("  Save: {:?}", start.elapsed());
 
@@ -877,7 +763,7 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // Create 2x2 RGB light frame
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![
                 100.0, 100.0, 100.0, // Pixel (0,0)
@@ -903,13 +789,13 @@ mod tests {
             method: StackingMethod::default(),
         };
 
-        let calibrated = light.calibrate(&masters);
+        masters.calibrate(&mut light);
 
         // Each channel should have 5.0 subtracted
-        assert_eq!(calibrated.pixels[0], 95.0); // R of (0,0)
-        assert_eq!(calibrated.pixels[1], 95.0); // G of (0,0)
-        assert_eq!(calibrated.pixels[2], 95.0); // B of (0,0)
-        assert_eq!(calibrated.pixels[3], 195.0); // R of (1,0)
+        assert_eq!(light.pixels[0], 95.0); // R of (0,0)
+        assert_eq!(light.pixels[1], 95.0); // G of (0,0)
+        assert_eq!(light.pixels[2], 95.0); // B of (0,0)
+        assert_eq!(light.pixels[3], 195.0); // R of (1,0)
     }
 
     #[test]
@@ -918,7 +804,7 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // RGB light frame
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0; 12], // 2x2x3
             dimensions: ImageDimensions::new(2, 2, 3),
@@ -940,7 +826,7 @@ mod tests {
         };
 
         // This should panic due to dimension mismatch (channels differ)
-        let _ = light.calibrate(&masters);
+        masters.calibrate(&mut light);
     }
 
     #[test]
@@ -949,7 +835,7 @@ mod tests {
         use crate::{CalibrationMasters, StackingMethod};
 
         // Grayscale light frame
-        let light = AstroImage {
+        let mut light = AstroImage {
             metadata: AstroImageMetadata::default(),
             pixels: vec![100.0; 4], // 2x2x1
             dimensions: ImageDimensions::new(2, 2, 1),
@@ -971,6 +857,6 @@ mod tests {
         };
 
         // This should panic due to dimension mismatch (channels differ)
-        let _ = light.calibrate(&masters);
+        masters.calibrate(&mut light);
     }
 }

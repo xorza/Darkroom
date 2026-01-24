@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use rayon::prelude::*;
 
 use crate::astro_image::HotPixelMap;
 use crate::{AstroImage, FrameType, ImageStack, StackingMethod};
@@ -27,6 +28,105 @@ pub struct CalibrationMasters {
 }
 
 impl CalibrationMasters {
+    /// Calibrate a light frame in place using these calibration masters.
+    ///
+    /// Applies the standard calibration formula:
+    /// 1. Subtract master bias (removes readout noise)
+    /// 2. Subtract master dark (removes thermal noise)
+    /// 3. Divide by normalized master flat (corrects vignetting and dust)
+    /// 4. Correct hot pixels (replace with median of neighbors)
+    ///
+    /// Note: If using a dark frame that was NOT bias-subtracted, skip the separate
+    /// bias subtraction as the dark already includes the bias signal.
+    ///
+    /// # Panics
+    /// Panics if the provided master frames have different dimensions than the image.
+    pub fn calibrate(&self, image: &mut AstroImage) {
+        // Chunk size to avoid false cache sharing (16KB of f32s)
+        const CHUNK_SIZE: usize = 4096;
+
+        // Subtract master bias (removes readout noise)
+        if let Some(ref bias) = self.master_bias {
+            assert!(
+                bias.dimensions == image.dimensions,
+                "Bias frame dimensions {:?} don't match light frame {:?}",
+                bias.dimensions,
+                image.dimensions
+            );
+            image
+                .pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        *p -= bias.pixels[start + i];
+                    }
+                });
+        }
+
+        // Subtract master dark (removes thermal noise)
+        if let Some(ref dark) = self.master_dark {
+            assert!(
+                dark.dimensions == image.dimensions,
+                "Dark frame dimensions {:?} don't match light frame {:?}",
+                dark.dimensions,
+                image.dimensions
+            );
+            image
+                .pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        *p -= dark.pixels[start + i];
+                    }
+                });
+        }
+
+        // Divide by normalized master flat (corrects vignetting)
+        if let Some(ref flat) = self.master_flat {
+            assert!(
+                flat.dimensions == image.dimensions,
+                "Flat frame dimensions {:?} don't match light frame {:?}",
+                flat.dimensions,
+                image.dimensions
+            );
+            let flat_mean = flat.mean();
+            assert!(
+                flat_mean > f32::EPSILON,
+                "Flat frame mean is zero or negative"
+            );
+            let inv_flat_mean = 1.0 / flat_mean;
+
+            image
+                .pixels
+                .par_chunks_mut(CHUNK_SIZE)
+                .enumerate()
+                .for_each(|(chunk_idx, chunk)| {
+                    let start = chunk_idx * CHUNK_SIZE;
+                    for (i, p) in chunk.iter_mut().enumerate() {
+                        let normalized_flat = flat.pixels[start + i] * inv_flat_mean;
+                        if normalized_flat > f32::EPSILON {
+                            *p /= normalized_flat;
+                        }
+                    }
+                });
+        }
+
+        // Correct hot pixels (replace with median of neighbors)
+        if let Some(ref hot_pixel_map) = self.hot_pixel_map {
+            assert!(
+                hot_pixel_map.dimensions == image.dimensions,
+                "Hot pixel map dimensions {:?} don't match light frame {:?}",
+                hot_pixel_map.dimensions,
+                image.dimensions
+            );
+            hot_pixel_map.correct(image);
+        }
+    }
+
     /// Generate the filename for a master frame.
     pub fn master_filename(frame_type: FrameType, method: &StackingMethod) -> String {
         format!("master_{}_{}.tiff", frame_type, method)
